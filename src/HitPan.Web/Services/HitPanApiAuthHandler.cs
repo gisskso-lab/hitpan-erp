@@ -29,8 +29,9 @@ public sealed class HitPanApiAuthHandler(
     /// 한쪽만 바꾸면 자료관리가 조용히 안 열린다.</para>
     /// </summary>
     private const string MainPcPassHeader = "X-MainPc-Pass";
-    // 동시 다발 401 시 refresh 가 중복 호출되지 않도록 직렬화한다(토큰 회전 충돌 방지).
-    private static readonly SemaphoreSlim RefreshLock = new(1, 1);
+    // ⬛ [낡은 줄 · 20260928작2 절I 이전] `private static readonly SemaphoreSlim RefreshLock = new(1, 1);`
+    //   이 핸들러 **혼자** 쓰던 잠금이었다 — `AuthTokenRefresher` 는 잠금 없이 같은 refresh 를 썼다.
+    // 🔴 [지금] 두 갱신 자리가 `RefreshGate.Lock` **하나**를 나눠 쓴다(탭 안) + `RefreshTabLock`(탭 사이).
 
     /// <summary>
     /// 🔴 20260924작1 절C — 403 <c>main_pc_only</c> 1회 자동 재왕복.
@@ -71,8 +72,10 @@ public sealed class HitPanApiAuthHandler(
             //   TryRefreshAsync 에 넘긴다. 락 진입 직후 토큰이 그새 바뀌어 있으면(=동시 401 중 다른 요청이
             //   이미 회전 완료) refresh 를 건너뛰고 즉시 재시도 → 불필요한 이중 회전·토큰 churn 방지.
             var tokenAt401 = await storage.GetAsync<string>(AuthStorageKeys.AccessToken).ConfigureAwait(false);
-            var refreshed = await TryRefreshAsync(tokenAt401.Success ? tokenAt401.Value : null, cancellationToken)
+            // 🔴 20260928작2 절I — 답이 셋이다: 성공(저장·남이 돌림) · 지움 · **유지**(서버에 못 닿음).
+            var decision = await TryRefreshAsync(tokenAt401.Success ? tokenAt401.Value : null, cancellationToken)
                 .ConfigureAwait(false);
+            var refreshed = decision is RefreshDecision.Saved or RefreshDecision.OtherTabRotated;
             if (refreshed)
             {
                 // HttpRequestMessage 는 1회용 — 동일 요청을 복제해 새 토큰으로 재시도.
@@ -82,15 +85,27 @@ public sealed class HitPanApiAuthHandler(
                 response.Dispose();
                 response = await base.SendAsync(retry, cancellationToken).ConfigureAwait(false);
             }
+            else if (decision == RefreshDecision.Keep)
+            {
+                // 🔴 20260928작2 절I — 서버에 닿지 못했다(5xx·502·연결 실패·시간 초과). **토큰을 지우지 않는다.**
+                //   ⬛ 종전엔 이 경우도 아래 갈래로 떨어져 토큰을 지우고 「로그인이 만료되었습니다」를 띄웠다 ⇒
+                //     회선이 잠깐 끊겨도 로그인이 사라지고, 다시 들어오려 하면 자기 접속에 막혔다(409).
+                logger.LogWarning("토큰 재발급이 서버에 닿지 못했습니다 — 저장된 로그인은 그대로 둡니다.");
+                // 🔴 20260928작2 절W — 돌려주는 원래 401 에 「갱신 못 닿음」 표식만 단다(상태·본문 그대로).
+                //   로그아웃 판정(LogoutGate)이 이 401 을 「서버가 거절함 = 완료」로 잘못 읽지 않게 한다.
+                LogoutGate.MarkIfRefreshUnreached(response, decision);
+                // ⬛ [낡은 안내 · 개정3 절R] TryClaimOfflineNotice 30초 창만 — 끝없이 되풀이됐다.
+                // 🔴 개정3 절R — 연속 「유지」 상한(3회 AND 60초)이면 상한 안내 한 번(닫을 때까지) · 그 뒤 30초 안내 멈춤.
+                ShowKeepNotice(snackbar);
+            }
             else if (tokenAt401.Success && !string.IsNullOrEmpty(tokenAt401.Value))
             {
                 // 봉합 (2026-06-20, AUTH-03): 토큰을 들고 있었는데 자동 재발급이 최종 실패(RefreshToken
                 //   만료/무효) → 세션이 끝난 것. 종전엔 원래 401 을 조용히 돌려줘 화면이 '이유 없이' 죽었다.
                 //   403 처리와 대칭으로, 저장 토큰을 정리하고 사용자에게 재로그인을 정직하게 안내한다.
                 //   (AuthStateProvider 가 다음 네비게이션에서 Anonymous→/login 으로 보낸다.)
-                await storage.DeleteAsync(AuthStorageKeys.AccessToken).ConfigureAwait(false);
-                await storage.DeleteAsync(AuthStorageKeys.RefreshToken).ConfigureAwait(false);
-                await storage.DeleteAsync(AuthStorageKeys.UserDisplayName).ConfigureAwait(false);
+                // ⬛ [낡은 지움 · 개정3 절S] 여기서 DeleteAsync 세 칸(비교 없이). 🔴 지금은 `TryRefreshAsync` 의 Clear 갈래가
+                //   잠금 안에서 **보낸 refresh 와 같을 때만** 지우고 온다(달랐으면 OtherTabRotated 로 와서 이 갈래에 안 온다).
                 snackbar.Add("로그인이 만료되었습니다. 다시 로그인해주세요.", Severity.Warning);
             }
         }
@@ -290,14 +305,41 @@ public sealed class HitPanApiAuthHandler(
 
     /// <summary>
     /// RefreshToken 으로 새 AccessToken/RefreshToken 을 발급받아 저장한다.
-    /// 동시 401 이 몰려도 RefreshLock 으로 1회만 회전. 실패 시 false(호출부는 원래 401 유지).
+    /// 동시 401 이 몰려도 <c>RefreshGate.Lock</c>(탭 안)·<c>RefreshTabLock</c>(탭 사이)으로 1회만 회전.
     /// </summary>
-    private async Task<bool> TryRefreshAsync(string? tokenAt401, CancellationToken ct)
+    /// <remarks>
+    /// ⬛ [낡은 계약 · 20260928작2 절I 이전] <c>bool</c> — 비 2xx·예외 전부 <c>false</c> ⇒ 호출부가 토큰을 지웠다.
+    /// 🔴 [지금] <see cref="RefreshDecision"/> — 판정은 <c>RefreshGate.Decide</c> 한 곳(설계 §13-2 ③).
+    /// 401 은 <b>보낸 refresh 가 아직 저장소에 있을 때만</b> 지움 · 5xx·연결 실패·시간 초과·예외는 <b>유지</b>.
+    /// </remarks>
+    /// <summary>
+    /// 🔴 20260928작2 개정3 절R — 「유지」 안내 한 곳. 상한 안내는 닫을 때까지 남긴다.
+    /// </summary>
+    internal static void ShowKeepNotice(ISnackbar bar)
     {
-        await RefreshLock.WaitAsync(ct).ConfigureAwait(false);
+        switch (RefreshGate.ClaimKeepNotice(DateTimeOffset.UtcNow))
+        {
+            case KeepNotice.Degraded:
+                bar.Add(RefreshGate.DegradedNotice, Severity.Warning, o =>
+                {
+                    o.RequireInteraction = true;
+                    o.ShowCloseIcon = true;
+                });
+                break;
+            case KeepNotice.Offline:
+                bar.Add(RefreshGate.OfflineNotice, Severity.Warning);
+                break;
+        }
+    }
+
+    private async Task<RefreshDecision> TryRefreshAsync(string? tokenAt401, CancellationToken ct)
+    {
+        await RefreshGate.Lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // 더블체크(double-checked): 락 대기 중 다른 401 요청이 이미 토큰을 회전했으면
+            await using var tabLock = await RefreshTabLock.AcquireAsync(js, logger).ConfigureAwait(false);
+
+            // 더블체크(double-checked): 락 대기 중 다른 401 요청(또는 다른 탭)이 이미 토큰을 회전했으면
             //   저장된 AccessToken 이 401 시점과 달라진다 → 재발급 생략하고 새 토큰으로 즉시 재시도.
             if (!string.IsNullOrEmpty(tokenAt401))
             {
@@ -306,7 +348,7 @@ public sealed class HitPanApiAuthHandler(
                     && !string.Equals(current.Value, tokenAt401, StringComparison.Ordinal))
                 {
                     logger.LogInformation("토큰이 이미 다른 요청에 의해 갱신됨 — 재발급 생략하고 재시도.");
-                    return true;
+                    return RefreshDecision.OtherTabRotated;
                 }
             }
 
@@ -314,49 +356,94 @@ public sealed class HitPanApiAuthHandler(
             if (!refreshToken.Success || string.IsNullOrEmpty(refreshToken.Value))
             {
                 logger.LogWarning("RefreshToken 이 없어 자동 재발급 불가 — 재로그인 필요.");
-                return false;
+                // 🔴 개정3 절S — 남은 칸 정리도 비교 함수로(보낸 것 없음 = 저장소가 비었을 때만 치운다).
+                if (await storage.DeleteAuthIfRefreshIsAsync(null) == AuthRemoveResult.Rotated)
+                {
+                    return RefreshDecision.OtherTabRotated;
+                }
+                return RefreshDecision.Clear;
             }
 
             // refresh 호출은 skipBearer 경로 — base.SendAsync 로 직접 보낸다(Bearer 헤더 없이).
-            using var req = new HttpRequestMessage(HttpMethod.Post, "api/auth/refresh")
+            int? status = null;
+            LoginApiResponse? data = null;
+            try
             {
-                Content = JsonContent.Create(new RefreshTokenRequestDto { RefreshToken = refreshToken.Value! })
-            };
+                using var req = new HttpRequestMessage(HttpMethod.Post, "api/auth/refresh")
+                {
+                    Content = JsonContent.Create(new RefreshTokenRequestDto { RefreshToken = refreshToken.Value! })
+                };
 
-            using var resp = await base.SendAsync(req, ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
+                using var resp = await base.SendAsync(req, ct).ConfigureAwait(false);
+                status = (int)resp.StatusCode;
+                if (resp.IsSuccessStatusCode)
+                {
+                    data = await resp.Content.ReadFromJsonAsync<LoginApiResponse>(cancellationToken: ct)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
             {
-                logger.LogWarning("토큰 재발급 실패(status={Status}) — RefreshToken 만료/무효. 재로그인 필요.",
-                    (int)resp.StatusCode);
-                return false;
+                // 연결 실패·시간 초과 — 응답을 못 받았다(status = null ⇒ 유지).
+                logger.LogWarning(ex, "토큰 재발급 요청이 서버에 닿지 못했습니다.");
             }
 
-            var data = await resp.Content.ReadFromJsonAsync<LoginApiResponse>(cancellationToken: ct)
-                .ConfigureAwait(false);
-            if (data is null || string.IsNullOrEmpty(data.AccessToken))
-            {
-                logger.LogWarning("토큰 재발급 응답이 비어있습니다 — 재로그인 필요.");
-                return false;
-            }
+            var after = await storage.GetAsync<string>(AuthStorageKeys.RefreshToken);
+            var decision = RefreshGate.Decide(status, refreshToken.Value, after.Success ? after.Value : null);
 
-            await storage.SetAsync(AuthStorageKeys.AccessToken, data.AccessToken);
-            if (!string.IsNullOrEmpty(data.RefreshToken))
+            switch (decision)
             {
-                await storage.SetAsync(AuthStorageKeys.RefreshToken, data.RefreshToken);
-            }
+                case RefreshDecision.Saved:
+                    if (data is null || string.IsNullOrEmpty(data.AccessToken))
+                    {
+                        logger.LogWarning("토큰 재발급 응답이 비어있습니다 — 저장된 로그인은 그대로 둡니다.");
+                        return RefreshDecision.Keep;
+                    }
 
-            logger.LogInformation("토큰 자동 재발급 성공 — 원요청을 재시도합니다.");
-            return true;
+                    // ⬛ [낡은 순서 · 개정3 절S] access → refresh
+                    // 🔴 개정3 절S — **refresh 먼저** → access(남의 탭 비교 틈을 줄인다).
+                    if (!string.IsNullOrEmpty(data.RefreshToken))
+                    {
+                        await storage.SetAsync(AuthStorageKeys.RefreshToken, data.RefreshToken);
+                    }
+                    await storage.SetAsync(AuthStorageKeys.AccessToken, data.AccessToken);
+
+                    logger.LogInformation("토큰 자동 재발급 성공 — 원요청을 재시도합니다.");
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.Saved, DateTimeOffset.UtcNow);
+                    return RefreshDecision.Saved;
+
+                case RefreshDecision.OtherTabRotated:
+                    logger.LogInformation("다른 탭이 먼저 토큰을 갱신했습니다 — 그 토큰으로 재시도합니다.");
+                    RefreshGate.RecordRefreshOutcome(decision, DateTimeOffset.UtcNow);
+                    return decision;
+
+                case RefreshDecision.Clear:
+                    logger.LogWarning("토큰 재발급 거절(status={Status}) — RefreshToken 만료/무효. 재로그인 필요.", status);
+                    // 🔴 개정3 절S — 지움을 잠금 **안에서**, 보낸 값과 같을 때만(⬛ 종전: 잠금 밖 호출자가 비교 없이 지웠다).
+                    if (await storage.DeleteAuthIfRefreshIsAsync(refreshToken.Value) == AuthRemoveResult.Rotated)
+                    {
+                        logger.LogInformation("지우기 직전에 다른 탭이 새 토큰을 썼습니다 — 그 토큰으로 재시도합니다.");
+                        RefreshGate.RecordRefreshOutcome(RefreshDecision.OtherTabRotated, DateTimeOffset.UtcNow);
+                        return RefreshDecision.OtherTabRotated;
+                    }
+                    RefreshGate.RecordRefreshOutcome(decision, DateTimeOffset.UtcNow);
+                    return decision;
+
+                default:
+                    logger.LogWarning("토큰 재발급 실패(status={Status}) — 서버 문제로 보고 로그인은 그대로 둡니다.", status);
+                    RefreshGate.RecordRefreshOutcome(RefreshDecision.Keep, DateTimeOffset.UtcNow);
+                    return RefreshDecision.Keep;
+            }
         }
         catch (Exception ex)
         {
-            // 헌법 #15: 빈 catch 금지. 재발급 중 예외는 경고 후 원래 401 유지.
-            logger.LogWarning(ex, "토큰 자동 재발급 중 예외 — 재로그인 필요.");
-            return false;
+            // 헌법 #15: 빈 catch 금지. ⬛ 종전엔 여기서 false(= 지움)였다 — 예외는 로그인이 끝났다는 증거가 아니다.
+            logger.LogWarning(ex, "토큰 자동 재발급 중 예외 — 저장된 로그인은 그대로 둡니다.");
+            return RefreshDecision.Keep;
         }
         finally
         {
-            RefreshLock.Release();
+            RefreshGate.Lock.Release();
         }
     }
 

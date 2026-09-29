@@ -41,6 +41,15 @@
              Link="Linked\MainPcRetryCoordinator.cs" />
     <Compile Include="..\HitPan.Web\Services\MainPcAccessState.cs"
              Link="Linked\MainPcAccessState.cs" />
+
+    <!-- 🔴 20260928작2 절O (W-1) — 갱신 판정표 RefreshGate.Decide 를 **실제로 불러** 잰다.
+         Blazor 의존 없는 순수 C# 이다(그 파일 머리에 적어 뒀다). 글자검사가 아니다. -->
+    <Compile Include="..\HitPan.Web\Services\RefreshGate.cs"
+             Link="Linked\RefreshGate.cs" />
+
+    <!-- 🔴 20260928작2 절V (W-4) — 로그아웃 완료 판정 LogoutGate.IsServerLogoutDone 을 실제로 불러 잰다(순수 C#). -->
+    <Compile Include="..\HitPan.Web\Services\LogoutGate.cs"
+             Link="Linked\LogoutGate.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -322,6 +322,9 @@ public class AuthController : ControllerBase
         //   [왜 409 인가] 자격 증명은 옳다. 틀린 것은 **지금 상태**다.
         //     401 로 답하면 화면의 자동 재발급 장치가 깨어나 엉뚱한 재시도를 한다.
         //
+        //   ⬛ [아래 `canForce` 서술은 1.3.46 까지 — 20260928작2 K-4 다] 화면은 이제 이 값을 읽지 않는다(버튼 제거 ·
+        //     `Login.razor`). 서버도 `ForceSignOutOtherPc` 를 읽지 않으므로 `true` 가 가도 앞 PC 를 끊을 길이 없다.
+        //     값 자체는 작지 범위 밖이라 그대로 두었다(⚠️ 개발명세서 미결 — 정리는 별건).
         //   ⚠️ `canForce` 는 화면이 [그 PC 접속을 끊고 여기서 사용하기] 버튼을 띄우는 열쇠다.
         //     이 값이 안 가면 사용자는 **영영 못 들어간다** — PC 가 꺼져 로그아웃이 안 돈 경우
         //     남은 세션이 본인 계정을 스스로 잠그기 때문이다.
@@ -330,12 +333,14 @@ public class AuthController : ControllerBase
             _logger.LogInformation(
                 "다른 PC 사용 중이라 로그인 거절 — 마지막 사용 {LastActive:u}", ex.OtherPcLastActiveAtUtc);
 
+            // ⬛ [낡은 칸 · 1.3.46 까지] `canForce = true` — 20260928작2 절G 에서 **뺐다**(잔재 정리).
+            //   화면에 버튼이 없고(`Login.razor` 절G) 서버도 force 를 읽지 않는다 ⇒ 「끊을 수 있다」는 거짓 신호였다.
+            //   Web 모델의 `CanForce` 칸은 무접촉(작지 절G) — 값이 안 오면 `false` 로 읽힌다.
             return Conflict(new
             {
                 message = ex.Message,
                 code = "other_pc_in_use",
-                otherPcLastActiveAt = ex.OtherPcLastActiveAtUtc,
-                canForce = true
+                otherPcLastActiveAt = ex.OtherPcLastActiveAtUtc
             });
         }
         catch (UnauthorizedAccessException ex)
@@ -364,6 +369,7 @@ public class AuthController : ControllerBase
             }
 
             // 세션 + refresh_token 정리
+            string? logoutSid = null;   // 20260928작2 절E — 접속기록이 같은 `sid` 를 쓴다(JWT 에서만)
             try
             {
                 var db = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
@@ -372,9 +378,12 @@ public class AuthController : ControllerBase
                     if (db is System.Data.Common.DbConnection c) await c.OpenAsync(ct);
                     else db.Open();
                 }
-                await Dapper.SqlMapper.ExecuteAsync(db,
-                    "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId",
-                    new { UserId = userId });
+                // ⬛ [낡은 줄 · 1.3.46 까지 — 20260928작2 절C 에서 아래 `sid` 갈래 안으로 좁혔다]
+                //   `UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId`
+                //   [무엇이 틀렸나] 계정의 refresh 를 **전부** 폐기했다 ⇒ 휴대폰에서 로그아웃하면
+                //   일하던 PC 가 갱신 때(8h 뒤) 「로그아웃된 토큰」으로 튕겼다(선행검증 §1 · L).
+                //   사장님 원문 *"휴대폰에서 로그아웃을 하던, pc에서 로그아웃을 하던 끊기면 안되지."*
+                //   ⇒ 이 로그인의 refresh 만 폐기한다 — 기준은 JWT `sid` = `refresh_tokens.session_id`(DB-130).
 
                 // 🔴 로그아웃은 **지금 이 기기의 세션 한 줄만** 지운다 (20260927작2 절F② · 설계 §8 F-5)
                 //
@@ -388,21 +397,72 @@ public class AuthController : ControllerBase
                 //     지울 기준이 없는데 아무것도 안 지우면 로그아웃이 조용히 실패한다.
                 //     옛 토큰은 갈리면 저절로 새 경로로 들어온다(작지 금지 #1b 와 같은 방향).
                 //   ⚠️ 이 줄을 `WHERE user_id` 로 되돌리면 게이트 G-B7 가 FAIL 한다.
-                var sid = User.FindFirst("sid")?.Value;
+                //   ⬛ [낡은 줄 · 바로 위 두 줄 — 20260928작2 절C 에서 뒤집었다]
+                //     *"`sid` 가 없으면 종전 그대로 전삭한다 … 아무것도 안 지우면 로그아웃이 조용히 실패한다."*
+                //   🔴 [지금] `sid` 가 없는 로그인은 **세션 행이 원래 없다**(`sid` 미탑재 = 기록 실패 또는 옛 토큰).
+                //     그래서 종전 `DELETE ... WHERE user_id` 는 **남의 행만** 지웠다 ⇒ **아무것도 지우지 않는다.**
+                //     refresh 도 가를 수 없으니 건드리지 않는다(화면이 자기 저장소를 비운다).
+                //     ⚠️ 잔여: 그 refresh 행이 7일 동안 DB 에 남는다(도난 시에만 의미 · 설계 §2).
+                //     ⚠️ 무삭제를 전삭으로 되돌리면 G-B19 가 FAIL 한다.
+                logoutSid = User.FindFirst("sid")?.Value;
+                var sid = logoutSid;
                 if (!string.IsNullOrWhiteSpace(sid))
                 {
+                    // 🔴 20260928작2 절C — 이 로그인의 refresh 만 폐기(`user_id` 동반 · `session_id` 일치).
+                    //   `user_id` 를 같이 거는 이유: 남의 `session_id` 를 폐기할 길을 조건으로 닫는다([3-V] ②).
+                    //   ⚠️ `WHERE user_id` 로 되돌리면 G-B18 ⓐ, 이 문장을 빼면 G-B18 ⓑ 가 FAIL 한다.
                     await Dapper.SqlMapper.ExecuteAsync(db,
-                        "DELETE FROM user_sessions WHERE session_id = @Sid",
-                        new { Sid = sid });
+                        "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND session_id = @Sid",
+                        new { UserId = userId, Sid = sid });
+
+                    // ⬛ [낡은 문장 · 20260928작2 절C] `DELETE FROM user_sessions WHERE session_id = @Sid`
+                    // 🔴 20260928작2 절K (방어) — 세션 행 삭제에도 `user_id` 를 건다. refresh 폐기와 **같은 모양**:
+                    //   `sid` 는 JWT 에서만 오지만, 조건으로도 남의 행을 지울 길을 닫는다([3-V] ②).
+                    //   순서 = ① refresh 폐기(위) ② 세션 행 삭제(여기) — ① 만 되고 ② 가 터져도 절L 술어가
+                    //   그 행을 「살아 있는 PC」로 세지 않는다(쓸 수 있는 refresh 가 없다 · G-B30 ⓑ).
+                    await Dapper.SqlMapper.ExecuteAsync(db,
+                        "DELETE FROM user_sessions WHERE user_id = @UserId AND session_id = @Sid",
+                        new { UserId = userId, Sid = sid });
                 }
                 else
                 {
-                    await Dapper.SqlMapper.ExecuteAsync(db,
-                        "DELETE FROM user_sessions WHERE user_id = @UserId",
-                        new { UserId = userId });
+                    // ⬛ [낡은 문장] `DELETE FROM user_sessions WHERE user_id = @UserId` — 위 설명대로 **지웠다.**
+                    _logger.LogInformation(
+                        "로그아웃 — 토큰에 세션 번호가 없어 지울 행이 없다(옛 토큰·세션 기록 실패). UserId: {UserId}", userId);
                 }
             }
-            catch (Exception ex) { _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId); }
+            // ⬛ [낡은 갈래 · 20260928작2 절K 이전] `catch (Exception ex) { _logger.LogWarning(…); }` 뒤 **200 「로그아웃 완료」**.
+            //   [무엇이 틀렸나] 폐기가 실패해도 200 이라 화면은 조용히 로그아웃했고, 남은 접속 때문에
+            //   다른 PC 가 최대 8h 409 로 막혔다(PI-4). 사용자는 왜인지 알 길이 없었다.
+            // 🔴 [지금] 실패는 **500** 으로 알린다(200 금지 · 설계 §13-4). 화면이 「로그아웃이 완료되지 않았습니다…」를 보여 준다.
+            //   접속기록(`logout`)은 남기지 않는다 — 끝나지 않은 로그아웃을 끝났다고 적지 않는다.
+            //   ⚠️ 이 갈래를 `Ok` 로 되돌리면 G-B30 ⓐ 가 FAIL 한다.
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "로그아웃 세션/토큰 정리 실패 — UserId: {UserId}", userId);
+                return StatusCode(500,
+                    new { message = "로그아웃이 완료되지 않았습니다" });
+            }
+
+            // 🔴 20260928작2 절E — 접속기록 1행(`audit_trail` · `user_session` · `logout`). 폐기 **뒤**에 남긴다.
+            //   테넌트·사용자는 JWT(`Items`)에서만(#2). 기기 종류는 로그인과 **같은 판정**(서버가 읽은 UA)이다 — 표시용.
+            //   실패는 함수 안에서 경고 로그만 — 로그아웃을 막지 않는다(#15 · #20).
+            try
+            {
+                var auditDb = HttpContext.RequestServices.GetRequiredService<System.Data.IDbConnection>();
+                if (auditDb.State != System.Data.ConnectionState.Open)
+                {
+                    if (auditDb is System.Data.Common.DbConnection ac) await ac.OpenAsync(ct);
+                    else auditDb.Open();
+                }
+                var ua = Request.Headers["User-Agent"].ToString();
+                var logoutDeviceKind = HitPan.Application.Common.DeviceTypeResolver.ToSessionDeviceKind(
+                    HitPan.Application.Common.DeviceTypeResolver.ResolveDeviceType(null, ua));
+                await HitPan.Application.Common.SessionAccessTrail.WriteAsync(
+                    auditDb, tenantId, userId, HitPan.Application.Common.SessionAccessTrail.ActionLogout,
+                    logoutSid, logoutDeviceKind, ua);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "로그아웃 접속기록 실패 — UserId: {UserId}", userId); }
         }
 
         return Ok(new { message = "로그아웃 완료" });
@@ -431,6 +491,26 @@ public class AuthController : ControllerBase
         catch (UnauthorizedAccessException ex)
         {
             return Unauthorized(new { message = ex.Message });
+        }
+        catch (HitPan.Application.Common.ConcurrentPcLoginException ex)
+        {
+            // 🔴 20260928작2 개정3 절Q ②(설계 §14-2 · X-1 = (가) 401 · PM 결재 9/28) — **방어로만 남긴다.**
+            //   ⬛ [낡은 서술 · 틀린 전제] 「이 예외는 여기서 안 잡혀 500 으로 갔다」 — CI run 36392248553 G-B36 이 뒤집었다.
+            //   [사실] **현재 도달 경로 없음**: 갱신 경로는 서비스가 이미 401 로 바꾼다 —
+            //     `HitPan.Application/Services/AuthService.cs:989-997` `catch (ConcurrentPcLoginException)` →
+            //     `throw new UnauthorizedAccessException("다른 컴퓨터에서 사용 중이어서 접속이 만료되었습니다. …")` ⇒ 위 ① 401.
+            //   이 갈래는 서비스의 그 변환이 빠지는 날 500(→ 화면 「유지」 영원히 재시도)으로 새지 않게 막는 2차 방어다.
+            _logger.LogWarning(ex, "토큰 갱신 거절 — 다른 PC 가 사용 중입니다.");
+            return Unauthorized(new { message = ex.Message, code = "other_pc_in_use" });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 🔴 20260928작2 개정3 절Q ③(설계 §14-2 · R-1 서버) — 설정 누락·DB 예외는 「이 refresh 는 무효」가 아니라
+            //   「서버가 판정을 못 했다」다. ⬛ 종전엔 전역 미들웨어가 400(InvalidOperationException)·409(MySql 1451/1452)로
+            //   바꿔 화면이 「판정」으로 읽었다. 이 주소만 500 으로 정직하게 낸다(🚫 GlobalExceptionMiddleware 무접촉).
+            _logger.LogError(ex, "토큰 갱신 중 서버 오류");
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "잠시 후 다시 시도해 주세요." });
         }
     }
 

@@ -3243,10 +3243,12 @@ CREATE TABLE `refresh_tokens` (
   `expires_at` datetime(6) NOT NULL,
   `is_revoked` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `session_id` varchar(36) DEFAULT NULL COMMENT '이 refresh 토큰을 낳은 로그인의 세션 번호(JWT sid). 로그아웃·죽은 PC 정리가 이 로그인만 가른다. NULL=sid 미탑재·옛 행 (DB-130)',
   PRIMARY KEY (`token_id`),
   KEY `idx_user` (`user_id`),
   KEY `idx_token` (`token_hash`(250)),
-  KEY `idx_expires` (`expires_at`)
+  KEY `idx_expires` (`expires_at`),
+  KEY `idx_user_session` (`user_id`,`session_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -3589,7 +3591,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4144,6 +4146,7 @@ CREATE TABLE `tenant_settings` (
   `enforce_tenant_session_limit` tinyint(1) NOT NULL DEFAULT 0 COMMENT '축A 테넌트 총량 동시세션 제한(SessionLimitMiddleware) 사용 여부. 0=끔(기본). 켜기 전 테넌트별 활성 사용자 수 실측 필수 (DB-127)',
   `enforce_single_pc_login` tinyint(1) NOT NULL DEFAULT 0 COMMENT '축B 같은 계정 PC 동시로그인 차단 사용 여부. 0=끔(기본 · DB-128). 켜는 것은 별도 결재. 모바일은 대상 아님 (DB-127 신설 · DB-128 기본 OFF)',
   `enforce_session_validity` tinyint(1) NOT NULL DEFAULT 1 COMMENT '세션 생존 확인(로그아웃·밀어내기 즉시 반영). 0=비상 끔. 축B(enforce_single_pc_login)와 별개 스위치 (DB-129)',
+  `enforce_one_pc_login` tinyint(1) NOT NULL DEFAULT 1 COMMENT '같은 계정 PC 동시로그인 차단(PC 1대 · 모바일 FREE · 먼저 들어온 PC 가 이긴다). 1=켬(기본) · 0=비상 끔. 행 없음도 켬으로 읽는다 (DB-131)',
   PRIMARY KEY (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
