@@ -30,48 +30,147 @@ public sealed class WatchdogStatusWriter
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
-    // 20260929작3 절W2 — local_update_apply_status 자가생성 DDL (한 곳)
+    // 20260929작3 갈래 R(9/30 재작업 · 설계 §12) — 「시도 기록」 새 표 local_update_attempts
     //
-    //   ① CREATE TABLE IF NOT EXISTS — 표가 없는 옛 PC(1.2.33 이전 설치 · 한 번도 적용 안 한 PC).
-    //      clean DDL(installer/hitpan_db_clean.sql `local_update_apply_status`)과 칸·키·엔진 일치(G-W8).
-    //   ② ALTER … ADD COLUMN IF NOT EXISTS consent_id — 표만 있고 칸이 없는 옛 PC.
-    //      칸은 끝에 붙는다 ⇒ clean DDL 도 consent_id 를 끝 칸으로 둔다(칸 순서까지 같다).
-    //   🔴 이 문장은 업데이트 zip 의 Migrations/SQL 에 넣지 않는다 — 넣으면 호환성 게이트 두 겹
-    //      (build-manifest.ps1 (b) · UpdateOrchestrator.PassesMigrationCrossCheckAsync ②)이 그 릴리스와
-    //      이후 모든 릴리스를 막는다. 이 표는 clean DDL + 워치독 자가생성 두 경로뿐이다(아래 WriteApplyStatusAsync 주석).
-    //   🔴 HitPan.Tests/Integrity/WatchdogApplyStatusDdlGateTests 가 아래 표식 사이의 문자열을 **원문 그대로** 읽어
-    //      격리 DB 에서 돌린다 — 표식을 지우거나 옮기면 게이트가 FAIL 로 알린다.
-    // ##W8-SCHEMA-BEGIN##
-    internal const string ApplyStatusCreateSql =
-        "CREATE TABLE IF NOT EXISTS `local_update_apply_status` (" +
+    //   ⬛ 갈래 W 의 「local_update_apply_status 에 consent_id 칸 + ADD COLUMN 자가 보강」은 폐기했다(작업지시서 §8).
+    //     apply_status 는 옛 워치독이 직접 읽고 쓰는 **보호 표**다 — 칸을 늘리면 옛 워치독 교차검증 ②가
+    //     그 릴리스와 이후 모든 릴리스를 막는다. 그래서 기존 표 3개는 무접촉 · 시도 기록은 새 표에만 둔다.
+    //   · 한 [예](local_update_consents.id) = 한 시도 = 한 행. consent_id UNIQUE ⇒ 같은 [예]로 두 번 시작하면 DB 가 막는다.
+    //   · 생성 경로 3개(설계 §12-4): DB-135 마이그 · 출하 DDL · 여기 자가생성. 셋 다 CREATE TABLE IF NOT EXISTS 만.
+    //   🔴 아래 표식 사이 문자열은 HitPan.Tests/Integrity/WatchdogApplyStatusDdlGateTests(G-R3·G-R4)가
+    //      **원문 그대로** 읽어 격리 DB 에서 돌리고, 칸·키·엔진을 DB-135·출하 DDL 과 대조한다.
+    //      표식을 지우거나 옮기면 게이트가 FAIL 로 알린다.
+    //   🔴 이 상수에 보호 표 이름을 넣지 마라 — 새 표만 만든다.
+    // ##R-SCHEMA-BEGIN##
+    internal const string AttemptsCreateSql =
+        "CREATE TABLE IF NOT EXISTS `local_update_attempts` (" +
         "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
-        "`tenant_id` varchar(36) DEFAULT NULL, " +
-        "`applied_version` varchar(20) NOT NULL, " +
+        "`consent_id` bigint(20) NOT NULL, " +
+        "`update_version` varchar(20) NOT NULL, " +
         "`result` varchar(20) NOT NULL, " +
         "`detail` text DEFAULT NULL, " +
-        "`applied_at` datetime(3) NOT NULL, " +
+        "`started_at` datetime(3) NOT NULL, " +
+        "`ended_at` datetime(3) DEFAULT NULL, " +
         "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
-        "`consent_id` bigint(20) DEFAULT NULL, " +
         "PRIMARY KEY (`id`), " +
-        "UNIQUE KEY `uk_local_update_apply_version` (`applied_version`), " +
-        "KEY `idx_local_update_apply_at` (`applied_at`)" +
+        "UNIQUE KEY `uk_local_update_attempts_consent` (`consent_id`), " +
+        "KEY `idx_local_update_attempts_ver` (`update_version`,`consent_id`)" +
         ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
-
-    internal const string ApplyStatusAddConsentColumnSql =
-        "ALTER TABLE `local_update_apply_status` ADD COLUMN IF NOT EXISTS `consent_id` bigint(20) DEFAULT NULL;";
-    // ##W8-SCHEMA-END##
-
-    /// <summary>표 자가생성 + 옛 표 칸 보강을 한 배치로. 동의 리더·기동 정리·적용결과 기록이 같은 문자열을 쓴다.</summary>
-    internal const string ApplyStatusSchemaSql = ApplyStatusCreateSql + " " + ApplyStatusAddConsentColumnSql;
+    // ##R-SCHEMA-END##
 
     /// <summary>
-    /// 20260929작3 절W6 ② — 워치독 **기동 시** 남아 있는 in_progress 행을 닫는다(설계 §5-4 · §6).
+    /// 시도 행 열기 — 이 [예]로 적용을 **시작한다**는 기록(설계 §12-1 · 규칙 C ①).
+    ///   INSERT(덮어쓰기 아님) — 같은 동의 id 로 두 번 쓰면 UNIQUE 위반 ⇒ <see cref="AttemptOpenResult.AlreadyUsed"/>
+    ///   (그 [예]는 이미 썼다 — 적용하지 않는다 · G-R7). 그 밖의 실패는 <see cref="AttemptOpenResult.Failed"/>(규칙 Z-1 대상).
+    /// 실패는 로그만(헌법 #15) — 예외를 밖으로 던지지 않는다(취소 제외).
+    /// </summary>
+    public async Task<AttemptOpenResult> OpenAttemptAsync(long consentId, string version, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Attempt] db.conf 자격증명 부재 — 시도 행을 열지 못했습니다(버전 {V} · 동의 {Id})", version, consentId);
+                return AttemptOpenResult.Failed;
+            }
+            if (!IsSafeVersionLiteral(version) || consentId <= 0)
+            {
+                _logger.LogWarning("[Update/Attempt] 안전하지 않은 값 — 시도 행 열기 거부(버전 '{V}' · 동의 {Id})", version, consentId);
+                return AttemptOpenResult.Failed;
+            }
+
+            var sql = AttemptsCreateSql + " " + BuildOpenAttemptSql(consentId, version);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            var (exit, _, stderr) = await RunReadAsync(clientExe, args, ct).ConfigureAwait(false);
+            if (exit == 0)
+            {
+                _logger.LogInformation("[Update/Attempt] 시도 행 열림 — 버전 {V} · 동의 {Id} · in_progress", version, consentId);
+                return AttemptOpenResult.Opened;
+            }
+            if (IsDuplicateKeyError(stderr))
+            {
+                _logger.LogWarning("[Update/Attempt] 동의 {Id} 는 이미 시도한 [예]입니다(시도 표 UNIQUE) — 다시 적용하지 않습니다(버전 {V})", consentId, version);
+                return AttemptOpenResult.AlreadyUsed;
+            }
+            _logger.LogWarning("[Update/Attempt] 시도 행 열기 실패(exit={E}) — 버전 {V} · 동의 {Id}: {Err}", exit, version, consentId, stderr);
+            return AttemptOpenResult.Failed;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Attempt] 시도 행 열기 예외 — 버전 {V} · 동의 {Id}", version, consentId);
+            return AttemptOpenResult.Failed;
+        }
+    }
+
+    /// <summary>
+    /// 시도 행 닫기 — 그 버전의 **진행 중(in_progress) 행만** 결과로 닫는다(설계 §12-1 ①).
+    ///   동의 없는 경로(Normal·Emergency 채널)는 열린 행이 없어 0행 = 무해. 이미 닫힌 행은 안 건드린다
+    ///   (오케스트레이터 종점이 먼저 닫았으면 그 결과가 남는다 · [4] F-3).
+    /// 실패는 로그만(헌법 #15). 반환 = 문장 실행 성공 여부.
+    /// </summary>
+    public async Task<bool> CloseAttemptAsync(string version, string result, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Attempt] db.conf 자격증명 부재 — 시도 행을 닫지 못했습니다(버전 {V} · 결과 {R})", version, result);
+                return false;
+            }
+            if (!IsSafeVersionLiteral(version))
+            {
+                _logger.LogWarning("[Update/Attempt] 안전하지 않은 버전 문자열 — 시도 행 닫기 거부: '{V}'", version);
+                return false;
+            }
+
+            var sql = AttemptsCreateSql + " " + BuildCloseAttemptSql(version, result, detail);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            await RunWriteAsync(clientExe, args, ct).ConfigureAwait(false);
+            _logger.LogInformation("[Update/Attempt] 시도 행 닫기 완료 — 버전 {V} · 결과 {R}(진행 중 행만)", version, result);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Attempt] 시도 행 닫기 실패 — 버전 {V} · 결과 {R}", version, result);
+            return false;
+        }
+    }
+
+    /// <summary>시도 행 INSERT 문(순수 — 시험이 문장을 본다). UPSERT 아님(G-R7).</summary>
+    internal static string BuildOpenAttemptSql(long consentId, string version) =>
+        "INSERT INTO `local_update_attempts` (consent_id, update_version, result, detail, started_at) " +
+        $"VALUES ({consentId.ToString(System.Globalization.CultureInfo.InvariantCulture)}, '{version}', 'in_progress', " +
+        $"{EscapeSqlLiteral($"동의 {consentId.ToString(System.Globalization.CultureInfo.InvariantCulture)} 로 적용 시작")}, NOW(3));";
+
+    /// <summary>시도 행 닫기 UPDATE 문(순수). 진행 중 행만 · ended_at=NOW(3).</summary>
+    internal static string BuildCloseAttemptSql(string version, string result, string? detail) =>
+        "UPDATE `local_update_attempts` " +
+        $"SET result={EscapeSqlLiteral(result)}, detail={EscapeSqlLiteral(detail)}, ended_at=NOW(3) " +
+        $"WHERE update_version='{version}' AND result='in_progress';";
+
+    /// <summary>mariadb 클라이언트 stderr 가 UNIQUE 위반(1062)인가.</summary>
+    internal static bool IsDuplicateKeyError(string? stderr) =>
+        !string.IsNullOrEmpty(stderr)
+        && (stderr.Contains("ERROR 1062", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 20260929작3 절W6 ② — 워치독 **기동 시** 남아 있는 in_progress 시도 행을 닫는다(설계 §5-4 · §6 · §12 R5).
     ///   기동 시점엔 적용이 돌 수 없다 — 적용은 이 프로세스 안에서만 돈다. 그러니 in_progress 는 전부
     ///   「전원 종료·강제 종료로 중단된 시도」다.
     ///   · 폴더를 되돌렸으면(<paramref name="restoredFolders"/>) → rolled_back 「업데이트 중 중단 — 이전 버전으로 되돌림」
     ///   · 아니면 → failed 「업데이트 중 중단」
     ///   detail 머리 「업데이트 중 중단」은 ERP 판정(설계 §7)이 알아보는 **고정 문구**다 — 바꾸려면 설계 개정 먼저.
-    ///   consent_id 는 건드리지 않는다 ⇒ 그 [예]는 「썼다」로 남고 재기동 뒤 무질문 재시도가 없다(규칙 C).
+    ///   ⬛ 갈래 R — 대상 표를 apply_status → local_update_attempts 로 바꿨다. apply_status 를 향한 UPDATE 는 0.
+    ///      본사 보고도 0(깔때기 RecordApplyStatusAsync 를 거치지 않는다 · 설계 §12-1 ③).
     /// 실패는 로그만(헌법 #15·#20) — 기동을 막지 않는다. 반환 = 기록 성공 여부.
     /// </summary>
     public async Task<bool> CloseInterruptedAttemptsAsync(bool restoredFolders, CancellationToken ct)
@@ -85,7 +184,7 @@ public sealed class WatchdogStatusWriter
                 return false;
             }
 
-            var sql = ApplyStatusSchemaSql + " " + BuildCloseInterruptedSql(restoredFolders);
+            var sql = AttemptsCreateSql + " " + BuildCloseInterruptedSql(restoredFolders);
             var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
             var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
 
@@ -106,14 +205,14 @@ public sealed class WatchdogStatusWriter
     internal const string DetailInterrupted = "업데이트 중 중단";
     internal const string DetailInterruptedRestored = "업데이트 중 중단 — 이전 버전으로 되돌림";
 
-    /// <summary>기동 정리 UPDATE 문(순수 — 시험이 문장을 본다).</summary>
+    /// <summary>기동 정리 UPDATE 문(순수 — 시험이 문장을 본다). 대상 = 시도 표 · 진행 중 행만.</summary>
     internal static string BuildCloseInterruptedSql(bool restoredFolders)
     {
         var (result, detail) = restoredFolders
             ? ("rolled_back", DetailInterruptedRestored)
             : ("failed", DetailInterrupted);
-        return "UPDATE `local_update_apply_status` " +
-               $"SET result='{result}', detail={EscapeSqlLiteral(detail)}, applied_at=NOW(3) " +
+        return "UPDATE `local_update_attempts` " +
+               $"SET result='{result}', detail={EscapeSqlLiteral(detail)}, ended_at=NOW(3) " +
                "WHERE result='in_progress';";
     }
 
@@ -184,11 +283,7 @@ public sealed class WatchdogStatusWriter
     ///
     /// 실패는 침묵하지 않고 로그만 남긴다(헌법 #15). 반환 false = 기록 실패(업데이트 흐름은 멈추지 않는다).
     /// </summary>
-    public async Task<bool> WriteApplyStatusAsync(string version, string result, string? detail, CancellationToken ct,
-        // 20260929작3 절W2 — 이 시도를 연 동의 id(local_update_consents.id). **선택 인자 · 뒤에 추가만**(헌법 #1).
-        //   값이 있을 때만 consent_id 를 쓴다(in_progress 기록). 없으면(종점 기록들) consent_id 를 **안 건드린다** —
-        //   같은 행(버전당 1행)에 앞서 쓴 동의 id 가 종점 기록 뒤에도 남아야 「이 [예]는 썼다」가 유지된다(설계 §5-2).
-        long? consentId = null)
+    public async Task<bool> WriteApplyStatusAsync(string version, string result, string? detail, CancellationToken ct)
     {
         try
         {
@@ -209,10 +304,19 @@ public sealed class WatchdogStatusWriter
 
             // 자가생성 DDL — clean DDL(installer/hitpan_db_clean.sql:1887~1898)과 컬럼·키·엔진 100% 일치.
             //   차이는 CREATE TABLE IF NOT EXISTS(기존 데이터·행 보존, DROP 금지)뿐 — 자가생성은 파괴하지 않는다.
-            // ⬛ 20260929작3 절W2 — 이 자리의 지역 상수 createSql 은 클래스 상수 ApplyStatusSchemaSql 로 옮겼다
-            //   (동의 리더·기동 정리도 같은 문자열을 써야 해서 · 두 벌이 되면 언젠가 갈라진다). 내용은 그대로 +
-            //   consent_id 칸 + 옛 표용 ADD COLUMN IF NOT EXISTS 한 줄.
-            const string createSql = ApplyStatusSchemaSql;
+            const string createSql =
+                "CREATE TABLE IF NOT EXISTS `local_update_apply_status` (" +
+                "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
+                "`tenant_id` varchar(36) DEFAULT NULL, " +
+                "`applied_version` varchar(20) NOT NULL, " +
+                "`result` varchar(20) NOT NULL, " +
+                "`detail` text DEFAULT NULL, " +
+                "`applied_at` datetime(3) NOT NULL, " +
+                "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
+                "PRIMARY KEY (`id`), " +
+                "UNIQUE KEY `uk_local_update_apply_version` (`applied_version`), " +
+                "KEY `idx_local_update_apply_at` (`applied_at`)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
 
             // UPSERT — 버전당 1행. 재시도 시 result·detail·applied_at 을 덮어쓴다(멱등).
             //   tenant_id 는 워치독 단일 테넌트라 NULL(스키마 코멘트대로). applied_at = NOW(3).
@@ -220,15 +324,6 @@ public sealed class WatchdogStatusWriter
                 "INSERT INTO `local_update_apply_status` (tenant_id, applied_version, result, detail, applied_at) " +
                 $"VALUES (NULL, '{version}', {resultLit}, {detailLit}, NOW(3)) " +
                 "ON DUPLICATE KEY UPDATE result=VALUES(result), detail=VALUES(detail), applied_at=VALUES(applied_at);";
-
-            // 20260929작3 절W2 — consent_id 가 있을 때만 칸 목록·갱신 목록에 넣는다(없으면 종전 문장 그대로).
-            if (consentId is { } cid)
-            {
-                upsertSql =
-                    "INSERT INTO `local_update_apply_status` (tenant_id, applied_version, result, detail, applied_at, consent_id) " +
-                    $"VALUES (NULL, '{version}', {resultLit}, {detailLit}, NOW(3), {cid.ToString(System.Globalization.CultureInfo.InvariantCulture)}) " +
-                    "ON DUPLICATE KEY UPDATE result=VALUES(result), detail=VALUES(detail), applied_at=VALUES(applied_at), consent_id=VALUES(consent_id);";
-            }
 
             // 자가생성 + UPSERT 를 단일 -e 배치로 한 번에(헌법 #16 — 드라이버 미사용·단일 실행).
             var sql = createSql + " " + upsertSql;
@@ -432,4 +527,16 @@ public sealed class WatchdogStatusWriter
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");
     }
+}
+
+/// <summary>
+/// 20260929작3 갈래 R — 시도 행 열기 결과(<see cref="WatchdogStatusWriter.OpenAttemptAsync"/>).
+///   Opened = 열림(적용 진행) · AlreadyUsed = 그 [예]는 이미 시도했다(UNIQUE 위반 — 적용 안 함 · 펜딩 해제) ·
+///   Failed = 그 밖의 기록 실패(적용 보류 · 규칙 Z-1 대상).
+/// </summary>
+public enum AttemptOpenResult
+{
+    Opened,
+    AlreadyUsed,
+    Failed,
 }

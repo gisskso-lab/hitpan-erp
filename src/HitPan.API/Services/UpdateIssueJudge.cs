@@ -106,7 +106,10 @@ public static class UpdateIssueJudge
     /// 경과(A)는 DB 시계끼리 잰다: <c>TIMESTAMPDIFF(SECOND, applied_at, NOW(3))</c> — 워치독이 DB <c>NOW(3)</c> 로 적는다(설계 §4).
     /// </para>
     /// <para>
-    /// ⚠️ <c>consent_id</c> 칸은 DB-135(갈래 W)가 만든다. 칸이 없는 DB 에서는 이 조회가 실패하고,
+    /// ⬛ 20260929작3 갈래 R(설계 §12-2) — A 출처 = <c>local_update_attempts</c> 의 L 최신 1행(<c>ORDER BY consent_id DESC</c>) ·
+    /// 경과 = <c>started_at</c>. apply_status 는 판정에 읽지 않는다(JOIN 삭제). 칸 이름(IssueRow)은 그대로 ⇒ 호출자·Judge 무변경.
+    /// 시도 표는 DB-135 가 만든다 — 없으면 이 조회가 실패하고 호출자는 종전 폴백(규칙 Z-2).
+    /// ⚠️(옛 줄) <c>consent_id</c> 칸은 DB-135(갈래 W)가 만든다. 칸이 없는 DB 에서는 이 조회가 실패하고,
     /// 호출자는 <b>종전 폴백</b>(first = 종전처럼 팝업)으로 간다(#15·#20).
     /// 🔴 운영 코드가 이 상수를 그대로 쓴다 — 게이트 G-A4 도 <b>이 상수</b>를 출하 DDL 위에서 돌린다(복사본 금지).
     /// </para>
@@ -118,7 +121,7 @@ public static class UpdateIssueJudge
                a.consent_id                               AS ApplyConsentId,
                a.result                                   AS ApplyResult,
                a.detail                                   AS ApplyDetail,
-               TIMESTAMPDIFF(SECOND, a.applied_at, NOW(3)) AS ApplyElapsedSeconds
+               TIMESTAMPDIFF(SECOND, a.started_at, NOW(3)) AS ApplyElapsedSeconds
         FROM (SELECT 1 AS one) AS k
         LEFT JOIN (
             SELECT id, action, consented_at
@@ -127,8 +130,13 @@ public static class UpdateIssueJudge
             ORDER BY id DESC
             LIMIT 1
         ) AS c ON 1 = 1
-        LEFT JOIN local_update_apply_status AS a
-               ON a.applied_version = @Version
+        LEFT JOIN (
+            SELECT consent_id, result, detail, started_at
+            FROM local_update_attempts
+            WHERE update_version = @Version
+            ORDER BY consent_id DESC
+            LIMIT 1
+        ) AS a ON 1 = 1
         """;
 
     /// <summary><see cref="IssueQuerySql"/> 1행 매핑.</summary>
