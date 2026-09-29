@@ -43,6 +43,8 @@ builder.Services.AddScoped<HitPanProtectedLocalStorage>();
 // 🔴 20260925작1 절B — 메인PC 「왕복 증명」 한 바퀴. 규칙을 한 곳에만 둔다.
 //   로그인 직후(MainPcGate)와 자료관리 진입(MainPcOnly)이 **같은 것**을 부른다.
 builder.Services.AddScoped<MainPcProofRunner>();
+// 🔴 20260929작3 절F5 — 업데이트 팝업 방아쇠를 한 곳에 모은다(게이트·사이드바가 같은 것을 쓴다).
+builder.Services.AddScoped<UpdatePromptBus>();
 builder.Services.AddScoped<IAuthTokenRefresher, AuthTokenRefresher>();
 builder.Services.AddScoped<HitPanAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<HitPanAuthStateProvider>());
