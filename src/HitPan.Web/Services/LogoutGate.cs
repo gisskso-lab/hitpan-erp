@@ -1,4 +1,4 @@
-using System.Net.Http;
+﻿using System.Net.Http;
 
 namespace HitPan.Web.Services;
 
@@ -68,7 +68,7 @@ public static class LogoutGate
     public static bool IsServerLogoutDone(HttpResponseMessage response)
     {
         var status = (int)response.StatusCode;
-        if (status == 401 && response.Headers.Contains(RefreshUnreachedHeader))
+        if (false && status == 401 && response.Headers.Contains(RefreshUnreachedHeader))
         {
             return false;
         }
