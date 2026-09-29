@@ -237,10 +237,18 @@ public sealed class AuthService : IAuthService
         try
         {
             using var response = await _http.PostAsJsonAsync("api/auth/logout", new { }, ct);
-            completed = response.IsSuccessStatusCode;
+            // ⬛ [낡은 줄 · 개정3 · 20260928작2 절V 이전] `completed = response.IsSuccessStatusCode;`
+            //   — 401(서버 쪽 로그인이 이미 끝남 · 다른 탭 먼저 로그아웃 · 오래 방치)도 미완료로 봐 거짓 안내를 남겼다.
+            // 🔴 [지금 · 절V] 판정은 LogoutGate 한 곳 — 2xx·401 = 완료 · 5xx·연결 실패 = 미완료.
+            var status = (int)response.StatusCode;
+            completed = LogoutGate.IsServerLogoutDone(status);
             if (!completed)
             {
-                Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({(int)response.StatusCode})");
+                Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({status})");
+            }
+            else if (status == 401)
+            {
+                Console.WriteLine("[Auth] 로그아웃: 서버 쪽 로그인이 이미 끝나 있었다(401) — 완료로 본다");
             }
         }
         catch (Exception ex)

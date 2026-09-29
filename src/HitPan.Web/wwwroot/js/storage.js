@@ -3,6 +3,18 @@
 //    비민감 UI 상태(테마, 필터, 목록 너비 등)는 localStorage 유지.
 //    (근본 방어인 HttpOnly 쿠키 전환은 P1 작지서로 별도 처리.)"
 //
+// 🔴 [지금 · 실제 동작 · 20260928작2 절V 정리 — 코드 동작 변경 없음]
+//   · 토큰은 C# `AuthStorageKeys` 의 이름 **'hitpan_access_token'·'hitpan_refresh_token'** 으로 **localStorage** 에 있다
+//     (아래 `AUTH_TOKEN_KEYS` · `set`/`get`). 표시 이름 'hitpan_user_name' 도 localStorage.
+//   · 2026-04-24 `7f285b96` 부터 1.3.46 까지도 토큰은 이미 localStorage 였다 — 아래 SESSION_KEYS 의 이름
+//     ('access_token'·'refresh_token')이 C# 이름과 달라 sessionStorage 갈래가 한 번도 안 탔다.
+//   · SESSION_KEYS 의 두 이름은 **1.3.46 부터 아무도 쓰지 않는다**(C# 은 hitpan_* 만 쓴다). 그래도 `hitpanStorage_inheritFromOpener`
+//     가 참조하므로 선언은 그대로 둔다(무접촉).
+//   · 같은 브라우저의 탭들은 한 로그인을 나눠 쓴다(한 탭 로그아웃 = 전 탭 로그아웃). 탭 사이 갱신 잠금 = `hitpanLock_*`.
+//   · 토큰 칸을 쓰면(`set` · 로그인·갱신) 표식 'hitpan_token_store_v2' 를 남긴다. 표식이 없을 때만 `get` 이 옛 sessionStorage
+//     토큰을 한 번 옮겨 오고 표식한다 · 표식이 있으면 sessionStorage 토큰은 찌꺼기로 치운다(개정3 절U · 아래).
+//
+// ⬛ [낡은 서술 · 절H~개정3 · 전제 PI-1 이 틀렸다 — 1.3.46 토큰은 이미 localStorage 였다(위 「지금」)]
 // 🔴 사장님 9/28 K-6 (가) — 창을 닫으면 자기 접속에 막히던 P0 봉합(20260928작2 절H · 설계 §13-1 · PI-1).
 //   [무엇이 났나] PC 1대 차단을 켜자, 창(탭)을 닫는 순간 sessionStorage 의 토큰이 사라지는데 서버의 접속은
 //     살아 있어서, 같은 PC 에서 다시 열면 **자기 접속 때문에** 「다른 PC에서 사용 중입니다」(409)로 막혔다.
