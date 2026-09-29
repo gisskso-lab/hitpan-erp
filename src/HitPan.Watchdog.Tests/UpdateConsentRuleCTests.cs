@@ -82,6 +82,15 @@ public sealed class UpdateConsentRuleCTests : IDisposable
             return Task.FromResult(false);
         }
 
+        /// <summary>20260930작3 갈래 Z — 비Major(Emergency/Normal) 적용 대역. 결과는 NonMajorResult(기본 성공).</summary>
+        public int NonMajorApplies;
+        public bool NonMajorResult = true;
+        public Task<bool> ApplyNonMajor(UpdateManifest m, CancellationToken ct)
+        {
+            NonMajorApplies++;
+            return Task.FromResult(NonMajorResult);
+        }
+
         /// <summary>기동 정리 대역 — 운영 SQL(BuildCloseInterruptedSql)과 같은 뜻.</summary>
         public Task<bool> Close(bool restored, CancellationToken ct)
         {
@@ -144,6 +153,10 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         worker.ReportConsentRejectedSeam = _ => db.RejectReports++;
         worker.CloseInterruptedAttemptsSeam = db.Close;
         worker.AppRootSeam = () => appRoot ?? throw new InvalidOperationException("시험이 appRoot 를 안 줬다 — 설치본 경로를 쓰면 안 된다");
+        // 20260930작3 갈래 Z — 설치 버전을 고정한다. 운영값(VersionInfo.Current)은 CI 가 9.9.9 로 굽는다(watchdog-ci CI_TEST_VERSION) —
+        //   그대로 두면 「설치 ≥ 펜딩이면 적용 0」 규칙이 이 파일의 1.3.x 장면을 전부 버린다. 장면별로는 G-Z2 가 바꿔 끼운다.
+        worker.InstalledVersionSeam = () => "1.0.0";
+        worker.ApplyNonMajorSeam = db.ApplyNonMajor;
         return worker;
     }
 
@@ -618,6 +631,50 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         Assert.Equal(FolderShape.R4, UpdateFolderRecovery.Classify(app));
     }
 
+    // 20260930작3 갈래 Z · [4] 2차 O-4 — 교체 전 종료 입구를 게이트에 더한다(가능한 것만).
+    //   ⬛ 교차검증 차단(PassesMigrationCrossCheckAsync)은 생략: 차단 조건이 schema_migrations 조회(db.conf → mariadb.exe)라
+    //     DB 가 필요하다. 이 PC 에서는 설치본 db.conf 를 읽게 되어 격리가 안 된다(#39) — 개발명세서 Z §5.
+
+    [Fact(DisplayName = "G-X1 O-4 깨진 zip(해제 실패) + R3 잔재 → 표식 0 · 다음 기동 무변경")]
+    public async Task GX1_깨진_zip은_표식을_남기지_않는다()
+    {
+        var (app, staging) = NewResidueScene();
+        File.WriteAllBytes(Path.Combine(staging, $"hitpan-{V51}.zip"), new byte[] { 0x50, 0x4B, 0x00, 0x13, 0x37, 0x00 });
+        var orch = NewOrchestrator();
+
+        var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);
+
+        Assert.False(ok);
+        Assert.False(File.Exists(UpdateFolderRecovery.MarkerPath(app)));
+        var r = FinallyThenNextBoot(app);
+        Assert.False(r.Restored);
+        Assert.Equal("1.3.50", Tag(app, "web"));
+        Assert.Equal("1.3.49-residue", Tag(app, "web.old"));
+        Assert.False(Directory.Exists(Path.Combine(app, "web.failed")));
+    }
+
+    [Fact(DisplayName = "G-X1 O-4 교체 전 정리(ClearStaleOldDirsForSwap) 실패 → 표식 0 · 다음 기동 무변경")]
+    public async Task GX1_교체전_정리_실패는_표식을_남기지_않는다()
+    {
+        // web 폴더 자리에 같은 이름의 **파일**이 있다 → RestoreMissingFromOld 의 web.old → web 되돌림이 실패 → 정리 false.
+        var app = NewAppRoot(("api", "1.3.50"), ("web.old", "1.3.49-residue"));
+        File.WriteAllText(Path.Combine(app, "web"), "not-a-folder");
+        var staging = Path.Combine(app, "_staging");
+        Directory.CreateDirectory(staging);
+        MakeZip(staging, "api", "web");
+        var orch = NewOrchestrator();
+
+        Assert.False(orch.ClearStaleOldDirsForSwap(app));                        // 장면 성립 확인(이 입구가 실제로 닫힌다)
+        var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);
+
+        Assert.False(ok);
+        Assert.False(File.Exists(UpdateFolderRecovery.MarkerPath(app)));
+        var r = FinallyThenNextBoot(app);
+        Assert.False(r.Restored);
+        Assert.Equal("1.3.50", Tag(app, "api"));
+        Assert.Equal("1.3.49-residue", Tag(app, "web.old"));
+    }
+
     // ══════════════════════════════════════════════════════════════
     // G-X2 — [4] F-2: 「이미 쓴 [예]」는 펜딩을 유지하고 본사 feed 를 다시 받지 않는다 (갈래 X)
     //   실제 Worker 의 한 루프 평가(EvaluateUpdateOncePerDayAsync)를 N번 돌려 feed 조회 수를 센다.
@@ -711,6 +768,110 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         await w.EvaluateUpdateForTestAsync(CancellationToken.None);
 
         Assert.True(feed.ManifestFetches > 0);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-Z2 — 20260930작3 갈래 Z · [4] 2차 F-4: 설치 버전 ≥ 펜딩 버전이면 펜딩을 버리고 적용 0 (역행 적용 차단)
+    //   실제 Worker 인스턴스 · 판단 코드는 운영 그대로 · 설치 버전·적용만 대역.
+    //   음성 대조군: (가) 시험 안 — 설치 1.3.49 면 같은 새 [예]로 적용 1(비교가 실제로 가른다)
+    //                (나) 소스 원복 실험 — 비교를 빼면 설치 1.3.51 장면이 적용 1 로 FAIL(개발명세서 Z §4 실측).
+    // ══════════════════════════════════════════════════════════════
+
+    private static UpdateManifest Emergency(string v) =>
+        new(v, UpdateChannel.Emergency, "https://example.invalid/x.zip", "00", 1, DateTime.UtcNow, null, false, null);
+
+    [Fact(DisplayName = "G-Z2 🔴 F-4 설치 1.3.51 · 펜딩 1.3.50 + 새 [예] → 적용 0 · 펜딩 해제 · 시도 기록 0 · 거부 보고 0")]
+    public async Task GZ2_설치가_펜딩_이상이면_새_예라도_적용0()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        db.Consents.Add((6, "approve"));                       // 옛 탭에서 들어온 새 [예]
+        var w = NewWorker(db);
+        w.InstalledVersionSeam = () => "1.3.51";
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;         // 방금 정규 확인함(feed 는 이 시험의 관심 밖)
+
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);   // 운영 루프가 부르는 그 함수
+
+        Assert.Equal(0, db.ApplyCalls);
+        Assert.Null(w.PendingConsentUpdateForTest);
+        Assert.Empty(db.Writes);                               // in_progress 도 안 열었다
+        Assert.Equal(0, db.RejectReports);
+    }
+
+    [Fact(DisplayName = "G-Z2 🔴 같은 버전(설치 1.3.50 · 펜딩 1.3.50) → 적용 0 · 펜딩 해제")]
+    public async Task GZ2_같은_버전도_적용0()
+    {
+        var db = new FakeLocalDb();
+        db.Consents.Add((6, "approve"));
+        var w = NewWorker(db);
+        w.InstalledVersionSeam = () => "1.3.50";
+        var m = Manifest("1.3.50");
+        w.PendingConsentUpdateForTest = m;
+
+        await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+
+        Assert.Equal(0, db.ApplyCalls);
+        Assert.Null(w.PendingConsentUpdateForTest);
+    }
+
+    [Fact(DisplayName = "G-Z2 🔴 F-4 장면 그대로 — 이미 쓴 [예]로 1.3.50 유지 중 Emergency 1.3.51 적용 성공 → 펜딩 해제 → 뒤이은 1.3.50 새 [예] 적용 0")]
+    public async Task GZ2_비Major_적용_성공_뒤_펜딩_정리()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient { Next = Emergency("1.3.51") };
+        var w = NewWorker(db, client: feed);
+        w.InstalledVersionSeam = () => "1.3.49";                                // 워치독 자기교체 전 = 같은 프로세스는 옛 버전
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow - TimeSpan.FromMinutes(61);   // 정규 확인 시점
+
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, feed.ManifestFetches);
+        Assert.Equal(1, db.NonMajorApplies);                                     // Emergency 1.3.51 적용(성공)
+        Assert.Null(w.PendingConsentUpdateForTest);                              // 같은 규칙으로 1.3.50 펜딩 정리
+
+        // 펜딩이 어떤 길로든 1.3.50 으로 다시 서고(재발견·복원) 옛 탭의 새 [예]가 들어와도 — 적용 0.
+        db.Consents.Add((6, "approve"));
+        var again = Manifest("1.3.50");
+        w.PendingConsentUpdateForTest = again;
+        await w.ConsumeConsentForMajorAsync(again, CancellationToken.None);
+        Assert.Equal(0, db.ApplyCalls);
+        Assert.Null(w.PendingConsentUpdateForTest);
+    }
+
+    [Fact(DisplayName = "G-Z2 무회귀 — Emergency 적용이 실패(false)하면 설치 버전이 안 바뀌었으므로 펜딩 1.3.50 은 그대로")]
+    public async Task GZ2_비Major_적용_실패면_펜딩_유지()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5, NonMajorResult = false };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient { Next = Emergency("1.3.51") };
+        var w = NewWorker(db, client: feed);
+        w.InstalledVersionSeam = () => "1.3.49";
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow - TimeSpan.FromMinutes(61);
+
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, db.NonMajorApplies);
+        Assert.Equal("1.3.50", w.PendingConsentUpdateForTest?.Version);
+    }
+
+    [Fact(DisplayName = "G-Z2 대조군(가) — 설치 1.3.49 · 펜딩 1.3.50 + 새 [예] → 적용 1 (비교가 실제로 가른다)")]
+    public async Task GZ2_대조군_설치가_낮으면_적용1()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        db.Consents.Add((6, "approve"));
+        var w = NewWorker(db);
+        w.InstalledVersionSeam = () => "1.3.49";
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;
+
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, db.ApplyCalls);
     }
 
     // ══════════════════════════════════════════════════════════════

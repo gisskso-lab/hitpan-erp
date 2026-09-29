@@ -134,6 +134,68 @@ public class Worker : BackgroundService
     //   ConsumeConsentForMajorAsync 가 매번 먼저 false 로 두고 그 분기에서만 true. 호출부가 정규 확인 주기로 내려갈지 가른다.
     private bool _pendingHeldByUsedApprove;
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260930작3 갈래 Z — [4] 2차 F-4 봉합(PM 결재 · 수용 아님): 역행 적용 차단의 워치독 쪽 겹.
+    //   ■ 무엇이 열려 있었나: 「이미 쓴 [예]」로 유지된 Major 펜딩(1.3.50)이 Emergency/Normal 적용(1.3.51) 뒤에도 남았다.
+    //     그 뒤 새 [예](옛 탭)가 들어오면 1.3.50 을 1.3.51 위에 적용할 수 있었다(오케스트레이터·Worker 어디에도 거부 없음).
+    //   ■ 규칙: 「설치 버전 ≥ 펜딩 버전이면 펜딩을 버리고 적용 0」. 비교는 UpdateClient.IsNewerVersion(다운그레이드 방어선과
+    //     같은 함수 · 3자리 정규화) 재사용 — 새로 만들지 않는다. 파싱 불가도 「새 버전 아님」 = 적용 0(모르면 바꾸지 않는다).
+    //   ■ 설치 버전 = VersionInfo.Current(이 워치독 어셈블리) 와 **이 수명에서 비Major 적용이 성공한 버전** 중 높은 쪽.
+    //     워치독 자기교체(W4-3)는 적용 뒤 따로 예약되므로, 적용 직후 같은 프로세스의 VersionInfo 는 아직 옛 버전이다 —
+    //     그래서 적용 성공 버전을 따로 기억한다(재기동하면 VersionInfo 자체가 새 버전이 된다).
+    //   ■ API 쪽 첫째 겹 = AuthController.UpdateConsent 의 버전 대조(옛 버전 [예]는 기록조차 안 된다).
+    // ══════════════════════════════════════════════════════════════════════════════════
+    internal Func<string> InstalledVersionSeam;
+    internal Func<UpdateManifest, CancellationToken, Task<bool>> ApplyNonMajorSeam;
+    private string? _nonMajorAppliedVersion;
+
+    /// <summary>20260930작3 갈래 Z — 이 수명에서 알고 있는 설치 버전(어셈블리 버전과 비Major 적용 성공 버전 중 높은 쪽).</summary>
+    private string EffectiveInstalledVersion()
+    {
+        var installed = InstalledVersionSeam();
+        return _nonMajorAppliedVersion is { } applied && UpdateClient.IsNewerVersion(applied, installed, out _)
+            ? applied
+            : installed;
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — <paramref name="version"/> 이 설치 버전보다 <b>높을 때만</b> 참(적용할 가치가 있다).
+    /// 거짓이면 <paramref name="installed"/>·<paramref name="reason"/> 에 로그용 사유를 채운다.
+    /// </summary>
+    private bool IsAboveInstalled(string version, out string installed, out string? reason)
+    {
+        installed = EffectiveInstalledVersion();
+        return UpdateClient.IsNewerVersion(version, installed, out reason);
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — 들고 있는 Major 펜딩이 설치 버전 이하이면 버린다(적용 0). 버렸으면 true.
+    /// 호출 자리: 비Major 적용 성공 직후(<see cref="NoteNonMajorApplied"/>).
+    /// </summary>
+    internal bool DropPendingIfNotNewer(string where)
+    {
+        if (_pendingConsentUpdate is not { } p) return false;
+        if (IsAboveInstalled(p.Version, out var installed, out var reason)) return false;
+
+        _logger.LogInformation("[Update] Major 펜딩 {V} 해제 — 설치 버전 {Installed} 이 같거나 더 높아 적용하지 않습니다({Where} · {Reason}).",
+            p.Version, installed, where, reason);
+        _pendingConsentUpdate = null;
+        _pendingHeldByUsedApprove = false;
+        return true;
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — 비Major(Emergency/Normal) 적용 결과를 기록하고, 성공이면 같은 규칙으로 Major 펜딩을 정리한다.
+    /// 실패(false)면 설치 버전이 안 바뀌었으므로 아무것도 하지 않는다.
+    /// </summary>
+    private void NoteNonMajorApplied(UpdateManifest m, bool ok, string channel)
+    {
+        if (!ok) return;
+        if (_nonMajorAppliedVersion is null || UpdateClient.IsNewerVersion(m.Version, _nonMajorAppliedVersion, out _))
+            _nonMajorAppliedVersion = m.Version;
+        DropPendingIfNotNewer($"{channel} {m.Version} 적용 성공 뒤");
+    }
+
     /// <summary>20260929작3 갈래 X 보완 · G-X3 시험용 — 마지막 정규 확인 시각(확인 게이트)을 읽고 쓴다.</summary>
     internal DateTime? LastUpdateCheckUtcForTest
     {
@@ -207,6 +269,9 @@ public class Worker : BackgroundService
         ReportConsentRejectedSeam = _update.ReportConsentRejected;
         CloseInterruptedAttemptsSeam = _statusWriter.CloseInterruptedAttemptsAsync;
         AppRootSeam = UpdateOrchestrator.AppRoot;
+        // 20260930작3 갈래 Z (F-4) — 설치 버전 · 비Major(Emergency/Normal) 적용 자리. 운영 = 종전과 같은 함수.
+        InstalledVersionSeam = GetCurrentVersion;
+        ApplyNonMajorSeam = _update.ApplyUpdateAsync;
 
         // ★ 20260807작2 N-10 — 재시작 폭주 상한 복원.
         //   디스크에 남은 마지막 확인 시각을 인메모리로 되살린다. 읽기 실패·손상·미래 시각이면
@@ -504,7 +569,8 @@ public class Worker : BackgroundService
             _lastNightPendingNoticeDate = null;
             _logger.LogInformation("[Update] Normal 채널 — 야간 창 진입, 보류분 자동 적용: {V} (대기 {Waited})",
                 toApply.Version, waited is { } w ? $"{w.TotalDays:F1}일" : "미상");
-            try { await _update.ApplyUpdateAsync(toApply, ct); }
+            // 20260930작3 갈래 Z (F-4) — 대리자 한 겹(운영 = 같은 함수) · 성공이면 Major 펜딩을 같은 규칙으로 정리.
+            try { NoteNonMajorApplied(toApply, await ApplyNonMajorSeam(toApply, ct), "Normal(야간 보류분)"); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "[Update] Normal 보류분 적용 중 예외"); }
             return;
@@ -619,7 +685,8 @@ public class Worker : BackgroundService
                     if (_update.IsNightWindow(DateTime.Now))
                     {
                         _logger.LogInformation("[Update] Normal 채널 — 야간 자동 적용 진입: {V}", m.Version);
-                        await _update.ApplyUpdateAsync(m, ct);
+                        // 20260930작3 갈래 Z (F-4) — 성공이면 Major 펜딩을 같은 규칙으로 정리.
+                        NoteNonMajorApplied(m, await ApplyNonMajorSeam(m, ct), "Normal");
                     }
                     else
                     {
@@ -637,7 +704,8 @@ public class Worker : BackgroundService
                 case UpdateAction.AnnounceThenApply: // Emergency
                     _logger.LogWarning("[Update] Emergency 채널 — 안내 후 적용 진입: {V} (안내 지연 {Delay})",
                         m.Version, decision.AnnounceDelay);
-                    await _update.ApplyUpdateAsync(m, ct);
+                    // 20260930작3 갈래 Z (F-4) — 성공이면 Major 펜딩(예: 「이미 쓴 [예]」로 유지된 1.3.50)을 같은 규칙으로 정리.
+                    NoteNonMajorApplied(m, await ApplyNonMajorSeam(m, ct), "Emergency");
                     break;
 
                 case UpdateAction.RequireConsent: // Major
@@ -691,6 +759,20 @@ public class Worker : BackgroundService
         //   버전 키로 막으면 새 [예](N-UPD2)가 조회조차 안 된다. 멱등은 이제 판독 뒤 **동의 id** 로 건다(아래).
         //   종전 조회 ReadLatestAsync 는 리더에 남아 있다(#1) — 규칙 C 는 id·used 까지 읽는 새 판독을 쓴다.
         _pendingHeldByUsedApprove = false;   // 갈래 X 보완 — 「이미 쓴 [예]」 분기에서만 true
+
+        // 20260930작3 갈래 Z (F-4) — 소비·적용 **직전** 게이트: 설치 버전 ≥ 펜딩 버전이면 펜딩을 버리고 적용 0.
+        //   동의를 읽기 전에 건다 — 새 [예]든 이미 쓴 [예]든 [나중에]든, 이미 깔린 버전 이하로 되돌리는 적용은 없다.
+        //   거부 보고(ReportConsentRejected)도 하지 않는다 — 고객의 답이 아니라 버전이 끝낸 펜딩이다.
+        //   펜딩을 비우면 호출부가 확인 게이트를 즉시 만료시켜 다음 루프에 feed 를 다시 본다(종전 해소 경로와 같다).
+        if (!IsAboveInstalled(m.Version, out var installedNow, out var notNewerReason))
+        {
+            _logger.LogInformation("[Update] Major 펜딩 {V} — 설치 버전 {Installed} 이 같거나 더 높아 적용하지 않고 펜딩을 버립니다({Reason}).",
+                m.Version, installedNow, notNewerReason);
+            if (_pendingConsentUpdate is { } held && UpdateClient.IsSameVersion(held.Version, m.Version))
+                _pendingConsentUpdate = null;
+            return;
+        }
+
         var usage = await ReadConsentUsageSeam(m.Version, ct);
         var decision = usage.Decision;
 
