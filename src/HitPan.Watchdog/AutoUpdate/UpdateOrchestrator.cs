@@ -215,7 +215,14 @@ public sealed class UpdateOrchestrator
             //   전원이 꺼져 이 표식이 남으면 다음 워치독 기동이 폴더를 마저 되돌린다(UpdateFolderRecovery).
             //   표식이 없으면 기동 복원은 R3 모양(성공 뒤 정리 잔재와 같은 모양)을 건드리지 않는다.
             //   교체·검증 성공 직후(정리 전)에 지우고, 실패 경로는 아래 finally 가 「폴더가 제자리면」 지운다.
-            UpdateFolderRecovery.TryWriteMarker(AppRoot(), manifest.Version, _logger);
+            // ⬛ 20260929작3 갈래 X · [4] F-1 봉합(PM 결재) — 종전 이 자리의 표식 쓰기
+            //     UpdateFolderRecovery.TryWriteMarker(AppRoot(), manifest.Version, _logger);
+            //   는 TrySwapFilesAsync 안 **첫 폴더 이동(web → web.old) 직전**으로 옮겼다(수정).
+            //   ■ 왜: 여기서 쓰면 교체 **전**에 끝나는 경로(zip 없음·해제 실패·api/web 없음·마이그 교차검증 차단·
+            //     교체 전 정리 실패)에도 표식이 남는다. finally 의 ClearMarkerIfSettled 는 폴더 모양만 보므로
+            //     앞선 성공 업데이트의 정리 잔재(R3 모양 — web.old 만 남음)가 있으면 표식을 못 지우고,
+            //     다음 기동 복원이 **멀쩡한 web 을 옛 잔재로 되돌린다**(작업리뷰서 1차 F-1 임시 폴더 실측).
+            //   ⇒ 표식 = 「폴더를 실제로 옮기기 시작했다」는 뜻으로만 쓴다. 교체 전에 끝나면 표식 0.
 
             // ===== W4-2 (2026-07-16, 사장님 결재): 파일 교체 (best-effort 스왑) =====
             //   여기부터 실제 파일을 바꾼다. 스왑 자체가 실패하면 TrySwapFilesAsync 안에서
@@ -325,11 +332,19 @@ public sealed class UpdateOrchestrator
     //   경로 규칙을 두 곳에 두면 복원이 딴 폴더를 건드린다(위 주석과 같은 이유).
     internal static string AppRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
 
-    private async Task<bool> TrySwapFilesAsync(UpdateManifest manifest, CancellationToken ct)
+    // 20260929작3 갈래 X · F-1 — 운영 호출은 종전과 같다(설치본 {app} · 워치독 staging). 경로를 받는 본체는 아래 오버로드.
+    private Task<bool> TrySwapFilesAsync(UpdateManifest manifest, CancellationToken ct)
+        => TrySwapFilesAsync(manifest, AppRoot(), _stagingDir, ct);
+
+    /// <summary>
+    /// 20260929작3 갈래 X · F-1 — 본체. 경로({app}·staging)를 인자로 받는다 — 시험은 임시 폴더로만 돈다(G-X1 · 헌법 #39).
+    ///   교체 표식은 이 안의 **첫 폴더 이동 직전**에만 쓴다. 그 앞에서 끝나는 모든 return 은 표식을 남기지 않는다.
+    /// </summary>
+    internal async Task<bool> TrySwapFilesAsync(UpdateManifest manifest, string appRoot, string stagingDir, CancellationToken ct)
     {
-        var appRoot = AppRoot();
-        var zipPath = Path.Combine(_stagingDir, $"hitpan-{manifest.Version}.zip");
-        var extractDir = Path.Combine(_stagingDir, "extract");
+        // ⬛ 갈래 X — 종전 「var appRoot = AppRoot();」·「_stagingDir」 두 곳은 인자로 받는다(값은 운영 호출에서 같다).
+        var zipPath = Path.Combine(stagingDir, $"hitpan-{manifest.Version}.zip");
+        var extractDir = Path.Combine(stagingDir, "extract");
 
         // ── 0) 해제 ── 이전 시도의 잔재가 있으면 지우고 새로 푼다(부분 잔재로 오염되지 않게).
         try
@@ -382,6 +397,10 @@ public sealed class UpdateOrchestrator
         // 어디까지 옮겼는지 추적해 실패 시 역복원한다(부분 성공도 전부 되돌림 — 헌법 #20).
         var webRenamedOut = false;   // web → web.old 완료?
         var webReplaced = false;     // extract\web → web 완료?
+
+        // 20260929작3 갈래 X · [4] F-1 봉합 — 교체 표식은 **여기, 첫 폴더 이동 직전**에 쓴다(종전 ApplyUpdateAsync 정지 직후에서 옮김).
+        //   이 위의 모든 return(zip 없음·해제 실패·api/web 없음·교차검증 차단·교체 전 정리 실패)은 표식을 남기지 않는다.
+        UpdateFolderRecovery.TryWriteMarker(appRoot, manifest.Version, _logger);
         try
         {
             // web: 기존을 web.old 로 밀어내고 신버전을 web 자리에 넣는다.
@@ -455,6 +474,13 @@ public sealed class UpdateOrchestrator
             {
                 _logger.LogError(restoreEx, "[Update] ⚠️ api 역복원 실패 — 부팅 복원 안전망(②)과 자가 점검(③)이 뒤를 받칩니다.");
             }
+
+            // 20260929작3 갈래 X · F-1 — 첫 이동(web → web.old)조차 안 됐으면 폴더는 한 번도 안 옮겨졌다.
+            //   예: 교체 전 정리(TryDeleteDir)가 잠긴 web.old 잔재를 못 지워 첫 Move 가 실패한 경우 — 모양은 R3 잔재 그대로다.
+            //   이때 표식이 남으면 finally 의 ClearMarkerIfSettled 가 (R3 라서) 못 지우고 다음 기동이 멀쩡한 web 을 되돌린다.
+            //   ⇒ 옮긴 것이 없으면 표식을 지운다(폴더를 안 건드렸으니 되돌릴 것도 없다).
+            if (!webRenamedOut)
+                UpdateFolderRecovery.DeleteMarker(appRoot, _logger);
 
             _logger.LogError("[Update] 🛑 파일 교체 실패 — 구버전으로 역복원했습니다({V})", manifest.Version);
             return false;

@@ -127,6 +127,15 @@ public class Worker : BackgroundService
     internal Func<bool, CancellationToken, Task<bool>> CloseInterruptedAttemptsSeam;
     internal Func<string> AppRootSeam;
 
+    // 20260929작3 갈래 X · F-2 — 「이미 쓴 [예]」 안내를 Information 으로 남긴 마지막 동의 id(같은 id 반복은 Debug).
+    private long _usedApproveNoticeConsentId;
+
+    /// <summary>20260929작3 갈래 X · G-X2 시험용 — 한 루프의 업데이트 평가(운영 RunOneLoop 가 부르는 그 함수)를 그대로 부른다.</summary>
+    internal Task EvaluateUpdateForTestAsync(CancellationToken ct) => EvaluateUpdateOncePerDayAsync(ct);
+
+    /// <summary>20260929작3 갈래 X · G-X2 시험용 — 확인 게이트를 만료시킨다(앞선 시험이 남긴 stamp 로 게이트가 닫혀 대조군이 헛돌지 않게).</summary>
+    internal void ExpireUpdateCheckGateForTest() => _lastUpdateCheckUtc = null;
+
     /// <summary>시험용 — 펜딩 Major 를 읽고 쓴다(운영 코드는 필드를 직접 쓴다).</summary>
     internal UpdateManifest? PendingConsentUpdateForTest
     {
@@ -674,10 +683,28 @@ public class Worker : BackgroundService
         if (decision == ConsentDecision.Approve
             && ((!oldRuleFallback && !usage.IsFreshApprove) || _consentAppliedVersions.Contains(usage.ConsentId)))
         {
-            _logger.LogInformation("[Update] Major 버전 {V} — 최신 [예](동의 {Id})는 이미 한 번 시도한 동의입니다(이미 쓴 동의 {Used}). " +
-                                   "다시 적용하지 않습니다 — ERP 가 다시 물어 새 [예]가 들어오면 그때 한 번 더 시도합니다.",
-                m.Version, usage.ConsentId, usage.UsedConsentId);
-            _pendingConsentUpdate = null;
+            // 20260929작3 갈래 X · [4] F-2 — 이 줄은 펜딩을 유지하므로 매 루프(60초) 온다. 같은 동의 id 는 처음 한 번만 Information,
+            //   그 뒤는 Debug — 고객 PC 기본 레벨에서 하루 1,440줄이 쌓이지 않게 한다(N-10 교훈).
+            if (_usedApproveNoticeConsentId != usage.ConsentId)
+            {
+                _usedApproveNoticeConsentId = usage.ConsentId;
+                _logger.LogInformation("[Update] Major 버전 {V} — 최신 [예](동의 {Id})는 이미 한 번 시도한 동의입니다(이미 쓴 동의 {Used}). " +
+                                       "다시 적용하지 않습니다 — ERP 가 다시 물어 새 [예]가 들어오면 그때 한 번 더 시도합니다(펜딩 유지 · 본사 feed 재조회 없음).",
+                    m.Version, usage.ConsentId, usage.UsedConsentId);
+            }
+            else
+            {
+                _logger.LogDebug("[Update] Major 버전 {V} — 이미 쓴 [예](동의 {Id}) 그대로 · 새 [예] 대기(펜딩 유지).", m.Version, usage.ConsentId);
+            }
+            // ⬛ 20260929작3 갈래 X · [4] F-2 봉합(PM 결재) — 종전 이 자리의
+            //     _pendingConsentUpdate = null;
+            //   은 뺐다(수정). 펜딩을 풀면 호출부(EvaluateUpdateOncePerDayAsync)가 확인 게이트를 즉시 만료시켜
+            //   다음 루프에 본사 feed 를 다시 받고 → 재펜딩 → 다시 「이미 쓴 [예]」… 고객이 답할 때까지 약 2분마다
+            //   feed 조회가 무기한 이어졌다(NCP 부하 · N-10 상한 취지와 충돌).
+            //   ⇒ 펜딩을 유지한다. 다음 루프는 로컬 DB 동의만 다시 읽고(feed 0), 새 [예]가 들어오면 그 루프에서
+            //     아래 Approve 로 적용에 진입한다(규칙 C 그대로 — 새 [예] 한 번 = 시도 한 번).
+            //   ⚠️ 대가: 펜딩이 선 동안엔 feed 를 안 읽으므로 그 사이 더 새 버전이 게시돼도 발견하지 않는다 —
+            //     None(미응답) 분기와 같은 성질이다. 고객이 [예]·[나중에] 로 답하면 풀린다.
             return;
         }
 
