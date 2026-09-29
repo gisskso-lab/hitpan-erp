@@ -94,7 +94,8 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         new(v, UpdateChannel.Major, "https://example.invalid/x.zip", "00", 1, DateTime.UtcNow, null, false, null);
 
     /// <summary>IntegrationLoopTests 와 같은 DI 등록으로 **실제 Worker** 를 만든다(호스트는 시작하지 않는다).</summary>
-    private static Worker NewWorker(FakeLocalDb db, string? appRoot = null)
+    // 20260929작3 갈래 X — client 인자 추가(G-X2 가 본사 feed 조회 수를 센다). 없으면 종전과 같은 실제 UpdateClient.
+    private static Worker NewWorker(FakeLocalDb db, string? appRoot = null, IUpdateClient? client = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddOptions<WatchdogOptions>()
@@ -121,7 +122,8 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         builder.Services.AddSingleton<MetaPingClient>();
         builder.Services.AddSingleton<UpdateHistoryClient>();
         builder.Services.AddSingleton<UpdateSignatureVerifier>();
-        builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
+        if (client is null) builder.Services.AddSingleton<IUpdateClient, UpdateClient>();
+        else builder.Services.AddSingleton(client);
         builder.Services.AddSingleton<WatchdogBackupRunner>();
         builder.Services.AddSingleton<UpdateLockFile>();
         builder.Services.AddSingleton<UpdateProcessGate>();
@@ -242,18 +244,21 @@ public sealed class UpdateConsentRuleCTests : IDisposable
     // G-W2 — 새 인스턴스(재기동): 옛 [예]로 묻지 않고 재시도하지 않는다 (B-3)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-W2 재기동 — approve id5 + 결과행 consent_id=5 rolled_back → 적용 0 · 펜딩 해제")]
+    // ⬛ 20260929작3 갈래 X · [4] F-2(PM 결재) — 기대값 「펜딩 해제」 → 「펜딩 유지」(수정). 해제하면 확인 게이트가 즉시 만료돼
+    //   고객이 답할 때까지 약 2분마다 본사 feed 를 다시 받았다. feed 조회 수 자체는 G-X2 가 잰다.
+    [Fact(DisplayName = "G-W2 재기동 — approve id5 + 결과행 consent_id=5 rolled_back → 적용 0 · 펜딩 유지(F-2)")]
     public async Task GW2_재기동_옛_예는_재시도_안함()
     {
         var db = new FakeLocalDb { Result = "rolled_back", UsedConsentId = 5 };
         db.Consents.Add((5, "approve"));
         var w = NewWorker(db);   // 새 인스턴스 — 인메모리 집합이 비어 있다
-        w.PendingConsentUpdateForTest = Manifest();
+        var m = Manifest();
+        w.PendingConsentUpdateForTest = m;
 
-        await w.ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
 
         Assert.Equal(0, db.ApplyCalls);
-        Assert.Null(w.PendingConsentUpdateForTest);
+        Assert.Same(m, w.PendingConsentUpdateForTest);
         Assert.DoesNotContain("in_progress", db.Writes);
     }
 
@@ -496,6 +501,216 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         await w2.ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
         await w2.ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
         Assert.Equal(2, rej.RejectReports);   // 종전: 소비 1회 = 보고 1회
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-X1 — [4] F-1: 교체 표식은 첫 폴더 이동 직전에만 쓴다 (갈래 X · 임시 폴더)
+    //   시나리오(작업리뷰서 1차 F-1 실측과 같은 모양): 앞선 성공 업데이트의 정리 잔재 web.old(1.3.49) +
+    //   현재 web·api = 1.3.50 · 1.3.51 시도가 교체 **전**에 끝난다 → 운영 finally 와 같은 ClearMarkerIfSettled →
+    //   다음 기동 RecoverAtStartup → web 은 1.3.50 그대로여야 한다(web.failed 0).
+    // ══════════════════════════════════════════════════════════════
+
+    private const string V51 = "1.3.51";
+
+    /// <summary>R3 잔재 모양 {app} + 빈 staging. 반환 (appRoot, stagingDir).</summary>
+    private (string App, string Staging) NewResidueScene()
+    {
+        var app = NewAppRoot(("web", "1.3.50"), ("api", "1.3.50"), ("web.old", "1.3.49-residue"));
+        var staging = Path.Combine(app, "_staging");
+        Directory.CreateDirectory(staging);
+        return (app, staging);
+    }
+
+    /// <summary>staging\hitpan-{V}.zip 을 만든다. folders = zip 최상위 폴더(각각 tag.txt = 새 버전).</summary>
+    private static void MakeZip(string staging, params string[] folders)
+    {
+        var src = Path.Combine(staging, "_src");
+        foreach (var f in folders)
+        {
+            Directory.CreateDirectory(Path.Combine(src, f));
+            File.WriteAllText(Path.Combine(src, f, "tag.txt"), V51);
+        }
+        System.IO.Compression.ZipFile.CreateFromDirectory(src, Path.Combine(staging, $"hitpan-{V51}.zip"));
+        Directory.Delete(src, recursive: true);
+    }
+
+    /// <summary>운영 ApplyUpdateAsync 의 교체 이후 순서를 그대로 흉내 — finally 의 표식 정리 → 다음 기동 복원.</summary>
+    private static FolderRecoveryResult FinallyThenNextBoot(string app)
+    {
+        UpdateFolderRecovery.ClearMarkerIfSettled(app, NullLogger.Instance);
+        return UpdateFolderRecovery.RecoverAtStartup(app, NullLogger.Instance);
+    }
+
+    [Theory(DisplayName = "G-X1 🔴 F-1 교체 전 차단 + R3 잔재 → 표식 0 · 다음 기동 무변경")]
+    [InlineData("zip 없음")]
+    [InlineData("zip 에 web 없음")]
+    public async Task GX1_교체전_차단은_표식을_남기지_않는다(string how)
+    {
+        var (app, staging) = NewResidueScene();
+        if (how == "zip 에 web 없음") MakeZip(staging, "api");
+        var orch = NewOrchestrator();
+
+        var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);
+
+        Assert.False(ok);
+        Assert.False(File.Exists(UpdateFolderRecovery.MarkerPath(app)));   // 교체 전에 끝났다 = 표식 0
+        var r = FinallyThenNextBoot(app);
+        Assert.False(r.Restored);
+        Assert.Equal("1.3.50", Tag(app, "web"));                           // 멀쩡한 web 그대로
+        Assert.Equal("1.3.49-residue", Tag(app, "web.old"));
+        Assert.False(Directory.Exists(Path.Combine(app, "web.failed")));
+    }
+
+    [Fact(DisplayName = "G-X1 음성대조군 — 표식을 교체 전에 쓰면(종전 순서) 같은 장면에서 web 이 잔재로 되돌아간다")]
+    public async Task GX1_대조군_종전_순서면_web_이_되돌아간다()
+    {
+        var (app, staging) = NewResidueScene();
+        var orch = NewOrchestrator();
+
+        // 종전 ApplyUpdateAsync :218 순서 — 정지 직후, 교체 전에 표식을 쓴다.
+        UpdateFolderRecovery.TryWriteMarker(app, V51, NullLogger.Instance);
+        var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);   // zip 없음 → 교체 전 종료
+
+        Assert.False(ok);
+        var r = FinallyThenNextBoot(app);
+        // 사고가 재현돼야 이 장면이 F-1 을 가르는 장면이다(측정 도구 검증).
+        Assert.True(r.Restored);
+        Assert.Equal("1.3.49-residue", Tag(app, "web"));
+        Assert.Equal("1.3.50", Tag(app, "web.failed"));
+    }
+
+    [Fact(DisplayName = "G-X1 F-1 첫 이동 실패(잠긴 web.old 잔재를 못 지움) → 표식 지움 · 다음 기동 무변경")]
+    public async Task GX1_첫_이동_실패면_표식_지움()
+    {
+        var (app, staging) = NewResidueScene();
+        MakeZip(staging, "api", "web");
+        var orch = NewOrchestrator();
+
+        // web.old 안 파일을 잠가 교체 전 정리(TryDeleteDir)가 잔재를 못 지우게 한다 → 첫 Move(web → web.old) 실패.
+        using (new FileStream(Path.Combine(app, "web.old", "lock.bin"), FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+        {
+            var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);
+            Assert.False(ok);
+        }
+
+        Assert.True(Directory.Exists(Path.Combine(app, "web.old")));         // 잔재가 실제로 남았다(장면 성립 확인)
+        Assert.False(File.Exists(UpdateFolderRecovery.MarkerPath(app)));
+        var r = FinallyThenNextBoot(app);
+        Assert.False(r.Restored);
+        Assert.Equal("1.3.50", Tag(app, "web"));
+        Assert.Equal("1.3.50", Tag(app, "api"));
+    }
+
+    [Fact(DisplayName = "G-X1 무회귀 — 실제 교체가 일어나면 표식은 쓰인다(R4 모양 · 기동 복원 대상 유지)")]
+    public async Task GX1_교체하면_표식은_쓰인다()
+    {
+        var (app, staging) = NewResidueScene();
+        MakeZip(staging, "api", "web");
+        var orch = NewOrchestrator();
+
+        var ok = await orch.TrySwapFilesAsync(Manifest(V51), app, staging, CancellationToken.None);
+
+        Assert.True(ok);
+        Assert.True(File.Exists(UpdateFolderRecovery.MarkerPath(app)));
+        Assert.Equal(V51, Tag(app, "web"));
+        Assert.Equal(V51, Tag(app, "api"));
+        Assert.Equal("1.3.50", Tag(app, "web.old"));                          // 잔재는 교체 전 정리로 치워지고 직전 버전이 .old
+        Assert.Equal(FolderShape.R4, UpdateFolderRecovery.Classify(app));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-X2 — [4] F-2: 「이미 쓴 [예]」는 펜딩을 유지하고 본사 feed 를 다시 받지 않는다 (갈래 X)
+    //   실제 Worker 의 한 루프 평가(EvaluateUpdateOncePerDayAsync)를 N번 돌려 feed 조회 수를 센다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>본사 feed 대역 — 조회 수만 센다(새 버전 없음 = null).</summary>
+    private sealed class CountingUpdateClient : IUpdateClient
+    {
+        public int ManifestFetches;
+        public UpdateManifest? Next;   // 갈래 X 보완 G-X3 — feed 가 돌려줄 manifest(기본 null = 새 버전 없음)
+        public Task<UpdateManifest?> GetLatestManifestAsync(string currentVersion, CancellationToken ct)
+        {
+            ManifestFetches++;
+            return Task.FromResult(Next);
+        }
+        public Task<string> DownloadAsync(UpdateManifest manifest, string targetDir, CancellationToken ct) =>
+            throw new NotSupportedException("G-X2 는 다운로드를 부르지 않는다");
+        public Task<bool> VerifySha256Async(string filePath, string expectedHash, CancellationToken ct) =>
+            throw new NotSupportedException("G-X2 는 검증을 부르지 않는다");
+        public bool LastFetchFailed => false;
+    }
+
+    [Fact(DisplayName = "G-X2 🟡 F-2 이미 쓴 [예] 5루프 → feed 조회 0 · 적용 0 → 새 [예] 삽입 → 그 루프에 적용 1")]
+    public async Task GX2_이미_쓴_예는_feed_를_다시_받지_않는다()
+    {
+        var db = new FakeLocalDb { Result = "blocked", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient();
+        var w = NewWorker(db, client: feed);
+        var m = Manifest();
+        w.PendingConsentUpdateForTest = m;
+        // ⬛ 갈래 X 보완(PM 9/30) — 종전 「게이트 만료(가장 불리)」 → 「방금 정규 확인함」. 이제 이 분기는 정규 확인 주기는
+        //   그대로 돌리므로(G-X3), 여기서 재는 것은 「주기 전 루프들은 조회 0 = 강제 만료 없음」이다.
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;
+
+        for (var i = 0; i < 5; i++)
+            await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(0, feed.ManifestFetches);
+        Assert.Equal(0, db.ApplyCalls);
+        Assert.Same(m, w.PendingConsentUpdateForTest);
+
+        db.Consents.Add((6, "approve"));   // ERP 가 다시 물어 새 [예]
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, db.ApplyCalls);
+        Assert.Equal(6, db.UsedConsentId);
+        Assert.Equal(0, feed.ManifestFetches);
+        Assert.Equal(0, db.RejectReports);
+    }
+
+    [Fact(DisplayName = "G-X3 🔴 이미 쓴 [예]로 펜딩 1.3.50 유지 중 — 주기 전 조회 0 · 정규 확인 시점에 조회 1 · 1.3.51 로 펜딩 교체")]
+    public async Task GX3_정규_확인은_돈다_더_새_버전이면_펜딩_교체()
+    {
+        var db = new FakeLocalDb { Result = "failed", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient { Next = Manifest("1.3.51") };   // 실패한 1.3.50 을 고치는 1.3.51 게시
+        var w = NewWorker(db, client: feed);
+        w.PendingConsentUpdateForTest = Manifest("1.3.50");
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow;   // 방금 정규 확인함
+
+        for (var i = 0; i < 3; i++)
+            await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+        Assert.Equal(0, feed.ManifestFetches);                                  // 강제 만료 없음(F-2)
+        Assert.Equal("1.3.50", w.PendingConsentUpdateForTest?.Version);
+
+        // 정규 확인 시점 도래(기본 60분 주기 + 1분).
+        w.LastUpdateCheckUtcForTest = DateTime.UtcNow - TimeSpan.FromMinutes(61);
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.Equal(1, feed.ManifestFetches);
+        Assert.Equal("1.3.51", w.PendingConsentUpdateForTest?.Version);        // 고치는 업데이트가 들어온다
+        Assert.Equal(0, db.ApplyCalls);                                         // 옛 [예]로 적용하지 않는다
+        Assert.Equal(0, db.RejectReports);
+
+        // 그 뒤 루프는 다시 주기 전 — 조회 0 추가.
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+        Assert.Equal(1, feed.ManifestFetches);
+    }
+
+    [Fact(DisplayName = "G-X2 음성대조군 — 펜딩을 풀면(종전 동작) 같은 루프에서 feed 조회가 일어난다(계수기 검증)")]
+    public async Task GX2_대조군_펜딩_해제면_feed_조회()
+    {
+        var db = new FakeLocalDb { Result = "blocked", UsedConsentId = 5 };
+        db.Consents.Add((5, "approve"));
+        var feed = new CountingUpdateClient();
+        var w = NewWorker(db, client: feed);
+        w.PendingConsentUpdateForTest = null;   // 종전 「이미 쓴 [예]」 분기가 남기던 상태
+        w.ExpireUpdateCheckGateForTest();       // 종전 호출부 :456 이 하던 게이트 즉시 만료
+
+        await w.EvaluateUpdateForTestAsync(CancellationToken.None);
+
+        Assert.True(feed.ManifestFetches > 0);
     }
 
     // ══════════════════════════════════════════════════════════════
