@@ -94,6 +94,115 @@ public sealed class WatchdogConsentReader
         }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260929작3 절W3 — 규칙 C 판독: 「최신 동의 1건」 + 「그 버전 결과행이 이미 쓴 동의 id」
+    //
+    //   ReadLatestAsync(위)는 남긴다(헌법 #1) — 다만 규칙 C 경로(Worker.ConsumeConsentForMajorAsync)는
+    //   이 메서드만 쓴다.
+    //   🔴 [3-V] 병렬이슈 02 봉합(PM 결재 9/29) — 정렬은 **id DESC 만**. 설계 §5-1 초안은
+    //      「consented_at DESC, id DESC」였으나 consented_at 은 API 프로세스 시계(DateTime.Now)라
+    //      PC 시계가 뒤로 가면 새 [예](id 더 큼)가 옛 행 뒤로 밀려 「이미 쓴 [예]」로 무시된다.
+    //      id 는 한 표 안의 순번이라 시계와 무관하다(설계 §3 「왜 시각이 아니라 id 인가」와 같은 이유).
+    //   🔴 HitPan.Tests/Integrity/WatchdogApplyStatusDdlGateTests 가 아래 표식 사이 문자열을 원문 그대로
+    //      읽어 격리 DB 에서 돌린다({0} = 버전 리터럴).
+    // ##W3-READ-BEGIN##
+    internal const string LatestWithUsageSqlFormat =
+        "SELECT c.id, c.action, COALESCE(a.consent_id, 0) FROM local_update_consents c " +
+        "LEFT JOIN local_update_apply_status a ON a.applied_version = c.update_version " +
+        "WHERE c.update_version = '{0}' ORDER BY c.id DESC LIMIT 1;";
+    // ##W3-READ-END##
+
+    // 표·칸 보강(자가생성 DDL)을 이 프로세스에서 한 번 성공했는가. 성공 뒤엔 매 루프 DDL 을 다시 던지지 않는다.
+    private bool _applyStatusSchemaEnsured;
+
+    /// <summary>
+    /// 20260929작3 절W3 — 규칙 C(설계 §3)의 입력 3값을 한 번의 조회로 읽는다.
+    ///   반환: (판정, 최신 동의 id, 그 버전 결과행의 consent_id — 행 없음·NULL = 0).
+    ///   · 행 없음 → None(0,0) · 조회 실패·해석 실패 → Error(적용 보류 · 다음 루프 재시도).
+    ///   🔴 해석 실패를 0 으로 읽지 않는다(PM 지시 9/29) — used=0 으로 읽으면 쓴 [예]가 「새 [예]」로 둔갑해
+    ///      무질문 재시도가 된다(B-3 재발). 모르면 적용하지 않는 쪽.
+    /// 🔴 결과표(local_update_apply_status)는 워치독이 첫 기록 때 만드는 표라 옛 PC 에 없을 수 있다 ⇒
+    ///    조회 전에 자가생성 DDL(WatchdogStatusWriter.ApplyStatusSchemaSql)을 **한 번** 따로 던진다.
+    ///    그 DDL 이 실패해도(권한 등) 조회는 시도한다 — 표·칸이 이미 있으면 조회는 된다.
+    /// </summary>
+    public async Task<ConsentUsage> ReadLatestWithUsageAsync(string updateVersion, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogError("[Update/Consent] db.conf 에서 DB 자격증명을 읽지 못했습니다(DB_NAME/DB_USER 부재) — 동의 조회 불가");
+                return ConsentUsage.Error;
+            }
+            if (!IsSafeVersionLiteral(updateVersion))
+            {
+                _logger.LogError("[Update/Consent] 안전하지 않은 버전 문자열 — 동의 조회 거부: '{V}'", updateVersion);
+                return ConsentUsage.Error;
+            }
+
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+
+            if (!_applyStatusSchemaEnsured)
+            {
+                try
+                {
+                    var ddl = WatchdogStatusWriter.ApplyStatusSchemaSql;
+                    var ddlArgs = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{ddl.Replace("\"", "\\\"")}\" {dbName}";
+                    await RunQueryAsync(clientExe, ddlArgs, ct).ConfigureAwait(false);
+                    _applyStatusSchemaEnsured = true;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ddlEx)
+                {
+                    _logger.LogWarning(ddlEx, "[Update/Consent] 결과표 자가생성·칸 보강 실패 — 조회는 계속 시도합니다(표·칸이 이미 있으면 된다)");
+                }
+            }
+
+            var sql = string.Format(System.Globalization.CultureInfo.InvariantCulture, LatestWithUsageSqlFormat, updateVersion);
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql}\" {dbName}";
+            var output = (await RunQueryAsync(clientExe, args, ct).ConfigureAwait(false)).Trim();
+
+            var usage = ParseLatestWithUsage(output);
+            if (usage.Decision == ConsentDecision.Error)
+                _logger.LogWarning("[Update/Consent] 버전 {V} 동의 판독 결과를 해석하지 못했습니다('{Raw}') — 적용 보류", updateVersion, output);
+            else
+                _logger.LogDebug("[Update/Consent] 버전 {V} 판독 — {D} · 최신 id {Id} · 이미 쓴 id {Used}",
+                    updateVersion, usage.Decision, usage.ConsentId, usage.UsedConsentId);
+            return usage;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Update/Consent] 로컬 동의 판독 실패 — 적용 보류, 다음 주기 재시도");
+            return ConsentUsage.Error;
+        }
+    }
+
+    /// <summary>
+    /// 판독 한 줄(탭 구분 `id  action  used`)을 해석한다(순수 — 시험이 직접 부른다).
+    ///   빈 출력 = 동의 없음(None) · 칸 수·숫자·음수 이상 = Error · action 이 approve/reject 가 아니면 None(종전과 같음).
+    /// </summary>
+    internal static ConsentUsage ParseLatestWithUsage(string output)
+    {
+        var line = output.Trim();
+        if (line.Length == 0) return ConsentUsage.NoConsent;
+
+        var parts = line.Split('\t');
+        if (parts.Length != 3) return ConsentUsage.Error;
+        if (!long.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) || id <= 0)
+            return ConsentUsage.Error;
+        if (!long.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var used) || used < 0)
+            return ConsentUsage.Error;
+
+        var action = parts[1].Trim();
+        if (string.Equals(action, "approve", StringComparison.OrdinalIgnoreCase))
+            return new ConsentUsage(ConsentDecision.Approve, id, used);
+        if (string.Equals(action, "reject", StringComparison.OrdinalIgnoreCase))
+            return new ConsentUsage(ConsentDecision.Reject, id, used);
+        return new ConsentUsage(ConsentDecision.None, id, used);
+    }
+
     /// <summary>
     /// W4-6 — 로컬에 "발견해 적재해 둔" Major 새버전(local_update_status)이 있으면 그 버전 문자열을 돌려준다.
     ///
@@ -238,6 +347,18 @@ public sealed class WatchdogConsentReader
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");
     }
+}
+
+/// <summary>
+/// 20260929작3 — 규칙 C 입력(설계 §3): 최신 동의 판정 · 그 동의 id · 그 버전 결과행이 이미 쓴 동의 id(없음=0).
+/// </summary>
+public readonly record struct ConsentUsage(ConsentDecision Decision, long ConsentId, long UsedConsentId)
+{
+    public static ConsentUsage Error => new(ConsentDecision.Error, 0, 0);
+    public static ConsentUsage NoConsent => new(ConsentDecision.None, 0, 0);
+
+    /// <summary>「새 [예]」인가 — 최신이 approve 이고 그 id 가 이미 쓴 id 보다 크다.</summary>
+    public bool IsFreshApprove => Decision == ConsentDecision.Approve && ConsentId > UsedConsentId;
 }
 
 /// <summary>로컬 동의 조회 결과(고리2 워치독 측 판단 입력).</summary>
