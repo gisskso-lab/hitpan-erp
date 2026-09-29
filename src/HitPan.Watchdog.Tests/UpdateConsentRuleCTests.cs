@@ -37,6 +37,9 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         public string? Result;
         public long? UsedConsentId;
         public bool FailInProgressWrite;
+        public bool AttemptsUnknown;       // 갈래 R Z-1 — 시도 표 판독 실패 대역(동의 표만 읽힘)
+        public bool UpsertOpen;            // 갈래 R G-R7 대조군 — INSERT 대신 UPSERT 였다면
+        public readonly HashSet<long> Attempts = new();
         public int ApplyCalls;
         public int RejectReports;
         public readonly List<string> Writes = new();
@@ -47,15 +50,27 @@ public sealed class UpdateConsentRuleCTests : IDisposable
             if (Consents.Count == 0) return Task.FromResult(ConsentUsage.NoConsent);
             var latest = Consents.OrderByDescending(c => c.Id).First();
             var decision = latest.Action == "approve" ? ConsentDecision.Approve : ConsentDecision.Reject;
+            if (AttemptsUnknown) return Task.FromResult(new ConsentUsage(decision, latest.Id, 0, AttemptsUnknown: true));
             return Task.FromResult(new ConsentUsage(decision, latest.Id, UsedConsentId ?? 0));
         }
 
-        public Task<bool> Write(string version, string result, string? detail, long? consentId, CancellationToken ct)
+        /// <summary>시도 행 열기 대역 — 운영 SQL(INSERT · consent_id UNIQUE)과 같은 뜻.</summary>
+        public Task<AttemptOpenResult> Open(long consentId, string version, CancellationToken ct)
+        {
+            Writes.Add("in_progress");
+            if (FailInProgressWrite) return Task.FromResult(AttemptOpenResult.Failed);
+            if (!UpsertOpen && Attempts.Contains(consentId)) return Task.FromResult(AttemptOpenResult.AlreadyUsed);
+            Attempts.Add(consentId);
+            Result = "in_progress";
+            UsedConsentId = Math.Max(UsedConsentId ?? 0, consentId);
+            return Task.FromResult(AttemptOpenResult.Opened);
+        }
+
+        /// <summary>시도 행 닫기 대역 — 운영 SQL 처럼 진행 중 행만 닫는다.</summary>
+        public Task<bool> CloseAttempt(string version, string result, string? detail, CancellationToken ct)
         {
             Writes.Add(result);
-            if (result == "in_progress" && FailInProgressWrite) return Task.FromResult(false);
-            Result = result;
-            if (consentId is { } cid) UsedConsentId = cid;   // 운영 UPSERT: 값 있을 때만 consent_id 갱신
+            if (Result == "in_progress") Result = result;
             return Task.FromResult(true);
         }
 
@@ -121,7 +136,8 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         var worker = host.Services.GetServices<IHostedService>().OfType<Worker>().Single();
 
         worker.ReadConsentUsageSeam = db.Read;
-        worker.WriteApplyStatusSeam = db.Write;
+        worker.OpenAttemptSeam = db.Open;
+        worker.CloseAttemptSeam = db.CloseAttempt;
         worker.ApplyUpdateSeam = db.Apply;
         worker.ReportConsentRejectedSeam = _ => db.RejectReports++;
         worker.CloseInterruptedAttemptsSeam = db.Close;
@@ -352,6 +368,9 @@ public sealed class UpdateConsentRuleCTests : IDisposable
         Assert.Contains("result='rolled_back'", rolled);
         Assert.Contains("'업데이트 중 중단 — 이전 버전으로 되돌림'", rolled);
         Assert.DoesNotContain("consent_id", failed);
+        // 갈래 R — 대상 = 시도 표 · apply_status 향한 UPDATE 0(G-R6 DB 없는 절반).
+        Assert.Contains("UPDATE `local_update_attempts`", failed);
+        Assert.DoesNotContain("local_update_apply_status", failed + rolled);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -512,30 +531,164 @@ public sealed class UpdateConsentRuleCTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
-    // G-W8 (DB 없는 절반) — 자가생성 DDL 칸 = 출하 DDL 칸
+    // ⬛ G-W8(apply_status consent_id 칸)은 갈래 R 로 폐기 → G-R2 · G-R3 · G-R5 · G-R7 (작업지시서 §8-2)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-W8 자가생성 DDL 칸 집합·순서 = 출하 DDL local_update_apply_status 칸")]
-    public void GW8_자가생성DDL_출하DDL_칸_일치()
+    private const string AlterGuarded = "ALTER TABLE local_update_apply_status ADD COLUMN x INT;";
+
+    private static bool OrchestratorMatches(string sql, string verb, string table)
     {
-        var clean = File.ReadAllText(Path.Combine(RepoRoot(), "installer", "hitpan_db_clean.sql"));
-        var m = Regex.Match(clean, @"CREATE TABLE `local_update_apply_status` \((?<body>.*?)\) ENGINE", RegexOptions.Singleline);
-        Assert.True(m.Success, "출하 DDL 에 local_update_apply_status 정의가 없다");
+        var mi = typeof(UpdateOrchestrator).GetMethod("MatchesTableStatement",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new Xunit.Sdk.XunitException("UpdateOrchestrator.MatchesTableStatement 를 못 찾았다");
+        return (bool)mi.Invoke(null, new object[] { sql, verb, table })!;
+    }
 
-        var cleanCols = ColumnDefs(m.Groups["body"].Value);
-        var selfBody = Regex.Match(WatchdogStatusWriter.ApplyStatusCreateSql, @"\((?<body>.*)\) ENGINE", RegexOptions.Singleline);
-        Assert.True(selfBody.Success);
-        var selfCols = ColumnDefs(selfBody.Groups["body"].Value.Replace(", ", ",\n"));
+    private static string[] OrchestratorGuardedTables() =>
+        (string[])(typeof(UpdateOrchestrator).GetField("GuardedUpdateTables",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?? throw new Xunit.Sdk.XunitException("GuardedUpdateTables 를 못 찾았다")).GetValue(null)!;
 
-        Assert.Equal(cleanCols.Select(c => c.Name), selfCols.Select(c => c.Name));   // 순서까지
-        Assert.Equal(cleanCols.Select(c => c.Type), selfCols.Select(c => c.Type));
-        Assert.Contains(cleanCols, c => c.Name == "consent_id");
+    /// <summary>워치독 런타임 ② 판정 — 원본 함수·원본 목록으로(복사 금지). true = 변경(blocked).</summary>
+    private static bool RuntimeGateBlocks(string sql) =>
+        OrchestratorGuardedTables().Any(t => OrchestratorMatches(sql, "ALTER", t) || OrchestratorMatches(sql, "DROP", t));
 
-        // 옛 표 보강 ALTER 가 붙이는 칸 정의 = 출하 DDL 의 consent_id 정의(칸 순서는 끝 — 위에서 확인).
-        var alter = Regex.Match(WatchdogStatusWriter.ApplyStatusAddConsentColumnSql, @"ADD COLUMN IF NOT EXISTS `consent_id` (?<def>[^;]+);");
-        Assert.True(alter.Success);
-        Assert.Equal(cleanCols.Last().Type, alter.Groups["def"].Value.Trim());
-        Assert.Equal("consent_id", cleanCols.Last().Name);
+    [Fact(DisplayName = "G-R2 워치독 런타임 ② 판정(원본 함수) — DB-135 원문 = 변경 아님 · 대조군 ALTER = blocked")]
+    public void GR2_런타임_교차검증_DB135_통과()
+    {
+        var db135 = File.ReadAllText(Path.Combine(RepoRoot(), "src", "HitPan.API", "Migrations", "SQL", "DB-135_local_update_attempts.sql"));
+        Assert.Contains("local_update_", db135);                 // 검사 대상에 든다(건너뛰기 아님)
+        Assert.False(RuntimeGateBlocks(db135));
+        Assert.True(RuntimeGateBlocks(AlterGuarded));            // 음성 대조군 — 같은 함수가 막는다
+        Assert.Contains("local_update_attempts", OrchestratorGuardedTables());   // R12(PM 결재)
+        Assert.DoesNotMatch(@"(?i)DROP\s+TABLE", db135);          // DROP TABLE IF EXISTS 도 금지
+        // 워치독 자가생성 문자열도 같은 판정을 통과한다.
+        Assert.False(RuntimeGateBlocks(WatchdogStatusWriter.AttemptsCreateSql));
+    }
+
+    private static (List<(string Name, string Type)> Cols, List<string> Keys, string Engine) Shape(string createBody, string tail)
+    {
+        var lines = createBody.Split('\n').Select(l => l.Trim().TrimEnd(',')).Where(l => l.Length > 0).ToList();
+        var keys = lines.Where(l => Regex.IsMatch(l, @"^(PRIMARY|UNIQUE|KEY)\b")).Select(l => Regex.Replace(l, @"\s+", " ")).ToList();
+        return (ColumnDefs(createBody), keys, tail.Trim().TrimEnd(';'));
+    }
+
+    private static (List<(string Name, string Type)> Cols, List<string> Keys, string Engine) ShapeOf(string text, bool singleLine)
+    {
+        var m = Regex.Match(text, @"CREATE TABLE (?:IF NOT EXISTS )?`local_update_attempts` \((?<body>.*?)\) (?<tail>ENGINE[^;]*;)", RegexOptions.Singleline);
+        Assert.True(m.Success, "local_update_attempts CREATE 를 못 찾았다");
+        var body = m.Groups["body"].Value;
+        if (singleLine) body = body.Replace(", ", ",\n");
+        return Shape(body, m.Groups["tail"].Value);
+    }
+
+    [Fact(DisplayName = "G-R3 칸·키·엔진 세 벌 일치 — DB-135 = 출하 DDL = 워치독 AttemptsCreateSql · 대조군 칸 하나 빼면 FAIL")]
+    public void GR3_세벌_일치()
+    {
+        var root = RepoRoot();
+        var mig = ShapeOf(File.ReadAllText(Path.Combine(root, "src", "HitPan.API", "Migrations", "SQL", "DB-135_local_update_attempts.sql")), false);
+        var clean = ShapeOf(File.ReadAllText(Path.Combine(root, "installer", "hitpan_db_clean.sql")), false);
+        var self = ShapeOf(WatchdogStatusWriter.AttemptsCreateSql, true);
+
+        foreach (var other in new[] { clean, self })
+        {
+            Assert.Equal(mig.Cols, other.Cols);
+            Assert.Equal(mig.Keys, other.Keys);
+            Assert.Equal(mig.Engine, other.Engine);
+        }
+        Assert.Equal(8, mig.Cols.Count);
+        Assert.Contains("ENGINE=InnoDB", mig.Engine);            // 헌법 #17
+
+        // 음성 대조군 — 한 벌에서 칸 하나(ended_at)를 빼면 같은 비교가 갈라진다.
+        var broken = ShapeOf(WatchdogStatusWriter.AttemptsCreateSql.Replace("`ended_at` datetime(3) DEFAULT NULL, ", ""), true);
+        Assert.NotEqual(mig.Cols, broken.Cols);
+
+        // 되돌림 확인 — 출하 DDL 의 apply_status 에 consent_id 칸이 없다(W 이전 원문).
+        var cleanText = File.ReadAllText(Path.Combine(root, "installer", "hitpan_db_clean.sql"));
+        var apply = Regex.Match(cleanText, @"CREATE TABLE `local_update_apply_status` \((?<body>.*?)\) ENGINE", RegexOptions.Singleline);
+        Assert.True(apply.Success);
+        Assert.DoesNotContain("consent_id", apply.Groups["body"].Value);
+        Assert.Contains("('DB-135','clean-ddl',1)", cleanText);   // 시드 편입(#36)
+    }
+
+    [Fact(DisplayName = "G-R5 규칙 Z-1 — 시도 표 판독 실패: 루프 1~3 적용 0 · 루프 4 적용 1(옛 규칙) · 같은 수명 재적용 0")]
+    public async Task GR5_Z1_판독실패_3루프_상한()
+    {
+        var db = new FakeLocalDb { AttemptsUnknown = true };
+        db.Consents.Add((5, "approve"));
+        var w = NewWorker(db);
+        var m = Manifest();
+        w.PendingConsentUpdateForTest = m;
+
+        for (var loop = 1; loop <= Worker.AttemptHoldLimit; loop++)
+        {
+            await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+            Assert.Equal(0, db.ApplyCalls);
+            Assert.Same(m, w.PendingConsentUpdateForTest);        // 보류 = 펜딩 유지
+        }
+        await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+        Assert.Equal(1, db.ApplyCalls);                           // 영영 안 막힌다
+
+        await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+        Assert.Equal(1, db.ApplyCalls);                           // 옛 규칙: 같은 동의 id 는 한 수명에 한 번
+        Assert.Equal(3, Worker.AttemptHoldLimit);                 // PM 결재값
+    }
+
+    [Fact(DisplayName = "G-R5b 규칙 Z-1 — 시도 행 기록 실패가 이어져도 루프 4 에 적용 1")]
+    public async Task GR5b_Z1_기록실패_3루프_상한()
+    {
+        var db = new FakeLocalDb { FailInProgressWrite = true };
+        db.Consents.Add((5, "approve"));
+        var w = NewWorker(db);
+        var m = Manifest();
+        for (var loop = 1; loop <= 3; loop++)
+        {
+            await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+            Assert.Equal(0, db.ApplyCalls);
+        }
+        await w.ConsumeConsentForMajorAsync(m, CancellationToken.None);
+        Assert.Equal(1, db.ApplyCalls);
+    }
+
+    [Fact(DisplayName = "G-R7 같은 동의 id 로 두 번 열면 두 번째는 AlreadyUsed → 적용 1회 · 대조군 UPSERT 면 2회")]
+    public async Task GR7_같은_동의_두번_INSERT_실패()
+    {
+        var db = new FakeLocalDb();
+        db.Consents.Add((5, "approve"));
+        await NewWorker(db).ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        Assert.Equal(1, db.ApplyCalls);
+
+        // 재기동(새 수명) + 판독이 낡아 used=0 으로 읽힌 최악의 경우 — DB UNIQUE 가 마지막 방어선.
+        db.UsedConsentId = 0;
+        await NewWorker(db).ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        Assert.Equal(1, db.ApplyCalls);
+
+        var up = new FakeLocalDb { UpsertOpen = true };
+        up.Consents.Add((5, "approve"));
+        await NewWorker(up).ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        up.UsedConsentId = 0;
+        await NewWorker(up).ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        Assert.Equal(2, up.ApplyCalls);                          // 음성 대조군
+
+        // 운영 문장은 INSERT(UPSERT 아님) · 1062 는 AlreadyUsed 로 읽힌다.
+        var open = WatchdogStatusWriter.BuildOpenAttemptSql(5, V);
+        Assert.StartsWith("INSERT INTO `local_update_attempts`", open);
+        Assert.DoesNotContain("ON DUPLICATE", open);
+        Assert.True(WatchdogStatusWriter.IsDuplicateKeyError("ERROR 1062 (23000) at line 1: Duplicate entry '5' for key 'uk_local_update_attempts_consent'"));
+        Assert.False(WatchdogStatusWriter.IsDuplicateKeyError("ERROR 1146 (42S02): Table doesn't exist"));
+    }
+
+    [Fact(DisplayName = "[4] F-3 종점 rolled_back 뒤 적용 예외 → rolled_back 유지(진행 중 행만 닫는다)")]
+    public async Task F3_종점_뒤_예외는_덮지_않는다()
+    {
+        var db = new FakeLocalDb();
+        db.Consents.Add((5, "approve"));
+        var w = NewWorker(db);
+        w.ApplyUpdateSeam = (_, _) => { db.Result = "rolled_back"; throw new IOException("시험 — 종점 뒤 예외"); };
+        await w.ConsumeConsentForMajorAsync(Manifest(), CancellationToken.None);
+        Assert.Equal("rolled_back", db.Result);
+        var close = WatchdogStatusWriter.BuildCloseAttemptSql(V, "failed", "x");
+        Assert.EndsWith("AND result='in_progress';", close);     // 운영 문장이 진행 중 행만 닫는다
     }
 
     private static List<(string Name, string Type)> ColumnDefs(string body)
