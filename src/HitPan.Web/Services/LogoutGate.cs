@@ -33,6 +33,7 @@ public static class LogoutGate
             return true;
         }
 
-        return code == 401;
+        // NEG-rev4 음성 대조군: 개정3 판(2xx 만 완료 · 401 도 미완료)으로 되돌림 — W-3 401 줄 FAIL 기대
+        return false;
     }
 }
