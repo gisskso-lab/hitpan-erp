@@ -98,4 +98,86 @@ public sealed class LocalSwapWorkerSealGateTests
         Assert.Equal(code, r.Exit);
         Assert.Contains(LocalSwapLauncher.TaskName, r.Left);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-S4 — S3(워치독 정지) 뒤 한 번 더 잰다 · 남의 교체가 끼어 있으면 폴더 무접촉
+    // ══════════════════════════════════════════════════════════════
+    // 주입(일꾼 -TestRoot 모드만):
+    //   OVL  = S2 끝(S3 잠금 전)에 남의 update.lock 본문 + app\web.old  — 설계 게이트 표 그대로
+    //   OVLK = S3 잠금 뒤(멈추는 도중)에 남의 update.lock 본문만     — 「본문 ≠ 내가 마지막에 쓴 본문」 갈래 단독 증명
+    //   pre-old = 시작 전부터 app\api.old 가 있다(S0 은 .old 를 안 본다 · S3 뒤 재판정만 잡는다)
+
+    private const string ForeignVersion = "9.9.9";
+
+    private static LocalSwapWorkerRig RunOverlap(string scene, string? scriptText = null)
+    {
+        var rig = LocalSwapWorkerRig.Rollback(DateTime.UtcNow);
+        string? failAt = null;
+        switch (scene)
+        {
+            case "OVL": failAt = "OVL"; break;
+            case "OVLK": failAt = "OVLK"; break;
+            case "pre-old": Directory.CreateDirectory(Path.Combine(rig.App, "api.old")); break;
+            default: throw new ArgumentException(scene);
+        }
+        var exit = rig.Run(scriptText, failAt);
+        Assert.True(exit == 0, "일꾼 종료 코드 " + exit + " / " + rig.Log());
+        return rig;
+    }
+
+    [Theory(DisplayName = "K1 G-S4 🚨 멈춘 뒤 남의 교체가 보이면 → refused/update_in_progress · 세 폴더 판 그대로 · .rbk 0 · keepalive /ENABLE · 서비스 Running · 작업 잔존 0")]
+    [InlineData("OVL")]
+    [InlineData("OVLK")]
+    [InlineData("pre-old")]
+    public void Overlap_after_stop_refuses_and_touches_no_folder(string scene)
+    {
+        using var rig = RunOverlap(scene);
+        var final = rig.Final();
+        var why = rig.Log() + "\n--- calls ---\n" + rig.Calls();
+        Assert.True(final.State == SwapStates.Refused, scene + ": 끝 상태 " + final.State + " / " + why);
+        Assert.Equal(SwapReasons.UpdateInProgress, final.Reason);
+        Assert.Equal("S3", final.Step);
+
+        // 세 폴더 판 그대로(지금 판 1.3.48) · 재료(prev)도 그대로 · .rbk 0
+        Assert.Equal(LocalSwapWorkerRig.From, LocalSwapWorkerRig.PartMark(rig.App, "api"));
+        Assert.Equal(LocalSwapWorkerRig.From, LocalSwapWorkerRig.PartMark(rig.App, "watchdog"));
+        Assert.Equal(LocalSwapWorkerRig.To, LocalSwapWorkerRig.PartMark(Path.Combine(rig.Work, "prev"), "api"));
+        foreach (var p in new[] { "api", "web", "watchdog" })
+            Assert.False(Directory.Exists(Path.Combine(rig.App, p + ".rbk")), p + ".rbk 가 생겼다(폴더를 건드렸다) / " + why);
+
+        // 멈췄던 것을 다시 켰다
+        Assert.EndsWith("/ENABLE", rig.LastCall("HitPan-ERP-API-keepalive-1"), StringComparison.Ordinal);
+        Assert.EndsWith("/ENABLE", rig.LastCall("HitPan-ERP-WEB-keepalive-1"), StringComparison.Ordinal);
+        Assert.EndsWith("/ENABLE", rig.LastCall("HitPanWatchdogGuardian"), StringComparison.Ordinal);
+        Assert.Equal("Running", rig.ServiceState());
+        Assert.Empty(rig.LeftoverTasks()); // 1회용 작업 · 이 판이 만든 부팅 안전망 모두 지움
+    }
+
+    [Fact(DisplayName = "K1 G-S4 🟢 남의 update.lock(OVLK)은 지우지 않는다 — 끝난 뒤에도 남의 본문 그대로")]
+    public void Foreign_lock_is_left_alone()
+    {
+        using var rig = RunOverlap("OVLK");
+        Assert.True(File.Exists(rig.UpdateLockPath), "남의 update.lock 을 지웠다 / " + rig.Log());
+        Assert.EndsWith("|" + ForeignVersion, File.ReadAllText(rig.UpdateLockPath), StringComparison.Ordinal);
+    }
+
+    /// <summary>대조군 사본 — 정지 뒤 재판정 한 줄을 뺀다.</summary>
+    public static string ControlNoRecheck()
+    {
+        var original = LocalSwapWorkerRig.OriginalScript();
+        const string line = "if ($null -eq $failReason) { $overlap = Test-OverlapAfterStop }";
+        Assert.True(original.Contains(line, StringComparison.Ordinal), "정지 뒤 재판정 줄을 못 찾았다 — 대조군을 같이 고쳐라");
+        return original.Replace(line, "# (control) recheck removed", StringComparison.Ordinal);
+    }
+
+    [Theory(DisplayName = "K1 G-S4 대조군 🔴 정지 뒤 재판정 뺀 사본 → S4 로 간다(.rbk 생김 · refused 아님 — 게이트가 FAIL 을 낸다)")]
+    [InlineData("OVL")]
+    [InlineData("OVLK")]
+    [InlineData("pre-old")]
+    public void Control_without_recheck_goes_on_to_swap(string scene)
+    {
+        using var rig = RunOverlap(scene, ControlNoRecheck());
+        Assert.NotEqual(SwapStates.Refused, rig.Final().State);
+        Assert.Contains("S4 swapped api", rig.Log());
+    }
 }

@@ -72,6 +72,7 @@ $Utf8 = New-Object System.Text.UTF8Encoding($false)
 $script:Req = $null
 $script:AppRoot = $null
 $script:HoldLock = $false
+$script:LockBody = $null
 $script:CreatedNet = $false
 $script:StageDir = $null
 $script:SrcRoot = $null
@@ -280,7 +281,38 @@ function Test-ForeignLock {
 function Set-Lock {
     $body = (Get-Date).ToUniversalTime().ToString('o') + '|' + [string]$script:Req.to
     [System.IO.File]::WriteAllText((Join-Path $script:AppRoot 'update.lock'), $body, $Utf8)
+    $script:LockBody = $body
     $script:HoldLock = $true
+}
+
+# seal 08: update.lock exists and its body is not the one this run wrote last (someone else took it)
+function Test-LockNotMine {
+    $f = Join-Path $script:AppRoot 'update.lock'
+    if (-not (Test-Path -LiteralPath $f)) { return $false }
+    try { $body = [System.IO.File]::ReadAllText($f, $Utf8) }
+    catch { Write-Log ('update.lock unreadable after stop, treated as not ours: ' + $_.Exception.Message); return $true }
+    return ($body -cne $script:LockBody)
+}
+
+# seal 08: the watchdog download/backup stretch (before it takes update.lock) is invisible at S0.
+# After the watchdog is stopped (S3) look once more. Any of these = another update got in between.
+function Test-OverlapAfterStop {
+    $why = New-Object System.Collections.ArrayList
+    if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'update-swap.marker')) { [void]$why.Add('update-swap.marker') }
+    if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'watchdog.new')) { [void]$why.Add('watchdog.new') }
+    foreach ($p in $Parts) { if (Test-Path -LiteralPath (Join-Path $script:AppRoot ($p + '.old'))) { [void]$why.Add($p + '.old') } }
+    if (Test-Task $SelfReplaceTask) { [void]$why.Add($SelfReplaceTask) }
+    if (Test-Task $SelfReplaceRecoverTask) { [void]$why.Add($SelfReplaceRecoverTask) }
+    if (Test-LockNotMine) { [void]$why.Add('update.lock') }
+    if ($why.Count -eq 0) { return $false }
+    Write-Log ('S3 another update showed up while stopping: ' + ($why -join ','))
+    return $true
+}
+
+# test only (OVL / OVLK): another updater shows up - its update.lock body, and with OVL its web.old folder
+function Invoke-TestOverlap([bool]$withOld) {
+    [System.IO.File]::WriteAllText((Join-Path $script:AppRoot 'update.lock'), ((Get-Date).ToUniversalTime().ToString('o') + '|9.9.9'), $Utf8)
+    if ($withOld) { New-Item -ItemType Directory -Path (Join-Path $script:AppRoot 'web.old') -Force | Out-Null }
 }
 
 function Unlock-UpdateLock {
@@ -645,22 +677,35 @@ try {
                 Complete-Swap 'refused' 'safety_net_failed' 'S2'
             } else {
                 $failReason = $null
+                $overlap = $false
+                if (Test-FailAt 'OVL') { Invoke-TestOverlap $true }
                 try {
                     Set-State 'running' $null 'S3'; Set-Lock
+                    if (Test-FailAt 'OVLK') { Invoke-TestOverlap $false }
                     $stopped = $true
                     Stop-All
                 } catch { Write-Log ('S3 failed: ' + $_.Exception.Message); $failReason = 'stop_failed' }
-                if ($null -eq $failReason) {
+                # seal 08: look again after the watchdog is stopped - folders stay untouched if anything shows up
+                if ($null -eq $failReason) { $overlap = Test-OverlapAfterStop }
+                if ($null -eq $failReason -and -not $overlap) {
                     try { Set-State 'running' $null 'S4'; Set-Lock; Invoke-Swap }
                     catch { Write-Log ('S4 failed: ' + $_.Exception.Message); $failReason = 'swap_failed' }
                 }
-                if ($null -eq $failReason) {
+                if ($null -eq $failReason -and -not $overlap) {
                     Set-State 'running' $null 'S5'; Set-Lock
                     [void](Start-All)
                     Set-State 'running' $null 'S6'
                     if (-not (Test-Running ([string]$script:Req.to) 'S6')) { $failReason = 'verify_failed' }
                 }
-                if ($null -eq $failReason) {
+                if ($overlap) {
+                    # nothing was swapped: start everything again and step aside for the other update
+                    if (Test-LockNotMine) { $script:HoldLock = $false } # never delete another updater's lock
+                    [void](Start-All)
+                    $stopped = $false
+                    Remove-DirSafe $script:StageDir
+                    if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
+                    Complete-Swap 'refused' 'update_in_progress' 'S3'
+                } elseif ($null -eq $failReason) {
                     Clear-AfterSuccess
                     Complete-Swap 'success' $null 'S6'
                 } else {
