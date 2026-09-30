@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using HitPan.API.Services.LocalRollback;
+using HitPan.API.Services.LocalSwap;
 using HitPan.Application.Interfaces;
 
 namespace HitPan.API.Services.ManualUpdate;
@@ -18,11 +20,8 @@ public static class ManualUpdateReasons
     public const string BackupFailed = "backup_failed";
     public const string DownloadFailed = "download_failed";
 
-    /// <summary>
-    /// ⚠️ 임시 — 갈래 A 의 교체 일꾼 런처(<c>ILocalSwapLauncher</c>)가 아직 이 갈래에 없다. 합칠 때 이 코드는 사라진다
-    /// (개발명세서 U 「못 한 것」 1번). 계약 §6 표에 없는 코드라 화면(F)은 「고객센터로 연락 주세요」로 다룬다.
-    /// </summary>
-    public const string LauncherNotWired = "launcher_not_wired";
+    // ⬛ LauncherNotWired("launcher_not_wired") — 20260930작1 I-API 가 런처를 이어 없앴다(개발명세서 I-API §1).
+    //    넘기기 거부 사유는 이제 런처(LocalSwap.SwapReasons — 계약 §6)의 코드가 그대로 나간다.
 }
 
 /// <summary>수동 업데이트 한 번의 진행 단계.</summary>
@@ -50,6 +49,8 @@ public sealed record ManualUpdateJobStatus(
     DateTime UpdatedAtUtc);
 
 /// <summary>「최신 버전 확인」 결과(읽기만 · 다운로드 0).</summary>
+/// <remarks><see cref="Last"/> = 마지막 교체 한 번의 끝 상태(request.json · 두 모드 공통 · 되돌리기 GET 과 같은 모양).
+/// 계약 §7 「결과는 다음 로그인 뒤 GET 이 알린다」 — 20260930작1 I-API(I-WEB 발견 §5-1).</remarks>
 public sealed record ManualUpdateCheckResult(
     string CurrentVersion,
     string? LatestVersion,
@@ -57,14 +58,15 @@ public sealed record ManualUpdateCheckResult(
     string Reason,
     long? PackageSizeBytes,
     string? ReleaseNotes,
-    bool Busy);
+    bool Busy,
+    LocalSwapLastResult? Last = null);
 
 /// <summary>[예] 를 받았을 때의 즉답. <see cref="Accepted"/> 면 202 · 아니면 사유.</summary>
 public sealed record ManualUpdateStartOutcome(bool Accepted, string Reason, ManualUpdateJobStatus? Job);
 
 /// <summary>
 /// 교체 일꾼에 넘길 주문(계약 §3 의 '호출자' 칸만). 런처가 schema·ticket·app_root·slot·api_port·requested_at 을 채운다.
-/// ⚠️ 갈래 A 의 <c>SwapRequest</c> 로 옮겨 담는 것은 합칠 때(개발명세서 U 「못 한 것」 1번).
+/// ⬛ 「합칠 때 옮겨 담는다」 — I-API 가 HandOff 에서 <see cref="SwapLaunchInput"/> 로 옮겨 담는다.
 /// </summary>
 public sealed record ManualSwapOrder(
     string Mode,
@@ -111,6 +113,7 @@ public sealed class ManualUpdateService
     private readonly IServiceScopeFactory _scopes;
     private readonly ManualFolders _folders;
     private readonly ManualUsageLog _usage;
+    private readonly ILocalSwapLauncher _launcher;
     private readonly ManualUpdateEnvironment _env;
     private readonly ILogger<ManualUpdateService> _logger;
     private readonly CancellationToken _stopping;
@@ -125,6 +128,7 @@ public sealed class ManualUpdateService
         IServiceScopeFactory scopes,
         ManualFolders folders,
         ManualUsageLog usage,
+        ILocalSwapLauncher launcher,
         ManualUpdateEnvironment env,
         ILogger<ManualUpdateService> logger,
         IHostApplicationLifetime? lifetime = null)
@@ -135,6 +139,7 @@ public sealed class ManualUpdateService
         _scopes = scopes;
         _folders = folders;
         _usage = usage;
+        _launcher = launcher;
         _env = env;
         _logger = logger;
         _stopping = lifetime?.ApplicationStopping ?? CancellationToken.None;
@@ -147,10 +152,12 @@ public sealed class ManualUpdateService
     public async Task<ManualUpdateCheckResult> CheckAsync(CancellationToken ct)
     {
         var current = _env.CurrentVersion();
-        var busy = IsBusy() || _autoLock.IsAutoUpdateInProgress();
+        var busy = IsBusy() || _autoLock.IsAutoUpdateInProgress()
+                   || _launcher.CheckBusy() is SwapReasons.SwapInProgress or SwapReasons.UpdateInProgress;
+        var last = LocalRollbackService.ToLast(_launcher.ReadLast());
 
         if (!_env.IsSupportedPlatform())
-            return new ManualUpdateCheckResult(current, null, false, ManualUpdateReasons.NotWindows, null, null, busy);
+            return new ManualUpdateCheckResult(current, null, false, ManualUpdateReasons.NotWindows, null, null, busy, last);
 
         var (reason, package) = await CheckFeedAsync(current, ct).ConfigureAwait(false);
         return new ManualUpdateCheckResult(
@@ -160,7 +167,8 @@ public sealed class ManualUpdateService
             reason,
             package?.SizeBytes,
             package?.ReleaseNotes,
-            busy);
+            busy,
+            last);
     }
 
     /// <summary>tenant 의 진행 상태(없으면 null). 다른 tenant 의 작업은 보여 주지 않는다.</summary>
@@ -191,6 +199,11 @@ public sealed class ManualUpdateService
 
             if (_autoLock.IsAutoUpdateInProgress())
                 return RefuseBeforeStart(from, safeEntry, userId, ManualUpdateReasons.UpdateInProgress);
+
+            // 20260930작1 I-API — 되돌리기와 한 틀(같은 런처·같은 요청서): 교체 진행 중 · 쿨다운(10분 · 두 모드 합쳐) ·
+            // 워치독 표식이면 받기·백업 전에 거부한다(병렬이슈 03 순서 「자물쇠 → 전제 재판정 → 받기 → 백업」).
+            if (_launcher.CheckBusy() is { } launcherBusy)
+                return RefuseBeforeStart(from, safeEntry, userId, launcherBusy);
 
             job = new Job(Guid.NewGuid().ToString("N"), tenantId, userId, safeEntry, from);
             _job = job;
@@ -338,10 +351,10 @@ public sealed class ManualUpdateService
 
             job.Move(ManualUpdateStages.HandingOff);
             var order = new ManualSwapOrder(
-                Mode: "update",
+                Mode: SwapModes.Update,
                 From: job.From,
                 To: pkg.Version,
-                MaterialKind: "manual_zip",
+                MaterialKind: SwapMaterialKinds.ManualZip,
                 MaterialPath: fullZip,
                 MaterialSha256: pkg.Sha256.ToLowerInvariant(),
                 RequestedBy: job.UserId,
@@ -364,15 +377,26 @@ public sealed class ManualUpdateService
     }
 
     /// <summary>
-    /// ⑤ 교체 일꾼에 넘기기. ⚠️ 미완 — 갈래 A 의 <c>ILocalSwapLauncher</c>(request.json 쓰기 · 바쁨 판정 · 1회용 번호 ·
-    /// 원자 잠금 · 쿨다운 · 1회용 SYSTEM 작업 등록)가 이 갈래에 아직 없다. 인터페이스를 이쪽에 겹쳐 만들지 않는다(PM 지시).
-    /// 합칠 때 이 한 곳에서 <paramref name="order"/> 를 A 의 SwapRequest 로 옮겨 Launch 를 부르고, 그 사유 코드를 그대로 돌려준다.
-    /// 그 전까지는 아무것도 등록하지 않고 <see cref="ManualUpdateReasons.LauncherNotWired"/> 로 멈춘다(받은 zip 은 staging 에 남는다).
+    /// ⑤ 교체 일꾼에 넘기기 — 갈래 A 의 <see cref="ILocalSwapLauncher"/>(바쁨 판정 · 원자 잠금 <c>swap.lock</c> · 쿨다운 ·
+    /// <c>request.json</c> · 1회용 SYSTEM 작업 등록)에 넘긴다(20260930작1 I-API).
+    /// 판·재료·해시는 전부 서버가 피드·받은 파일에서 계산한 값이다(요청 본문 유래 0 · 병렬이슈 04).
+    /// 거부면 런처 사유 코드(계약 §6)를 그대로 돌려준다 — 작업 등록 0 · 잠금 풀림(런처가 보장).
+    /// ⬛ U 초판의 「launcher_not_wired 로 멈춘다」 자리는 이것으로 대체됐다.
     /// </summary>
     private string HandOff(ManualSwapOrder order)
     {
-        _logger.LogWarning("[ManualUpdate] 교체 일꾼 런처가 아직 연결되지 않아 넘기지 않았다 — {From} → {To}", order.From, order.To);
-        return ManualUpdateReasons.LauncherNotWired;
+        var result = _launcher.Launch(new SwapLaunchInput(
+            Mode: order.Mode,
+            From: order.From,
+            To: order.To,
+            Material: new SwapMaterial { Kind = order.MaterialKind, Path = order.MaterialPath, Sha256 = order.MaterialSha256 },
+            RequestedBy: order.RequestedBy,
+            Entry: order.Entry,
+            AutoState: order.AutoState,
+            Ticket: null));
+        if (result.Started) return ManualUpdateReasons.Ok;
+        _logger.LogWarning("[ManualUpdate] 교체 일꾼이 받지 않았다 — 사유 {Reason} · {From} → {To}", result.Reason, order.From, order.To);
+        return result.Reason;
     }
 
     private async Task<bool> RunBackupAsync(string tenantId, CancellationToken ct)

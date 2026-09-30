@@ -80,4 +80,10 @@
     <Compile Include="..\HitPan.Watchdog\WatchdogOptions.cs" Link="Linked\Watchdog\WatchdogOptions.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 2026-09-30 작1 I-API (갈래 A 개발명세서 §2): 교체 일꾼 스크립트를 출력·게시 폴더에 복사한다.
+         없으면 런처가 script_missing 으로 거부한다(계약 §6) — .ps1 은 SDK 기본 Content 가 아니다(DB-*.sql 과 같은 이유). -->
+    <None Update="Rollback\local-swap.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

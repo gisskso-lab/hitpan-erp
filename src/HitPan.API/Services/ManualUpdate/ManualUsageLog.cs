@@ -24,7 +24,7 @@ public sealed record ManualUsageEntry(
 ///
 /// ■ 무엇을 적나 — 계약 §7: U 는 <b>일꾼에 넘기기 전에 끝난 사용</b>(거부·실패)만 적는다. 넘긴 뒤의 끝 상태는 일꾼이 같은 파일에
 ///   한 줄 적는다 ⇒ 한 번의 사용 = 한 줄(두 줄로 적지 않는다). 이벤트로그도 한 건.
-/// ■ 어디에 — <c>{app}\manual\usage.jsonl</c>(덧붙이기만 · <see cref="ManualFolders"/> 쓰기 전 검사) + 이벤트로그
+/// ■ 어디에 — <c>{app}\rollback\usage.jsonl</c>(20260930작1 I-API: 일꾼과 한 파일 · ⬛초판 <c>{app}\manual\</c>)(덧붙이기만 · <see cref="ManualFolders"/> 쓰기 전 검사) + 이벤트로그
 ///   (원천 <c>HitPanWatchdog</c> · 새 원천 등록 0 · 번호 <see cref="EventIdRefusedBeforeHandOff"/>).
 /// ■ 무엇을 안 하나 — DB 쓰기 0 · 본사 전송 0(#18·#22 · L-3 결재) · 민감정보 0(비밀번호·토큰·경로 값·거래 자료 없음).
 /// </summary>
@@ -71,7 +71,7 @@ public sealed class ManualUsageLog
         var line = JsonSerializer.Serialize(entry, JsonOptions);
         try
         {
-            ManualFolders.EnsureRestricted(_folders.ManualDir);
+            ManualFolders.EnsureRestricted(_folders.UsageDir);
             lock (FileGate)
             {
                 using var fs = new FileStream(_folders.UsageFile, FileMode.Append, FileAccess.Write, FileShare.Read);

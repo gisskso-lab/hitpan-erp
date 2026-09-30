@@ -28,17 +28,21 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 
 > 🔴 **개정(같은 날 · [3-V] 병렬이슈 01~04 반영 — 아래 표보다 우선)**: 작업 폴더·요청서·일꾼 사본·기록·usage.jsonl 은 전부 **`{app}\rollback\`** 아래(`%ProgramData%\HitPan` 은 Users 가 하위 폴더를 먼저 만들 수 있다 — 01). 수동 받는 곳 = **`{app}\manual\staging\`**(U). 쓰기 전 `BackupService.EnsureRestrictedSystemFolder`(C-8·C-12) — 걸리면 `folder_unsafe` · 작업 등록 0. 한 번에 하나 = `{app}\rollback\swap.lock`(`번호|UTC` · CreateNew · 일꾼이 끝에 지움) · `schtasks /Create` 에 `/F` 없음 · 끝난 교체 뒤 **10분 쿨다운**(`cooldown`) · 요청서 `requested_at` 10분 지나면 일꾼 거부(03). 되돌리기 성공 = `{app}\rollback\rolled-back.txt`(`to|from|UTC`) — 첫 칸 = 지금 판이면 `rollback_chain_blocked` · update 성공이 지운다(02). `/TR` = 고정 틀(설치 경로·모드 상수·서버 번호뿐 · 04). 새 사유 코드: `folder_unsafe` · `cooldown` · `rollback_chain_blocked`.
 
+> 🟢 **I-API 개정(9/30 · 20260930작1 통합 갈래 I-API)**: 아래 표를 위 개정 줄대로 **`{app}` 한 벌**로 고쳤다. `%ProgramData%\HitPan\…` 경로는 이 계약에 **0**(워치독 재료 ② 는 SYSTEM 프로필 `LocalApplicationData` — `%ProgramData%` 아님). 폴더 판정 = `BackupService.EnsureRestrictedSystemFolder` **한 벌**(런처 `SwapFolderGuard` · 수동 `ManualFolders.EnsureRestricted` 둘 다 이것만 부른다). 규칙 대조표 = 개발명세서 I-API §2.
+
 | 무엇 | 경로 | 누가 만든다 |
 |---|---|---|
-| 작업 폴더 | `%ProgramData%\HitPan\rollback\` | 런처(처음 쓸 때 · ACL = SYSTEM·Administrators 쓰기만, 상속 끊음) |
-| 요청서 | `…\rollback\request.json` | 런처가 쓰고, 일꾼이 상태만 고쳐 쓴다 |
-| 일꾼 사본 | `…\rollback\run\local-swap.ps1` | 런처(`{api}\Rollback\local-swap.ps1` 에서 복사 — api 폴더는 곧 바뀐다) |
-| 일꾼 기록 | `…\rollback\logs\swap-{ticket}.log` | 일꾼 |
+| 작업 폴더 | `{app}\rollback\` | 런처(처음 쓸 때 · 공용 판정 C-8: 상속 끊고 SYSTEM·Administrators·실행 계정만 · 쓰기 전마다 C-12) |
+| 한 번에 하나 잠금 | `{app}\rollback\swap.lock`(`번호\|UTC` · CreateNew) | 런처(만든다) · 일꾼(끝에 지운다 · 번호가 같을 때만) |
+| 요청서 | `{app}\rollback\request.json` | 런처가 쓰고, 일꾼이 상태만 고쳐 쓴다 |
+| 일꾼 사본 | `{app}\rollback\run\local-swap.ps1` | 런처(`{api}\Rollback\local-swap.ps1` 에서 복사 — api 폴더는 곧 바뀐다) |
+| 일꾼 기록 | `{app}\rollback\logs\swap-{ticket}.log` | 일꾼 |
+| 연쇄 차단 표식 | `{app}\rollback\rolled-back.txt`(`to\|from\|UTC`) | 일꾼(rollback 성공) · update 성공이 지운다(02) |
 | 준비 폴더 | `{app}\rollback\stage\{to}\{api,web,watchdog}` | 일꾼(S1 · zip 해제 — 같은 볼륨이라 S4 가 이름 바꾸기로 끝난다) |
 | 이전 판(재료 ①) | `{app}\rollback\prev\{api,web,watchdog}` + `version.txt` + `replaced-by.txt` + `sha256.txt` | 일꾼(update 성공 정리에서만) |
 | 옛 세 벌 임시 | `{app}\{api,web,watchdog}.rbk` | 일꾼(S4 · 성공 정리/S7 에서 사라진다) |
-| 수동 기록 | `%ProgramData%\HitPan\manual\usage.jsonl` | 일꾼(끝 상태 한 줄 · 덧붙이기만) |
-| 수동 받는 곳 | `%ProgramData%\HitPan\manual\staging\` | U(다운로드) — 일꾼은 update 성공 뒤 그 zip 만 지운다 |
+| 수동 기록(한 파일) | `{app}\rollback\usage.jsonl` | 일꾼(넘긴 뒤 끝 상태 한 줄) · API `ManualUsageLog`(넘기기 전 거부 한 줄) — 덧붙이기만 · 한 사용 = 한 줄 |
+| 수동 받는 곳 | `{app}\manual\staging\` | U(다운로드 · `{app}\manual` 부터 공용 판정) — 일꾼은 update 성공 뒤 그 zip 만 지운다 |
 | 워치독 받는 곳(재료 ②) | `%SystemRoot%\System32\config\systemprofile\AppData\Local\HitPan\Updates\staging\hitpan-{V}.zip` | 워치독(읽기만 · 삭제·수정 0) |
 
 ## §3 `request.json` — schema 1
@@ -96,15 +100,18 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | 코드 | 어디서 | 뜻 | 화면 문구(설계 기본) |
 |---|---|---|---|
 | `ok` | API | 열 수 있다 | — |
-| `main_pc_only` | API 문(403 · `[MainPcOnly]` 그대로) | 메인PC 아님 | 대표 컴퓨터에서만 할 수 있습니다 |
+| `main_pc_only` | API 문(403 · `[MainPcOnly]` 그대로) | 메인PC 아님 | 회사 자료가 들어 있는 컴퓨터(메인PC)에서만 할 수 있습니다 — 작3 통일안(`UpdatePromptPlan.MainPcPhrase` · 작업지시서 §11 PM 판정) · ⬛ 초판 「대표 컴퓨터에서만」은 폐기(9/30 I-API · I-WEB 발견 §5-3) |
 | (403 정책) | API 문(`TenantAdminOnly`) | 관리자 아님 | 관리자 계정으로만 할 수 있습니다 |
 | `not_windows` | API | 윈도가 아님(개발 환경) | 이 컴퓨터에서는 할 수 없습니다 |
 | `no_previous_version` | API(A) | 재료 ①·② 둘 다 없음 / 바로 앞 판이 아님 | 이 컴퓨터에 되돌릴 이전 버전이 없습니다 — 고객센터로 연락 주세요 |
+| `rollback_chain_blocked` | API(A · `RollbackMaterialFinder`) | 지금 판이 되돌리기로 온 판 — 한 단계보다 더 앞으로 연쇄 되돌리기 금지(병렬이슈 02) | 이미 한 번 되돌린 버전입니다. 한 단계보다 더 앞으로는 되돌릴 수 없습니다 |
 | `update_in_progress` | API·일꾼 S0 | §4 | 업데이트가 진행 중입니다 |
 | `swap_in_progress` | API | §4 | 업데이트가 진행 중입니다 |
+| `cooldown` | 런처(`CheckBusy`) | 끝난 교체(`refused` 제외) 뒤 10분 안 — 반복 재기동 막기(병렬이슈 03) | 방금 버전을 바꾸었습니다. 10분쯤 지난 뒤 다시 해 주세요 |
 | `disk_low` | API(A: P-e · U: `UpdateDiskSpaceGuard`) | 저장 공간 부족 | 저장 공간이 부족합니다 |
 | `ticket_invalid` | API(A) | 확인 번호가 없거나 10분 지남 · 그 사이 재료가 바뀜 | 화면을 새로 고친 뒤 다시 해 주세요 |
 | `script_missing` | 런처 | `{api}\Rollback\local-swap.ps1` 없음(출력 복사 누락) | 고객센터로 연락 주세요 |
+| `folder_unsafe` | 런처(`ISwapFolderGuard`) | 작업 폴더가 안전하지 않음(링크·권한 — 병렬이슈 01) · 아무것도 안 바꿈 | 히트판이 설치된 폴더를 안전하게 쓸 수 없어 아무것도 바꾸지 않았습니다 — 고객센터로 연락 주세요 |
 | `task_register_failed` | 런처 | 1회용 작업 등록·실행 실패(U-3) | 고객센터로 연락 주세요 |
 | `request_invalid` | 런처·일꾼 S0 | 요청서 칸 누락·판 순서 어긋남·허용 뿌리 밖 경로·schema 다름 | 고객센터로 연락 주세요 |
 | `material_invalid` | 일꾼 S1 | 세 벌 없음 · FileVersion ≠ `to` · `sha256.txt` 불일치 · zip 해제 실패 | 이 컴퓨터에 되돌릴 이전 버전이 없습니다 — 고객센터로 연락 주세요 |
@@ -114,7 +121,10 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | `swap_failed` | 일꾼 S4 → S7 | 교체 실패 | 원래 버전으로 돌려 두었습니다 |
 | `verify_failed` | 일꾼 S6 → S7 | 180초 안에 `to` 로 안 뜸 | 원래 버전으로 돌려 두었습니다 |
 | `revert_failed` | 일꾼 S7 | 원위치 확인 실패(`broken`) | 고객센터로 연락 주세요 |
-| U 예약 | API(U) | `feed_unreachable` · `signature_invalid` · `no_newer_version` · `backup_failed` · `download_failed` | 설계 §13-8 |
+| U(수동 업데이트) | API(U · `ManualUpdateReasons`) | `feed_unreachable` · `signature_invalid` · `no_newer_version` · `backup_failed` · `download_failed` (+ 위 표의 `not_windows`·`update_in_progress`·`swap_in_progress`·`disk_low`·`hash_mismatch` 를 같은 글자로 씀) | 설계 §13-8 · 화면 `LocalSwapUiText` |
+| ⬛ `launcher_not_wired` | (U 임시 · 폐기) | 런처가 이어지기 전 자리표 — I-API 1 이 런처를 이어 없앴다(`ManualUpdateService.cs` 주석) · 서버가 더는 보내지 않는다 | 화면은 옛 판 대비 문구만 남김 |
+
+> 대조 기준(9/30 I-API): 서버 상수 `SwapReasons`(20) + `ManualUpdateReasons`(11 · `ok` 포함 겹침 6) = 25개 전부가 이 표에 있다(node 로 글자 대조 · 빠짐 0). 화면 쪽은 I-WEB 게이트 F-C2 가 리플렉션으로 같은 상수를 전부 대조한다.
 
 ## §7 끝에 남는 것
 
@@ -128,3 +138,23 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 - `version.txt` = 옛 판(`from`) 한 줄 · `replaced-by.txt` = 새 판(`to`) 한 줄 — **`replaced-by` ≠ 지금 판이면 ① 은 「바로 앞 판」 이 아니다**(그 사이 자동 업데이트가 한 번 더 갔다 ⇒ 무시).
 - `sha256.txt` = 한 줄에 `<64hex>  <상대경로>`(상대경로 = `api\HitPan.API.exe` 처럼 prev 기준). 일꾼 S1 이 전부 다시 잰다.
 - 1세대만: 새로 만들기 전에 `prev` 를 비운다.
+
+## §9 이벤트 번호 표 (20260930작1 I-API 3 · 원천 `HitPanWatchdog` 한 곳 · 새 원천 등록 0)
+
+> 근거 = PM P-4 결재(대역 28060~) · §7. 실측 `git grep -nE "\b280[0-9]{2}\b" -- src installer scripts .github`(2026-09-30 · `80f9fd03`) — 아래 표 밖의 280xx 는 레포에 0.
+> 게이트 = `LocalSwapEventIdGateTests`(코드에서 번호를 뽑아 이 표와 대조 · 겹침 0 · 음성대조군 = 일꾼 update 기준을 28065 로 옮긴 사본은 FAIL).
+
+| 번호 | 누가 쓰나 | 뜻 | 코드 위치 |
+|---|---|---|---|
+| 28008 | 설치(워치독 설치 스크립트 · 기존) | 설치 경고 | `installer/scripts/InstallWatchdog.ps1` |
+| 28030 · 28031 | 워치독 자기교체(기존) | 자기교체 정보·경고 | `src/HitPan.Watchdog/AutoUpdate/UpdateOrchestrator.cs` |
+| 28040 | 일꾼 rollback | 시작 | `Rollback/local-swap.ps1` `$EventBase`(+0) |
+| 28041 · 28042 · 28043 · 28044 | 일꾼 rollback | 성공 · 거부 · 원위치 · 망가짐 | 같은 파일 `Complete-Swap`(+1~+4) |
+| 28045 ~ 28059 | — | 비움(rollback 예비) | — |
+| 28060 | 일꾼 update | 시작 | `$EventBase`(+0) |
+| 28061 · 28062 · 28063 · 28064 | 일꾼 update | 성공 · 거부 · 원위치 · 망가짐 | `Complete-Swap`(+1~+4) |
+| 28065 | API 수동 업데이트(U) | 넘기기 **전** 끝난 사용(거부·받기 실패·백업 실패 등) — `usage.jsonl` 1줄과 짝 | `ManualUsageLog.EventIdRefusedBeforeHandOff` |
+| 28066 ~ 28079 | — | 비움(update 예비) | — |
+
+- 🔴 되돌리기 **요청 전** 거부(GET 판정·확인 번호 틀림)는 이벤트 0 — 화면에만 알린다(§7 · A 명세서 §5).
+- 번호를 새로 쓸 때는 이 표에 먼저 줄을 넣고 게이트 기대값을 같이 바꾼다(표 밖 번호 = 게이트 FAIL).
