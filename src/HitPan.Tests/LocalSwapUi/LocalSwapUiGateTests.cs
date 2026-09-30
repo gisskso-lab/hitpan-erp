@@ -16,17 +16,36 @@ namespace HitPan.Tests.LocalSwapUi;
 /// </remarks>
 public sealed class LocalSwapUiGateTests
 {
+    // ⬛ F 잠정 이름(no_material · feed_unavailable · already_latest · scheduler_unavailable) → 🟢 I-WEB: 계약 §6 · API 상수 이름.
     private static readonly string[] KnownCodes =
     {
-        LocalSwapUiText.ReasonMainPcOnly, LocalSwapUiText.ReasonAdminOnly, LocalSwapUiText.ReasonNoMaterial,
-        LocalSwapUiText.ReasonUpdateInProgress, LocalSwapUiText.ReasonSwapInProgress, LocalSwapUiText.ReasonDiskLow,
-        LocalSwapUiText.ReasonFeedUnavailable, LocalSwapUiText.ReasonBackupFailed, LocalSwapUiText.ReasonAlreadyLatest,
-        LocalSwapUiText.ReasonVerifyFailed, LocalSwapUiText.ReasonSchedulerUnavailable,
+        LocalSwapUiText.ReasonMainPcOnly, LocalSwapUiText.ReasonAdminOnly, LocalSwapUiText.ReasonNotWindows,
+        LocalSwapUiText.ReasonNoPreviousVersion, LocalSwapUiText.ReasonRollbackChainBlocked,
+        LocalSwapUiText.ReasonUpdateInProgress, LocalSwapUiText.ReasonSwapInProgress, LocalSwapUiText.ReasonCooldown,
+        LocalSwapUiText.ReasonDiskLow, LocalSwapUiText.ReasonTicketInvalid, LocalSwapUiText.ReasonScriptMissing,
+        LocalSwapUiText.ReasonFolderUnsafe, LocalSwapUiText.ReasonTaskRegisterFailed, LocalSwapUiText.ReasonRequestInvalid,
+        LocalSwapUiText.ReasonMaterialInvalid, LocalSwapUiText.ReasonHashMismatch, LocalSwapUiText.ReasonSafetyNetFailed,
+        LocalSwapUiText.ReasonStopFailed, LocalSwapUiText.ReasonSwapFailed, LocalSwapUiText.ReasonVerifyFailed,
+        LocalSwapUiText.ReasonRevertFailed, LocalSwapUiText.ReasonFeedUnreachable, LocalSwapUiText.ReasonSignatureInvalid,
+        LocalSwapUiText.ReasonNoNewerVersion, LocalSwapUiText.ReasonBackupFailed, LocalSwapUiText.ReasonDownloadFailed,
+        LocalSwapUiText.ReasonLauncherNotWired,
     };
+
+    private static readonly string[] EndStates = { "requested", "running", "success", "refused", "reverted", "broken" };
+    private static readonly string[] Stages =
+        { "checking", "downloading", "verifying", "backing_up", "handing_off", "handed_off", "refused", "zzz" };
 
     private static IEnumerable<string> AllCustomerTexts()
     {
         foreach (var c in KnownCodes) yield return LocalSwapUiText.ReasonText(c);
+        foreach (var mode in new[] { "update", "rollback" })
+        foreach (var st in EndStates)
+        foreach (var rs in new[] { null, "verify_failed", "disk_low", "revert_failed" })
+            yield return LocalSwapUiText.EndStateText(mode, st, rs, "1.3.49", "1.3.50")!;
+        foreach (var sg in Stages) yield return LocalSwapUiText.StageText(sg);
+        yield return LocalSwapUiText.BrokenAdvice;
+        yield return LocalSwapUiText.UpdateStatusLost;
+        yield return LocalSwapUiText.LastCaption(new DateTime(2026, 9, 30, 5, 5, 0, DateTimeKind.Utc));
         yield return LocalSwapUiText.ReasonText(null);
         yield return LocalSwapUiText.ReasonText("zzz_unknown");
         foreach (var s in new[] { 0, 401, 403, 404, 500 }) yield return LocalSwapUiText.HttpFailureText(s, null);
@@ -129,7 +148,9 @@ public sealed class LocalSwapUiGateTests
     {
         Assert.Equal("main_pc_only", LocalSwapUiText.ExtractCode("{\"error\":\"main_pc_only\",\"message\":\"x\"}"));
         Assert.Equal("disk_low", LocalSwapUiText.ExtractCode("{\"code\":\"disk_low\"}"));
-        Assert.Equal("no_material", LocalSwapUiText.ExtractCode("{\"Reason\":\"no_material\"}"));
+        Assert.Equal("no_previous_version", LocalSwapUiText.ExtractCode("{\"Reason\":\"no_previous_version\"}"));
+        // 서버 409 모양 그대로(되돌리기 { started:false, reason } · 수동 업데이트 { reason }).
+        Assert.Equal("cooldown", LocalSwapUiText.ExtractCode("{\"started\":false,\"reason\":\"cooldown\"}"));
         Assert.Null(LocalSwapUiText.ExtractCode("<html>oops</html>"));
         Assert.Null(LocalSwapUiText.ExtractCode(""));
         Assert.Null(LocalSwapUiText.ExtractCode("[1,2]"));
@@ -156,8 +177,9 @@ public sealed class LocalSwapUiGateTests
     [Fact(DisplayName = "F-T6 수동 업데이트 클라이언트 — 자동 경로(update-consent*) 호출 0 · 403 main_pc_only → 메인PC 문구")]
     public async Task FT6_ManualUpdateClient()
     {
+        // I-WEB: 서버 ManualUpdateCheckResult 모양(canStart 칸은 서버에 없다 — 화면 DTO 가 계산).
         var h = new FakeHandler(r => r.Method == HttpMethod.Get
-            ? Json(HttpStatusCode.OK, "{\"currentVersion\":\"1.3.49\",\"latestVersion\":\"1.3.50\",\"updateAvailable\":true,\"canStart\":true}")
+            ? Json(HttpStatusCode.OK, "{\"currentVersion\":\"1.3.49\",\"latestVersion\":\"1.3.50\",\"updateAvailable\":true,\"reason\":\"ok\",\"busy\":false}")
             : Json(HttpStatusCode.Forbidden, "{\"error\":\"main_pc_only\"}"));
         var c = new ManualUpdateClient(new HttpClient(h) { BaseAddress = new Uri("http://localhost/") },
             NullLogger<ManualUpdateClient>.Instance);
@@ -175,25 +197,36 @@ public sealed class LocalSwapUiGateTests
 
         Assert.Equal(2, h.Calls.Count);
         Assert.All(h.Calls, x => Assert.DoesNotContain("update-consent", x));
-        Assert.Equal("GET /" + LocalSwapUiText.ApiUpdateStatus, h.Calls[0]);
+        Assert.Equal("GET /" + LocalSwapUiText.ApiUpdateCheck, h.Calls[0]);
         Assert.Equal("POST /" + LocalSwapUiText.ApiUpdateStart, h.Calls[1]);
 
         // 🔴 [3-V] 적발 04 — [예] 본문에 버전·경로 0(서버가 계산).
         Assert.Equal("{}", h.Bodies.Single());
     }
 
-    [Fact(DisplayName = "F-T8 적발 04 — 되돌리기 [예] 본문 = 빈 객체 · 음성대조군(버전 실은 본문)은 검사에 걸린다")]
-    public async Task FT8_StartBody_NoVersionNoPath()
+    [Fact(DisplayName = "F-T8 적발 04 + C-5 — 되돌리기 [예] 본문 = 확인 번호 한 칸뿐(버전·경로 0) · 음성대조군(버전 실은 본문)은 검사에 걸린다")]
+    public async Task FT8_StartBody_TicketOnly_NoVersionNoPath()
     {
-        var h = new FakeHandler(_ => Json(HttpStatusCode.OK, "{\"accepted\":true}"));
+        // ⬛ F: 본문 {} · 응답 {accepted} → 🟢 I-WEB: 서버 LocalRollbackStartBody { Ticket } · 202 { started, reason }.
+        const string ticket = "0123456789abcdef0123456789abcdef";
+        var h = new FakeHandler(_ => Json(HttpStatusCode.Accepted, "{\"started\":true,\"reason\":\"ok\"}"));
         var c = new LocalRollbackClient(new HttpClient(h) { BaseAddress = new Uri("http://localhost/") },
             NullLogger<LocalRollbackClient>.Instance);
-        var r = await c.StartAsync();
-        Assert.True(r.Ok && r.Data!.Accepted);
+        var r = await c.StartAsync(ticket);
+        Assert.True(r.Ok && r.Data!.Started);
 
-        static bool CarriesValue(string body) => Regex.IsMatch(body, "[0-9]+\\.[0-9]+|[\\\\/]|version|path", RegexOptions.IgnoreCase);
-        Assert.False(CarriesValue(h.Bodies.Single()));
-        Assert.True(CarriesValue("{\"targetVersion\":\"1.3.48\"}"));   // 대조군 — 옛 모양은 걸린다
+        var body = h.Bodies.Single();
+        using (var doc = System.Text.Json.JsonDocument.Parse(body))
+        {
+            var names = doc.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+            Assert.Equal(new[] { "ticket" }, names);                               // 칸은 번호 하나
+            Assert.Equal(ticket, doc.RootElement.GetProperty("ticket").GetString());
+        }
+
+        static bool CarriesValue(string b) => Regex.IsMatch(b, "[0-9]+\\.[0-9]+|[\\\\/]|version|path|material|to\"|from\"", RegexOptions.IgnoreCase);
+        Assert.False(CarriesValue(body));
+        Assert.True(CarriesValue("{\"targetVersion\":\"1.3.48\"}"));                 // 대조군 — 옛 모양은 걸린다
+        Assert.True(CarriesValue("{\"ticket\":\"x\",\"to\":\"1.3.48\"}"));           // 대조군 — 번호에 판을 곁들여도 걸린다
     }
 
     [Fact(DisplayName = "F-T7 되돌리기 클라이언트 — 403 본문없음 = 관리자 문구 · 연결 끊김 = 예외 대신 Status 0")]
@@ -211,7 +244,7 @@ public sealed class LocalSwapUiGateTests
         var broken = new FakeHandler(_ => throw new HttpRequestException("끊김"));
         var c2 = new LocalRollbackClient(new HttpClient(broken) { BaseAddress = new Uri("http://localhost/") },
             NullLogger<LocalRollbackClient>.Instance);
-        var r = await c2.StartAsync();
+        var r = await c2.StartAsync("0123456789abcdef0123456789abcdef");
         Assert.False(r.Ok);
         Assert.Equal(0, r.Status);
         Assert.Equal("POST /" + LocalSwapUiText.ApiRollbackStart, broken.Calls.Single());
@@ -340,5 +373,188 @@ public sealed class LocalSwapUiGateTests
             Assert.False(p.StartsWith("//", StringComparison.Ordinal));
             Assert.DoesNotContain(":", p);
         }
+    }
+
+    // ═══════════════ I-WEB 계약 대조 (C-1~C-7) — 화면 ↔ 실제 API ═══════════════
+
+    /// <summary>컨트롤러 소스에서 「방식 주소」 목록을 뽑는다(클래스 [Route] + 메서드 [HttpGet/Post("…")]).</summary>
+    private static HashSet<string> ControllerRoutes(string src)
+    {
+        var baseRoute = Regex.Match(src, "\\[Route\\(\"([^\"]+)\"\\)\\]").Groups[1].Value;
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in Regex.Matches(src, "\\[Http(Get|Post|Put|Delete)(?:\\(\"([^\"]*)\"\\))?\\]"))
+        {
+            var sub = m.Groups[2].Value;
+            set.Add(m.Groups[1].Value.ToUpperInvariant() + " " + (sub.Length == 0 ? baseRoute : baseRoute + "/" + sub));
+        }
+        return set;
+    }
+
+    [Fact(DisplayName = "F-C1 (C-6) 화면이 부르는 주소 = 실제 컨트롤러 라우트 · 음성대조군(F 옛 잠정 주소·바꾼 라우트)은 걸린다")]
+    public void FC1_Routes_MatchControllers()
+    {
+        var ctl = Path.Combine(RepoRoot(), "src", "HitPan.API", "Controllers");
+        var rb = ControllerRoutes(File.ReadAllText(Path.Combine(ctl, "LocalRollbackController.cs")));
+        var mu = ControllerRoutes(File.ReadAllText(Path.Combine(ctl, "ManualUpdateController.cs")));
+
+        Assert.Contains("GET " + LocalSwapUiText.ApiRollbackStatus, rb);
+        Assert.Contains("POST " + LocalSwapUiText.ApiRollbackStart, rb);
+        Assert.Contains("GET " + LocalSwapUiText.ApiUpdateCheck, mu);
+        Assert.Contains("POST " + LocalSwapUiText.ApiUpdateStart, mu);
+        Assert.Contains("GET " + LocalSwapUiText.ApiUpdateJob, mu);
+
+        // 음성대조군 ① — F 가 쓰던 잠정 주소는 컨트롤러에 없다(이 검사가 어긋남을 잡는다).
+        Assert.DoesNotContain("GET api/system/local-rollback/status", rb);
+        Assert.DoesNotContain("GET api/system/manual-update/status", mu);
+        Assert.DoesNotContain("POST api/system/manual-update", mu);
+        // 음성대조군 ② — 라우트를 바꾼 사본이면 화면 주소가 빠진다.
+        var mutated = ControllerRoutes(File.ReadAllText(Path.Combine(ctl, "ManualUpdateController.cs"))
+            .Replace("[HttpPost(\"apply\")]", "[HttpPost(\"start\")]"));
+        Assert.DoesNotContain("POST " + LocalSwapUiText.ApiUpdateStart, mutated);
+    }
+
+    private static IEnumerable<string> ConstStrings(Type t) =>
+        t.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!);
+
+    [Fact(DisplayName = "F-C2 (C-1~C-3) 서버 사유 코드(SwapReasons·ManualUpdateReasons) 전부 제 문구 · 계약 §6 코드 전부 · 끝 상태·진행 단계 전부 · 음성대조군(F 옛 이름)은 「고객센터」로 떨어진다")]
+    public void FC2_EveryServerCode_HasItsOwnText()
+    {
+        var serverCodes = ConstStrings(typeof(HitPan.API.Services.LocalSwap.SwapReasons))
+            .Concat(ConstStrings(typeof(HitPan.API.Services.ManualUpdate.ManualUpdateReasons)))
+            .Where(c => c != "ok").Distinct().ToArray();
+        Assert.True(serverCodes.Length >= 25, "서버 사유 코드를 읽어야 한다: " + serverCodes.Length);
+
+        // 계약 §6 표(U 예약 포함) — 문서에 적힌 코드. 서버 상수와 따로 적어 두 쪽 누락을 모두 잡는다.
+        var contractCodes = new[]
+        {
+            "main_pc_only", "not_windows", "no_previous_version", "update_in_progress", "swap_in_progress", "disk_low",
+            "ticket_invalid", "script_missing", "task_register_failed", "request_invalid", "material_invalid",
+            "hash_mismatch", "safety_net_failed", "stop_failed", "swap_failed", "verify_failed", "revert_failed",
+            "feed_unreachable", "signature_invalid", "no_newer_version", "backup_failed", "download_failed",
+        };
+
+        foreach (var c in serverCodes.Concat(contractCodes).Distinct())
+        {
+            var t = LocalSwapUiText.ReasonText(c);
+            Assert.True(t != LocalSwapUiText.UnknownReason, "문구 없음(고객센터로 떨어짐): " + c);
+            Assert.DoesNotContain(c, t);
+        }
+
+        // 계약 §6 「원래 버전으로 돌려 두었습니다」 3종은 그 말을 담는다.
+        foreach (var c in new[] { "stop_failed", "swap_failed", "verify_failed" })
+            Assert.Contains("원래 버전으로 돌려 두었습니다", LocalSwapUiText.ReasonText(c));
+
+        // 끝 상태(계약 §5) — 서버 SwapStates 전부 · 두 모드 모두 문구가 있다.
+        foreach (var st in ConstStrings(typeof(HitPan.API.Services.LocalSwap.SwapStates)))
+        foreach (var mode in ConstStrings(typeof(HitPan.API.Services.LocalSwap.SwapModes)))
+            Assert.False(string.IsNullOrWhiteSpace(LocalSwapUiText.EndStateText(mode, st, null, "1.3.49", "1.3.50")), st + "/" + mode);
+
+        // 진행 단계 — 서버 ManualUpdateStages 전부 제 문구(모르는 단계의 기본 문구로 떨어지지 않는다).
+        var fallback = LocalSwapUiText.StageText("zzz_unknown");
+        foreach (var sg in ConstStrings(typeof(HitPan.API.Services.ManualUpdate.ManualUpdateStages)).Where(s => s != "refused"))
+            Assert.NotEqual(fallback, LocalSwapUiText.StageText(sg));
+
+        // 음성대조군 — F 옛 잠정 이름은 서버가 주지 않는다 ⇒ 매핑이 없고 「고객센터」로 떨어진다(= 검사가 누락을 잡는다).
+        foreach (var old in new[] { "no_material", "feed_unavailable", "already_latest", "scheduler_unavailable" })
+        {
+            Assert.DoesNotContain(old, serverCodes);
+            Assert.Equal(LocalSwapUiText.UnknownReason, LocalSwapUiText.ReasonText(old));
+        }
+        Assert.Null(LocalSwapUiText.EndStateText("update", "zzz", null, null, null));
+    }
+
+    [Fact(DisplayName = "F-C3 (C-5·C-6·C-7) 서버 DTO 를 서버 직렬화 그대로 보내면 화면 DTO 가 칸을 다 받는다(확인 번호·지난 결과·진행 단계) · 음성대조군(F 옛 모양)은 놓친다")]
+    public async Task FC3_ServerDto_RoundTrip()
+    {
+        var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);   // ASP.NET Core 기본
+        const string ticket = "0123456789abcdef0123456789abcdef";
+        var at = new DateTime(2026, 9, 30, 5, 0, 0, DateTimeKind.Utc);
+
+        var rbJson = System.Text.Json.JsonSerializer.Serialize(new HitPan.API.Services.LocalRollback.LocalRollbackStatus(
+            true, "ok", "1.3.50", "1.3.49", "prev", ticket, 10,
+            new HitPan.API.Services.LocalRollback.LocalSwapLastResult("update", "reverted", "verify_failed", "1.3.50", "1.3.51", at)), web);
+        var h1 = new FakeHandler(_ => Json(HttpStatusCode.OK, rbJson));
+        var rb = await new LocalRollbackClient(new HttpClient(h1) { BaseAddress = new Uri("http://localhost/") },
+            NullLogger<LocalRollbackClient>.Instance).GetStatusAsync();
+        Assert.True(rb.Ok);
+        Assert.True(rb.Data!.CanRollback);
+        Assert.Equal("1.3.49", rb.Data.TargetVersion);
+        Assert.Equal(ticket, rb.Data.Ticket);
+        Assert.Equal(10, rb.Data.TicketMinutes);
+        Assert.Equal("reverted", rb.Data.Last!.State);
+        Assert.Equal("verify_failed", rb.Data.Last.Reason);
+        Assert.Equal(at, rb.Data.Last.AtUtc.ToUniversalTime());
+
+        var chkJson = System.Text.Json.JsonSerializer.Serialize(new HitPan.API.Services.ManualUpdate.ManualUpdateCheckResult(
+            "1.3.49", "1.3.50", true, "ok", 1234, null, false), web);
+        var jobJson = System.Text.Json.JsonSerializer.Serialize(new HitPan.API.Services.ManualUpdate.ManualUpdateJobStatus(
+            "j1", "backing_up", null, "1.3.49", "1.3.50", at, at), web);
+        var h2 = new FakeHandler(r => r.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, chkJson)
+            : Json(HttpStatusCode.Accepted, jobJson));
+        var mu = new ManualUpdateClient(new HttpClient(h2) { BaseAddress = new Uri("http://localhost/") },
+            NullLogger<ManualUpdateClient>.Instance);
+        var chk = await mu.CheckAsync();
+        Assert.True(chk.Ok && chk.Data!.CanStart);
+        Assert.Equal("1.3.50", chk.Data.LatestVersion);
+        var job = await mu.StartAsync();
+        Assert.True(job.Ok);
+        Assert.Equal("backing_up", job.Data!.Stage);
+
+        // 바쁨·새 판 없음이면 [업데이트 하기] 가 꺼진다.
+        Assert.False(new ManualUpdateStatus { UpdateAvailable = true, LatestVersion = "1.3.50", Reason = "ok", Busy = true }.CanStart);
+        Assert.False(new ManualUpdateStatus { UpdateAvailable = false, Reason = "no_newer_version" }.CanStart);
+
+        // 204(진행 상태 없음) — 예외 없이 Status 204.
+        var h3 = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        var none = await new ManualUpdateClient(new HttpClient(h3) { BaseAddress = new Uri("http://localhost/") },
+            NullLogger<ManualUpdateClient>.Instance).GetJobAsync();
+        Assert.False(none.Ok);
+        Assert.Equal(204, none.Status);
+        Assert.Equal("GET /" + LocalSwapUiText.ApiUpdateJob, h3.Calls.Single());
+
+        // 음성대조군 — F 옛 모양({ accepted }) 으로 서버 202 { started:true } 를 읽으면 「시작 안 됨」으로 오판한다.
+        var startJson = "{\"started\":true,\"reason\":\"ok\"}";
+        Assert.False(System.Text.Json.JsonSerializer.Deserialize<OldFStartShape>(startJson, web)!.Accepted);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<LocalSwapStartResult>(startJson, web)!.Started);
+    }
+
+    private sealed class OldFStartShape
+    {
+        public bool Accepted { get; set; }
+    }
+
+    [Fact(DisplayName = "F-T9 (C-7) 끝 상태 문구 — 원위치는 원래 판·원인·다음 단계 · 망가짐은 다시 켜기+고객센터 · 낡은 기록은 안 보인다")]
+    public void FT9_EndState()
+    {
+        var rev = LocalSwapUiText.EndStateText("update", "reverted", "verify_failed", "1.3.49", "1.3.50")!;
+        Assert.Contains("1.3.49", rev);
+        Assert.Contains("제때 켜지지", rev);
+        Assert.Contains("이전 버전으로 되돌리기", rev);          // 단계 ③ 안내
+
+        var rbRev = LocalSwapUiText.EndStateText("rollback", "reverted", "swap_failed", "1.3.50", "1.3.49")!;
+        Assert.Contains("1.3.50", rbRev);
+        Assert.DoesNotContain("이전 버전으로 되돌리기」", rbRev);  // 되돌리기 실패에 되돌리기를 권하지 않는다
+
+        var broken = LocalSwapUiText.EndStateText("rollback", "broken", "revert_failed", "1.3.50", "1.3.49")!;
+        Assert.Contains("다시 켜", broken);
+        Assert.Contains("고객센터", broken);
+
+        Assert.Contains("1.3.50", LocalSwapUiText.EndStateText("update", "success", null, "1.3.49", "1.3.50")!);
+        Assert.Contains(LocalSwapUiText.ReasonText("cooldown"), LocalSwapUiText.EndStateText("rollback", "refused", "cooldown", "1.3.50", "1.3.49")!);
+
+        Assert.Equal(3, LocalSwapUiText.EndStateLevel("success"));
+        Assert.Equal(2, LocalSwapUiText.EndStateLevel("broken"));
+        Assert.Equal(1, LocalSwapUiText.EndStateLevel("reverted"));
+
+        var now = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
+        Assert.True(LocalSwapUiText.ShouldShowLast("success", "1.3.49", "1.3.50", now.AddHours(-1), "1.3.50", now));
+        Assert.False(LocalSwapUiText.ShouldShowLast("success", "1.3.49", "1.3.50", now.AddHours(-1), "1.3.51", now));   // 그 뒤 또 바뀜
+        Assert.True(LocalSwapUiText.ShouldShowLast("reverted", "1.3.49", "1.3.50", now.AddHours(-1), "1.3.49", now));
+        Assert.False(LocalSwapUiText.ShouldShowLast("reverted", "1.3.49", "1.3.50", now.AddHours(-1), "1.3.50", now));
+        Assert.False(LocalSwapUiText.ShouldShowLast("broken", "1.3.49", "1.3.50", now.AddHours(-25), "1.3.49", now));   // 하루 지남
+        Assert.False(LocalSwapUiText.ShouldShowLast("zzz", "1.3.49", "1.3.50", now, "1.3.49", now));
     }
 }
