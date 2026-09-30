@@ -17,6 +17,9 @@
 # -TestRoot <dir> : test mode. Every external action (scheduled tasks, service, process kill,
 #   health check, event log) is replaced by a stand-in under <dir>. app_root and material paths
 #   must be under <dir>. Failure injection: <dir>\fail-at.txt containing S1|S2|S3|S4|S6|S7.
+#   Seal round (20260930 no.1, lane K1): S7R = Invoke-Revert throws on its first line,
+#   S7R2 = Invoke-Revert throws after the first folder is back, OVL = another update shows up while
+#   we stop (foreign update.lock body + web.old), OVLK = foreign update.lock body only.
 
 [CmdletBinding()]
 param(
@@ -318,18 +321,27 @@ function Stop-All {
     Write-Log 'S3 stopped'
 }
 
+# One line of Start-All. A failure (exit code or exception) only turns the result false;
+# it never skips the next line (seal F-1: one broken line must not leave the rest switched off).
+function Invoke-StartStep([string]$what, [scriptblock]$action) {
+    try { return [bool](& $action) }
+    catch { Write-Log ('S5 ' + $what + ' failed: ' + $_.Exception.Message); return $false }
+}
+
 function Start-All {
     $slot = [int]$script:Req.slot
     $ok = $true
-    if ((Invoke-Schtasks ('/Change /TN "HitPan-ERP-API-keepalive-' + $slot + '" /ENABLE')) -ne 0) { $ok = $false }
-    if ((Invoke-Schtasks ('/Change /TN "HitPan-ERP-WEB-keepalive-' + $slot + '" /ENABLE')) -ne 0) { $ok = $false }
-    Invoke-Schtasks ('/Run /TN "HitPan-ERP-API-tenant-' + $slot + '"') | Out-Null
-    Invoke-Schtasks ('/Run /TN "HitPan-ERP-WEB-tenant-' + $slot + '"') | Out-Null
-    if ($IsTest) { Set-TestService 'Running' }
-    else {
-        try { Start-Service -Name $WatchdogService } catch { $ok = $false; Write-Log ("watchdog service start failed: " + $_.Exception.Message) }
+    if (-not (Invoke-StartStep 'api keepalive enable' { (Invoke-Schtasks ('/Change /TN "HitPan-ERP-API-keepalive-' + $slot + '" /ENABLE')) -eq 0 })) { $ok = $false }
+    if (-not (Invoke-StartStep 'web keepalive enable' { (Invoke-Schtasks ('/Change /TN "HitPan-ERP-WEB-keepalive-' + $slot + '" /ENABLE')) -eq 0 })) { $ok = $false }
+    # the exit codes of /Run and the guardian line were never part of the result; only an exception is
+    if (-not (Invoke-StartStep 'api run' { Invoke-Schtasks ('/Run /TN "HitPan-ERP-API-tenant-' + $slot + '"') | Out-Null; $true })) { $ok = $false }
+    if (-not (Invoke-StartStep 'web run' { Invoke-Schtasks ('/Run /TN "HitPan-ERP-WEB-tenant-' + $slot + '"') | Out-Null; $true })) { $ok = $false }
+    if ($IsTest) {
+        if (-not (Invoke-StartStep 'watchdog service start' { Set-TestService 'Running'; $true })) { $ok = $false }
+    } else {
+        if (-not (Invoke-StartStep 'watchdog service start' { Start-Service -Name $WatchdogService; $true })) { $ok = $false }
     }
-    Invoke-Schtasks ('/Change /TN "' + $GuardianTask + '" /ENABLE') | Out-Null
+    if (-not (Invoke-StartStep 'guardian enable' { Invoke-Schtasks ('/Change /TN "' + $GuardianTask + '" /ENABLE') | Out-Null; $true })) { $ok = $false }
     Write-Log ("S5 started ok=" + $ok)
     return $ok
 }
@@ -377,6 +389,7 @@ function Invoke-Swap {
 }
 
 function Invoke-Revert {
+    if (Test-FailAt 'S7R') { throw 'injected S7R failure (revert, first line)' }
     $list = @($script:Swapped.ToArray())
     [array]::Reverse($list)
     foreach ($p in $list) {
@@ -390,6 +403,7 @@ function Invoke-Revert {
         }
         Move-Part $rbk $dst
         Write-Log ('S7 restored ' + $p)
+        if (Test-FailAt 'S7R2') { throw ('injected S7R2 failure (revert, after ' + $p + ')') }
     }
 }
 
@@ -637,12 +651,19 @@ try {
                 } else {
                     Set-State 'running' $failReason 'S7'; Set-Lock
                     $back = $false
+                    $revertOk = $false
+                    # seal F-1: start again whether or not the folders went back (a thrown revert used to
+                    # skip Start-All and leave the keepalive tasks and the watchdog switched off)
                     try {
                         try { Stop-All } catch { Write-Log ('S7 stop warning: ' + $_.Exception.Message) }
                         Invoke-Revert
-                        [void](Start-All)
-                        $back = Test-Running ([string]$script:Req.from) 'S7'
-                    } catch { Write-Log ('S7 failed: ' + $_.Exception.Message) }
+                        $revertOk = $true
+                    } catch { Write-Log ('S7 revert failed: ' + $_.Exception.Message) }
+                    finally { [void](Start-All) }
+                    if ($revertOk) {
+                        try { $back = Test-Running ([string]$script:Req.from) 'S7' }
+                        catch { Write-Log ('S7 verify failed: ' + $_.Exception.Message) }
+                    }
                     if ($back) {
                         Remove-DirSafe $script:StageDir
                         if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }

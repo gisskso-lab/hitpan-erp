@@ -88,7 +88,10 @@ internal sealed class LocalSwapWorkerRig : IDisposable
         File.ReadAllText(Path.Combine(RepoRoot(), "src", "HitPan.API", "Rollback", LocalSwapLauncher.ScriptFileName));
 
     /// <summary>일꾼을 돌린다. <paramref name="scriptText"/> = 대조군 사본(없으면 원본) · <paramref name="failAt"/> = 실패 주입(S1·S6·S7 …).</summary>
-    public int Run(string? scriptText = null, string? failAt = null)
+    public int Run(string? scriptText = null, string? failAt = null) => Run(scriptText, failAt, null);
+
+    /// <summary>일꾼을 돌린다 — <paramref name="ticketArg"/> = <c>-Ticket</c> 인자를 바꿔 넣는다(없으면 요청서와 같은 번호 · 작1 봉합 K1 G-R2).</summary>
+    public int Run(string? scriptText, string? failAt, string? ticketArg)
     {
         var script = Path.Combine(Root, "script", LocalSwapLauncher.ScriptFileName);
         Directory.CreateDirectory(Path.GetDirectoryName(script)!);
@@ -103,7 +106,7 @@ internal sealed class LocalSwapWorkerRig : IDisposable
             RedirectStandardError = true,
         };
         foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
-                     "-Mode", SwapModes.Rollback, "-Ticket", Ticket, "-TestRoot", Root })
+                     "-Mode", SwapModes.Rollback, "-Ticket", ticketArg ?? Ticket, "-TestRoot", Root })
             psi.ArgumentList.Add(a);
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("powershell 을 못 띄웠다");
         var stdout = p.StandardOutput.ReadToEndAsync();
@@ -127,6 +130,40 @@ internal sealed class LocalSwapWorkerRig : IDisposable
     public string[] LeftoverTasks() => Directory.Exists(TasksDir)
         ? Directory.GetFiles(TasksDir).Select(Path.GetFileName).Where(n => n!.StartsWith("HitPan", StringComparison.OrdinalIgnoreCase)).Select(n => n!).ToArray()
         : Array.Empty<string>();
+
+    // ── 작1 봉합 K1 도우미(G-S7a · G-R2 · G-S4) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    public string RequestPath => Path.Combine(Work, LocalSwapLauncher.RequestFileName);
+    public string SwapLockPath => Path.Combine(Work, LocalSwapLauncher.LockFileName);
+    public string UpdateLockPath => Path.Combine(App, "update.lock");
+
+    /// <summary>요청서 한 칸을 바꿔 쓴다(API 를 건너뛴 모양 — schema·ticket·state 등).</summary>
+    public void SetRequestField(string name, System.Text.Json.Nodes.JsonNode? value)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(RequestPath))!.AsObject();
+        node[name] = value;
+        File.WriteAllText(RequestPath, node.ToJsonString(), new UTF8Encoding(false));
+    }
+
+    /// <summary>대역 워치독 서비스 상태(<c>{root}\services\HitPanWatchdog</c>).</summary>
+    public string ServiceState()
+    {
+        var f = Path.Combine(Root, "services", "HitPanWatchdog");
+        return File.Exists(f) ? File.ReadAllText(f).Trim() : "Missing";
+    }
+
+    /// <summary><c>calls.log</c> 에서 <paramref name="contains"/> 를 품은 마지막 줄(없으면 빈 글자).</summary>
+    public string LastCall(string contains) =>
+        Calls().Split('\n').Select(l => l.TrimEnd('\r')).LastOrDefault(l => l.Contains(contains, StringComparison.Ordinal)) ?? "";
+
+    /// <summary><paramref name="dir"/>\<paramref name="part"/> 의 판 표식(web 은 판 표식이 없어 파일 글자를 돌려준다).</summary>
+    public static string PartMark(string dir, string part)
+    {
+        var v = Path.Combine(dir, part, ".testversion");
+        if (File.Exists(v)) return File.ReadAllText(v).Trim();
+        var bin = Path.Combine(dir, part, part + ".bin");
+        return File.Exists(bin) ? File.ReadAllText(bin) : "(없음)";
+    }
 
     public string Calls()
     {
