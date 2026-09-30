@@ -91,8 +91,12 @@ public class LoginStockGateTests
         var src = StripComments(Read("src", "HitPan.Web", "Pages", "Login.razor"));
 
         Assert.Contains("최신버젼업데이트", src);
-        Assert.Contains("OnClick=\"ManualUpdateAsync\"", src);
-        // 실제 실행 경로까지 이어져 있어야 한다.
+        // ⬛ [낡은 기대 · 20260930작1 PM 결재 L-1 (가) 로 바뀜] Assert.Contains("OnClick=\"ManualUpdateAsync\"", src);
+        //   버튼은 이제 익명 예약(update-consent-local)을 걸지 않고, 관리자 로그인 뒤 수동 업데이트 화면(/data/update)으로 간다.
+        //   「탈출구는 살아 있어야 한다」는 이 시험의 뜻은 그대로 — 목적지만 바뀌었다(G-L1 은 LocalSwapUiGateTests).
+        Assert.Contains("OnClick=\"GoManualUpdateAfterLogin\"", src);
+        Assert.Contains("PostLoginPath(_goManualUpdateAfterLogin)", src);
+        // 옛 실행 경로는 지우지 않았다(#1 · 설계 §13-4).
         Assert.Contains("StartUpdateAsync", src);
     }
 
