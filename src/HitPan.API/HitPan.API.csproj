@@ -62,4 +62,22 @@
     <None Update="Migrations\SQL\DB-*.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 2026-09-30 작1 갈래 U (설계 §13-2 · PM 결재): 수동 업데이트 모듈이 워치독의 서명검증·다운로드·해시·
+         디스크·잠금 판정을 '같은 한 벌'로 쓰도록 워치독 원본을 링크 컴파일한다.
+         · 파일 복사 0 · 워치독 파일·워치독 csproj 수정 0 · 공용 라이브러리로 옮기지 않는다(= 워치독을 뜯는 일).
+         · 서명 검증을 두 벌로 두지 않는다 — 수동 경로에 서명 우회 입구를 만들지 않기 위해서다(설계 §13-3).
+         · API 쪽에서는 Services/ManualUpdate/WatchdogUpdateCoreAdapter.cs 만 이 형식들을 직접 부른다.
+         · 동의 판독기(WatchdogConsentReader)·주 루프(Worker)는 링크하지 않는다(G-U3). -->
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateChannel.cs" Link="Linked\Watchdog\UpdateChannel.cs" />
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateManifestSigning.cs" Link="Linked\Watchdog\UpdateManifestSigning.cs" />
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateSignatureVerifier.cs" Link="Linked\Watchdog\UpdateSignatureVerifier.cs" />
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateClient.cs" Link="Linked\Watchdog\UpdateClient.cs" />
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateDiskSpaceGuard.cs" Link="Linked\Watchdog\UpdateDiskSpaceGuard.cs" />
+    <Compile Include="..\HitPan.Watchdog\AutoUpdate\UpdateLockFile.cs" Link="Linked\Watchdog\UpdateLockFile.cs" />
+    <Compile Include="..\HitPan.Watchdog\DbConfReader.cs" Link="Linked\Watchdog\DbConfReader.cs" />
+    <!-- DbConfReader.ApplyToOptions 의 매개변수 형식(POCO · 의존 0). 수동 모듈은 부르지 않는다 — 형식만 필요. -->
+    <Compile Include="..\HitPan.Watchdog\WatchdogOptions.cs" Link="Linked\Watchdog\WatchdogOptions.cs" />
+  </ItemGroup>
+
 </Project>
