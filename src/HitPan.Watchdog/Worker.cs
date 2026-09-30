@@ -99,7 +99,122 @@ public class Worker : BackgroundService
     //   같은 버전을 중복 적용하지 않는다(멱등). 적용 진입 시 _pendingConsentUpdate 를 비우는 것에 더해,
     //   거부 후 거부분이 다시 펜딩으로 돌아오는 케이스까지 막기 위해 적용 시도 버전 집합을 별도로 둔다.
     //   고리4(실 적용)가 붙으면 이 집합이 "이미 처리한 버전" 기준이 된다(재처리 차단).
-    private readonly HashSet<string> _consentAppliedVersions = new(StringComparer.OrdinalIgnoreCase);
+    // ⬛ 20260929작3 절W4 — 위 설명의 「버전」은 **낡았다.** 키를 버전 → **동의 id**(local_update_consents.id)로 바꿨다
+    //   (설계 §3 · 헌법 #1 수정 허용 · 이름은 grep 연속성을 위해 그대로 둔다).
+    //   ■ 왜: 버전 키면 실패한 [예] 뒤에 사장님이 **새 [예]** 를 눌러도 같은 워치독 수명 안에서는 영영 무시된다(N-UPD2 · B-1).
+    //   ■ 지금: 「[예] 한 번 = 시도 한 번」. 같은 동의 id 는 두 번 적용하지 않고, 새 동의 id 는 새 시도다.
+    //     DB 의 결과행 consent_id(재기동 뒤에도 남는 기록)와 함께 이중 안전장치다.
+    private readonly HashSet<long> _consentAppliedVersions = new();
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260929작3 — 규칙 C·기동 정리의 바깥 호출 자리(시험 대역 자리)
+    //   Worker 의 구체 의존(동의 리더·상태 기록기·오케스트레이터)은 DB·프로세스·파일을 실제로 건드린다.
+    //   게이트 G-W1~G-W7 이 그 자리에 대역을 끼워 「같은 인스턴스·새 인스턴스」 동작을 재도록
+    //   호출을 대리자 한 겹으로 모았다. 운영에서는 생성자가 실제 메서드를 그대로 꽂는다(동작 불변).
+    //   ⚠️ 운영 코드는 이 필드를 바꾸지 않는다 — 시험(InternalsVisibleTo)만 바꾼다.
+    internal Func<string, CancellationToken, Task<ConsentUsage>> ReadConsentUsageSeam;
+    // ⬛ 갈래 R — WriteApplyStatusSeam(apply_status 에 in_progress·consent_id)은 폐기 → 시도 표 열기·닫기 두 자리.
+    internal Func<long, string, CancellationToken, Task<AttemptOpenResult>> OpenAttemptSeam;
+    internal Func<string, string, string?, CancellationToken, Task<bool>> CloseAttemptSeam;
+
+    // 20260929작3 갈래 R 규칙 Z-1(설계 §12-5 · PM 결재 3루프) — 시도 표 때문에 적용을 보류한 동의 id 와 연속 횟수.
+    //   같은 동의 id 로 연속 3루프까지만 보류하고, 넘으면 종전 규칙(이 수명에서 처음 보는 동의 id → 적용)으로 내려앉는다.
+    internal const int AttemptHoldLimit = 3;
+    private long _attemptHoldConsentId;
+    private int _attemptHoldCount;
+    internal Func<UpdateManifest, CancellationToken, Task<bool>> ApplyUpdateSeam;
+    internal Action<UpdateManifest> ReportConsentRejectedSeam;
+    internal Func<bool, CancellationToken, Task<bool>> CloseInterruptedAttemptsSeam;
+    internal Func<string> AppRootSeam;
+
+    // 20260929작3 갈래 X · F-2 — 「이미 쓴 [예]」 안내를 Information 으로 남긴 마지막 동의 id(같은 id 반복은 Debug).
+    private long _usedApproveNoticeConsentId;
+
+    // 20260929작3 갈래 X 보완(PM 결재 9/30) — 이번 소비가 「이미 쓴 [예]」로 펜딩을 유지했는가.
+    //   ConsumeConsentForMajorAsync 가 매번 먼저 false 로 두고 그 분기에서만 true. 호출부가 정규 확인 주기로 내려갈지 가른다.
+    private bool _pendingHeldByUsedApprove;
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260930작3 갈래 Z — [4] 2차 F-4 봉합(PM 결재 · 수용 아님): 역행 적용 차단의 워치독 쪽 겹.
+    //   ■ 무엇이 열려 있었나: 「이미 쓴 [예]」로 유지된 Major 펜딩(1.3.50)이 Emergency/Normal 적용(1.3.51) 뒤에도 남았다.
+    //     그 뒤 새 [예](옛 탭)가 들어오면 1.3.50 을 1.3.51 위에 적용할 수 있었다(오케스트레이터·Worker 어디에도 거부 없음).
+    //   ■ 규칙: 「설치 버전 ≥ 펜딩 버전이면 펜딩을 버리고 적용 0」. 비교는 UpdateClient.IsNewerVersion(다운그레이드 방어선과
+    //     같은 함수 · 3자리 정규화) 재사용 — 새로 만들지 않는다. 파싱 불가도 「새 버전 아님」 = 적용 0(모르면 바꾸지 않는다).
+    //   ■ 설치 버전 = VersionInfo.Current(이 워치독 어셈블리) 와 **이 수명에서 비Major 적용이 성공한 버전** 중 높은 쪽.
+    //     워치독 자기교체(W4-3)는 적용 뒤 따로 예약되므로, 적용 직후 같은 프로세스의 VersionInfo 는 아직 옛 버전이다 —
+    //     그래서 적용 성공 버전을 따로 기억한다(재기동하면 VersionInfo 자체가 새 버전이 된다).
+    //   ■ API 쪽 첫째 겹 = AuthController.UpdateConsent 의 버전 대조(옛 버전 [예]는 기록조차 안 된다).
+    // ══════════════════════════════════════════════════════════════════════════════════
+    internal Func<string> InstalledVersionSeam;
+    internal Func<UpdateManifest, CancellationToken, Task<bool>> ApplyNonMajorSeam;
+    private string? _nonMajorAppliedVersion;
+
+    /// <summary>20260930작3 갈래 Z — 이 수명에서 알고 있는 설치 버전(어셈블리 버전과 비Major 적용 성공 버전 중 높은 쪽).</summary>
+    private string EffectiveInstalledVersion()
+    {
+        var installed = InstalledVersionSeam();
+        return _nonMajorAppliedVersion is { } applied && UpdateClient.IsNewerVersion(applied, installed, out _)
+            ? applied
+            : installed;
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — <paramref name="version"/> 이 설치 버전보다 <b>높을 때만</b> 참(적용할 가치가 있다).
+    /// 거짓이면 <paramref name="installed"/>·<paramref name="reason"/> 에 로그용 사유를 채운다.
+    /// </summary>
+    private bool IsAboveInstalled(string version, out string installed, out string? reason)
+    {
+        installed = EffectiveInstalledVersion();
+        return UpdateClient.IsNewerVersion(version, installed, out reason);
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — 들고 있는 Major 펜딩이 설치 버전 이하이면 버린다(적용 0). 버렸으면 true.
+    /// 호출 자리: 비Major 적용 성공 직후(<see cref="NoteNonMajorApplied"/>).
+    /// </summary>
+    internal bool DropPendingIfNotNewer(string where)
+    {
+        if (_pendingConsentUpdate is not { } p) return false;
+        if (IsAboveInstalled(p.Version, out var installed, out var reason)) return false;
+
+        _logger.LogInformation("[Update] Major 펜딩 {V} 해제 — 설치 버전 {Installed} 이 같거나 더 높아 적용하지 않습니다({Where} · {Reason}).",
+            p.Version, installed, where, reason);
+        _pendingConsentUpdate = null;
+        _pendingHeldByUsedApprove = false;
+        return true;
+    }
+
+    /// <summary>
+    /// 20260930작3 갈래 Z — 비Major(Emergency/Normal) 적용 결과를 기록하고, 성공이면 같은 규칙으로 Major 펜딩을 정리한다.
+    /// 실패(false)면 설치 버전이 안 바뀌었으므로 아무것도 하지 않는다.
+    /// </summary>
+    private void NoteNonMajorApplied(UpdateManifest m, bool ok, string channel)
+    {
+        if (!ok) return;
+        if (_nonMajorAppliedVersion is null || UpdateClient.IsNewerVersion(m.Version, _nonMajorAppliedVersion, out _))
+            _nonMajorAppliedVersion = m.Version;
+        DropPendingIfNotNewer($"{channel} {m.Version} 적용 성공 뒤");
+    }
+
+    /// <summary>20260929작3 갈래 X 보완 · G-X3 시험용 — 마지막 정규 확인 시각(확인 게이트)을 읽고 쓴다.</summary>
+    internal DateTime? LastUpdateCheckUtcForTest
+    {
+        get => _lastUpdateCheckUtc;
+        set => _lastUpdateCheckUtc = value;
+    }
+
+    /// <summary>20260929작3 갈래 X · G-X2 시험용 — 한 루프의 업데이트 평가(운영 RunOneLoop 가 부르는 그 함수)를 그대로 부른다.</summary>
+    internal Task EvaluateUpdateForTestAsync(CancellationToken ct) => EvaluateUpdateOncePerDayAsync(ct);
+
+    /// <summary>20260929작3 갈래 X · G-X2 시험용 — 확인 게이트를 만료시킨다(앞선 시험이 남긴 stamp 로 게이트가 닫혀 대조군이 헛돌지 않게).</summary>
+    internal void ExpireUpdateCheckGateForTest() => _lastUpdateCheckUtc = null;
+
+    /// <summary>시험용 — 펜딩 Major 를 읽고 쓴다(운영 코드는 필드를 직접 쓴다).</summary>
+    internal UpdateManifest? PendingConsentUpdateForTest
+    {
+        get => _pendingConsentUpdate;
+        set => _pendingConsentUpdate = value;
+    }
 
     private readonly WatchdogConsentReader _consent;
 
@@ -146,6 +261,18 @@ public class Worker : BackgroundService
         _updateLock = updateLock;
         _updateCheckStamp = updateCheckStamp;
 
+        // 20260929작3 — 바깥 호출 자리에 실제 메서드를 꽂는다(운영 동작 = 종전 직접 호출과 같다).
+        ReadConsentUsageSeam = _consent.ReadLatestWithUsageAsync;
+        OpenAttemptSeam = _statusWriter.OpenAttemptAsync;
+        CloseAttemptSeam = _statusWriter.CloseAttemptAsync;
+        ApplyUpdateSeam = _update.ApplyUpdateAsync;
+        ReportConsentRejectedSeam = _update.ReportConsentRejected;
+        CloseInterruptedAttemptsSeam = _statusWriter.CloseInterruptedAttemptsAsync;
+        AppRootSeam = UpdateOrchestrator.AppRoot;
+        // 20260930작3 갈래 Z (F-4) — 설치 버전 · 비Major(Emergency/Normal) 적용 자리. 운영 = 종전과 같은 함수.
+        InstalledVersionSeam = GetCurrentVersion;
+        ApplyNonMajorSeam = _update.ApplyUpdateAsync;
+
         // ★ 20260807작2 N-10 — 재시작 폭주 상한 복원.
         //   디스크에 남은 마지막 확인 시각을 인메모리로 되살린다. 읽기 실패·손상·미래 시각이면
         //   null 이 돌아오고(fail-open) 첫 루프가 즉시 확인한다 — "덜 확인"이 아니라 "더 확인" 쪽.
@@ -156,6 +283,14 @@ public class Worker : BackgroundService
     {
         // 봉합 (2026-07-16, 작1 W4-0): 종전 "v1.0.0" 하드코딩 — 로그가 늘 1.0.0 이라 CS 가 버전을 오판했다.
         _logger.LogInformation("HitPan Watchdog started v{Version}", VersionInfo.Current);
+
+        // 20260929작3 절W6 — 교체 중 중단(전원 종료 등) 정리를 **가장 먼저** 한다(설계 §5-4 · §6).
+        //   ① 폴더 복원(교체 표식이 있을 때만 R1~R3) ② 남은 in_progress 행을 failed/rolled_back 으로 닫기.
+        //   설계는 「:195 기동 복원 블록 앞」을 지정했다 — 그보다 더 앞(keepalive 자가 점검 전)에 둔 이유:
+        //   keepalive 가 되살아나 ERP 가 뜬 뒤에는 그 폴더가 잠겨 옮길 수 없다. 폴더를 먼저 제자리에 둔다.
+        //   이 호출은 예외를 밖으로 던지지 않는다(취소 제외) — 실패해도 기동은 계속한다(헌법 #15·#20).
+        if (OperatingSystem.IsWindows())
+            await RecoverInterruptedUpdateAtStartupAsync(stoppingToken);
 
         // W4-1 ③ 자가 점검 (2026-07-16, 사장님 결재) — 재부팅 점검보다 먼저 한다.
         //   업데이트가 keepalive 를 끈 뒤 워치독이 죽으면 keepalive 가 꺼진 채 남아 ERP 가 영영 안 뜬다.
@@ -381,6 +516,9 @@ public class Worker : BackgroundService
     /// </summary>
     private async Task EvaluateUpdateOncePerDayAsync(CancellationToken ct)
     {
+        // 20260929작3 갈래 X 보완 — 「이미 쓴 [예]」로 Major 펜딩을 든 채 정규 확인 주기로 내려가는 루프인가.
+        var majorHeldForRegularCheck = false;
+
         // 봉합 (2026-06-29, 작1 고리2 워치독 측): Major(동의 필요) 펜딩이 있으면 매 루프 로컬 동의를 읽어
         //   적용 가부를 판단한다. 동의는 ERP 에서 아무 때나 들어올 수 있으므로 확인 주기 게이트와 분리해
         //   _pendingNightUpdate 와 동일한 매 루프 폴링 패턴으로 처리한다(feed 재조회 없음 — 로컬 DB 만 읽음).
@@ -407,11 +545,21 @@ public class Worker : BackgroundService
                 _logger.LogInformation("[Update] Major 펜딩 해소 — 확인 게이트 즉시 만료. 새 버전이 올라와 있으면 다음 루프에서 발견합니다.");
             }
             // 동의 처리(승인 적용 진입/거부 폐기) 후엔 펜딩이 비워졌을 수 있다. 다른 채널 평가와 섞지 않고 반환.
-            return;
+            // 20260929작3 갈래 X 보완(PM 결재 9/30) — 단 「이미 쓴 [예]」로 펜딩을 **유지**한 경우만은 반환하지 않고
+            //   아래 **정규 확인 주기(N시간 게이트)** 로 내려간다. 강제 만료는 하지 않는다(F-2 — 2분 주기 재조회 0).
+            //   ■ 왜: 실패한 1.3.50 을 고치려고 1.3.51 을 게시해도 고객이 답하기 전까지 1.3.50 에 묶이고,
+            //     [예]를 누르면 다시 1.3.50 을 시도하게 된다(「업데이트를 고치는 업데이트가 못 들어오는」 길).
+            //     정규 확인에서 더 새 버전이 오면 아래 RequireConsent 가 펜딩을 그 버전으로 바꾼다.
+            //   ■ 미응답(None)·조회실패(Error)·기록실패 보류는 종전 그대로 반환한다(범위 밖 · 기존 성질).
+            if (_pendingConsentUpdate is null || !_pendingHeldByUsedApprove)
+                return;
+            majorHeldForRegularCheck = true;
         }
 
         // 낮에 보류해 둔 Normal 업데이트가 있으면, 야간 창에 진입했을 때 feed 재조회 없이 적용한다.
-        if (_pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
+        // 20260929작3 갈래 X 보완 — Major 펜딩을 든 채 내려온 루프에서는 종전처럼 이 적용을 하지 않는다
+        //   (종전엔 Major 펜딩이 있으면 위에서 반환해 여기에 오지 않았다 — 그 성질 유지).
+        if (!majorHeldForRegularCheck && _pendingNightUpdate is { } pending && _update.IsNightWindow(DateTime.Now))
         {
             var toApply = _pendingNightUpdate;
             _pendingNightUpdate = null;
@@ -421,7 +569,8 @@ public class Worker : BackgroundService
             _lastNightPendingNoticeDate = null;
             _logger.LogInformation("[Update] Normal 채널 — 야간 창 진입, 보류분 자동 적용: {V} (대기 {Waited})",
                 toApply.Version, waited is { } w ? $"{w.TotalDays:F1}일" : "미상");
-            try { await _update.ApplyUpdateAsync(toApply, ct); }
+            // 20260930작3 갈래 Z (F-4) — 대리자 한 겹(운영 = 같은 함수) · 성공이면 Major 펜딩을 같은 규칙으로 정리.
+            try { NoteNonMajorApplied(toApply, await ApplyNonMajorSeam(toApply, ct), "Normal(야간 보류분)"); }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { _logger.LogWarning(ex, "[Update] Normal 보류분 적용 중 예외"); }
             return;
@@ -536,7 +685,8 @@ public class Worker : BackgroundService
                     if (_update.IsNightWindow(DateTime.Now))
                     {
                         _logger.LogInformation("[Update] Normal 채널 — 야간 자동 적용 진입: {V}", m.Version);
-                        await _update.ApplyUpdateAsync(m, ct);
+                        // 20260930작3 갈래 Z (F-4) — 성공이면 Major 펜딩을 같은 규칙으로 정리.
+                        NoteNonMajorApplied(m, await ApplyNonMajorSeam(m, ct), "Normal");
                     }
                     else
                     {
@@ -554,7 +704,8 @@ public class Worker : BackgroundService
                 case UpdateAction.AnnounceThenApply: // Emergency
                     _logger.LogWarning("[Update] Emergency 채널 — 안내 후 적용 진입: {V} (안내 지연 {Delay})",
                         m.Version, decision.AnnounceDelay);
-                    await _update.ApplyUpdateAsync(m, ct);
+                    // 20260930작3 갈래 Z (F-4) — 성공이면 Major 펜딩(예: 「이미 쓴 [예]」로 유지된 1.3.50)을 같은 규칙으로 정리.
+                    NoteNonMajorApplied(m, await ApplyNonMajorSeam(m, ct), "Emergency");
                     break;
 
                 case UpdateAction.RequireConsent: // Major
@@ -595,18 +746,78 @@ public class Worker : BackgroundService
     ///   None     → 미응답. 펜딩 유지(다음 루프 재조회).
     ///   Error    → 조회 실패. 펜딩 유지(보수적, 다음 루프 재시도).
     /// 멱등: 이미 적용을 시도한 버전(_consentAppliedVersions)은 다시 적용하지 않는다.
+    /// ⬛ 위 「멱등」 줄은 낡았다 — 20260929작3 규칙 C(설계 §3)로 바뀌었다:
+    ///   「[예] 한 번 = 시도 한 번」. 최신 동의가 approve 이고 그 id 가 결과행이 이미 쓴 id 보다 크면 **새 [예]** —
+    ///   ① in_progress 행(consent_id=그 id)을 **먼저** 기록 ② 기록 성공했을 때만 적용 ③ 기록 실패면 적용 안 함·펜딩 유지.
+    ///   id 가 이미 쓴 id 이하(또는 이 수명에서 이미 쓴 id)면 **이미 쓴 [예]** — 적용 안 함 · 펜딩 해제 · 보고 0
+    ///   (ERP 가 「업데이트가 정상적으로 이루어지지 않았습니다」로 다시 묻는다 · 사장님 Q-1 「응 다시 물어봐」).
+    ///   Reject·None·Error 분기는 **종전 그대로**다(#43 [나중에]=적용 안 함 불변 · R-1 보고 수 불변).
     /// </summary>
-    private async Task ConsumeConsentForMajorAsync(UpdateManifest m, CancellationToken ct)
+    internal async Task ConsumeConsentForMajorAsync(UpdateManifest m, CancellationToken ct)
     {
-        // 멱등 — 이미 이 버전 적용을 시도했으면 펜딩만 비우고 끝(중복 백업·적용 차단).
-        if (_consentAppliedVersions.Contains(m.Version))
+        // ⬛ 20260929작3 절W4 — 종전 「이 버전을 이미 시도했으면 조회 없이 펜딩 해제」 멱등 블록은 뺐다(수정).
+        //   버전 키로 막으면 새 [예](N-UPD2)가 조회조차 안 된다. 멱등은 이제 판독 뒤 **동의 id** 로 건다(아래).
+        //   종전 조회 ReadLatestAsync 는 리더에 남아 있다(#1) — 규칙 C 는 id·used 까지 읽는 새 판독을 쓴다.
+        _pendingHeldByUsedApprove = false;   // 갈래 X 보완 — 「이미 쓴 [예]」 분기에서만 true
+
+        // 20260930작3 갈래 Z (F-4) — 소비·적용 **직전** 게이트: 설치 버전 ≥ 펜딩 버전이면 펜딩을 버리고 적용 0.
+        //   동의를 읽기 전에 건다 — 새 [예]든 이미 쓴 [예]든 [나중에]든, 이미 깔린 버전 이하로 되돌리는 적용은 없다.
+        //   거부 보고(ReportConsentRejected)도 하지 않는다 — 고객의 답이 아니라 버전이 끝낸 펜딩이다.
+        //   펜딩을 비우면 호출부가 확인 게이트를 즉시 만료시켜 다음 루프에 feed 를 다시 본다(종전 해소 경로와 같다).
+        if (!IsAboveInstalled(m.Version, out var installedNow, out var notNewerReason))
         {
-            _logger.LogDebug("[Update] Major 버전 {V} 은 이미 적용 시도됨 — 펜딩 해제(멱등)", m.Version);
-            _pendingConsentUpdate = null;
+            _logger.LogInformation("[Update] Major 펜딩 {V} — 설치 버전 {Installed} 이 같거나 더 높아 적용하지 않고 펜딩을 버립니다({Reason}).",
+                m.Version, installedNow, notNewerReason);
+            if (_pendingConsentUpdate is { } held && UpdateClient.IsSameVersion(held.Version, m.Version))
+                _pendingConsentUpdate = null;
             return;
         }
 
-        var decision = await _consent.ReadLatestAsync(m.Version, ct);
+        var usage = await ReadConsentUsageSeam(m.Version, ct);
+        var decision = usage.Decision;
+
+        // 20260929작3 갈래 R 규칙 Z-1 — 시도 표를 못 읽었다(동의 표만 읽힘). 같은 동의 id 로 3루프까지만 보류.
+        var oldRuleFallback = false;
+        if (decision == ConsentDecision.Approve && usage.AttemptsUnknown)
+        {
+            if (!AttemptHoldExceeded(usage.ConsentId, m.Version, "시도 표 판독 실패"))
+                return;   // 보류 — 펜딩 유지 · 다음 루프 재판독
+            oldRuleFallback = true;
+        }
+
+        // 규칙 C — 최신이 approve 인데 새 [예]가 아니면 「이미 쓴 [예]」: 적용 안 함 · 펜딩 해제 · 보고 0.
+        //   Z-1 내려앉음(옛 규칙)에서는 인메모리 동의 id 집합만 본다.
+        if (decision == ConsentDecision.Approve
+            && ((!oldRuleFallback && !usage.IsFreshApprove) || _consentAppliedVersions.Contains(usage.ConsentId)))
+        {
+            // 20260929작3 갈래 X · [4] F-2 — 이 줄은 펜딩을 유지하므로 매 루프(60초) 온다. 같은 동의 id 는 처음 한 번만 Information,
+            //   그 뒤는 Debug — 고객 PC 기본 레벨에서 하루 1,440줄이 쌓이지 않게 한다(N-10 교훈).
+            if (_usedApproveNoticeConsentId != usage.ConsentId)
+            {
+                _usedApproveNoticeConsentId = usage.ConsentId;
+                _logger.LogInformation("[Update] Major 버전 {V} — 최신 [예](동의 {Id})는 이미 한 번 시도한 동의입니다(이미 쓴 동의 {Used}). " +
+                                       "다시 적용하지 않습니다 — ERP 가 다시 물어 새 [예]가 들어오면 그때 한 번 더 시도합니다(펜딩 유지 · 본사 feed 재조회 없음).",
+                    m.Version, usage.ConsentId, usage.UsedConsentId);
+            }
+            else
+            {
+                _logger.LogDebug("[Update] Major 버전 {V} — 이미 쓴 [예](동의 {Id}) 그대로 · 새 [예] 대기(펜딩 유지).", m.Version, usage.ConsentId);
+            }
+            // ⬛ 20260929작3 갈래 X · [4] F-2 봉합(PM 결재) — 종전 이 자리의
+            //     _pendingConsentUpdate = null;
+            //   은 뺐다(수정). 펜딩을 풀면 호출부(EvaluateUpdateOncePerDayAsync)가 확인 게이트를 즉시 만료시켜
+            //   다음 루프에 본사 feed 를 다시 받고 → 재펜딩 → 다시 「이미 쓴 [예]」… 고객이 답할 때까지 약 2분마다
+            //   feed 조회가 무기한 이어졌다(NCP 부하 · N-10 상한 취지와 충돌).
+            //   ⇒ 펜딩을 유지한다. 다음 루프는 로컬 DB 동의만 다시 읽고(feed 0), 새 [예]가 들어오면 그 루프에서
+            //     아래 Approve 로 적용에 진입한다(규칙 C 그대로 — 새 [예] 한 번 = 시도 한 번).
+            //   ⚠️ 대가: 펜딩이 선 동안엔 feed 를 안 읽으므로 그 사이 더 새 버전이 게시돼도 발견하지 않는다 —
+            //     None(미응답) 분기와 같은 성질이다. 고객이 [예]·[나중에] 로 답하면 풀린다.
+            //   ⬛ 위 「대가」는 PM 반려(9/30)로 **이 분기에서는 없앴다** — 아래 표식으로 호출부가 정규 확인 주기
+            //     (N시간 게이트 · 기본 60분)는 그대로 돌리고, 더 새 버전이 오면 펜딩을 그 버전으로 바꾼다.
+            _pendingHeldByUsedApprove = true;
+            return;
+        }
+
         switch (decision)
         {
             case ConsentDecision.Approve:
@@ -633,13 +844,49 @@ public class Worker : BackgroundService
                 //       ① 향후 '업무시간 중 자동작업 자제' 판정에 재사용 여지가 있고
                 //       ② 헌법 #1 이 제거를 금지하기 때문이다. 호출처 0건임을 알고 남긴다.
 
+                // 20260929작3 규칙 C ① — 이 [예]를 「썼다」는 기록(in_progress · consent_id)을 **적용 전에** 남긴다.
+                //   다운로드 실패·슬롯 실패·예외·전원 종료가 나도 「이 [예]는 썼다」가 DB 에 남아
+                //   재기동 뒤 묻지 않고 옛 [예]로 다시 시도하는 일(B-3)이 원리적으로 사라진다(설계 §3).
+                //   ③ 기록에 실패하면 적용하지 않고 펜딩을 유지한다(다음 루프에 다시) — 기록 없이 적용하면
+                //     재기동 뒤 같은 [예]로 또 시도하게 된다.
+                // ⬛ 갈래 R — 기록 자리 apply_status → 시도 표 INSERT(UPSERT 아님 · 설계 §12-1).
+                //   AlreadyUsed(UNIQUE 위반) = 그 [예]는 이미 시도했다 → 적용 안 함 · 펜딩 해제(G-R7).
+                //   Failed = 기록 실패 → 규칙 Z-1: 같은 동의 id 로 3루프까지 보류, 넘으면 옛 규칙으로 적용 + LogWarning.
+                var opened = oldRuleFallback
+                    ? AttemptOpenResult.Failed
+                    : await OpenAttemptSeam(usage.ConsentId, m.Version, ct);
+                if (opened == AttemptOpenResult.AlreadyUsed)
+                {
+                    _logger.LogInformation("[Update] Major 버전 {V} — 동의 {Id} 는 시도 표에 이미 있습니다. 다시 적용하지 않습니다.", m.Version, usage.ConsentId);
+                    _consentAppliedVersions.Add(usage.ConsentId);
+                    _pendingConsentUpdate = null;
+                    break;
+                }
+                if (opened == AttemptOpenResult.Failed && !oldRuleFallback
+                    && !AttemptHoldExceeded(usage.ConsentId, m.Version, "시도 행 기록 실패"))
+                {
+                    _logger.LogWarning("[Update] Major 버전 {V} — 적용 시작 기록(in_progress · 동의 {Id})에 실패해 이번 루프에는 적용하지 않습니다. 펜딩 유지 — 다음 루프에 다시 시도합니다.",
+                        m.Version, usage.ConsentId);
+                    break;
+                }
+                ResetAttemptHold();
+
                 // 멱등 기록을 먼저 남긴 뒤 적용 — 적용 중 예외가 나도 같은 버전을 무한 재시도하지 않게 한다.
-                _consentAppliedVersions.Add(m.Version);
+                // ⬛ 20260929작3 — 「같은 버전」 → 「같은 동의 id」(키 변경 · 위 필드 주석).
+                _consentAppliedVersions.Add(usage.ConsentId);
                 _pendingConsentUpdate = null;
                 _logger.LogInformation("[Update] Major 버전 {V} 동의 확인 — 즉시 적용 진입(백업→차단→교체→재기동). 고객이 [예] 를 눌렀으므로 영업시간을 이유로 미루지 않는다.", m.Version);
-                try { await _update.ApplyUpdateAsync(m, ct); }
+                try { await ApplyUpdateSeam(m, ct); }
                 catch (OperationCanceledException) { throw; }
-                catch (Exception ex) { _logger.LogWarning(ex, "[Update] Major 동의 적용 중 예외 — 버전 {V}", m.Version); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[Update] Major 동의 적용 중 예외 — 버전 {V}", m.Version);
+                    // 20260929작3 절W5 — 행 안 남던 종점(설계 §5-3). 예외면 in_progress 가 그대로 남아
+                    //   ERP 가 30분 동안 「진행 중」으로 보였다. failed 로 닫는다(consent_id 는 안 건드림 — 쓴 [예] 유지).
+                    //   detail 은 「업데이트 중 중단」으로 시작하지 않는다(설계 §7 「그 밖」 매핑).
+                    //   ⬛ 갈래 R — 시도 행만 닫는다(진행 중 행만 · 오케스트레이터 종점이 이미 닫았으면 무변경 · [4] F-3).
+                    await CloseAttemptSeam(m.Version, "failed", $"적용 중 예외 — {ex.GetType().Name}", ct);
+                }
                 break;
 
             case ConsentDecision.Reject:
@@ -647,7 +894,8 @@ public class Worker : BackgroundService
                 // 20260806작4 (사장님 오더 ③ 3시점 중 ③) — 거부도 본사에 알린다.
                 //   [3-V] 적발: 종전엔 이 경로가 빠져 CS 가 "왜 계속 구버전인가"를 알 수 없었다.
                 //   기다리지 않는다(내부에서 fire-and-forget). 거부는 정상 동작이라 아무것도 강제하지 않는다.
-                _update.ReportConsentRejected(m);
+                // 20260929작3 — 호출만 대리자 한 겹을 거친다(운영 = 같은 메서드 · 동작·빈도 불변 G-W7).
+                ReportConsentRejectedSeam(m);
                 _pendingConsentUpdate = null;
                 break;
 
@@ -658,6 +906,66 @@ public class Worker : BackgroundService
             case ConsentDecision.Error:
                 _logger.LogDebug("[Update] Major 버전 {V} 동의 조회 실패 — 펜딩 유지(다음 루프 재시도)", m.Version);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// 20260929작3 갈래 R 규칙 Z-1 — 시도 표 때문에 보류할 때 부른다. 같은 동의 id 연속 횟수를 센다.
+    ///   반환 false = 아직 보류(1~3루프) · true = 상한 초과 → 옛 규칙으로 내려앉는다(LogWarning).
+    /// </summary>
+    private bool AttemptHoldExceeded(long consentId, string version, string why)
+    {
+        if (_attemptHoldConsentId != consentId)
+        {
+            _attemptHoldConsentId = consentId;
+            _attemptHoldCount = 0;
+        }
+        _attemptHoldCount++;
+        if (_attemptHoldCount <= AttemptHoldLimit)
+        {
+            _logger.LogWarning("[Update] Major 버전 {V} — {Why}로 적용 보류 {N}/{Max}루프(동의 {Id}). 펜딩 유지.",
+                version, why, _attemptHoldCount, AttemptHoldLimit, consentId);
+            return false;
+        }
+        _logger.LogWarning("[Update] Major 버전 {V} — {Why}가 {Max}루프를 넘었습니다(동의 {Id}). 시도 표 없이 종전 규칙(이 수명에서 처음 보는 동의 id)으로 적용합니다(규칙 Z-1).",
+            version, why, AttemptHoldLimit, consentId);
+        return true;
+    }
+
+    private void ResetAttemptHold()
+    {
+        _attemptHoldConsentId = 0;
+        _attemptHoldCount = 0;
+    }
+
+    /// <summary>
+    /// 20260929작3 절W6 — 워치독 기동 시 교체 중 중단 정리(설계 §5-4 · §6).
+    ///   ① 폴더 복원(UpdateFolderRecovery — 교체 표식이 있을 때만 R1~R3 · [3-V] 병렬이슈 01)
+    ///   ② in_progress 행 닫기 — 폴더를 되돌렸으면 rolled_back 「업데이트 중 중단 — 이전 버전으로 되돌림」,
+    ///      아니면 failed 「업데이트 중 중단」. 기동 시점엔 적용이 돌 수 없으므로 남은 in_progress 는 전부 중단된 시도다.
+    ///   어느 쪽이 실패해도 로그만 남기고 기동을 계속한다(헌법 #15·#20). 취소만 위로 던진다.
+    /// </summary>
+    internal async Task RecoverInterruptedUpdateAtStartupAsync(CancellationToken ct)
+    {
+        var restored = false;
+        try
+        {
+            var result = UpdateFolderRecovery.RecoverAtStartup(AppRootSeam(), _logger);
+            restored = result.Restored;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update] 기동 시 폴더 복원 호출 실패 — 워치독 기동은 계속합니다.");
+        }
+
+        try
+        {
+            await CloseInterruptedAttemptsSeam(restored, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update] 기동 시 중단된 시도 정리 호출 실패 — 워치독 기동은 계속합니다.");
         }
     }
 

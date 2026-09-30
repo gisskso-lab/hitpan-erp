@@ -29,6 +29,193 @@ public sealed class WatchdogStatusWriter
         _logger = logger;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // 20260929작3 갈래 R(9/30 재작업 · 설계 §12) — 「시도 기록」 새 표 local_update_attempts
+    //
+    //   ⬛ 갈래 W 의 「local_update_apply_status 에 consent_id 칸 + ADD COLUMN 자가 보강」은 폐기했다(작업지시서 §8).
+    //     apply_status 는 옛 워치독이 직접 읽고 쓰는 **보호 표**다 — 칸을 늘리면 옛 워치독 교차검증 ②가
+    //     그 릴리스와 이후 모든 릴리스를 막는다. 그래서 기존 표 3개는 무접촉 · 시도 기록은 새 표에만 둔다.
+    //   · 한 [예](local_update_consents.id) = 한 시도 = 한 행. consent_id UNIQUE ⇒ 같은 [예]로 두 번 시작하면 DB 가 막는다.
+    //   · 생성 경로 3개(설계 §12-4): DB-135 마이그 · 출하 DDL · 여기 자가생성. 셋 다 CREATE TABLE IF NOT EXISTS 만.
+    //   🔴 아래 표식 사이 문자열은 HitPan.Tests/Integrity/WatchdogApplyStatusDdlGateTests(G-R3·G-R4)가
+    //      **원문 그대로** 읽어 격리 DB 에서 돌리고, 칸·키·엔진을 DB-135·출하 DDL 과 대조한다.
+    //      표식을 지우거나 옮기면 게이트가 FAIL 로 알린다.
+    //   🔴 이 상수에 보호 표 이름을 넣지 마라 — 새 표만 만든다.
+    // ##R-SCHEMA-BEGIN##
+    internal const string AttemptsCreateSql =
+        "CREATE TABLE IF NOT EXISTS `local_update_attempts` (" +
+        "`id` bigint(20) NOT NULL AUTO_INCREMENT, " +
+        "`consent_id` bigint(20) NOT NULL, " +
+        "`update_version` varchar(20) NOT NULL, " +
+        "`result` varchar(20) NOT NULL, " +
+        "`detail` text DEFAULT NULL, " +
+        "`started_at` datetime(3) NOT NULL, " +
+        "`ended_at` datetime(3) DEFAULT NULL, " +
+        "`created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3), " +
+        "PRIMARY KEY (`id`), " +
+        "UNIQUE KEY `uk_local_update_attempts_consent` (`consent_id`), " +
+        "KEY `idx_local_update_attempts_ver` (`update_version`,`consent_id`)" +
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+    // ##R-SCHEMA-END##
+
+    /// <summary>
+    /// 시도 행 열기 — 이 [예]로 적용을 **시작한다**는 기록(설계 §12-1 · 규칙 C ①).
+    ///   INSERT(덮어쓰기 아님) — 같은 동의 id 로 두 번 쓰면 UNIQUE 위반 ⇒ <see cref="AttemptOpenResult.AlreadyUsed"/>
+    ///   (그 [예]는 이미 썼다 — 적용하지 않는다 · G-R7). 그 밖의 실패는 <see cref="AttemptOpenResult.Failed"/>(규칙 Z-1 대상).
+    /// 실패는 로그만(헌법 #15) — 예외를 밖으로 던지지 않는다(취소 제외).
+    /// </summary>
+    public async Task<AttemptOpenResult> OpenAttemptAsync(long consentId, string version, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Attempt] db.conf 자격증명 부재 — 시도 행을 열지 못했습니다(버전 {V} · 동의 {Id})", version, consentId);
+                return AttemptOpenResult.Failed;
+            }
+            if (!IsSafeVersionLiteral(version) || consentId <= 0)
+            {
+                _logger.LogWarning("[Update/Attempt] 안전하지 않은 값 — 시도 행 열기 거부(버전 '{V}' · 동의 {Id})", version, consentId);
+                return AttemptOpenResult.Failed;
+            }
+
+            var sql = AttemptsCreateSql + " " + BuildOpenAttemptSql(consentId, version);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            var (exit, _, stderr) = await RunReadAsync(clientExe, args, ct).ConfigureAwait(false);
+            if (exit == 0)
+            {
+                _logger.LogInformation("[Update/Attempt] 시도 행 열림 — 버전 {V} · 동의 {Id} · in_progress", version, consentId);
+                return AttemptOpenResult.Opened;
+            }
+            if (IsDuplicateKeyError(stderr))
+            {
+                _logger.LogWarning("[Update/Attempt] 동의 {Id} 는 이미 시도한 [예]입니다(시도 표 UNIQUE) — 다시 적용하지 않습니다(버전 {V})", consentId, version);
+                return AttemptOpenResult.AlreadyUsed;
+            }
+            _logger.LogWarning("[Update/Attempt] 시도 행 열기 실패(exit={E}) — 버전 {V} · 동의 {Id}: {Err}", exit, version, consentId, stderr);
+            return AttemptOpenResult.Failed;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Attempt] 시도 행 열기 예외 — 버전 {V} · 동의 {Id}", version, consentId);
+            return AttemptOpenResult.Failed;
+        }
+    }
+
+    /// <summary>
+    /// 시도 행 닫기 — 그 버전의 **진행 중(in_progress) 행만** 결과로 닫는다(설계 §12-1 ①).
+    ///   동의 없는 경로(Normal·Emergency 채널)는 열린 행이 없어 0행 = 무해. 이미 닫힌 행은 안 건드린다
+    ///   (오케스트레이터 종점이 먼저 닫았으면 그 결과가 남는다 · [4] F-3).
+    /// 실패는 로그만(헌법 #15). 반환 = 문장 실행 성공 여부.
+    /// </summary>
+    public async Task<bool> CloseAttemptAsync(string version, string result, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Attempt] db.conf 자격증명 부재 — 시도 행을 닫지 못했습니다(버전 {V} · 결과 {R})", version, result);
+                return false;
+            }
+            if (!IsSafeVersionLiteral(version))
+            {
+                _logger.LogWarning("[Update/Attempt] 안전하지 않은 버전 문자열 — 시도 행 닫기 거부: '{V}'", version);
+                return false;
+            }
+
+            var sql = AttemptsCreateSql + " " + BuildCloseAttemptSql(version, result, detail);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            await RunWriteAsync(clientExe, args, ct).ConfigureAwait(false);
+            _logger.LogInformation("[Update/Attempt] 시도 행 닫기 완료 — 버전 {V} · 결과 {R}(진행 중 행만)", version, result);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Attempt] 시도 행 닫기 실패 — 버전 {V} · 결과 {R}", version, result);
+            return false;
+        }
+    }
+
+    /// <summary>시도 행 INSERT 문(순수 — 시험이 문장을 본다). UPSERT 아님(G-R7).</summary>
+    internal static string BuildOpenAttemptSql(long consentId, string version) =>
+        "INSERT INTO `local_update_attempts` (consent_id, update_version, result, detail, started_at) " +
+        $"VALUES ({consentId.ToString(System.Globalization.CultureInfo.InvariantCulture)}, '{version}', 'in_progress', " +
+        $"{EscapeSqlLiteral($"동의 {consentId.ToString(System.Globalization.CultureInfo.InvariantCulture)} 로 적용 시작")}, NOW(3));";
+
+    /// <summary>시도 행 닫기 UPDATE 문(순수). 진행 중 행만 · ended_at=NOW(3).</summary>
+    internal static string BuildCloseAttemptSql(string version, string result, string? detail) =>
+        "UPDATE `local_update_attempts` " +
+        $"SET result={EscapeSqlLiteral(result)}, detail={EscapeSqlLiteral(detail)}, ended_at=NOW(3) " +
+        $"WHERE update_version='{version}' AND result='in_progress';";
+
+    /// <summary>mariadb 클라이언트 stderr 가 UNIQUE 위반(1062)인가.</summary>
+    internal static bool IsDuplicateKeyError(string? stderr) =>
+        !string.IsNullOrEmpty(stderr)
+        && (stderr.Contains("ERROR 1062", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("Duplicate entry", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 20260929작3 절W6 ② — 워치독 **기동 시** 남아 있는 in_progress 시도 행을 닫는다(설계 §5-4 · §6 · §12 R5).
+    ///   기동 시점엔 적용이 돌 수 없다 — 적용은 이 프로세스 안에서만 돈다. 그러니 in_progress 는 전부
+    ///   「전원 종료·강제 종료로 중단된 시도」다.
+    ///   · 폴더를 되돌렸으면(<paramref name="restoredFolders"/>) → rolled_back 「업데이트 중 중단 — 이전 버전으로 되돌림」
+    ///   · 아니면 → failed 「업데이트 중 중단」
+    ///   detail 머리 「업데이트 중 중단」은 ERP 판정(설계 §7)이 알아보는 **고정 문구**다 — 바꾸려면 설계 개정 먼저.
+    ///   ⬛ 갈래 R — 대상 표를 apply_status → local_update_attempts 로 바꿨다. apply_status 를 향한 UPDATE 는 0.
+    ///      본사 보고도 0(깔때기 RecordApplyStatusAsync 를 거치지 않는다 · 설계 §12-1 ③).
+    /// 실패는 로그만(헌법 #15·#20) — 기동을 막지 않는다. 반환 = 기록 성공 여부.
+    /// </summary>
+    public async Task<bool> CloseInterruptedAttemptsAsync(bool restoredFolders, CancellationToken ct)
+    {
+        try
+        {
+            var (host, port, dbName, user, pass) = ResolveDbCredentials();
+            if (string.IsNullOrWhiteSpace(dbName) || string.IsNullOrWhiteSpace(user))
+            {
+                _logger.LogWarning("[Update/Apply] db.conf 자격증명 부재 — 기동 시 중단된 시도 정리 생략");
+                return false;
+            }
+
+            var sql = AttemptsCreateSql + " " + BuildCloseInterruptedSql(restoredFolders);
+            var clientExe = ResolveMariadbBinary("mariadb.exe", "mysql.exe");
+            var args = $"-h {host} -P {port} -u {user} \"-p{pass}\" -N -B --default-character-set=utf8mb4 -e \"{sql.Replace("\"", "\\\"")}\" {dbName}";
+
+            await RunWriteAsync(clientExe, args, ct).ConfigureAwait(false);
+            _logger.LogInformation("[Update/Apply] 기동 시 중단된 시도 정리 완료 — in_progress → {R}",
+                restoredFolders ? "rolled_back" : "failed");
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update/Apply] 기동 시 중단된 시도 정리 실패 — 워치독 기동은 계속합니다");
+            return false;
+        }
+    }
+
+    /// <summary>고정 detail 문구(설계 §7 계약). ERP 판정이 머리 「업데이트 중 중단」을 알아본다.</summary>
+    internal const string DetailInterrupted = "업데이트 중 중단";
+    internal const string DetailInterruptedRestored = "업데이트 중 중단 — 이전 버전으로 되돌림";
+
+    /// <summary>기동 정리 UPDATE 문(순수 — 시험이 문장을 본다). 대상 = 시도 표 · 진행 중 행만.</summary>
+    internal static string BuildCloseInterruptedSql(bool restoredFolders)
+    {
+        var (result, detail) = restoredFolders
+            ? ("rolled_back", DetailInterruptedRestored)
+            : ("failed", DetailInterrupted);
+        return "UPDATE `local_update_attempts` " +
+               $"SET result='{result}', detail={EscapeSqlLiteral(detail)}, ended_at=NOW(3) " +
+               "WHERE result='in_progress';";
+    }
+
     /// <summary>
     /// 발견한 새버전(Major)을 local_update_status 에 적재한다. "최신 1건"만 유지하기 위해 DELETE→INSERT 로 교체한다.
     ///   적재 실패는 침묵하지 않고 로그만 남긴다(헌법 #15). 적재 실패가 워치독 루프 전체를 멈추지 않게 false 반환.
@@ -340,4 +527,16 @@ public sealed class WatchdogStatusWriter
         throw new InvalidOperationException(
             $"MariaDB 클라이언트 실행파일을 찾을 수 없습니다 ({string.Join("/", candidates)}). MariaDB 설치·PATH 등록을 확인하세요.");
     }
+}
+
+/// <summary>
+/// 20260929작3 갈래 R — 시도 행 열기 결과(<see cref="WatchdogStatusWriter.OpenAttemptAsync"/>).
+///   Opened = 열림(적용 진행) · AlreadyUsed = 그 [예]는 이미 시도했다(UNIQUE 위반 — 적용 안 함 · 펜딩 해제) ·
+///   Failed = 그 밖의 기록 실패(적용 보류 · 규칙 Z-1 대상).
+/// </summary>
+public enum AttemptOpenResult
+{
+    Opened,
+    AlreadyUsed,
+    Failed,
 }

@@ -540,8 +540,16 @@ public class AuthController : ControllerBase
     ///   · tenant_id·user_id 는 JWT 클레임에서만 받는다(헌법 #2). 파라미터로 받지 않는다.
     ///   · INSERT ONLY — 동의 이력은 갱신/삭제하지 않는다(매 동의/거부를 한 행으로 남긴다).
     /// </summary>
+    /// <remarks>
+    /// 🔴 20260929작3 절A3 — <b>[예]/[나중에]는 메인PC 에서만</b>(사장님 9/29 ③ 「= 메인PC에서만」).
+    /// 메인PC 가 아니면 <c>MainPcOnly</c> 필터가 403 <c>main_pc_only</c> 로 돌려보내고 <b>행 0</b> —
+    /// approve·reject 둘 다다. 종전엔 직원 PC 의 [나중에]가 사장님의 [예]를 뒤집을 수 있었다(1차 선행검증 ⑤).
+    /// 판정은 단일출처 <c>MainPcOnlyAttribute.IsMainPc</c> — 도메인으로 연 메인PC 는 출입증으로 통과한다.
+    /// 응답 문구는 무변경. <c>update-consent-local</c> 은 무접촉(설계 §8).
+    /// </remarks>
     [HttpPost("update-consent")]
     [Authorize(Policy = "TenantOnly")]
+    [HitPan.API.Security.MainPcOnly]
     public async Task<IActionResult> UpdateConsent([FromBody] UpdateConsentRequest request, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -559,6 +567,24 @@ public class AuthController : ControllerBase
         var action = request.Action.Trim().ToLowerInvariant();
         if (action != "approve" && action != "reject")
             return BadRequest(new { message = "동작은 approve 또는 reject 여야 합니다." });
+
+        // 🔴 20260930작3 갈래 Z — [4] 2차 F-4 봉합(PM 결재 · 수용 아님). 지금 준비된 **그 버전**에만 답을 받는다.
+        //   ■ 무엇이 열려 있었나: 이 엔드포인트는 요청 버전을 대조하지 않고 INSERT 했다. 이미 떠 있던 탭에서
+        //     1.3.50 [예]가 들어오면, 그 사이 Emergency/Normal 로 1.3.51 이 깔린 뒤라도 워치독이 그 [예]로
+        //     1.3.50 을 1.3.51 위에 적용할 수 있었다(역행). 워치독 쪽 둘째 겹은 Worker.DropPendingIfNotNewer.
+        //   ■ 대조 기준 = ComputeUpdateStatusAsync(로그인·update-status·update-consent-local 과 같은 함수 · 복붙 아님).
+        //     UpdateAvailable=true 이고 LatestVersion 이 요청 버전과 같을 때만 기록한다. approve·reject 둘 다.
+        //   ■ 조회 실패는 그 함수가 UpdateAvailable=false 로 폴백하므로 여기서는 400(기록 0)으로 닫힌다 —
+        //     모르면 받지 않는다. 화면을 새로 고치면 그때의 상태로 다시 묻는다.
+        //   ■ update-consent-local 은 무접촉(자기 ③ 대조를 이미 가진다).
+        var staged = await ComputeUpdateStatusAsync(ct);
+        if (!IsAnswerForStagedUpdate(staged, request.UpdateVersion))
+        {
+            _logger.LogInformation(
+                "업데이트 동의 거절(버전 불일치) — 요청 {Requested} · 준비된 {Latest} · 새 버전 있음 {Available} · 동작 {Action}",
+                request.UpdateVersion, staged.LatestVersion ?? "없음", staged.UpdateAvailable, action);
+            return BadRequest(new { message = StaleConsentMessage });
+        }
 
         try
         {
@@ -603,6 +629,18 @@ public class AuthController : ControllerBase
             return StatusCode(500, new { message = "동의 기록에 실패했습니다. 잠시 후 다시 시도해주세요." });
         }
     }
+
+    /// <summary>20260930작3 갈래 Z (F-4) — 옛 버전·끝난 업데이트에 대한 답을 돌려보낼 때의 고객 문구(개발용어 0).</summary>
+    private const string StaleConsentMessage = "이미 더 새 버전이 있거나 업데이트가 끝났습니다. 화면을 새로 고쳐 주세요.";
+
+    /// <summary>
+    /// 20260930작3 갈래 Z (F-4) — 이 답이 <b>지금 준비된 그 업데이트</b>에 대한 것인가.
+    /// 새 버전이 있고(<c>UpdateAvailable</c>) 요청 버전이 <c>LatestVersion</c> 과 같을 때만 참.
+    /// </summary>
+    private static bool IsAnswerForStagedUpdate(UpdateStatusDto status, string requestedVersion) =>
+        status.UpdateAvailable
+        && !string.IsNullOrWhiteSpace(status.LatestVersion)
+        && string.Equals(status.LatestVersion, requestedVersion.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 고리2(A안) — 로그인 응답에 업데이트 동의 팝업 정보를 채운다.
@@ -838,7 +876,12 @@ public class AuthController : ControllerBase
             UpdateAvailable = false,
             LatestVersion = null,
             UpdateChannel = null,
-            ConsentMessage = null
+            ConsentMessage = null,
+            // 🔴 20260929작3 절A2 — 응답 4필드(추가만 · 설계 §4). 새 버전이 없으면 none.
+            IssueKind = HitPan.API.Services.UpdateIssueJudge.KindNone,
+            IssueText = null,
+            NeedsPrompt = false,
+            CanRespond = ComputeCanRespond()
         };
 
         try
@@ -873,6 +916,9 @@ public class AuthController : ControllerBase
                 status.LatestVersion = row.LatestVersion;
                 status.UpdateChannel = row.UpdateChannel;
                 status.ConsentMessage = row.ConsentMessage;
+
+                // 🔴 20260929작3 절A2 — 「미완료」 판정(설계 §4). 새 버전이 있을 때만 C·A 를 읽는다.
+                await ApplyUpdateIssueAsync(db, status, ct);
             }
         }
         catch (Exception ex)
@@ -880,9 +926,77 @@ public class AuthController : ControllerBase
             // 헌법 #15: 침묵 금지 + 호출자는 절대 안 깨지게(false 폴백).
             _logger.LogWarning(ex, "업데이트 상태 조회 실패 — UpdateAvailable false 폴백");
             status.UpdateAvailable = false;
+            // 20260929작3 절A2 — 폴백과 짝을 맞춘다(새 버전 없음 = none · 팝업 없음).
+            status.IssueKind = HitPan.API.Services.UpdateIssueJudge.KindNone;
+            status.IssueText = null;
+            status.NeedsPrompt = false;
         }
 
         return status;
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절A2 — L 의 최신 동의 C · 결과행 A 를 <b>한 번의 쿼리</b>로 읽어 판정을 채운다(설계 §4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 쿼리는 <see cref="HitPan.API.Services.UpdateIssueJudge.IssueQuerySql"/> <b>한 개</b>(#16 — WhenAll 금지).
+    /// 종전 L 조회는 <b>무변경</b>(#1)이고, 같은 연결로 그 뒤에 한 번 더 묻는다 — L 을 알아야 C·A 를 찾는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>실패 = 종전 폴백</b>(#15·#20): 표·칸(<c>consent_id</c> · DB-135) 부재 등 어떤 예외도
+    /// LogWarning 한 줄 후 <c>first</c>(= 종전처럼 새 버전이 있으면 팝업)로 간다. ERP 사용·로그인을 막지 않는다.
+    /// </para>
+    /// </remarks>
+    private async Task ApplyUpdateIssueAsync(System.Data.IDbConnection db, UpdateStatusDto status, CancellationToken ct)
+    {
+        HitPan.API.Services.UpdateIssueJudge.Verdict verdict;
+        try
+        {
+            var row = await Dapper.SqlMapper.QueryFirstOrDefaultAsync<HitPan.API.Services.UpdateIssueJudge.IssueRow>(db,
+                new Dapper.CommandDefinition(
+                    HitPan.API.Services.UpdateIssueJudge.IssueQuerySql,
+                    new { Version = status.LatestVersion },
+                    cancellationToken: ct));
+
+            // 경과(C): consented_at 은 update-consent 가 API 시계(DateTime.Now)로 적는다 — 같은 시계로 잰다(설계 §4).
+            verdict = HitPan.API.Services.UpdateIssueJudge.Judge(
+                HitPan.API.Services.UpdateIssueJudge.FromRow(status.UpdateAvailable, status.LatestVersion, row, DateTime.Now));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "업데이트 미완료 판정 조회 실패 — 종전 팝업 동작으로 폴백 (Version: {Version})", status.LatestVersion);
+            verdict = HitPan.API.Services.UpdateIssueJudge.Fallback(status.UpdateAvailable, status.LatestVersion);
+        }
+
+        status.IssueKind = verdict.Kind;
+        status.IssueText = verdict.IssueText;
+        status.NeedsPrompt = verdict.NeedsPrompt;
+    }
+
+    /// <summary>
+    /// 🔴 20260929작3 절A2 — [예]/[나중에]를 이 화면에서 누를 수 있나 = <b>메인PC 인가</b>.
+    /// </summary>
+    /// <remarks>
+    /// 판정 단일출처 <c>MainPcOnlyAttribute.IsMainPc</c> 를 <b>호출</b>만 한다(복붙 금지 — 한쪽만 고쳐지면
+    /// 화면은 [예]를 보여 주는데 서버는 403 이 된다). <c>update-consent</c> 의 필터와 같은 함수다(절A3).
+    /// 판정 중 예외는 <b>누를 수 없음</b>(false)으로 닫는다 — 열어 두는 쪽으로 실패하지 않는다.
+    /// </remarks>
+    private bool ComputeCanRespond()
+    {
+        try
+        {
+            return HitPan.API.Security.MainPcOnlyAttribute.IsMainPc(HttpContext);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "메인PC 판정 실패 — 업데이트 응답 불가(false)로 닫는다");
+            return false;
+        }
     }
 
     /// <summary>local_update_status 1행 매핑(고리2 새버전 상태).</summary>
@@ -965,6 +1079,23 @@ public sealed class UpdateStatusDto
 
     /// <summary>팝업에 보여줄 안내 문구(manifest 발행값).</summary>
     public string? ConsentMessage { get; set; }
+
+    // ── 20260929작3 절A2 — 응답 4필드 추가(기존 5필드 불변 · 설계 §4 · 갈래 F 와의 계약) ──
+
+    /// <summary>
+    /// 미완료 종류: none · first · later · requested · not_started · in_progress · interrupted · failed
+    /// (<c>UpdateIssueJudge.Kind*</c>).
+    /// </summary>
+    public string? IssueKind { get; set; }
+
+    /// <summary>고객 문구(설계 §7 매핑 결과만 · 워치독 detail 원문 비노출). none 이면 null.</summary>
+    public string? IssueText { get; set; }
+
+    /// <summary>[예]/[나중에]를 누를 수 있는 자리인가 = <c>MainPcOnlyAttribute.IsMainPc</c>.</summary>
+    public bool CanRespond { get; set; }
+
+    /// <summary>팝업이 필요한가 = kind ∈ first·later·not_started·interrupted·failed.</summary>
+    public bool NeedsPrompt { get; set; }
 }
 
 /// <summary>고리2 업데이트 동의 요청 — tenant_id·user_id 는 JWT 클레임에서만(헌법 #2), 바디에 두지 않는다.</summary>

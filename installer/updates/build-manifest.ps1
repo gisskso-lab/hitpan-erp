@@ -158,7 +158,10 @@ function Get-MigrationCreateColumns([string]$sqlText, [string]$table) {
     return ($cols | Sort-Object -Unique)
 }
 
-$guardedTables = @('local_update_status', 'local_update_consents', 'local_update_apply_status')
+# 20260929작3 갈래 R(설계 §12-6 · PM 결재 9/30) — 시도 표 local_update_attempts 추가: 워치독이 직접 읽고 쓰는 표라
+#   옛 워치독과 섞이는 사정이 apply_status 와 같다 ⇒ 앞으로 ALTER 금지 · CREATE 칸은 clean DDL 과 같아야 한다.
+#   런타임 게이트(UpdateOrchestrator.GuardedUpdateTables)와 같은 목록이어야 한다.
+$guardedTables = @('local_update_status', 'local_update_consents', 'local_update_apply_status', 'local_update_attempts')
 $sqlDir = Join-Path $apiDir 'Migrations\SQL'
 $migrationFiles = @()
 if (Test-Path $sqlDir) {

@@ -163,6 +163,10 @@ public sealed class UpdateOrchestrator
         if (!verified)
         {
             _logger.LogError("[Update] 다운로드/검증 실패 — 적용 차단 ({V})", manifest.Version);
+            // 20260929작3 절W5 — 종전엔 이 종점이 결과행을 안 남겨, ERP 가 「왜 안 됐나」를 몰랐다(설계 §5-3).
+            //   아무것도 안 바꿨다(구버전 그대로). detail 은 설계 §7 매핑이 「그 밖 · 시작 안 됨」으로 읽는 고정 문구.
+            // ⬛ 갈래 R(설계 §12-1 ③) — apply_status·본사 보고 깔때기를 거치지 않고 **시도 행만** 닫는다(보고 수 불변).
+            await CloseAttemptOnlyAsync(manifest, "failed", "다운로드·검증 실패 — 업데이트 시작 안 함", ct);
             return false;
         }
 
@@ -188,6 +192,9 @@ public sealed class UpdateOrchestrator
         if (slot is null)
         {
             _logger.LogError("[Update] 🛑 슬롯을 판정하지 못해 적용을 중단합니다 — 구버전 그대로 유지({V})", manifest.Version);
+            // 20260929작3 절W5 — 행 안 남던 종점(설계 §5-3). 구버전 그대로.
+            // ⬛ 갈래 R(설계 §12-1 ③) — 시도 행만 닫는다(apply_status 기록 0 · 본사 보고 0).
+            await CloseAttemptOnlyAsync(manifest, "failed", "실행 슬롯 판정 실패 — 업데이트 시작 안 함", ct);
             return false;
         }
 
@@ -203,6 +210,19 @@ public sealed class UpdateOrchestrator
                 await RecordApplyStatusAsync(manifest, "rolled_back", "교체 준비(정지) 실패 — 구버전 유지", ct);
                 return false;
             }
+
+            // 20260929작3 절W6 · [3-V] 병렬이슈 01 — 교체 표식. 폴더를 옮기기 직전에 쓴다.
+            //   전원이 꺼져 이 표식이 남으면 다음 워치독 기동이 폴더를 마저 되돌린다(UpdateFolderRecovery).
+            //   표식이 없으면 기동 복원은 R3 모양(성공 뒤 정리 잔재와 같은 모양)을 건드리지 않는다.
+            //   교체·검증 성공 직후(정리 전)에 지우고, 실패 경로는 아래 finally 가 「폴더가 제자리면」 지운다.
+            // ⬛ 20260929작3 갈래 X · [4] F-1 봉합(PM 결재) — 종전 이 자리의 표식 쓰기
+            //     UpdateFolderRecovery.TryWriteMarker(AppRoot(), manifest.Version, _logger);
+            //   는 TrySwapFilesAsync 안 **첫 폴더 이동(web → web.old) 직전**으로 옮겼다(수정).
+            //   ■ 왜: 여기서 쓰면 교체 **전**에 끝나는 경로(zip 없음·해제 실패·api/web 없음·마이그 교차검증 차단·
+            //     교체 전 정리 실패)에도 표식이 남는다. finally 의 ClearMarkerIfSettled 는 폴더 모양만 보므로
+            //     앞선 성공 업데이트의 정리 잔재(R3 모양 — web.old 만 남음)가 있으면 표식을 못 지우고,
+            //     다음 기동 복원이 **멀쩡한 web 을 옛 잔재로 되돌린다**(작업리뷰서 1차 F-1 임시 폴더 실측).
+            //   ⇒ 표식 = 「폴더를 실제로 옮기기 시작했다」는 뜻으로만 쓴다. 교체 전에 끝나면 표식 0.
 
             // ===== W4-2 (2026-07-16, 사장님 결재): 파일 교체 (best-effort 스왑) =====
             //   여기부터 실제 파일을 바꾼다. 스왑 자체가 실패하면 TrySwapFilesAsync 안에서
@@ -253,6 +273,9 @@ public sealed class UpdateOrchestrator
             }
 
             _logger.LogInformation("[Update] ✅ 업데이트 적용·검증 성공(api→web, /health+FileVersion 2중 통과)({V})", manifest.Version);
+            // 20260929작3 · [3-V] 병렬이슈 01 — 교체 표식은 **정리(.old 삭제) 전에** 지운다.
+            //   정리 도중 전원이 꺼져 web.old 만 남아도(R3 모양) 표식이 없으니 기동 복원이 새 web 을 치우지 않는다.
+            UpdateFolderRecovery.DeleteMarker(AppRoot(), _logger);
             // W4-6: 성공 기록 → 성공 정리(staging·.old·watchdog.new·안전망·TTL). .old 정리는 성공 확정 후에만.
             await RecordApplyStatusAsync(manifest, "success", null, ct);
             CleanupAfterSuccess(slot.Value);
@@ -270,6 +293,11 @@ public sealed class UpdateOrchestrator
             var restored = _gate.RestoreKeepalive(slot.Value);
             if (restored) _gate.RemoveRestoreSafetyNet();
             _lock.Release();
+
+            // 20260929작3 · [3-V] 병렬이슈 01 — 실패·롤백 경로의 교체 표식 정리.
+            //   폴더가 제자리(web·api 있음 · .old 없음)로 돌아왔으면 지우고, 아니면(롤백 실패 등) 남겨
+            //   다음 기동 복원이 보게 한다. 표식이 없으면(성공 경로·교체 전 종료) 아무것도 안 한다.
+            UpdateFolderRecovery.ClearMarkerIfSettled(AppRoot(), _logger);
 
             // 교체 후 ERP 를 다시 띄우는 건 W4-4 다. 그때까지는 keepalive 가 1분 내에 되살린다
             //   (교체를 안 했으므로 구버전이 그대로 뜬다).
@@ -300,13 +328,23 @@ public sealed class UpdateOrchestrator
     ///   (DbConfReader.ResolveDbConfPath 와 동일한 '..' 규칙 — 설치 구조 단일 출처). W4-2 스왑과 W4-5
     ///   FileVersion 검증·롤백이 같은 값을 써야 하므로 한 곳으로 모은다(경로가 어긋나면 롤백이 딴 폴더를 건드린다).
     /// </summary>
-    private static string AppRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
+    // 20260929작3 절W6 — private → internal(수정). 워치독 기동 폴더 복원(Worker)이 **같은** {app} 을 봐야 한다 —
+    //   경로 규칙을 두 곳에 두면 복원이 딴 폴더를 건드린다(위 주석과 같은 이유).
+    internal static string AppRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
 
-    private async Task<bool> TrySwapFilesAsync(UpdateManifest manifest, CancellationToken ct)
+    // 20260929작3 갈래 X · F-1 — 운영 호출은 종전과 같다(설치본 {app} · 워치독 staging). 경로를 받는 본체는 아래 오버로드.
+    private Task<bool> TrySwapFilesAsync(UpdateManifest manifest, CancellationToken ct)
+        => TrySwapFilesAsync(manifest, AppRoot(), _stagingDir, ct);
+
+    /// <summary>
+    /// 20260929작3 갈래 X · F-1 — 본체. 경로({app}·staging)를 인자로 받는다 — 시험은 임시 폴더로만 돈다(G-X1 · 헌법 #39).
+    ///   교체 표식은 이 안의 **첫 폴더 이동 직전**에만 쓴다. 그 앞에서 끝나는 모든 return 은 표식을 남기지 않는다.
+    /// </summary>
+    internal async Task<bool> TrySwapFilesAsync(UpdateManifest manifest, string appRoot, string stagingDir, CancellationToken ct)
     {
-        var appRoot = AppRoot();
-        var zipPath = Path.Combine(_stagingDir, $"hitpan-{manifest.Version}.zip");
-        var extractDir = Path.Combine(_stagingDir, "extract");
+        // ⬛ 갈래 X — 종전 「var appRoot = AppRoot();」·「_stagingDir」 두 곳은 인자로 받는다(값은 운영 호출에서 같다).
+        var zipPath = Path.Combine(stagingDir, $"hitpan-{manifest.Version}.zip");
+        var extractDir = Path.Combine(stagingDir, "extract");
 
         // ── 0) 해제 ── 이전 시도의 잔재가 있으면 지우고 새로 푼다(부분 잔재로 오염되지 않게).
         try
@@ -348,12 +386,21 @@ public sealed class UpdateOrchestrator
         var appApiOld = Path.Combine(appRoot, "api.old");
 
         // 이전 실패로 남은 .old 가 있으면 리네임이 막힌다 — 스왑 시작 전 치운다(멱등).
-        TryDeleteDir(appWebOld);
-        TryDeleteDir(appApiOld);
+        // ⬛ 20260929작3 절W6 — 종전 두 줄(TryDeleteDir(appWebOld) · TryDeleteDir(appApiOld))은
+        //   ClearStaleOldDirsForSwap 안으로 옮겼다(그 앞에 R1·R2 가드 · 설계 §6). 지우는 동작 자체는 같다.
+        if (!ClearStaleOldDirsForSwap(appRoot))
+        {
+            _logger.LogError("[Update] 🛑 교체 전 구버전 폴더를 제자리로 되돌리지 못했습니다 — 유일한 구버전(.old)을 지우지 않고 교체를 멈춥니다({V}).", manifest.Version);
+            return false;
+        }
 
         // 어디까지 옮겼는지 추적해 실패 시 역복원한다(부분 성공도 전부 되돌림 — 헌법 #20).
         var webRenamedOut = false;   // web → web.old 완료?
         var webReplaced = false;     // extract\web → web 완료?
+
+        // 20260929작3 갈래 X · [4] F-1 봉합 — 교체 표식은 **여기, 첫 폴더 이동 직전**에 쓴다(종전 ApplyUpdateAsync 정지 직후에서 옮김).
+        //   이 위의 모든 return(zip 없음·해제 실패·api/web 없음·교차검증 차단·교체 전 정리 실패)은 표식을 남기지 않는다.
+        UpdateFolderRecovery.TryWriteMarker(appRoot, manifest.Version, _logger);
         try
         {
             // web: 기존을 web.old 로 밀어내고 신버전을 web 자리에 넣는다.
@@ -428,15 +475,41 @@ public sealed class UpdateOrchestrator
                 _logger.LogError(restoreEx, "[Update] ⚠️ api 역복원 실패 — 부팅 복원 안전망(②)과 자가 점검(③)이 뒤를 받칩니다.");
             }
 
+            // 20260929작3 갈래 X · F-1 — 첫 이동(web → web.old)조차 안 됐으면 폴더는 한 번도 안 옮겨졌다.
+            //   예: 교체 전 정리(TryDeleteDir)가 잠긴 web.old 잔재를 못 지워 첫 Move 가 실패한 경우 — 모양은 R3 잔재 그대로다.
+            //   이때 표식이 남으면 finally 의 ClearMarkerIfSettled 가 (R3 라서) 못 지우고 다음 기동이 멀쩡한 web 을 되돌린다.
+            //   ⇒ 옮긴 것이 없으면 표식을 지운다(폴더를 안 건드렸으니 되돌릴 것도 없다).
+            if (!webRenamedOut)
+                UpdateFolderRecovery.DeleteMarker(appRoot, _logger);
+
             _logger.LogError("[Update] 🛑 파일 교체 실패 — 구버전으로 역복원했습니다({V})", manifest.Version);
             return false;
         }
     }
 
+    /// <summary>
+    /// 20260929작3 절W6 — 교체 전 .old 정리 + <b>:351 가드</b>(설계 §6).
+    ///   전원 종료로 R1·R2 모양(web 또는 api 폴더 없음 + .old 있음)이 남아 있으면 그 .old 가 **유일한 구버전**이다.
+    ///   종전처럼 바로 지우면 구버전이 사라지고 다음 교체가 실패했을 때 되돌릴 것이 없다.
+    ///   ⇒ 지우기 전에 먼저 제자리로 되돌린다. 되돌리지 못하면 false — 호출부는 교체를 멈춘다(.old 보존).
+    ///   경로를 인자로 받는다 — 시험은 임시 폴더로만 돈다(G-W6 · 헌법 #39).
+    /// </summary>
+    internal bool ClearStaleOldDirsForSwap(string appRoot)
+    {
+        if (!UpdateFolderRecovery.RestoreMissingFromOld(appRoot, _logger))
+            return false;
+
+        TryDeleteDir(Path.Combine(appRoot, "web.old"));
+        TryDeleteDir(Path.Combine(appRoot, "api.old"));
+        return true;
+    }
+
     /// <summary>워치독이 직접 SQL 로 읽고 쓰는 상태 테이블 — 이 스키마 변경은 구버전 워치독을 깬다(B-2 게이트 대상).
     /// apply_status 는 워치독 상태기록기(WatchdogStatusWriter)가 직접 CREATE·INSERT 한다(W4-6) — F-1 반영으로 포함.</summary>
+    // 20260929작3 갈래 R(설계 §12-6 · PM 결재 9/30) — 시도 표 local_update_attempts 추가(워치독이 직접 읽고 쓴다).
+    //   빌드타임 게이트(build-manifest.ps1 $guardedTables)와 같은 목록이어야 한다.
     private static readonly string[] GuardedUpdateTables =
-        { "local_update_status", "local_update_consents", "local_update_apply_status" };
+        { "local_update_status", "local_update_consents", "local_update_apply_status", "local_update_attempts" };
 
     /// <summary>
     /// 20260722작2(A'안) — 마이그 파일명에서 migration_id 를 추출한다. API MigrationRunner 의 규칙과 반드시
@@ -891,6 +964,27 @@ public sealed class UpdateOrchestrator
         //   ⚠️ ct 를 넘기지 않는다 — 넘기면 업데이트 종료와 함께 보고가 취소돼 버린다.
         //      취소 없이 짧은 자체 타임아웃(UpdateHistoryClient)으로 스스로 끝낸다.
         _ = ReportUpdateHistoryToHqAsync(manifest, result, detail, CancellationToken.None);
+
+        // 20260929작3 갈래 R(설계 §12-1 ①·R10) — 종전 기록·보고는 **그대로** 두고, 그 뒤 시도 행을 같은 결과로 닫는다.
+        //   동의 없는 경로(Normal·Emergency)는 열린 행이 없어 0행 = 무해.
+        await CloseAttemptOnlyAsync(manifest, result, detail, ct);
+    }
+
+    /// <summary>
+    /// 20260929작3 갈래 R — 시도 행(local_update_attempts)만 닫는다. apply_status 기록 0 · 본사 보고 0(설계 §12-1 ③).
+    ///   실패는 라이터가 로그로 남긴다 — 흐름을 멈추지 않는다(헌법 #15·#20). 취소만 위로.
+    /// </summary>
+    private async Task CloseAttemptOnlyAsync(UpdateManifest manifest, string result, string? detail, CancellationToken ct)
+    {
+        try
+        {
+            await _statusWriter.CloseAttemptAsync(manifest.Version, result, detail, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Update] 시도 행 닫기 호출 실패 — 버전 {V}, 결과 {R}", manifest.Version, result);
+        }
     }
 
     /// <summary>
