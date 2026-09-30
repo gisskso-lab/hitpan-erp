@@ -1,0 +1,114 @@
+using HitPan.API.Services.LocalSwap;
+using Xunit;
+
+namespace HitPan.Tests.LocalSwap;
+
+/// <summary>
+/// 🚨 20260930작1 I-API 6 — S2 부팅 안전망(<c>/SC ONSTART</c> 임시 작업 <c>HitPan-ERP-keepalive-restore</c>)이
+/// 교체 일꾼의 <b>모든 끝</b>에서 어떻게 남는지 잰다. 작업지시서 §11 조건부 승인: 「S7(성공·실패 모두)에서 반드시 스스로 지운다 ·
+/// 끝난 뒤 <c>HitPan-*</c> 작업 잔존 0(대조군: 지우기 줄 뺀 사본)」.
+/// </summary>
+/// <remarks>
+/// <para>🟢 일꾼 <c>-TestRoot</c> 모드만 쓴다(<see cref="LocalSwapWorkerRig"/>) — <c>schtasks</c> 는 <c>{root}\tasks</c> 대역 파일 ·
+/// 실제 예약 작업·서비스·프로세스 무접촉.</para>
+/// <para>⚠️ <b>broken 한 줄은 §11 과 코드가 다르다</b> — 일꾼 <c>local-swap.ps1:651</c> 은 broken(되돌리기도 확인 못 함)에서
+/// 안전망을 <b>일부러 남긴다</b>(재부팅이 keepalive 를 되살리는 마지막 복구 수단 · 계약 §6 broken 행). 이 게이트는 지금 코드를
+/// 그대로 재고(남는다), PM 판정이 「broken 도 지운다」면 그 한 줄의 기대만 뒤집는다(개발명세서 I-API §6).</para>
+/// </remarks>
+public sealed class LocalSwapOnStartGateTests
+{
+    private const string NetTask = "HitPan-ERP-keepalive-restore";
+
+    private static string[] Run(string? failAt, out SwapRequest final, out string calls, string? scriptText = null, bool netAlreadyThere = false)
+    {
+        using var rig = LocalSwapWorkerRig.Rollback(DateTime.UtcNow);
+        if (netAlreadyThere) File.WriteAllText(Path.Combine(rig.TasksDir, NetTask), "task");
+        var exit = rig.Run(scriptText, failAt);
+        Assert.True(exit == 0, "일꾼 종료 코드 " + exit + " / " + rig.Log());
+        final = rig.Final();
+        calls = rig.Calls();
+        return rig.LeftoverTasks();
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 success — 이 판이 만든 ONSTART 안전망 · 1회용 작업 둘 다 지워진다(HitPan-* 잔존 0)")]
+    public void Success_removes_net()
+    {
+        var left = Run(null, out var final, out var calls);
+        Assert.Equal(SwapStates.Success, final.State);
+        Assert.Contains("/SC ONSTART", calls);              // 실제로 만들었고
+        Assert.Contains("/Delete /TN \"" + NetTask + "\"", calls); // 스스로 지웠다
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 reverted(S6 확인 실패 → 원위치) — 안전망 지워짐 · 잔존 0")]
+    public void Reverted_after_verify_failure_removes_net()
+    {
+        var left = Run("S6", out var final, out _);
+        Assert.Equal(SwapStates.Reverted, final.State);
+        Assert.Equal(SwapReasons.VerifyFailed, final.Reason);
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 reverted(S3 멈추기 실패) — 안전망 지워짐 · 잔존 0")]
+    public void Reverted_after_stop_failure_removes_net()
+    {
+        var left = Run("S3", out var final, out _);
+        Assert.Equal(SwapStates.Reverted, final.State);
+        Assert.Equal(SwapReasons.StopFailed, final.Reason);
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 refused(S2 안전망 확인 실패) — 만든 것 지우고 멈춘다 · 잔존 0")]
+    public void Refused_at_s2_removes_net()
+    {
+        var left = Run("S2", out var final, out var calls);
+        Assert.Equal(SwapStates.Refused, final.State);
+        Assert.Equal(SwapReasons.SafetyNetFailed, final.Reason);
+        Assert.Contains("/SC ONSTART", calls);
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 refused(S1 재료 불량) — 안전망을 만들기 전에 끝난다 · ONSTART 호출 0 · 잔존 0")]
+    public void Refused_at_s1_never_creates_net()
+    {
+        var left = Run("S1", out var final, out var calls);
+        Assert.Equal(SwapStates.Refused, final.State);
+        Assert.DoesNotContain("ONSTART", calls);
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "I-API6 🟢 이미 있던 안전망(자동 업데이트 UpdateProcessGate 몫)은 남의 것 — 새로 만들지도 지우지도 않는다")]
+    public void Pre_existing_net_is_not_ours()
+    {
+        var left = Run(null, out var final, out var calls, netAlreadyThere: true);
+        Assert.Equal(SwapStates.Success, final.State);
+        Assert.DoesNotContain("ONSTART", calls);
+        Assert.DoesNotContain("/Delete /TN \"" + NetTask + "\"", calls);
+        Assert.Equal(new[] { NetTask }, left);
+    }
+
+    [Fact(DisplayName = "I-API6 ⚠️ broken(S6·S7 둘 다 실패) — 지금 코드 = 안전망 남김(계약 §6 · 재부팅 복구) · 1회용 작업은 지워짐 · PM 판정 대기")]
+    public void Broken_keeps_net_by_current_design()
+    {
+        var left = Run("S6,S7", out var final, out _);
+        Assert.Equal(SwapStates.Broken, final.State);
+        Assert.Equal(SwapReasons.RevertFailed, final.Reason);
+        // 남는 것은 부팅 안전망 하나뿐 — 1회용 교체 작업(HitPan-LocalSwap)은 finally 에서 지워진다
+        Assert.Equal(new[] { NetTask }, left);
+    }
+
+    [Fact(DisplayName = "I-API6 대조군 🔴 success 의 지우기 줄을 뺀 일꾼 사본 → 안전망이 남는다(게이트가 FAIL 을 낸다)")]
+    public void Control_without_delete_line_leaves_net()
+    {
+        var original = LocalSwapWorkerRig.OriginalScript();
+        const string line = "    if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN \"' + $RestoreTaskName + '\" /F') | Out-Null }\r\n}";
+        var lf = line.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var target = original.Contains(line, StringComparison.Ordinal) ? line : lf;
+        Assert.True(original.Contains(target, StringComparison.Ordinal), "Clear-AfterSuccess 의 지우기 줄을 못 찾았다 — 대조군을 같이 고쳐라");
+        var copy = original.Replace(target, target.EndsWith("\r\n}", StringComparison.Ordinal) ? "\r\n}" : "\n}", StringComparison.Ordinal);
+
+        var left = Run(null, out var final, out _, copy);
+        Assert.Equal(SwapStates.Success, final.State);
+        Assert.Equal(new[] { NetTask }, left); // 원본이면 Empty — Success_removes_net 이 이것을 잡는다
+    }
+}
