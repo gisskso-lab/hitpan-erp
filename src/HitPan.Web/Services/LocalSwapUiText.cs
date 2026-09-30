@@ -154,6 +154,10 @@ public static class LocalSwapUiText
     public const string ReasonWorkerNotStarted = "worker_not_started";
     public const string ReasonWorkerInterrupted = "worker_interrupted";
     public const string ReasonSwapInterrupted = "swap_interrupted";
+    // 20260930작1 봉합2 B2(설계 15-2 · 계약 §6 봉합 2차) — 워치독 .old 남음(런처·일꾼 S0 refused) · 지난 교체 잔재(일꾼 success·refused)
+    public const string ReasonUpdateCleanupPending = "update_cleanup_pending";
+    public const string ReasonCleanupPending = "cleanup_pending";
+    public const string ReasonCarryPending = "carry_pending";
 
     public const string UnknownReason = "지금은 할 수 없습니다. 고객센터로 연락 주세요.";
 
@@ -202,6 +206,12 @@ public static class LocalSwapUiText
         ReasonWorkerNotStarted => "예약해 둔 작업이 시작되지 않아 아무것도 바꾸지 않았습니다. 다시 해 주세요.",
         ReasonWorkerInterrupted => "버전을 바꾸던 도중 멈췄습니다. " + BrokenAdvice,
         ReasonSwapInterrupted => "이전 교체가 끝까지 되지 않았습니다. 고객센터로 연락 주세요.",
+        ReasonUpdateCleanupPending =>
+            "이전 자동 업데이트의 정리가 아직 끝나지 않았습니다. 다음 자동 업데이트가 끝나면 다시 쓰실 수 있습니다.",
+        ReasonCleanupPending =>
+            "지난 교체에서 쓰던 프로그램 파일 일부를 아직 치우지 못했습니다. 다음 업데이트·되돌리기 때 먼저 치웁니다. 쓰시는 데는 지장 없습니다.",
+        ReasonCarryPending =>
+            "일부 첨부 파일을 아직 제자리로 옮기지 못했습니다. 파일은 지워지지 않고 보관돼 있으며, 다음 업데이트·되돌리기 때 먼저 옮깁니다.",
         _ => UnknownReason,
     };
 
@@ -241,7 +251,7 @@ public static class LocalSwapUiText
         return (state ?? string.Empty).Trim().ToLowerInvariant() switch
         {
             StateRequested or StateRunning => $"{what}가 진행 중입니다. 끝난 뒤 다시 로그인해 주세요.",
-            StateSuccess => $"지난번 {what}가 끝났습니다. 지금 {Ver(to)} 버전을 쓰고 계십니다.",
+            StateSuccess => $"지난번 {what}가 끝났습니다. 지금 {Ver(to)} 버전을 쓰고 계십니다." + SuccessNote(reason),
             StateRefused => $"지난번 {what}는 시작하지 않았습니다(바뀐 것은 없습니다). " + ReasonText(reason),
             StateReverted => isUpdate
                 ? CauseText(reason) + UpdateFailed(from)
@@ -251,6 +261,16 @@ public static class LocalSwapUiText
             _ => null,
         };
     }
+
+    /// <summary>
+    /// 20260930작1 봉합2 B2(설계 15-2) — <c>success</c> 뒤 잔재 사유(<c>cleanup_pending</c>·<c>carry_pending</c>)는 성공 줄 뒤에 그 문구를 붙인다
+    /// (앞 공백 하나 · 색은 성공 그대로). 그 밖의 사유·빈 값은 빈 글자 — 종전 성공 줄 그대로.
+    /// </summary>
+    private static string SuccessNote(string? reason) => (reason ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        ReasonCleanupPending or ReasonCarryPending => " " + ReasonText(reason),
+        _ => string.Empty,
+    };
 
     /// <summary>끝 상태의 무게(화면 알림 색) — 0 알림 · 1 주의 · 2 위험 · 3 성공.</summary>
     public static int EndStateLevel(string? state) => (state ?? string.Empty).Trim().ToLowerInvariant() switch
