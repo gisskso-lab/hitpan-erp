@@ -139,7 +139,9 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         var wd = NormalizeVersion(_env.WatchdogVersion);
         if (api is null || wd is null || api != wd) return SwapReasons.SwapInterrupted; // M3
 
-        if (last?.State == SwapStates.Broken)
+        // 20260930작1 봉합3 16ⓑ — 정지 전 단계(S0·S1·S2)에서 끝난 broken 은 M4 가 아니다: 정지는 S3 · 첫 .rbk 는 S4(일꾼 순서)
+        //   ⇒ 프로그램 폴더·서비스를 안 바꿨다. 단계가 비었거나 모르는 값이면 종전대로 M4(보수).
+        if (last?.State == SwapStates.Broken && !IsBeforeStop(last.Step))
         {
             // M4 — S7R(원위치 0 · 세 폴더 전부 to)를 잔재로 오판하지 않게: 그때 .rbk 는 검증된 옛 판의 유일한 사본.
             var unchanged = last.PartsAfter is { } after
@@ -151,6 +153,15 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         _logger.LogDebug("[LocalSwap] 지난 교체의 잔재(.rbk)가 남아 있습니다 — 판 {Version} 로 맞음 · 바쁨 아님(다음 교체가 먼저 치웁니다).", api);
         return null; // M5
     }
+
+    /// <summary>
+    /// 20260930작1 봉합3 16ⓑ — 일꾼 단계가 정지(S3) 전(S0·S1·S2)이면 true. null·빈 값·모르는 값은 false(종전 M4 판정 그대로).
+    /// 근거: 일꾼 <c>local-swap.ps1</c> 은 S3 에서 처음 멈추고(<c>$stopped = $true</c>) S4 <c>Invoke-Swap</c> 에서 처음 <c>.rbk</c> 를 만든다.
+    /// </summary>
+    private static bool IsBeforeStop(string? step) =>
+        step is not null && (string.Equals(step, "S0", StringComparison.Ordinal)
+                             || string.Equals(step, "S1", StringComparison.Ordinal)
+                             || string.Equals(step, "S2", StringComparison.Ordinal));
 
     /// <summary><c>M.m.b</c> 로 맞춘다(4자리면 뒤를 버린다). 못 읽거나 <c>0.0.0</c>(<c>VersionInfo</c> 못 읽음 표식)이면 null.</summary>
     internal static string? NormalizeVersion(string? raw)

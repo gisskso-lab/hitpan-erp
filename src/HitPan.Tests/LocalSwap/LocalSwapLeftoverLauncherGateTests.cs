@@ -257,4 +257,48 @@ public sealed class LocalSwapLeftoverLauncherGateTests : IDisposable
         Assert.Equal(SwapReasons.UpdateInProgress, Launcher(env, new FakeSchtasks()).CheckBusy());
         Assert.True(Directory.Exists(Path.Combine(env.AppRoot!, "web.old")));
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-MX3 — 봉합3 16ⓑ: M4 는 정지 전 단계(S0·S1·S2)에서 끝난 broken 에 적용하지 않는다(설계 §16-3)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary><see cref="Ended"/> 와 같은 요청서인데 <c>step</c> 만 <paramref name="step"/>(null 이면 JSON null)로 바꿔 쓴다.</summary>
+    private static void EndedAt(FakeSwapEnvironment env, string? step, string state, string? reason, string from, string to, string? afterApi, string? afterWd)
+    {
+        Ended(env, state, reason, from, to, afterApi, afterWd);
+        var path = Path.Combine(Work(env), LocalSwapLauncher.RequestFileName);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        node["step"] = step;
+        File.WriteAllText(path, node.ToJsonString());
+    }
+
+    [Fact(DisplayName = "봉합3 G-MX3 🔴 (a) worker_interrupted step S0 · parts_after 없음 · 판 = from ⇒ null(M5) — 멈춘 것 0 인데 잠기던 두 기능이 열린다")]
+    public void GMX3_a_interrupted_at_S0_is_leftover()
+    {
+        var env = Installed("mx3-a", V48);
+        EndedAt(env, "S0", SwapStates.Broken, SwapReasons.WorkerInterrupted, V48, V47, null, null);
+        Assert.Equal("S0", Launcher(env, new FakeSchtasks()).ReadLast()!.Step); // step 을 실제로 읽는다
+        Assert.Null(Launcher(env, new FakeSchtasks()).CheckBusy());
+    }
+
+    [Fact(DisplayName = "봉합3 G-MX3 🔴 (b) revert_failed step S1 · parts_after = 지금 판 ⇒ null(M5)")]
+    public void GMX3_b_broken_at_S1_is_leftover()
+    {
+        var env = Installed("mx3-b", V48);
+        EndedAt(env, "S1", SwapStates.Broken, SwapReasons.RevertFailed, V48, V47, V48, V48);
+        Assert.Null(Launcher(env, new FakeSchtasks()).CheckBusy());
+    }
+
+    [Fact(DisplayName = "봉합3 G-MX3 🔴 대조 줄 (c) (a) 인데 step S6 · (d) step null ⇒ 종전대로 swap_interrupted(M4 · 보수)")]
+    public void GMX3_cd_after_stop_or_unknown_is_interrupted()
+    {
+        var c = Installed("mx3-c", V48);
+        EndedAt(c, "S6", SwapStates.Broken, SwapReasons.WorkerInterrupted, V48, V47, null, null);
+        Assert.Equal(SwapReasons.SwapInterrupted, Launcher(c, new FakeSchtasks()).CheckBusy());
+
+        var d = Installed("mx3-d", V48);
+        EndedAt(d, null, SwapStates.Broken, SwapReasons.WorkerInterrupted, V48, V47, null, null);
+        Assert.Null(Launcher(d, new FakeSchtasks()).ReadLast()!.Step);
+        Assert.Equal(SwapReasons.SwapInterrupted, Launcher(d, new FakeSchtasks()).CheckBusy());
+    }
 }
