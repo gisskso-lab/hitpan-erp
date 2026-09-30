@@ -41,7 +41,9 @@ $Parts = @('api', 'web', 'watchdog')
 $LockTtlMinutes = 15
 $VerifySeconds = 180
 
-if ($Ticket -notmatch '^[0-9a-f]{32}$') { exit 2 }
+# seal 06a: a bad ticket no longer exits here (outside everything, the one-time task stayed forever);
+# the main part ends it with Exit-Early 2. The log name never carries a bad ticket into a path.
+$TicketOk = ($Ticket -match '^[0-9a-f]{32}$')
 
 $IsTest = -not [string]::IsNullOrEmpty($TestRoot)
 # The work folder is {app}\rollback (Program Files: only administrators can write - parallel issue 01).
@@ -60,7 +62,9 @@ $SwapLockPath = Join-Path $WorkDir 'swap.lock'
 $ChainMarkPath = Join-Path $WorkDir 'rolled-back.txt'
 $TicketMinutes = 10
 $RequestPath = Join-Path $WorkDir 'request.json'
-$LogPath = Join-Path (Join-Path $WorkDir 'logs') ("swap-" + $Ticket + ".log")
+$LogName = 'swap-invalid-ticket.log'
+if ($TicketOk) { $LogName = "swap-" + $Ticket + ".log" }
+$LogPath = Join-Path (Join-Path $WorkDir 'logs') $LogName
 $EventBase = 28060
 if ($Mode -eq 'rollback') { $EventBase = 28040 }
 $Utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -590,15 +594,26 @@ function Clear-AfterSuccess {
     if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
 }
 
+# Early exit (seal 06a): the request is missing, unreadable or not this run's. Remove ONLY the
+# one-time task (a leftover task makes the API report "in progress" forever) and stop.
+# swap.lock and request.json are never touched here: they may belong to another ticket.
+function Exit-Early([int]$code) {
+    Write-Log ('early exit ' + $code + ' (request not for this run) - one-time task removed, lock and request untouched')
+    try { Invoke-Schtasks ('/Delete /TN "' + $SwapTaskName + '" /F') | Out-Null }
+    catch { Write-Log ('early exit ' + $code + ': one-time task delete failed: ' + $_.Exception.Message) }
+    exit $code
+}
+
 # ======================================================================================
 # main
 # ======================================================================================
-if (-not (Test-Path -LiteralPath $RequestPath)) { exit 3 }
-try { $script:Req = [System.IO.File]::ReadAllText($RequestPath, $Utf8) | ConvertFrom-Json } catch { exit 4 }
-if ([int]$script:Req.schema -ne 1) { exit 5 }
-if ([string]$script:Req.ticket -ne $Ticket) { exit 6 }
-if ([string]$script:Req.mode -ne $Mode) { exit 7 }
-if ([string]$script:Req.state -ne 'requested') { exit 8 }
+if (-not $TicketOk) { Exit-Early 2 }
+if (-not (Test-Path -LiteralPath $RequestPath)) { Exit-Early 3 }
+try { $script:Req = [System.IO.File]::ReadAllText($RequestPath, $Utf8) | ConvertFrom-Json } catch { Exit-Early 4 }
+if ([int]$script:Req.schema -ne 1) { Exit-Early 5 }
+if ([string]$script:Req.ticket -ne $Ticket) { Exit-Early 6 }
+if ([string]$script:Req.mode -ne $Mode) { Exit-Early 7 }
+if ([string]$script:Req.state -ne 'requested') { Exit-Early 8 }
 
 $stopped = $false
 try {
