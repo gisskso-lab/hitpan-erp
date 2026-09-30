@@ -46,6 +46,15 @@
             }
             else
             {
+                @* C-7 — 지난 교체 결과(계약 §7 · 두 모드 공통 · 다음 로그인 뒤 알림). 낡은 기록은 안 보인다. *@
+                @if (_lastText is not null)
+                {
+                    <MudAlert Severity="@_lastSeverity" Dense="true" Class="mb-3">
+                        <div style="font-size:12px; opacity:.8;">@_lastCaption</div>
+                        <div>@_lastText</div>
+                    </MudAlert>
+                }
+
                 <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
                     <tbody>
                         <tr><td style="width:160px;">지금 쓰시는 버전</td><td><b>@(_status?.CurrentVersion ?? "-")</b></td></tr>
@@ -77,8 +86,14 @@
     private bool _started;
     private LocalRollbackStatus? _status;
     private string? _message;
+    private string? _lastText;
+    private string? _lastCaption;
+    private Severity _lastSeverity = Severity.Info;
 
-    private bool CanRollback => _status is { CanRollback: true } && !string.IsNullOrWhiteSpace(_status.TargetVersion);
+    // C-5 — 확인 번호가 있어야 [예] 를 보낼 수 있다(번호 없이 보내면 서버가 ticket_invalid 로 거절).
+    private bool CanRollback => _status is { CanRollback: true }
+                                && !string.IsNullOrWhiteSpace(_status.TargetVersion)
+                                && !string.IsNullOrWhiteSpace(_status.Ticket);
 
     protected override async Task OnInitializedAsync()
     {
@@ -104,18 +119,37 @@
         }
 
         _status = r.Data;
+        ShowLast(_status?.Last, _status?.CurrentVersion);
         if (_status is { CanRollback: false })
         {
             // 재료 없음이 가장 흔하다 — 코드가 비어 있으면 그 문구로 본다(설계 §13 「되돌릴 이전 버전이 없습니다」).
+            // C-1 — 서버 이름은 no_previous_version(⬛ F 잠정 이름 no_material).
             _message = LocalSwapUiText.ReasonText(
-                string.IsNullOrWhiteSpace(_status.Reason) ? LocalSwapUiText.ReasonNoMaterial : _status.Reason);
+                string.IsNullOrWhiteSpace(_status.Reason) ? LocalSwapUiText.ReasonNoPreviousVersion : _status.Reason);
         }
+    }
+
+    /// <summary>지난 교체 결과 한 줄(계약 §7) — 낡은 기록은 안 보인다(<see cref="LocalSwapUiText.ShouldShowLast"/>).</summary>
+    private void ShowLast(LocalSwapLast? last, string? current)
+    {
+        _lastText = null;
+        if (last is null || !LocalSwapUiText.ShouldShowLast(last.State, last.From, last.To, last.AtUtc, current, DateTime.UtcNow)) return;
+        _lastText = LocalSwapUiText.EndStateText(last.Mode, last.State, last.Reason, last.From, last.To);
+        _lastCaption = LocalSwapUiText.LastCaption(last.AtUtc);
+        _lastSeverity = LocalSwapUiText.EndStateLevel(last.State) switch
+        {
+            3 => Severity.Success,
+            2 => Severity.Error,
+            1 => Severity.Warning,
+            _ => Severity.Info,
+        };
     }
 
     private async Task StartAsync()
     {
         if (_busy || !CanRollback) return;
         var to = _status!.TargetVersion!;
+        var ticket = _status.Ticket;
 
         var yes = await ConfirmDialog.ShowAsync(
             Dialog,
@@ -129,15 +163,21 @@
         _busy = true;
         try
         {
-            var r = await Api.StartAsync();   // 🔴 적발 04 — 버전은 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용)
-            if (r.Ok && r.Data?.Accepted == true)
+            // 🔴 적발 04 — 버전·경로는 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용). C-5 — 확인 번호 하나만.
+            var r = await Api.StartAsync(ticket);
+            if (r.Ok && r.Data?.Started == true)
             {
                 _started = true;
                 Snackbar.Add(LocalSwapUiText.RollbackStarted, Severity.Success);
                 return;
             }
 
-            _message = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : r.FailureText;
+            // 409 { started:false, reason } · 403 — 고객 문구로.
+            var failText = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : (r.Status == 0 ? LocalSwapUiText.StartFailed : r.FailureText);
+
+            // 확인 번호는 한 번 쓰면 사라진다 — 새 번호를 받아 두고(문구는 유지) 다시 누를 수 있게 한다.
+            await LoadAsync();
+            _message = failText;
         }
         finally
         {
