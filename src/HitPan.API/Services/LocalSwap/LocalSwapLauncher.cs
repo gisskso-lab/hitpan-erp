@@ -506,20 +506,39 @@ public sealed class LocalSwapEnvironment : ILocalSwapEnvironment
         {
             var app = AppRoot;
             if (app is null) return null;
-            var exe = Path.Combine(app, "watchdog", "HitPan.Watchdog.exe");
-            if (!File.Exists(exe)) return null;
+            // ⬛ 봉합2 B1: {app}\watchdog\HitPan.Watchdog.exe 의 FileVersion 만 읽었다.
+            // 20260930작1 봉합2 B2(PM 추가) — 게시 파이프라인(deploy-update.yml · build-manifest.ps1)이 판의 출처로 쓰는
+            //   HitPan.Watchdog.dll 을 먼저 읽고, 없을 때만 exe(한 벌 출처). self-contained apphost exe 의 버전 자원이 dll 과 같다는 보장은 ⚠️미확인.
+            return ReadWatchdogVersion(Path.Combine(app, "watchdog"), _logger);
+        }
+    }
+
+    /// <summary>워치독 판 파일 이름 — 먼저 읽는 순서(dll → exe).</summary>
+    public static readonly string[] WatchdogVersionFiles = { "HitPan.Watchdog.dll", "HitPan.Watchdog.exe" };
+
+    /// <summary>
+    /// 20260930작1 봉합2 B2 — <paramref name="watchdogDir"/> 의 <c>HitPan.Watchdog.dll</c> FileVersion <c>M.m.b</c>. dll 이 없을 때만 exe.
+    /// 있는 첫 파일의 판을 쓴다(dll 이 있는데 판을 못 읽으면 exe 로 넘어가지 않고 null — 두 출처를 섞지 않는다). 읽기만.
+    /// </summary>
+    public static string? ReadWatchdogVersion(string watchdogDir, ILogger logger)
+    {
+        foreach (var name in WatchdogVersionFiles)
+        {
+            var file = Path.Combine(watchdogDir, name);
+            if (!File.Exists(file)) continue;
             try
             {
-                var fv = FileVersionInfo.GetVersionInfo(exe);
+                var fv = FileVersionInfo.GetVersionInfo(file);
                 if (fv.FileMajorPart == 0 && fv.FileMinorPart == 0 && fv.FileBuildPart == 0) return null;
                 return $"{fv.FileMajorPart}.{fv.FileMinorPart}.{fv.FileBuildPart}";
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning(ex, "[LocalSwap] 워치독 판을 읽지 못했습니다: {Path}", exe);
+                logger.LogWarning(ex, "[LocalSwap] 워치독 판을 읽지 못했습니다: {Path}", file);
                 return null;
             }
         }
+        return null;
     }
 }
 
