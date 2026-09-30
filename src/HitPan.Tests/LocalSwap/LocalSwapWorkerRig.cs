@@ -333,6 +333,28 @@ internal sealed class LocalSwapWorkerRig : IDisposable
     public int CountCalls(string contains) =>
         Calls().Split('\n').Count(l => l.Contains(contains, StringComparison.Ordinal));
 
+    // ── 작1 봉합2 A2 도우미(G-LO1 · G-MX2 · G-CF3b · 설계 §15) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    /// <summary>일꾼 기록에서 <paramref name="contains"/> 를 품은 줄 수.</summary>
+    public int CountLog(string contains) =>
+        Log().Split('\n').Count(l => l.Contains(contains, StringComparison.Ordinal));
+
+    /// <summary>요청서 <c>parts_after</c> 칸(설계 15-2) — 칸이 없으면 <c>Present=false</c>.
+    /// 🔴 런처 쪽 <c>SwapRequest.PartsAfter</c> 는 B1 갈래가 더한다 — 여기선 요청서 JSON 을 글자 그대로 읽는다.</summary>
+    public (bool Present, string? Api, string? Watchdog) PartsAfter()
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(RequestPath))!.AsObject();
+        if (!node.TryGetPropertyValue("parts_after", out var pa) || pa is not System.Text.Json.Nodes.JsonObject o) return (false, null, null);
+        return (true, o["api"]?.GetValue<string>(), o["watchdog"]?.GetValue<string>());
+    }
+
+    /// <summary><c>{app}\{part}\.testversion</c> — 없으면 null(일꾼 <c>Get-PartVersion</c> 시험 모드와 같은 출처).</summary>
+    public string? LiveVersion(string part)
+    {
+        var f = Path.Combine(App, part, ".testversion");
+        return File.Exists(f) ? File.ReadAllText(f).Trim() : null;
+    }
+
     public string Calls()
     {
         var f = Path.Combine(Root, "calls.log");

@@ -324,4 +324,137 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.Equal("S3", final.Step);
         Assert.True(rig.CountCalls(ApiKeepaliveOff) >= 1);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 봉합2 A2 — 일꾼 끝 쪽: N-1 ⓐⓑ(성공 정리 재시도 · 정직한 끝 사유) · N-3 ⓐ(parts_after)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>A2 대조군 — 성공 정리는 그대로(잠김 주입 포함) 하되 끝 사유를 버리는 사본(= 봉합2 전 「사유 없는 success」 모양).</summary>
+    public static string ControlNoSuccessReason() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "return (Get-SuccessLeftover)", "[void](Get-SuccessLeftover); return $null", "성공 정리 사유");
+
+    /// <summary>A2 대조군 — <c>Complete-Swap</c> 의 <c>parts_after</c> 한 줄을 뺀 사본(= 봉합2 전 요청서 · 칸 없음).</summary>
+    public static string ControlNoPartsAfter() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "Set-ReqField 'parts_after' (Get-PartsAfter)", "# (control) parts_after removed", "parts_after");
+
+    /// <summary>되돌리기는 1.3.48 → 1.3.47 · 업데이트는 1.3.47 → 1.3.48(<see cref="Make"/>).</summary>
+    private static string Target(string mode) => mode == "rollback" ? LocalSwapWorkerRig.To : LocalSwapWorkerRig.From;
+
+    // ══════════════════════════════════════════════════════════════
+    // G-LO1 — 성공인데 .rbk 가 남는 끝: 같은 실행 안 재시도 3회 → 그래도 남으면 success + 정직한 사유 · 첨부 0 손실
+    // ══════════════════════════════════════════════════════════════
+    //   RBKH      = 성공 정리 동안 api.rbk 맨 위 프로그램 파일 하나를 FileShare.None 으로 쥔다 → cleanup_pending
+    //   S4C,RBKHC = S4 싣기 건너뜀(시드가 api.rbk 에 남음) + api.rbk\chat-files 파일 하나를 쥔다 → carry_pending
+
+    public static IEnumerable<object[]> LeftoverAfterSuccessCases() => new[]
+    {
+        new object[] { "rollback", "RBKH", CleanupPending },
+        new object[] { "update", "RBKH", CleanupPending },
+        new object[] { "rollback", "S4C,RBKHC", CarryPending },
+        new object[] { "update", "S4C,RBKHC", CarryPending },
+    };
+
+    [Theory(DisplayName = "봉합2 G-LO1 🚨 성공 정리 중 api.rbk 파일 잠김 → success + cleanup_pending(프로그램 파일) / carry_pending(첨부) · 재시도 3회 · 첨부 합(api ∪ api.rbk) = 시드")]
+    [MemberData(nameof(LeftoverAfterSuccessCases))]
+    public void Leftover_after_success_is_told_honestly(string mode, string failAt, string reason)
+    {
+        using var rig = Make(mode);
+        var seed = rig.SeedCarry();
+        Assert.Equal(5, seed.Count);
+        Assert.Equal(0, rig.Run(null, failAt));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == reason,
+            mode + "/" + failAt + ": 끝 " + final.State + "/" + final.Reason + " (기대 success/" + reason + ") / " + why);
+        Assert.Equal("S6", final.Step);
+        Assert.Equal(Target(mode), rig.LiveVersion("api"));          // 교체 자체는 끝났다 — 성공은 성공
+        Assert.Contains("test hold", rig.Log());                       // 주입이 실제로 걸렸다
+        Assert.Equal(3, rig.CountLog("success cleanup retry "));       // ⓐ 같은 실행 안 재시도 3회
+        Assert.True(Directory.Exists(ApiRbk(rig)), "잠긴 api.rbk 가 없다 — 주입이 안 걸렸다 / " + why);
+        var union = CarryUnion(rig);
+        Assert.Equal(seed.Count, union.Count);
+        AssertContainsAll(seed, union, why);
+        Assert.Empty(rig.LeftoverTasks());
+    }
+
+    [Theory(DisplayName = "봉합2 G-LO1 🟢(보탬) 잠김 없음 → success · 사유 없음 · 재시도 0 · api.rbk 없음")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Clean_success_has_no_reason_and_no_retry(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedCarry();
+        Assert.Equal(0, rig.Run());
+        var final = rig.Final();
+        Assert.True(final.State == SwapStates.Success && string.IsNullOrEmpty(final.Reason), mode + ": 끝 " + final.State + "/" + final.Reason + " / " + Why(rig));
+        Assert.Equal(0, rig.CountLog("success cleanup retry "));
+        Assert.False(Directory.Exists(ApiRbk(rig)));
+    }
+
+    [Theory(DisplayName = "봉합2 G-LO1 대조군 🔴 끝 사유를 버리는 사본 → api.rbk 가 남았는데 사유 없는 success(N-1 거짓 끝 · 게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback", "RBKH")]
+    [InlineData("update", "S4C,RBKHC")]
+    public void Control_without_reason_says_plain_success(string mode, string failAt)
+    {
+        using var rig = Make(mode);
+        rig.SeedCarry();
+        Assert.Equal(0, rig.Run(ControlNoSuccessReason(), failAt));
+        var final = rig.Final();
+        Assert.Equal(SwapStates.Success, final.State);
+        Assert.True(string.IsNullOrEmpty(final.Reason), "대조군인데 사유가 있다: " + final.Reason);
+        Assert.True(Directory.Exists(ApiRbk(rig)), "대조군에서 api.rbk 가 안 남았다 — 대조가 성립 안 한다 / " + Why(rig));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-MX2 — 끝 상태마다 요청서 parts_after = 끝난 뒤 살아 있는 api·watchdog 판(.testversion)
+    // ══════════════════════════════════════════════════════════════
+    //   S6,S7R2 = 원위치가 첫 폴더(watchdog)만 돌려놓고 던짐 → broken · 섞인 판(api 1.3.47 · watchdog 1.3.48)
+
+    public static IEnumerable<object?[]> PartsAfterCases() => new[]
+    {
+        new object?[] { "S6,S7R2", SwapStates.Broken, LocalSwapWorkerRig.To, LocalSwapWorkerRig.From },
+        new object?[] { null, SwapStates.Success, LocalSwapWorkerRig.To, LocalSwapWorkerRig.To },
+        new object?[] { "S6", SwapStates.Reverted, LocalSwapWorkerRig.From, LocalSwapWorkerRig.From },
+        new object?[] { "S1", SwapStates.Refused, LocalSwapWorkerRig.From, LocalSwapWorkerRig.From }, // 🟢(보탬) 네 번째 끝
+    };
+
+    [Theory(DisplayName = "봉합2 G-MX2 🚨 끝 상태(broken 섞인 판 · success · reverted · refused) → 요청서 parts_after = 끝난 뒤 폴더 판")]
+    [MemberData(nameof(PartsAfterCases))]
+    public void Parts_after_is_the_live_versions_at_the_end(string? failAt, string state, string api, string watchdog)
+    {
+        using var rig = Make("rollback");
+        Assert.Equal(0, rig.Run(null, failAt));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == state, failAt + ": 끝 " + final.State + "/" + final.Reason + " (기대 " + state + ") / " + why);
+        // 기대값은 표로 고정하고, 폴더에서 다시 읽은 값과도 맞춘다(끝난 뒤에 읽었다는 증거)
+        Assert.Equal(api, rig.LiveVersion("api"));
+        Assert.Equal(watchdog, rig.LiveVersion("watchdog"));
+        var pa = rig.PartsAfter();
+        Assert.True(pa.Present, failAt + ": 요청서에 parts_after 칸이 없다 / " + why);
+        Assert.Equal(api, pa.Api);
+        Assert.Equal(watchdog, pa.Watchdog);
+    }
+
+    [Fact(DisplayName = "봉합2 G-MX2 🟢(보탬) 판을 못 읽으면(api 폴더 없음 · M2 거부) → parts_after 칸은 있고 api = null")]
+    public void Parts_after_is_null_when_a_version_cannot_be_read()
+    {
+        using var rig = MakeShape("M2");
+        Assert.Equal(0, rig.Run());
+        Assert.Equal(SwapReasons.SwapInterrupted, rig.Final().Reason);
+        var pa = rig.PartsAfter();
+        Assert.True(pa.Present, "parts_after 칸이 없다 / " + Why(rig));
+        Assert.Null(pa.Api);
+        Assert.Equal(LocalSwapWorkerRig.From, pa.Watchdog);
+    }
+
+    [Theory(DisplayName = "봉합2 G-MX2 대조군 🔴 parts_after 줄 뺀 사본 → 요청서에 칸 없음(게이트가 FAIL 을 낸다)")]
+    [InlineData("S6,S7R2")]
+    [InlineData(null)]
+    public void Control_without_parts_after_has_no_field(string? failAt)
+    {
+        using var rig = Make("rollback");
+        Assert.Equal(0, rig.Run(ControlNoPartsAfter(), failAt));
+        Assert.False(rig.PartsAfter().Present, "대조군인데 parts_after 칸이 있다 / " + Why(rig));
+    }
 }
