@@ -7,6 +7,7 @@ namespace HitPan.Tests.LocalSwap;
 
 /// <summary>
 /// 🚨 20260930작1 봉합 K1 — 교체 일꾼(<c>local-swap.ps1</c>) 봉합 게이트: G-R2(조기 종료 · 설계 §14-1 06ⓐ) · G-S4(겹침 · 14-2 08).
+/// K2 가 G-P3w(재료 ② 일꾼 재확인 · 14-1 05)를 덧붙였다.
 /// </summary>
 /// <remarks>
 /// <para>🟢 일꾼 <c>-TestRoot</c> 모드만 쓴다(<see cref="LocalSwapWorkerRig"/>) — 예약 작업·서비스·프로세스는 <c>{root}</c> 아래 대역 파일.</para>
@@ -179,5 +180,90 @@ public sealed class LocalSwapWorkerSealGateTests
         using var rig = RunOverlap(scene, ControlNoRecheck());
         Assert.NotEqual(SwapStates.Refused, rig.Final().State);
         Assert.Contains("S4 swapped api", rig.Log());
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-P3w (작1 봉합 K2 · 설계 §14-1 05) — 일꾼 S1 재확인: 재료 ② zip 은 「바로 직전 설치 판」일 때만
+    // ══════════════════════════════════════════════════════════════
+    // rig 가 request.json 을 직접 써 API 판정을 건너뛴다(API 판정 뒤 바뀐 경우와 같은 모양).
+    //   N = 1.3.46 · N+1 = 1.3.47 · N+2 = 1.3.48(지금 판) · zip 은 staging 에 N 과 N+2 둘 다 있다
+    //   (1) stale-prev = rollback\prev 판 N · replaced-by N+1(≠ 지금 N+2) · 요청 zip N
+    //   (2) history    = versions-seen.txt N,N+1,N+2(설치 EXE 로 N+1 을 거친 모양) · 요청 zip N
+    //   (3) adjacent   = versions-seen.txt N+1,N+2 · 요청 zip N+1 — 허용
+    //   (4) unknown    = 이력 없음 · prev 없음 · 요청 zip N+1 — 허용(1.3.48 비상 경로 보존)
+
+    private const string VN = "1.3.46", VN1 = "1.3.47", VN2 = "1.3.48";
+
+    private static LocalSwapWorkerRig MakeZipScene(string scene)
+    {
+        var to = scene is "stale-prev" or "history" ? VN : VN1;
+        var rig = LocalSwapWorkerRig.RollbackZip(DateTime.UtcNow, VN2, to);
+        LocalSwapWorkerRig.MakeZip(Path.Combine(rig.WdStaging, "hitpan-" + VN2 + ".zip"), VN2);
+        var t = DateTime.UtcNow;
+        switch (scene)
+        {
+            case "stale-prev": rig.MakePrev(VN, VN1); break;
+            case "history":
+                File.WriteAllText(rig.SeenPath, VN + "|" + t.AddDays(-9).ToString("o") + "\n" + VN1 + "|" + t.AddDays(-3).ToString("o") + "\n" + VN2 + "|" + t.AddHours(-1).ToString("o") + "\n");
+                break;
+            case "adjacent":
+                File.WriteAllText(rig.SeenPath, VN1 + "|" + t.AddDays(-3).ToString("o") + "\n" + VN2 + "|" + t.AddHours(-1).ToString("o") + "\n");
+                break;
+            case "unknown": break;
+            default: throw new ArgumentException(scene);
+        }
+        return rig;
+    }
+
+    [Theory(DisplayName = "K2 G-P3w 🚨 재료② 가 직전 판이 아니면(묵은 prev · 판 이력) → S1 refused/material_invalid · 아무것도 안 멈춤 · 세 폴더 그대로 · 작업 잔존 0")]
+    [InlineData("stale-prev")]
+    [InlineData("history")]
+    public void Worker_refuses_non_adjacent_staging_zip(string scene)
+    {
+        using var rig = MakeZipScene(scene);
+        Assert.Equal(0, rig.Run());
+        var final = rig.Final();
+        var why = rig.Log() + "\n--- calls ---\n" + rig.Calls();
+        Assert.True(final.State == SwapStates.Refused, scene + ": 끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(SwapReasons.MaterialInvalid, final.Reason);
+        Assert.Equal("S1", final.Step);
+        Assert.DoesNotContain("/DISABLE", rig.Calls());
+        Assert.DoesNotContain("taskkill", rig.Calls());
+        Assert.Equal(VN2, LocalSwapWorkerRig.PartMark(rig.App, "api"));
+        Assert.Equal(VN2, LocalSwapWorkerRig.PartMark(rig.App, "watchdog"));
+        Assert.False(Directory.Exists(Path.Combine(rig.Work, "stage")), scene + ": zip 을 풀었다(거부는 풀기 전이어야 한다)");
+        Assert.Empty(rig.LeftoverTasks());
+    }
+
+    [Theory(DisplayName = "K2 G-P3w 🟢 바로 직전 판(이력 N+1,N+2 · zip N+1) · 이력 모름(prev 없음) → 되돌리기 성공")]
+    [InlineData("adjacent")]
+    [InlineData("unknown")]
+    public void Worker_allows_adjacent_or_unknown(string scene)
+    {
+        using var rig = MakeZipScene(scene);
+        Assert.Equal(0, rig.Run());
+        var final = rig.Final();
+        Assert.True(final.State == SwapStates.Success, scene + ": 끝 " + final.State + "/" + final.Reason + " / " + rig.Log());
+        Assert.Equal(VN1, LocalSwapWorkerRig.PartMark(rig.App, "api"));
+    }
+
+    /// <summary>대조군 사본 — 일꾼 재확인 한 줄을 뺀다(= K2 전 일꾼).</summary>
+    public static string ControlNoZipRecheck()
+    {
+        var original = LocalSwapWorkerRig.OriginalScript();
+        const string line = "$skip = Get-StagingZipRefusal";
+        Assert.True(original.Contains(line, StringComparison.Ordinal), "일꾼 재확인 줄을 못 찾았다 — 대조군을 같이 고쳐라");
+        return original.Replace(line, "$skip = $null", StringComparison.Ordinal);
+    }
+
+    [Theory(DisplayName = "K2 G-P3w 대조군 🔴 재확인 뺀 일꾼 → 두 판 뒤(N)로 되돌린다(게이트가 FAIL 을 낸다)")]
+    [InlineData("stale-prev")]
+    [InlineData("history")]
+    public void Control_without_recheck_skips_a_version(string scene)
+    {
+        using var rig = MakeZipScene(scene);
+        Assert.Equal(0, rig.Run(ControlNoZipRecheck()));
+        Assert.Equal(SwapStates.Success, rig.Final().State);
+        Assert.Equal(VN, LocalSwapWorkerRig.PartMark(rig.App, "api"));
     }
 }
