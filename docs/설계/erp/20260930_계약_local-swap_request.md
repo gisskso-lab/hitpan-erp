@@ -81,6 +81,12 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | `step` | `S0`~`S7`\|null | — | 일꾼 | 마지막으로 들어간 단계 |
 | `log` | string | — | 일꾼 | 일꾼 기록 파일 경로 |
 
+> 🟢 **봉합 2차 합의(10/1 작1 봉합2 · 설계 §15-2 · PM 결재 T-2)** — 칸 하나 덧붙임(schema **1 유지** — 모르는 칸은 옛 판이 무시한다).
+>
+> | 칸 | 형 | 필수 | 누가 | 뜻 |
+> |---|---|---|---|---|
+> | `parts_after` | `{"api":"M.m.b","watchdog":"M.m.b"}`\|없음 | — | 일꾼(끝 상태 `success`·`refused`·`reverted`·`broken` 네 가지 모두) | 끝 상태를 적을 때 살아 있는 api·watchdog 판. 런처가 §4 `.rbk` 판정표 M4 에서 「그 뒤 판이 바뀌었나」를 잰다. 화면 표시 없음. 런처는 요청을 걸 때 이 칸을 적지 않는다(비어 있으면 JSON 에서 빠진다 · 없음 = 옛 일꾼이거나 `worker_interrupted`) |
+
 ## §4 바쁨 판정(런처 · 두 모드 공통 · G-U5)
 
 아래 하나라도 있으면 `Launch` 거부(작업 등록 0 · `request.json` 안 건드림):
@@ -99,6 +105,19 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 > - **예약(F-4 · 프로세스 안)**: `bool TryReserve(string owner)` — 비었거나 같은 주인이면 잡고(다시 잡으면 시각 갱신) `true` · 남이 쥐고 있으면 `false`. `void Release(string owner)` — 주인이 같을 때만 푼다(남의 것·빈 것은 무시). 예약은 **30분**(`OpenRequestStale`) 안 갱신이 없으면 없는 것으로 본다(해제 누락이 영구 바쁨으로 번지지 않게). API 가 재시작하면 사라진다(교체가 시작된 뒤는 `swap.lock` 이 이어받는다). 파일·작업 등록 0.
 > - `string? CheckBusy()` = **누구의 예약이든** 있으면 `swap_in_progress`(화면 상태 조회용). 🆕`string? CheckBusy(string? owner)` = **남의 예약**만 `swap_in_progress`(자기 예약은 무시). `Launch` 는 `SwapLaunchInput.Owner`(🆕 끝 칸 · 기본 null)로 `CheckBusy(owner)` 를 부른다 ⇒ 예약한 호출부는 **같은 owner 를 `Owner` 에 넣어** `Launch` 해야 자기 예약에 막히지 않는다. 판정 순서: 예약 → 열린 요청 30분 → `swap.lock` 30분 → 묵은 것 정리 → 쿨다운 → 워치독 표식(`.rbk` 는 위 `swap_interrupted` 규칙).
 > - **사전 판정(07)**: 🆕`string? CheckReady()` — `Launch` 앞 정적 판정만 떼어 낸 것: 윈도 아님 `not_windows` · 설치 루트 없음·슬롯 없음 `request_invalid` · 일꾼 원본 없음 `script_missing` · 작업 폴더 `{app}\rollback`·`run` 문지기 실패 `folder_unsafe`. 되면 null. 바쁨은 보지 않는다(→ `CheckBusy`). 호출부(M: `ManualUpdateService.CheckAsync`·`Start` · `LocalRollbackService.GetStatus`·`Start`)는 `CheckBusy` **앞**에서 부른다. `Launch` 도 첫머리에서 같은 함수를 부른다(판정 한 벌).
+
+> 🟢 **봉합 2차 합의(10/1 작1 봉합2 · 설계 §15-0·15-1 N-1ⓒ·N-2·N-3ⓑ · PM 결재 T-1·T-2)** — 위 「끝나지 않은 교체」 줄(`.rbk` + `broken` 이면 `swap_interrupted`, 아니면 `update_in_progress`)을 아래 **모양 판정표**로 바꾼다. `.rbk` 를 만드는 곳은 우리 일꾼뿐 · 교체는 하나씩 ⇒ 보이는 `.rbk` 는 끝났거나 끊긴 **지난** 교체의 것 — 「진행 중」이 아니라 모양으로 가른다(런처 `CheckBusy` 와 일꾼 S0 가 같은 표 · M4 는 런처만).
+>
+> | # | 모양 | 판정 |
+> |---|---|---|
+> | M1 | `{app}\{api,web,watchdog}.rbk` 없음 | 해당 없음 |
+> | M2 | `{p}.rbk` 있는데 살아 있는 `{p}` 없음 | `swap_interrupted`(폴더 무접촉) |
+> | M3 | 살아 있는 api 판(`VersionInfo.Current`)·watchdog 판(`{app}\watchdog\HitPan.Watchdog.exe` FileVersion M.m.b)이 다르거나 못 읽음 | `swap_interrupted` |
+> | M4 | 마지막 요청 `broken` 이고 그 뒤 판이 안 바뀜 — `parts_after` 있으면 지금 (api,watchdog) = 기록 · 없으면 지금 판 ∈ {`from`,`to`} | `swap_interrupted`(런처만) |
+> | M5 | 그 밖 | **잔재 — 바쁨 아님**(다음 교체의 일꾼 S0 가 문지기로 치운다) |
+>
+> - 판정 순서(런처·일꾼 같게): 예약 → 열린 요청 30분 → `swap.lock` 30분 → 묵은 것 정리 → 쿨다운 → 워치독 진행 표식(`update-swap.marker` · `watchdog.new` · `update.lock` 15분 · 자가교체 작업) → `update_in_progress` ▸ M2·M3·M4 → `swap_interrupted` ▸ `{app}\{api,web,watchdog}.old` 폴더 → 🆕`update_cleanup_pending`(N-2) ▸ M5 → 통과.
+> - N-2: `.old` 는 워치독이 다음 교체 시작 때 지운다 — 우리는 **보기만**(지우기·옮기기 0). 교체 표식이 `.old` 와 함께 있으면 종전대로 `update_in_progress`(진짜 중단 모양 = 워치독 `RecoverAtStartup` 몫). 호출부는 받기·백업·번호 발급 **전**에 이 판정을 받는다(호출부 연결 = 봉합2 B2).
 
 ## §5 상태
 
@@ -145,6 +164,17 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 
 > 대조 기준(9/30 I-API): 서버 상수 `SwapReasons`(20) + `ManualUpdateReasons`(11 · `ok` 포함 겹침 6) = 25개 전부가 이 표에 있다(node 로 글자 대조 · 빠짐 0). 화면 쪽은 I-WEB 게이트 F-C2 가 리플렉션으로 같은 상수를 전부 대조한다.
 > 🟢 봉합 차수(9/30 · 갈래 L): `SwapReasons` 20 → **23**(위 3줄) ⇒ `ok` 뺀 서버 코드 24 → **27** · F-C2 하한 24 → 27 · F-C2 계약 코드 목록에 3개 덧붙임.
+
+> 🟢 **봉합 2차 합의(10/1 작1 봉합2 · 설계 §15-2 · PM 결재 T-2)** — 사유 코드 3 덧붙임. `SwapReasons` 23 → **26** ⇒ `ok` 뺀 서버 코드 27 → **30** · F-C2 하한 27 → 30(B2).
+>
+> | 코드 | 어디서 | 뜻 | 화면 문구(설계 §15-2) |
+> |---|---|---|---|
+> | `update_cleanup_pending` | 런처(`CheckBusy`) · 일꾼 S0(`refused`) | 워치독 `{api,web,watchdog}.old` 가 남음(자동 업데이트 정리 전) · 교체 표식 없음 · ERP 정지 **전** 거부 | 이전 자동 업데이트의 정리가 아직 끝나지 않았습니다. 다음 자동 업데이트가 끝나면 다시 쓰실 수 있습니다. |
+> | `cleanup_pending` | 일꾼(`success`·`refused`) | 지난 교체의 `.rbk` 안 프로그램 파일을 못 치움(고객 자료는 없음) | 지난 교체에서 쓰던 프로그램 파일 일부를 아직 치우지 못했습니다. 다음 업데이트·되돌리기 때 먼저 치웁니다. 쓰시는 데는 지장 없습니다. |
+> | `carry_pending` | 일꾼(`success`·`refused`) | `api.rbk` 안에 첨부·백업이 남음(지우지 않고 보관) | 일부 첨부 파일을 아직 제자리로 옮기지 못했습니다. 파일은 지워지지 않고 보관돼 있으며, 다음 업데이트·되돌리기 때 먼저 옮깁니다. |
+>
+> - `success` + 사유는 성공 줄 뒤에 사유 문구를 붙인다(색은 성공 그대로 · 화면 = B2).
+> - `swap_interrupted` 뜻 넓힘: 「`.rbk` + `broken`」 → §4 봉합 2차 판정표 M2·M3·M4.
 
 ## §7 끝에 남는 것
 

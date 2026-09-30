@@ -100,16 +100,64 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         if (ClearStale(app, ref last) is { } stuck) return stuck;
 
         // ── 자동 업데이트(워치독) 진행 표식 — 설계 §1 P-d ──
+        // 20260930작1 봉합2(설계 §15-0 판정 순서) — 워치독 진행 표식을 .rbk 보다 먼저 전부 본다(종전: .rbk 가 update.lock·자가교체 작업 앞).
         if (File.Exists(Path.Combine(app, "update-swap.marker"))) return SwapReasons.UpdateInProgress;
         if (Directory.Exists(Path.Combine(app, "watchdog.new"))) return SwapReasons.UpdateInProgress;
-        foreach (var p in Parts)
-            if (Directory.Exists(Path.Combine(app, p + ".rbk")))
-                // 봉합 06ⓑ — 마지막 요청이 broken 이면 「진행 중」이 아니라 「끝까지 되지 않았다」(영구 거짓 표시 없앰)
-                return last?.State == SwapStates.Broken ? SwapReasons.SwapInterrupted : SwapReasons.UpdateInProgress;
         if (IsLockFresh(Path.Combine(app, "update.lock"), WatchdogLockTtl, now, 0)) return SwapReasons.UpdateInProgress;
         if (TaskExists("HitPanWatchdogSelfReplace") || TaskExists("HitPanWatchdogSelfReplaceRecover"))
             return SwapReasons.UpdateInProgress;
+
+        // 봉합2 N-1ⓒ·N-3ⓑ — .rbk 는 「진행 중」이 아니라 모양으로 가른다(M2·M3·M4 → swap_interrupted · M5 = 잔재, 바쁨 아님).
+        //   종전(봉합 06ⓑ): .rbk 가 있으면 broken 아니면 무조건 update_in_progress ⇒ 성공 뒤 잔재 하나로 영구 거짓 「진행 중」.
+        if (JudgeLeftoverRbk(app, last) is { } rbk) return rbk;
+
+        // 봉합2 N-2 — 워치독 .old 가 남아 있으면(교체 표식 없음 · 위에서 이미 걸렀다) ERP 를 멈추기 전에 거부한다.
+        //   .old 는 보기만 — 워치독이 다음 교체 시작 때 지운다(UpdateOrchestrator.ClearStaleOldDirsForSwap).
+        foreach (var p in Parts)
+            if (Directory.Exists(Path.Combine(app, p + ".old"))) return SwapReasons.UpdateCleanupPending;
         return null;
+    }
+
+    /// <summary>
+    /// 20260930작1 봉합2 — 설계 §15-0 판정표(계약 §4 봉합 2차). <c>{p}.rbk</c> 가 하나도 없으면 null(M1).
+    /// M2 <c>{p}.rbk</c> 있는데 살아 있는 <c>{p}</c> 없음 · M3 살아 있는 api·watchdog 판이 다르거나 못 읽음 ·
+    /// M4 마지막 요청 <c>broken</c> 이고 그 뒤 판이 안 바뀜 ⇒ <c>swap_interrupted</c>. 그 밖(M5 = 잔재)은 null — 다음 교체의 일꾼 S0 가 치운다.
+    /// 폴더는 보기만 한다(지우기·옮기기 0).
+    /// </summary>
+    private string? JudgeLeftoverRbk(string app, SwapRequest? last)
+    {
+        var any = false;
+        foreach (var p in Parts)
+        {
+            if (!Directory.Exists(Path.Combine(app, p + ".rbk"))) continue;
+            any = true;
+            if (!Directory.Exists(Path.Combine(app, p))) return SwapReasons.SwapInterrupted; // M2 — S4 한가운데 끊김
+        }
+        if (!any) return null; // M1
+
+        var api = NormalizeVersion(_env.CurrentVersion);
+        var wd = NormalizeVersion(_env.WatchdogVersion);
+        if (api is null || wd is null || api != wd) return SwapReasons.SwapInterrupted; // M3
+
+        if (last?.State == SwapStates.Broken)
+        {
+            // M4 — S7R(원위치 0 · 세 폴더 전부 to)를 잔재로 오판하지 않게: 그때 .rbk 는 검증된 옛 판의 유일한 사본.
+            var unchanged = last.PartsAfter is { } after
+                ? NormalizeVersion(after.Api) == api && NormalizeVersion(after.Watchdog) == wd
+                : NormalizeVersion(last.From) == api || NormalizeVersion(last.To) == api;
+            if (unchanged) return SwapReasons.SwapInterrupted;
+        }
+
+        _logger.LogDebug("[LocalSwap] 지난 교체의 잔재(.rbk)가 남아 있습니다 — 판 {Version} 로 맞음 · 바쁨 아님(다음 교체가 먼저 치웁니다).", api);
+        return null; // M5
+    }
+
+    /// <summary><c>M.m.b</c> 로 맞춘다(4자리면 뒤를 버린다). 못 읽거나 <c>0.0.0</c>(<c>VersionInfo</c> 못 읽음 표식)이면 null.</summary>
+    internal static string? NormalizeVersion(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || !Version.TryParse(raw.Trim(), out var v) || v.Build < 0) return null;
+        if (v.Major == 0 && v.Minor == 0 && v.Build == 0) return null;
+        return $"{v.Major}.{v.Minor}.{v.Build}";
     }
 
     /// <summary>
@@ -417,6 +465,10 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
 /// <summary>설치 환경 — 실제 PC.</summary>
 public sealed class LocalSwapEnvironment : ILocalSwapEnvironment
 {
+    private readonly ILogger<LocalSwapEnvironment> _logger;
+
+    public LocalSwapEnvironment(ILogger<LocalSwapEnvironment> logger) => _logger = logger;
+
     public bool IsWindows => OperatingSystem.IsWindows();
 
     public string? AppRoot
@@ -446,6 +498,48 @@ public sealed class LocalSwapEnvironment : ILocalSwapEnvironment
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HitPan", "Updates", "staging");
 
     public DateTime UtcNow => DateTime.UtcNow;
+
+    /// <summary>20260930작1 봉합2 N-3 — <c>{app}\watchdog\HitPan.Watchdog.exe</c> FileVersion <c>M.m.b</c>. 설치 루트·파일·판 표식이 없으면 null(읽기만).</summary>
+    public string? WatchdogVersion
+    {
+        get
+        {
+            var app = AppRoot;
+            if (app is null) return null;
+            // ⬛ 봉합2 B1: {app}\watchdog\HitPan.Watchdog.exe 의 FileVersion 만 읽었다.
+            // 20260930작1 봉합2 B2(PM 추가) — 게시 파이프라인(deploy-update.yml · build-manifest.ps1)이 판의 출처로 쓰는
+            //   HitPan.Watchdog.dll 을 먼저 읽고, 없을 때만 exe(한 벌 출처). self-contained apphost exe 의 버전 자원이 dll 과 같다는 보장은 ⚠️미확인.
+            return ReadWatchdogVersion(Path.Combine(app, "watchdog"), _logger);
+        }
+    }
+
+    /// <summary>워치독 판 파일 이름 — 먼저 읽는 순서(dll → exe).</summary>
+    public static readonly string[] WatchdogVersionFiles = { "HitPan.Watchdog.dll", "HitPan.Watchdog.exe" };
+
+    /// <summary>
+    /// 20260930작1 봉합2 B2 — <paramref name="watchdogDir"/> 의 <c>HitPan.Watchdog.dll</c> FileVersion <c>M.m.b</c>. dll 이 없을 때만 exe.
+    /// 있는 첫 파일의 판을 쓴다(dll 이 있는데 판을 못 읽으면 exe 로 넘어가지 않고 null — 두 출처를 섞지 않는다). 읽기만.
+    /// </summary>
+    public static string? ReadWatchdogVersion(string watchdogDir, ILogger logger)
+    {
+        foreach (var name in WatchdogVersionFiles)
+        {
+            var file = Path.Combine(watchdogDir, name);
+            if (!File.Exists(file)) continue;
+            try
+            {
+                var fv = FileVersionInfo.GetVersionInfo(file);
+                if (fv.FileMajorPart == 0 && fv.FileMinorPart == 0 && fv.FileBuildPart == 0) return null;
+                return $"{fv.FileMajorPart}.{fv.FileMinorPart}.{fv.FileBuildPart}";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(ex, "[LocalSwap] 워치독 판을 읽지 못했습니다: {Path}", file);
+                return null;
+            }
+        }
+        return null;
+    }
 }
 
 /// <summary>schtasks — 실제 PC(창 없이 · 셸 없이).</summary>

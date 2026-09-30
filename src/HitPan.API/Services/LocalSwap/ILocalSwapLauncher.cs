@@ -74,6 +74,12 @@ public interface ILocalSwapEnvironment
 
     /// <summary>지금 UTC(시험에서 바꾼다).</summary>
     DateTime UtcNow { get; }
+
+    /// <summary>
+    /// 20260930작1 봉합2 N-3(설계 §15-0 M3·M4) — 살아 있는 워치독 판 <c>M.m.b</c>
+    /// (<c>{app}\watchdog\HitPan.Watchdog.exe</c> FileVersion). 못 읽으면 null(= 판정표 M3 「못 읽음」). 읽기만.
+    /// </summary>
+    string? WatchdogVersion { get; }
 }
 
 /// <summary>schtasks 실행 — 시험에서 대역으로 바꾼다. 반환 = 종료 코드.</summary>

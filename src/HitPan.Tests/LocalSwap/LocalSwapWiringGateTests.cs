@@ -201,7 +201,8 @@ public sealed class LocalSwapWiringGateTests : IDisposable
         public required LocalRollbackService Rollback { get; init; }
     }
 
-    private Rig Build(string name)
+    // 20260930작1 봉합2 B2 — renew = 한 단계 안 예약 갱신 주기(설계 15-1 10ⓑ). null = 운영 기본(5분) · 0 = 끔.
+    private Rig Build(string name, TimeSpan? renew = null)
     {
         var env = Env(name);
         SeedPrev(env);
@@ -217,7 +218,8 @@ public sealed class LocalSwapWiringGateTests : IDisposable
         var folders = new ManualFolders(env.AppRoot!);
         var usage = new ManualUsageLog(folders, NullLogger<ManualUsageLog>.Instance, (_, _, _) => { });
         var manual = new ManualUpdateService(feed, fetch, new NoAutoLock(), scopes, folders, usage, launcher,
-            new ManualUpdateEnvironment(() => true, () => Current), NullLogger<ManualUpdateService>.Instance);
+            new ManualUpdateEnvironment(() => true, () => Current), NullLogger<ManualUpdateService>.Instance,
+            reservationRenewInterval: renew);
         var rollback = new LocalRollbackService(launcher, env, NullLogger<LocalRollbackService>.Instance);
         return new Rig
         {
@@ -355,17 +357,191 @@ public sealed class LocalSwapWiringGateTests : IDisposable
         Assert.Equal(0, r.Backup.Runs);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 20260930작1 봉합2 B2 — 설계 §15-3 G-U5e · G-U5h · G-U5f(10 예약 갱신) · G-OLD2 서비스 부분(N-2) · 워치독 판 출처(PM 추가)
+    // 🔴 대조(개발명세서 B2 §4): G-U5e = 단계 갱신 뺌 · G-U5h = 주기 갱신 뺌 · G-U5f = 갱신 반환값 무시 · G-OLD2 = CheckAsync 새 줄 뺌
+    //    · 워치독 판 = dll/exe 순서 뒤집음 — 각각 FAIL 확인.
+    // 🔴 되돌리기 확인 번호는 10분짜리(LocalRollbackService.TicketLifetime)라 +40분 뒤엔 미리 받아 둔 번호가 만료된다 ⇒
+    //    「되돌리기가 끼어들 수 있나」를 그 시각의 GetStatus(번호 발급) → Start 로 잰다(예약이 살아 있으면 번호 0 · Launch 0).
+    // ══════════════════════════════════════════════════════════════
+
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "G-U5e 🔴 단계마다 예약 갱신 — 받기 +20분 → 백업 한가운데 +20분(주기 갱신 끔) → 되돌리기 번호 0 · Launch 0 (대조: 단계 갱신 빼면 만료돼 되돌리기가 걸린다)")]
+    public async Task U5e_stage_renewal_keeps_reservation_across_stages()
+    {
+        var r = Build("u5e", renew: TimeSpan.Zero);
+        r.Fetch.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        r.Fetch.SucceedAfterHold = true;
+        r.Backup.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var start = r.Manual.Start("T-1", "u1", "menu");
+        Assert.True(start.Accepted, start.Reason);
+        await r.Fetch.Entered.Task.WaitAsync(Wait); // 받기 한가운데(시작 +0)
+
+        r.Env.UtcNow = r.Env.UtcNow.AddMinutes(20); // 받기가 20분 걸렸다
+        r.Fetch.Hold.SetResult();
+        await r.Backup.Entered.Task.WaitAsync(Wait); // 백업 한가운데 — 검증·백업 단계로 옮길 때 +20분에 갱신됐어야 한다
+        r.Env.UtcNow = r.Env.UtcNow.AddMinutes(20); // 시작 +40분 · 마지막 단계 갱신 +20분
+
+        var st = r.Rollback.GetStatus("u1");
+        var rb = r.Rollback.Start("u1", st.Ticket);
+        Assert.Equal(0, r.Launcher.Launches);
+        Assert.Equal(0, r.Tasks.CountStartingWith("/Create"));
+        Assert.False(rb.Started, "받기+백업이 30분을 넘자 예약이 만료돼 되돌리기가 백업 도중 끼어들었다(10)");
+        Assert.Equal(SwapReasons.SwapInProgress, st.Reason);
+        Assert.Null(st.Ticket);
+
+        // 백업이 끝나면 넘기기까지 간다(자기 예약에 막히지 않는다)
+        r.Backup.Hold.SetResult();
+        await r.Manual.LastRun;
+        Assert.Equal(ManualUpdateStages.HandedOff, r.Manual.GetStatus("T-1")!.Stage);
+        Assert.Equal(1, r.Launcher.Launches);
+    }
+
+    [Fact(DisplayName = "G-U5h 🔴 한 단계 안 주기 갱신(10ms) — 받기 한가운데 +20분 → 갱신 → +20분 → 되돌리기 번호 0 · Launch 0 (대조: 주기 갱신 빼면 걸린다)")]
+    public async Task U5h_periodic_renewal_keeps_reservation_within_one_stage()
+    {
+        var r = Build("u5h", renew: TimeSpan.FromMilliseconds(10));
+        r.Fetch.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var start = r.Manual.Start("T-1", "u1", "menu");
+        Assert.True(start.Accepted, start.Reason);
+        await r.Fetch.Entered.Task.WaitAsync(Wait); // 받기 한가운데 — 이 한 단계가 40분 걸린다
+
+        r.Env.UtcNow = r.Env.UtcNow.AddMinutes(20);
+        // 시계를 옮긴 뒤 주기 갱신이 두 번 돌 때까지(설계 「200ms 대기」 · 느린 CI 를 위해 최대 5초). 못 돌아도 여기서는 단언하지 않는다 —
+        // 대조(주기 갱신 뺀 사본)는 아래 되돌리기 단언에서 FAIL 해야 한다.
+        var before = r.Launcher.Reserves;
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (r.Launcher.Reserves < before + 2 && DateTime.UtcNow < until) await Task.Delay(20);
+        await Task.Delay(200);
+        r.Env.UtcNow = r.Env.UtcNow.AddMinutes(20); // 시작 +40분 · 단계 갱신은 +0분뿐
+
+        var st = r.Rollback.GetStatus("u1");
+        var rb = r.Rollback.Start("u1", st.Ticket);
+        Assert.Equal(0, r.Launcher.Launches);
+        Assert.False(rb.Started, "받기 한 단계가 30분을 넘자 예약이 만료돼 되돌리기가 끼어들었다(10ⓑ)");
+        Assert.Equal(SwapReasons.SwapInProgress, st.Reason);
+        Assert.Null(st.Ticket);
+
+        r.Fetch.Hold.SetResult(); // 받기 실패로 끝 — 예약이 풀리고 주기 갱신도 멈춘다
+        await r.Manual.LastRun;
+        Assert.Equal(ManualUpdateStages.Refused, r.Manual.GetStatus("T-1")!.Stage);
+        var reservesAtEnd = r.Launcher.Reserves;
+        await Task.Delay(100);
+        Assert.Equal(reservesAtEnd, r.Launcher.Reserves); // 끝난 뒤 주기 갱신 0(다시 쥐지 않는다)
+        var again = r.Rollback.GetStatus("u1");
+        Assert.True(again.CanRollback, again.Reason);
+    }
+
+    [Fact(DisplayName = "G-U5f 🔴 갱신 실패 — +31분 뒤 남이 예약 → 다음 단계 갱신 false → swap_in_progress 로 끝 · 백업 0 · Launch 0 (대조: 반환값 무시하면 백업·넘기기)")]
+    public async Task U5f_failed_renewal_ends_without_backup_or_handoff()
+    {
+        var r = Build("u5f", renew: TimeSpan.Zero);
+        r.Fetch.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        r.Fetch.SucceedAfterHold = true;
+
+        var start = r.Manual.Start("T-1", "u1", "menu");
+        Assert.True(start.Accepted, start.Reason);
+        await r.Fetch.Entered.Task.WaitAsync(Wait);
+
+        r.Env.UtcNow = r.Env.UtcNow.AddMinutes(31); // 만료(30분 갱신 없음 = 주인 없음 · 규칙 그대로)
+        Assert.True(r.Launcher.TryReserve("other:gate"), "만료 뒤엔 남이 쥘 수 있어야 한다(만료 규칙 그대로)");
+
+        r.Fetch.Hold.SetResult(); // 받기 성공 → 검증 단계로 옮기며 갱신 → false
+        await r.Manual.LastRun;
+        var s = r.Manual.GetStatus("T-1")!;
+        Assert.Equal(ManualUpdateStages.Refused, s.Stage);
+        Assert.Equal(ManualUpdateReasons.SwapInProgress, s.Reason);
+        Assert.Equal(0, r.Backup.Runs);
+        Assert.Equal(0, r.Launcher.Launches);
+        Assert.Equal(0, r.Tasks.CountStartingWith("/Create"));
+        // 남의 예약은 그대로(우리 끝이 남의 예약을 풀지 않는다)
+        Assert.False(r.Launcher.TryReserve("third:gate"));
+    }
+
+    [Fact(DisplayName = "G-OLD2 🔴 서비스 — web.old 단독 ⇒ 수동 업데이트 확인 「가능」 아님(update_cleanup_pending · 피드 0) · [예] 받기 0·백업 0 · 되돌리기 번호 0 · .old 무접촉")]
+    public async Task GOLD2_old_blocks_manual_update_and_rollback_ticket()
+    {
+        var r = Build("old2");
+        var old = Path.Combine(r.Env.AppRoot!, "web.old");
+        Directory.CreateDirectory(old);
+        var oldFile = Path.Combine(old, "HitPan.Web.dll");
+        File.WriteAllText(oldFile, "old");
+
+        var check = await r.Manual.CheckAsync(CancellationToken.None);
+        Assert.False(check.UpdateAvailable, "워치독 .old 가 남아 있는데 수동 업데이트가 「가능」이라 했다(N-2)");
+        Assert.Equal(SwapReasons.UpdateCleanupPending, check.Reason);
+        Assert.False(check.Busy, "정리 대기는 「진행 중」이 아니다");
+        Assert.Equal(0, r.Feed.Calls);
+
+        var start = r.Manual.Start("T-1", "u1", "menu");
+        await r.Manual.LastRun;
+        Assert.False(start.Accepted);
+        Assert.Equal(SwapReasons.UpdateCleanupPending, start.Reason);
+        Assert.Equal(0, r.Fetch.Downloads);
+        Assert.Equal(0, r.Backup.Runs);
+        Assert.Equal(0, r.Launcher.Launches);
+
+        var status = r.Rollback.GetStatus("u1");
+        Assert.False(status.CanRollback);
+        Assert.Null(status.Ticket);
+        Assert.Equal(SwapReasons.UpdateCleanupPending, status.Reason);
+
+        Assert.True(File.Exists(oldFile), ".old 를 건드렸다(보기만 해야 한다)");
+
+        // 대조군 — (시험이) .old 를 치우면 같은 재료로 번호가 나온다(거부가 .old 때문임을 확인)
+        Directory.Delete(old, recursive: true);
+        var ok = r.Rollback.GetStatus("u1");
+        Assert.True(ok.CanRollback, ok.Reason);
+    }
+
+    [Fact(DisplayName = "G-WV 🔴 워치독 판 출처 — HitPan.Watchdog.dll 판 ≠ exe 판이면 dll 판(게시 파이프라인과 한 벌) · dll 없을 때만 exe · 둘 다 없으면 null")]
+    public void WatchdogVersion_prefers_dll_over_exe()
+    {
+        var dir = Path.Combine(_root, "wv", "watchdog");
+        Directory.CreateDirectory(dir);
+        var dllSrc = typeof(Assert).Assembly.Location;   // xunit.assert — 판 2.x
+        var exeSrc = typeof(object).Assembly.Location;   // System.Private.CoreLib — 판 8.x
+        static string V(string p)
+        {
+            var f = System.Diagnostics.FileVersionInfo.GetVersionInfo(p);
+            return $"{f.FileMajorPart}.{f.FileMinorPart}.{f.FileBuildPart}";
+        }
+        Assert.NotEqual(V(dllSrc), V(exeSrc)); // 전제 — 두 판이 달라야 어느 쪽을 읽었는지 가른다
+
+        var dll = Path.Combine(dir, "HitPan.Watchdog.dll");
+        var exe = Path.Combine(dir, "HitPan.Watchdog.exe");
+        File.Copy(dllSrc, dll);
+        File.Copy(exeSrc, exe);
+        Assert.Equal(V(dllSrc), LocalSwapEnvironment.ReadWatchdogVersion(dir, NullLogger.Instance));
+
+        File.Delete(dll);
+        Assert.Equal(V(exeSrc), LocalSwapEnvironment.ReadWatchdogVersion(dir, NullLogger.Instance));
+
+        File.Delete(exe);
+        Assert.Null(LocalSwapEnvironment.ReadWatchdogVersion(dir, NullLogger.Instance));
+    }
+
     // ── 대역 ──
 
     private sealed class CountingLauncher(ILocalSwapLauncher inner) : ILocalSwapLauncher
     {
         private int _launches;
+        private int _reserves; // 봉합2 B2 — 예약(갱신 포함) 호출 수. 세기를 먼저 하고 안쪽을 부른다(센 뒤의 호출은 그 뒤 시계를 읽는다).
         public int Launches => Volatile.Read(ref _launches);
+        public int Reserves => Volatile.Read(ref _reserves);
         public string? CheckBusy() => inner.CheckBusy();
         public string? CheckBusy(string? owner) => inner.CheckBusy(owner);
         public SwapRequest? ReadLast() => inner.ReadLast();
         public string? CheckReady() => inner.CheckReady();
-        public bool TryReserve(string owner) => inner.TryReserve(owner);
+
+        public bool TryReserve(string owner)
+        {
+            Interlocked.Increment(ref _reserves);
+            return inner.TryReserve(owner);
+        }
         public void Release(string owner) => inner.Release(owner);
 
         public SwapLaunchResult Launch(SwapLaunchInput input)
@@ -393,6 +569,8 @@ public sealed class LocalSwapWiringGateTests : IDisposable
         public int Downloads;
         public TaskCompletionSource? Hold { get; set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>봉합2 B2 — true 면 <see cref="Hold"/> 가 풀린 뒤 받기 성공으로 끝난다(기본 false = 종전대로 실패).</summary>
+        public bool SucceedAfterHold { get; set; }
 
         public bool HasEnoughSpace(long packageSizeBytes, string targetDir) => true;
 
@@ -403,7 +581,7 @@ public sealed class LocalSwapWiringGateTests : IDisposable
             if (Hold is not null)
             {
                 await Hold.Task.ConfigureAwait(false);
-                throw new IOException("gate: download stopped");
+                if (!SucceedAfterHold) throw new IOException("gate: download stopped");
             }
             var path = Path.Combine(targetDir, $"hitpan-{package.Version}.zip");
             await File.WriteAllBytesAsync(path, new byte[] { 1, 2, 3 }, ct).ConfigureAwait(false);
@@ -421,11 +599,16 @@ public sealed class LocalSwapWiringGateTests : IDisposable
     private sealed class CountingBackup : IBackupService
     {
         public int Runs;
+        /// <summary>봉합2 B2 — 있으면 백업 한가운데서 멈췄다가 풀리면 성공으로 끝난다.</summary>
+        public TaskCompletionSource? Hold { get; set; }
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task<RunBackupResponse> RunBackupAsync(string tenantId, string triggeredBy = "manual", CancellationToken ct = default)
+        public async Task<RunBackupResponse> RunBackupAsync(string tenantId, string triggeredBy = "manual", CancellationToken ct = default)
         {
             Interlocked.Increment(ref Runs);
-            return Task.FromResult(new RunBackupResponse { Success = true });
+            Entered.TrySetResult();
+            if (Hold is not null) await Hold.Task.ConfigureAwait(false);
+            return new RunBackupResponse { Success = true };
         }
 
         public Task<BackupSettingsDto> GetSettingsAsync(string tenantId, CancellationToken ct = default) => throw new NotSupportedException();

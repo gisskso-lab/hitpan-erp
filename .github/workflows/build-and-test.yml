@@ -56,6 +56,8 @@ jobs:
           GATES="$GATES|ManualUpdateSelfCheckTests|LocalSwapUiGateTests"
           # 20260930작1 봉합 차수(작업지시서 §12-1 M) — K1 원위치·조기종료·겹침 · K2 첨부 옮겨 싣기 · L 런처·재료 · M 연결(판 이력·사전 판정·예약)
           GATES="$GATES|LocalSwapRevertGateTests|LocalSwapWorkerSealGateTests|LocalSwapChatFilesGateTests|LocalSwapSealGateTests|LocalSwapWiringGateTests"
+          # 20260930작1 봉합 2차(작업지시서 §13) — 남은 찌꺼기 처리(A 갈래) · 런처 쪽 찌꺼기 판정(B 갈래)
+          GATES="$GATES|LocalSwapLeftoverGateTests|LocalSwapLeftoverLauncherGateTests"
           echo "▶ 이 단계가 무는 게이트: $GATES"
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
