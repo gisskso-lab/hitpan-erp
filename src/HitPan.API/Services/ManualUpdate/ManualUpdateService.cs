@@ -152,12 +152,25 @@ public sealed class ManualUpdateService
     public async Task<ManualUpdateCheckResult> CheckAsync(CancellationToken ct)
     {
         var current = _env.CurrentVersion();
+        // ⬛ 봉합 전: var busy = IsBusy() || _autoLock.IsAutoUpdateInProgress()
+        //            || _launcher.CheckBusy() is SwapReasons.SwapInProgress or SwapReasons.UpdateInProgress;
+        // 20260930작1 봉합 07(계약 §4) — 사전 판정(CheckReady) 을 바쁨(CheckBusy) 앞에서 본다. 한 번만 부른다(폴더 문지기 1회).
+        var notReady = _env.IsSupportedPlatform() ? _launcher.CheckReady() : null;
+        var launcherBusy = notReady is null ? _launcher.CheckBusy() : null;
         var busy = IsBusy() || _autoLock.IsAutoUpdateInProgress()
-                   || _launcher.CheckBusy() is SwapReasons.SwapInProgress or SwapReasons.UpdateInProgress;
+                   || launcherBusy is SwapReasons.SwapInProgress or SwapReasons.UpdateInProgress;
         var last = LocalRollbackService.ToLast(_launcher.ReadLast());
 
         if (!_env.IsSupportedPlatform())
             return new ManualUpdateCheckResult(current, null, false, ManualUpdateReasons.NotWindows, null, null, busy, last);
+
+        // 봉합 07 — 넘길 수 없는 설치(슬롯·루트·일꾼 원본 없음 · 작업 폴더 문지기 실패)면 피드도 안 묻고 그 사유(「가능」 거짓 0).
+        if (notReady is not null)
+            return new ManualUpdateCheckResult(current, null, false, notReady, null, null, busy, last);
+
+        // 봉합 06ⓑ(L 개발명세서 §5 ⚠️) — 끝나지 않은 교체(swap_interrupted)는 「진행 중」도 「가능」도 아니다. 그 사유를 그대로 보인다.
+        if (launcherBusy == SwapReasons.SwapInterrupted)
+            return new ManualUpdateCheckResult(current, null, false, launcherBusy, null, null, busy, last);
 
         var (reason, package) = await CheckFeedAsync(current, ct).ConfigureAwait(false);
         return new ManualUpdateCheckResult(
@@ -202,10 +215,21 @@ public sealed class ManualUpdateService
 
             // 20260930작1 I-API — 되돌리기와 한 틀(같은 런처·같은 요청서): 교체 진행 중 · 쿨다운(10분 · 두 모드 합쳐) ·
             // 워치독 표식이면 받기·백업 전에 거부한다(병렬이슈 03 순서 「자물쇠 → 전제 재판정 → 받기 → 백업」).
-            if (_launcher.CheckBusy() is { } launcherBusy)
-                return RefuseBeforeStart(from, safeEntry, userId, launcherBusy);
+            // ⬛ 봉합 전: if (_launcher.CheckBusy() is { } launcherBusy) return RefuseBeforeStart(…, launcherBusy);
+            // 20260930작1 봉합 07·F-4(계약 §4) — CheckReady → CheckBusy(owner) → TryReserve(owner) 순서. 받기·백업 **전**.
+            //   07: 넘길 수 없는 설치면 받기 0 · 백업 0(백업 30개 밀림 = 복원 지점 소실 방지 · G-U7).
+            //   F-4: 받기·백업 동안 되돌리기가 끼어들지 못하게 예약한다(G-U5d). 넘기기 뒤·거부·실패 때 RunAsync 가 푼다.
+            if (_launcher.CheckReady() is { } notReady)
+                return RefuseBeforeStart(from, safeEntry, userId, notReady);
 
-            job = new Job(Guid.NewGuid().ToString("N"), tenantId, userId, safeEntry, from);
+            var jobId = Guid.NewGuid().ToString("N");
+            var owner = ReservationOwner(jobId);
+            if (_launcher.CheckBusy(owner) is { } launcherBusy)
+                return RefuseBeforeStart(from, safeEntry, userId, launcherBusy);
+            if (!_launcher.TryReserve(owner))
+                return RefuseBeforeStart(from, safeEntry, userId, ManualUpdateReasons.SwapInProgress);
+
+            job = new Job(jobId, tenantId, userId, safeEntry, from);
             _job = job;
         }
 
@@ -214,6 +238,9 @@ public sealed class ManualUpdateService
         LastRun = Task.Run(() => RunAsync(job), CancellationToken.None);
         return new ManualUpdateStartOutcome(true, ManualUpdateReasons.Ok, job.Snapshot());
     }
+
+    /// <summary>봉합 F-4 — 런처 예약 주인(한 작업 = 한 주인). <see cref="SwapLaunchInput.Owner"/> 에도 같은 값을 넣는다(계약 §4).</summary>
+    internal static string ReservationOwner(string jobId) => "manual-update:" + jobId;
 
     private bool IsBusy()
     {
@@ -360,7 +387,7 @@ public sealed class ManualUpdateService
                 RequestedBy: job.UserId,
                 Entry: job.Entry,
                 AutoState: null);
-            var handOffReason = HandOff(order);
+            var handOffReason = HandOff(order, ReservationOwner(job.Id)); // 봉합 F-4 — 자기 예약에 막히지 않게 같은 owner
             if (handOffReason == ManualUpdateReasons.Ok)
             {
                 job.Move(ManualUpdateStages.HandedOff);
@@ -374,6 +401,11 @@ public sealed class ManualUpdateService
             _logger.LogError(ex, "[ManualUpdate] 수동 업데이트 중 예상 못 한 오류 — 넘기지 않았다");
             Finish(job, ManualUpdateReasons.DownloadFailed);
         }
+        finally
+        {
+            // 봉합 F-4 — 넘기기 성공 뒤는 swap.lock 이 이어받고, 거부·실패면 교체가 없다 ⇒ 어느 끝이든 예약을 푼다.
+            _launcher.Release(ReservationOwner(job.Id));
+        }
     }
 
     /// <summary>
@@ -383,7 +415,7 @@ public sealed class ManualUpdateService
     /// 거부면 런처 사유 코드(계약 §6)를 그대로 돌려준다 — 작업 등록 0 · 잠금 풀림(런처가 보장).
     /// ⬛ U 초판의 「launcher_not_wired 로 멈춘다」 자리는 이것으로 대체됐다.
     /// </summary>
-    private string HandOff(ManualSwapOrder order)
+    private string HandOff(ManualSwapOrder order, string? owner = null)
     {
         var result = _launcher.Launch(new SwapLaunchInput(
             Mode: order.Mode,
@@ -393,7 +425,8 @@ public sealed class ManualUpdateService
             RequestedBy: order.RequestedBy,
             Entry: order.Entry,
             AutoState: order.AutoState,
-            Ticket: null));
+            Ticket: null,
+            Owner: owner)); // 봉합 F-4(계약 §4) — 예약한 주인 그대로
         if (result.Started) return ManualUpdateReasons.Ok;
         _logger.LogWarning("[ManualUpdate] 교체 일꾼이 받지 않았다 — 사유 {Reason} · {From} → {To}", result.Reason, order.From, order.To);
         return result.Reason;

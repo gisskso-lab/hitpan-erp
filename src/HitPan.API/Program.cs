@@ -433,6 +433,8 @@ builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISchtasksRunner, Hit
 builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISwapFolderGuard, HitPan.API.Services.LocalSwap.SwapFolderGuard>();
 builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapLauncher, HitPan.API.Services.LocalSwap.LocalSwapLauncher>();
 builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.ILocalRollbackService, HitPan.API.Services.LocalRollback.LocalRollbackService>();
+// 20260930작1 봉합 05ⓑ(PM 결재 S-2) — 기동 때 한 번 {app}\rollback\versions-seen.txt 에 자기 판 한 줄. 실패해도 경고만 · 기동 계속.
+builder.Services.AddHostedService<HitPan.API.Services.LocalSwap.InstalledVersionLedger>();
 
 builder.Services.AddCors(options =>
 {

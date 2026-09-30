@@ -54,7 +54,9 @@ public sealed class LocalRollbackService : ILocalRollbackService
         if (!string.Equals(issued.UserId, userId, StringComparison.Ordinal) || _env.UtcNow - issued.IssuedUtc > TicketLifetime)
             return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
 
-        var (material, reason) = Judge();
+        // 봉합 F-4(계약 §4) — 이 되돌리기 한 번의 예약 주인. 판정(CheckBusy(owner))·예약·Launch(Owner) 에 같은 값.
+        var owner = ReservationOwner(ticket);
+        var (material, reason) = Judge(owner);
         if (material is null) return SwapLaunchResult.Refuse(reason);
         if (material.Kind != issued.Kind || material.Version != issued.To ||
             !string.Equals(material.Path, issued.Path, StringComparison.OrdinalIgnoreCase))
@@ -64,24 +66,43 @@ public sealed class LocalRollbackService : ILocalRollbackService
             return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
         }
 
-        var result = _launcher.Launch(new SwapLaunchInput(
-            Mode: SwapModes.Rollback,
-            From: _env.CurrentVersion,
-            To: material.Version,
-            Material: new SwapMaterial { Kind = material.Kind, Path = material.Path, Sha256 = null },
-            RequestedBy: userId,
-            Entry: SwapEntries.Menu,
-            AutoState: null,
-            Ticket: ticket));
+        // 봉합 F-4 — CheckReady → CheckBusy(owner) → TryReserve(owner) 순서(계약 §4). 남이 쥐고 있으면(수동 업데이트 받기·백업 중) 진행 중.
+        if (!_launcher.TryReserve(owner)) return SwapLaunchResult.Refuse(SwapReasons.SwapInProgress);
+        SwapLaunchResult result;
+        try
+        {
+            result = _launcher.Launch(new SwapLaunchInput(
+                Mode: SwapModes.Rollback,
+                From: _env.CurrentVersion,
+                To: material.Version,
+                Material: new SwapMaterial { Kind = material.Kind, Path = material.Path, Sha256 = null },
+                RequestedBy: userId,
+                Entry: SwapEntries.Menu,
+                AutoState: null,
+                Ticket: ticket,
+                Owner: owner));
+        }
+        finally
+        {
+            // 걸렸으면 swap.lock 이 이어받고, 거부면 교체가 없다 ⇒ 어느 쪽이든 예약을 푼다.
+            _launcher.Release(owner);
+        }
         _logger.LogInformation("[LocalRollback] 되돌리기 요청 — {From} → {To} · 재료 {Kind} · 사용자 {User} · 결과 {Reason}",
             _env.CurrentVersion, material.Version, material.Kind, userId, result.Reason);
         return result;
     }
 
-    /// <summary>전제 판정(설계 §1 P-c~P-f · P-a 는 컨트롤러 문). 순서: 바쁨 → 재료 → 저장 공간.</summary>
-    private (RollbackMaterial? Material, string Reason) Judge()
+    /// <summary>봉합 F-4 — 되돌리기 예약 주인(확인 번호 하나 = 주인 하나).</summary>
+    internal static string ReservationOwner(string ticket) => "rollback:" + ticket;
+
+    /// <summary>전제 판정(설계 §1 P-c~P-f · P-a 는 컨트롤러 문). 순서: 사전 판정 → 바쁨 → 재료 → 저장 공간.</summary>
+    /// <param name="owner">봉합 F-4 — 이 주인의 예약은 바쁨으로 보지 않는다. null(상태 조회) = 누구의 예약이든 바쁨.</param>
+    private (RollbackMaterial? Material, string Reason) Judge(string? owner = null)
     {
-        if (_launcher.CheckBusy() is { } busy) return (null, busy);
+        // ⬛ 봉합 전: 바쁨(CheckBusy())부터 — 슬롯·일꾼 원본·작업 폴더가 틀려도 번호를 발급했다(07).
+        // 20260930작1 봉합 07(계약 §4) — 사전 판정을 바쁨 앞에서. 걸리면 번호 발급 0(G-U7).
+        if (_launcher.CheckReady() is { } notReady) return (null, notReady);
+        if (_launcher.CheckBusy(owner) is { } busy) return (null, busy);
         var app = _env.AppRoot;
         if (app is null) return (null, SwapReasons.RequestInvalid);
         try

@@ -118,6 +118,13 @@ public static class SwapReasons
     public const string SwapFailed = "swap_failed";
     public const string VerifyFailed = "verify_failed";
     public const string RevertFailed = "revert_failed";
+    // 20260930작1 봉합 06ⓑ — 런처(CheckBusy)가 묵은 요청·남은 작업을 정리할 때(계약 §4·§6 봉합 합의)
+    /// <summary><c>requested</c> 로 30분 넘게 묵음 — 일꾼이 아예 못 떴다(끝 상태 <c>refused</c>).</summary>
+    public const string WorkerNotStarted = "worker_not_started";
+    /// <summary><c>running</c> 으로 30분 넘게 묵음 — 일꾼이 도중에 끊겼다(끝 상태 <c>broken</c>).</summary>
+    public const string WorkerInterrupted = "worker_interrupted";
+    /// <summary><c>.rbk</c> 가 남아 있고 마지막 요청이 <c>broken</c> — 「진행 중」 대신.</summary>
+    public const string SwapInterrupted = "swap_interrupted";
 }
 
 /// <summary>런처에 넘기는 값 — 판·재료는 <b>서버가 계산한 값</b>만(요청 본문 유래 0 · 병렬이슈 04).</summary>
@@ -129,7 +136,9 @@ public sealed record SwapLaunchInput(
     string RequestedBy,
     string Entry,
     string? AutoState,
-    string? Ticket);
+    string? Ticket,
+    // 20260930작1 봉합 F-4(계약 §4) — 예약 주인. TryReserve 한 호출부는 같은 값을 넣어야 자기 예약에 막히지 않는다. 기본 null = 예약 없음.
+    string? Owner = null);
 
 /// <summary>런처 결과. <see cref="Started"/> 가 true 면 1회용 작업이 돌기 시작했다(202).</summary>
 public sealed record SwapLaunchResult(bool Started, string Reason, string? Ticket)

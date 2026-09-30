@@ -24,6 +24,8 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
     public const string RequestFileName = "request.json";
     public const string LockFileName = "swap.lock";
     public const string ScriptFileName = "local-swap.ps1";
+    /// <summary>판 이력 <c>{app}\rollback\versions-seen.txt</c> — 계약 §2 봉합 합의(쓰기 = 갈래 M 기록기 · 읽기 = <c>RollbackMaterialFinder</c>·일꾼 S1).</summary>
+    public const string VersionsSeenFileName = "versions-seen.txt";
 
     /// <summary>열린 요청(<c>requested</c>·<c>running</c>)이 이보다 오래 안 바뀌면 죽은 것으로 본다.</summary>
     public static readonly TimeSpan OpenRequestStale = TimeSpan.FromMinutes(30);
@@ -71,12 +73,17 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         }
     }
 
-    public string? CheckBusy()
+    public string? CheckBusy() => CheckBusy(null);
+
+    public string? CheckBusy(string? owner)
     {
         if (!_env.IsWindows) return SwapReasons.NotWindows;
         var app = _env.AppRoot;
         if (app is null) return SwapReasons.RequestInvalid;
         var now = _env.UtcNow;
+
+        // 봉합 F-4 — 프로세스 안 예약(받기·백업 중): 남의 예약이면 바쁨(owner null = 누구의 예약이든)
+        if (IsReservedByOther(owner, now)) return SwapReasons.SwapInProgress;
 
         // ── 두 수동 동작(한 틀) ──
         var last = ReadLast();
@@ -88,17 +95,66 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
                 return SwapReasons.Cooldown;
         }
         if (IsLockFresh(Path.Combine(app, WorkFolderName, LockFileName), OpenRequestStale, now, 1)) return SwapReasons.SwapInProgress;
-        if (TaskExists(TaskName)) return SwapReasons.SwapInProgress;
+        // 20260930작1 봉합 06ⓑ — 여기까지 왔으면 열린 요청도 swap.lock 도 30분 넘게 묵었다(또는 없다).
+        //   종전: 작업이 있기만 하면 바쁨 ⇒ 일꾼이 아예 못 떠도 영구 「진행 중」. 이제: 묵은 요청서를 끝 상태로 적고 남은 작업을 지운다.
+        if (ClearStale(app, ref last) is { } stuck) return stuck;
 
         // ── 자동 업데이트(워치독) 진행 표식 — 설계 §1 P-d ──
         if (File.Exists(Path.Combine(app, "update-swap.marker"))) return SwapReasons.UpdateInProgress;
         if (Directory.Exists(Path.Combine(app, "watchdog.new"))) return SwapReasons.UpdateInProgress;
         foreach (var p in Parts)
-            if (Directory.Exists(Path.Combine(app, p + ".rbk"))) return SwapReasons.UpdateInProgress;
+            if (Directory.Exists(Path.Combine(app, p + ".rbk")))
+                // 봉합 06ⓑ — 마지막 요청이 broken 이면 「진행 중」이 아니라 「끝까지 되지 않았다」(영구 거짓 표시 없앰)
+                return last?.State == SwapStates.Broken ? SwapReasons.SwapInterrupted : SwapReasons.UpdateInProgress;
         if (IsLockFresh(Path.Combine(app, "update.lock"), WatchdogLockTtl, now, 0)) return SwapReasons.UpdateInProgress;
         if (TaskExists("HitPanWatchdogSelfReplace") || TaskExists("HitPanWatchdogSelfReplaceRecover"))
             return SwapReasons.UpdateInProgress;
         return null;
+    }
+
+    /// <summary>
+    /// 봉합 06ⓑ(계약 §4 봉합 합의) — 열린 요청·<c>swap.lock</c> 이 둘 다 묵었을 때만 부른다.
+    /// ① 열린 요청서를 끝 상태로(<c>requested</c> → <c>refused</c>/<c>worker_not_started</c> · <c>running</c> → <c>broken</c>/<c>worker_interrupted</c>)
+    /// — <c>updated_at</c>·<c>step</c> 은 그대로(쿨다운을 새로 걸지 않는다) · <paramref name="last"/> 도 같이 바꾼다(뒤 판정이 본다).
+    /// ② 남은 1회용 작업을 지운다. 지우기가 실패하면 <c>swap_in_progress</c>(그대로 바쁨), 아니면 null.
+    /// 🔴 잠금(<c>_gate</c>) 안에서 요청서·<c>swap.lock</c> 을 <b>다시</b> 읽는다 — 그 사이 <see cref="Launch"/> 가 새 요청을 걸었으면
+    /// 옛 판정으로 새 요청서를 덮거나 새 작업을 지우지 않는다(그 경우 바쁨).
+    /// </summary>
+    private string? ClearStale(string app, ref SwapRequest? last)
+    {
+        lock (_gate)
+        {
+            var now = _env.UtcNow;
+            if (IsLockFresh(Path.Combine(app, WorkFolderName, LockFileName), OpenRequestStale, now, 1)) return SwapReasons.SwapInProgress;
+            last = ReadLast();
+            if (last is not null && SwapStates.IsOpen(last.State) && now - last.LastTouchedUtc < OpenRequestStale)
+                return SwapReasons.SwapInProgress;
+            if (last is not null && !SwapStates.IsOpen(last.State) && last.State != SwapStates.Refused
+                && now - last.LastTouchedUtc >= TimeSpan.Zero && now - last.LastTouchedUtc < Cooldown)
+                return SwapReasons.Cooldown; // 다시 읽는 사이 끝난 교체(바깥 판정과 같은 규칙)
+
+            if (last is not null && SwapStates.IsOpen(last.State))
+            {
+                var wasRunning = last.State == SwapStates.Running;
+                last.State = wasRunning ? SwapStates.Broken : SwapStates.Refused;
+                last.Reason = wasRunning ? SwapReasons.WorkerInterrupted : SwapReasons.WorkerNotStarted;
+                _logger.LogWarning("[LocalSwap] 요청서가 {Min}분 넘게 {Old} 로 멈춰 있어 끝 상태 {State}/{Reason} 로 적습니다(번호 {Ticket} · 단계 {Step}).",
+                    OpenRequestStale.TotalMinutes, wasRunning ? SwapStates.Running : SwapStates.Requested, last.State, last.Reason, last.Ticket, last.Step);
+                try { WriteAtomic(Path.Combine(app, WorkFolderName, RequestFileName), last.ToJson()); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "[LocalSwap] 묵은 요청서에 끝 상태를 적지 못했습니다({Reason}).", last.Reason);
+                }
+            }
+
+            if (!TaskExists(TaskName)) return null;
+            _logger.LogWarning("[LocalSwap] 1회용 작업 {Task} 가 남아 있는데 요청·잠금이 {Min}분 넘게 묵었습니다 — 작업을 지웁니다.",
+                TaskName, OpenRequestStale.TotalMinutes);
+            var del = _schtasks.Run($"/Delete /TN \"{TaskName}\" /F");
+            if (del == 0) return null;
+            _logger.LogWarning("[LocalSwap] 남은 작업 {Task} 를 지우지 못했습니다(exit={Code}) — 진행 중으로 둡니다.", TaskName, del);
+            return SwapReasons.SwapInProgress;
+        }
     }
 
     public SwapLaunchResult Launch(SwapLaunchInput input)
@@ -109,17 +165,16 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         }
     }
 
-    private SwapLaunchResult LaunchCore(SwapLaunchInput input)
+    /// <summary>
+    /// 봉합 07(계약 §4 봉합 합의) — <see cref="Launch"/> 앞 정적 판정 한 벌. <see cref="LaunchCore"/> 도 이것을 부른다.
+    /// </summary>
+    public string? CheckReady()
     {
-        if (!_env.IsWindows) return SwapLaunchResult.Refuse(SwapReasons.NotWindows);
+        if (!_env.IsWindows) return SwapReasons.NotWindows;
         var app = _env.AppRoot;
         var slot = _env.Slot;
-        if (app is null || slot is null or < 1) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
-        if (input.Mode is not (SwapModes.Update or SwapModes.Rollback)) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
-        if (!File.Exists(_env.ScriptSourcePath)) return SwapLaunchResult.Refuse(SwapReasons.ScriptMissing);
-
-        var ticket = input.Ticket ?? NewTicket();
-        if (!TicketShape.IsMatch(ticket)) return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
+        if (app is null || slot is null or < 1) return SwapReasons.RequestInvalid;
+        if (!File.Exists(_env.ScriptSourcePath)) return SwapReasons.ScriptMissing;
 
         var work = Path.Combine(app, WorkFolderName);
         var run = Path.Combine(work, "run");
@@ -131,10 +186,72 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "[LocalSwap] 작업 폴더가 안전하지 않아 교체를 걸지 않았습니다(병렬이슈 01).");
-            return SwapLaunchResult.Refuse(SwapReasons.FolderUnsafe);
+            return SwapReasons.FolderUnsafe;
         }
+        return null;
+    }
 
-        if (CheckBusy() is { } busy) return SwapLaunchResult.Refuse(busy);
+    // ── 봉합 F-4 — 프로세스 안 예약(파일·작업 등록 0 · API 재시작이면 사라진다 · 교체가 시작되면 swap.lock 이 이어받는다) ──
+    private string? _reservedBy;
+    private DateTime _reservedAtUtc;
+
+    public bool TryReserve(string owner)
+    {
+        if (string.IsNullOrWhiteSpace(owner)) return false;
+        lock (_gate)
+        {
+            var now = _env.UtcNow;
+            ExpireReservation(now);
+            if (_reservedBy is not null && !string.Equals(_reservedBy, owner, StringComparison.Ordinal)) return false;
+            _reservedBy = owner;
+            _reservedAtUtc = now;
+            return true;
+        }
+    }
+
+    public void Release(string owner)
+    {
+        lock (_gate)
+        {
+            if (_reservedBy is not null && string.Equals(_reservedBy, owner, StringComparison.Ordinal)) _reservedBy = null;
+        }
+    }
+
+    private bool IsReservedByOther(string? owner, DateTime now)
+    {
+        lock (_gate)
+        {
+            ExpireReservation(now);
+            return _reservedBy is not null && (owner is null || !string.Equals(_reservedBy, owner, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>예약이 30분(<see cref="OpenRequestStale"/>) 넘게 갱신되지 않았으면 푼다 — 해제 누락이 영구 바쁨으로 번지지 않게. <c>_gate</c> 안에서만.</summary>
+    private void ExpireReservation(DateTime now)
+    {
+        if (_reservedBy is null) return;
+        var age = now - _reservedAtUtc;
+        if (age >= TimeSpan.Zero && age < OpenRequestStale) return;
+        _logger.LogWarning("[LocalSwap] 예약({Owner})이 {Min}분 넘게 풀리지 않아 없는 것으로 봅니다.", _reservedBy, OpenRequestStale.TotalMinutes);
+        _reservedBy = null;
+    }
+
+    private SwapLaunchResult LaunchCore(SwapLaunchInput input)
+    {
+        // 봉합 07 — 정적 판정은 CheckReady 한 벌(호출부가 받기·백업 전에 부르는 것과 같은 판정)
+        if (CheckReady() is { } notReady) return SwapLaunchResult.Refuse(notReady);
+        var app = _env.AppRoot!;
+        var slot = _env.Slot!;
+        if (input.Mode is not (SwapModes.Update or SwapModes.Rollback)) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
+
+        var ticket = input.Ticket ?? NewTicket();
+        if (!TicketShape.IsMatch(ticket)) return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
+
+        var work = Path.Combine(app, WorkFolderName);
+        var run = Path.Combine(work, "run");
+
+        // 봉합 F-4 — 자기 예약(input.Owner)은 바쁨으로 보지 않는다
+        if (CheckBusy(input.Owner) is { } busy) return SwapLaunchResult.Refuse(busy);
 
         var lockPath = Path.Combine(work, LockFileName);
         if (!TryCreateLock(lockPath, ticket)) return SwapLaunchResult.Refuse(SwapReasons.SwapInProgress);

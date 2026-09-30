@@ -11,6 +11,7 @@ public interface ILocalSwapLauncher
 {
     /// <summary>
     /// 지금 교체를 시작할 수 없는 이유. 없으면 null. 두 모드 공통(계약 §4 · G-U5 · 병렬이슈 03 쿨다운 포함).
+    /// 봉합 L: <b>누구의 예약이든</b>(<see cref="TryReserve"/>) 있으면 <c>swap_in_progress</c>.
     /// </summary>
     string? CheckBusy();
 
@@ -22,6 +23,29 @@ public interface ILocalSwapLauncher
     /// 실패하면 작업 등록 0 · 잠금 풀림.
     /// </summary>
     SwapLaunchResult Launch(SwapLaunchInput input);
+
+    // ── 20260930작1 봉합 07·F-4 런처 쪽(설계 §14-2 · 계약 §4 봉합 합의) — 호출부 연결은 갈래 M ──
+
+    /// <summary>
+    /// 사전 판정(07) — <see cref="Launch"/> 앞 정적 판정만: 윈도 아님 · 설치 루트·슬롯 없음 · 일꾼 원본 없음 · 작업 폴더 문지기 실패.
+    /// 되면 null. 바쁨은 보지 않는다(→ <see cref="CheckBusy()"/>). 호출부는 받기·백업·번호 발급 <b>전</b>, <see cref="CheckBusy()"/> 앞에서 부른다.
+    /// </summary>
+    string? CheckReady();
+
+    /// <summary>
+    /// <see cref="CheckBusy()"/> 와 같되 <paramref name="owner"/> 자신의 예약은 바쁨으로 보지 않는다(남의 예약만 <c>swap_in_progress</c>).
+    /// owner 가 null 이면 <see cref="CheckBusy()"/> 와 같다.
+    /// </summary>
+    string? CheckBusy(string? owner);
+
+    /// <summary>
+    /// 프로세스 안 예약(F-4) — 받기·백업처럼 교체 <b>전</b> 긴 준비 구간을 남이 끼어들지 못하게 잡는다.
+    /// 비었거나 같은 주인이면 잡고(시각 갱신) true · 남이 쥐고 있으면 false. 30분 갱신이 없으면 풀린 것으로 본다.
+    /// </summary>
+    bool TryReserve(string owner);
+
+    /// <summary>예약을 푼다 — 주인이 같을 때만(남의 것·빈 것은 무시).</summary>
+    void Release(string owner);
 }
 
 /// <summary>설치 환경 읽기 — 시험에서 대역으로 바꾼다.</summary>
