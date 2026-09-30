@@ -5,7 +5,7 @@
 | 작업 | 20260930작1 — 갈래 A(`LocalSwapLauncher`·`local-swap.ps1`) · 갈래 U(`manual\staging` · `usage.jsonl`) |
 | 검증 | [3-V] 보안상무 안철수 (hp-verifier) · 2026-09-30 |
 | 심각도 | 🔴 **상 (P0 후보)** — 이 PC 의 **관리자 아닌 Windows 사용자**(또는 그 권한으로 도는 악성 프로그램)가 **SYSTEM 권한 실행**을 얻는다 |
-| 상태 | 🔴미봉합 — 설계 단계 적발(코드 미착수 · 갈래 A worktree 변경 0) · 설계가 막는 방법을 적지 않았다 |
+| 상태 | 🟢봉합 확인(2차 코드 `3e81219c` · 기본 설치 경로 한정) — 작업·받는 폴더를 `{app}\rollback`·`{app}\manual\staging`(Program Files · Users 쓰기 0 실측)으로 옮김(`LocalSwapLauncher.cs:13-15,124-135` · `ManualFolders.cs:6-10,53-59`) · 쓰기 전 C-12 공용 판정(`BackupService.cs:815`) · 일꾼 S0 app_root·재료 경로 고정 대조(`local-swap.ps1:483-506`) · ⚠️잔여: 권고1 「개별 사용자 쓰기 줄도 거부」 미적용(`BackupService.cs:864-868` 은 개별 사용자 줄 허용) · ⚠️트랙 밖: 설치 경로를 `C:\HitPan` 등으로 고르면(`.iss` 폴더 페이지 안 숨김) C:\ 상속으로 Authenticated Users 수정권 — `{app}\api`(SYSTEM 실행)·일꾼 원본이 바뀐다(별건 파일 미작성 · 실설치 분포 미확인) · (1차: 🔴미봉합 — 설계 단계 적발) |
 | 근거 등급 | 실측(이 PC 폴더 권한 읽기) + 설계 추적 |
 
 ## 무엇이 문제인가
