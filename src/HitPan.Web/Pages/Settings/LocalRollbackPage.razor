@@ -1,0 +1,147 @@
+@page "/data/rollback"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 🔴 20260930작1 갈래 F — 자료관리 「이전 버전으로 되돌리기」 = 사장님 용어로 **수동 되돌리기**.
+     사장님 9/30 원문: "1. 바로 이전버젼으로 되돌리는 것으로 한정해야지. / 2. … 메인컴퓨터에 관리자만 가능해야됨 / 3. 경고는 당연히 해야지."
+     L-2(PM 결재): 업데이트가 안 막혔어도 **늘 열림** — 메인PC + 관리자 + 이전 판 재료가 있을 때(서버 판정).
+     경고는 두 번 보인다 — 화면에 늘 한 줄 + [예] 전 팝업(설계 §8 · §13-8).
+     되돌리기는 프로그램만 바꾼다 — 입력한 자료는 지워지지 않는다(설계 §0·§5). *@
+@attribute [Authorize]
+@using HitPan.Web.Helpers
+@inject LocalRollbackClient Api
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+
+<PageTitle>이전 버전으로 되돌리기</PageTitle>
+
+<MudPaper Elevation="0" Class="pa-4" Style="max-width:760px;">
+    <MudText Typo="Typo.h6" Class="mb-1">@LocalSwapUiText.MenuRollback</MudText>
+    <MudText Typo="Typo.body2" Class="mb-1">@LocalSwapUiText.FirstLine</MudText>
+    <MudText Typo="Typo.caption" Class="d-block mb-3" Style="color:var(--mud-palette-text-secondary)">@LocalSwapUiText.WhoCanUse</MudText>
+
+    <MudAlert Severity="Severity.Warning" Class="mb-3">
+        <div><b>@LocalSwapUiText.RollbackWarning</b></div>
+        <div>@LocalSwapUiText.DataKept</div>
+        <div>@LocalSwapUiText.RollbackOnlyOneStep</div>
+    </MudAlert>
+
+    @if (_roleChecking)
+    {
+        <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+    }
+    else if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">@LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonAdminOnly)</MudAlert>
+    }
+    else
+    {
+        <MainPcOnly OnAllowed="LoadAsync">
+            @if (_loading)
+            {
+                <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+            }
+            else if (_started)
+            {
+                <MudAlert Severity="Severity.Success">@LocalSwapUiText.RollbackStarted</MudAlert>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                    <tbody>
+                        <tr><td style="width:160px;">지금 쓰시는 버전</td><td><b>@(_status?.CurrentVersion ?? "-")</b></td></tr>
+                        <tr><td>되돌아갈 버전</td><td><b>@(_status?.TargetVersion ?? "-")</b></td></tr>
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_message is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@_message</MudAlert>
+                }
+
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">다시 확인</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_busy || !CanRollback"
+                               StartIcon="@Icons.Material.Filled.Restore" OnClick="StartAsync">@LocalSwapUiText.MenuRollback</MudButton>
+                </MudStack>
+            }
+        </MainPcOnly>
+    }
+</MudPaper>
+
+@code {
+    private bool _roleChecking = true;
+    private bool _isAdmin;
+    private bool _loading;
+    private bool _busy;
+    private bool _started;
+    private LocalRollbackStatus? _status;
+    private string? _message;
+
+    private bool CanRollback => _status is { CanRollback: true } && !string.IsNullOrWhiteSpace(_status.TargetVersion);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        _roleChecking = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _message = null;
+        StateHasChanged();
+
+        var r = await Api.GetStatusAsync();
+        _loading = false;
+
+        if (!r.Ok)
+        {
+            _status = null;
+            _message = r.Status == 0 ? LocalSwapUiText.CheckFailed : r.FailureText;
+            return;
+        }
+
+        _status = r.Data;
+        if (_status is { CanRollback: false })
+        {
+            // 재료 없음이 가장 흔하다 — 코드가 비어 있으면 그 문구로 본다(설계 §13 「되돌릴 이전 버전이 없습니다」).
+            _message = LocalSwapUiText.ReasonText(
+                string.IsNullOrWhiteSpace(_status.Reason) ? LocalSwapUiText.ReasonNoMaterial : _status.Reason);
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        if (_busy || !CanRollback) return;
+        var to = _status!.TargetVersion!;
+
+        var yes = await ConfirmDialog.ShowAsync(
+            Dialog,
+            title: LocalSwapUiText.MenuRollback,
+            message: LocalSwapUiText.RollbackConfirm(to),
+            confirmText: "예",
+            cancelText: "아니요",
+            severity: Severity.Warning);
+        if (!yes) return;
+
+        _busy = true;
+        try
+        {
+            var r = await Api.StartAsync(to);
+            if (r.Ok && r.Data?.Accepted == true)
+            {
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.RollbackStarted, Severity.Success);
+                return;
+            }
+
+            _message = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : r.FailureText;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
