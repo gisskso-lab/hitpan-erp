@@ -457,4 +457,265 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.Equal(0, rig.Run(ControlNoPartsAfter(), failAt));
         Assert.False(rig.PartsAfter().Present, "대조군인데 parts_after 칸이 있다 / " + Why(rig));
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 봉합3 C — 병렬이슈 15(M6 「보관 미완」 = 옛 판의 유일한 사본은 잔재가 아니다) · 16ⓐ(S0 정리 던짐 → broken 아님) · 설계 §16
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 C-0 실측(10/1): PS5.1 Move-Item 은 폴더 안 파일 하나가 FileShare.None 으로 쥐어져 있으면 던진다 — 단 다른 파일을 먼저 옮긴 뒤에
+    //    던진다(부분 이동). 그래서 일꾼 Complete-PrevGeneration 은 옮기기 전에 폴더가 비어 있는지(Test-DirFree) 보고, 반쯤 옮겨진 부분은 파일 단위로 합친다.
+
+    private const string OldGen = "1.3.45";
+
+    private static string Rbk(LocalSwapWorkerRig rig, string part) => Path.Combine(rig.App, part + ".rbk");
+
+    /// <summary><paramref name="gen"/>(<c>{part}\상대경로</c>)에서 한 부분만 떼어 <c>{part}\</c> 를 벗긴다.</summary>
+    private static Dictionary<string, string> PartOf(Dictionary<string, string> gen, string part) =>
+        gen.Where(kv => kv.Key.StartsWith(part + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+           .ToDictionary(kv => kv.Key.Substring(part.Length + 1), kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary><c>prev</c> 완성본: 세 부분 · <c>version.txt</c>=<paramref name="from"/> · <c>replaced-by.txt</c>=<paramref name="to"/> · <c>sha256.txt</c> 줄 수 = 시드 · 파일 해시 = 시드 · 표식 없음 · <c>.rbk</c> 없음.</summary>
+    private static void AssertPrevComplete(LocalSwapWorkerRig rig, Dictionary<string, string> gen, string from, string to, string why)
+    {
+        foreach (var p in new[] { "api", "web", "watchdog" })
+        {
+            Assert.True(Directory.Exists(Path.Combine(rig.PrevDir, p)), "prev\\" + p + " 가 없다 / " + why);
+            Assert.False(Directory.Exists(Rbk(rig, p)), p + ".rbk 가 남았다 / " + why);
+        }
+        Assert.Equal(from, File.ReadAllText(Path.Combine(rig.PrevDir, "version.txt")).Trim());
+        Assert.Equal(to, File.ReadAllText(Path.Combine(rig.PrevDir, "replaced-by.txt")).Trim());
+        var list = Path.Combine(rig.PrevDir, "sha256.txt");
+        Assert.True(File.Exists(list), "sha256.txt 가 없다 / " + why);
+        Assert.Equal(gen.Count, File.ReadAllLines(list).Count(l => !string.IsNullOrWhiteSpace(l)));
+        AssertSame(gen, rig.PrevParts(), "prev");
+        Assert.False(File.Exists(rig.PrevSavingPath), "보관 표식이 남았다 / " + why);
+    }
+
+    /// <summary>봉합3 대조군 — 성공 정리 재시도의 M6 보관 마침(15ⓒ)을 뺀 사본(재시도가 지우기로 돌아감 = 봉합3 전).</summary>
+    public static string ControlNoPrevRetry() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if ($null -ne $pm -and -not $pm.stale) { [void](Complete-PrevGeneration $pm.from $pm.to); continue }",
+        "# (control) seal3 15 (c) removed", "성공 재시도 보관 마침");
+
+    /// <summary>봉합3 대조군 — S0 의 M6 보관 마침(15ⓓ)을 뺀 사본(S0 가 M5 로 보고 지움 = 봉합3 전).</summary>
+    public static string ControlNoS0Finish() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if ($null -ne $mark -and -not $mark.stale) { if (-not (Complete-PrevGeneration $mark.from $mark.to)) { Write-Log 'S0 previous generation saving not finished - old folders kept'; return (Get-RbkLeftReason) } }",
+        "# (control) seal3 15 (d) removed", "S0 보관 마침");
+
+    /// <summary>봉합3 대조군 — 낡은 표식 판정에서 <c>to</c> 조건을 뺀 사본.</summary>
+    public static string ControlNoMarkToCheck() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if ($o.to -ne $live) { $stale = $true }", "# (control) mark to check removed", "표식 to 조건");
+
+    /// <summary>봉합3 대조군 — <c>Clear-Leftover</c> 자체 catch 가 다시 던지는 사본(= 봉합3 전: 본문 catch 가 broken).</summary>
+    public static string ControlNoOwnCatch() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "Write-Log ('S0 leftover cleanup threw: ' + $_.Exception.Message + ' - refused before anything is stopped')",
+        "throw", "S0 자체 catch");
+
+    // ── G-PV1 · G-PV2 — 같은 실행 안 보관 마침 / 끝내 못 마침(업데이트 모드) ──
+
+    [Fact(DisplayName = "봉합3 G-PV1 🚨 업데이트 첫 보관 중 web.rbk 파일 잠김(PVH) → 재시도가 보관을 마침 · success 사유 없음 · prev 세 부분+세 파일 · 표식·.rbk 없음 · prev 해시 = 옛 판")]
+    public void Prev_saving_is_finished_by_the_success_retry()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVH"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && string.IsNullOrEmpty(final.Reason), "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Contains("test hold", rig.Log());                                  // 주입이 실제로 걸렸다
+        Assert.Contains("previous generation not finished", rig.Log());          // 첫 보관은 실제로 못 마쳤다
+        AssertPrevComplete(rig, gen, LocalSwapWorkerRig.To, LocalSwapWorkerRig.From, why);
+    }
+
+    [Fact(DisplayName = "봉합3 G-PV1 대조군 🔴 재시도 보관 마침(15ⓒ) 뺀 사본 → web.rbk·watchdog.rbk 지워짐 · prev 반쪽(게이트가 FAIL 을 낸다)")]
+    public void Control_success_retry_deletes_the_old_generation()
+    {
+        using var rig = Make("update");
+        Assert.Equal(0, rig.Run(ControlNoPrevRetry(), "PVH"));
+        Assert.False(Directory.Exists(Rbk(rig, "watchdog")), "대조군에서 watchdog.rbk 가 안 지워졌다 / " + Why(rig));
+        Assert.False(Directory.Exists(Path.Combine(rig.PrevDir, "watchdog")), "대조군인데 prev\\watchdog 가 있다 / " + Why(rig));
+    }
+
+    [Fact(DisplayName = "봉합3 G-PV2 🚨 web.rbk 파일을 끝까지 쥠(PVHH) → success+cleanup_pending · web.rbk·watchdog.rbk 파일 수·해시 = 옛 판 · 표식 남음 · prev\\api 있음")]
+    public void Prev_saving_not_finished_keeps_the_old_generation()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVHH"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Contains("test hold", rig.Log());
+        Assert.Equal(3, rig.CountLog("success cleanup retry "));
+        AssertSame(PartOf(gen, "web"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")), "web.rbk");
+        AssertSame(PartOf(gen, "watchdog"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "watchdog")), "watchdog.rbk");
+        Assert.True(File.Exists(rig.PrevSavingPath), "보관 표식이 없다 / " + why);
+        Assert.True(Directory.Exists(Path.Combine(rig.PrevDir, "api")), "prev\\api 가 없다 / " + why);
+        AssertSame(PartOf(gen, "api"), LocalSwapWorkerRig.AllFiles(Path.Combine(rig.PrevDir, "api")), "prev\\api");
+    }
+
+    [Fact(DisplayName = "봉합3 G-PV2 대조군 🔴 재시도 보관 마침(15ⓒ) 뺀 사본 → 문지기가 watchdog.rbk 를 지움(게이트가 FAIL 을 낸다)")]
+    public void Control_success_retry_deletes_the_free_part()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(ControlNoPrevRetry(), "PVHH"));
+        Assert.NotEqual(PartOf(gen, "watchdog").Count, LocalSwapWorkerRig.AllFiles(Rbk(rig, "watchdog")).Count);
+    }
+
+    // ── G-PV3 · G-PV3b — 다음 교체 S0 가 보관을 마친다 / 못 마치면 정지 전 거부 ──
+
+    [Theory(DisplayName = "봉합3 G-PV3 🚨 보관 반쪽(prev\\api 만 · web.rbk·watchdog.rbk · 표식) → S0 가 보관 마침 · S1 까지 감(material_invalid) · prev 완성 · 표식·.rbk 없음 · /DISABLE 0")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Next_S0_finishes_the_prev_saving(string mode)
+    {
+        using var rig = Make(mode);
+        var live = rig.LiveVersion("api")!;
+        var gen = rig.SeedHalfPrev(OldGen);
+        Assert.Equal(0, rig.Run(null, "S1"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Refused && final.Reason == SwapReasons.MaterialInvalid, mode + ": 끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal("S1", final.Step);
+        Assert.Equal(0, rig.CountCalls("/DISABLE"));
+        AssertPrevComplete(rig, gen, OldGen, live, why);
+    }
+
+    [Theory(DisplayName = "봉합3 G-PV3 대조군 🔴 S0 보관 마침(15ⓓ) 뺀 사본 → S0 가 M5 로 보고 .rbk 를 지움 · prev 반쪽(게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Control_S0_deletes_the_half_saved_generation(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedHalfPrev(OldGen);
+        Assert.Equal(0, rig.Run(ControlNoS0Finish(), "S1"));
+        Assert.False(Directory.Exists(Rbk(rig, "web")), mode + ": 대조군에서 web.rbk 가 안 지워졌다 / " + Why(rig));
+        Assert.False(Directory.Exists(Path.Combine(rig.PrevDir, "web")));
+    }
+
+    [Theory(DisplayName = "봉합3 G-PV3b 🚨 보관 반쪽 + web.rbk 파일을 실행 내내 쥠 → refused/cleanup_pending · S0 · /DISABLE 0 · web.rbk·watchdog.rbk 그대로 · 표식 남음")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Next_S0_cannot_finish_and_refuses_before_stop(string mode)
+    {
+        using var rig = Make(mode);
+        var gen = rig.SeedHalfPrev(OldGen);
+        int exit;
+        using (new FileStream(Path.Combine(Rbk(rig, "web"), "web.bin"), FileMode.Open, FileAccess.Read, FileShare.None))
+            exit = rig.Run();
+        Assert.Equal(0, exit);
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Refused && final.Reason == CleanupPending, mode + ": 끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal("S0", final.Step);
+        Assert.Equal(0, rig.CountCalls("/DISABLE"));
+        Assert.Equal("Running", rig.ServiceState());
+        AssertSame(PartOf(gen, "web"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")), "web.rbk");
+        AssertSame(PartOf(gen, "watchdog"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "watchdog")), "watchdog.rbk");
+        Assert.True(File.Exists(rig.PrevSavingPath), "보관 표식이 없다 / " + why);
+        Assert.Empty(rig.LeftoverTasks());
+    }
+
+    [Theory(DisplayName = "봉합3 G-PV3b 대조군 🔴 S0 보관 마침(15ⓓ) 뺀 사본 → 쥔 web.rbk 만 남고 watchdog.rbk 지워짐(게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Control_S0_deletes_the_free_part(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedHalfPrev(OldGen);
+        using (new FileStream(Path.Combine(Rbk(rig, "web"), "web.bin"), FileMode.Open, FileAccess.Read, FileShare.None))
+            Assert.Equal(0, rig.Run(ControlNoS0Finish()));
+        Assert.False(Directory.Exists(Rbk(rig, "watchdog")), mode + ": 대조군에서 watchdog.rbk 가 안 지워졌다 / " + Why(rig));
+    }
+
+    // ── G-PV4 — 낡은 표식: 표식만 지우고 .rbk 는 M5 대로 · prev 무접촉 ──
+
+    private static LocalSwapWorkerRig MakeStaleMark(string kind, out Dictionary<string, string> prevLists)
+    {
+        var rig = Make("rollback");
+        switch (kind)
+        {
+            case "to-moved": // (i) 표식 to ≠ 지금 api 판(그 사이 워치독 업데이트가 판을 바꿈)
+                rig.SeedHalfPrev(OldGen, markTo: "1.3.46");
+                break;
+            case "prev-done": // (ii) prev 가 이미 완성본(sha256.txt 있음 · 다른 판)
+                rig.SeedHalfPrev(OldGen);
+                rig.MakePrev("1.3.44", "1.3.45");
+                File.WriteAllText(Path.Combine(rig.PrevDir, "sha256.txt"), "someone else's list\n");
+                break;
+            default: throw new ArgumentException(kind);
+        }
+        prevLists = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in LocalSwapWorkerRig.AllFiles(rig.PrevDir))
+            if (!kv.Key.Contains(Path.DirectorySeparatorChar)) prevLists[kv.Key] = kv.Value;
+        return rig;
+    }
+
+    [Theory(DisplayName = "봉합3 G-PV4 🚨 낡은 표식((i) to ≠ 지금 판 · (ii) prev 완성본) → 표식만 지움 · .rbk 는 M5 대로 치움 · prev 목록 파일 해시 그대로")]
+    [InlineData("to-moved")]
+    [InlineData("prev-done")]
+    public void Stale_mark_is_removed_alone(string kind)
+    {
+        using var rig = MakeStaleMark(kind, out var lists);
+        var prevApi = LocalSwapWorkerRig.AllFiles(Path.Combine(rig.PrevDir, "api"));
+        Assert.Equal(0, rig.Run(null, "S1"));
+        var why = Why(rig);
+        Assert.Equal(SwapReasons.MaterialInvalid, rig.Final().Reason);
+        Assert.False(File.Exists(rig.PrevSavingPath), kind + ": 표식이 남았다 / " + why);
+        Assert.False(Directory.Exists(Rbk(rig, "web")), kind + ": web.rbk 가 안 치워졌다 / " + why);
+        Assert.False(Directory.Exists(Rbk(rig, "watchdog")), kind + ": watchdog.rbk 가 안 치워졌다 / " + why);
+        var now = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in LocalSwapWorkerRig.AllFiles(rig.PrevDir))
+            if (!kv.Key.Contains(Path.DirectorySeparatorChar)) now[kv.Key] = kv.Value;
+        AssertSame(lists, now, kind + " prev 목록 파일");
+        AssertSame(prevApi, LocalSwapWorkerRig.AllFiles(Path.Combine(rig.PrevDir, "api")), kind + " prev\\api");
+        Assert.Contains("stale", rig.Log());
+    }
+
+    [Fact(DisplayName = "봉합3 G-PV4 대조군 🔴 표식 to 조건 뺀 사본 → (i) 에서 남의 판을 보관으로 마쳐 prev 에 목록 파일을 쓴다(게이트가 FAIL 을 낸다)")]
+    public void Control_without_to_check_writes_into_prev()
+    {
+        using var rig = MakeStaleMark("to-moved", out var lists);
+        Assert.Empty(lists);
+        Assert.Equal(0, rig.Run(ControlNoMarkToCheck(), "S1"));
+        Assert.True(File.Exists(Path.Combine(rig.PrevDir, "version.txt")), "대조군인데 prev 에 version.txt 가 안 생겼다 / " + Why(rig));
+    }
+
+    // ── G-S0X — S0 정리가 던지면 broken 이 아니라 정지 전 정직한 거부 ──
+
+    [Theory(DisplayName = "봉합3 G-S0X 🚨 S0 정리 던짐(LOTHROW) → refused · cleanup_pending(첨부 있으면 carry_pending) · step S0 · broken 0 · /DISABLE 0 · api.rbk 그대로")]
+    [InlineData("rollback", true)]
+    [InlineData("rollback", false)]
+    [InlineData("update", true)]
+    [InlineData("update", false)]
+    public void S0_cleanup_throw_is_refused_not_broken(string mode, bool withCarry)
+    {
+        using var rig = Make(mode);
+        rig.SeedLeftoverRbk(withCarry);
+        var before = LocalSwapWorkerRig.AllFiles(ApiRbk(rig));
+        Assert.Equal(0, rig.Run(null, "LOTHROW"));
+        var final = rig.Final();
+        var why = Why(rig);
+        var want = withCarry ? CarryPending : CleanupPending;
+        Assert.True(final.State == SwapStates.Refused && final.Reason == want, mode + "/" + withCarry + ": 끝 " + final.State + "/" + final.Reason + " (기대 refused/" + want + ") / " + why);
+        Assert.Equal("S0", final.Step);
+        Assert.Equal(0, rig.CountCalls("/DISABLE"));
+        Assert.Equal("Running", rig.ServiceState());
+        Assert.Contains("injected LOTHROW", rig.Log());
+        AssertSame(before, LocalSwapWorkerRig.AllFiles(ApiRbk(rig)), "api.rbk");
+        Assert.Empty(rig.LeftoverTasks());
+    }
+
+    [Theory(DisplayName = "봉합3 G-S0X 대조군 🔴 자체 catch 가 다시 던지는 사본 → broken/revert_failed step S0(게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Control_S0_throw_ends_broken(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedLeftoverRbk();
+        Assert.Equal(0, rig.Run(ControlNoOwnCatch(), "LOTHROW"));
+        var final = rig.Final();
+        Assert.Equal(SwapStates.Broken, final.State);
+        Assert.Equal(SwapReasons.RevertFailed, final.Reason);
+        Assert.Equal("S0", final.Step);
+    }
 }

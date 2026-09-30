@@ -29,6 +29,9 @@
 #   is skipped (it stays in api.rbk), RBKH = while the success cleanup runs, one program file at the top of
 #   api.rbk is held open (FileShare.None), RBKHC = the same for one file under api.rbk\chat-files (when no
 #   leftover was there at S0; the S0 side of RBKHC is lane A1).
+#   Seal round 3 lane C (design 16-1 15/16): PVH = one file in web.rbk is held open (FileShare.None) during the
+#   first prev saving of an update and let go before the success retries, PVHH = the same file held to the end of the
+#   success cleanup, LOTHROW = the S0 leftover cleanup throws after its list (before the first delete).
 
 [CmdletBinding()]
 param(
@@ -753,7 +756,8 @@ function Test-UpdateBusy {
 # Only this worker makes .rbk folders and swaps run one at a time (swap.lock), so a .rbk seen at S0 belongs
 # to an EARLIER swap that ended or was cut off.
 #   M1 no .rbk | M2 a .rbk and a live program folder is missing | M3 live api/watchdog versions differ or
-#   are unreadable | M5 anything else = a leftover (not busy) that Clear-Leftover takes away.
+#   are unreadable | M6 (seal3) the old generation whose saving into prev did not finish (Clear-Leftover finishes it) |
+#   M5 anything else = a leftover (not busy) that Clear-Leftover takes away.
 # M4 (last request broken and nothing changed since) is judged by the launcher only (design 15-4).
 function Get-LeftoverShape {
     $any = $false
@@ -763,6 +767,11 @@ function Get-LeftoverShape {
     $a = Get-PartVersion (Join-Path $script:AppRoot 'api') 'api'
     $w = Get-PartVersion (Join-Path $script:AppRoot 'watchdog') 'watchdog'
     if ($null -eq $a -or $null -eq $w -or $a -ne $w) { return 'M3' }
+    # seal3 15 (design 16-0): M6 = the .rbk folders are the old generation whose saving into prev did not finish
+    # (the mark written before the move is still there, it names the live version and prev has no sha256.txt).
+    # Not a leftover: Clear-Leftover finishes the saving instead of deleting them. Not busy either (like M5).
+    $mark = Get-PrevSavingMark
+    if ($null -ne $mark -and -not $mark.stale) { return 'M6' }
     return 'M5'
 }
 
@@ -806,29 +815,52 @@ function Open-TestHold([string]$dir) {
 # Every delete goes through the gatekeeper (customer data is carried to the live {app}\api first). A .rbk with a
 # file in use is not touched at all (no half carry). Returns $null when nothing is left, otherwise the honest
 # reason: carry_pending (customer data still inside api.rbk) or cleanup_pending (program files only).
+#
+# seal3 16 (a): the whole body runs in its own try/catch. A throw here (a folder listing, a file check) used to reach
+# the main catch and end broken/revert_failed at S0 although nothing was stopped or swapped. Now it is refused at S0
+# with the honest reason (Get-RbkLeftReason; cleanup_pending when that throws too or nothing is left to name).
+# seal3 15 (d)(e): the prev-saving mark is looked at first. A live mark (M6) = the .rbk folders are the old generation:
+# the saving is finished (they are not deleted); if it cannot be finished the swap is refused here (nothing stopped).
+# A stale mark is removed alone - the .rbk folders then go the M5 way and prev is not touched.
 function Clear-Leftover {
-    $left = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
-    if ($left.Count -eq 0) { return $null }
-    if (Test-FailAt 'LOSKIP') { Write-Log 'injected LOSKIP: S0 leftover cleanup skipped'; return $null }
-    $hold = $null
-    if (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
     try {
-        foreach ($p in $left) {
-            $rbk = Join-Path $script:AppRoot ($p + '.rbk')
-            if (-not (Test-DirFree $rbk)) { Write-Log ('S0 leftover ' + $rbk + ' kept: a file in it is in use'); continue }
-            if (Remove-AppDirSafe $rbk) { Write-Log ('S0 leftover ' + $rbk + ' cleared') }
+        $mark = Get-PrevSavingMark
+        if ($null -ne $mark -and $mark.stale) {
+            Write-Log ('S0 prev-saving mark is stale (from=' + $mark.from + ' to=' + $mark.to + ') - mark removed, prev untouched')
+            try { Remove-Item -LiteralPath $mark.path -Force }
+            catch { Write-Log ('S0 stale prev-saving mark delete failed (judged stale again next time): ' + $_.Exception.Message) }
         }
-    } finally {
-        if ($null -ne $hold) { $hold.Dispose() }
+        if ($null -ne $mark -and -not $mark.stale) { if (-not (Complete-PrevGeneration $mark.from $mark.to)) { Write-Log 'S0 previous generation saving not finished - old folders kept'; return (Get-RbkLeftReason) } }
+        $left = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+        if ($left.Count -eq 0) { return $null }
+        if (Test-FailAt 'LOSKIP') { Write-Log 'injected LOSKIP: S0 leftover cleanup skipped'; return $null }
+        if (Test-FailAt 'LOTHROW') { throw 'injected LOTHROW: S0 leftover cleanup threw' }
+        $hold = $null
+        if (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
+        try {
+            foreach ($p in $left) {
+                $rbk = Join-Path $script:AppRoot ($p + '.rbk')
+                if (-not (Test-DirFree $rbk)) { Write-Log ('S0 leftover ' + $rbk + ' kept: a file in it is in use'); continue }
+                if (Remove-AppDirSafe $rbk) { Write-Log ('S0 leftover ' + $rbk + ' cleared') }
+            }
+        } finally {
+            if ($null -ne $hold) { $hold.Dispose() }
+        }
+        $still = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+        if ($still.Count -eq 0) { return $null }
+        $apiRbk = Join-Path $script:AppRoot 'api.rbk'
+        if (Test-Path -LiteralPath $apiRbk) {
+            foreach ($a in @(Get-CarryApiDirs $apiRbk)) { if (Test-HasCarryData $a) { Write-Log 'S0 leftover not cleared: customer data still in api.rbk'; return 'carry_pending' } }
+        }
+        Write-Log ('S0 leftover not cleared: ' + ($still -join ','))
+        return 'cleanup_pending'
+    } catch {
+        Write-Log ('S0 leftover cleanup threw: ' + $_.Exception.Message + ' - refused before anything is stopped')
+        $r = $null
+        try { $r = Get-RbkLeftReason } catch { Write-Log ('S0 leftover reason check threw too: ' + $_.Exception.Message) }
+        if ($null -eq $r) { $r = 'cleanup_pending' }
+        return $r
     }
-    $still = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
-    if ($still.Count -eq 0) { return $null }
-    $apiRbk = Join-Path $script:AppRoot 'api.rbk'
-    if (Test-Path -LiteralPath $apiRbk) {
-        foreach ($a in @(Get-CarryApiDirs $apiRbk)) { if (Test-HasCarryData $a) { Write-Log 'S0 leftover not cleared: customer data still in api.rbk'; return 'carry_pending' } }
-    }
-    Write-Log ('S0 leftover not cleared: ' + ($still -join ','))
-    return 'cleanup_pending'
 }
 
 # ======================================================================================
@@ -873,9 +905,81 @@ function Save-PrevGeneration {
             return
         }
         New-Item -ItemType Directory -Path $prev -Force | Out-Null
-        foreach ($p in $Parts) { Move-Part (Join-Path $script:AppRoot ($p + '.rbk')) (Join-Path $prev $p) }
-        [System.IO.File]::WriteAllText((Join-Path $prev 'version.txt'), [string]$script:Req.from, $Utf8)
-        [System.IO.File]::WriteAllText((Join-Path $prev 'replaced-by.txt'), [string]$script:Req.to, $Utf8)
+        # seal3 15 (a): the mark is written BEFORE anything moves and removed only after sha256.txt is written, so a throw
+        # or a power cut half way leaves it behind - the .rbk folders are then known to be the old generation (M6).
+        [System.IO.File]::WriteAllText((Get-PrevSavingPath), ([string]$script:Req.from + '|' + [string]$script:Req.to + '|' + $Ticket), $Utf8)
+        # test only (PVH): one file in web.rbk is held during this first try and let go before the retries
+        $hold = $null
+        if (Test-FailAt 'PVH') { $hold = Open-TestHold (Join-Path $script:AppRoot 'web.rbk') }
+        try { [void](Complete-PrevGeneration ([string]$script:Req.from) ([string]$script:Req.to)) }
+        finally { if ($null -ne $hold) { $hold.Dispose() } }
+    } catch {
+        # preservation never flips a successful swap (best effort, same as the watchdog)
+        Write-Log ('previous generation save failed: ' + $_.Exception.Message)
+    }
+}
+
+# ---- seal3 15 (design 16-0): the prev-saving mark {app}\rollback\prev-saving.txt = "from|to|ticket" (one line) ----
+function Get-PrevSavingPath { return (Join-Path $script:AppRoot 'rollback\prev-saving.txt') }
+
+# Reads the mark. $null = no mark. Otherwise from, to, ticket, path and stale: $true when the mark no longer names the
+# live generation - unreadable, its "to" is not the live api version (a watchdog update moved on since) or
+# prev\sha256.txt is there (someone finished a prev already; it is not ours to overwrite). Never throws.
+function Get-PrevSavingMark {
+    try {
+        $path = Get-PrevSavingPath
+        if (-not (Test-Path -LiteralPath $path)) { return $null }
+        $o = [ordered]@{ from = $null; to = $null; ticket = $null; path = $path; stale = $true }
+        try {
+            $f = ([System.IO.File]::ReadAllText($path, $Utf8)).Trim().Split('|')
+            if ($f.Length -ge 3) { $o.from = ConvertTo-NormVersion $f[0]; $o.to = ConvertTo-NormVersion $f[1]; $o.ticket = $f[2] }
+            $live = Get-PartVersion (Join-Path $script:AppRoot 'api') 'api'
+            $stale = ($null -eq $o.from -or $null -eq $o.to -or $null -eq $live)
+            if ($o.to -ne $live) { $stale = $true }
+            if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'rollback\prev\sha256.txt')) { $stale = $true }
+            $o.stale = $stale
+        } catch { Write-Log ('prev-saving mark unreadable (judged stale): ' + $_.Exception.Message) }
+        return (New-Object PSObject -Property $o)
+    } catch {
+        Write-Log ('prev-saving mark check failed: ' + $_.Exception.Message)
+        return $null
+    }
+}
+
+# seal3 15 (b): finish saving the old generation (the .rbk folders) into {app}\rollback\prev. Idempotent - it can be
+# called again after any half way stop - and never throws ($false + a log line when it could not finish).
+#  - a part whose prev\{p} is missing: {p}.rbk is moved as a whole, only when no file in it is in use (C-0: Move-Item
+#    of a folder with a held file throws AFTER moving the other files - it would split the part in two)
+#  - a part that is in both places (a move cut off half way): the files left in {p}.rbk are moved in one by one, never
+#    over a file that is already in prev\{p}; {p}.rbk goes when no file is left in it
+#  - all three parts in prev: version.txt (from) / replaced-by.txt (to) / sha256.txt, then the mark is removed LAST.
+function Complete-PrevGeneration([string]$from, [string]$to) {
+    try {
+        $prev = Join-Path $script:AppRoot 'rollback\prev'
+        if (-not (Test-Path -LiteralPath $prev)) { New-Item -ItemType Directory -Path $prev -Force | Out-Null }
+        foreach ($p in $Parts) {
+            $rbk = Join-Path $script:AppRoot ($p + '.rbk')
+            $dst = Join-Path $prev $p
+            if (-not (Test-Path -LiteralPath $rbk)) { continue }
+            if (-not (Test-DirFree $rbk)) { Write-Log ('previous generation not finished: a file in ' + $rbk + ' is in use'); return $false }
+            if (-not (Test-Path -LiteralPath $dst)) { Move-Item -LiteralPath $rbk -Destination $dst; continue }
+            $base = (Get-Item -LiteralPath $rbk -Force).FullName.TrimEnd('\')
+            foreach ($f in @(Get-ChildItem -LiteralPath $rbk -Recurse -File -Force)) {
+                $target = Join-Path $dst ($f.FullName.Substring($base.Length).TrimStart('\'))
+                if (Test-Path -LiteralPath $target) { Write-Log ('previous generation not finished: ' + $target + ' is already there'); return $false }
+                $parent = Split-Path -Parent $target
+                if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                Move-Item -LiteralPath $f.FullName -Destination $target
+            }
+            if ($null -ne (Get-ChildItem -LiteralPath $rbk -Recurse -File -Force | Select-Object -First 1)) { Write-Log ('previous generation not finished: files left in ' + $rbk); return $false }
+            Remove-Item -LiteralPath $rbk -Recurse -Force
+            Write-Log ('previous generation: the rest of ' + $rbk + ' moved into ' + $dst)
+        }
+        foreach ($p in $Parts) {
+            if (-not (Test-Path -LiteralPath (Join-Path $prev $p))) { Write-Log ('previous generation not finished: prev\' + $p + ' missing'); return $false }
+        }
+        [System.IO.File]::WriteAllText((Join-Path $prev 'version.txt'), $from, $Utf8)
+        [System.IO.File]::WriteAllText((Join-Path $prev 'replaced-by.txt'), $to, $Utf8)
         $sb = New-Object System.Text.StringBuilder
         foreach ($p in $Parts) {
             foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $prev $p) -Recurse -File -Force)) {
@@ -884,10 +988,13 @@ function Save-PrevGeneration {
             }
         }
         [System.IO.File]::WriteAllText((Join-Path $prev 'sha256.txt'), $sb.ToString(), $Utf8)
+        $mk = Get-PrevSavingPath
+        if (Test-Path -LiteralPath $mk) { Remove-Item -LiteralPath $mk -Force }
         Write-Log 'previous generation saved'
+        return $true
     } catch {
-        # preservation never flips a successful swap (best effort, same as the watchdog)
-        Write-Log ('previous generation save failed: ' + $_.Exception.Message)
+        Write-Log ('previous generation save not finished: ' + $_.Exception.Message)
+        return $false
     }
 }
 
@@ -939,6 +1046,12 @@ function Get-SuccessLeftover {
         if ($left.Count -eq 0) { return $null }
         Write-Log ('success cleanup retry ' + $i + '/' + $SuccessRetryCount + ': ' + ($left -join ','))
         if ($SuccessRetrySeconds -gt 0) { Start-Sleep -Seconds $SuccessRetrySeconds }
+        # seal3 15 (c): in update mode the .rbk folders under a live prev-saving mark (M6) are the only copy of the old
+        # generation - the retry finishes the saving, it never deletes them. Not finished = they stay as they are.
+        if ($Mode -eq 'update') {
+            $pm = Get-PrevSavingMark
+            if ($null -ne $pm -and -not $pm.stale) { [void](Complete-PrevGeneration $pm.from $pm.to); continue }
+        }
         foreach ($p in $left) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
     }
     return (Get-RbkLeftReason)
@@ -959,6 +1072,7 @@ function Invoke-SuccessCleanup {
     $hold = $null
     if (Test-FailAt 'RBKH') { $hold = Open-TestHoldTop (Join-Path $script:AppRoot 'api.rbk') }
     elseif (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
+    elseif (Test-FailAt 'PVHH') { $hold = Open-TestHold (Join-Path $script:AppRoot 'web.rbk') } # seal3: held to the end
     try {
         Clear-AfterSuccess | Out-Null
         return (Get-SuccessLeftover)

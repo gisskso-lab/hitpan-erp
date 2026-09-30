@@ -355,6 +355,54 @@ internal sealed class LocalSwapWorkerRig : IDisposable
         return File.Exists(f) ? File.ReadAllText(f).Trim() : null;
     }
 
+    // ── 작1 봉합3 C 도우미(G-PV1~PV4 · G-PV3b · 설계 §16) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    public string PrevDir => Path.Combine(Work, "prev");
+
+    /// <summary>보관 표식 <c>{app}\rollback\prev-saving.txt</c>(<c>from|to|ticket</c> 한 줄 · 일꾼 <c>Get-PrevSavingPath</c> 와 같은 자리).</summary>
+    public string PrevSavingPath => Path.Combine(Work, "prev-saving.txt");
+
+    /// <summary>
+    /// 옛 판 <paramref name="oldVersion"/> 의 보관이 반쯤 멈춘 모양(M6) — <c>prev\api</c> 만 옛 판 · <c>{app}\web.rbk</c>·<c>watchdog.rbk</c> = 옛 판 ·
+    /// 표식 <c>old|markTo|옛 번호</c>(<paramref name="markTo"/> 가 없으면 지금 api 판). 부분마다 파일 둘(맨 위 + <c>lib\</c> 아래) · 옛 <c>prev</c> 는 먼저 지운다.
+    /// 돌려주는 값 = <c>prev</c> 기준 상대경로(<c>api\api.bin</c> …) → SHA-256, 세 부분 전부.
+    /// </summary>
+    public Dictionary<string, string> SeedHalfPrev(string oldVersion, string? markTo = null)
+    {
+        if (Directory.Exists(PrevDir)) Directory.Delete(PrevDir, recursive: true);
+        var gen = Path.Combine(Root, "oldgen");
+        foreach (var p in new[] { "api", "web", "watchdog" })
+        {
+            Part(gen, p, p == "web" ? null : oldVersion);
+            var lib = Path.Combine(gen, p, "lib");
+            Directory.CreateDirectory(lib);
+            File.WriteAllText(Path.Combine(lib, p + "-lib.dll"), p + "-lib-" + oldVersion + "-" + Guid.NewGuid());
+        }
+        var seed = AllFiles(gen);
+        Directory.CreateDirectory(PrevDir);
+        Directory.Move(Path.Combine(gen, "api"), Path.Combine(PrevDir, "api"));
+        Directory.Move(Path.Combine(gen, "web"), Path.Combine(App, "web.rbk"));
+        Directory.Move(Path.Combine(gen, "watchdog"), Path.Combine(App, "watchdog.rbk"));
+        Directory.Delete(gen, recursive: true);
+        File.WriteAllText(PrevSavingPath, oldVersion + "|" + (markTo ?? LiveVersion("api")) + "|" + LocalSwapLauncher.NewTicket());
+        return seed;
+    }
+
+    /// <summary>살아 있는 세 폴더의 파일 — <c>{part}\상대경로</c> → SHA-256(업데이트 전 = 곧 보관될 옛 판).</summary>
+    public Dictionary<string, string> LiveGeneration()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in new[] { "api", "web", "watchdog" })
+            foreach (var kv in AllFiles(Path.Combine(App, p)))
+                map[Path.Combine(p, kv.Key)] = kv.Value;
+        return map;
+    }
+
+    /// <summary><c>prev</c> 안 세 부분의 파일만(목록 파일 셋 제외) — 상대경로 → SHA-256.</summary>
+    public Dictionary<string, string> PrevParts() =>
+        AllFiles(PrevDir).Where(kv => kv.Key.Contains(Path.DirectorySeparatorChar))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
     public string Calls()
     {
         var f = Path.Combine(Root, "calls.log");
