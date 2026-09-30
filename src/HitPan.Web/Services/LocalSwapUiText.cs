@@ -33,6 +33,11 @@ public static class LocalSwapUiText
     public const string ApiUpdateStatus = "api/system/manual-update/status";
     public const string ApiUpdateStart = "api/system/manual-update";
 
+    /// <summary>
+    /// 🔴 [3-V] 적발 04 반영(PM 9/30) — [예] 요청 본문. 버전·경로·주소를 싣지 않는다(서버가 계산 · 화면 값 불신).
+    /// </summary>
+    public static readonly object EmptyBody = new { };
+
     // ───────────── 메뉴 · 첫 줄 (설계 §13-8) ─────────────
     public const string MenuUpdate = "최신 버전 확인/업데이트";
     public const string MenuRollback = "이전 버전으로 되돌리기";
@@ -172,6 +177,10 @@ public static class LocalSwapUiText
     /// <summary>
     /// 로그인 뒤 목적지(L-1 (가)) — 로그인창 [최신버젼업데이트] 를 눌렀으면 <see cref="UpdatePath"/>, 아니면 첫 화면.
     /// </summary>
+    /// <remarks>
+    /// 🔴 [3-V] 적발 04 반영(PM 9/30) — <b>고정 경로 둘 중 하나만</b> 돌려준다. 주소창 <c>returnUrl</c> 같은 바깥 값을
+    /// 받지 않는다(열린 이동 금지). 약관·승인 대기·첫 설정 이동은 <c>Login.razor</c> 에서 이보다 먼저 간다.
+    /// </remarks>
     public static string PostLoginPath(bool goManualUpdate) => goManualUpdate ? UpdatePath : "/";
 
     private static string Ver(string? v) => string.IsNullOrWhiteSpace(v) ? "확인 중" : v.Trim();

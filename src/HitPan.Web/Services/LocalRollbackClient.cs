@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 
 namespace HitPan.Web.Services;
@@ -17,9 +18,13 @@ public sealed class LocalRollbackClient(HttpClient http, ILogger<LocalRollbackCl
         LocalSwapCall.GetAsync<LocalRollbackStatus>(http, logger, LocalSwapUiText.ApiRollbackStatus, ct);
 
     /// <summary>[예] 뒤 — 서버가 전제를 다시 판정한다(화면 값 불신 · 설계 §2).</summary>
-    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(string targetVersion, CancellationToken ct = default) =>
+    /// <remarks>
+    /// 🔴 [3-V] 적발 04 반영(PM 지시 9/30) — 화면은 버전·경로를 요청 본문에 <b>싣지 않는다</b>. 무엇으로 되돌릴지는 서버가 계산한다.
+    /// 본문은 빈 객체 하나(<see cref="LocalSwapUiText.EmptyBody"/>).
+    /// </remarks>
+    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(CancellationToken ct = default) =>
         LocalSwapCall.PostAsync<LocalSwapStartResult>(
-            http, logger, LocalSwapUiText.ApiRollbackStart, new { targetVersion }, ct);
+            http, logger, LocalSwapUiText.ApiRollbackStart, LocalSwapUiText.EmptyBody, ct);
 }
 
 /// <summary>되돌리기 상태(잠정 DTO — 계약 대조 필요).</summary>

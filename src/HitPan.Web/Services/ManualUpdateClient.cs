@@ -1,30 +1,33 @@
+﻿using Microsoft.Extensions.Logging;
+
 namespace HitPan.Web.Services;
 
 /// <summary>
-/// 🔴 20260930작1 갈래 F — 「최신 버전 확인/업데이트」(수동 업데이트) 화면이 부르는 API.
+/// ?뵶 20260930?? 媛덈옒 F ???뚯턀??踰꾩쟾 ?뺤씤/?낅뜲?댄듃???섎룞 ?낅뜲?댄듃) ?붾㈃??遺瑜대뒗 API.
 /// </summary>
 /// <remarks>
 /// <para>
-/// 사장님 용어(9/30): <b>자동</b> = 로그인 팝업 · <b>수동</b> = 메뉴로 직접. 이 클라이언트는 수동 쪽이다.
-/// 자동 경로(<c>update-consent</c> · <c>update-consent-local</c>)는 <b>부르지 않는다</b>(G-43 · G-L1).
+/// ?ъ옣???⑹뼱(9/30): <b>?먮룞</b> = 濡쒓렇???앹뾽 쨌 <b>?섎룞</b> = 硫붾돱濡?吏곸젒. ???대씪?댁뼵?몃뒗 ?섎룞 履쎌씠??
+/// ?먮룞 寃쎈줈(<c>update-consent</c> 쨌 <c>update-consent-local</c>)??<b>遺瑜댁? ?딅뒗??/b>(G-43 쨌 G-L1).
 /// </para>
 /// <para>
-/// 문(門)은 서버가 막는다 — <c>TenantAdminOnly</c> + <c>[MainPcOnly]</c>(설계 §13-4). 주소·필드는 잠정 — 갈래 A·U 계약 대조 필요.
+/// 臾??)? ?쒕쾭媛 留됰뒗????<c>TenantAdminOnly</c> + <c>[MainPcOnly]</c>(?ㅺ퀎 짠13-4). 二쇱냼쨌?꾨뱶???좎젙 ??媛덈옒 A쨌U 怨꾩빟 ?議??꾩슂.
 /// </para>
 /// </remarks>
 public sealed class ManualUpdateClient(HttpClient http, ILogger<ManualUpdateClient> logger)
 {
-    /// <summary>지금 판 · 받을 수 있는 최신 판 · 시작 가능 여부 · 안 되면 사유 코드 · 지난번 수동 업데이트 결과.</summary>
+    /// <summary>吏湲???쨌 諛쏆쓣 ???덈뒗 理쒖떊 ??쨌 ?쒖옉 媛???щ? 쨌 ???섎㈃ ?ъ쑀 肄붾뱶 쨌 吏?쒕쾲 ?섎룞 ?낅뜲?댄듃 寃곌낵.</summary>
     public Task<LocalSwapCallResult<ManualUpdateStatus>> CheckAsync(CancellationToken ct = default) =>
         LocalSwapCall.GetAsync<ManualUpdateStatus>(http, logger, LocalSwapUiText.ApiUpdateStatus, ct);
 
-    /// <summary>[예] 뒤 — 서버가 서명·해시·백업을 거친 뒤에만 교체 작업을 건다(설계 §13-2).</summary>
-    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(string toVersion, CancellationToken ct = default) =>
+    /// <summary>[?? ?????쒕쾭媛 ?쒕챸쨌?댁떆쨌諛깆뾽??嫄곗튇 ?ㅼ뿉留?援먯껜 ?묒뾽??嫄대떎(?ㅺ퀎 짠13-2).</summary>
+    /// <remarks>?뵶 [3-V] ?곷컻 04 諛섏쁺 ??踰꾩쟾쨌寃쎈줈瑜?蹂몃Ц???ｌ? ?딅뒗??諛쏆쓣 ?먯? ?쒕쾭媛 ?쇰뱶?먯꽌 怨꾩궛 쨌 蹂몃Ц = 鍮?媛앹껜).</remarks>
+    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(CancellationToken ct = default) =>
         LocalSwapCall.PostAsync<LocalSwapStartResult>(
-            http, logger, LocalSwapUiText.ApiUpdateStart, new { toVersion }, ct);
+            http, logger, LocalSwapUiText.ApiUpdateStart, LocalSwapUiText.EmptyBody, ct);
 }
 
-/// <summary>수동 업데이트 상태(잠정 DTO — 계약 대조 필요).</summary>
+/// <summary>?섎룞 ?낅뜲?댄듃 ?곹깭(?좎젙 DTO ??怨꾩빟 ?議??꾩슂).</summary>
 public sealed class ManualUpdateStatus
 {
     public string? CurrentVersion { get; set; }
@@ -33,7 +36,7 @@ public sealed class ManualUpdateStatus
     public bool CanStart { get; set; }
     public string? Reason { get; set; }
 
-    /// <summary>지난번 수동 업데이트가 실패해 원래 판으로 돌려 두었으면 true(설계 §13-8 「업데이트 실패」 문구).</summary>
+    /// <summary>吏?쒕쾲 ?섎룞 ?낅뜲?댄듃媛 ?ㅽ뙣???먮옒 ?먯쑝濡??뚮젮 ?먯뿀?쇰㈃ true(?ㅺ퀎 짠13-8 ?뚯뾽?곗씠???ㅽ뙣??臾멸뎄).</summary>
     public bool LastFailedRestored { get; set; }
     public string? LastFromVersion { get; set; }
 }

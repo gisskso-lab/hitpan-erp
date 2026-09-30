@@ -142,7 +142,7 @@
         _busy = true;
         try
         {
-            var r = await Api.StartAsync(to);
+            var r = await Api.StartAsync();   // 🔴 적발 04 — 버전은 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용)
             if (r.Ok && r.Data?.Accepted == true)
             {
                 _started = true;
