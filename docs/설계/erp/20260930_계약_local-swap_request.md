@@ -44,6 +44,14 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | 수동 기록(한 파일) | `{app}\rollback\usage.jsonl` | 일꾼(넘긴 뒤 끝 상태 한 줄) · API `ManualUsageLog`(넘기기 전 거부 한 줄) — 덧붙이기만 · 한 사용 = 한 줄 |
 | 수동 받는 곳 | `{app}\manual\staging\` | U(다운로드 · `{app}\manual` 부터 공용 판정) — 일꾼은 update 성공 뒤 그 zip 만 지운다 |
 | 워치독 받는 곳(재료 ②) | `%SystemRoot%\System32\config\systemprofile\AppData\Local\HitPan\Updates\staging\hitpan-{V}.zip` | 워치독(읽기만 · 삭제·수정 0) |
+| 판 이력(봉합 05ⓑ) | `{app}\rollback\versions-seen.txt` | API 기동(갈래 M `InstalledVersionLedger`) — 읽기 = `RollbackMaterialFinder`(L) · 일꾼 S1(K2) |
+
+> 🟢 **봉합 차수 합의(9/30 작1 봉합 · 설계 §14-1 05 · 갈래 L 이 먼저 적는다 — K·M 은 이 절을 읽고 맞춘다)** — `versions-seen.txt`
+> - 위치 `{app}\rollback\versions-seen.txt`(파일 이름 상수 = `LocalSwapLauncher.VersionsSeenFileName`). 쓰기 전 폴더 문지기 `EnsureSafe(work)` — 실패하면 **안 쓰고 경고 로그만**(기동을 막지 않는다 · PM 결재 S-2).
+> - 한 줄 = `{M.m.b}|{UTC o}`(예 `1.3.49|2026-09-30T13:00:00.0000000Z`) · 줄바꿈 `\r\n` · UTF-8(BOM 없음) · ASCII 로만. **덧붙이기만**(고치기·지우기 0 · 일꾼도 안 지운다).
+> - 기록기(M): API 기동 때 자기 판(`VersionInfo.Current` 세 칸)을 적는다. **마지막 줄의 판과 같으면 안 쓴다.**
+> - 읽는 쪽(L·K2): 칸이 두 개가 아니거나 판이 `M.m.b` 로 안 읽히는 줄은 **건너뛴다**. 읽힌 줄 가운데 **마지막 줄 판 = 지금 판**일 때만, 그 위로 올라가며 처음 만나는 **지금 판과 다른 판 = 직전 설치 판**. 마지막 줄 ≠ 지금 판 · 읽힌 줄이 하나뿐 · 파일 없음 = **직전 판 모름**.
+> - 판정(재료 ②): ⓐ `rollback\prev` 폴더가 있고 `replaced-by.txt` 가 지금 판이 아니면(없거나 못 읽어도 같다) ② 도 거부 ⓑ 직전 판을 알면 ② 는 `hitpan-{직전 판}.zip` 만(지금 판보다 작아야 하고 지금 판 zip 도 있어야 한다 — 기존 규칙 유지) · 모르면 ⓐ 만(= 봉합 전과 같음 · 1.3.48 비상 경로 보존). 사유 = `no_previous_version`.
 
 ## §3 `request.json` — schema 1
 
@@ -84,6 +92,14 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 
 - 일꾼은 S0 에서 `{app}\update.lock` 을 **자기가 잡는다**(`UTC|to` · 단계마다 새로 씀 · 끝에 지움) — 워치독 코드 무변경 · 그 잠금 규칙을 따를 뿐(13-2). ⚠️U-9: 워치독이 묵은 잠금으로 보고 지우는 조건은 15분 경과뿐(`UpdateLockFile.IsUpdateInProgress`).
 
+> 🟢 **봉합 차수 합의(9/30 작1 봉합 · 설계 §14-1 06ⓑ · 14-2 07·F-4 · 갈래 L)** — 위 표 `swap_in_progress` 줄의 「또는 작업 `HitPan-LocalSwap` 이 이미 있다」를 아래로 **좁힌다**(나머지 줄은 그대로).
+> - **남은 작업(06ⓑ)**: 작업 `HitPan-LocalSwap` 이 있어도 「열린 요청(`requested`·`running`)이 **30분** 안에 갱신됨」 또는 「`swap.lock` 이 **30분** 안」일 때만 바쁨(이 둘은 위 표 판정이 먼저 잡는다). 둘 다 묵었으면 런처가 `/Delete /TN "HitPan-LocalSwap" /F` 로 지우고(경고 로그) 바쁨이 아니다. 지우기가 실패하면 그대로 `swap_in_progress`.
+> - **묵은 요청서 끝 상태**: 열린 요청이 30분 넘게 안 바뀌었고 `swap.lock` 도 묵었으면(작업이 있든 없든) 런처가 끝 상태로 적는다 — `requested` → `refused`/`worker_not_started` · `running` → `broken`/`worker_interrupted`. `updated_at`·`step` 은 **안 바꾼다**(일꾼이 마지막으로 만진 시각 그대로 — 끝 상태를 적은 순간이 쿨다운을 새로 걸지 않게).
+> - **끝나지 않은 교체**: 그 뒤(쿨다운 판정 다음) `{app}\{api,web,watchdog}.rbk` 가 하나라도 남아 있고 마지막 요청이 `broken` 이면 `update_in_progress` 대신 **`swap_interrupted`**(영구 「진행 중」 거짓 표시 없앰). 요청이 `broken` 이 아니면 종전대로 `update_in_progress`.
+> - **예약(F-4 · 프로세스 안)**: `bool TryReserve(string owner)` — 비었거나 같은 주인이면 잡고(다시 잡으면 시각 갱신) `true` · 남이 쥐고 있으면 `false`. `void Release(string owner)` — 주인이 같을 때만 푼다(남의 것·빈 것은 무시). 예약은 **30분**(`OpenRequestStale`) 안 갱신이 없으면 없는 것으로 본다(해제 누락이 영구 바쁨으로 번지지 않게). API 가 재시작하면 사라진다(교체가 시작된 뒤는 `swap.lock` 이 이어받는다). 파일·작업 등록 0.
+> - `string? CheckBusy()` = **누구의 예약이든** 있으면 `swap_in_progress`(화면 상태 조회용). 🆕`string? CheckBusy(string? owner)` = **남의 예약**만 `swap_in_progress`(자기 예약은 무시). `Launch` 는 `SwapLaunchInput.Owner`(🆕 끝 칸 · 기본 null)로 `CheckBusy(owner)` 를 부른다 ⇒ 예약한 호출부는 **같은 owner 를 `Owner` 에 넣어** `Launch` 해야 자기 예약에 막히지 않는다. 판정 순서: 예약 → 열린 요청 30분 → `swap.lock` 30분 → 묵은 것 정리 → 쿨다운 → 워치독 표식(`.rbk` 는 위 `swap_interrupted` 규칙).
+> - **사전 판정(07)**: 🆕`string? CheckReady()` — `Launch` 앞 정적 판정만 떼어 낸 것: 윈도 아님 `not_windows` · 설치 루트 없음·슬롯 없음 `request_invalid` · 일꾼 원본 없음 `script_missing` · 작업 폴더 `{app}\rollback`·`run` 문지기 실패 `folder_unsafe`. 되면 null. 바쁨은 보지 않는다(→ `CheckBusy`). 호출부(M: `ManualUpdateService.CheckAsync`·`Start` · `LocalRollbackService.GetStatus`·`Start`)는 `CheckBusy` **앞**에서 부른다. `Launch` 도 첫머리에서 같은 함수를 부른다(판정 한 벌).
+
 ## §5 상태
 
 | 상태 | 누가 | 뜻 | 멈춘 것 |
@@ -123,8 +139,12 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | `revert_failed` | 일꾼 S7 | 원위치 확인 실패(`broken`) | 고객센터로 연락 주세요 |
 | U(수동 업데이트) | API(U · `ManualUpdateReasons`) | `feed_unreachable` · `signature_invalid` · `no_newer_version` · `backup_failed` · `download_failed` (+ 위 표의 `not_windows`·`update_in_progress`·`swap_in_progress`·`disk_low`·`hash_mismatch` 를 같은 글자로 씀) | 설계 §13-8 · 화면 `LocalSwapUiText` |
 | ⬛ `launcher_not_wired` | (U 임시 · 폐기) | 런처가 이어지기 전 자리표 — I-API 1 이 런처를 이어 없앴다(`ManualUpdateService.cs` 주석) · 서버가 더는 보내지 않는다 | 화면은 옛 판 대비 문구만 남김 |
+| `worker_not_started` | 런처(`CheckBusy` · 봉합 06ⓑ) | `requested` 로 30분 넘게 묵음 — 일꾼이 아예 못 떴다 · 끝 상태 `refused`(아무것도 안 멈춤) | 예약해 둔 작업이 시작되지 않아 아무것도 바꾸지 않았습니다. 다시 해 주세요 |
+| `worker_interrupted` | 런처(`CheckBusy` · 봉합 06ⓑ) | `running` 으로 30분 넘게 묵음 — 일꾼이 도중에 끊겼다 · 끝 상태 `broken` | 버전을 바꾸던 도중 멈췄습니다 + `broken` 안내(다시 켜기 → 고객센터) |
+| `swap_interrupted` | 런처(`CheckBusy` · 봉합 06ⓑ) | `.rbk` 가 남아 있고 마지막 요청이 `broken` — 「진행 중」 대신 | 이전 교체가 끝까지 되지 않았습니다. 고객센터로 연락 주세요(설계 §14-1 06 문언 그대로) |
 
 > 대조 기준(9/30 I-API): 서버 상수 `SwapReasons`(20) + `ManualUpdateReasons`(11 · `ok` 포함 겹침 6) = 25개 전부가 이 표에 있다(node 로 글자 대조 · 빠짐 0). 화면 쪽은 I-WEB 게이트 F-C2 가 리플렉션으로 같은 상수를 전부 대조한다.
+> 🟢 봉합 차수(9/30 · 갈래 L): `SwapReasons` 20 → **23**(위 3줄) ⇒ `ok` 뺀 서버 코드 24 → **27** · F-C2 하한 24 → 27 · F-C2 계약 코드 목록에 3개 덧붙임.
 
 ## §7 끝에 남는 것
 
