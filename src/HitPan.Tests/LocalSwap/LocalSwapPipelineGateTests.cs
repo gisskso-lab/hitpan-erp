@@ -274,8 +274,8 @@ public sealed class LocalSwapPipelineGateTests
             services.AddSingleton<IWebHostEnvironment>(new GateHostEnvironment());
             services.AddSingleton<IHostEnvironment>(sp => sp.GetRequiredService<IWebHostEnvironment>());
             services.AddRouting();
-            services.AddAuthentication(GateAuthHandler.Scheme)
-                .AddScheme<AuthenticationSchemeOptions, GateAuthHandler>(GateAuthHandler.Scheme, _ => { });
+            services.AddAuthentication(GateAuthHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, GateAuthHandler>(GateAuthHandler.SchemeName, _ => { });
             services.AddAuthorization(o =>
                 // Program.cs:394 의 TenantAdminOnly 와 같은 조건.
                 o.AddPolicy("TenantAdminOnly", p => p.RequireAssertion(ctx => ctx.User.HasClaim("account_type", "tenant_admin"))));
@@ -368,7 +368,7 @@ public sealed class LocalSwapPipelineGateTests
     private sealed class GateAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
     {
-        public const string Scheme = "GateJwt";
+        public const string SchemeName = "GateJwt";
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
@@ -380,8 +380,8 @@ public sealed class LocalSwapPipelineGateTests
                 new Claim("tenant_id", TenantId),
                 new Claim("user_id", "gate-owner"),
                 new Claim("role", accountType == "tenant_admin" ? "admin" : "user"),
-            }, Scheme);
-            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(id), Scheme)));
+            }, SchemeName);
+            return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(id), SchemeName)));
         }
     }
 
