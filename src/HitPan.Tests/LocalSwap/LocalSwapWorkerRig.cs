@@ -403,6 +403,21 @@ internal sealed class LocalSwapWorkerRig : IDisposable
         AllFiles(PrevDir).Where(kv => kv.Key.Contains(Path.DirectorySeparatorChar))
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 
+    // ── 작1 봉합4 D 도우미(G-PV5 · G-PV6 · 설계 §17) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    /// <summary>
+    /// 살아 있는 <c>{app}\{part}</c> 에 파일 둘을 더한다 — 맨 위 <c>z-extra.css</c> · <c>lib\{part}-lib.dll</c>.
+    /// 폴더 열거 순서 = <c>{part}.bin</c> → <c>z-extra.css</c> → <c>lib\…</c>(D-0 실측) ⇒ 마지막 파일을 쥐면 앞 두 파일은 옮겨지는 부분 이동이 난다.
+    /// </summary>
+    public void AddLiveFiles(string part)
+    {
+        var dir = Path.Combine(App, part);
+        File.WriteAllText(Path.Combine(dir, "z-extra.css"), part + "-extra-" + Guid.NewGuid());
+        var lib = Path.Combine(dir, "lib");
+        Directory.CreateDirectory(lib);
+        File.WriteAllText(Path.Combine(lib, part + "-lib.dll"), part + "-lib-" + Guid.NewGuid());
+    }
+
     public string Calls()
     {
         var f = Path.Combine(Root, "calls.log");

@@ -811,6 +811,18 @@ function Open-TestHold([string]$dir) {
     return [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'None')
 }
 
+# test only (PVL · PVLL, seal4 P2-1): hold the LAST file listed under $dir open with FileShare.None. D-0 (10/1): the listing
+# order is the order Move-Item moves the files in, so a folder move then moves the files before it and throws (a real
+# half move). Returns the stream or $null.
+$script:PvlDone = $false
+function Open-TestHoldLast([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir)) { return $null }
+    $f = Get-ChildItem -LiteralPath $dir -Recurse -File -Force | Select-Object -Last 1
+    if ($null -eq $f) { return $null }
+    Write-Log ('test hold last ' + $f.FullName)
+    return [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'None')
+}
+
 # seal2 N-1 (d): take away the M5 leftover .rbk folders at S0 - after Set-Lock, before S1, with nothing stopped.
 # Every delete goes through the gatekeeper (customer data is carried to the live {app}\api first). A .rbk with a
 # file in use is not touched at all (no half carry). Returns $null when nothing is left, otherwise the honest
@@ -992,7 +1004,13 @@ function Complete-PrevGeneration([string]$from, [string]$to) {
             $dst = Join-Path $prev $p
             if (-not (Test-Path -LiteralPath $rbk)) { continue }
             if (-not (Test-DirFree $rbk)) { Write-Log ('previous generation not finished: a file in ' + $rbk + ' is in use'); return $false }
-            if (-not (Test-Path -LiteralPath $dst)) { Move-Item -LiteralPath $rbk -Destination $dst; continue }
+            if (-not (Test-Path -LiteralPath $dst)) {
+                # test only (PVL, seal4 P2-1): on the first call the last file of web.rbk is held during this move only
+                $hold = $null
+                if ($p -eq 'web' -and -not $script:PvlDone -and (Test-FailAt 'PVL')) { $script:PvlDone = $true; $hold = Open-TestHoldLast $rbk }
+                try { Move-Item -LiteralPath $rbk -Destination $dst } finally { if ($null -ne $hold) { $hold.Dispose() } }
+                continue
+            }
             $base = (Get-Item -LiteralPath $rbk -Force).FullName.TrimEnd('\')
             foreach ($f in @(Get-ChildItem -LiteralPath $rbk -Recurse -File -Force)) {
                 $target = Join-Path $dst ($f.FullName.Substring($base.Length).TrimStart('\'))
@@ -1118,6 +1136,7 @@ function Invoke-SuccessCleanup {
     if (Test-FailAt 'RBKH') { $hold = Open-TestHoldTop (Join-Path $script:AppRoot 'api.rbk') }
     elseif (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
     elseif (Test-FailAt 'PVHH') { $hold = Open-TestHold (Join-Path $script:AppRoot 'web.rbk') } # seal3: held to the end
+    elseif (Test-FailAt 'PVLL') { $hold = Open-TestHoldLast (Join-Path $script:AppRoot 'web.rbk') } # seal4: last file, held to the end
     $markHold = $null
     try {
         Clear-AfterSuccess | Out-Null

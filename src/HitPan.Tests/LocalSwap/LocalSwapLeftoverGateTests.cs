@@ -886,4 +886,83 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "대조군 끝 " + final.State + "/" + final.Reason + " / " + Why(rig));
         Assert.True(Directory.Exists(Rbk(rig, "web")), "대조군에서 web.rbk 가 없다 / " + Why(rig));
     }
+
+    // ── G-PV5 · G-PV6 — 부분 이동(P2-1): 마지막 열거 파일을 쥐면 앞 파일은 옮겨지고 던진다(D-0) ──
+
+    /// <summary>봉합4 대조군 — <c>Complete-PrevGeneration</c> 합치기 경로를 뺀 사본(<c>prev\{p}</c> 가 이미 있으면 바로 $false).</summary>
+    public static string ControlNoMergePath() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "$base = (Get-Item -LiteralPath $rbk -Force).FullName.TrimEnd('\\')",
+        "return $false # (control) merge path removed", "합치기 경로");
+
+    /// <summary>봉합4 대조군 — <c>Complete-PrevGeneration</c> 의 <c>Test-DirFree</c> 선확인을 뺀 사본.</summary>
+    public static string ControlNoDirFreeCheck() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if (-not (Test-DirFree $rbk)) { Write-Log ('previous generation not finished: a file in ' + $rbk + ' is in use'); return $false }",
+        "# (control) Test-DirFree pre-check removed", "보관 Test-DirFree 선확인");
+
+    /// <summary>업데이트 한 판 · 살아 있는 web 에 파일 셋(맨 위 둘 + lib\ 하나).</summary>
+    private static LocalSwapWorkerRig MakeMultiFileWeb()
+    {
+        var rig = Make("update");
+        rig.AddLiveFiles("web");
+        Assert.Equal(3, LocalSwapWorkerRig.AllFiles(Path.Combine(rig.App, "web")).Count);
+        return rig;
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV5 🚨 첫 보관에서 web.rbk 마지막 파일을 쥔 채 이동(PVL) = 실제 부분 이동 → 재시도가 합친다 · success 사유 없음 · prev 완성 · prev\\web 해시 = 옛 판(쥔 파일 포함) · 표식·.rbk 없음")]
+    public void Half_moved_part_is_merged_by_the_retry()
+    {
+        using var rig = MakeMultiFileWeb();
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVL"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && string.IsNullOrEmpty(final.Reason), "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(1, rig.CountLog("test hold last "));                                                   // 주입이 한 번 걸렸다
+        Assert.Contains("previous generation save not finished", rig.Log());                                // 첫 이동이 실제로 던졌다
+        Assert.Contains("previous generation: the rest of", rig.Log());                                     // 합치기 경로가 돌았다
+        AssertPrevComplete(rig, gen, LocalSwapWorkerRig.To, LocalSwapWorkerRig.From, why);
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV5 대조군 🔴 합치기 경로 뺀 사본 → web.rbk 에 쥔 파일 하나만 남고 prev\\web 에 나머지 둘 = 부분 이동이 실제로 났다 · sha256.txt 없음 · cleanup_pending(게이트가 FAIL 을 낸다)")]
+    public void Control_without_merge_path_leaves_the_half_move()
+    {
+        using var rig = MakeMultiFileWeb();
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(ControlNoMergePath(), "PVL"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "대조군 끝 " + final.State + "/" + final.Reason + " / " + why);
+        var left = LocalSwapWorkerRig.AllFiles(Rbk(rig, "web"));
+        var moved = LocalSwapWorkerRig.AllFiles(Path.Combine(rig.PrevDir, "web"));
+        Assert.Equal(new[] { Path.Combine("lib", "web-lib.dll") }, left.Keys.ToArray());                    // 쥔 마지막 파일만 남았다
+        Assert.Equal(PartOf(gen, "web").Count - 1, moved.Count);                                            // 앞 파일들은 옮겨졌다
+        Assert.False(File.Exists(Path.Combine(rig.PrevDir, "sha256.txt")), "대조군인데 sha256.txt 가 있다 / " + why);
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV6 🚨 web.rbk 마지막 파일을 끝까지 쥠(PVLL) → success+cleanup_pending · prev\\web 없음(반쪽 0) · web.rbk 파일 수·해시 = 옛 판 · sha256.txt 없음 · 표식 남음")]
+    public void Held_last_file_never_splits_the_part()
+    {
+        using var rig = MakeMultiFileWeb();
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVLL"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(1, rig.CountLog("test hold last "));
+        Assert.False(Directory.Exists(Path.Combine(rig.PrevDir, "web")), "prev\\web 가 생겼다(반쪽) / " + why);
+        AssertSame(PartOf(gen, "web"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")), "web.rbk");
+        Assert.False(File.Exists(Path.Combine(rig.PrevDir, "sha256.txt")), "sha256.txt 가 있다 / " + why);
+        Assert.True(File.Exists(rig.PrevSavingPath), "보관 표식이 없다 / " + why);
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV6 대조군 🔴 Test-DirFree 선확인 뺀 사본 → prev\\web 반쪽 · web.rbk 해시 ≠ 옛 판(게이트가 FAIL 을 낸다)")]
+    public void Control_without_dir_free_check_splits_the_part()
+    {
+        using var rig = MakeMultiFileWeb();
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(ControlNoDirFreeCheck(), "PVLL"));
+        var why = Why(rig);
+        Assert.True(Directory.Exists(Path.Combine(rig.PrevDir, "web")), "대조군인데 prev\\web 가 없다 / " + why);
+        Assert.NotEqual(PartOf(gen, "web").Count, LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")).Count);
+    }
 }
