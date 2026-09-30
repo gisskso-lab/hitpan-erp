@@ -236,10 +236,12 @@ public sealed class LocalSwapSealGateTests : IDisposable
         Assert.Equal(0, sc.CountStartingWith("/Create"));
 
         // 대조 — .rbk 가 남았어도 마지막 요청이 broken 이 아니면 종전대로 update_in_progress
+        //   ⬛ 20260930작1 봉합2(설계 15-3 기대값 변경 ② · PM 결재 T-4): 그 기대값이 N-1 거짓 「진행 중」 자체였다.
+        //   이제 15-0 모양대로 — web.rbk 있는데 살아 있는 web 없음(M2) · 워치독 판 null(M3) ⇒ swap_interrupted · update_in_progress 아님.
         var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-rbk-only"));
         env2.UtcNow = T0;
         Directory.CreateDirectory(Path.Combine(env2.AppRoot!, "web.rbk"));
-        Assert.Equal(SwapReasons.UpdateInProgress, Launcher(env2, new FakeSchtasks()).CheckBusy());
+        Assert.Equal(SwapReasons.SwapInterrupted, Launcher(env2, new FakeSchtasks()).CheckBusy());
     }
 
     [Fact(DisplayName = "G-R1 남은 작업 — swap.lock 이 30분 안이면 작업이 있어도 바쁨 · 지우기 0 / 요청서 없이 작업만 묵었으면 지우고 통과")]
