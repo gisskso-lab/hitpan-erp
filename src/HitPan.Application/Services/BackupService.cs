@@ -807,6 +807,13 @@ public sealed class BackupService : IBackupService
     /// (「셋 밖 쓰기 권한자 = 거부」 는 관리자가 탐색기 「계속」 으로 붙인 사용자 줄에 백업을 영구히 막았다 · 병렬이슈29 교차점 우회)
     /// Windows 밖에서는 권한 모델이 달라 만들기만 한다(리눅스 CI 한계 — 개발명세서).
     /// </summary>
+    /// <summary>
+    /// 20260930작1 병렬이슈 01 — 교체 일꾼 작업 폴더(<c>{app}\rollback</c>)도 <b>같은</b> C-8·C-12 판정
+    /// (소유자 · 넓은 그룹 권한 줄 · 재분석 지점)을 받게 여는 공용 입구. 복붙하면 한쪽만 고쳐지는 날이 온다.
+    /// 판정 본문은 한 글자도 안 바꿨다(헌법 #1 — 추가만). 실패 = <see cref="InvalidOperationException"/>(문구는 백업 기준 · 호출부가 사유 코드로 바꾼다).
+    /// </summary>
+    public static void EnsureRestrictedSystemFolder(string path) => EnsureRestrictedBackupFolder(path);
+
     private static void EnsureRestrictedBackupFolder(string path)
     {
         if (OperatingSystem.IsWindows())
