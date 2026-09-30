@@ -132,3 +132,23 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 - `version.txt` = 옛 판(`from`) 한 줄 · `replaced-by.txt` = 새 판(`to`) 한 줄 — **`replaced-by` ≠ 지금 판이면 ① 은 「바로 앞 판」 이 아니다**(그 사이 자동 업데이트가 한 번 더 갔다 ⇒ 무시).
 - `sha256.txt` = 한 줄에 `<64hex>  <상대경로>`(상대경로 = `api\HitPan.API.exe` 처럼 prev 기준). 일꾼 S1 이 전부 다시 잰다.
 - 1세대만: 새로 만들기 전에 `prev` 를 비운다.
+
+## §9 이벤트 번호 표 (20260930작1 I-API 3 · 원천 `HitPanWatchdog` 한 곳 · 새 원천 등록 0)
+
+> 근거 = PM P-4 결재(대역 28060~) · §7. 실측 `git grep -nE "\b280[0-9]{2}\b" -- src installer scripts .github`(2026-09-30 · `80f9fd03`) — 아래 표 밖의 280xx 는 레포에 0.
+> 게이트 = `LocalSwapEventIdGateTests`(코드에서 번호를 뽑아 이 표와 대조 · 겹침 0 · 음성대조군 = 일꾼 update 기준을 28065 로 옮긴 사본은 FAIL).
+
+| 번호 | 누가 쓰나 | 뜻 | 코드 위치 |
+|---|---|---|---|
+| 28008 | 설치(워치독 설치 스크립트 · 기존) | 설치 경고 | `installer/scripts/InstallWatchdog.ps1` |
+| 28030 · 28031 | 워치독 자기교체(기존) | 자기교체 정보·경고 | `src/HitPan.Watchdog/AutoUpdate/UpdateOrchestrator.cs` |
+| 28040 | 일꾼 rollback | 시작 | `Rollback/local-swap.ps1` `$EventBase`(+0) |
+| 28041 · 28042 · 28043 · 28044 | 일꾼 rollback | 성공 · 거부 · 원위치 · 망가짐 | 같은 파일 `Complete-Swap`(+1~+4) |
+| 28045 ~ 28059 | — | 비움(rollback 예비) | — |
+| 28060 | 일꾼 update | 시작 | `$EventBase`(+0) |
+| 28061 · 28062 · 28063 · 28064 | 일꾼 update | 성공 · 거부 · 원위치 · 망가짐 | `Complete-Swap`(+1~+4) |
+| 28065 | API 수동 업데이트(U) | 넘기기 **전** 끝난 사용(거부·받기 실패·백업 실패 등) — `usage.jsonl` 1줄과 짝 | `ManualUsageLog.EventIdRefusedBeforeHandOff` |
+| 28066 ~ 28079 | — | 비움(update 예비) | — |
+
+- 🔴 되돌리기 **요청 전** 거부(GET 판정·확인 번호 틀림)는 이벤트 0 — 화면에만 알린다(§7 · A 명세서 §5).
+- 번호를 새로 쓸 때는 이 표에 먼저 줄을 넣고 게이트 기대값을 같이 바꾼다(표 밖 번호 = 게이트 FAIL).
