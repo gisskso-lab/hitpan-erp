@@ -100,15 +100,18 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | 코드 | 어디서 | 뜻 | 화면 문구(설계 기본) |
 |---|---|---|---|
 | `ok` | API | 열 수 있다 | — |
-| `main_pc_only` | API 문(403 · `[MainPcOnly]` 그대로) | 메인PC 아님 | 대표 컴퓨터에서만 할 수 있습니다 |
+| `main_pc_only` | API 문(403 · `[MainPcOnly]` 그대로) | 메인PC 아님 | 회사 자료가 들어 있는 컴퓨터(메인PC)에서만 할 수 있습니다 — 작3 통일안(`UpdatePromptPlan.MainPcPhrase` · 작업지시서 §11 PM 판정) · ⬛ 초판 「대표 컴퓨터에서만」은 폐기(9/30 I-API · I-WEB 발견 §5-3) |
 | (403 정책) | API 문(`TenantAdminOnly`) | 관리자 아님 | 관리자 계정으로만 할 수 있습니다 |
 | `not_windows` | API | 윈도가 아님(개발 환경) | 이 컴퓨터에서는 할 수 없습니다 |
 | `no_previous_version` | API(A) | 재료 ①·② 둘 다 없음 / 바로 앞 판이 아님 | 이 컴퓨터에 되돌릴 이전 버전이 없습니다 — 고객센터로 연락 주세요 |
+| `rollback_chain_blocked` | API(A · `RollbackMaterialFinder`) | 지금 판이 되돌리기로 온 판 — 한 단계보다 더 앞으로 연쇄 되돌리기 금지(병렬이슈 02) | 이미 한 번 되돌린 버전입니다. 한 단계보다 더 앞으로는 되돌릴 수 없습니다 |
 | `update_in_progress` | API·일꾼 S0 | §4 | 업데이트가 진행 중입니다 |
 | `swap_in_progress` | API | §4 | 업데이트가 진행 중입니다 |
+| `cooldown` | 런처(`CheckBusy`) | 끝난 교체(`refused` 제외) 뒤 10분 안 — 반복 재기동 막기(병렬이슈 03) | 방금 버전을 바꾸었습니다. 10분쯤 지난 뒤 다시 해 주세요 |
 | `disk_low` | API(A: P-e · U: `UpdateDiskSpaceGuard`) | 저장 공간 부족 | 저장 공간이 부족합니다 |
 | `ticket_invalid` | API(A) | 확인 번호가 없거나 10분 지남 · 그 사이 재료가 바뀜 | 화면을 새로 고친 뒤 다시 해 주세요 |
 | `script_missing` | 런처 | `{api}\Rollback\local-swap.ps1` 없음(출력 복사 누락) | 고객센터로 연락 주세요 |
+| `folder_unsafe` | 런처(`ISwapFolderGuard`) | 작업 폴더가 안전하지 않음(링크·권한 — 병렬이슈 01) · 아무것도 안 바꿈 | 히트판이 설치된 폴더를 안전하게 쓸 수 없어 아무것도 바꾸지 않았습니다 — 고객센터로 연락 주세요 |
 | `task_register_failed` | 런처 | 1회용 작업 등록·실행 실패(U-3) | 고객센터로 연락 주세요 |
 | `request_invalid` | 런처·일꾼 S0 | 요청서 칸 누락·판 순서 어긋남·허용 뿌리 밖 경로·schema 다름 | 고객센터로 연락 주세요 |
 | `material_invalid` | 일꾼 S1 | 세 벌 없음 · FileVersion ≠ `to` · `sha256.txt` 불일치 · zip 해제 실패 | 이 컴퓨터에 되돌릴 이전 버전이 없습니다 — 고객센터로 연락 주세요 |
@@ -118,7 +121,10 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 | `swap_failed` | 일꾼 S4 → S7 | 교체 실패 | 원래 버전으로 돌려 두었습니다 |
 | `verify_failed` | 일꾼 S6 → S7 | 180초 안에 `to` 로 안 뜸 | 원래 버전으로 돌려 두었습니다 |
 | `revert_failed` | 일꾼 S7 | 원위치 확인 실패(`broken`) | 고객센터로 연락 주세요 |
-| U 예약 | API(U) | `feed_unreachable` · `signature_invalid` · `no_newer_version` · `backup_failed` · `download_failed` | 설계 §13-8 |
+| U(수동 업데이트) | API(U · `ManualUpdateReasons`) | `feed_unreachable` · `signature_invalid` · `no_newer_version` · `backup_failed` · `download_failed` (+ 위 표의 `not_windows`·`update_in_progress`·`swap_in_progress`·`disk_low`·`hash_mismatch` 를 같은 글자로 씀) | 설계 §13-8 · 화면 `LocalSwapUiText` |
+| ⬛ `launcher_not_wired` | (U 임시 · 폐기) | 런처가 이어지기 전 자리표 — I-API 1 이 런처를 이어 없앴다(`ManualUpdateService.cs` 주석) · 서버가 더는 보내지 않는다 | 화면은 옛 판 대비 문구만 남김 |
+
+> 대조 기준(9/30 I-API): 서버 상수 `SwapReasons`(20) + `ManualUpdateReasons`(11 · `ok` 포함 겹침 6) = 25개 전부가 이 표에 있다(node 로 글자 대조 · 빠짐 0). 화면 쪽은 I-WEB 게이트 F-C2 가 리플렉션으로 같은 상수를 전부 대조한다.
 
 ## §7 끝에 남는 것
 
