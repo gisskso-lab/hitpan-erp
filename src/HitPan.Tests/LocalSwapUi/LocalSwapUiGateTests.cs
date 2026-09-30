@@ -424,15 +424,18 @@ public sealed class LocalSwapUiGateTests
         var serverCodes = ConstStrings(typeof(HitPan.API.Services.LocalSwap.SwapReasons))
             .Concat(ConstStrings(typeof(HitPan.API.Services.ManualUpdate.ManualUpdateReasons)))
             .Where(c => c != "ok").Distinct().ToArray();
-        Assert.True(serverCodes.Length >= 25, "서버 사유 코드를 읽어야 한다: " + serverCodes.Length);
+        // 20260930작1 합침 — I-API 1 이 U 임시 코드 launcher_not_wired 를 없애 25 → 24(ok 제외 · 계약 §6 ⬛ 줄).
+        Assert.True(serverCodes.Length >= 24, "서버 사유 코드를 읽어야 한다: " + serverCodes.Length);
 
-        // 계약 §6 표(U 예약 포함) — 문서에 적힌 코드. 서버 상수와 따로 적어 두 쪽 누락을 모두 잡는다.
+        // 계약 §6 표 — 문서에 적힌 코드. 서버 상수와 따로 적어 두 쪽 누락을 모두 잡는다.
+        // 20260930작1 합침 — I-API 가 계약 §6 에 올린 3개(rollback_chain_blocked·cooldown·folder_unsafe)도 여기 적는다.
         var contractCodes = new[]
         {
             "main_pc_only", "not_windows", "no_previous_version", "update_in_progress", "swap_in_progress", "disk_low",
             "ticket_invalid", "script_missing", "task_register_failed", "request_invalid", "material_invalid",
             "hash_mismatch", "safety_net_failed", "stop_failed", "swap_failed", "verify_failed", "revert_failed",
             "feed_unreachable", "signature_invalid", "no_newer_version", "backup_failed", "download_failed",
+            "rollback_chain_blocked", "cooldown", "folder_unsafe",
         };
 
         foreach (var c in serverCodes.Concat(contractCodes).Distinct())
