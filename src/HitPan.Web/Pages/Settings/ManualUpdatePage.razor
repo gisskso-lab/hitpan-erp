@@ -1,0 +1,162 @@
+@page "/data/update"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 🔴 20260930작1 갈래 F — 자료관리 「최신 버전 확인/업데이트」 = 사장님 용어로 **수동 업데이트**.
+     사장님 9/30 원문: "업데이트 팝업이 안돌면 강제로 업데이트 할 수 있도록 자료관리 메뉴에 최신버젼확인/업데이트 메뉴를 신설"
+                      "버젼업그레이드, 자료관리 메뉴는 메인컴퓨터에서만 … 메인컴퓨터에 관리자만 가능해야됨"
+     ① 계정 — [Authorize](로그인만) + 화면 안에서 관리자 판정. Roles 로 막으면 직원은 로그인 창으로 튕겨
+        이유를 모른다 ⇒ 여기서 「관리자 계정으로만」 한 줄을 보여 준다. 실제로 막는 것은 서버(TenantAdminOnly).
+     ② 자리 — <MainPcOnly> 로 메인PC 왕복을 거친 뒤에만 조회한다(20260924작1 절D 규칙 그대로).
+     ③ 자동 경로(update-consent·update-consent-local)는 부르지 않는다(G-43 · G-L1). *@
+@attribute [Authorize]
+@using HitPan.Web.Helpers
+@inject ManualUpdateClient Api
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+
+<PageTitle>최신 버전 확인/업데이트</PageTitle>
+
+<MudPaper Elevation="0" Class="pa-4" Style="max-width:760px;">
+    <MudText Typo="Typo.h6" Class="mb-1">@LocalSwapUiText.MenuUpdate</MudText>
+    <MudText Typo="Typo.body2" Class="mb-1">@LocalSwapUiText.FirstLine</MudText>
+    <MudText Typo="Typo.caption" Class="d-block mb-3" Style="color:var(--mud-palette-text-secondary)">@LocalSwapUiText.WhoCanUse</MudText>
+
+    @if (_roleChecking)
+    {
+        <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+    }
+    else if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">@LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonAdminOnly)</MudAlert>
+    }
+    else
+    {
+        <MainPcOnly OnAllowed="LoadAsync">
+            @if (_loading)
+            {
+                <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+            }
+            else if (_started)
+            {
+                <MudAlert Severity="Severity.Success">@LocalSwapUiText.UpdateStarted</MudAlert>
+            }
+            else
+            {
+                @if (_status?.LastFailedRestored == true)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@LocalSwapUiText.UpdateFailed(_status.LastFromVersion)</MudAlert>
+                }
+
+                <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                    <tbody>
+                        <tr><td style="width:160px;">지금 쓰시는 버전</td><td><b>@(_status?.CurrentVersion ?? "-")</b></td></tr>
+                        <tr><td>받을 수 있는 최신 버전</td><td><b>@(_status?.LatestVersion ?? "-")</b></td></tr>
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_message is not null)
+                {
+                    <MudAlert Severity="@_messageSeverity" Dense="true" Class="mb-3">@_message</MudAlert>
+                }
+
+                <MudStack Row="true" Spacing="2" Class="mb-3">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">최신 버전 확인</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || !CanStart"
+                               StartIcon="@Icons.Material.Filled.SystemUpdateAlt" OnClick="StartAsync">업데이트 하기</MudButton>
+                </MudStack>
+
+                <MudText Typo="Typo.caption" Class="d-block" Style="color:var(--mud-palette-text-secondary)">
+                    @LocalSwapUiText.NextStepRollback
+                    <MudLink Href="@LocalSwapUiText.RollbackPath" Typo="Typo.caption">@LocalSwapUiText.MenuRollback</MudLink>
+                </MudText>
+            }
+        </MainPcOnly>
+    }
+</MudPaper>
+
+@code {
+    private bool _roleChecking = true;
+    private bool _isAdmin;
+    private bool _loading;
+    private bool _busy;
+    private bool _started;
+    private ManualUpdateStatus? _status;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+
+    private bool CanStart => _status is { CanStart: true, UpdateAvailable: true }
+                             && !string.IsNullOrWhiteSpace(_status.LatestVersion);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        _roleChecking = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _message = null;
+        StateHasChanged();
+
+        var r = await Api.CheckAsync();
+        _loading = false;
+
+        if (!r.Ok)
+        {
+            _status = null;
+            _message = r.Status == 0 ? LocalSwapUiText.CheckFailed : r.FailureText;
+            _messageSeverity = Severity.Warning;
+            return;
+        }
+
+        _status = r.Data;
+        if (_status is { UpdateAvailable: false })
+        {
+            _message = LocalSwapUiText.AlreadyLatest;
+            _messageSeverity = Severity.Info;
+        }
+        else if (_status is { CanStart: false })
+        {
+            _message = LocalSwapUiText.ReasonText(_status.Reason);
+            _messageSeverity = Severity.Warning;
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        if (_busy || !CanStart) return;
+        var to = _status!.LatestVersion!;
+
+        var yes = await ConfirmDialog.ShowAsync(
+            Dialog,
+            title: LocalSwapUiText.MenuUpdate,
+            message: LocalSwapUiText.UpdateConfirm(to),
+            confirmText: "예",
+            cancelText: "아니요",
+            severity: Severity.Warning);
+        if (!yes) return;
+
+        _busy = true;
+        try
+        {
+            var r = await Api.StartAsync();   // 🔴 적발 04 — 버전은 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용)
+            if (r.Ok && r.Data?.Accepted == true)
+            {
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.UpdateStarted, Severity.Success);
+                return;
+            }
+
+            // 거부 사유는 본문(r.Data.Reason) 또는 오류 응답(r.Reason) — 둘 다 고객 문구로.
+            _message = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : r.FailureText;
+            _messageSeverity = Severity.Warning;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

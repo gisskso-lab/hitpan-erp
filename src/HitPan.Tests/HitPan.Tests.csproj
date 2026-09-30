@@ -60,6 +60,15 @@
              Link="Linked\UpdatePromptBus.cs" />
     <Compile Include="..\HitPan.Web\Services\MainPcProofRunner.cs"
              Link="Linked\MainPcProofRunner.cs" />
+
+    <!-- 🔴 20260930작1 갈래 F — 수동 업데이트·되돌리기 화면의 사유 코드 → 고객 문구 표와 두 클라이언트를 **실제로 불러** 잰다.
+         셋 다 Blazor 비의존 순수 C#(HttpClient·ILogger 만). 대역 핸들러로 실제 요청 주소·횟수를 센다. -->
+    <Compile Include="..\HitPan.Web\Services\LocalSwapUiText.cs"
+             Link="Linked\LocalSwapUiText.cs" />
+    <Compile Include="..\HitPan.Web\Services\LocalRollbackClient.cs"
+             Link="Linked\LocalRollbackClient.cs" />
+    <Compile Include="..\HitPan.Web\Services\ManualUpdateClient.cs"
+             Link="Linked\ManualUpdateClient.cs" />
   </ItemGroup>
 
   <ItemGroup>

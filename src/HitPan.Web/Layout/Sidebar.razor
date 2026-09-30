@@ -333,6 +333,10 @@
         <MudNavLink Href="/data/logs" Icon="@Icons.Material.Filled.ManageSearch">ERP 로그 기록</MudNavLink>
         @* 모든데이터 초기화 (사장님 결재 2026-06-23) — 부모계정·회사정보·로그 제외 전체 포맷 *@
         <MudNavLink Href="/data/reset" Icon="@Icons.Material.Filled.DeleteForever">모든데이터 초기화</MudNavLink>
+        @* 🔴 20260930작1 갈래 F — 수동 업데이트·수동 되돌리기 (사장님 9/30 「자료관리에 이전버전으로 회귀하는 메뉴하고,
+             최신버젼 업데이트 메뉴 신설」). 부모계정 if 안 · 메인PC 판정은 화면(MainPcOnly)과 서버([MainPcOnly])가 한다. *@
+        <MudNavLink Href="@LocalSwapUiText.UpdatePath" Icon="@Icons.Material.Filled.SystemUpdateAlt">@LocalSwapUiText.MenuUpdate</MudNavLink>
+        <MudNavLink Href="@LocalSwapUiText.RollbackPath" Icon="@Icons.Material.Filled.Restore">@LocalSwapUiText.MenuRollback</MudNavLink>
     </MudNavGroup>
     }
 
@@ -372,6 +376,12 @@
             else if (!string.IsNullOrWhiteSpace(_updateLine.Hint))
             {
                 <div class="hp-sidebar-update-issue-hint">@_updateLine.Hint</div>
+            }
+            @* 🔴 20260930작1 갈래 F — 이슈 줄 아래 수동 업데이트 화면으로 가는 링크 한 줄(추가만).
+                 작3 판정·문구·[업데이트 마치기](UpdatePromptBus) 는 무변경. 관리자에게만 — 직원은 그 화면을 못 쓴다. *@
+            @if (_isTenantAdmin)
+            {
+                <MudLink Href="@LocalSwapUiText.UpdatePath" Typo="Typo.caption" Class="hp-sidebar-update-issue-hint d-block">@LocalSwapUiText.SidebarIssueLink</MudLink>
             }
         </div>
     }
