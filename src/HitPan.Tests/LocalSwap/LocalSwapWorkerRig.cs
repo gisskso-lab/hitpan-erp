@@ -298,6 +298,41 @@ internal sealed class LocalSwapWorkerRig : IDisposable
     /// <summary>S6W 가 쓰는 새 첨부(api 기준 상대경로).</summary>
     public string S6wRelPath => Path.Combine("chat-files", "T1", "202609", "s6w-" + Ticket + ".bin");
 
+    // ── 작1 봉합2 A1 도우미(G-LO2 · G-LO2b · G-LO2c · G-LO3 · G-OLD1 · 설계 §15) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    /// <summary>지난 교체가 남긴 <c>{app}\api.rbk</c> 를 차린다 — <c>chat-files</c> 1 · <c>HitpanBackup</c> 1(<paramref name="withCarry"/> 일 때) · 프로그램 파일(dll) 1.
+    /// 돌려주는 값 = 옮겨 싣는 파일의 api 기준 상대경로 → SHA-256(<see cref="CarryFiles"/> 와 같은 모양).</summary>
+    public Dictionary<string, string> SeedLeftoverRbk(bool withCarry = true)
+    {
+        var rbk = Path.Combine(App, "api.rbk");
+        Directory.CreateDirectory(rbk);
+        File.WriteAllText(Path.Combine(rbk, "HitPan.Old.dll"), "old-dll-" + Guid.NewGuid());
+        if (withCarry)
+        {
+            var chat = Path.Combine(rbk, "chat-files", "T1", "202609");
+            var backup = Path.Combine(rbk, "HitpanBackup");
+            Directory.CreateDirectory(chat);
+            Directory.CreateDirectory(backup);
+            File.WriteAllBytes(Path.Combine(chat, "lo-" + Guid.NewGuid().ToString("N") + ".png"), RandomNumberGenerator.GetBytes(64));
+            File.WriteAllText(Path.Combine(backup, "hitpan_20260928_0300.sql"), "-- leftover backup " + Guid.NewGuid());
+        }
+        return CarryFiles(rbk);
+    }
+
+    /// <summary><paramref name="dir"/> 아래 모든 파일 — 상대경로 → SHA-256(폴더가 없으면 빈 사전).</summary>
+    public static Dictionary<string, string> AllFiles(string dir)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(dir)) return map;
+        foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            map[Path.GetRelativePath(dir, f)] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f)));
+        return map;
+    }
+
+    /// <summary><c>calls.log</c> 에서 <paramref name="contains"/> 를 품은 줄 수.</summary>
+    public int CountCalls(string contains) =>
+        Calls().Split('\n').Count(l => l.Contains(contains, StringComparison.Ordinal));
+
     public string Calls()
     {
         var f = Path.Combine(Root, "calls.log");

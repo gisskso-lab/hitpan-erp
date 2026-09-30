@@ -107,6 +107,8 @@ public sealed class LocalSwapWorkerSealGateTests
     //   OVL  = S2 끝(S3 잠금 전)에 남의 update.lock 본문 + app\web.old  — 설계 게이트 표 그대로
     //   OVLK = S3 잠금 뒤(멈추는 도중)에 남의 update.lock 본문만     — 「본문 ≠ 내가 마지막에 쓴 본문」 갈래 단독 증명
     //   pre-old = 시작 전부터 app\api.old 가 있다(S0 은 .old 를 안 본다 · S3 뒤 재판정만 잡는다)
+    //   🔄 봉합2(설계 15-3 ① · PM 결재 T-4): pre-old 장면의 기대값이 바뀌었다 — S0 이 .old 를 정지 전에 거부한다(update_cleanup_pending · S0).
+    //      그래서 이 장면은 아래 두 Theory 에서 빠지고 G-OLD1(LocalSwapLeftoverGateTests)로 옮겨 갔다. 그 대조군 = 이 장면의 옛 기대(S3 · update_in_progress).
 
     private const string ForeignVersion = "9.9.9";
 
@@ -129,7 +131,6 @@ public sealed class LocalSwapWorkerSealGateTests
     [Theory(DisplayName = "K1 G-S4 🚨 멈춘 뒤 남의 교체가 보이면 → refused/update_in_progress · 세 폴더 판 그대로 · .rbk 0 · keepalive /ENABLE · 서비스 Running · 작업 잔존 0")]
     [InlineData("OVL")]
     [InlineData("OVLK")]
-    [InlineData("pre-old")]
     public void Overlap_after_stop_refuses_and_touches_no_folder(string scene)
     {
         using var rig = RunOverlap(scene);
@@ -174,7 +175,6 @@ public sealed class LocalSwapWorkerSealGateTests
     [Theory(DisplayName = "K1 G-S4 대조군 🔴 정지 뒤 재판정 뺀 사본 → S4 로 간다(.rbk 생김 · refused 아님 — 게이트가 FAIL 을 낸다)")]
     [InlineData("OVL")]
     [InlineData("OVLK")]
-    [InlineData("pre-old")]
     public void Control_without_recheck_goes_on_to_swap(string scene)
     {
         using var rig = RunOverlap(scene, ControlNoRecheck());
