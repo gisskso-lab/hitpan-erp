@@ -317,9 +317,13 @@ public sealed class LocalSwapEnvironment : ILocalSwapEnvironment
 
     public string CurrentVersion => VersionInfo.Current;
 
-    public int? Slot => int.TryParse(HitPan.Infrastructure.Configuration.TenantConfigReader.Get("SLOT_INDEX")?.Trim(), out var s) && s >= 1 ? s : null;
+    // 20260930작1 I-API 7 — SLOT_INDEX·API_PORT 는 워치독과 「같은 한 벌」로 읽는다(링크 컴파일한 워치독 원본 DbConfReader ·
+    //   HitPan.API.csproj <Compile Link>). 일꾼이 이 슬롯으로 keepalive 작업 이름을 만들고, 워치독 UpdateProcessGate 도
+    //   DbConfReader.GetValue("SLOT_INDEX") 로 같은 이름을 만든다 ⇒ 두 쪽 판정(찾는 db.conf 순서·환경변수 폴백 여부)이 갈리면
+    //   서로 다른 작업을 멈추고 켠다. 종전 TenantConfigReader 는 exe 폴더를 먼저 보고 환경변수로 폴백해 워치독과 달랐다.
+    public int? Slot => int.TryParse(HitPan.Watchdog.DbConfReader.GetValue("SLOT_INDEX"), out var s) && s >= 1 ? s : null;
 
-    public int ApiPort => int.TryParse(HitPan.Infrastructure.Configuration.TenantConfigReader.Get("API_PORT")?.Trim(), out var p) && p > 0 ? p : 5257;
+    public int ApiPort => int.TryParse(HitPan.Watchdog.DbConfReader.GetValue("API_PORT"), out var p) && p > 0 ? p : 5257;
 
     public string WatchdogStagingDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HitPan", "Updates", "staging");
