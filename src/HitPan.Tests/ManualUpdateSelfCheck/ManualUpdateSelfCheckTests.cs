@@ -243,6 +243,27 @@ public sealed class ManualUpdateSelfCheckTests : IDisposable
         Assert.NotEmpty(Hits("var c = new BackofficeClient(\"https://back.hitpan.kr\");"));
     }
 
+    // ── 계약 §7 · I-WEB 발견 §5-1 — 수동 업데이트 확인도 마지막 교체 결과(last)를 싣는다 ──
+    [Fact(DisplayName = "I-API I-WEB§5-1 넘긴 뒤 「최신 버전 확인」에 last(update · 1.3.48→1.3.49 · requested) · 대조군 교체 기록 없으면 last 없음")]
+    public async Task Check_CarriesLast_AfterHandOff()
+    {
+        var r = Build();
+        r.Feed.Result = Newer("1.3.49");
+
+        var before = await r.Service.CheckAsync(CancellationToken.None);
+        Assert.Null(before.Last);
+
+        var s = await RunToEnd(r);
+        Assert.Equal(ManualUpdateStages.HandedOff, s.Stage);
+
+        var after = await r.Service.CheckAsync(CancellationToken.None);
+        Assert.NotNull(after.Last);
+        Assert.Equal(HitPan.API.Services.LocalSwap.SwapModes.Update, after.Last!.Mode);
+        Assert.Equal(HitPan.API.Services.LocalSwap.SwapStates.Requested, after.Last.State);
+        Assert.Equal(Current, after.Last.From);
+        Assert.Equal("1.3.49", after.Last.To);
+    }
+
     private static string FindRepoRoot()
     {
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d is not null; d = d.Parent)

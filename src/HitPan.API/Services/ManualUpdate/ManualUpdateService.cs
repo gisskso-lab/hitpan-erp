@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using HitPan.API.Services.LocalRollback;
 using HitPan.API.Services.LocalSwap;
 using HitPan.Application.Interfaces;
 
@@ -48,6 +49,8 @@ public sealed record ManualUpdateJobStatus(
     DateTime UpdatedAtUtc);
 
 /// <summary>「최신 버전 확인」 결과(읽기만 · 다운로드 0).</summary>
+/// <remarks><see cref="Last"/> = 마지막 교체 한 번의 끝 상태(request.json · 두 모드 공통 · 되돌리기 GET 과 같은 모양).
+/// 계약 §7 「결과는 다음 로그인 뒤 GET 이 알린다」 — 20260930작1 I-API(I-WEB 발견 §5-1).</remarks>
 public sealed record ManualUpdateCheckResult(
     string CurrentVersion,
     string? LatestVersion,
@@ -55,7 +58,8 @@ public sealed record ManualUpdateCheckResult(
     string Reason,
     long? PackageSizeBytes,
     string? ReleaseNotes,
-    bool Busy);
+    bool Busy,
+    LocalSwapLastResult? Last = null);
 
 /// <summary>[예] 를 받았을 때의 즉답. <see cref="Accepted"/> 면 202 · 아니면 사유.</summary>
 public sealed record ManualUpdateStartOutcome(bool Accepted, string Reason, ManualUpdateJobStatus? Job);
@@ -150,9 +154,10 @@ public sealed class ManualUpdateService
         var current = _env.CurrentVersion();
         var busy = IsBusy() || _autoLock.IsAutoUpdateInProgress()
                    || _launcher.CheckBusy() is SwapReasons.SwapInProgress or SwapReasons.UpdateInProgress;
+        var last = LocalRollbackService.ToLast(_launcher.ReadLast());
 
         if (!_env.IsSupportedPlatform())
-            return new ManualUpdateCheckResult(current, null, false, ManualUpdateReasons.NotWindows, null, null, busy);
+            return new ManualUpdateCheckResult(current, null, false, ManualUpdateReasons.NotWindows, null, null, busy, last);
 
         var (reason, package) = await CheckFeedAsync(current, ct).ConfigureAwait(false);
         return new ManualUpdateCheckResult(
@@ -162,7 +167,8 @@ public sealed class ManualUpdateService
             reason,
             package?.SizeBytes,
             package?.ReleaseNotes,
-            busy);
+            busy,
+            last);
     }
 
     /// <summary>tenant 의 진행 상태(없으면 null). 다른 tenant 의 작업은 보여 주지 않는다.</summary>

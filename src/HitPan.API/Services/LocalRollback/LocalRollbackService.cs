@@ -101,7 +101,8 @@ public sealed class LocalRollbackService : ILocalRollbackService
         }
     }
 
-    private static LocalSwapLastResult? ToLast(SwapRequest? r) =>
+    /// <summary>request.json 한 줄 → 화면 칸. 수동 업데이트 확인(<c>ManualUpdateService.CheckAsync</c>)도 같은 것을 쓴다(한 벌).</summary>
+    internal static LocalSwapLastResult? ToLast(SwapRequest? r) =>
         r is null ? null : new LocalSwapLastResult(r.Mode, r.State, r.Reason, r.From, r.To, r.LastTouchedUtc);
 
     private void PurgeExpired()
