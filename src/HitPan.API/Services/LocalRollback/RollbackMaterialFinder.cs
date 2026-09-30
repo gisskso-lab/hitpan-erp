@@ -17,6 +17,8 @@ public sealed record RollbackMaterial(string Kind, string Path, string Version);
 /// <item>② 워치독 <c>staging\hitpan-{V}.zip</c> — V = 지금 판보다 작은 것 가운데 <b>가장 큰 판 하나</b>.
 ///   ⚠️ 이력 대조(설계 §3-3 「V 성공 → 현재 성공」)는 자료 읽기라 이 모듈이 하지 않는다 — 대신 <b>지금 판의 zip 도 있어야</b>
 ///   (= 지금 판이 워치독 자동 업데이트로 들어왔다는 파일 증거) 받는다. 설치 EXE 로 깐 판은 zip 이 없어 거부된다(설계 §3-3 과 같은 결과).</item>
+/// <item>🟢 20260930작1 봉합 05(설계 §14-1 · 계약 §2 봉합 합의) — ⓐ <c>prev</c> 가 있고 <c>replaced-by</c> ≠ 지금 판이면 ② 도 거부
+///   ⓑ 판 이력 <c>versions-seen.txt</c> 로 직전 설치 판을 알면 ② 는 그 판의 zip 만(수동 업데이트·설치 EXE 로 한 판이 끼어도 두 판 뒤를 고르지 않는다).</item>
 /// </list>
 /// </remarks>
 public static class RollbackMaterialFinder
@@ -41,12 +43,55 @@ public static class RollbackMaterialFinder
             return null;
         }
 
-        var prev = FindPrev(System.IO.Path.Combine(work, "prev"), current);
+        var prevDir = System.IO.Path.Combine(work, "prev");
+        var prev = FindPrev(prevDir, current);
         if (prev is not null) { reason = SwapReasons.Ok; return prev; }
 
-        var zip = FindStagingZip(watchdogStagingDir, current);
+        // 20260930작1 봉합 05 ⓐ — 묵은 prev 거부: prev 가 있는데 지금 판이 그걸 밀어낸 판이 아니면(= 그 뒤 다른 경로로 한 판 더 갔다)
+        //   워치독 zip 가운데 「지금보다 낮은 것」도 바로 앞 판이라는 보장이 없다 ⇒ ② 도 거부(병렬이슈 05 · 계약 §2 봉합 합의).
+        if (IsStalePrev(prevDir, current)) return null;
+
+        // ⓑ 판 이력 — 직전 설치 판을 알면 ② 는 그 판의 zip 만. 모르면 ⓐ 만(봉합 전과 같음 · 1.3.48 비상 경로 보존).
+        var knownPrevious = TryReadPreviousVersion(System.IO.Path.Combine(work, LocalSwapLauncher.VersionsSeenFileName), current, out var p)
+            ? p : null;
+        var zip = FindStagingZip(watchdogStagingDir, current, knownPrevious);
         if (zip is not null) { reason = SwapReasons.Ok; return zip; }
         return null;
+    }
+
+    /// <summary>
+    /// 봉합 05 ⓐ — <c>rollback\prev</c> 폴더가 있고 <c>replaced-by.txt</c> 가 지금 판이 아니다(없거나 못 읽어도 같다 — 막는 쪽).
+    /// </summary>
+    public static bool IsStalePrev(string prevDir, Version current)
+    {
+        if (!Directory.Exists(prevDir)) return false;
+        return !(TryReadVersion(System.IO.Path.Combine(prevDir, "replaced-by.txt"), out var by) && by == current);
+    }
+
+    /// <summary>
+    /// 봉합 05 ⓑ — 판 이력(<c>versions-seen.txt</c> · 계약 §2)에서 직전 설치 판을 읽는다. 읽기만(기록기는 갈래 M).
+    /// 읽힌 줄의 <b>마지막 줄 판 = 지금 판</b>일 때만, 그 위로 올라가며 처음 만나는 다른 판. 그 밖(파일 없음 · 마지막 ≠ 지금 · 한 줄뿐)은 false(모름).
+    /// 모양이 틀린 줄은 건너뛴다. 파일을 못 읽으면 예외가 그대로 나간다(호출부가 거부·기록 — <c>IsChainBlocked</c> 와 같은 폭).
+    /// </summary>
+    public static bool TryReadPreviousVersion(string ledgerPath, Version current, out Version previous)
+    {
+        previous = new Version(0, 0, 0);
+        if (!File.Exists(ledgerPath)) return false;
+        var seen = new List<Version>();
+        foreach (var line in File.ReadAllLines(ledgerPath))
+        {
+            var cells = line.Trim().Split('|');
+            if (cells.Length != 2 || !TryParse(cells[0], out var v)) continue;
+            seen.Add(v);
+        }
+        if (seen.Count < 2 || seen[^1] != current) return false;
+        for (var i = seen.Count - 2; i >= 0; i--)
+        {
+            if (seen[i] == current) continue;
+            previous = seen[i];
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -83,7 +128,8 @@ public static class RollbackMaterialFinder
         return new RollbackMaterial(SwapMaterialKinds.Prev, prev, Format(v));
     }
 
-    private static RollbackMaterial? FindStagingZip(string stagingDir, Version current)
+    /// <param name="knownPrevious">봉합 05 ⓑ — 판 이력으로 안 직전 설치 판. null 이면 종전 규칙(지금보다 낮은 것 가운데 가장 큰 것).</param>
+    private static RollbackMaterial? FindStagingZip(string stagingDir, Version current, Version? knownPrevious)
     {
         if (!Directory.Exists(stagingDir)) return null;
         Version? best = null;
@@ -94,6 +140,7 @@ public static class RollbackMaterialFinder
             var name = System.IO.Path.GetFileNameWithoutExtension(file);
             if (!TryParse(name["hitpan-".Length..], out var v)) continue;
             if (v == current) { currentZipSeen = true; continue; }
+            if (knownPrevious is not null && v != knownPrevious) continue; // 봉합 05 ⓑ — 직전 판이 아닌 zip 은 후보 아님
             if (v < current && (best is null || v > best)) { best = v; bestPath = file; }
         }
         if (best is null || bestPath is null || !currentZipSeen) return null;

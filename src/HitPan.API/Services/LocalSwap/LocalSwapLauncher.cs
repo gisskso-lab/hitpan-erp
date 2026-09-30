@@ -24,6 +24,8 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
     public const string RequestFileName = "request.json";
     public const string LockFileName = "swap.lock";
     public const string ScriptFileName = "local-swap.ps1";
+    /// <summary>판 이력 <c>{app}\rollback\versions-seen.txt</c> — 계약 §2 봉합 합의(쓰기 = 갈래 M 기록기 · 읽기 = <c>RollbackMaterialFinder</c>·일꾼 S1).</summary>
+    public const string VersionsSeenFileName = "versions-seen.txt";
 
     /// <summary>열린 요청(<c>requested</c>·<c>running</c>)이 이보다 오래 안 바뀌면 죽은 것으로 본다.</summary>
     public static readonly TimeSpan OpenRequestStale = TimeSpan.FromMinutes(30);
