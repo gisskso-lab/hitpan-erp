@@ -118,6 +118,14 @@ public sealed class ManualUpdateService
     private readonly ILogger<ManualUpdateService> _logger;
     private readonly CancellationToken _stopping;
 
+    /// <summary>
+    /// 20260930작1 봉합2 10ⓑ(설계 15-1 · PM 결재 T-3) — 한 단계 <b>안</b> 예약 갱신 주기. 운영 5분(런처 만료 30분의 1/6).
+    /// 0 이하면 끈다(시험이 「단계마다 갱신」만 따로 잴 때).
+    /// </summary>
+    public static readonly TimeSpan DefaultReservationRenewInterval = TimeSpan.FromMinutes(5);
+
+    private readonly TimeSpan _renewInterval;
+
     private readonly object _gate = new();
     private Job? _job;
 
@@ -131,8 +139,11 @@ public sealed class ManualUpdateService
         ILocalSwapLauncher launcher,
         ManualUpdateEnvironment env,
         ILogger<ManualUpdateService> logger,
-        IHostApplicationLifetime? lifetime = null)
+        IHostApplicationLifetime? lifetime = null,
+        TimeSpan? reservationRenewInterval = null)
     {
+        // 봉합2 10ⓑ — 생성자 주입(시험 10ms). DI 는 이 인자를 모르므로 기본값(null → 5분)을 쓴다.
+        _renewInterval = reservationRenewInterval ?? DefaultReservationRenewInterval;
         _feed = feed;
         _fetcher = fetcher;
         _autoLock = autoLock;
@@ -170,6 +181,11 @@ public sealed class ManualUpdateService
 
         // 봉합 06ⓑ(L 개발명세서 §5 ⚠️) — 끝나지 않은 교체(swap_interrupted)는 「진행 중」도 「가능」도 아니다. 그 사유를 그대로 보인다.
         if (launcherBusy == SwapReasons.SwapInterrupted)
+            return new ManualUpdateCheckResult(current, null, false, launcherBusy, null, null, busy, last);
+
+        // 20260930작1 봉합2 N-2(설계 15-1) — 워치독 .old 가 남아 있으면(update_cleanup_pending) 「가능」이 아니다.
+        //   [예] 는 런처 CheckBusy(owner) 가 받기·백업 전에 같은 사유로 거부한다 ⇒ 확인 화면도 같은 사유를 보인다(피드 안 묻는다).
+        if (launcherBusy == SwapReasons.UpdateCleanupPending)
             return new ManualUpdateCheckResult(current, null, false, launcherBusy, null, null, busy, last);
 
         var (reason, package) = await CheckFeedAsync(current, ct).ConfigureAwait(false);
@@ -289,9 +305,16 @@ public sealed class ManualUpdateService
     private async Task RunAsync(Job job)
     {
         var ct = _stopping;
+        // 20260930작1 봉합2 10ⓑ — 한 단계 안 주기 갱신(받기·백업이 30분을 넘어도 예약이 만료되지 않게). 끝나면 멈춘다(finally).
+        using var renewStop = new CancellationTokenSource();
+        var renewLoop = _renewInterval > TimeSpan.Zero
+            ? Task.Run(() => RenewLoopAsync(job, renewStop.Token), CancellationToken.None)
+            : Task.CompletedTask;
         try
         {
-            job.Move(ManualUpdateStages.Checking);
+            // ⬛ 봉합2 전: job.Move(…) 다섯 곳(Checking·Downloading·Verifying·BackingUp·HandingOff) — 예약은 Start 때 한 번만 찍혔다.
+            // 20260930작1 봉합2 10ⓐⓒ — 단계를 옮길 때마다 예약 갱신 · 실패면 그 자리에서 swap_in_progress 로 끝(백업·넘기기 0).
+            if (!MoveRenewed(job, ManualUpdateStages.Checking)) return;
             var (reason, pkg) = await CheckFeedAsync(job.From, ct).ConfigureAwait(false);
             if (pkg is null)
             {
@@ -301,7 +324,7 @@ public sealed class ManualUpdateService
             job.SetTo(pkg.Version);
 
             // ② 받기
-            job.Move(ManualUpdateStages.Downloading);
+            if (!MoveRenewed(job, ManualUpdateStages.Downloading)) return;
             try
             {
                 ManualFolders.EnsureRestricted(_folders.StagingDir);
@@ -344,7 +367,7 @@ public sealed class ManualUpdateService
             }
 
             // ③ 해시 — 받은 파일이 연결(재분석 지점)이거나 받는 폴더 밖이면 믿지 않는다.
-            job.Move(ManualUpdateStages.Verifying);
+            if (!MoveRenewed(job, ManualUpdateStages.Verifying)) return;
             var fullZip = Path.GetFullPath(zipPath);
             var stagingRoot = Path.GetFullPath(_folders.StagingDir) + Path.DirectorySeparatorChar;
             if (!fullZip.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || ManualFolders.IsReparsePoint(fullZip))
@@ -362,7 +385,7 @@ public sealed class ManualUpdateService
             }
 
             // ④ 자료 백업 — 실패하면 넘기지 않는다(G-U4 · 업데이트 백업 원칙 「백업 실패 시 업데이트 차단」).
-            job.Move(ManualUpdateStages.BackingUp);
+            if (!MoveRenewed(job, ManualUpdateStages.BackingUp)) return;
             if (!await RunBackupAsync(job.TenantId, ct).ConfigureAwait(false))
             {
                 Finish(job, ManualUpdateReasons.BackupFailed);
@@ -376,7 +399,7 @@ public sealed class ManualUpdateService
                 return;
             }
 
-            job.Move(ManualUpdateStages.HandingOff);
+            if (!MoveRenewed(job, ManualUpdateStages.HandingOff)) return;
             var order = new ManualSwapOrder(
                 Mode: SwapModes.Update,
                 From: job.From,
@@ -403,8 +426,70 @@ public sealed class ManualUpdateService
         }
         finally
         {
+            // 봉합2 10ⓑ — 주기 갱신을 먼저 멈춘다(풀어 놓은 예약을 주기 갱신이 다시 쥐지 않게).
+            renewStop.Cancel();
+            await renewLoop.ConfigureAwait(false);
             // 봉합 F-4 — 넘기기 성공 뒤는 swap.lock 이 이어받고, 거부·실패면 교체가 없다 ⇒ 어느 끝이든 예약을 푼다.
             _launcher.Release(ReservationOwner(job.Id));
+        }
+    }
+
+    /// <summary>
+    /// 20260930작1 봉합2 10ⓐ(설계 15-1) — 예약 갱신 = 같은 주인으로 <see cref="ILocalSwapLauncher.TryReserve"/> 재호출(시각을 새로 찍는다).
+    /// <c>false</c> = 만료 뒤 남이 쥐었다. 한 번 잃으면 끝까지 잃은 것으로 본다(남이 풀어도 다시 쥐지 않는다 — 그 사이 교체가 있었을 수 있다).
+    /// </summary>
+    private bool RenewReservation(Job job)
+    {
+        if (job.ReservationLost) return false;
+        if (_launcher.TryReserve(ReservationOwner(job.Id))) return true;
+        job.MarkReservationLost();
+        _logger.LogWarning("[ManualUpdate] 예약을 갱신하지 못했다(다른 업데이트·되돌리기가 쥐었다) — 단계 {Stage} · {From} → {To}",
+            job.Snapshot().Stage, job.From, job.To ?? "-");
+        return false;
+    }
+
+    /// <summary>봉합2 10ⓐⓒ — 단계를 옮기고 예약을 갱신한다. 갱신 실패면 그 자리에서 <c>swap_in_progress</c> 로 끝(백업·넘기기 0).</summary>
+    private bool MoveRenewed(Job job, string stage)
+    {
+        if (RenewReservation(job))
+        {
+            job.Move(stage);
+            return true;
+        }
+        Finish(job, ManualUpdateReasons.SwapInProgress);
+        return false;
+    }
+
+    /// <summary>
+    /// 봉합2 10ⓑ(PM 결재 T-3) — 한 단계 안 주기 갱신. 실패하면 잃었다는 표시만 남기고 멈춘다 —
+    /// 도는 받기·백업은 끊지 않고(백업을 반쯤에서 끊지 않는다) 다음 단계 문턱(<see cref="MoveRenewed"/>)이 끝낸다.
+    /// </summary>
+    private async Task RenewLoopAsync(Job job, CancellationToken stop)
+    {
+        while (!stop.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(_renewInterval, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogDebug("[ManualUpdate] 예약 주기 갱신을 멈췄다 — 작업 {Job}", job.Id);
+                return;
+            }
+
+            if (stop.IsCancellationRequested) return;
+            try
+            {
+                if (!RenewReservation(job)) return;
+            }
+            catch (Exception ex)
+            {
+                // finally 의 await 가 던지지 않게(던지면 예약 해제를 건너뛴다). 못 쟀으면 잃은 것으로 본다 — 다음 단계 문턱이 끝낸다.
+                _logger.LogWarning(ex, "[ManualUpdate] 예약 주기 갱신 중 오류 — 잃은 것으로 본다 · 작업 {Job}", job.Id);
+                job.MarkReservationLost();
+                return;
+            }
         }
     }
 
@@ -515,6 +600,19 @@ public sealed class ManualUpdateService
         public void SetTo(string to)
         {
             lock (_lock) _to = to;
+        }
+
+        // 봉합2 10ⓒ — 예약을 한 번 잃었나(주기 갱신·단계 갱신 공통 · 한 번 잃으면 되돌리지 않는다)
+        private bool _reservationLost;
+
+        public bool ReservationLost
+        {
+            get { lock (_lock) return _reservationLost; }
+        }
+
+        public void MarkReservationLost()
+        {
+            lock (_lock) _reservationLost = true;
         }
 
         public void Move(string stage)
