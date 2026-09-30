@@ -257,6 +257,10 @@ public sealed class LocalSwapPipelineGateTests
             var feed = new CountingFeed(() => Interlocked.Increment(ref calls));
             var launcher = new Mock<ILocalSwapLauncher>();
             launcher.Setup(l => l.CheckBusy()).Returns((string?)null);
+            // 20260930작1 봉합 L(#12) — ILocalSwapLauncher 새 멤버도 「막지 않음」으로 맞춘다(서비스 연결은 갈래 M)
+            launcher.Setup(l => l.CheckBusy(It.IsAny<string?>())).Returns((string?)null);
+            launcher.Setup(l => l.CheckReady()).Returns((string?)null);
+            launcher.Setup(l => l.TryReserve(It.IsAny<string>())).Returns(true);
             launcher.Setup(l => l.Launch(It.IsAny<SwapLaunchInput>()))
                 .Callback(() => Interlocked.Increment(ref calls))
                 .Returns(SwapLaunchResult.Refuse(SwapReasons.NoPreviousVersion));

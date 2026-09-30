@@ -136,7 +136,9 @@ public sealed record SwapLaunchInput(
     string RequestedBy,
     string Entry,
     string? AutoState,
-    string? Ticket);
+    string? Ticket,
+    // 20260930작1 봉합 F-4(계약 §4) — 예약 주인. TryReserve 한 호출부는 같은 값을 넣어야 자기 예약에 막히지 않는다. 기본 null = 예약 없음.
+    string? Owner = null);
 
 /// <summary>런처 결과. <see cref="Started"/> 가 true 면 1회용 작업이 돌기 시작했다(202).</summary>
 public sealed record SwapLaunchResult(bool Started, string Reason, string? Ticket)

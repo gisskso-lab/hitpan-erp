@@ -73,12 +73,17 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         }
     }
 
-    public string? CheckBusy()
+    public string? CheckBusy() => CheckBusy(null);
+
+    public string? CheckBusy(string? owner)
     {
         if (!_env.IsWindows) return SwapReasons.NotWindows;
         var app = _env.AppRoot;
         if (app is null) return SwapReasons.RequestInvalid;
         var now = _env.UtcNow;
+
+        // 봉합 F-4 — 프로세스 안 예약(받기·백업 중): 남의 예약이면 바쁨(owner null = 누구의 예약이든)
+        if (IsReservedByOther(owner, now)) return SwapReasons.SwapInProgress;
 
         // ── 두 수동 동작(한 틀) ──
         var last = ReadLast();
@@ -160,17 +165,16 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         }
     }
 
-    private SwapLaunchResult LaunchCore(SwapLaunchInput input)
+    /// <summary>
+    /// 봉합 07(계약 §4 봉합 합의) — <see cref="Launch"/> 앞 정적 판정 한 벌. <see cref="LaunchCore"/> 도 이것을 부른다.
+    /// </summary>
+    public string? CheckReady()
     {
-        if (!_env.IsWindows) return SwapLaunchResult.Refuse(SwapReasons.NotWindows);
+        if (!_env.IsWindows) return SwapReasons.NotWindows;
         var app = _env.AppRoot;
         var slot = _env.Slot;
-        if (app is null || slot is null or < 1) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
-        if (input.Mode is not (SwapModes.Update or SwapModes.Rollback)) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
-        if (!File.Exists(_env.ScriptSourcePath)) return SwapLaunchResult.Refuse(SwapReasons.ScriptMissing);
-
-        var ticket = input.Ticket ?? NewTicket();
-        if (!TicketShape.IsMatch(ticket)) return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
+        if (app is null || slot is null or < 1) return SwapReasons.RequestInvalid;
+        if (!File.Exists(_env.ScriptSourcePath)) return SwapReasons.ScriptMissing;
 
         var work = Path.Combine(app, WorkFolderName);
         var run = Path.Combine(work, "run");
@@ -182,10 +186,72 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "[LocalSwap] 작업 폴더가 안전하지 않아 교체를 걸지 않았습니다(병렬이슈 01).");
-            return SwapLaunchResult.Refuse(SwapReasons.FolderUnsafe);
+            return SwapReasons.FolderUnsafe;
         }
+        return null;
+    }
 
-        if (CheckBusy() is { } busy) return SwapLaunchResult.Refuse(busy);
+    // ── 봉합 F-4 — 프로세스 안 예약(파일·작업 등록 0 · API 재시작이면 사라진다 · 교체가 시작되면 swap.lock 이 이어받는다) ──
+    private string? _reservedBy;
+    private DateTime _reservedAtUtc;
+
+    public bool TryReserve(string owner)
+    {
+        if (string.IsNullOrWhiteSpace(owner)) return false;
+        lock (_gate)
+        {
+            var now = _env.UtcNow;
+            ExpireReservation(now);
+            if (_reservedBy is not null && !string.Equals(_reservedBy, owner, StringComparison.Ordinal)) return false;
+            _reservedBy = owner;
+            _reservedAtUtc = now;
+            return true;
+        }
+    }
+
+    public void Release(string owner)
+    {
+        lock (_gate)
+        {
+            if (_reservedBy is not null && string.Equals(_reservedBy, owner, StringComparison.Ordinal)) _reservedBy = null;
+        }
+    }
+
+    private bool IsReservedByOther(string? owner, DateTime now)
+    {
+        lock (_gate)
+        {
+            ExpireReservation(now);
+            return _reservedBy is not null && (owner is null || !string.Equals(_reservedBy, owner, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>예약이 30분(<see cref="OpenRequestStale"/>) 넘게 갱신되지 않았으면 푼다 — 해제 누락이 영구 바쁨으로 번지지 않게. <c>_gate</c> 안에서만.</summary>
+    private void ExpireReservation(DateTime now)
+    {
+        if (_reservedBy is null) return;
+        var age = now - _reservedAtUtc;
+        if (age >= TimeSpan.Zero && age < OpenRequestStale) return;
+        _logger.LogWarning("[LocalSwap] 예약({Owner})이 {Min}분 넘게 풀리지 않아 없는 것으로 봅니다.", _reservedBy, OpenRequestStale.TotalMinutes);
+        _reservedBy = null;
+    }
+
+    private SwapLaunchResult LaunchCore(SwapLaunchInput input)
+    {
+        // 봉합 07 — 정적 판정은 CheckReady 한 벌(호출부가 받기·백업 전에 부르는 것과 같은 판정)
+        if (CheckReady() is { } notReady) return SwapLaunchResult.Refuse(notReady);
+        var app = _env.AppRoot!;
+        var slot = _env.Slot!;
+        if (input.Mode is not (SwapModes.Update or SwapModes.Rollback)) return SwapLaunchResult.Refuse(SwapReasons.RequestInvalid);
+
+        var ticket = input.Ticket ?? NewTicket();
+        if (!TicketShape.IsMatch(ticket)) return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
+
+        var work = Path.Combine(app, WorkFolderName);
+        var run = Path.Combine(work, "run");
+
+        // 봉합 F-4 — 자기 예약(input.Owner)은 바쁨으로 보지 않는다
+        if (CheckBusy(input.Owner) is { } busy) return SwapLaunchResult.Refuse(busy);
 
         var lockPath = Path.Combine(work, LockFileName);
         if (!TryCreateLock(lockPath, ticket)) return SwapLaunchResult.Refuse(SwapReasons.SwapInProgress);

@@ -262,4 +262,95 @@ public sealed class LocalSwapSealGateTests : IDisposable
         Assert.Null(Launcher(env2, sc2).CheckBusy());
         Assert.Equal(1, Deletes(sc2));
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 07·F-4 런처 쪽 — CheckReady(사전 판정 한 벌) · TryReserve/Release(프로세스 안 예약) · CheckBusy(owner)
+    //   (서비스 연결 게이트 G-U7·G-U5d 는 갈래 M)
+    // ══════════════════════════════════════════════════════════════
+
+    private static SwapLaunchInput Input(string? owner = null) => new(
+        SwapModes.Rollback, N2, N1, new SwapMaterial { Kind = SwapMaterialKinds.Prev, Path = "x" },
+        "gate-user", SwapEntries.Menu, null, null, owner);
+
+    [Fact(DisplayName = "07 CheckReady — 슬롯 없음 request_invalid · 폴더 문지기 실패 folder_unsafe · 원본 없음 script_missing · 되면 null · Launch 도 같은 답(작업 등록 0)")]
+    public void CheckReady_is_the_static_gate_of_launch()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "ready"));
+        var sc = new FakeSchtasks();
+        var guard = new HookedFolderGuard();
+        var launcher = new LocalSwapLauncher(env, sc, guard, NullLogger<LocalSwapLauncher>.Instance);
+
+        Assert.Null(launcher.CheckReady());
+
+        env.Slot = null;
+        Assert.Equal(SwapReasons.RequestInvalid, launcher.CheckReady());
+        Assert.Equal(SwapReasons.RequestInvalid, launcher.Launch(Input()).Reason);
+        env.Slot = 1;
+
+        guard.Before = _ => throw new InvalidOperationException("gate: unsafe");
+        Assert.Equal(SwapReasons.FolderUnsafe, launcher.CheckReady());
+        Assert.Equal(SwapReasons.FolderUnsafe, launcher.Launch(Input()).Reason);
+        guard.Before = null;
+
+        var script = env.ScriptSourcePath;
+        env.ScriptSourcePath = script + ".missing";
+        Assert.Equal(SwapReasons.ScriptMissing, launcher.CheckReady());
+        env.ScriptSourcePath = script;
+
+        env.IsWindows = false;
+        Assert.Equal(SwapReasons.NotWindows, launcher.CheckReady());
+        env.IsWindows = true;
+
+        Assert.Equal(0, sc.CountStartingWith("/Create"));
+        Assert.Equal(0, sc.CountStartingWith("/Query")); // 정적 판정은 바쁨(작업 조회)을 보지 않는다
+    }
+
+    [Fact(DisplayName = "F-4 🔴 예약 — 남의 예약 = swap_in_progress · Launch 0 / 자기 예약(Owner) = 시작 · 해제는 주인만 · 30분 갱신 없으면 풀림")]
+    public void Reservation_blocks_others_but_not_its_owner()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "reserve"));
+        env.UtcNow = T0;
+        var sc = new FakeSchtasks();
+        var launcher = Launcher(env, sc);
+
+        Assert.Null(launcher.CheckBusy());
+        Assert.True(launcher.TryReserve("manual-update"));
+        Assert.True(launcher.TryReserve("manual-update")); // 같은 주인 = 다시 잡기(시각 갱신)
+        Assert.False(launcher.TryReserve("rollback"));
+        Assert.False(launcher.TryReserve(" "));
+
+        Assert.Equal(SwapReasons.SwapInProgress, launcher.CheckBusy());
+        Assert.Equal(SwapReasons.SwapInProgress, launcher.CheckBusy("rollback"));
+        Assert.Null(launcher.CheckBusy("manual-update"));
+
+        // 남(예약 없는 되돌리기)은 막힌다 — 작업 등록 0
+        var other = launcher.Launch(Input());
+        Assert.False(other.Started);
+        Assert.Equal(SwapReasons.SwapInProgress, other.Reason);
+        Assert.Equal(0, sc.CountStartingWith("/Create"));
+
+        // 남의 해제는 무시
+        launcher.Release("rollback");
+        Assert.Equal(SwapReasons.SwapInProgress, launcher.CheckBusy());
+
+        // 주인은 자기 예약에 막히지 않는다
+        var mine = launcher.Launch(Input("manual-update"));
+        Assert.True(mine.Started, mine.Reason);
+        Assert.Equal(1, sc.CountStartingWith("/Create"));
+
+        launcher.Release("manual-update");
+        Assert.True(launcher.TryReserve("rollback"));
+        launcher.Release("rollback");
+
+        // 30분 갱신이 없으면 풀린 것으로 본다(해제 누락이 영구 바쁨으로 번지지 않게)
+        var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "reserve-expire"));
+        env2.UtcNow = T0;
+        var l2 = Launcher(env2, new FakeSchtasks());
+        Assert.True(l2.TryReserve("manual-update"));
+        env2.UtcNow = T0.AddMinutes(29);
+        Assert.Equal(SwapReasons.SwapInProgress, l2.CheckBusy());
+        env2.UtcNow = T0.AddMinutes(31);
+        Assert.Null(l2.CheckBusy());
+        Assert.True(l2.TryReserve("rollback"));
+    }
 }

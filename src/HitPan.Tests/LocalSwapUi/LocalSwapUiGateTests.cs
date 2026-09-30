@@ -29,6 +29,7 @@ public sealed class LocalSwapUiGateTests
         LocalSwapUiText.ReasonRevertFailed, LocalSwapUiText.ReasonFeedUnreachable, LocalSwapUiText.ReasonSignatureInvalid,
         LocalSwapUiText.ReasonNoNewerVersion, LocalSwapUiText.ReasonBackupFailed, LocalSwapUiText.ReasonDownloadFailed,
         LocalSwapUiText.ReasonLauncherNotWired,
+        LocalSwapUiText.ReasonWorkerNotStarted, LocalSwapUiText.ReasonWorkerInterrupted, LocalSwapUiText.ReasonSwapInterrupted, // 봉합 L — F-T2 금지어 검사에도 싣는다
     };
 
     private static readonly string[] EndStates = { "requested", "running", "success", "refused", "reverted", "broken" };
