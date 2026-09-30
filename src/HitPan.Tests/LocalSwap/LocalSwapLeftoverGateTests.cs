@@ -821,4 +821,69 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.Equal(0, RunWithMarkHeld(rig, ControlUnreadStaleAfterHours(), 25));
         Assert.False(Directory.Exists(Rbk(rig, "web")), mode + ": 대조군에서 web.rbk 가 안 지워졌다 / " + Why(rig));
     }
+
+    // ── G-PV7 — 표식 못 씀(P2-2): .rbk 이동 멈춤 · 재시도는 표식 다시 쓰기만 ──
+
+    /// <summary>봉합4 대조군 — 성공 재시도의 「표식 없음」 갈래(17-1 ⓒ)를 뺀 사본(= 봉합4 전: 표식 없으면 .rbk 를 지운다).</summary>
+    public static string ControlNoUnmarkedRetry() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if ($null -eq $pm -and $script:PrevSaveUnmarked) {",
+        "if ($false) { # (control) seal4 P2-2 (c) removed", "표식 없음 재시도 갈래");
+
+    /// <summary>봉합4 대조군 — 17-1 ⓒ 의 「표식 다시 쓰기」만 뺀 사본(.rbk 는 남기되 보관을 마치지 못한다).</summary>
+    public static string ControlNoMarkRewrite() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "elseif (Write-PrevSavingMark) { [void](Complete-PrevGeneration ([string]$script:Req.from) ([string]$script:Req.to)) }",
+        "elseif ($false) { } # (control) mark rewrite removed", "표식 다시 쓰기");
+
+    [Fact(DisplayName = "봉합4 G-PV7(a) 🚨 표식 매번 못 씀(PVMW) → success+cleanup_pending · api·web·watchdog.rbk 파일 수·해시 = 옛 판 · 표식 없음 · prev 안 부분 0")]
+    public void Mark_never_written_keeps_the_old_generation_unmoved()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVMW"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(4, rig.CountLog("injected PVMW:"));                              // 첫 보관 1 + 재시도 3 — 주입이 매번 걸렸다
+        Assert.Equal(3, rig.CountLog("success cleanup: prev-saving mark still not written"));
+        foreach (var p in new[] { "api", "web", "watchdog" })
+        {
+            AssertSame(PartOf(gen, p), LocalSwapWorkerRig.AllFiles(Rbk(rig, p)), p + ".rbk");
+            Assert.False(Directory.Exists(Path.Combine(rig.PrevDir, p)), "prev\\" + p + " 가 생겼다 / " + why);
+        }
+        Assert.False(File.Exists(rig.PrevSavingPath), "보관 표식이 생겼다 / " + why);
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV7(a) 대조군 🔴 표식 없음 갈래(17-1 ⓒ) 뺀 사본(봉합4 전) → 재시도가 .rbk 세 개를 지운다 = 두 세대 모두 없음(게이트가 FAIL 을 낸다)")]
+    public void Control_mark_never_written_deletes_the_old_generation()
+    {
+        using var rig = Make("update");
+        Assert.Equal(0, rig.Run(ControlNoUnmarkedRetry(), "PVMW"));
+        Assert.Contains("injected PVMW:", rig.Log());
+        foreach (var p in new[] { "api", "web", "watchdog" })
+            Assert.False(Directory.Exists(Rbk(rig, p)), "대조군에서 " + p + ".rbk 가 안 지워졌다 / " + Why(rig));
+        Assert.Empty(rig.PrevParts());
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV7(b) 🚨 표식 첫 쓰기만 실패(PVMW1) → 재시도가 표식을 다시 쓰고 보관을 마침 · success 사유 없음 · prev 완성 · 해시 = 옛 판 · 표식·.rbk 없음")]
+    public void Mark_written_by_the_retry_finishes_the_saving()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVMW1"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && string.IsNullOrEmpty(final.Reason), "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(1, rig.CountLog("injected PVMW1"));                              // 첫 쓰기는 실제로 실패했다
+        AssertPrevComplete(rig, gen, LocalSwapWorkerRig.To, LocalSwapWorkerRig.From, why);
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV7(b) 대조군 🔴 표식 다시 쓰기 뺀 사본 → .rbk 는 남지만 보관 못 마침 · success+cleanup_pending(게이트가 FAIL 을 낸다)")]
+    public void Control_without_mark_rewrite_is_cleanup_pending()
+    {
+        using var rig = Make("update");
+        Assert.Equal(0, rig.Run(ControlNoMarkRewrite(), "PVMW1"));
+        var final = rig.Final();
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "대조군 끝 " + final.State + "/" + final.Reason + " / " + Why(rig));
+        Assert.True(Directory.Exists(Rbk(rig, "web")), "대조군에서 web.rbk 가 없다 / " + Why(rig));
+    }
 }

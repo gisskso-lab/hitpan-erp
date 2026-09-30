@@ -897,6 +897,9 @@ function Complete-Swap([string]$state, [string]$reason, [string]$step) {
 
 function Save-PrevGeneration {
     # update mode: the old three folders (.rbk) become the one and only previous generation
+    # seal4 P2-2 (a): $true until the prev-saving mark is written (Write-PrevSavingMark sets it back to $false). While it
+    # is $true the .rbk folders are the old generation with no mark - the success retry must not delete them.
+    $script:PrevSaveUnmarked = $true
     try {
         $prev = Join-Path $script:AppRoot 'rollback\prev'
         # seal F-2 (c): the old generation goes through the gatekeeper. If customer data in it could not be
@@ -904,12 +907,13 @@ function Save-PrevGeneration {
         if (-not (Remove-AppDirSafe $prev)) {
             Write-Log 'previous generation not saved: the old one still holds customer data that could not be carried'
             foreach ($p in $Parts) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
+            $script:PrevSaveUnmarked = $false
             return
         }
-        New-Item -ItemType Directory -Path $prev -Force | Out-Null
         # seal3 15 (a): the mark is written BEFORE anything moves and removed only after sha256.txt is written, so a throw
         # or a power cut half way leaves it behind - the .rbk folders are then known to be the old generation (M6).
-        [System.IO.File]::WriteAllText((Get-PrevSavingPath), ([string]$script:Req.from + '|' + [string]$script:Req.to + '|' + $Ticket), $Utf8)
+        # seal4 P2-2 (b): no mark = nothing moves (the .rbk folders stay where they are; the retry writes the mark again)
+        if (-not (Write-PrevSavingMark)) { Write-Log 'previous generation not saved yet: the mark could not be written - old folders not moved'; return }
         # test only (PVH): one file in web.rbk is held during this first try and let go before the retries
         $hold = $null
         if (Test-FailAt 'PVH') { $hold = Open-TestHold (Join-Path $script:AppRoot 'web.rbk') }
@@ -923,6 +927,24 @@ function Save-PrevGeneration {
 
 # ---- seal3 15 (design 16-0): the prev-saving mark {app}\rollback\prev-saving.txt = "from|to|ticket" (one line) ----
 function Get-PrevSavingPath { return (Join-Path $script:AppRoot 'rollback\prev-saving.txt') }
+
+# seal4 P2-2 (b): makes {app}\rollback\prev and writes the prev-saving mark for this run. Never throws: $true when the
+# mark is written ($script:PrevSaveUnmarked goes back to $false), otherwise $false + a log line.
+$script:PrevSaveUnmarked = $false
+$script:PvMw1Done = $false
+function Write-PrevSavingMark {
+    try {
+        if (Test-FailAt 'PVMW') { throw 'injected PVMW: prev-saving mark write failed' }
+        if ((Test-FailAt 'PVMW1') -and -not $script:PvMw1Done) { $script:PvMw1Done = $true; throw 'injected PVMW1: prev-saving mark write failed (first call)' }
+        New-Item -ItemType Directory -Path (Join-Path $script:AppRoot 'rollback\prev') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Get-PrevSavingPath), ([string]$script:Req.from + '|' + [string]$script:Req.to + '|' + $Ticket), $Utf8)
+        $script:PrevSaveUnmarked = $false
+        return $true
+    } catch {
+        Write-Log ('prev-saving mark not written (old folders kept): ' + $_.Exception.Message)
+        return $false
+    }
+}
 
 # Reads the mark. $null = no mark. Otherwise from, to, ticket, path and stale: $true when the mark no longer names the
 # live generation - unreadable, its "to" is not the live api version (a watchdog update moved on since) or
@@ -1060,6 +1082,19 @@ function Get-SuccessLeftover {
             $pm = Get-PrevSavingMark
             # seal4 18 (a): a mark that cannot be read - whose folders they are is unknown, they stay as they are
             if ($null -ne $pm -and $pm.unread) { Write-Log 'success cleanup: prev-saving mark unreadable - old folders kept'; continue }
+            # seal4 P2-2 (c): the mark of this run was never written - the .rbk folders are the old generation with no mark.
+            # Write the mark again only when the old prev is gone or empty (a half deleted old prev is not mixed in), then
+            # finish the saving. Mark still not written = the .rbk folders are not touched.
+            if ($null -eq $pm -and $script:PrevSaveUnmarked) {
+                try {
+                    $pv = Join-Path $script:AppRoot 'rollback\prev'
+                    $pvEmpty = (-not (Test-Path -LiteralPath $pv)) -or ($null -eq (Get-ChildItem -LiteralPath $pv -Force | Select-Object -First 1))
+                    if (-not $pvEmpty) { Write-Log 'success cleanup: no prev-saving mark and the old prev is not empty - old folders kept' }
+                    elseif (Write-PrevSavingMark) { [void](Complete-PrevGeneration ([string]$script:Req.from) ([string]$script:Req.to)) }
+                    else { Write-Log 'success cleanup: prev-saving mark still not written - old folders kept' }
+                } catch { Write-Log ('success cleanup: prev-saving mark retry failed - old folders kept: ' + $_.Exception.Message) }
+                continue
+            }
             if ($null -ne $pm -and -not $pm.stale) { [void](Complete-PrevGeneration $pm.from $pm.to); continue }
         }
         foreach ($p in $left) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
