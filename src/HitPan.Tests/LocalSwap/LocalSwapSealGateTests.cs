@@ -156,4 +156,110 @@ public sealed class LocalSwapSealGateTests : IDisposable
 
         Assert.False(RollbackMaterialFinder.TryReadPreviousVersion(Path.Combine(dir, "none.txt"), cur, out _)); // 파일 없음
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-R1 남은 작업 — 설계 §14-3
+    // ══════════════════════════════════════════════════════════════
+
+    private static readonly DateTime T0 = new(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
+
+    private static void OpenRequest(FakeSwapEnvironment env, string state, int minutesAgo)
+    {
+        Directory.CreateDirectory(Work(env));
+        var r = new SwapRequest
+        {
+            Ticket = LocalSwapLauncher.NewTicket(), Mode = SwapModes.Rollback, State = state, From = N2, To = N1,
+            RequestedAt = T0.AddMinutes(-minutesAgo - 1), UpdatedAt = T0.AddMinutes(-minutesAgo), AppRoot = env.AppRoot!, Slot = 1,
+            Step = state == SwapStates.Running ? "S4" : null,
+        };
+        File.WriteAllText(Path.Combine(Work(env), LocalSwapLauncher.RequestFileName), r.ToJson());
+    }
+
+    private static int Deletes(FakeSchtasks sc) =>
+        sc.Calls.Count(c => c.StartsWith("/Delete /TN \"" + LocalSwapLauncher.TaskName + "\" /F", StringComparison.Ordinal));
+
+    [Fact(DisplayName = "G-R1 🔴 남은 작업 — requested 31분 = 작업 지움 · refused/worker_not_started · 바쁨 아님 (대조: 29분 = swap_in_progress · 지우기 0)")]
+    public void GR1_requested_stale_task_is_cleared()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-req31"));
+        env.UtcNow = T0;
+        OpenRequest(env, SwapStates.Requested, 31);
+        var sc = new FakeSchtasks();
+        sc.Tasks.Add(LocalSwapLauncher.TaskName);
+        var launcher = Launcher(env, sc);
+
+        Assert.Null(launcher.CheckBusy());
+        Assert.Equal(1, Deletes(sc));
+        Assert.DoesNotContain(LocalSwapLauncher.TaskName, sc.Tasks);
+        var last = launcher.ReadLast()!;
+        Assert.Equal(SwapStates.Refused, last.State);
+        Assert.Equal(SwapReasons.WorkerNotStarted, last.Reason);
+        Assert.Equal(T0.AddMinutes(-31), last.LastTouchedUtc); // 끝 상태를 적어도 쿨다운을 새로 걸지 않는다(계약 §4 봉합)
+        Assert.Null(launcher.CheckBusy()); // 다시 물어도 그대로(쿨다운 0 · refused)
+
+        // 대조 — 29분이면 아직 살아 있는 요청: 바쁨 · 지우기 0 · 요청서 그대로
+        var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-req29"));
+        env2.UtcNow = T0;
+        OpenRequest(env2, SwapStates.Requested, 29);
+        var sc2 = new FakeSchtasks();
+        sc2.Tasks.Add(LocalSwapLauncher.TaskName);
+        var l2 = Launcher(env2, sc2);
+        Assert.Equal(SwapReasons.SwapInProgress, l2.CheckBusy());
+        Assert.Equal(0, Deletes(sc2));
+        Assert.Equal(SwapStates.Requested, l2.ReadLast()!.State);
+    }
+
+    [Fact(DisplayName = "G-R1 🔴 남은 작업 — running 31분 + api.rbk = broken/worker_interrupted · 사유 swap_interrupted (「진행 중」 아님)")]
+    public void GR1_running_stale_with_rbk_is_interrupted()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-run31"));
+        env.UtcNow = T0;
+        OpenRequest(env, SwapStates.Running, 31);
+        Directory.CreateDirectory(Path.Combine(env.AppRoot!, "api.rbk"));
+        var sc = new FakeSchtasks();
+        sc.Tasks.Add(LocalSwapLauncher.TaskName);
+        var launcher = Launcher(env, sc);
+
+        Assert.Equal(SwapReasons.SwapInterrupted, launcher.CheckBusy());
+        Assert.Equal(1, Deletes(sc));
+        var last = launcher.ReadLast()!;
+        Assert.Equal(SwapStates.Broken, last.State);
+        Assert.Equal(SwapReasons.WorkerInterrupted, last.Reason);
+        Assert.Equal("S4", last.Step);
+        Assert.Equal(SwapReasons.SwapInterrupted, launcher.CheckBusy()); // 다시 물어도 같은 답(쿨다운으로 바뀌지 않는다)
+
+        // 교체는 막힌다 — 작업 등록 0
+        var r = launcher.Launch(new SwapLaunchInput(SwapModes.Rollback, N2, N1,
+            new SwapMaterial { Kind = SwapMaterialKinds.Prev, Path = "x" }, "gate-user", SwapEntries.Menu, null, null));
+        Assert.False(r.Started);
+        Assert.Equal(SwapReasons.SwapInterrupted, r.Reason);
+        Assert.Equal(0, sc.CountStartingWith("/Create"));
+
+        // 대조 — .rbk 가 남았어도 마지막 요청이 broken 이 아니면 종전대로 update_in_progress
+        var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-rbk-only"));
+        env2.UtcNow = T0;
+        Directory.CreateDirectory(Path.Combine(env2.AppRoot!, "web.rbk"));
+        Assert.Equal(SwapReasons.UpdateInProgress, Launcher(env2, new FakeSchtasks()).CheckBusy());
+    }
+
+    [Fact(DisplayName = "G-R1 남은 작업 — swap.lock 이 30분 안이면 작업이 있어도 바쁨 · 지우기 0 / 요청서 없이 작업만 묵었으면 지우고 통과")]
+    public void GR1_fresh_lock_keeps_task_and_orphan_task_is_cleared()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-lock"));
+        env.UtcNow = T0;
+        Directory.CreateDirectory(Work(env));
+        File.WriteAllText(Path.Combine(Work(env), LocalSwapLauncher.LockFileName),
+            LocalSwapLauncher.NewTicket() + "|" + T0.AddMinutes(-5).ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        var sc = new FakeSchtasks();
+        sc.Tasks.Add(LocalSwapLauncher.TaskName);
+        Assert.Equal(SwapReasons.SwapInProgress, Launcher(env, sc).CheckBusy());
+        Assert.Equal(0, Deletes(sc));
+
+        var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "r1-orphan"));
+        env2.UtcNow = T0;
+        var sc2 = new FakeSchtasks();
+        sc2.Tasks.Add(LocalSwapLauncher.TaskName);
+        Assert.Null(Launcher(env2, sc2).CheckBusy());
+        Assert.Equal(1, Deletes(sc2));
+    }
 }

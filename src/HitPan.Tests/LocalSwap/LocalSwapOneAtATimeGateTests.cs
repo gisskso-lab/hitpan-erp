@@ -132,14 +132,27 @@ public sealed class LocalSwapOneAtATimeGateTests : IDisposable
         Assert.False(ForceFlag.IsMatch(create), "작업 등록에 /F 가 있다 — 같은 이름 작업을 덮는다(병렬이슈 03 ②): " + create);
         Assert.True(ForceFlag.IsMatch(create.Replace("/Create ", "/Create /F ", StringComparison.Ordinal)), "대조군 — /F 판정식이 /F 를 못 잡는다");
 
-        // 이미 등록된 같은 이름 작업(묵은 요청·다른 요청)이 있으면 새로 걸지 않는다
+        // 이미 등록된 같은 이름 작업(다른 요청)이 있으면 새로 걸지 않는다
+        // 🔄 20260930작1 봉합 L(설계 §14-1 06ⓑ) — 「작업만 있으면 바쁨」은 봉합이 좁혔다: 작업이 있어도 열린 요청·swap.lock 이
+        //    30분 안일 때만 바쁨(묵은 작업은 지운다 — G-R1 · LocalSwapSealGateTests). 그래서 이 장면에 「살아 있는 다른 요청」을 둔다.
         var env2 = FakeSwapEnvironment.Under(Path.Combine(_root, "exists"));
+        WriteLast(env2, SwapModes.Update, SwapStates.Running, env2.UtcNow.AddMinutes(-1));
         var sc2 = new FakeSchtasks();
         sc2.Tasks.Add(LocalSwapLauncher.TaskName);
         var r2 = Launcher(env2, sc2).Launch(Input());
         Assert.False(r2.Started);
         Assert.Equal(SwapReasons.SwapInProgress, r2.Reason);
         Assert.Equal(0, sc2.CountStartingWith("/Create"));
+
+        // 🆕 봉합 L — 바쁨 판정을 지난 뒤(= 묵은 작업을 지운 뒤) 등록 직전에 남이 같은 이름 작업을 만들면 /F 가 없어 덮지 않는다
+        var env3 = FakeSwapEnvironment.Under(Path.Combine(_root, "exists-race"));
+        var sc3 = new FakeSchtasks();
+        sc3.OnCreate = () => sc3.Tasks.Add(LocalSwapLauncher.TaskName);
+        var r3 = Launcher(env3, sc3).Launch(Input());
+        Assert.False(r3.Started);
+        Assert.Equal(SwapReasons.TaskRegisterFailed, r3.Reason);
+        Assert.Equal(1, sc3.CountStartingWith("/Create"));
+        Assert.Equal(0, sc3.CountStartingWith("/Run"));
     }
 
     // ══════════════════════════════════════════════════════════════

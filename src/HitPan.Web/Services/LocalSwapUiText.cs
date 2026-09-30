@@ -150,6 +150,10 @@ public static class LocalSwapUiText
     public const string ReasonDownloadFailed = "download_failed";
     /// <summary>갈래 U 의 임시 코드(런처 연결 전) — I-API 가 연결하면 사라진다. 그 전까지도 화면은 제 문구로 받는다.</summary>
     public const string ReasonLauncherNotWired = "launcher_not_wired";
+    // 20260930작1 봉합 06ⓑ(갈래 L · 계약 §6 봉합 3줄) — 런처가 묵은 요청·남은 작업을 정리할 때
+    public const string ReasonWorkerNotStarted = "worker_not_started";
+    public const string ReasonWorkerInterrupted = "worker_interrupted";
+    public const string ReasonSwapInterrupted = "swap_interrupted";
 
     public const string UnknownReason = "지금은 할 수 없습니다. 고객센터로 연락 주세요.";
 
@@ -195,6 +199,9 @@ public static class LocalSwapUiText
         ReasonDownloadFailed => "새 버전 파일을 끝까지 받지 못했습니다. 인터넷 연결을 확인한 뒤 다시 해 주세요.",
         ReasonLauncherNotWired =>
             "이 버전의 히트판에서는 아직 이 메뉴로 버전을 바꿀 수 없습니다. 아무것도 바꾸지 않았습니다. 고객센터로 연락 주세요.",
+        ReasonWorkerNotStarted => "예약해 둔 작업이 시작되지 않아 아무것도 바꾸지 않았습니다. 다시 해 주세요.",
+        ReasonWorkerInterrupted => "버전을 바꾸던 도중 멈췄습니다. " + BrokenAdvice,
+        ReasonSwapInterrupted => "이전 교체가 끝까지 되지 않았습니다. 고객센터로 연락 주세요.",
         _ => UnknownReason,
     };
 

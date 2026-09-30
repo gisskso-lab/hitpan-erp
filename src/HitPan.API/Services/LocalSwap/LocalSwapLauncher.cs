@@ -90,17 +90,66 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
                 return SwapReasons.Cooldown;
         }
         if (IsLockFresh(Path.Combine(app, WorkFolderName, LockFileName), OpenRequestStale, now, 1)) return SwapReasons.SwapInProgress;
-        if (TaskExists(TaskName)) return SwapReasons.SwapInProgress;
+        // 20260930작1 봉합 06ⓑ — 여기까지 왔으면 열린 요청도 swap.lock 도 30분 넘게 묵었다(또는 없다).
+        //   종전: 작업이 있기만 하면 바쁨 ⇒ 일꾼이 아예 못 떠도 영구 「진행 중」. 이제: 묵은 요청서를 끝 상태로 적고 남은 작업을 지운다.
+        if (ClearStale(app, ref last) is { } stuck) return stuck;
 
         // ── 자동 업데이트(워치독) 진행 표식 — 설계 §1 P-d ──
         if (File.Exists(Path.Combine(app, "update-swap.marker"))) return SwapReasons.UpdateInProgress;
         if (Directory.Exists(Path.Combine(app, "watchdog.new"))) return SwapReasons.UpdateInProgress;
         foreach (var p in Parts)
-            if (Directory.Exists(Path.Combine(app, p + ".rbk"))) return SwapReasons.UpdateInProgress;
+            if (Directory.Exists(Path.Combine(app, p + ".rbk")))
+                // 봉합 06ⓑ — 마지막 요청이 broken 이면 「진행 중」이 아니라 「끝까지 되지 않았다」(영구 거짓 표시 없앰)
+                return last?.State == SwapStates.Broken ? SwapReasons.SwapInterrupted : SwapReasons.UpdateInProgress;
         if (IsLockFresh(Path.Combine(app, "update.lock"), WatchdogLockTtl, now, 0)) return SwapReasons.UpdateInProgress;
         if (TaskExists("HitPanWatchdogSelfReplace") || TaskExists("HitPanWatchdogSelfReplaceRecover"))
             return SwapReasons.UpdateInProgress;
         return null;
+    }
+
+    /// <summary>
+    /// 봉합 06ⓑ(계약 §4 봉합 합의) — 열린 요청·<c>swap.lock</c> 이 둘 다 묵었을 때만 부른다.
+    /// ① 열린 요청서를 끝 상태로(<c>requested</c> → <c>refused</c>/<c>worker_not_started</c> · <c>running</c> → <c>broken</c>/<c>worker_interrupted</c>)
+    /// — <c>updated_at</c>·<c>step</c> 은 그대로(쿨다운을 새로 걸지 않는다) · <paramref name="last"/> 도 같이 바꾼다(뒤 판정이 본다).
+    /// ② 남은 1회용 작업을 지운다. 지우기가 실패하면 <c>swap_in_progress</c>(그대로 바쁨), 아니면 null.
+    /// 🔴 잠금(<c>_gate</c>) 안에서 요청서·<c>swap.lock</c> 을 <b>다시</b> 읽는다 — 그 사이 <see cref="Launch"/> 가 새 요청을 걸었으면
+    /// 옛 판정으로 새 요청서를 덮거나 새 작업을 지우지 않는다(그 경우 바쁨).
+    /// </summary>
+    private string? ClearStale(string app, ref SwapRequest? last)
+    {
+        lock (_gate)
+        {
+            var now = _env.UtcNow;
+            if (IsLockFresh(Path.Combine(app, WorkFolderName, LockFileName), OpenRequestStale, now, 1)) return SwapReasons.SwapInProgress;
+            last = ReadLast();
+            if (last is not null && SwapStates.IsOpen(last.State) && now - last.LastTouchedUtc < OpenRequestStale)
+                return SwapReasons.SwapInProgress;
+            if (last is not null && !SwapStates.IsOpen(last.State) && last.State != SwapStates.Refused
+                && now - last.LastTouchedUtc >= TimeSpan.Zero && now - last.LastTouchedUtc < Cooldown)
+                return SwapReasons.Cooldown; // 다시 읽는 사이 끝난 교체(바깥 판정과 같은 규칙)
+
+            if (last is not null && SwapStates.IsOpen(last.State))
+            {
+                var wasRunning = last.State == SwapStates.Running;
+                last.State = wasRunning ? SwapStates.Broken : SwapStates.Refused;
+                last.Reason = wasRunning ? SwapReasons.WorkerInterrupted : SwapReasons.WorkerNotStarted;
+                _logger.LogWarning("[LocalSwap] 요청서가 {Min}분 넘게 {Old} 로 멈춰 있어 끝 상태 {State}/{Reason} 로 적습니다(번호 {Ticket} · 단계 {Step}).",
+                    OpenRequestStale.TotalMinutes, wasRunning ? SwapStates.Running : SwapStates.Requested, last.State, last.Reason, last.Ticket, last.Step);
+                try { WriteAtomic(Path.Combine(app, WorkFolderName, RequestFileName), last.ToJson()); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "[LocalSwap] 묵은 요청서에 끝 상태를 적지 못했습니다({Reason}).", last.Reason);
+                }
+            }
+
+            if (!TaskExists(TaskName)) return null;
+            _logger.LogWarning("[LocalSwap] 1회용 작업 {Task} 가 남아 있는데 요청·잠금이 {Min}분 넘게 묵었습니다 — 작업을 지웁니다.",
+                TaskName, OpenRequestStale.TotalMinutes);
+            var del = _schtasks.Run($"/Delete /TN \"{TaskName}\" /F");
+            if (del == 0) return null;
+            _logger.LogWarning("[LocalSwap] 남은 작업 {Task} 를 지우지 못했습니다(exit={Code}) — 진행 중으로 둡니다.", TaskName, del);
+            return SwapReasons.SwapInProgress;
+        }
     }
 
     public SwapLaunchResult Launch(SwapLaunchInput input)
