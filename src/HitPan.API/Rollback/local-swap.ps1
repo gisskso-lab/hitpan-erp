@@ -22,6 +22,13 @@
 #   we stop (foreign update.lock body + web.old), OVLK = foreign update.lock body only.
 #   Seal round lane K2: S6W = the new version writes one attachment in S6 (use with S6),
 #   S7C = the S7 carry of customer data out of api fails.
+#   Seal round 2 lane A1 (design 15-0, 15-1 N-1 d/e, N-2): LOSKIP = the S0 leftover cleanup is skipped,
+#   RBKHC = while the S0 leftover cleanup runs, one file under api.rbk\chat-files is held open
+#   (FileShare.None - a real lock).
+#   Seal round 2 lane A2 (design 15-1 N-1 a/b, N-3 a): S4C = the S4 carry of customer data into the new api
+#   is skipped (it stays in api.rbk), RBKH = while the success cleanup runs, one program file at the top of
+#   api.rbk is held open (FileShare.None), RBKHC = the same for one file under api.rbk\chat-files (when no
+#   leftover was there at S0; the S0 side of RBKHC is lane A1).
 
 [CmdletBinding()]
 param(
@@ -519,6 +526,9 @@ function Move-Part([string]$from, [string]$to) {
 }
 
 function Invoke-Swap {
+    # seal2 N-1 (e) safety line: Move-Part clears its destination with a raw delete (no gatekeeper). A .rbk that is
+    # already there (a leftover the S0 cleanup did not take) may hold customer data - stop before anything moves (S7).
+    foreach ($p in $Parts) { if (Test-Path -LiteralPath (Join-Path $script:AppRoot ($p + '.rbk'))) { throw ('S4 ' + $p + '.rbk is already there - not swapping over it') } }
     foreach ($p in $Parts) {
         $dst = Join-Path $script:AppRoot $p
         $rbk = $dst + '.rbk'
@@ -529,6 +539,8 @@ function Invoke-Swap {
         if (Test-FailAt 'S4X') { New-Item -ItemType Directory -Path $dst -Force | Out-Null }
         Move-Part (Join-Path $script:SrcRoot $p) $dst
         Write-Log ('S4 swapped ' + $p)
+        # test only (S4C): the carry below is skipped - customer data stays in api.rbk (what a carry that could not finish leaves)
+        if ($p -eq 'api' -and (Test-FailAt 'S4C')) { Write-Log 'injected S4C: S4 customer data carry skipped'; continue }
         # seal F-2 (a): customer data rides along into the new api at once (services are stopped).
         # If anything is left in api.rbk the delete gatekeeper keeps that folder later.
         if ($p -eq 'api' -and -not (Move-CarryData $rbk $dst)) { Write-Log 'S4 customer data carry incomplete - rest stays in api.rbk' }
@@ -700,7 +712,14 @@ function Test-RequestValid {
         $age = ((Get-Date).ToUniversalTime() - $at).TotalMinutes
         if ($age -lt -1 -or $age -gt $TicketMinutes) { Write-Log ('request expired age=' + $age); return $false }
     } catch { Write-Log ('requested_at unreadable: ' + $_.Exception.Message); return $false }
-    if (-not (Test-Path -LiteralPath (Join-Path $app 'api')) -or -not (Test-Path -LiteralPath (Join-Path $app 'watchdog'))) { Write-Log 'app_root has no api/watchdog'; return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $app 'api')) -or -not (Test-Path -LiteralPath (Join-Path $app 'watchdog'))) {
+        # seal2 15-0 M2: a program folder is gone but its .rbk is there = a swap cut off in the middle of S4.
+        # That is not a bad request; S0 refuses it as swap_interrupted and touches no folder.
+        $anyRbk = $false
+        foreach ($p in $Parts) { if (Test-Path -LiteralPath (Join-Path $app ($p + '.rbk'))) { $anyRbk = $true } }
+        if (-not $anyRbk) { Write-Log 'app_root has no api/watchdog'; return $false }
+        Write-Log 'app_root is missing a program folder but a .rbk is there - judged at S0 (swap_interrupted)'
+    }
     $script:AppRoot = $app
     $kind = [string]$r.material.kind; $path = [string]$r.material.path
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
@@ -718,6 +737,8 @@ function Test-RequestValid {
     return $allowed
 }
 
+# The S0 check before seal round 2 (every .rbk = busy, .old not looked at). Kept as it was (rule 1: add only);
+# the main part now calls Get-S0Refusal. The gate controls put this line back to show the old behaviour.
 function Test-UpdateBusy {
     if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'update-swap.marker')) { return $true }
     if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'watchdog.new')) { return $true }
@@ -728,10 +749,109 @@ function Test-UpdateBusy {
     return $false
 }
 
+# ---- seal2 (design 15-0): a {p}.rbk left at S0 is judged by its SHAPE, not as "in progress" ----
+# Only this worker makes .rbk folders and swaps run one at a time (swap.lock), so a .rbk seen at S0 belongs
+# to an EARLIER swap that ended or was cut off.
+#   M1 no .rbk | M2 a .rbk and a live program folder is missing | M3 live api/watchdog versions differ or
+#   are unreadable | M5 anything else = a leftover (not busy) that Clear-Leftover takes away.
+# M4 (last request broken and nothing changed since) is judged by the launcher only (design 15-4).
+function Get-LeftoverShape {
+    $any = $false
+    foreach ($p in $Parts) { if (Test-Path -LiteralPath (Join-Path $script:AppRoot ($p + '.rbk'))) { $any = $true } }
+    if (-not $any) { return 'M1' }
+    foreach ($p in $Parts) { if (-not (Test-Path -LiteralPath (Join-Path $script:AppRoot $p))) { return 'M2' } }
+    $a = Get-PartVersion (Join-Path $script:AppRoot 'api') 'api'
+    $w = Get-PartVersion (Join-Path $script:AppRoot 'watchdog') 'watchdog'
+    if ($null -eq $a -or $null -eq $w -or $a -ne $w) { return 'M3' }
+    return 'M5'
+}
+
+# S0 refusal (design 15-0 order). Returns $null when the swap may go on, otherwise the reason code.
+#  1 watchdog progress marks -> update_in_progress  2 M2/M3 -> swap_interrupted
+#  3 {p}.old (the watchdog cleans it at its next update; we only look) -> update_cleanup_pending
+# Nothing here stops anything or touches a folder.
+function Get-S0Refusal {
+    if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'update-swap.marker')) { return 'update_in_progress' }
+    if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'watchdog.new')) { return 'update_in_progress' }
+    if (Test-ForeignLock) { return 'update_in_progress' }
+    if (Test-Task $SelfReplaceTask) { return 'update_in_progress' }
+    if (Test-Task $SelfReplaceRecoverTask) { return 'update_in_progress' }
+    $shape = Get-LeftoverShape
+    if ($shape -eq 'M2' -or $shape -eq 'M3') { Write-Log ('S0 leftover shape ' + $shape); return 'swap_interrupted' }
+    foreach ($p in $Parts) {
+        if (Test-Path -LiteralPath (Join-Path $script:AppRoot ($p + '.old'))) { Write-Log ('S0 ' + $p + '.old is there (watchdog cleanup not done)'); return 'update_cleanup_pending' }
+    }
+    return $null
+}
+
+# true when every file under $dir can be opened exclusively right now (nothing holds it)
+function Test-DirFree([string]$dir) {
+    foreach ($f in @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force)) {
+        try { $s = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'None'); $s.Dispose() }
+        catch { Write-Log ('S0 leftover file in use ' + $f.FullName + ': ' + $_.Exception.Message); return $false }
+    }
+    return $true
+}
+
+# test only (RBKHC): hold the first file under $dir open with FileShare.None. Returns the stream or $null.
+function Open-TestHold([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir)) { return $null }
+    $f = Get-ChildItem -LiteralPath $dir -Recurse -File -Force | Select-Object -First 1
+    if ($null -eq $f) { return $null }
+    Write-Log ('test hold ' + $f.FullName)
+    return [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'None')
+}
+
+# seal2 N-1 (d): take away the M5 leftover .rbk folders at S0 - after Set-Lock, before S1, with nothing stopped.
+# Every delete goes through the gatekeeper (customer data is carried to the live {app}\api first). A .rbk with a
+# file in use is not touched at all (no half carry). Returns $null when nothing is left, otherwise the honest
+# reason: carry_pending (customer data still inside api.rbk) or cleanup_pending (program files only).
+function Clear-Leftover {
+    $left = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+    if ($left.Count -eq 0) { return $null }
+    if (Test-FailAt 'LOSKIP') { Write-Log 'injected LOSKIP: S0 leftover cleanup skipped'; return $null }
+    $hold = $null
+    if (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
+    try {
+        foreach ($p in $left) {
+            $rbk = Join-Path $script:AppRoot ($p + '.rbk')
+            if (-not (Test-DirFree $rbk)) { Write-Log ('S0 leftover ' + $rbk + ' kept: a file in it is in use'); continue }
+            if (Remove-AppDirSafe $rbk) { Write-Log ('S0 leftover ' + $rbk + ' cleared') }
+        }
+    } finally {
+        if ($null -ne $hold) { $hold.Dispose() }
+    }
+    $still = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+    if ($still.Count -eq 0) { return $null }
+    $apiRbk = Join-Path $script:AppRoot 'api.rbk'
+    if (Test-Path -LiteralPath $apiRbk) {
+        foreach ($a in @(Get-CarryApiDirs $apiRbk)) { if (Test-HasCarryData $a) { Write-Log 'S0 leftover not cleared: customer data still in api.rbk'; return 'carry_pending' } }
+    }
+    Write-Log ('S0 leftover not cleared: ' + ($still -join ','))
+    return 'cleanup_pending'
+}
+
 # ======================================================================================
 # finish
 # ======================================================================================
+# seal2 N-3 (a): the api and watchdog versions that are live when the run ends ({"api":"M.m.b","watchdog":"M.m.b"};
+# null when a folder is gone or its version cannot be read). The launcher uses it to tell "nothing changed since a
+# broken end" from "the watchdog has put the versions right since". Reading only; never throws.
+function Get-PartsAfter {
+    $o = [ordered]@{ api = $null; watchdog = $null }
+    try {
+        $root = $script:AppRoot
+        if ([string]::IsNullOrEmpty($root)) { $root = $ExpectedAppRoot }
+        $o.api = Get-PartVersion (Join-Path $root 'api') 'api'
+        $o.watchdog = Get-PartVersion (Join-Path $root 'watchdog') 'watchdog'
+    } catch {
+        Write-Log ('parts_after read failed: ' + $_.Exception.Message)
+    }
+    return (New-Object PSObject -Property $o)
+}
+
 function Complete-Swap([string]$state, [string]$reason, [string]$step) {
+    Set-ReqField 'parts_after' (Get-PartsAfter)
     Set-State $state $reason $step
     $offset = @{ 'success' = 1; 'refused' = 2; 'reverted' = 3; 'broken' = 4 }[$state]
     $type = 'Information'
@@ -793,6 +913,60 @@ function Clear-AfterSuccess {
     if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
 }
 
+# seal2 N-1 (b): the honest reason for .rbk folders that are still there. $null when none is left,
+# carry_pending when customer data is still inside api.rbk, otherwise cleanup_pending (program files only).
+function Get-RbkLeftReason {
+    $still = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+    if ($still.Count -eq 0) { return $null }
+    $apiRbk = Join-Path $script:AppRoot 'api.rbk'
+    if (Test-Path -LiteralPath $apiRbk) {
+        foreach ($a in @(Get-CarryApiDirs $apiRbk)) {
+            if (Test-HasCarryData $a) { Write-Log 'leftover not cleared: customer data still in api.rbk'; return 'carry_pending' }
+        }
+    }
+    Write-Log ('leftover not cleared: ' + ($still -join ','))
+    return 'cleanup_pending'
+}
+
+# seal2 N-1 (a): the success cleanup of the .rbk folders is tried again in the same run - up to 3 more times,
+# 10 seconds apart (0 in test mode) - always through the gatekeeper (customer data is carried first, never lost).
+$SuccessRetryCount = 3
+$SuccessRetrySeconds = 10
+if ($IsTest) { $SuccessRetrySeconds = 0 }
+function Get-SuccessLeftover {
+    for ($i = 1; $i -le $SuccessRetryCount; $i++) {
+        $left = @($Parts | Where-Object { Test-Path -LiteralPath (Join-Path $script:AppRoot ($_ + '.rbk')) })
+        if ($left.Count -eq 0) { return $null }
+        Write-Log ('success cleanup retry ' + $i + '/' + $SuccessRetryCount + ': ' + ($left -join ','))
+        if ($SuccessRetrySeconds -gt 0) { Start-Sleep -Seconds $SuccessRetrySeconds }
+        foreach ($p in $left) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
+    }
+    return (Get-RbkLeftReason)
+}
+
+# test only (RBKH): hold one program file at the top of $dir open with FileShare.None. Returns the stream or $null.
+function Open-TestHoldTop([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir)) { return $null }
+    $f = Get-ChildItem -LiteralPath $dir -File -Force | Where-Object { -not $_.Name.StartsWith('.') } | Select-Object -First 1
+    if ($null -eq $f) { return $null }
+    Write-Log ('test hold ' + $f.FullName)
+    return [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'None')
+}
+
+# seal2 N-1 (a)(b): the success cleanup, then the retries. Returns the reason that goes next to success
+# ($null = nothing left). Success stays success: the swap itself is done and verified.
+function Invoke-SuccessCleanup {
+    $hold = $null
+    if (Test-FailAt 'RBKH') { $hold = Open-TestHoldTop (Join-Path $script:AppRoot 'api.rbk') }
+    elseif (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
+    try {
+        Clear-AfterSuccess | Out-Null
+        return (Get-SuccessLeftover)
+    } finally {
+        if ($null -ne $hold) { $hold.Dispose() }
+    }
+}
+
 # Early exit (seal 06a): the request is missing, unreadable or not this run's. Remove ONLY the
 # one-time task (a leftover task makes the API report "in progress" forever) and stop.
 # swap.lock and request.json are never touched here: they may belong to another ticket.
@@ -819,12 +993,18 @@ try {
     Set-State 'running' $null 'S0'
     Write-Event 0 'Information' ('HitPan local-swap ' + $Mode + ' start ' + [string]$script:Req.from + ' -> ' + [string]$script:Req.to + ' (ticket ' + $Ticket + ')')
     if (-not (Test-RequestValid)) { Complete-Swap 'refused' 'request_invalid' 'S0' }
-    elseif (Test-UpdateBusy) { Complete-Swap 'refused' 'update_in_progress' 'S0' }
+    elseif ($null -ne ($s0Why = Get-S0Refusal)) { Complete-Swap 'refused' $s0Why 'S0' }
     else {
         Set-Lock
-        Set-State 'running' $null 'S1'
-        $why = Initialize-Material
-        if ($null -ne $why) { Complete-Swap 'refused' $why 'S1' }
+        # seal2 N-1 (d): a leftover .rbk is taken away here, nothing stopped yet. Not all gone = refused at S0.
+        $why = Clear-Leftover
+        $whyStep = 'S0'
+        if ($null -eq $why) {
+            Set-State 'running' $null 'S1'
+            $why = Initialize-Material
+            $whyStep = 'S1'
+        }
+        if ($null -ne $why) { Complete-Swap 'refused' $why $whyStep }
         else {
             Set-State 'running' $null 'S2'
             $netOk = $true
@@ -874,8 +1054,9 @@ try {
                     if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
                     Complete-Swap 'refused' 'update_in_progress' 'S3'
                 } elseif ($null -eq $failReason) {
-                    Clear-AfterSuccess
-                    Complete-Swap 'success' $null 'S6'
+                    # seal2 N-1 (a)(b): the .rbk cleanup is retried; what is still left is told next to success
+                    $okWhy = Invoke-SuccessCleanup
+                    Complete-Swap 'success' $okWhy 'S6'
                 } else {
                     Set-State 'running' $failReason 'S7'; Set-Lock
                     $back = $false
