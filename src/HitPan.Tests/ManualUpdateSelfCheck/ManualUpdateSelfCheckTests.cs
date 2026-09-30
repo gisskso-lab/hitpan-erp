@@ -83,7 +83,7 @@ public sealed class ManualUpdateSelfCheckTests : IDisposable
     }
 
     private sealed record Rig(ManualUpdateService Service, FakeFeed Feed, FakeFetcher Fetcher, FakeLock Lock, FakeBackup Backup,
-        ManualFolders Folders, List<int> Events);
+        ManualFolders Folders, List<int> Events, HitPan.Tests.LocalSwap.FakeSchtasks Schtasks);
 
     private Rig Build()
     {
@@ -94,12 +94,18 @@ public sealed class ManualUpdateSelfCheckTests : IDisposable
         var sc = new ServiceCollection();
         sc.AddScoped<IBackupService>(_ => backup);
         var scopes = sc.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-        var folders = new ManualFolders(_appRoot);
+        // 20260930작1 I-API — 런처가 이어졌다: 실제 LocalSwapLauncher + 대역(작업 등록은 메모리 · 설치 폴더는 임시).
+        var swapEnv = HitPan.Tests.LocalSwap.FakeSwapEnvironment.Under(_appRoot);
+        swapEnv.CurrentVersion = Current;
+        var schtasks = new HitPan.Tests.LocalSwap.FakeSchtasks();
+        var launcher = new HitPan.API.Services.LocalSwap.LocalSwapLauncher(swapEnv, schtasks,
+            new HitPan.Tests.LocalSwap.HookedFolderGuard(), NullLogger<HitPan.API.Services.LocalSwap.LocalSwapLauncher>.Instance);
+        var folders = new ManualFolders(swapEnv.AppRoot!);
         var events = new List<int>();
         var usage = new ManualUsageLog(folders, NullLogger<ManualUsageLog>.Instance, (id, _, _) => events.Add(id));
         var env = new ManualUpdateEnvironment(() => true, () => Current);
-        var svc = new ManualUpdateService(feed, fetcher, autoLock, scopes, folders, usage, env, NullLogger<ManualUpdateService>.Instance);
-        return new Rig(svc, feed, fetcher, autoLock, backup, folders, events);
+        var svc = new ManualUpdateService(feed, fetcher, autoLock, scopes, folders, usage, launcher, env, NullLogger<ManualUpdateService>.Instance);
+        return new Rig(svc, feed, fetcher, autoLock, backup, folders, events, schtasks);
     }
 
     private static FeedCheckResult Newer(string version) =>
@@ -154,8 +160,9 @@ public sealed class ManualUpdateSelfCheckTests : IDisposable
     // ── G-U4 백업 선행 ─────────────────────────────────────
     [Theory(DisplayName = "U자기확인 백업 실패 → 넘기기 단계 도달 0 · 대조군 백업 성공이면 넘기기 단계 도달")]
     [InlineData(false, ManualUpdateReasons.BackupFailed)]
-    [InlineData(true, ManualUpdateReasons.LauncherNotWired)]
-    public async Task BackupGate(bool backupOk, string expectedReason)
+    // ⬛ 초판 대조군 기대값 launcher_not_wired — I-API 가 런처를 이어 「넘김(handed_off · 사유 없음)」으로 바뀌었다.
+    [InlineData(true, null)]
+    public async Task BackupGate(bool backupOk, string? expectedReason)
     {
         var r = Build();
         r.Feed.Result = Newer("1.3.49");
@@ -183,7 +190,10 @@ public sealed class ManualUpdateSelfCheckTests : IDisposable
     {
         var r = Build();
         r.Feed.Result = Newer("1.3.49");
-        await RunToEnd(r);
+        // I-API — 런처가 이어져 넘기기가 성공한다. 「넘기기 전 종료」를 만들려고 작업 등록을 실패시킨다(task_register_failed).
+        r.Schtasks.CreateExit = 1;
+        var s = await RunToEnd(r);
+        Assert.Equal(HitPan.API.Services.LocalSwap.SwapReasons.TaskRegisterFailed, s.Reason);
         Assert.Equal(1, UsageLines(r));
         Assert.Equal(new[] { ManualUsageLog.EventIdRefusedBeforeHandOff }, r.Events);
         var line = File.ReadAllText(r.Folders.UsageFile);

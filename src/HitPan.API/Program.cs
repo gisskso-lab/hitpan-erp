@@ -426,7 +426,13 @@ builder.Services.AddSingleton(_ => new HitPan.API.Services.ManualUpdate.ManualFo
 builder.Services.AddSingleton(HitPan.API.Services.ManualUpdate.ManualUpdateEnvironment.Default);
 builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUsageLog>();
 builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUpdateService>();
-// ⏳ 갈래 A DI 줄(ILocalSwapLauncher 등)은 A 개발명세서 「U 가 넣을 줄」 확인 뒤 여기 아래에 넣는다(PM 합칠 때).
+// ⬛ (⏳ 갈래 A DI 줄 자리 — 20260930작1 I-API 가 아래 5줄로 채웠다 · A 개발명세서 §2 「U 가 넣을 줄」 그대로)
+// 교체 일꾼 런처·수동 되돌리기 — 확인 번호를 메모리에 쥐고(LocalRollbackService) 한 번에 하나 lock 을 쥐므로(LocalSwapLauncher) Singleton 필수.
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapEnvironment, HitPan.API.Services.LocalSwap.LocalSwapEnvironment>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISchtasksRunner, HitPan.API.Services.LocalSwap.SchtasksRunner>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISwapFolderGuard, HitPan.API.Services.LocalSwap.SwapFolderGuard>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapLauncher, HitPan.API.Services.LocalSwap.LocalSwapLauncher>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.ILocalRollbackService, HitPan.API.Services.LocalRollback.LocalRollbackService>();
 
 builder.Services.AddCors(options =>
 {
