@@ -23,7 +23,10 @@ internal sealed class LocalSwapWorkerRig : IDisposable
     public string App => Path.Combine(Root, "app");
     public string Work => Path.Combine(App, "rollback");
     public string TasksDir => Path.Combine(Root, "tasks");
-    public string Ticket { get; } = LocalSwapLauncher.NewTicket();
+    public string Ticket { get; private set; } = LocalSwapLauncher.NewTicket();
+
+    /// <summary>일꾼 <c>-Mode</c> — 기본 rollback(작1 봉합 K2 가 update 판을 더했다).</summary>
+    public string Mode { get; private set; } = SwapModes.Rollback;
 
     private LocalSwapWorkerRig(string root) => Root = root;
 
@@ -106,7 +109,7 @@ internal sealed class LocalSwapWorkerRig : IDisposable
             RedirectStandardError = true,
         };
         foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
-                     "-Mode", SwapModes.Rollback, "-Ticket", ticketArg ?? Ticket, "-TestRoot", Root })
+                     "-Mode", Mode, "-Ticket", ticketArg ?? Ticket, "-TestRoot", Root })
             psi.ArgumentList.Add(a);
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("powershell 을 못 띄웠다");
         var stdout = p.StandardOutput.ReadToEndAsync();
@@ -164,6 +167,136 @@ internal sealed class LocalSwapWorkerRig : IDisposable
         var bin = Path.Combine(dir, part, part + ".bin");
         return File.Exists(bin) ? File.ReadAllText(bin) : "(없음)";
     }
+
+    // ── 작1 봉합 K2 도우미(G-CF1~CF4 · G-P3w) — 기존 시험 무변경 · 덧붙이기만 ──
+
+    /// <summary>옮겨 싣는 고객 자료 폴더(일꾼 <c>$CarryDirs</c> 와 같아야 한다 · 사장님 결재 S-4).</summary>
+    public static readonly string[] CarryDirs = { "chat-files", "HitpanBackup" };
+
+    public string WdStaging => Path.Combine(Root, "wdstaging");
+    public string ManualStaging => Path.Combine(App, "manual", "staging");
+    public string SeenPath => Path.Combine(Work, "versions-seen.txt");
+
+    /// <summary>프로그램 세 폴더(지금 판 <paramref name="from"/>)·대역 서비스·1회용 작업만 있는 판.</summary>
+    private static LocalSwapWorkerRig Bare(string from)
+    {
+        var rig = new LocalSwapWorkerRig(Path.Combine(Path.GetTempPath(), "hp-lsw-" + Guid.NewGuid().ToString("N")));
+        Part(rig.App, "api", from);
+        Part(rig.App, "web", null);
+        Part(rig.App, "watchdog", from);
+        Directory.CreateDirectory(rig.Work);
+        Directory.CreateDirectory(Path.Combine(rig.Root, "services"));
+        File.WriteAllText(Path.Combine(rig.Root, "services", "HitPanWatchdog"), "Running");
+        Directory.CreateDirectory(rig.TasksDir);
+        File.WriteAllText(Path.Combine(rig.TasksDir, LocalSwapLauncher.TaskName), "task");
+        return rig;
+    }
+
+    /// <summary>세 폴더(판 <paramref name="version"/>)를 담은 zip.</summary>
+    public static void MakeZip(string zipPath, string version)
+    {
+        var src = zipPath + ".src";
+        Part(src, "api", version);
+        Part(src, "web", null);
+        Part(src, "watchdog", version);
+        Directory.CreateDirectory(Path.GetDirectoryName(zipPath)!);
+        if (File.Exists(zipPath)) File.Delete(zipPath);
+        System.IO.Compression.ZipFile.CreateFromDirectory(src, zipPath);
+        Directory.Delete(src, recursive: true);
+    }
+
+    private void WriteRequest(string mode, string from, string to, SwapMaterial material, DateTime requestedAtUtc)
+    {
+        Mode = mode;
+        var request = new SwapRequest
+        {
+            Ticket = Ticket,
+            Mode = mode,
+            State = SwapStates.Requested,
+            From = from,
+            To = to,
+            Material = material,
+            AppRoot = App,
+            Slot = 1,
+            ApiPort = 5257,
+            RequestedBy = "gate-user",
+            RequestedAt = requestedAtUtc,
+            Entry = SwapEntries.Menu,
+        };
+        File.WriteAllText(RequestPath, request.ToJson(), new UTF8Encoding(false));
+    }
+
+    /// <summary>되돌리기 — 재료 ② 워치독 받은 zip(<c>{root}\wdstaging\hitpan-{to}.zip</c>). rig 가 요청서를 직접 쓴다(API 를 건너뛴 모양).</summary>
+    public static LocalSwapWorkerRig RollbackZip(DateTime requestedAtUtc, string from = From, string to = To)
+    {
+        var rig = Bare(from);
+        var zip = Path.Combine(rig.WdStaging, "hitpan-" + to + ".zip");
+        MakeZip(zip, to);
+        rig.WriteRequest(SwapModes.Rollback, from, to, new SwapMaterial { Kind = SwapMaterialKinds.StagingZip, Path = zip }, requestedAtUtc);
+        return rig;
+    }
+
+    /// <summary>수동 업데이트 — 재료 <c>{app}\manual\staging\hitpan-{to}.zip</c>(해시 포함).</summary>
+    public static LocalSwapWorkerRig UpdateZip(DateTime requestedAtUtc, string from, string to)
+    {
+        var rig = Bare(from);
+        rig.NextUpdate(requestedAtUtc, from, to);
+        return rig;
+    }
+
+    /// <summary>같은 판 위에서 수동 업데이트 한 번 더 — 새 번호 · 새 zip · 새 요청서.</summary>
+    public void NextUpdate(DateTime requestedAtUtc, string from, string to)
+    {
+        Ticket = LocalSwapLauncher.NewTicket();
+        var zip = Path.Combine(ManualStaging, "hitpan-" + to + ".zip");
+        MakeZip(zip, to);
+        var sha = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(zip))).ToLowerInvariant();
+        WriteRequest(SwapModes.Update, from, to, new SwapMaterial { Kind = SwapMaterialKinds.ManualZip, Path = zip, Sha256 = sha }, requestedAtUtc);
+        File.WriteAllText(Path.Combine(TasksDir, LocalSwapLauncher.TaskName), "task");
+    }
+
+    /// <summary><c>{app}\rollback\prev</c> 를 차린다 — 판 <paramref name="version"/> · 바꾼 판 <paramref name="replacedBy"/>.</summary>
+    public void MakePrev(string version, string replacedBy)
+    {
+        var prev = Path.Combine(Work, "prev");
+        Part(prev, "api", version);
+        Part(prev, "web", null);
+        Part(prev, "watchdog", version);
+        File.WriteAllText(Path.Combine(prev, "version.txt"), version);
+        File.WriteAllText(Path.Combine(prev, "replaced-by.txt"), replacedBy);
+    }
+
+    /// <summary>시드 — <c>{app}\api\chat-files\T1\202609\{guid}.*</c> 3개 · <c>{app}\api\HitpanBackup\*.sql</c> 2개. 돌려주는 값 = api 기준 상대경로 → SHA-256.</summary>
+    public Dictionary<string, string> SeedCarry()
+    {
+        var api = Path.Combine(App, "api");
+        var chat = Path.Combine(api, "chat-files", "T1", "202609");
+        var backup = Path.Combine(api, "HitpanBackup");
+        Directory.CreateDirectory(chat);
+        Directory.CreateDirectory(backup);
+        foreach (var ext in new[] { ".png", ".pdf", ".txt" })
+            File.WriteAllBytes(Path.Combine(chat, Guid.NewGuid().ToString("N") + ext), RandomNumberGenerator.GetBytes(64));
+        File.WriteAllText(Path.Combine(backup, "hitpan_20260929_0300.sql"), "-- backup 1 " + Guid.NewGuid());
+        File.WriteAllText(Path.Combine(backup, "hitpan_20260930_0300.sql"), "-- backup 2 " + Guid.NewGuid());
+        return CarryFiles(api);
+    }
+
+    /// <summary><paramref name="apiDir"/> 아래 옮겨 싣는 폴더 두 개의 파일 — api 기준 상대경로 → SHA-256(없으면 빈 사전).</summary>
+    public static Dictionary<string, string> CarryFiles(string apiDir)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in CarryDirs)
+        {
+            var d = Path.Combine(apiDir, c);
+            if (!Directory.Exists(d)) continue;
+            foreach (var f in Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
+                map[Path.GetRelativePath(apiDir, f)] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f)));
+        }
+        return map;
+    }
+
+    /// <summary>S6W 가 쓰는 새 첨부(api 기준 상대경로).</summary>
+    public string S6wRelPath => Path.Combine("chat-files", "T1", "202609", "s6w-" + Ticket + ".bin");
 
     public string Calls()
     {

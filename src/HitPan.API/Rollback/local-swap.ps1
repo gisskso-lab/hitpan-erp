@@ -20,6 +20,8 @@
 #   Seal round (20260930 no.1, lane K1): S7R = Invoke-Revert throws on its first line,
 #   S7R2 = Invoke-Revert throws after the first folder is back, OVL = another update shows up while
 #   we stop (foreign update.lock body + web.old), OVLK = foreign update.lock body only.
+#   Seal round lane K2: S6W = the new version writes one attachment in S6 (use with S6),
+#   S7C = the S7 carry of customer data out of api fails.
 
 [CmdletBinding()]
 param(
@@ -261,6 +263,112 @@ function Remove-DirSafe([string]$dir) {
     catch { Write-Log ("remove failed " + $dir + ": " + $_.Exception.Message) }
 }
 
+# ---- seal F-2: customer data that lives INSIDE the program folder {app}\api ----
+# chat-files (ChatFileStore default root) and HitpanBackup (BackupService last-resort folder) sit in
+# {app}\api, and the swap unit is the whole api folder. They are carried along, never deleted.
+# Only these two names are carried (owner approval S-4). A PC that keeps them elsewhere has nothing here.
+$CarryDirs = @('chat-files', 'HitpanBackup')
+
+# Move the carry folders from one api folder to another. No overwrite ever: when the target has no
+# such folder the whole folder is renamed (same volume); otherwise file by file, and a name that is
+# already taken gets ".dup-{ticket}" so both files stay. Only source folders left empty are removed.
+# Returns $false when anything could not be moved (what is left stays where it was).
+function Move-CarryData([string]$fromApi, [string]$toApi) {
+    $ok = $true
+    foreach ($c in $CarryDirs) {
+        $src = Join-Path $fromApi $c
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $dst = Join-Path $toApi $c
+        try {
+            if (-not (Test-Path -LiteralPath $toApi)) { throw ('no target folder ' + $toApi) }
+            if (-not (Test-Path -LiteralPath $dst)) {
+                Move-Item -LiteralPath $src -Destination $dst
+                Write-Log ('carried ' + $src + ' -> ' + $dst + ' (folder)')
+                continue
+            }
+            $base = (Get-Item -LiteralPath $src -Force).FullName.TrimEnd('\')
+            $n = 0; $dup = 0
+            foreach ($f in @(Get-ChildItem -LiteralPath $src -Recurse -File -Force)) {
+                $rel = $f.FullName.Substring($base.Length).TrimStart('\')
+                $target = Join-Path $dst $rel
+                if (Test-Path -LiteralPath $target) {
+                    $cand = $target + '.dup-' + $Ticket
+                    $k = 1
+                    while (Test-Path -LiteralPath $cand) { $cand = $target + '.dup-' + $Ticket + '-' + $k; $k++ }
+                    $target = $cand
+                    $dup++
+                }
+                $parent = Split-Path -Parent $target
+                if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                Move-Item -LiteralPath $f.FullName -Destination $target
+                $n++
+            }
+            foreach ($d in @(Get-ChildItem -LiteralPath $src -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending)) {
+                if ($null -eq (Get-ChildItem -LiteralPath $d.FullName -Force | Select-Object -First 1)) { Remove-Item -LiteralPath $d.FullName -Force }
+            }
+            if ($null -eq (Get-ChildItem -LiteralPath $src -Force | Select-Object -First 1)) { Remove-Item -LiteralPath $src -Force }
+            Write-Log ('carried ' + $src + ' -> ' + $dst + ' files=' + $n + ' renamed-dup=' + $dup)
+        } catch {
+            Write-Log ('carry failed ' + $src + ' -> ' + $dst + ': ' + $_.Exception.Message)
+            $ok = $false
+        }
+    }
+    return $ok
+}
+
+# true when an api folder still holds at least one file under a carry folder
+function Test-HasCarryData([string]$apiDir) {
+    foreach ($c in $CarryDirs) {
+        $d = Join-Path $apiDir $c
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        if ($null -ne (Get-ChildItem -LiteralPath $d -Recurse -File -Force | Select-Object -First 1)) { return $true }
+    }
+    return $false
+}
+
+# the api folders a program folder may hold: itself (api / api.rbk), <dir>\api (prev, stage\<v>),
+# <dir>\<any>\api (rollback\stage)
+function Get-CarryApiDirs([string]$dir) {
+    $list = New-Object System.Collections.ArrayList
+    $leaf = Split-Path -Leaf $dir
+    if ($leaf -eq 'api' -or $leaf -eq 'api.rbk') { [void]$list.Add($dir) }
+    $a = Join-Path $dir 'api'
+    if (Test-Path -LiteralPath $a) { [void]$list.Add($a) }
+    foreach ($d in @(Get-ChildItem -LiteralPath $dir -Directory -Force)) {
+        $a2 = Join-Path $d.FullName 'api'
+        if (Test-Path -LiteralPath $a2) { [void]$list.Add($a2) }
+    }
+    return @($list.ToArray())
+}
+
+# seal F-2: the delete gatekeeper for program folders (api.rbk, rollback\prev, rollback\stage, a swapped-out api).
+# Customer data still inside is carried to the live {app}\api first; if that cannot be done the folder is
+# NOT deleted. Returns $true when the folder is gone (or was never there).
+function Remove-AppDirSafe([string]$dir) {
+    if ([string]::IsNullOrEmpty($dir)) { return $true }
+    if (-not (Test-Path -LiteralPath $dir)) { return $true }
+    $live = Join-Path $script:AppRoot 'api'
+    $liveFull = [System.IO.Path]::GetFullPath($live).TrimEnd('\')
+    foreach ($a in @(Get-CarryApiDirs $dir)) {
+        if (-not (Test-HasCarryData $a)) { continue }
+        $isLive = [System.IO.Path]::GetFullPath($a).TrimEnd('\').Equals($liveFull, [System.StringComparison]::OrdinalIgnoreCase)
+        if (-not $isLive -and (Test-Path -LiteralPath $live)) { [void](Move-CarryData $a $live) }
+        if (Test-HasCarryData $a) {
+            Write-Log ('kept ' + $dir + ': customer data inside ' + $a + ' could not be carried to ' + $live)
+            return $false
+        }
+    }
+    Remove-DirSafe $dir
+    return (-not (Test-Path -LiteralPath $dir))
+}
+
+# test only (S6W): the new version writes one attachment while it runs (S5..S6)
+function Invoke-TestNewCarryFile {
+    $d = Join-Path $script:AppRoot 'api\chat-files\T1\202609'
+    if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+    [System.IO.File]::WriteAllText((Join-Path $d ('s6w-' + $Ticket + '.bin')), ('s6w-' + $Ticket), $Utf8)
+}
+
 # ---- lock: same file and body format as the watchdog UpdateLockFile ({app}\update.lock = "UTC|version") ----
 function Test-ForeignLock {
     $f = Join-Path $script:AppRoot 'update.lock'
@@ -421,6 +529,9 @@ function Invoke-Swap {
         if (Test-FailAt 'S4X') { New-Item -ItemType Directory -Path $dst -Force | Out-Null }
         Move-Part (Join-Path $script:SrcRoot $p) $dst
         Write-Log ('S4 swapped ' + $p)
+        # seal F-2 (a): customer data rides along into the new api at once (services are stopped).
+        # If anything is left in api.rbk the delete gatekeeper keeps that folder later.
+        if ($p -eq 'api' -and -not (Move-CarryData $rbk $dst)) { Write-Log 'S4 customer data carry incomplete - rest stays in api.rbk' }
     }
 }
 
@@ -432,10 +543,17 @@ function Invoke-Revert {
         $dst = Join-Path $script:AppRoot $p
         $rbk = $dst + '.rbk'
         if (-not (Test-Path -LiteralPath $rbk)) { continue }
+        # seal F-2 (b): before api goes back, what the new version kept (attachments written in S5..S6 too)
+        # rides back into api.rbk. If it cannot, api is not touched (the S7 catch ends broken).
+        if ($p -eq 'api' -and (Test-Path -LiteralPath $dst)) {
+            if (Test-FailAt 'S7C') { Write-Log 'injected S7C carry failure' }
+            else { [void](Move-CarryData $dst $rbk) }
+            if (Test-HasCarryData $dst) { throw ('S7 customer data could not be carried out of ' + $dst + ' - api left as it is') }
+        }
         if (Test-Path -LiteralPath $dst) {
             $back = Join-Path $script:SrcRoot $p
             if ($script:Req.material.kind -eq 'prev' -and -not (Test-Path -LiteralPath $back)) { Move-Item -LiteralPath $dst -Destination $back }
-            else { Remove-Item -LiteralPath $dst -Recurse -Force }
+            elseif (-not (Remove-AppDirSafe $dst)) { throw ('S7 could not remove ' + $dst) }
         }
         Move-Part $rbk $dst
         Write-Log ('S7 restored ' + $p)
@@ -484,6 +602,44 @@ function Expand-Material([string]$zip) {
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $script:StageDir)
 }
 
+# seal 05 (worker re-check - the API decided first, things may have changed since):
+# the staging zip must be the version installed right before this one. Returns $null when allowed,
+# otherwise why not.
+#  (a) a stale prev: {app}\rollback\prev exists and was replaced by another version than the current one
+#      (a manual update or the setup EXE came in between) -> refuse
+#  (b) version history {app}\rollback\versions-seen.txt ("M.m.b|UTC" per line, appended by the API at start):
+#      when the last line is the current version, the nearest line above with another version is the one
+#      installed right before -> the zip must be exactly that one. Unknown history -> only (a).
+function Get-StagingZipRefusal {
+    $now = ConvertTo-NormVersion ([string]$script:Req.from)
+    $to = ConvertTo-NormVersion ([string]$script:Req.to)
+    $prev = Join-Path $script:AppRoot 'rollback\prev'
+    if (Test-Path -LiteralPath $prev) {
+        $by = $null
+        $byFile = Join-Path $prev 'replaced-by.txt'
+        if (Test-Path -LiteralPath $byFile) { $by = ConvertTo-NormVersion (Get-Content -LiteralPath $byFile -Raw) }
+        if ($by -ne $now) { return ('stale prev replaced-by=' + $by + ' now=' + $now) }
+    }
+    $seen = Join-Path $script:AppRoot 'rollback\versions-seen.txt'
+    if (-not (Test-Path -LiteralPath $seen)) { return $null }
+    $vers = New-Object System.Collections.ArrayList
+    try {
+        foreach ($line in [System.IO.File]::ReadAllLines($seen, $Utf8)) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $v = ConvertTo-NormVersion ($line.Split('|')[0])
+            if ($null -ne $v) { [void]$vers.Add($v) }
+        }
+    } catch {
+        Write-Log ('versions-seen.txt unreadable, history unknown: ' + $_.Exception.Message)
+        return $null
+    }
+    if ($vers.Count -eq 0 -or $vers[$vers.Count - 1] -ne $now) { return $null }
+    $before = $null
+    for ($i = $vers.Count - 2; $i -ge 0; $i--) { if ($vers[$i] -ne $now) { $before = $vers[$i]; break } }
+    if ($null -ne $before -and $before -ne $to) { return ('zip ' + $to + ' is not the version installed right before ' + $now + ' (' + $before + ')') }
+    return $null
+}
+
 # returns $null when ready, otherwise a reason code
 function Initialize-Material {
     $mat = $script:Req.material
@@ -502,6 +658,10 @@ function Initialize-Material {
     } else {
         $zip = [string]$mat.path
         if (-not (Test-Path -LiteralPath $zip)) { Write-Log ('zip missing ' + $zip); return 'material_invalid' }
+        if ($Mode -eq 'rollback') {
+            $skip = Get-StagingZipRefusal
+            if ($null -ne $skip) { Write-Log ('S1 staging zip refused: ' + $skip); return 'material_invalid' }
+        }
         if ($Mode -eq 'update') {
             $h = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
             if (-not $h.Equals([string]$mat.sha256, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -585,7 +745,13 @@ function Save-PrevGeneration {
     # update mode: the old three folders (.rbk) become the one and only previous generation
     try {
         $prev = Join-Path $script:AppRoot 'rollback\prev'
-        Remove-DirSafe $prev
+        # seal F-2 (c): the old generation goes through the gatekeeper. If customer data in it could not be
+        # carried out, it stays as it is and no new generation is saved (the old program folders go instead).
+        if (-not (Remove-AppDirSafe $prev)) {
+            Write-Log 'previous generation not saved: the old one still holds customer data that could not be carried'
+            foreach ($p in $Parts) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
+            return
+        }
         New-Item -ItemType Directory -Path $prev -Force | Out-Null
         foreach ($p in $Parts) { Move-Part (Join-Path $script:AppRoot ($p + '.rbk')) (Join-Path $prev $p) }
         [System.IO.File]::WriteAllText((Join-Path $prev 'version.txt'), [string]$script:Req.from, $Utf8)
@@ -613,16 +779,17 @@ function Clear-AfterSuccess {
         try { if (Test-Path -LiteralPath $ChainMarkPath) { Remove-Item -LiteralPath $ChainMarkPath -Force } }
         catch { Write-Log ('rolled-back mark delete failed: ' + $_.Exception.Message) }
     } else {
-        foreach ($p in $Parts) { Remove-DirSafe (Join-Path $script:AppRoot ($p + '.rbk')) }
-        if ($script:Req.material.kind -eq 'prev') { Remove-DirSafe ([string]$script:Req.material.path) }
+        # seal F-2 (c): every program folder delete goes through the gatekeeper (customer data is carried first)
+        foreach ($p in $Parts) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
+        if ($script:Req.material.kind -eq 'prev') { [void](Remove-AppDirSafe ([string]$script:Req.material.path)) }
         # "rolled back to <to>": the API refuses another rollback while the installed version is <to>
         try {
             $mark = [string]$script:Req.to + '|' + [string]$script:Req.from + '|' + (Get-Date).ToUniversalTime().ToString('o')
             [System.IO.File]::WriteAllText($ChainMarkPath, $mark, $Utf8)
         } catch { Write-Log ('rolled-back mark write failed: ' + $_.Exception.Message) }
     }
-    Remove-DirSafe $script:StageDir
-    Remove-DirSafe (Join-Path $script:AppRoot 'rollback\stage')
+    [void](Remove-AppDirSafe $script:StageDir)
+    [void](Remove-AppDirSafe (Join-Path $script:AppRoot 'rollback\stage'))
     if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
 }
 
@@ -695,6 +862,7 @@ try {
                     Set-State 'running' $null 'S5'; Set-Lock
                     [void](Start-All)
                     Set-State 'running' $null 'S6'
+                    if (Test-FailAt 'S6W') { Invoke-TestNewCarryFile }
                     if (-not (Test-Running ([string]$script:Req.to) 'S6')) { $failReason = 'verify_failed' }
                 }
                 if ($overlap) {
@@ -725,7 +893,7 @@ try {
                         catch { Write-Log ('S7 verify failed: ' + $_.Exception.Message) }
                     }
                     if ($back) {
-                        Remove-DirSafe $script:StageDir
+                        [void](Remove-AppDirSafe $script:StageDir)
                         if ($script:CreatedNet) { Invoke-Schtasks ('/Delete /TN "' + $RestoreTaskName + '" /F') | Out-Null }
                         Complete-Swap 'reverted' $failReason 'S7'
                     } else {
