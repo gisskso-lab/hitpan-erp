@@ -16,6 +16,8 @@ internal sealed class FakeSwapEnvironment : ILocalSwapEnvironment
     public int ApiPort { get; set; } = 5257;
     public string WatchdogStagingDir { get; set; } = "";
     public DateTime UtcNow { get; set; } = DateTime.UtcNow;
+    /// <summary>20260930작1 봉합2 — 기본 null(= 판정표 M3 「못 읽음」 ⇒ <c>.rbk</c> 가 있으면 <c>swap_interrupted</c> · 설계 15-3).</summary>
+    public string? WatchdogVersion { get; set; }
 
     /// <summary>{root}\app 를 설치 폴더로 · 일꾼 원본은 {root}\src\local-swap.ps1(내용 무관 — 런처는 복사만).</summary>
     public static FakeSwapEnvironment Under(string root)

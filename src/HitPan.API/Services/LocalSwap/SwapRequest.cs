@@ -34,6 +34,13 @@ public sealed class SwapRequest
     [JsonPropertyName("updated_at")] public DateTime? UpdatedAt { get; set; }
     [JsonPropertyName("step")] public string? Step { get; set; }
     [JsonPropertyName("log")] public string? Log { get; set; }
+    /// <summary>
+    /// 20260930작1 봉합2 N-3ⓐ(계약 §3 봉합 2차 · schema 1 덧붙이기) — 일꾼이 끝 상태를 적을 때 살아 있는 api·watchdog 판.
+    /// 런처는 적지 않는다(비어 있으면 JSON 에서 빠진다 — 종전 요청서 모양 그대로). 런처 <c>CheckBusy</c> 판정표 M4 가 읽는다.
+    /// </summary>
+    [JsonPropertyName("parts_after")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SwapPartsAfter? PartsAfter { get; set; }
 
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
@@ -53,6 +60,13 @@ public sealed class SwapMaterial
     [JsonPropertyName("kind")] public string Kind { get; set; } = "";
     [JsonPropertyName("path")] public string Path { get; set; } = "";
     [JsonPropertyName("sha256")] public string? Sha256 { get; set; }
+}
+
+/// <summary>20260930작1 봉합2 N-3ⓐ — 끝 상태 때 살아 있는 판(<c>{"api":"M.m.b","watchdog":"M.m.b"}</c> · 계약 §3 봉합 2차). 화면 표시 없음.</summary>
+public sealed class SwapPartsAfter
+{
+    [JsonPropertyName("api")] public string? Api { get; set; }
+    [JsonPropertyName("watchdog")] public string? Watchdog { get; set; }
 }
 
 /// <summary>모드 — 두 수동 동작이 한 틀(같은 일꾼·같은 작업 이름)을 쓴다(설계 §13-2).</summary>
@@ -125,6 +139,13 @@ public static class SwapReasons
     public const string WorkerInterrupted = "worker_interrupted";
     /// <summary><c>.rbk</c> 가 남아 있고 마지막 요청이 <c>broken</c> — 「진행 중」 대신.</summary>
     public const string SwapInterrupted = "swap_interrupted";
+    // 20260930작1 봉합2 — 설계 §15-2 · 계약 §6 봉합 2차(같은 글자를 일꾼 local-swap.ps1 도 쓴다)
+    /// <summary>워치독 <c>{api,web,watchdog}.old</c> 가 남음(교체 표식 없음) — ERP 정지 <b>전</b> 거부(N-2 · 런처·일꾼 S0).</summary>
+    public const string UpdateCleanupPending = "update_cleanup_pending";
+    /// <summary>지난 교체 <c>.rbk</c> 안 프로그램 파일을 못 치움(N-1 · 일꾼 <c>success</c>·<c>refused</c>).</summary>
+    public const string CleanupPending = "cleanup_pending";
+    /// <summary><c>api.rbk</c> 안에 첨부·백업이 남음 — 지우지 않고 보관(N-1 · 일꾼 <c>success</c>·<c>refused</c>).</summary>
+    public const string CarryPending = "carry_pending";
 }
 
 /// <summary>런처에 넘기는 값 — 판·재료는 <b>서버가 계산한 값</b>만(요청 본문 유래 0 · 병렬이슈 04).</summary>
