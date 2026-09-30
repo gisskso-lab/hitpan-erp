@@ -9,7 +9,7 @@ namespace HitPan.Web.Services;
 /// <remarks>
 /// 문(門)은 서버가 막는다 — <c>[Authorize(Policy="TenantAdminOnly")]</c> + <c>[MainPcOnly]</c>(설계 §13-4).
 /// 화면은 서버 판정을 믿고 결과를 고객 문구로 옮길 뿐이다(<see cref="LocalSwapUiText"/>).
-/// 주소·필드 이름은 잠정(설계 §0 · §13) — 갈래 A 계약 문서와 대조 필요.
+/// ⬛ 주소·필드 이름은 잠정이었다(F) → 🟢 I-WEB(9/30) 이 <c>LocalRollbackController</c> 라우트·DTO 와 맞췄다(C-5·C-6·C-7).
 /// </remarks>
 public sealed class LocalRollbackClient(HttpClient http, ILogger<LocalRollbackClient> logger)
 {
@@ -20,29 +20,51 @@ public sealed class LocalRollbackClient(HttpClient http, ILogger<LocalRollbackCl
     /// <summary>[예] 뒤 — 서버가 전제를 다시 판정한다(화면 값 불신 · 설계 §2).</summary>
     /// <remarks>
     /// 🔴 [3-V] 적발 04 반영(PM 지시 9/30) — 화면은 버전·경로를 요청 본문에 <b>싣지 않는다</b>. 무엇으로 되돌릴지는 서버가 계산한다.
-    /// 본문은 빈 객체 하나(<see cref="LocalSwapUiText.EmptyBody"/>).
+    /// 🔴 C-5(I-WEB 9/30) — 서버 <c>LocalRollbackStartBody</c> 는 <b>1회용 확인 번호 하나</b>를 받는다(없으면 <c>ticket_invalid</c>).
+    /// 본문 = <c>{ "ticket": "…" }</c>(<see cref="LocalSwapUiText.RollbackStartBody"/>) — 조회(<see cref="GetStatusAsync"/>) 때 받은 값 그대로.
+    /// 번호는 한 번 쓰면 사라진다 ⇒ 실패 뒤에는 다시 조회해 새 번호를 받는다(화면 몫).
     /// </remarks>
-    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(CancellationToken ct = default) =>
+    public Task<LocalSwapCallResult<LocalSwapStartResult>> StartAsync(string? ticket, CancellationToken ct = default) =>
         LocalSwapCall.PostAsync<LocalSwapStartResult>(
-            http, logger, LocalSwapUiText.ApiRollbackStart, LocalSwapUiText.EmptyBody, ct);
+            http, logger, LocalSwapUiText.ApiRollbackStart, LocalSwapUiText.RollbackStartBody(ticket), ct);
 }
 
-/// <summary>되돌리기 상태(잠정 DTO — 계약 대조 필요).</summary>
+/// <summary>
+/// 되돌리기 상태 — 서버 <c>HitPan.API.Services.LocalRollback.LocalRollbackStatus</c> 와 같은 칸(C-6 · 게이트 F-C3 가 왕복으로 잰다).
+/// </summary>
 public sealed class LocalRollbackStatus
 {
+    public bool CanRollback { get; set; }
+    public string? Reason { get; set; }
     public string? CurrentVersion { get; set; }
     /// <summary>되돌아갈 판 = 현재의 바로 앞 판(설계 §3-3). 재료가 없으면 null.</summary>
     public string? TargetVersion { get; set; }
-    public bool CanRollback { get; set; }
-    public string? Reason { get; set; }
+    /// <summary>재료 종류(<c>prev</c>·<c>staging_zip</c>) — 화면은 보이지 않는다(개발용어).</summary>
+    public string? MaterialKind { get; set; }
+    /// <summary>1회용 확인 번호(32자) — [예] 본문에 이것만 싣는다.</summary>
+    public string? Ticket { get; set; }
+    /// <summary>번호 유효 시간(분).</summary>
+    public int TicketMinutes { get; set; }
+    /// <summary>지난 교체 한 번의 결과(두 모드 공통 · 계약 §7) — 없으면 null.</summary>
+    public LocalSwapLast? Last { get; set; }
 }
 
-/// <summary>[예] 뒤 서버 응답(잠정 DTO — 계약 대조 필요).</summary>
+/// <summary>지난 교체 결과 — 서버 <c>LocalSwapLastResult</c> 와 같은 칸.</summary>
+public sealed class LocalSwapLast
+{
+    public string? Mode { get; set; }
+    public string? State { get; set; }
+    public string? Reason { get; set; }
+    public string? From { get; set; }
+    public string? To { get; set; }
+    public DateTime AtUtc { get; set; }
+}
+
+/// <summary>되돌리기 [예] 뒤 서버 응답 — 202 <c>{ started: true, reason }</c> · 409 <c>{ started: false, reason }</c>.</summary>
 public sealed class LocalSwapStartResult
 {
-    public bool Accepted { get; set; }
+    public bool Started { get; set; }
     public string? Reason { get; set; }
-    public string? Ticket { get; set; }
 }
 
 /// <summary>호출 한 번의 결과 — 성공이면 <see cref="Data"/>, 아니면 상태·사유 코드.</summary>
@@ -93,6 +115,9 @@ internal static class LocalSwapCall
     private static async Task<LocalSwapCallResult<T>> ReadAsync<T>(HttpResponseMessage res, CancellationToken ct) where T : class
     {
         var status = (int)res.StatusCode;
+        // 204 = 내용 없음(수동 업데이트 진행 상태가 없을 때) — 본문을 읽지 않는다(빈 본문을 JSON 으로 읽으면 예외).
+        if (res.StatusCode == System.Net.HttpStatusCode.NoContent)
+            return new LocalSwapCallResult<T> { Ok = false, Status = status };
         if (res.IsSuccessStatusCode)
         {
             var data = await res.Content.ReadFromJsonAsync<T>(cancellationToken: ct);

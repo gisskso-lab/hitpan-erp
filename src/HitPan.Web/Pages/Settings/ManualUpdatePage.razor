@@ -8,6 +8,7 @@
      ② 자리 — <MainPcOnly> 로 메인PC 왕복을 거친 뒤에만 조회한다(20260924작1 절D 규칙 그대로).
      ③ 자동 경로(update-consent·update-consent-local)는 부르지 않는다(G-43 · G-L1). *@
 @attribute [Authorize]
+@implements IDisposable
 @using HitPan.Web.Helpers
 @inject ManualUpdateClient Api
 @inject AuthenticationStateProvider AuthState
@@ -40,11 +41,23 @@
             {
                 <MudAlert Severity="Severity.Success">@LocalSwapUiText.UpdateStarted</MudAlert>
             }
+            else if (_stageText is not null)
+            {
+                @* C-7/U — [예] 뒤 일꾼에 넘기기 전까지(받기·확인·백업) 진행 단계. 이 동안 히트판은 아직 켜져 있다. *@
+                <div class="d-flex align-center pa-4" style="gap:12px;">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">@_stageText</MudText>
+                </div>
+            }
             else
             {
-                @if (_status?.LastFailedRestored == true)
+                @* C-7 — 지난 교체 결과(계약 §7 · 다음 로그인 뒤 알림). ⚠️ 서버 check 응답에 last 칸이 아직 없다(명세서 I-WEB §4). *@
+                @if (_lastText is not null)
                 {
-                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@LocalSwapUiText.UpdateFailed(_status.LastFromVersion)</MudAlert>
+                    <MudAlert Severity="@_lastSeverity" Dense="true" Class="mb-3">
+                        <div style="font-size:12px; opacity:.8;">@_lastCaption</div>
+                        <div>@_lastText</div>
+                    </MudAlert>
                 }
 
                 <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
@@ -84,9 +97,24 @@
     private ManualUpdateStatus? _status;
     private string? _message;
     private Severity _messageSeverity = Severity.Info;
+    private string? _stageText;
+    private string? _lastText;
+    private string? _lastCaption;
+    private Severity _lastSeverity = Severity.Info;
+    private readonly CancellationTokenSource _cts = new();
 
-    private bool CanStart => _status is { CanStart: true, UpdateAvailable: true }
-                             && !string.IsNullOrWhiteSpace(_status.LatestVersion);
+    /// <summary>진행 상태를 몇 초마다 · 최대 얼마 동안 볼지(받기가 길 수 있다).</summary>
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan PollLimit = TimeSpan.FromMinutes(30);
+
+    // ⬛ F: _status is { CanStart: true, UpdateAvailable: true } — 서버 check 응답에는 CanStart 칸이 없다(C-6). 판정은 DTO 가 한다.
+    private bool CanStart => _status is { CanStart: true };
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -113,15 +141,101 @@
         }
 
         _status = r.Data;
-        if (_status is { UpdateAvailable: false })
+        ShowLast(_status?.Last, _status?.CurrentVersion);
+        if (_status is null) return;
+
+        // C-2 — 사유 코드는 서버 ManualUpdateReasons 그대로(ok · no_newer_version · feed_unreachable · signature_invalid · not_windows …).
+        var reason = (_status.Reason ?? string.Empty).Trim().ToLowerInvariant();
+        if (_status.Busy)
+        {
+            _message = LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonUpdateInProgress);
+            _messageSeverity = Severity.Warning;
+        }
+        else if (!_status.UpdateAvailable && (reason is "" or LocalSwapUiText.ReasonOk or LocalSwapUiText.ReasonNoNewerVersion))
         {
             _message = LocalSwapUiText.AlreadyLatest;
             _messageSeverity = Severity.Info;
         }
-        else if (_status is { CanStart: false })
+        else if (!_status.CanStart)
         {
             _message = LocalSwapUiText.ReasonText(_status.Reason);
             _messageSeverity = Severity.Warning;
+        }
+    }
+
+    /// <summary>지난 교체 결과 한 줄(계약 §7) — 낡은 기록은 안 보인다(<see cref="LocalSwapUiText.ShouldShowLast"/>).</summary>
+    private void ShowLast(LocalSwapLast? last, string? current)
+    {
+        _lastText = null;
+        if (last is null || !LocalSwapUiText.ShouldShowLast(last.State, last.From, last.To, last.AtUtc, current, DateTime.UtcNow)) return;
+        _lastText = LocalSwapUiText.EndStateText(last.Mode, last.State, last.Reason, last.From, last.To);
+        _lastCaption = LocalSwapUiText.LastCaption(last.AtUtc);
+        _lastSeverity = LocalSwapUiText.EndStateLevel(last.State) switch
+        {
+            3 => Severity.Success,
+            2 => Severity.Error,
+            1 => Severity.Warning,
+            _ => Severity.Info,
+        };
+    }
+
+    /// <summary>
+    /// [예] 뒤 진행 — 서버가 받기·확인·백업을 마치고 일꾼에 넘기면(<c>handed_off</c>) 곧 히트판이 멈춘다.
+    /// 넘기기 전에 멈추면(<c>refused</c>) 그 사유를 보인다. 연결이 끊기면 넘긴 뒤 멈춘 것으로 본다.
+    /// </summary>
+    private async Task FollowJobAsync(ManualUpdateJob? job)
+    {
+        var until = DateTime.UtcNow + PollLimit;
+        while (true)
+        {
+            var stage = (job?.Stage ?? string.Empty).Trim().ToLowerInvariant();
+            if (stage == LocalSwapUiText.StageHandedOff)
+            {
+                _stageText = null;
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.UpdateStarted, Severity.Success);
+                return;
+            }
+            if (stage == LocalSwapUiText.StageRefused)
+            {
+                _stageText = null;
+                _message = LocalSwapUiText.ReasonText(job?.Reason);
+                _messageSeverity = Severity.Warning;
+                return;
+            }
+
+            _stageText = LocalSwapUiText.StageText(stage);
+            StateHasChanged();
+            if (DateTime.UtcNow > until || _cts.IsCancellationRequested)
+            {
+                _stageText = null;
+                _message = LocalSwapUiText.StartFailed;
+                _messageSeverity = Severity.Warning;
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(PollEvery, _cts.Token);
+            }
+            catch (TaskCanceledException)
+            {
+                // 화면을 떠났다 — 더 볼 필요가 없다(서버 작업은 그대로 진행된다).
+                return;
+            }
+
+            var r = await Api.GetJobAsync(_cts.Token);
+            if (r.Ok) { job = r.Data; continue; }
+            _stageText = null;
+            if (r.Status == 0)
+            {
+                // 연결이 끊겼다 = 교체가 시작돼 히트판이 멈춘 것(넘긴 뒤 API 가 멈춘다 · 계약 §7).
+                _started = true;
+                return;
+            }
+            _message = r.Status == 204 ? LocalSwapUiText.UpdateStatusLost : r.FailureText;
+            _messageSeverity = Severity.Warning;
+            return;
         }
     }
 
@@ -143,15 +257,15 @@
         try
         {
             var r = await Api.StartAsync();   // 🔴 적발 04 — 버전은 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용)
-            if (r.Ok && r.Data?.Accepted == true)
+            if (r.Ok)
             {
-                _started = true;
-                Snackbar.Add(LocalSwapUiText.UpdateStarted, Severity.Success);
+                // 202 = 받아들임 + 진행 상태(ManualUpdateJobStatus). 넘길 때까지 따라간다.
+                await FollowJobAsync(r.Data);
                 return;
             }
 
-            // 거부 사유는 본문(r.Data.Reason) 또는 오류 응답(r.Reason) — 둘 다 고객 문구로.
-            _message = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : r.FailureText;
+            // 409 { reason } · 403 { error: main_pc_only } · 403 본문없음(관리자 아님) — 전부 고객 문구로.
+            _message = r.Status == 0 ? LocalSwapUiText.StartFailed : r.FailureText;
             _messageSeverity = Severity.Warning;
         }
         finally
