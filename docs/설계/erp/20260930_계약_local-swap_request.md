@@ -28,17 +28,21 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 
 > 🔴 **개정(같은 날 · [3-V] 병렬이슈 01~04 반영 — 아래 표보다 우선)**: 작업 폴더·요청서·일꾼 사본·기록·usage.jsonl 은 전부 **`{app}\rollback\`** 아래(`%ProgramData%\HitPan` 은 Users 가 하위 폴더를 먼저 만들 수 있다 — 01). 수동 받는 곳 = **`{app}\manual\staging\`**(U). 쓰기 전 `BackupService.EnsureRestrictedSystemFolder`(C-8·C-12) — 걸리면 `folder_unsafe` · 작업 등록 0. 한 번에 하나 = `{app}\rollback\swap.lock`(`번호|UTC` · CreateNew · 일꾼이 끝에 지움) · `schtasks /Create` 에 `/F` 없음 · 끝난 교체 뒤 **10분 쿨다운**(`cooldown`) · 요청서 `requested_at` 10분 지나면 일꾼 거부(03). 되돌리기 성공 = `{app}\rollback\rolled-back.txt`(`to|from|UTC`) — 첫 칸 = 지금 판이면 `rollback_chain_blocked` · update 성공이 지운다(02). `/TR` = 고정 틀(설치 경로·모드 상수·서버 번호뿐 · 04). 새 사유 코드: `folder_unsafe` · `cooldown` · `rollback_chain_blocked`.
 
+> 🟢 **I-API 개정(9/30 · 20260930작1 통합 갈래 I-API)**: 아래 표를 위 개정 줄대로 **`{app}` 한 벌**로 고쳤다. `%ProgramData%\HitPan\…` 경로는 이 계약에 **0**(워치독 재료 ② 는 SYSTEM 프로필 `LocalApplicationData` — `%ProgramData%` 아님). 폴더 판정 = `BackupService.EnsureRestrictedSystemFolder` **한 벌**(런처 `SwapFolderGuard` · 수동 `ManualFolders.EnsureRestricted` 둘 다 이것만 부른다). 규칙 대조표 = 개발명세서 I-API §2.
+
 | 무엇 | 경로 | 누가 만든다 |
 |---|---|---|
-| 작업 폴더 | `%ProgramData%\HitPan\rollback\` | 런처(처음 쓸 때 · ACL = SYSTEM·Administrators 쓰기만, 상속 끊음) |
-| 요청서 | `…\rollback\request.json` | 런처가 쓰고, 일꾼이 상태만 고쳐 쓴다 |
-| 일꾼 사본 | `…\rollback\run\local-swap.ps1` | 런처(`{api}\Rollback\local-swap.ps1` 에서 복사 — api 폴더는 곧 바뀐다) |
-| 일꾼 기록 | `…\rollback\logs\swap-{ticket}.log` | 일꾼 |
+| 작업 폴더 | `{app}\rollback\` | 런처(처음 쓸 때 · 공용 판정 C-8: 상속 끊고 SYSTEM·Administrators·실행 계정만 · 쓰기 전마다 C-12) |
+| 한 번에 하나 잠금 | `{app}\rollback\swap.lock`(`번호\|UTC` · CreateNew) | 런처(만든다) · 일꾼(끝에 지운다 · 번호가 같을 때만) |
+| 요청서 | `{app}\rollback\request.json` | 런처가 쓰고, 일꾼이 상태만 고쳐 쓴다 |
+| 일꾼 사본 | `{app}\rollback\run\local-swap.ps1` | 런처(`{api}\Rollback\local-swap.ps1` 에서 복사 — api 폴더는 곧 바뀐다) |
+| 일꾼 기록 | `{app}\rollback\logs\swap-{ticket}.log` | 일꾼 |
+| 연쇄 차단 표식 | `{app}\rollback\rolled-back.txt`(`to\|from\|UTC`) | 일꾼(rollback 성공) · update 성공이 지운다(02) |
 | 준비 폴더 | `{app}\rollback\stage\{to}\{api,web,watchdog}` | 일꾼(S1 · zip 해제 — 같은 볼륨이라 S4 가 이름 바꾸기로 끝난다) |
 | 이전 판(재료 ①) | `{app}\rollback\prev\{api,web,watchdog}` + `version.txt` + `replaced-by.txt` + `sha256.txt` | 일꾼(update 성공 정리에서만) |
 | 옛 세 벌 임시 | `{app}\{api,web,watchdog}.rbk` | 일꾼(S4 · 성공 정리/S7 에서 사라진다) |
-| 수동 기록 | `%ProgramData%\HitPan\manual\usage.jsonl` | 일꾼(끝 상태 한 줄 · 덧붙이기만) |
-| 수동 받는 곳 | `%ProgramData%\HitPan\manual\staging\` | U(다운로드) — 일꾼은 update 성공 뒤 그 zip 만 지운다 |
+| 수동 기록(한 파일) | `{app}\rollback\usage.jsonl` | 일꾼(넘긴 뒤 끝 상태 한 줄) · API `ManualUsageLog`(넘기기 전 거부 한 줄) — 덧붙이기만 · 한 사용 = 한 줄 |
+| 수동 받는 곳 | `{app}\manual\staging\` | U(다운로드 · `{app}\manual` 부터 공용 판정) — 일꾼은 update 성공 뒤 그 zip 만 지운다 |
 | 워치독 받는 곳(재료 ②) | `%SystemRoot%\System32\config\systemprofile\AppData\Local\HitPan\Updates\staging\hitpan-{V}.zip` | 워치독(읽기만 · 삭제·수정 0) |
 
 ## §3 `request.json` — schema 1
