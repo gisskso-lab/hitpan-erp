@@ -292,11 +292,14 @@ public sealed class LocalSwapChatFilesGateTests
     //   문지기가 유일한 줄인 되돌리기 장면 = S4 싣기가 다 못 끝나 고객 자료가 api.rbk 에 남은 채 성공(S4C) →
     //   성공 정리의 Remove-AppDirSafe(api.rbk) 만이 그 자료를 {app}\api 로 싣는다.
 
-    /// <summary>A0 변이 ④ 그대로 — 문지기 본문 첫 줄에서 안을 안 보고 지운다(호출 자리 8곳 · 반환값 모양은 그대로).</summary>
+    /// <summary>A0 변이 ④ 그대로 — 문지기의 빈 경로·없는 폴더 두 줄 <b>뒤</b>에서 안을 안 보고 지운다(호출 자리 8곳 · 반환값 모양은 그대로).
+    /// 머리 바로 뒤에 넣으면 빈 경로(<c>$script:StageDir</c> = null)에서 <c>Test-Path ''</c> 가 던져 문지기와 무관한 결함이 섞인다.</summary>
     public static string ControlGatekeeperBodyOff(string? text = null)
     {
         text ??= LocalSwapWorkerRig.OriginalScript();
-        var a = Require(text, "function Remove-AppDirSafe([string]$dir) {", "Remove-AppDirSafe 머리");
+        const string guard = "if (-not (Test-Path -LiteralPath $dir)) { return $true }";
+        Assert.True(text.Split(guard).Length == 2, "Remove-AppDirSafe 의 없는 폴더 줄이 하나가 아니다 — 대조군을 같이 고쳐라");
+        var a = Require(text, guard, "Remove-AppDirSafe 없는 폴더 줄");
         return text.Replace(a, a + "\r\n    Remove-DirSafe $dir; return (-not (Test-Path -LiteralPath $dir))", StringComparison.Ordinal);
     }
 
