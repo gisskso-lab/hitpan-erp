@@ -412,6 +412,22 @@ builder.Services.AddSingleton<IMigrationProgressService, MigrationProgressServic
 // 배관(SignalR)은 위 마이그 진행률용으로 이미 검증돼 있어 패턴만 복제한다.
 builder.Services.AddSingleton<INotificationService, SignalRNotificationService>();
 
+// 2026-09-30 작1 갈래 U — 수동 업데이트(자료관리 「최신 버전 확인/업데이트」 · 설계 §13). 워치독과 독립된 모듈.
+//   어댑터 하나가 세 창구를 맡는다(링크 컴파일한 워치독 원본을 감쌈 · 워치독 형식은 DI 에 안 흩어진다).
+//   서비스는 단일 인스턴스 — 한 PC 에서 수동 업데이트는 한 번에 하나.
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>();
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IUpdateFeed>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IPackageFetcher>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IAutoUpdateLockProbe>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton(_ => new HitPan.API.Services.ManualUpdate.ManualFolders());
+builder.Services.AddSingleton(HitPan.API.Services.ManualUpdate.ManualUpdateEnvironment.Default);
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUsageLog>();
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUpdateService>();
+// ⏳ 갈래 A DI 줄(ILocalSwapLauncher 등)은 A 개발명세서 「U 가 넣을 줄」 확인 뒤 여기 아래에 넣는다(PM 합칠 때).
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>
