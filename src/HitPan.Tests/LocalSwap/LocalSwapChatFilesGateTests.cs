@@ -283,4 +283,49 @@ public sealed class LocalSwapChatFilesGateTests
         var (seed, now, _) = RunTwoUpdates(rig, ControlNoGatekeeper(ControlNoS4Carry()));
         Assert.True(seed.Keys.Any(k => !now.ContainsKey(k)), variant + ": 대조군인데 잃은 것이 없다 / " + Why(rig));
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🆕 G-CF3b(작1 봉합2 A2 · PM 범위 추가 10/1) — 되돌리기 경로에서 「지우기 전 문지기」 하나만 빼도 FAIL 하는 장면
+    // ══════════════════════════════════════════════════════════════
+    //   A0 변이 ④ 발견: 문지기 본문만 무력화하면 G-CF1~4 21건 중 되돌리기 쪽을 잡는 게이트가 0.
+    //   S7(원위치)의 api 지우기는 멈춤 줄(Test-HasCarryData $dst)이 문지기와 같은 폴더를 먼저 본다 — 거기선 문지기가 단독일 수 없다.
+    //   문지기가 유일한 줄인 되돌리기 장면 = S4 싣기가 다 못 끝나 고객 자료가 api.rbk 에 남은 채 성공(S4C) →
+    //   성공 정리의 Remove-AppDirSafe(api.rbk) 만이 그 자료를 {app}\api 로 싣는다.
+
+    /// <summary>A0 변이 ④ 그대로 — 문지기 본문 첫 줄에서 안을 안 보고 지운다(호출 자리 8곳 · 반환값 모양은 그대로).</summary>
+    public static string ControlGatekeeperBodyOff(string? text = null)
+    {
+        text ??= LocalSwapWorkerRig.OriginalScript();
+        var a = Require(text, "function Remove-AppDirSafe([string]$dir) {", "Remove-AppDirSafe 머리");
+        return text.Replace(a, a + "\r\n    Remove-DirSafe $dir; return (-not (Test-Path -LiteralPath $dir))", StringComparison.Ordinal);
+    }
+
+    [Theory(DisplayName = "봉합2 G-CF3b 🚨 되돌리기 · S4 싣기 못 끝남(S4C) → 성공 정리의 문지기가 api.rbk 고객 자료를 {app}\\api 로 싣고 지운다 · {app}\\api = 시드")]
+    [InlineData("prev")]
+    [InlineData("zip")]
+    public void Rollback_gatekeeper_alone_carries_what_S4_left(string kind)
+    {
+        using var rig = Make(kind);
+        var seed = rig.SeedCarry();
+        Assert.Equal(0, rig.Run(null, "S4C"));
+        var final = rig.Final();
+        Assert.True(final.State == SwapStates.Success, kind + ": 끝 " + final.State + "/" + final.Reason + " / " + Why(rig));
+        Assert.Contains("injected S4C", rig.Log()); // S4 싣기가 정말 건너뛰어졌다 — 싣는 줄은 문지기뿐
+        var now = LocalSwapWorkerRig.CarryFiles(ApiDir(rig));
+        AssertContainsAll(seed, now, kind + " {app}\\api");
+        Assert.Equal(seed.Count, now.Count);
+        Assert.False(Directory.Exists(Path.Combine(rig.App, "api.rbk")), kind + ": api.rbk 가 남았다 / " + Why(rig));
+    }
+
+    [Theory(DisplayName = "봉합2 G-CF3b 대조군 🔴 문지기 본문만 무력화(A0 변이 ④) · S4C → api.rbk 와 함께 고객 자료 소실(게이트가 FAIL 을 낸다)")]
+    [InlineData("prev")]
+    [InlineData("zip")]
+    public void Control_gatekeeper_body_off_loses_what_S4_left(string kind)
+    {
+        using var rig = Make(kind);
+        var seed = rig.SeedCarry();
+        Assert.Equal(0, rig.Run(ControlGatekeeperBodyOff(), "S4C"));
+        var all = Union(ApiDir(rig), Path.Combine(rig.App, "api.rbk"), Path.Combine(rig.Work, "prev", "api"));
+        Assert.True(seed.Keys.Any(k => !all.ContainsKey(k)), kind + ": 대조군인데 잃은 것이 없다 / " + Why(rig));
+    }
 }
