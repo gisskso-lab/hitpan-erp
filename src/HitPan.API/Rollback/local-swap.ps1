@@ -825,6 +825,8 @@ function Open-TestHold([string]$dir) {
 function Clear-Leftover {
     try {
         $mark = Get-PrevSavingMark
+        # seal4 18 (b): a mark that cannot be read - the mark and the .rbk folders are not touched, refused here (nothing stopped)
+        if ($null -ne $mark -and $mark.unread) { Write-Log 'S0 prev-saving mark unreadable - mark and old folders kept'; return (Get-RbkLeftReason) }
         if ($null -ne $mark -and $mark.stale) {
             Write-Log ('S0 prev-saving mark is stale (from=' + $mark.from + ' to=' + $mark.to + ') - mark removed, prev untouched')
             try { Remove-Item -LiteralPath $mark.path -Force }
@@ -925,11 +927,14 @@ function Get-PrevSavingPath { return (Join-Path $script:AppRoot 'rollback\prev-s
 # Reads the mark. $null = no mark. Otherwise from, to, ticket, path and stale: $true when the mark no longer names the
 # live generation - unreadable, its "to" is not the live api version (a watchdog update moved on since) or
 # prev\sha256.txt is there (someone finished a prev already; it is not ours to overwrite). Never throws.
+# seal4 18 (design 17-0): a mark that is there but cannot be read is NOT stale - unread = $true (stale = $false, from/to
+# null). Not knowing whose folders they are, nobody deletes the .rbk folders or the mark (the retry and S0 both keep
+# them). No time limit: while the mark cannot be read they stay (owner decision V-3 - customer centre).
 function Get-PrevSavingMark {
     try {
         $path = Get-PrevSavingPath
         if (-not (Test-Path -LiteralPath $path)) { return $null }
-        $o = [ordered]@{ from = $null; to = $null; ticket = $null; path = $path; stale = $true }
+        $o = [ordered]@{ from = $null; to = $null; ticket = $null; path = $path; stale = $true; unread = $false }
         try {
             $f = ([System.IO.File]::ReadAllText($path, $Utf8)).Trim().Split('|')
             if ($f.Length -ge 3) { $o.from = ConvertTo-NormVersion $f[0]; $o.to = ConvertTo-NormVersion $f[1]; $o.ticket = $f[2] }
@@ -938,11 +943,14 @@ function Get-PrevSavingMark {
             if ($o.to -ne $live) { $stale = $true }
             if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'rollback\prev\sha256.txt')) { $stale = $true }
             $o.stale = $stale
-        } catch { Write-Log ('prev-saving mark unreadable (judged stale): ' + $_.Exception.Message) }
+        } catch {
+            $o.from = $null; $o.to = $null; $o.stale = $false; $o.unread = $true
+            Write-Log ('prev-saving mark unreadable (kept, old folders kept): ' + $_.Exception.Message)
+        }
         return (New-Object PSObject -Property $o)
     } catch {
-        Write-Log ('prev-saving mark check failed: ' + $_.Exception.Message)
-        return $null
+        Write-Log ('prev-saving mark check failed (judged unreadable, old folders kept): ' + $_.Exception.Message)
+        return (New-Object PSObject -Property ([ordered]@{ from = $null; to = $null; ticket = $null; path = $null; stale = $false; unread = $true }))
     }
 }
 
@@ -1050,6 +1058,8 @@ function Get-SuccessLeftover {
         # generation - the retry finishes the saving, it never deletes them. Not finished = they stay as they are.
         if ($Mode -eq 'update') {
             $pm = Get-PrevSavingMark
+            # seal4 18 (a): a mark that cannot be read - whose folders they are is unknown, they stay as they are
+            if ($null -ne $pm -and $pm.unread) { Write-Log 'success cleanup: prev-saving mark unreadable - old folders kept'; continue }
             if ($null -ne $pm -and -not $pm.stale) { [void](Complete-PrevGeneration $pm.from $pm.to); continue }
         }
         foreach ($p in $left) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
@@ -1073,10 +1083,14 @@ function Invoke-SuccessCleanup {
     if (Test-FailAt 'RBKH') { $hold = Open-TestHoldTop (Join-Path $script:AppRoot 'api.rbk') }
     elseif (Test-FailAt 'RBKHC') { $hold = Open-TestHold (Join-Path $script:AppRoot 'api.rbk\chat-files') }
     elseif (Test-FailAt 'PVHH') { $hold = Open-TestHold (Join-Path $script:AppRoot 'web.rbk') } # seal3: held to the end
+    $markHold = $null
     try {
         Clear-AfterSuccess | Out-Null
+        # test only (PVMR, seal4): the prev-saving mark is held from after the first saving to the end (it cannot be read)
+        if ((Test-FailAt 'PVMR') -and (Test-Path -LiteralPath (Get-PrevSavingPath))) { Write-Log 'test hold mark'; $markHold = [System.IO.File]::Open((Get-PrevSavingPath), 'Open', 'Read', 'None') }
         return (Get-SuccessLeftover)
     } finally {
+        if ($null -ne $markHold) { $markHold.Dispose() }
         if ($null -ne $hold) { $hold.Dispose() }
     }
 }

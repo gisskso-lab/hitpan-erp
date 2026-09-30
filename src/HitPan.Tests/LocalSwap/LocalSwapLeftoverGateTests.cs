@@ -718,4 +718,107 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.Equal(SwapReasons.RevertFailed, final.Reason);
         Assert.Equal("S0", final.Step);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 봉합4 D — 「모르면 남긴다」 · 병렬이슈 18(표식 못 읽음) · [4] P2-2(표식 못 씀) · P2-1(부분 이동 게이트 공백) · 설계 §17 · 작업지시서 §15
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 D-0 실측(10/1 · PS 5.1.26100 · $ErrorActionPreference='Stop'): 폴더 안 마지막 열거 파일(lib\…)을 FileShare.None 으로 쥐고 그 폴더를
+    //    Move-Item → 앞 두 파일은 옮겨지고 던진다(부분 이동). 첫 파일을 쥐면 아무것도 안 옮기고 던지지만 목적지 빈 폴더는 생긴다.
+    //    열거 순서(Get-ChildItem -Recurse -File) = 맨 위 파일 → 하위 폴더 = Move-Item 이 옮기는 순서.
+
+    /// <summary>봉합4 대조군 — 「못 읽음」을 종전처럼 낡음으로 보는 사본(= 봉합4 전 안쪽 catch).</summary>
+    public static string ControlUnreadAsStale() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "$o.from = $null; $o.to = $null; $o.stale = $false; $o.unread = $true",
+        "$o.unread = $false # (control) unreadable judged stale", "표식 못 읽음 판정");
+
+    /// <summary>봉합4 대조군 — 표식이 24시간 넘게 못 읽히면 낡음으로 보는 사본(⬛ 설계 17-0 「풀리는 길」 · 사장님 V-3 로 폐기된 안).</summary>
+    public static string ControlUnreadStaleAfterHours() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "$o.from = $null; $o.to = $null; $o.stale = $false; $o.unread = $true",
+        "if (((Get-Date).ToUniversalTime() - (Get-Item -LiteralPath $path -Force).LastWriteTimeUtc).TotalHours -gt 24) { $o.unread = $false } else { $o.from = $null; $o.to = $null; $o.stale = $false; $o.unread = $true }",
+        "표식 못 읽음 판정");
+
+    // ── G-PV8 — 표식 못 읽음(18): 재시도·S0 모두 .rbk·표식 무접촉 · 시간이 지나도 풀지 않는다 ──
+
+    [Fact(DisplayName = "봉합4 G-PV8(a) 🚨 첫 보관 못 마침(PVH) + 표식을 끝까지 쥠(PVMR) → success+cleanup_pending · web.rbk·watchdog.rbk 해시 = 옛 판 · 표식 남음 · prev\\api = 옛 판")]
+    public void Unreadable_mark_keeps_the_old_generation_in_the_retry()
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, rig.Run(null, "PVH,PVMR"));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, "끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Contains("test hold mark", rig.Log());                                   // 주입이 실제로 걸렸다
+        Assert.Equal(3, rig.CountLog("success cleanup: prev-saving mark unreadable")); // 재시도 3회 모두 못 읽음
+        AssertSame(PartOf(gen, "web"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")), "web.rbk");
+        AssertSame(PartOf(gen, "watchdog"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "watchdog")), "watchdog.rbk");
+        Assert.True(File.Exists(rig.PrevSavingPath), "보관 표식이 없다 / " + why);
+        AssertSame(PartOf(gen, "api"), LocalSwapWorkerRig.AllFiles(Path.Combine(rig.PrevDir, "api")), "prev\\api");
+    }
+
+    [Fact(DisplayName = "봉합4 G-PV8(a) 대조군 🔴 못 읽음 = 낡음 사본(봉합4 전) → 재시도가 web.rbk·watchdog.rbk 를 지운다(게이트가 FAIL 을 낸다)")]
+    public void Control_unreadable_mark_as_stale_deletes_in_the_retry()
+    {
+        using var rig = Make("update");
+        Assert.Equal(0, rig.Run(ControlUnreadAsStale(), "PVH,PVMR"));
+        Assert.Contains("test hold mark", rig.Log());
+        Assert.False(Directory.Exists(Rbk(rig, "watchdog")), "대조군에서 watchdog.rbk 가 안 지워졌다 / " + Why(rig));
+    }
+
+    /// <summary>G-PV3 시드(보관 반쪽) · 표식 시각을 <paramref name="markAgeHours"/> 시간 전으로 · 표식을 FileShare.None 으로 쥔 채 일꾼을 S1 주입으로 돌린다.</summary>
+    private static int RunWithMarkHeld(LocalSwapWorkerRig rig, string? script, int markAgeHours)
+    {
+        if (markAgeHours > 0) File.SetLastWriteTimeUtc(rig.PrevSavingPath, DateTime.UtcNow.AddHours(-markAgeHours));
+        using var held = new FileStream(rig.PrevSavingPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        return rig.Run(script, "S1");
+    }
+
+    [Theory(DisplayName = "봉합4 G-PV8(b)(c) 🚨 보관 반쪽 + 표식을 시험이 쥠((c) 표식 25시간 전) → refused/cleanup_pending · S0 · /DISABLE 0 · .rbk 해시 = 옛 판 · 표식 남음 · prev 무접촉")]
+    [InlineData("rollback", 0)]
+    [InlineData("update", 0)]
+    [InlineData("rollback", 25)]
+    [InlineData("update", 25)]
+    public void Unreadable_mark_is_refused_at_S0_and_kept(string mode, int markAgeHours)
+    {
+        using var rig = Make(mode);
+        var gen = rig.SeedHalfPrev(OldGen);
+        var prevBefore = LocalSwapWorkerRig.AllFiles(rig.PrevDir);
+        var markBefore = File.ReadAllText(rig.PrevSavingPath);
+        Assert.Equal(0, RunWithMarkHeld(rig, null, markAgeHours));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Refused && final.Reason == CleanupPending, mode + "/" + markAgeHours + "h: 끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal("S0", final.Step);
+        Assert.Equal(0, rig.CountCalls("/DISABLE"));
+        Assert.Equal("Running", rig.ServiceState());
+        Assert.Contains("S0 prev-saving mark unreadable", rig.Log());
+        AssertSame(PartOf(gen, "web"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "web")), "web.rbk");
+        AssertSame(PartOf(gen, "watchdog"), LocalSwapWorkerRig.AllFiles(Rbk(rig, "watchdog")), "watchdog.rbk");
+        Assert.Equal(markBefore, File.ReadAllText(rig.PrevSavingPath));
+        AssertSame(prevBefore, LocalSwapWorkerRig.AllFiles(rig.PrevDir), "prev");
+        Assert.Empty(rig.LeftoverTasks());
+    }
+
+    [Theory(DisplayName = "봉합4 G-PV8(b) 대조군 🔴 못 읽음 = 낡음 사본(봉합4 전) → S0 가 M5 로 web.rbk·watchdog.rbk 를 지운다(게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Control_unreadable_mark_as_stale_deletes_at_S0(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedHalfPrev(OldGen);
+        Assert.Equal(0, RunWithMarkHeld(rig, ControlUnreadAsStale(), 0));
+        Assert.False(Directory.Exists(Rbk(rig, "web")), mode + ": 대조군에서 web.rbk 가 안 지워졌다 / " + Why(rig));
+        Assert.False(Directory.Exists(Rbk(rig, "watchdog")), mode + ": 대조군에서 watchdog.rbk 가 안 지워졌다 / " + Why(rig));
+    }
+
+    [Theory(DisplayName = "봉합4 G-PV8(c) 대조군 🔴 24시간 지나면 낡음으로 보는 사본(⬛ 폐기안) → 25시간 전 표식에서 .rbk 를 지운다(게이트가 FAIL 을 낸다)")]
+    [InlineData("rollback")]
+    [InlineData("update")]
+    public void Control_unreadable_mark_expires_after_hours(string mode)
+    {
+        using var rig = Make(mode);
+        rig.SeedHalfPrev(OldGen);
+        Assert.Equal(0, RunWithMarkHeld(rig, ControlUnreadStaleAfterHours(), 25));
+        Assert.False(Directory.Exists(Rbk(rig, "web")), mode + ": 대조군에서 web.rbk 가 안 지워졌다 / " + Why(rig));
+    }
 }
