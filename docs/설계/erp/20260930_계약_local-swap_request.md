@@ -26,6 +26,8 @@ API (A: LocalRollbackService / U: ManualUpdateService)
 
 ## §2 폴더
 
+> 🔴 **개정(같은 날 · [3-V] 병렬이슈 01~04 반영 — 아래 표보다 우선)**: 작업 폴더·요청서·일꾼 사본·기록·usage.jsonl 은 전부 **`{app}\rollback\`** 아래(`%ProgramData%\HitPan` 은 Users 가 하위 폴더를 먼저 만들 수 있다 — 01). 수동 받는 곳 = **`{app}\manual\staging\`**(U). 쓰기 전 `BackupService.EnsureRestrictedSystemFolder`(C-8·C-12) — 걸리면 `folder_unsafe` · 작업 등록 0. 한 번에 하나 = `{app}\rollback\swap.lock`(`번호|UTC` · CreateNew · 일꾼이 끝에 지움) · `schtasks /Create` 에 `/F` 없음 · 끝난 교체 뒤 **10분 쿨다운**(`cooldown`) · 요청서 `requested_at` 10분 지나면 일꾼 거부(03). 되돌리기 성공 = `{app}\rollback\rolled-back.txt`(`to|from|UTC`) — 첫 칸 = 지금 판이면 `rollback_chain_blocked` · update 성공이 지운다(02). `/TR` = 고정 틀(설치 경로·모드 상수·서버 번호뿐 · 04). 새 사유 코드: `folder_unsafe` · `cooldown` · `rollback_chain_blocked`.
+
 | 무엇 | 경로 | 누가 만든다 |
 |---|---|---|
 | 작업 폴더 | `%ProgramData%\HitPan\rollback\` | 런처(처음 쓸 때 · ACL = SYSTEM·Administrators 쓰기만, 상속 끊음) |
