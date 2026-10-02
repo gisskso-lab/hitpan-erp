@@ -173,6 +173,26 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         }
     }
 
+    // ── 20260930작1 1.3.50 확대 갈래 N7 (ㄱ) — 작업지시서 18-10 · 병렬이슈 24 ─────────────
+    //   위 기존 줄은 그대로 두고 덧붙이기만 했다(#1). CheckAsync 의 남기기 한 줄만 이 함수 부름으로 바꿨다(개발명세서 N7 §2).
+    //   · 피드 확인(CheckAsync)이 남기는 서명본 = 설치 판 이상만. 설치 판보다 낮다고 **읽힌** 때만 남기지 않고 정보 한 줄.
+    //     판 모양을 못 읽으면 판정 불능 ⇒ 기존대로 남긴다(막는 것은 「낮음이 확인될 때」만 · 이전 기능 변경 0).
+    //   · 19-8 첫 회 확인표 받기의 남기기(TryFetchFirstPrevious → KeepSignedManifest)는 이 함수를 안 거친다(그대로).
+    //   ⇒ 지금 판 아래 저장본은 「그 판이 설치 판이던 때 남은 것」 또는 첫 회 확인표에서만 생긴다(첫 회 갈래 「아래 1개」 출처가 좁혀진다).
+
+    /// <summary>피드 확인이 쥔 서명 manifest 를 설치 판 이상일 때만 남긴다(위 머리말). 낮으면 정보 한 줄.</summary>
+    private void KeepFeedManifestNotBelow(UpdateManifest manifest, string currentVersion)
+    {
+        if (RollbackMaterialFinder.TryParse(currentVersion, out var installed)
+            && RollbackMaterialFinder.TryParse(manifest.Version, out var held)
+            && held < installed)
+        {
+            _logger.LogInformation("[ManualUpdate] 피드 판({Held})이 설치 판({Installed})보다 낮아 서명 안내 파일을 남기지 않는다", manifest.Version, currentVersion);
+            return;
+        }
+        KeepSignedManifest(manifest);
+    }
+
     /// <inheritdoc />
     public FeedPackage? LoadVerified(string version)
     {
@@ -256,7 +276,7 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         }
 
         // 20260930작1 1.3.50 확대 N1 — 여기 = 서명 통과 manifest 를 쥔 자리. Newer·NotNewer 모두 남긴다(실패는 경고 한 줄 · 결과 무영향).
-        KeepSignedManifest(manifest);
+        KeepFeedManifestNotBelow(manifest, currentVersion);
         // N6(설계 §19-8) — 첫 회만: 판 이력이 막 태어났고 저장본에 지금 판 아래가 없으면 직전 판 확인표를 한 번 받는다(결과 무영향).
         await TryFetchFirstPrevious(manifest, currentVersion, ct).ConfigureAwait(false);
 
