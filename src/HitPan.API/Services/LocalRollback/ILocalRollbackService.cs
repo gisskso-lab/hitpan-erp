@@ -29,6 +29,10 @@ public interface ILocalRollbackService
 /// <param name="Ticket">1회용 확인 번호(열 수 있을 때).</param>
 /// <param name="TicketMinutes">번호 유효 분.</param>
 /// <param name="Last">마지막 교체 결과(다음 로그인 뒤 알림 · 두 모드 공통).</param>
+/// <param name="Fetch">
+/// 20260930작1 1.3.50 확대 N2(설계 §19-3) — 세 번째 길(본사 보관 이전 판 받기)의 진행. 받기를 건 적이 없으면 null.
+/// 메모리만(API 가 다시 뜨면 사라진다 — 넘긴 뒤 결과는 <see cref="Last"/>).
+/// </param>
 public sealed record LocalRollbackStatus(
     bool CanRollback,
     string Reason,
@@ -37,7 +41,17 @@ public sealed record LocalRollbackStatus(
     string? MaterialKind,
     string? Ticket,
     int TicketMinutes,
-    LocalSwapLastResult? Last);
+    LocalSwapLastResult? Last,
+    LocalRollbackFetchStatus? Fetch = null);
+
+/// <summary>
+/// 20260930작1 1.3.50 확대 N2(설계 §19-3) — 세 번째 길 받기 진행 한 칸.
+/// </summary>
+/// <param name="Stage">기존 <c>ManualUpdateStages</c> 글자 — <c>downloading</c>·<c>verifying</c>·<c>handing_off</c>·<c>handed_off</c>·<c>refused</c>.</param>
+/// <param name="Reason">멈춘 사유(19-3 · 새 사유 0) — 끝나기 전·넘긴 뒤는 null.</param>
+/// <param name="To">되돌릴 판.</param>
+/// <param name="AtUtc">이 단계로 옮긴 때.</param>
+public sealed record LocalRollbackFetchStatus(string Stage, string? Reason, string To, DateTime AtUtc);
 
 /// <summary>마지막 교체 결과 — 요청서 끝 상태.</summary>
 public sealed record LocalSwapLastResult(string Mode, string State, string? Reason, string From, string To, DateTime AtUtc);
