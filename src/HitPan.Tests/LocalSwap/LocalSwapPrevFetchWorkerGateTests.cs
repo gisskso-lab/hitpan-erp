@@ -43,6 +43,8 @@ public sealed class LocalSwapPrevFetchWorkerGateTests
     private static (LocalSwapWorkerRig Rig, string Zip) Make(string? zipDir = null, string zipVersion = LocalSwapWorkerRig.To, string? sha = null)
     {
         var rig = LocalSwapWorkerRig.RollbackZip(DateTime.UtcNow);
+        // 18-8 X-9 R-21c: rollback + manual_zip 은 판 이력(마지막 == from · 바로 위 == to)이 있어야 선다 — 정상 PC 모양의 이력을 깐다
+        File.WriteAllText(rig.SeenPath, LocalSwapWorkerRig.To + "|2026-09-01T00:00:00Z\r\n" + LocalSwapWorkerRig.From + "|2026-09-02T00:00:00Z\r\n");
         var zip = Path.Combine(zipDir ?? rig.ManualStaging, "hitpan-" + zipVersion + ".zip");
         LocalSwapWorkerRig.MakeZip(zip, LocalSwapWorkerRig.To);
         rig.SetRequestField("material", new JsonObject
