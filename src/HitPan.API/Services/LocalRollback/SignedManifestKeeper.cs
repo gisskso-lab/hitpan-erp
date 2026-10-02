@@ -67,6 +67,8 @@ public sealed class SignedManifestKeeper
         // 판 이력 기록기와 같은 입구 — 작업 폴더 · 그 아래 저장본 폴더 둘 다(재분석 지점·넓은 권한 줄이면 던진다).
         _guard.EnsureSafe(Path.Combine(_env.AppRoot!, LocalSwapLauncher.WorkFolderName));
         _guard.EnsureSafe(dir);
+        // 실제 문지기는 폴더를 만들어 두지만, 그 일을 문지기에 기대지 않는다(문지기 통과 뒤라 재분석 지점을 거쳐 만들 틈 0 · 있으면 아무 일 없음).
+        Directory.CreateDirectory(dir);
 
         // 파일 이름은 받은 글자가 아니라 정규화한 판으로만 만든다(경로 조각이 끼어들 틈 0).
         var path = Path.Combine(dir, RollbackMaterialFinder.Format(v) + Extension);
