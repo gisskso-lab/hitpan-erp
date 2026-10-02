@@ -887,6 +887,58 @@ public sealed class LocalSwapLeftoverGateTests
         Assert.True(Directory.Exists(Rbk(rig, "web")), "대조군에서 web.rbk 가 없다 / " + Why(rig));
     }
 
+    // ── G-PV9 — 남의 표식 + 이번 실행 표식 못 씀(병렬이슈 19 · 설계 §18): 재시도가 .rbk 를 지우지 않고 남의 표식도 덮지 않는다 ──
+    //    주입 0: 시험이 남의 표식을 FileShare.Read 로 쥔다 ⇒ 읽기는 되고 지우기·쓰기는 안 된다(S0 지우기 실패 → 첫 보관 표식 쓰기 실패 → 재시도 stale).
+
+    /// <summary>봉합5 대조군 — 19 줄(이번 실행 표식 못 씀 + 남의 표식 있음 ⇒ 무접촉)을 뺀 사본(= 봉합5 전: 낡음이면 .rbk 를 지운다).</summary>
+    public static string ControlNoForeignMarkStop() => Sub(LocalSwapWorkerRig.OriginalScript(),
+        "if ($null -ne $pm -and $script:PrevSaveUnmarked) {",
+        "<# (control) seal5 19 removed #> if ($false) {", "남의 표식 무접촉 줄");   // 같은 줄에 본문이 이어져 # 줄 주석은 못 쓴다
+
+    /// <summary>(a) 낡은 표식(<c>to</c> ≠ 지금 판) · (b) 빈 표식(0바이트 = 이번 실행이 만든 뒤 못 쓴 표식과 같은 판정 입력)을 깔고 FileShare.Read 로 쥔 채 돌린다.</summary>
+    private static int RunWithForeignMarkHeld(LocalSwapWorkerRig rig, string? script, string kind)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(rig.PrevSavingPath)!);
+        File.WriteAllText(rig.PrevSavingPath, kind == "stale" ? OldGen + "|" + OldGen + "|seed" : "");
+        using var held = new FileStream(rig.PrevSavingPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return rig.Run(script);
+    }
+
+    [Theory(DisplayName = "봉합5 G-PV9 🚨 남의 표식((a) 낡음 (b) 빈 것)을 시험이 FileShare.Read 로 쥠 → success+cleanup_pending · api·web·watchdog.rbk 해시 = 옛 판 · 남의 표식 그대로 · prev 안 부분 0")]
+    [InlineData("stale")]
+    [InlineData("empty")]
+    public void Foreign_mark_with_this_run_unmarked_keeps_the_old_generation(string kind)
+    {
+        using var rig = Make("update");
+        var gen = rig.LiveGeneration();
+        Assert.Equal(0, RunWithForeignMarkHeld(rig, null, kind));
+        var final = rig.Final();
+        var why = Why(rig);
+        Assert.True(final.State == SwapStates.Success && final.Reason == CleanupPending, kind + ": 끝 " + final.State + "/" + final.Reason + " / " + why);
+        Assert.Equal(1, rig.CountLog("S0 stale prev-saving mark delete failed"));      // S0 가 남의 표식을 못 지웠다(쥠이 실제로 걸렸다)
+        Assert.Equal(1, rig.CountLog("prev-saving mark not written"));                 // 첫 보관만 쓰기 실패 · 재시도는 다시 쓰지 않았다
+        Assert.Equal(3, rig.CountLog("another mark is there - old folders kept"));     // 재시도 3회 모두 19 줄에서 멈춤(읽기는 됐다 = unread 아님)
+        foreach (var p in new[] { "api", "web", "watchdog" })
+        {
+            AssertSame(PartOf(gen, p), LocalSwapWorkerRig.AllFiles(Rbk(rig, p)), p + ".rbk");
+            Assert.False(Directory.Exists(Path.Combine(rig.PrevDir, p)), "prev\\" + p + " 가 생겼다 / " + why);
+        }
+        Assert.Equal(kind == "stale" ? OldGen + "|" + OldGen + "|seed" : "", File.ReadAllText(rig.PrevSavingPath));
+    }
+
+    [Theory(DisplayName = "봉합5 G-PV9 대조군 🔴 19 줄 뺀 사본(봉합5 전) → 재시도가 남의 표식을 낡음으로 보고 .rbk 세 개를 지운다 = 두 세대 모두 없음(게이트가 FAIL 을 낸다)")]
+    [InlineData("stale")]
+    [InlineData("empty")]
+    public void Control_foreign_mark_with_this_run_unmarked_deletes_the_old_generation(string kind)
+    {
+        using var rig = Make("update");
+        Assert.Equal(0, RunWithForeignMarkHeld(rig, ControlNoForeignMarkStop(), kind));
+        Assert.Equal(1, rig.CountLog("S0 stale prev-saving mark delete failed"));
+        foreach (var p in new[] { "api", "web", "watchdog" })
+            Assert.False(Directory.Exists(Rbk(rig, p)), kind + ": 대조군에서 " + p + ".rbk 가 안 지워졌다 / " + Why(rig));
+        Assert.Empty(rig.PrevParts());
+    }
+
     // ── G-PV5 · G-PV6 — 부분 이동(P2-1): 마지막 열거 파일을 쥐면 앞 파일은 옮겨지고 던진다(D-0) ──
 
     /// <summary>봉합4 대조군 — <c>Complete-PrevGeneration</c> 합치기 경로를 뺀 사본(<c>prev\{p}</c> 가 이미 있으면 바로 $false).</summary>
