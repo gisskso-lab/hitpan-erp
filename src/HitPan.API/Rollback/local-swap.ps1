@@ -683,6 +683,14 @@ function Initialize-Material {
                 Write-Log ('zip hash mismatch ' + $h); return 'hash_mismatch'
             }
         }
+        # 1.3.50 N2 p2: the fetched previous-version zip is hashed once more right before anything is written
+        # (the API checked it, this catches a change after it was placed). Mismatch = refused, nothing touched.
+        if ($Mode -eq 'rollback' -and $mat.kind -eq 'manual_zip') {
+            $h = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+            if (-not $h.Equals([string]$mat.sha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-Log ('rollback zip hash mismatch ' + $h); return 'hash_mismatch'
+            }
+        }
         try { Expand-Material $zip }
         catch { Write-Log ('zip extract failed: ' + $_.Exception.Message); Remove-DirSafe $script:StageDir; return 'material_invalid' }
         $script:SrcRoot = $script:StageDir
@@ -735,6 +743,11 @@ function Test-RequestValid {
     }
     if ($Mode -eq 'update' -and $kind -eq 'manual_zip') {
         $allowed = (Test-Under $path (Join-Path $ManualDir 'staging')) -and ([string]$r.material.sha256 -match '^[0-9a-fA-F]{64}$')
+    }
+    # 1.3.50 N2 p1 (design 19-1 piece B): rollback may use the previous-version zip the API fetched from the update server.
+    # Stricter than the update line: under {manual}\staging AND named hitpan-{to}.zip AND a 64-hex sha256 to check against.
+    if ($Mode -eq 'rollback' -and $kind -eq 'manual_zip') {
+        $allowed = (Test-Under $path (Join-Path $ManualDir 'staging')) -and ([System.IO.Path]::GetFileName($path) -eq ('hitpan-' + $to + '.zip')) -and ([string]$r.material.sha256 -match '^[0-9a-fA-F]{64}$')
     }
     if (-not $allowed) { Write-Log ('material not allowed kind=' + $kind + ' path=' + $path) }
     return $allowed
@@ -1057,6 +1070,10 @@ function Clear-AfterSuccess {
         # seal F-2 (c): every program folder delete goes through the gatekeeper (customer data is carried first)
         foreach ($p in $Parts) { [void](Remove-AppDirSafe (Join-Path $script:AppRoot ($p + '.rbk'))) }
         if ($script:Req.material.kind -eq 'prev') { [void](Remove-AppDirSafe ([string]$script:Req.material.path)) }
+        # 1.3.50 N2 p3: the fetched previous-version zip is not kept after a successful rollback (same shape as the update line)
+        if ($script:Req.material.kind -eq 'manual_zip') {
+            try { Remove-Item -LiteralPath ([string]$script:Req.material.path) -Force } catch { Write-Log ('rollback zip delete failed: ' + $_.Exception.Message) }
+        }
         # "rolled back to <to>": the API refuses another rollback while the installed version is <to>
         try {
             $mark = [string]$script:Req.to + '|' + [string]$script:Req.from + '|' + (Get-Date).ToUniversalTime().ToString('o')
