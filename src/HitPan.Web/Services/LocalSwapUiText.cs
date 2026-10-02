@@ -475,11 +475,19 @@ public static class LocalSwapUiText
     /// <summary>확인창 덧붙임 — 넣어 둔 파일을 쓰는 경우(받지 않음 · 18-6 X-8 PM 보정).</summary>
     public const string RollbackPlacedConfirmNote = "준비된 이전 버전 파일로 되돌립니다.";
 
+    /// <summary>
+    /// 확인창 덧붙임 — 세 번째 길(재료 manual_zip)에서 실제로 쓰는 한 문장(18-7 PM 판정 · N3 막힌 것 1 (b)).
+    /// [예] 전에는 받기/넣어 둔 파일을 가를 표지가 없다(설계 19-3 계약) ⇒ 두 경우 모두 사실인 문장 하나로.
+    /// 위 두 상수는 표지가 생기면 쓸 자리로 남긴다.
+    /// </summary>
+    public const string RollbackThirdPathConfirmNote =
+        "이전 버전 파일이 히트판 정품인지 확인한 뒤 되돌립니다. 이 컴퓨터에 파일이 없으면 본사에 보관된 파일을 받아 오므로 몇 분 더 걸릴 수 있습니다.";
+
     /// <summary>받기 진행 단계 → 고객 문구(설계 19-3). 넘김(<c>handed_off</c>)은 기존 <see cref="RollbackStarted"/>.</summary>
     public static string FetchStageText(string? stage) => (stage ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         StageDownloading => "이전 버전 파일을 받는 중입니다… 다 받을 때까지 히트판은 그대로 쓰실 수 있습니다.",
-        StageVerifying => "받은 파일이 히트판 정품인지 확인하는 중입니다…",
+        StageVerifying => "이전 버전 파일이 히트판 정품인지 확인하는 중입니다…", // 18-7: 넣어 둔 파일도 같은 단계라 「받은」을 뺐다
         StageHandingOff => "되돌리기를 시작합니다…",
         StageHandedOff => RollbackStarted,
         _ => "준비하는 중입니다…",
