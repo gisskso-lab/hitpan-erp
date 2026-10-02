@@ -1,4 +1,8 @@
 using HitPan.Watchdog.AutoUpdate;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using HitPan.API.Services.LocalRollback;
 
 namespace HitPan.API.Services.ManualUpdate;
 
@@ -23,7 +27,7 @@ namespace HitPan.API.Services.ManualUpdate;
 ///   (= null 이면 조회 실패 또는 서명·형식 불량뿐), 판 비교는 그 뒤 원본의 같은 함수 <c>IsNewerVersion</c> 으로 여기서 한다.
 ///   서명 검증 순서(판 값을 믿기 전에 서명)는 원본 안에서 그대로 지켜진다.
 /// </summary>
-public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IAutoUpdateLockProbe
+public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IAutoUpdateLockProbe, IPreviousPackageFeed
 {
     /// <summary>원본 비교를 늘 통과시키는 판(위 설명). 피드 판이 이 값 이하면 원본이 null 을 준다 — 정상 피드에선 없는 일.</summary>
     private const string PassThroughVersion = "0.0.0";
@@ -40,6 +44,120 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         _client = new UpdateClient(httpFactory, loggerFactory.CreateLogger<UpdateClient>(), verifier);
         _disk = new UpdateDiskSpaceGuard(loggerFactory.CreateLogger<UpdateDiskSpaceGuard>());
         _lock = new UpdateLockFile(loggerFactory.CreateLogger<UpdateLockFile>());
+        _verifier = verifier;
+    }
+
+    // ── 20260930작1 1.3.50 확대 갈래 N1 — 서명 안내 파일 남기기·다시 확인(설계 §19-1 조각 A · §19-3) ─────────────────
+    //   위 생성자·필드·CheckAsync 기존 줄은 그대로 두고 덧붙이기만 했다(#1).
+    //   · 남기기: CheckAsync 가 서명 통과 manifest 를 쥔 자리(null 검사 뒤)에서 받은 값 그대로 직렬화해 저장본으로 넘긴다.
+    //     반환값·판 비교·로그는 그대로 · 남기기 실패는 경고 한 줄로 끝(확인 결과 무영향 · #15 · #30).
+    //   · 다시 확인(LoadVerified): 저장본을 피드와 같은 읽기 규칙으로 되읽어 **기존 검증기 Verify** 로 서명을 다시 본다(새 암호 코드 0).
+
+    /// <summary>
+    /// 저장본 읽기·쓰기 규칙 = 피드 읽기 규칙(<c>UpdateClient.ManifestJsonOptions</c> · <c>UpdateClient.cs:51-54</c>)과 같은 모양 —
+    /// Web 기본값 + 글자 채널(<c>"Major"</c>)·숫자 채널 둘 다. 서버 manifest 원문을 사람이 저장본 폴더에 그대로 넣어도 읽힌다(③ 본사·대리점 대응).
+    /// (원본 필드는 private 이라 같은 설정으로 한 벌 둔다 · 쓰기도 이 설정이라 채널이 글자로 남는다.)
+    /// </summary>
+    private static readonly JsonSerializerOptions KeptManifestJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    /// <summary>형식 기준 = 수동 업데이트가 피드 값을 믿는 기준과 같다(<c>ManualUpdateService.cs:107-108</c> · <c>:288-289</c>).</summary>
+    private static readonly Regex KeptThreePartVersion = new(@"^\d{1,5}\.\d{1,5}\.\d{1,6}$", RegexOptions.CultureInvariant);
+    private static readonly Regex KeptSha256Hex = new("^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant);
+
+    private readonly UpdateSignatureVerifier _verifier;
+    private readonly SignedManifestKeeper? _keeper;
+
+    /// <summary>
+    /// 저장본 담당을 받는 생성자(DI 가 고른다 — 등록된 인자를 가장 많이 채우는 생성자).
+    /// 기존 두 인자 생성자는 그대로다(남기기 없이 돈다 · 기존 시험 무수정).
+    /// </summary>
+    public WatchdogUpdateCoreAdapter(IHttpClientFactory httpFactory, ILoggerFactory loggerFactory, SignedManifestKeeper keeper)
+        : this(httpFactory, loggerFactory)
+    {
+        _keeper = keeper;
+    }
+
+    /// <summary>서명 통과 manifest 를 저장본으로 남긴다. 어떤 실패도 경고 한 줄로 끝(부르는 쪽 결과 무영향).</summary>
+    private void KeepSignedManifest(UpdateManifest manifest)
+    {
+        if (_keeper is null) return;
+        try
+        {
+            var json = JsonSerializer.Serialize(manifest, KeptManifestJsonOptions);
+            _keeper.Keep(manifest.Version, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ManualUpdate] 서명 확인된 안내 파일을 남기지 못했다({Version}) — 확인 결과에는 영향 없음", manifest.Version);
+        }
+    }
+
+    /// <inheritdoc />
+    public FeedPackage? LoadVerified(string version)
+    {
+        if (_keeper is null)
+        {
+            _logger.LogWarning("[ManualUpdate] 저장본 담당이 없어 {Version} 판 안내 파일을 확인하지 않는다", version);
+            return null;
+        }
+        if (!RollbackMaterialFinder.TryParse(version, out var wanted))
+        {
+            _logger.LogWarning("[ManualUpdate] 요청 판({Version})이 M.m.b 로 읽히지 않아 저장본을 보지 않는다", version);
+            return null;
+        }
+
+        var json = _keeper.Read(version);
+        if (json is null)
+        {
+            _logger.LogWarning("[ManualUpdate] {Version} 판 안내 파일 저장본이 없다", version);
+            return null;
+        }
+
+        UpdateManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<UpdateManifest>(json, KeptManifestJsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "[ManualUpdate] {Version} 판 안내 파일 저장본 형식 불량 — 쓰지 않는다", version);
+            return null;
+        }
+        if (manifest is null)
+        {
+            _logger.LogWarning("[ManualUpdate] {Version} 판 안내 파일 저장본이 비었다 — 쓰지 않는다", version);
+            return null;
+        }
+
+        // 서명이 먼저 — 판·주소·해시를 믿기 전에(원본 GetLatestManifestAsync 와 같은 순서). 사유는 Verify 가 이미 남겼다.
+        if (!_verifier.Verify(manifest))
+        {
+            _logger.LogWarning("[ManualUpdate] {Version} 판 안내 파일 저장본 서명 불량 — 쓰지 않는다", version);
+            return null;
+        }
+        if (!RollbackMaterialFinder.TryParse(manifest.Version, out var inside) || inside != wanted)
+        {
+            _logger.LogWarning("[ManualUpdate] 저장본 안의 판({Inside})이 요청 판({Version})과 다르다 — 쓰지 않는다", manifest.Version, version);
+            return null;
+        }
+        if (manifest.Version is null || !KeptThreePartVersion.IsMatch(manifest.Version)
+            || manifest.Sha256 is null || !KeptSha256Hex.IsMatch(manifest.Sha256)
+            || string.IsNullOrWhiteSpace(manifest.DownloadUrl))
+        {
+            _logger.LogWarning("[ManualUpdate] {Version} 판 안내 파일 저장본 값 형식 불량(판·해시·주소) — 쓰지 않는다", version);
+            return null;
+        }
+
+        return new FeedPackage(
+            manifest.Version,
+            manifest.Channel.ToString(),
+            manifest.DownloadUrl,
+            manifest.Sha256,
+            manifest.SizeBytes,
+            manifest.ReleaseNotes);
     }
 
     /// <summary>워치독 원본 SemVer 비교 그대로(3자리 정규화 · 판정 불능 = false). 서비스가 한 번 더 확인할 때 쓴다.</summary>
@@ -58,6 +176,9 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
             _logger.LogWarning("[ManualUpdate] 피드 매니페스트를 받아들이지 않았다(서명·형식) — 다운로드하지 않는다");
             return new FeedCheckResult(FeedCheckStatus.Invalid, null, "서명·형식 불량");
         }
+
+        // 20260930작1 1.3.50 확대 N1 — 여기 = 서명 통과 manifest 를 쥔 자리. Newer·NotNewer 모두 남긴다(실패는 경고 한 줄 · 결과 무영향).
+        KeepSignedManifest(manifest);
 
         if (!UpdateClient.IsNewerVersion(manifest.Version, currentVersion, out var reason))
         {
