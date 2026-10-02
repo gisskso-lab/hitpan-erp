@@ -176,7 +176,9 @@ public sealed class LocalRollbackService : ILocalRollbackService
         // T2 묵은 prev 아님(재료 ② 와 같은 판정 재사용)
         if (RollbackMaterialFinder.IsStalePrev(Path.Combine(work, "prev"), current)) return (null, SwapReasons.NoPreviousVersion);
         // T3 판 이력이 직전 설치 판 P 를 안다 — 모르면 받지 않는다(두 판 뒤 원천 차단)
-        if (!RollbackMaterialFinder.TryReadPreviousVersion(Path.Combine(work, LocalSwapLauncher.VersionsSeenFileName), current, out var previous))
+        if (!RollbackMaterialFinder.TryReadPreviousVersion(Path.Combine(work, LocalSwapLauncher.VersionsSeenFileName), current, out var previous)
+            // N6(설계 §19-8 판정 4a) — 이력이 「막 태어난 상태」이고 저장본 중 지금 판 아래가 정확히 1개면 그 판. 그래도 모르면 지금대로.
+            && !SignedManifestKeeper.TryFirstRunPrevious(app, current, out previous))
             return (null, SwapReasons.NoPreviousVersion);
         // T4 P < 지금 판
         if (previous >= current) return (null, SwapReasons.NoPreviousVersion);
