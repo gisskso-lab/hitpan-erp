@@ -1,4 +1,5 @@
 using HitPan.Watchdog.AutoUpdate;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -78,6 +79,83 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         : this(httpFactory, loggerFactory)
     {
         _keeper = keeper;
+        // N6(설계 §19-8) — 첫 회 확인표 받기용. 기존 두 인자 생성자·UpdateClient 무접촉(UpdateClient 는 피드 주소가 환경변수 고정).
+        _firstRunHttp = httpFactory;
+    }
+
+    // ── 20260930작1 1.3.50 확대 갈래 N6 — 첫 회 NCP 확인표 받기(설계 §19-8 판정 2·3·4 · 작업지시서 18-9 X-12) ─────────────
+    //   위 기존 줄은 그대로 두고 덧붙이기만 했다(#1). 코드에 판 숫자 0 · 새 설정 키 0 · 새 사유 0 · 새 상수 1(뒷이름).
+    //   · 언제: CheckAsync 가 서명 통과 manifest 를 남긴 직후 한 번 — 그 판 == 지금 판 · 판 이력 「막 태어난 상태」 · 저장본 중 지금 판 아래 0개.
+    //   · 주소: 손에 든 지금 판 서명 manifest 의 downloadUrl 마지막 조각이 정확히 「hitpan-{지금 판}.zip」 일 때만 그 조각을
+    //     「hitpan-{지금 판}.previous-manifest.json」 으로 바꾼다(호스트·폴더 = 서명된 주소 그대로). 다르면 묻지 않는다(추측 0).
+    //   · 요청 모양 = 피드 확인과 같다(기본 클라이언트 GET · 30초 · 쿼리·헤더 0 · #18/#22).
+    //   · 검사: 기존 검증기 Verify → 안의 판 P < 지금 판 → 기존 KeepSignedManifest(= Keep(P, …)). 실패 = 남기지 않고 경고/정보 한 줄(결과 무영향 · #15).
+
+    /// <summary>NCP 에 놓인 「지금 판 직전 게시본 확인표」 이름의 뒷부분(설계 §19-8 판정 1).</summary>
+    private const string FirstPreviousSuffix = ".previous-manifest.json";
+
+    private readonly IHttpClientFactory? _firstRunHttp;
+
+    /// <summary>
+    /// 지금 판 서명 manifest 의 <paramref name="downloadUrl"/> 마지막 조각이 정확히 <c>hitpan-{지금 판}.zip</c> 이면
+    /// 그 조각만 <c>hitpan-{지금 판}.previous-manifest.json</c> 으로 바꾼 주소. 아니면 null(묻지 않는다).
+    /// </summary>
+    private static string? FirstPreviousUrl(string? downloadUrl, Version current)
+    {
+        if (string.IsNullOrWhiteSpace(downloadUrl) || !Uri.TryCreate(downloadUrl, UriKind.Absolute, out _)) return null;
+        var cut = downloadUrl.LastIndexOf('/');
+        if (cut < 0) return null;
+        var stem = "hitpan-" + RollbackMaterialFinder.Format(current);
+        if (!string.Equals(downloadUrl[(cut + 1)..], stem + ".zip", StringComparison.Ordinal)) return null;
+        return downloadUrl[..(cut + 1)] + stem + FirstPreviousSuffix;
+    }
+
+    /// <summary>첫 회 확인표 받기(위 머리말). 어떤 실패도 경고/정보 한 줄로 끝(확인 결과 무영향).</summary>
+    private async Task TryFetchFirstPrevious(UpdateManifest manifest, string currentVersion, CancellationToken ct)
+    {
+        if (_keeper is null || _firstRunHttp is null) return;
+        if (!RollbackMaterialFinder.TryParse(currentVersion, out var current)
+            || !RollbackMaterialFinder.TryParse(manifest.Version, out var held) || held != current) return;
+        string? url = null;
+        try
+        {
+            if (!_keeper.NeedsFirstRunPrevious(current)) return;
+            url = FirstPreviousUrl(manifest.DownloadUrl, current);
+            if (url is null)
+            {
+                _logger.LogInformation("[ManualUpdate] 받는 주소 마지막 조각이 hitpan-{Current}.zip 이 아니라 직전 판 확인표를 묻지 않는다", currentVersion);
+                return;
+            }
+
+            var http = _firstRunHttp.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(30);
+            var previous = await http.GetFromJsonAsync<UpdateManifest>(url, KeptManifestJsonOptions, ct).ConfigureAwait(false);
+            if (previous is null)
+            {
+                _logger.LogWarning("[ManualUpdate] 직전 판 확인표 응답이 비었다 — 남기지 않는다");
+                return;
+            }
+            // 서명이 먼저 — 판을 믿기 전에(LoadVerified 와 같은 순서). 사유는 Verify 가 이미 남겼다.
+            if (!_verifier.Verify(previous))
+            {
+                _logger.LogWarning("[ManualUpdate] 직전 판 확인표 서명 불량 — 남기지 않는다");
+                return;
+            }
+            if (!RollbackMaterialFinder.TryParse(previous.Version, out var p) || p >= current)
+            {
+                _logger.LogWarning("[ManualUpdate] 직전 판 확인표 안의 판({Inside})이 지금 판({Current}) 아래가 아니다 — 남기지 않는다", previous.Version, currentVersion);
+                return;
+            }
+            KeepSignedManifest(previous);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("[ManualUpdate] 직전 판 확인표가 없다(404) — 지금과 같이 되돌릴 이전 버전 없음");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ManualUpdate] 직전 판 확인표를 받지 못했다({Url}) — 확인 결과에는 영향 없음", url);
+        }
     }
 
     /// <summary>서명 통과 manifest 를 저장본으로 남긴다. 어떤 실패도 경고 한 줄로 끝(부르는 쪽 결과 무영향).</summary>
@@ -179,6 +257,8 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
 
         // 20260930작1 1.3.50 확대 N1 — 여기 = 서명 통과 manifest 를 쥔 자리. Newer·NotNewer 모두 남긴다(실패는 경고 한 줄 · 결과 무영향).
         KeepSignedManifest(manifest);
+        // N6(설계 §19-8) — 첫 회만: 판 이력이 막 태어났고 저장본에 지금 판 아래가 없으면 직전 판 확인표를 한 번 받는다(결과 무영향).
+        await TryFetchFirstPrevious(manifest, currentVersion, ct).ConfigureAwait(false);
 
         if (!UpdateClient.IsNewerVersion(manifest.Version, currentVersion, out var reason))
         {

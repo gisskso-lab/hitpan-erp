@@ -178,6 +178,67 @@ public sealed class SignedManifestKeeper
         }
     }
 
+    // ── 20260930작1 1.3.50 확대 갈래 N6 — 첫 회 「이력이 막 태어난 상태」(설계 §19-8 판정 4·4a · 작업지시서 18-9 X-12) ──────────
+    //   위 기존 줄은 그대로 두고 덧붙이기만 했다(#1). 판 숫자 0 — 지금 판·저장본 이름·판 이력만 본다.
+    //   · 「막 태어난 상태」 = 판 이력에서 읽힌 줄이 1개 이상이고 전부 == 지금 판(읽는 규칙 = TryReadPreviousVersion 과 같다: 두 칸 · 판 모양).
+    //   · 저장본 목록 = 이 폴더의 정규화한 판 이름 파일 중 지금 판 아래(Prune 과 같은 이름 규칙).
+    //   · 첫 회 받기(어댑터 CheckAsync)는 「막 태어남 + 아래 0개」일 때만 · 되돌리기 T3 은 「막 태어남 + 아래 정확히 1개」일 때만 그 판을 쓴다.
+
+    /// <summary>판 이력이 「막 태어난 상태」인가 — 읽힌 줄 1개 이상 · 전부 == <paramref name="current"/>. 파일 없음 = false. 읽기 실패 = 예외(부르는 쪽).</summary>
+    public static bool IsLedgerJustBorn(string appRoot, Version current)
+    {
+        var ledger = Path.Combine(appRoot, LocalSwapLauncher.WorkFolderName, LocalSwapLauncher.VersionsSeenFileName);
+        if (!File.Exists(ledger)) return false;
+        var count = 0;
+        foreach (var line in File.ReadAllLines(ledger))
+        {
+            var cells = line.Trim().Split('|');
+            if (cells.Length != 2 || !RollbackMaterialFinder.TryParse(cells[0], out var v)) continue;
+            if (v != current) return false;
+            count++;
+        }
+        return count > 0;
+    }
+
+    /// <summary>저장본 중 <paramref name="current"/> 아래 판들(정규화한 판 이름 파일만). 폴더 없음 = 빈 목록. 읽기 실패 = 예외(부르는 쪽).</summary>
+    public static List<Version> StoredBelow(string appRoot, Version current)
+    {
+        var below = new List<Version>();
+        var dir = ManifestsDir(appRoot);
+        if (dir is null || !Directory.Exists(dir)) return below;
+        foreach (var file in Directory.GetFiles(dir, "*" + Extension))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (!RollbackMaterialFinder.TryParse(name, out var sv) || RollbackMaterialFinder.Format(sv) != name) continue;
+            if (sv < current) below.Add(sv);
+        }
+        return below;
+    }
+
+    /// <summary>
+    /// 되돌리기 T3 덧붙임(판정 4a) — 판 이력이 「막 태어난 상태」이고 저장본 중 지금 판 아래가 <b>정확히 1개</b>이면 그 판(&lt; 지금 판).
+    /// 그 밖 = false(모름 · 지금 규칙 그대로). 읽기 실패 = 예외(부르는 쪽 catch 가 같은 사유로 받는다).
+    /// </summary>
+    public static bool TryFirstRunPrevious(string appRoot, Version current, out Version previous)
+    {
+        previous = new Version(0, 0, 0);
+        if (!IsLedgerJustBorn(appRoot, current)) return false;
+        var below = StoredBelow(appRoot, current);
+        if (below.Count != 1 || below[0] >= current) return false;
+        previous = below[0];
+        return true;
+    }
+
+    /// <summary>
+    /// 첫 회 받기를 물을 때인가(판정 4) — 윈도우 · 설치 루트 있음 · 판 이력 「막 태어난 상태」 · 저장본 중 지금 판 아래 0개.
+    /// 읽기 실패 = 예외(부르는 쪽 어댑터가 경고 한 줄로 받는다).
+    /// </summary>
+    public bool NeedsFirstRunPrevious(Version current)
+    {
+        if (!_env.IsWindows || _env.AppRoot is not { } app) return false;
+        return IsLedgerJustBorn(app, current) && StoredBelow(app, current).Count == 0;
+    }
+
     private void DeleteQuietly(string path, string what)
     {
         try

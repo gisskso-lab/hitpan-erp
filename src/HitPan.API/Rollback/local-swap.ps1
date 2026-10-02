@@ -673,6 +673,31 @@ function ConvertTo-LedgerVersion([string]$v) {
     return ([string]$n[0] + '.' + [string]$n[1] + '.' + [string]$n[2])
 }
 
+# 1.3.50 N6 (design 19-8 4a - first run): the history was born on this version, so it cannot know the one before.
+# Same shape as the API (SignedManifestKeeper.TryFirstRunPrevious): at least one readable history line, every one == from,
+# AND among the kept signed manifests {app}\rollback\manifests\{M.m.b}.json exactly one is below from, and it is to (to < from).
+# Anything else -> $false (the rule above stays as it is). No version numbers in code.
+function Test-FirstRunFetchedZip($vers, [string]$now, [string]$to) {
+    if ($null -eq $vers -or $vers.Count -lt 1) { return $false }
+    foreach ($v in $vers) { if ($v -ne $now) { return $false } }
+    if (-not ([version]$to -lt [version]$now)) { return $false }
+    $dir = Join-Path $script:AppRoot 'rollback\manifests'
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return $false }
+    $below = New-Object System.Collections.ArrayList
+    try {
+        foreach ($f in [System.IO.Directory]::GetFiles($dir, '*.json')) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($f)
+            $v = ConvertTo-LedgerVersion $name
+            if ($null -eq $v -or $v -ne $name) { continue }
+            if ([version]$v -lt [version]$now) { [void]$below.Add($v) }
+        }
+    } catch {
+        Write-Log ('kept manifests unreadable, first run not allowed: ' + $_.Exception.Message)
+        return $false
+    }
+    return ($below.Count -eq 1 -and $below[0] -eq $to)
+}
+
 function Get-FetchedZipHistoryRefusal {
     $now = ConvertTo-LedgerVersion ([string]$script:Req.from)
     $to = ConvertTo-LedgerVersion ([string]$script:Req.to)
@@ -690,6 +715,8 @@ function Get-FetchedZipHistoryRefusal {
     } catch {
         return ('version history unreadable: ' + $_.Exception.Message)
     }
+    # 1.3.50 N6 (design 19-8 4a): history just born (every readable line == from) + exactly one kept manifest below from == to -> allowed.
+    if (Test-FirstRunFetchedZip $vers $now $to) { Write-Log ('S1 fetched zip first run: history just born, kept manifest ' + $to); return $null }
     if ($vers.Count -lt 2) { return 'version history too short' }
     if ($vers[$vers.Count - 1] -ne $now) { return ('version history last ' + $vers[$vers.Count - 1] + ' is not from ' + $now) }
     $before = $null
