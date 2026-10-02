@@ -435,6 +435,14 @@ builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapLauncher, 
 builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.ILocalRollbackService, HitPan.API.Services.LocalRollback.LocalRollbackService>();
 // 20260930작1 봉합 05ⓑ(PM 결재 S-2) — 기동 때 한 번 {app}\rollback\versions-seen.txt 에 자기 판 한 줄. 실패해도 경고만 · 기동 계속.
 builder.Services.AddHostedService<HitPan.API.Services.LocalSwap.InstalledVersionLedger>();
+// 20260930작1 1.3.50 확대 갈래 N1(설계 §19-1 조각 A · 작업지시서 18-5 X-2 (나)) — 서명 안내 파일을 {app}\rollback\manifests 에 남긴다.
+//   저장본 담당을 등록하면 위 어댑터는 그것을 받는 생성자로 만들어진다(DI 는 채울 수 있는 인자가 가장 많은 생성자를 고른다).
+//   IPreviousPackageFeed 는 같은 어댑터 한 벌(되돌리기 세 번째 길이 저장본을 기존 검증기로 다시 확인).
+//   기동 확인은 판 이력 기록기 뒤에 한 번만 · 기동을 막지 않는다 · 실패는 경고 한 줄 · 재시도 0.
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.SignedManifestKeeper>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.IPreviousPackageFeed>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddHostedService<HitPan.API.Services.LocalRollback.SignedManifestStartupCheck>();
 
 builder.Services.AddCors(options =>
 {
