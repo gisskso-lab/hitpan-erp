@@ -2,6 +2,8 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 using HitPan.API.Services.LocalRollback;
 using HitPan.API.Services.LocalSwap;
 using HitPan.API.Services.ManualUpdate;
@@ -183,6 +185,282 @@ public sealed partial class LocalSwapManifestKeepGateTests
             Assert.EndsWith("manifest.json", req.RequestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase);
             Assert.Empty(req.Headers);          // User-Agent·인증·고객 식별 헤더 전부 0
             Assert.Empty(req.Headers.UserAgent);
+        }
+        finally { Cleanup(root); }
+    }
+}
+
+/// <summary>
+/// N4b 시험 키(작업지시서 18-7) — 제품에 시험 주입 자리를 새로 내지 않고 <b>기존 운영 키 출처</b>
+/// (<c>db.conf</c> 의 <c>HITPAN_UPDATE_PUBLIC_KEY__{kid}</c> · <c>UpdateSignatureVerifier.ResolvePublicKeyPem</c>)를 그대로 쓴다.
+/// </summary>
+/// <remarks>
+/// <para>kid = <see cref="Kid"/>(운영 <c>upd-v1</c> 아님) — 시험 키가 남아도 운영 manifest 검증에는 닿지 않는다.</para>
+/// <para>쓰는 자리 = 워치독 <c>DbConfReader</c> 가 찾는 순서(<c>BaseDirectory\..\db.conf</c> → <c>BaseDirectory\db.conf</c>)의 첫 있는 파일 ·
+/// 없으면 <c>BaseDirectory\db.conf</c> 를 새로 만든다. 있던 파일은 바이트 그대로 백업 → finally 에서 복원 · 새로 만든 파일은 finally 에서 지운다.</para>
+/// <para>병렬 끈 xUnit 컬렉션(<see cref="N4bTestKeyCollection"/>) 안에서만 부른다 — 그 컬렉션은 다른 시험이 모두 끝난 뒤 혼자 돈다.</para>
+/// </remarks>
+internal static class N4bTestKey
+{
+    public const string Kid = "hp-test-n4b";
+    public const string ConfKey = "HITPAN_UPDATE_PUBLIC_KEY__" + Kid;
+
+    private static readonly ECDsa Key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+    /// <summary>db.conf 한 줄에 들어갈 공개키 — 줄바꿈을 글자 <c>\n</c> 으로(검증기 <c>NormalizePem</c> 이 되돌린다).</summary>
+    private static string PublicPemOneLine =>
+        Key.ExportSubjectPublicKeyInfoPem().Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+
+    /// <summary>서명 본문(<c>UpdateManifestSigning.BuildSigningPayload</c>)을 시험 키로 서명한다. der = openssl 모양(NCP 서버 원문).</summary>
+    public static string Sign(string payload, bool der) => Convert.ToBase64String(Key.SignData(
+        Encoding.UTF8.GetBytes(payload), HashAlgorithmName.SHA256,
+        der ? DSASignatureFormat.Rfc3279DerSequence : DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+
+    public static UpdateManifest Signed(UpdateManifest m, bool der = false) =>
+        m with { Kid = Kid, Signature = Sign(UpdateManifestSigning.BuildSigningPayload(m), der) };
+
+    /// <summary>지금 이 시험 실행에서 <c>DbConfReader</c> 가 읽을 db.conf 자리.</summary>
+    public static string ConfPath()
+    {
+        var b = AppContext.BaseDirectory;
+        foreach (var c in new[] { Path.Combine(b, "..", "db.conf"), Path.Combine(b, "db.conf") })
+        {
+            var full = Path.GetFullPath(c);
+            if (File.Exists(full)) return full;
+        }
+        return Path.GetFullPath(Path.Combine(b, "db.conf"));
+    }
+
+    public static async Task WithKeyAsync(Func<Task> body)
+    {
+        var path = ConfPath();
+        var existed = File.Exists(path);
+        var backup = existed ? File.ReadAllBytes(path) : null;
+        try
+        {
+            var head = existed ? File.ReadAllText(path).TrimEnd('\r', '\n') + Environment.NewLine : string.Empty;
+            File.WriteAllText(path, head + ConfKey + "=" + PublicPemOneLine + Environment.NewLine, new UTF8Encoding(false));
+            await body();
+        }
+        finally
+        {
+            if (existed) File.WriteAllBytes(path, backup!);
+            else File.Delete(path);
+        }
+    }
+}
+
+/// <summary>N4b 시험 키를 쓰는 시험 묶음 — 병렬 끔(db.conf 는 프로세스 공유 파일).</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class N4bTestKeyCollection
+{
+    public const string Name = "N4b 시험 키 db.conf (병렬 끔)";
+}
+
+/// <summary>모든 기록을 손에 쥐는 로거 — 경고 수를 잰다.</summary>
+internal sealed class ListLoggerFactory : ILoggerFactory
+{
+    public List<(string Category, LogLevel Level, string Message, Exception? Error)> Entries { get; } = new();
+
+    public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
+    public void AddProvider(ILoggerProvider provider) { }
+    public void Dispose() { }
+
+    public int Count(LogLevel level) { lock (Entries) return Entries.Count(e => e.Level == level); }
+
+    private sealed class Logger(ListLoggerFactory owner, string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (owner.Entries) owner.Entries.Add((category, logLevel, formatter(state, exception), exception));
+        }
+    }
+}
+
+/// <summary>
+/// N4b — 서명 <b>통과</b> 저장본이 필요한 G-NK1 · G-NK4 · G-NK2(바꿔치기 대조 대체) · G-NK6. 시험 키 = <see cref="N4bTestKey"/>(db.conf · 제품 diff 0).
+/// </summary>
+/// <remarks>
+/// 대조(Edit 도구로 제품을 바꿔 돌림 → 원복 · 개발명세서 N4 「N4b」 절): G-NK1 = <c>CheckAsync</c> 의 <c>KeepSignedManifest(manifest);</c> 뺌 ·
+/// G-NK2b = <c>LoadVerified</c> 의 <c>Verify</c> 줄 뺌 · G-NK4 = <c>KeepSignedManifest</c> 의 catch 뺌 · G-NK6 = 읽기 규칙의 <c>JsonStringEnumConverter</c> 뺌.
+/// </remarks>
+[Collection(N4bTestKeyCollection.Name)]
+public sealed partial class LocalSwapManifestKeepGateTests
+{
+    private static UpdateManifest Plain(string version) => new(
+        version, UpdateChannel.Normal, "https://feed.invalid/hitpan-" + version + ".zip",
+        "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789ABCDEF", 123_456_789,
+        new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc), "판 안내 " + version, RequiresMigration: false, ConsentMessage: null);
+
+    private static Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> Serve(UpdateManifest m) =>
+        (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(JsonSerializer.Serialize(m, FeedJson), Encoding.UTF8, "application/json") });
+
+    /// <summary>남기기 담당 없는 어댑터(기존 생성자)로 같은 응답을 본 결과 — 「남기기 전과 같다」 기준.</summary>
+    private static async Task<FeedCheckResult> WithoutKeeper(UpdateManifest m, string current)
+    {
+        var http = new RecordingFactory();
+        http.Handler.Respond = Serve(m);
+        return await new WatchdogUpdateCoreAdapter(http, NullLoggerFactory.Instance).CheckAsync(current, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "N4b G-NK 시험 키 — kid 가 운영 upd-v1 아님 · db.conf 에 키가 없으면 시험 키 서명 저장본은 통과 못 함(검증기가 진짜 키를 본다) · 끝나면 db.conf 원상")]
+    public async Task Nk_test_key_is_isolated()
+    {
+        Assert.NotEqual(UpdateManifestSigning.DefaultKid, N4bTestKey.Kid);
+        var path = N4bTestKey.ConfPath();
+        var before = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        var (adapter, http, env, root) = MakeAdapter();
+        try
+        {
+            var signed = N4bTestKey.Signed(Plain(env.CurrentVersion));
+            var keeper = new SignedManifestKeeper(env, new HookedFolderGuard(), NullLogger<SignedManifestKeeper>.Instance);
+            Assert.True(keeper.Keep(signed.Version, JsonSerializer.Serialize(signed, FeedJson)));
+            Assert.Null(adapter.LoadVerified(signed.Version));                 // 키 없음 → 거부
+            await N4bTestKey.WithKeyAsync(() =>
+            {
+                Assert.NotNull(adapter.LoadVerified(signed.Version));          // 키 있음 → 통과
+                return Task.CompletedTask;
+            });
+            Assert.Null(adapter.LoadVerified(signed.Version));                 // 복구 뒤 → 다시 거부
+            Assert.Empty(http.Handler.Requests);
+        }
+        finally { Cleanup(root); }
+        var after = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        Assert.True(before is null ? after is null : after is not null && before.AsSpan().SequenceEqual(after), "db.conf 가 원상으로 안 돌아왔다: " + path);
+    }
+
+    // ── G-NK1 — 남김 (지금 판 · 더 높은 판) ──
+
+    [Theory(DisplayName = "N4b G-NK1 🚨 시험 키 서명 manifest → CheckAsync 가 manifests\\{V}.json 을 남김 · LoadVerified 서명 통과·값 동일 · 결과는 남기기 없는 어댑터와 같음")]
+    [InlineData("1.3.48")] // 지금 판(NotNewer)
+    [InlineData("1.3.51")] // 더 높은 판(Newer)
+    public async Task Nk1_signed_manifest_kept_and_round_trips(string version)
+    {
+        var (adapter, http, env, root) = MakeAdapter();
+        try
+        {
+            await N4bTestKey.WithKeyAsync(async () =>
+            {
+                var signed = N4bTestKey.Signed(Plain(version));
+                http.Handler.Respond = Serve(signed);
+                var r = await adapter.CheckAsync(env.CurrentVersion, CancellationToken.None);
+                Assert.Equal(await WithoutKeeper(signed, env.CurrentVersion), r);
+                Assert.Equal(version == env.CurrentVersion ? FeedCheckStatus.NotNewer : FeedCheckStatus.Newer, r.Status);
+                Assert.Contains(version + ".json", Kept(env));
+                var pkg = adapter.LoadVerified(version);
+                Assert.True(pkg is not null, "남긴 저장본이 서명 확인을 못 지났다 — 왕복이 서명 본문을 바꿨다");
+                Assert.Equal(new FeedPackage(signed.Version, signed.Channel.ToString(), signed.DownloadUrl, signed.Sha256, signed.SizeBytes, signed.ReleaseNotes), pkg);
+                Assert.Single(http.Handler.Requests);                          // 피드 GET 1 · 처리기 밖 0
+            });
+        }
+        finally { Cleanup(root); }
+    }
+
+    // ── G-NK2 대조 대체(18-7) — 바꿔치기 저장본 ──
+
+    [Fact(DisplayName = "N4b G-NK2b 🚨 서명 통과 저장본의 받는 주소를 바꿔치기 → LoadVerified null(바꾸기 전엔 통과) · 대조 = Verify 줄 뺀 사본에서 통과")]
+    public async Task Nk2b_swapped_stored_manifest_rejected()
+    {
+        var (adapter, http, env, root) = MakeAdapter();
+        try
+        {
+            await N4bTestKey.WithKeyAsync(async () =>
+            {
+                var signed = N4bTestKey.Signed(Plain(env.CurrentVersion));
+                http.Handler.Respond = Serve(signed);
+                await adapter.CheckAsync(env.CurrentVersion, CancellationToken.None);
+                Assert.NotNull(adapter.LoadVerified(signed.Version));
+                var file = Path.Combine(SignedManifestKeeper.ManifestsDir(env.AppRoot)!, signed.Version + ".json");
+                var text = File.ReadAllText(file);
+                Assert.Contains(signed.DownloadUrl, text);
+                File.WriteAllText(file, text.Replace(signed.DownloadUrl, "https://evil.invalid/hitpan-" + signed.Version + ".zip", StringComparison.Ordinal));
+                Assert.Null(adapter.LoadVerified(signed.Version));
+            });
+        }
+        finally { Cleanup(root); }
+    }
+
+    // ── G-NK4 — 남기기 실패 무해 ──
+
+    [Fact(DisplayName = "N4b G-NK4 🚨 폴더 문지기가 던짐 → CheckAsync 결과 그대로 · 경고 정확히 1(어댑터) · 예외 0 · 파일 0")]
+    public async Task Nk4_keep_failure_is_harmless()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hp-nk-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var env = FakeSwapEnvironment.Under(root);
+            var logs = new ListLoggerFactory();
+            var guard = new HookedFolderGuard { Before = p => throw new IOException("gate: folder unsafe " + p) };
+            var keeper = new SignedManifestKeeper(env, guard, logs.CreateLogger<SignedManifestKeeper>());
+            var http = new RecordingFactory();
+            var adapter = new WatchdogUpdateCoreAdapter(http, logs, keeper);
+            await N4bTestKey.WithKeyAsync(async () =>
+            {
+                var signed = N4bTestKey.Signed(Plain("1.3.51"));
+                http.Handler.Respond = Serve(signed);
+                FeedCheckResult? r = null;
+                var ex = await Record.ExceptionAsync(async () => r = await adapter.CheckAsync(env.CurrentVersion, CancellationToken.None));
+                Assert.True(ex is null, "남기기 실패가 확인 결과로 새어 나왔다: " + ex);
+                Assert.Equal(await WithoutKeeper(signed, env.CurrentVersion), r);
+                Assert.Equal(1, logs.Count(LogLevel.Warning));
+                var w = logs.Entries.Single(e => e.Level == LogLevel.Warning);
+                Assert.Equal(typeof(WatchdogUpdateCoreAdapter).FullName, w.Category);
+                Assert.IsType<IOException>(w.Error);
+                Assert.Empty(Kept(env));
+            });
+        }
+        finally { Cleanup(root); }
+    }
+
+    // ── G-NK6 — 서버 원문 모양 저장본 ──
+
+    /// <summary>
+    /// <c>installer/updates/build-manifest.ps1</c> 의 <c>[ordered]@{…} | ConvertTo-Json</c>(PowerShell 5.1 모양 · channel 은 글자) +
+    /// NCP <c>sign-manifest.sh</c> 가 붙이는 signature(openssl DER · 표준 Base64)·kid.
+    /// </summary>
+    private static string ServerShapedManifest(string version, string channelText, string sig) =>
+        "{\r\n" +
+        "    \"version\":  \"" + version + "\",\r\n" +
+        "    \"channel\":  \"" + channelText + "\",\r\n" +
+        "    \"downloadUrl\":  \"https://updates.hitpan.kr/hitpan-" + version + ".zip\",\r\n" +
+        "    \"sha256\":  \"" + new string('c', 64) + "\",\r\n" +
+        "    \"sizeBytes\":  98765432,\r\n" +
+        "    \"releasedAt\":  \"2026-10-01T00:00:00Z\",\r\n" +
+        "    \"releaseNotes\":  null,\r\n" +
+        "    \"requiresMigration\":  false,\r\n" +
+        "    \"consentMessage\":  null,\r\n" +
+        "    \"signature\":  \"" + sig + "\",\r\n" +
+        "    \"kid\":  \"" + N4bTestKey.Kid + "\"\r\n" +
+        "}";
+
+    [Theory(DisplayName = "N4b G-NK6 🚨 서버 원문 모양(channel 글자 · openssl DER 서명) 저장본 {P}.json → LoadVerified 통과 · 판 == P")]
+    [InlineData("Normal")]
+    [InlineData("normal")]
+    public async Task Nk6_server_shaped_stored_manifest_loads(string channelText)
+    {
+        var (adapter, http, env, root) = MakeAdapter();
+        try
+        {
+            const string p = "1.3.47";
+            var payload = UpdateManifestSigning.BuildSigningPayload(new UpdateManifest(
+                p, UpdateChannel.Normal, "https://updates.hitpan.kr/hitpan-" + p + ".zip", new string('c', 64), 98765432,
+                DateTime.MinValue, null, RequiresMigration: false, ConsentMessage: null));
+            var dir = SignedManifestKeeper.ManifestsDir(env.AppRoot)!;
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, p + ".json"), ServerShapedManifest(p, channelText, N4bTestKey.Sign(payload, der: true)), new UTF8Encoding(false));
+            await N4bTestKey.WithKeyAsync(() =>
+            {
+                var pkg = adapter.LoadVerified(p);
+                Assert.True(pkg is not null, "서버 원문 모양 저장본을 못 읽었다(읽기 규칙·서명 본문 어긋남)");
+                Assert.Equal(p, pkg!.Version);
+                Assert.Equal(new string('c', 64), pkg.Sha256);
+                Assert.Equal(98765432, pkg.SizeBytes);
+                return Task.CompletedTask;
+            });
+            Assert.Empty(http.Handler.Requests);
         }
         finally { Cleanup(root); }
     }
