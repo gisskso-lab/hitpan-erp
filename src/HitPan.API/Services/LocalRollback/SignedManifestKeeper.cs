@@ -41,6 +41,18 @@ public sealed class SignedManifestKeeper
         _logger = logger;
     }
 
+    // ── 20260930작1 1.3.50 확대 갈래 N5 — R-21b 판 이력 빈칸 메우기(설계 §19-7 · 작업지시서 18-8 X-9 (ㄱ)) ──────────
+    //   기존 3인자 생성자는 그대로(메우기 없음 = 전과 똑같다). 이 생성자로 만들었을 때만(운영 DI — 인자 많은 쪽을 고른다) 메운다.
+    //   기록기는 새로 짓지 않는다 — 기존 InstalledVersionLedger 를 같은 env·guard 로 만들어 Record() 만 부른다(그 파일 diff 0).
+    private readonly InstalledVersionLedger? _ledger;
+
+    /// <summary>운영(DI) — 기존 생성자 + 판 이력 기록기(같은 env·문지기). <c>Program.cs</c> 등록은 그대로다.</summary>
+    public SignedManifestKeeper(ILocalSwapEnvironment env, ISwapFolderGuard guard, ILogger<SignedManifestKeeper> logger, ILoggerFactory loggerFactory)
+        : this(env, guard, logger)
+    {
+        _ledger = new InstalledVersionLedger(env, guard, loggerFactory.CreateLogger<InstalledVersionLedger>());
+    }
+
     /// <summary><c>{appRoot}\rollback\manifests</c>. 설치 루트를 모르면 null.</summary>
     public static string? ManifestsDir(string? appRoot)
         => appRoot is null ? null : Path.Combine(appRoot, LocalSwapLauncher.WorkFolderName, FolderName);
@@ -83,6 +95,11 @@ public sealed class SignedManifestKeeper
             DeleteQuietly(tmp, "임시 파일");
         }
         _logger.LogInformation("[ManifestKeeper] {Version} 판 안내 파일을 남겼습니다.", RollbackMaterialFinder.Format(v));
+
+        // N5 R-21b — 남긴 판 == 지금 판이면 「지금 이 판이 돈다」가 사실인 순간 ⇒ 기존 판 이력 기록기를 한 번 더 부른다(Prune 이 이력을 읽기 전).
+        //   마지막 줄 == 지금 판이면 기록기가 아무것도 안 한다(멱등) · 문지기 거부·읽기·쓰기 실패는 기록기 안에서 경고 한 줄로 끝난다(그 밖의 예외는 위 문지기 호출이 먼저 던졌을 것).
+        if (_ledger is not null && RollbackMaterialFinder.TryParse(_env.CurrentVersion, out var running) && running == v)
+            _ledger.Record();
 
         Prune(dir);
         return true;
