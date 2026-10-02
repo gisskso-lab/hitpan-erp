@@ -39,7 +39,7 @@ public sealed class LocalRollbackStatus
     public string? CurrentVersion { get; set; }
     /// <summary>되돌아갈 판 = 현재의 바로 앞 판(설계 §3-3). 재료가 없으면 null.</summary>
     public string? TargetVersion { get; set; }
-    /// <summary>재료 종류(<c>prev</c>·<c>staging_zip</c>) — 화면은 보이지 않는다(개발용어).</summary>
+    /// <summary>재료 종류(<c>prev</c>·<c>staging_zip</c> · 확대 1.3.50 세 번째 길 <c>manual_zip</c>) — 화면은 보이지 않는다(개발용어).</summary>
     public string? MaterialKind { get; set; }
     /// <summary>1회용 확인 번호(32자) — [예] 본문에 이것만 싣는다.</summary>
     public string? Ticket { get; set; }
@@ -47,6 +47,23 @@ public sealed class LocalRollbackStatus
     public int TicketMinutes { get; set; }
     /// <summary>지난 교체 한 번의 결과(두 모드 공통 · 계약 §7) — 없으면 null.</summary>
     public LocalSwapLast? Last { get; set; }
+    /// <summary>
+    /// 🔴 20260930작1 확대 1.3.50 갈래 N3(설계 19-3 계약) — 세 번째 길(본사 보관본 받기) [예] 뒤 받기 진행. 기본 null.
+    /// 서버가 메모리에만 들고 있다(API 가 다시 뜨면 사라짐 → 넘긴 뒤 결과는 <see cref="Last"/>).
+    /// </summary>
+    public LocalRollbackFetch? Fetch { get; set; }
+}
+
+/// <summary>
+/// 받기 진행 한 칸 — 설계 19-3 <c>{ stage, reason, to, atUtc }</c>. <c>stage</c> 는 기존 수동 업데이트 단계 글자
+/// (downloading · verifying · handing_off · handed_off · refused) · <c>reason</c> 은 기존 사유 코드(새 사유 0).
+/// </summary>
+public sealed class LocalRollbackFetch
+{
+    public string? Stage { get; set; }
+    public string? Reason { get; set; }
+    public string? To { get; set; }
+    public DateTime AtUtc { get; set; }
 }
 
 /// <summary>지난 교체 결과 — 서버 <c>LocalSwapLastResult</c> 와 같은 칸.</summary>
