@@ -193,6 +193,33 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         KeepSignedManifest(manifest);
     }
 
+    // ── 20260930작1 1.3.50 확대 갈래 N7 (ㄴ) — 작업지시서 18-10 · [4] F-2 ─────────────
+    //   위 기존 줄은 그대로 두고 덧붙이기만 했다(#1). CheckAsync 에 표지 한 줄을 더하고, 첫 회 받기 부름 한 줄만 이 함수 부름으로 바꿨다(개발명세서 N7 §2).
+    //   · 한 번만: 어댑터 = 싱글턴(Program.cs AddSingleton) ⇒ 아래 필드 = API 프로세스 표지. 설치 판(currentVersion)마다 받기를 **시작하는 순간** 표지를 세운다
+    //     ⇒ 성공·404·실패·서명 불량 모두 그 판 동안 다시 묻지 않는다(재시작하면 새 프로세스 = 한 번 더 · 디스크 표지 0 · 새 설정 키 0).
+    //   · 기다림: 프로세스의 **첫** CheckAsync 만 받기를 기다린다 — 그 부름 = 기동 확인(SignedManifestStartupCheck · 이미 뒤에서 돈다 · 기동 비차단 그대로).
+    //     그 뒤의 CheckAsync(업데이트 화면 ManualUpdateService)는 받기를 기다리지 않는다:
+    //       표지가 서 있으면(받는 중 포함) 건너뛴다 · 아직이면(기동 확인이 피드에 못 닿아 받기 자리에 못 온 경우) 뒤에서 한 번 시작하고 곧바로 돌아온다.
+    //     뒤에서 도는 받기는 화면 요청의 취소 토큰을 안 쓴다(요청이 끝나면 받기도 끊겨 「한 번」이 헛돈다) — 상한은 받기 안의 30초 제한 그대로.
+    //     뒤 받기의 모든 실패는 TryFetchFirstPrevious 안 catch 가 경고/정보 한 줄로 끝낸다(관찰 안 된 예외 0 · #15).
+
+    private int _checkCalls;
+    private readonly object _firstRunGate = new();
+    private string? _firstRunStartedFor;
+
+    /// <summary>첫 회 확인표 받기를 프로세스당·설치 판당 한 번만 시작한다(위 머리말). 첫 확인만 기다리고, 그 뒤는 기다리지 않는다.</summary>
+    private Task FirstPreviousOncePerVersion(UpdateManifest manifest, string currentVersion, bool firstCheckInProcess, CancellationToken ct)
+    {
+        lock (_firstRunGate)
+        {
+            if (string.Equals(_firstRunStartedFor, currentVersion, StringComparison.Ordinal)) return Task.CompletedTask;
+            _firstRunStartedFor = currentVersion;
+        }
+        if (firstCheckInProcess) return TryFetchFirstPrevious(manifest, currentVersion, ct);
+        _ = Task.Run(() => TryFetchFirstPrevious(manifest, currentVersion, CancellationToken.None), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
     /// <inheritdoc />
     public FeedPackage? LoadVerified(string version)
     {
@@ -264,6 +291,8 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
 
     public async Task<FeedCheckResult> CheckAsync(string currentVersion, CancellationToken ct)
     {
+        // N7(18-10 (ㄴ)) — 이 프로세스의 첫 확인인가(첫 회 확인표 받기를 기다릴지 가른다 · FirstPreviousOncePerVersion 머리말).
+        var firstCheckInProcess = Interlocked.Increment(ref _checkCalls) == 1;
         var manifest = await _client.GetLatestManifestAsync(PassThroughVersion, ct).ConfigureAwait(false);
         if (manifest is null)
         {
@@ -278,7 +307,7 @@ public sealed class WatchdogUpdateCoreAdapter : IUpdateFeed, IPackageFetcher, IA
         // 20260930작1 1.3.50 확대 N1 — 여기 = 서명 통과 manifest 를 쥔 자리. Newer·NotNewer 모두 남긴다(실패는 경고 한 줄 · 결과 무영향).
         KeepFeedManifestNotBelow(manifest, currentVersion);
         // N6(설계 §19-8) — 첫 회만: 판 이력이 막 태어났고 저장본에 지금 판 아래가 없으면 직전 판 확인표를 한 번 받는다(결과 무영향).
-        await TryFetchFirstPrevious(manifest, currentVersion, ct).ConfigureAwait(false);
+        await FirstPreviousOncePerVersion(manifest, currentVersion, firstCheckInProcess, ct).ConfigureAwait(false);
 
         if (!UpdateClient.IsNewerVersion(manifest.Version, currentVersion, out var reason))
         {
