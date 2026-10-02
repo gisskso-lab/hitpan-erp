@@ -1100,6 +1100,9 @@ function Get-SuccessLeftover {
             $pm = Get-PrevSavingMark
             # seal4 18 (a): a mark that cannot be read - whose folders they are is unknown, they stay as they are
             if ($null -ne $pm -and $pm.unread) { Write-Log 'success cleanup: prev-saving mark unreadable - old folders kept'; continue }
+            # seal5 19: this run's mark was never written but another mark is there (stale, empty or half written) - it is not
+            # ours: it is not overwritten and the .rbk folders (the old generation, unmarked) are not touched
+            if ($null -ne $pm -and $script:PrevSaveUnmarked) { Write-Log 'success cleanup: prev-saving mark of this run not written and another mark is there - old folders kept'; continue }
             # seal4 P2-2 (c): the mark of this run was never written - the .rbk folders are the old generation with no mark.
             # Write the mark again only when the old prev is gone or empty (a half deleted old prev is not mixed in), then
             # finish the saving. Mark still not written = the .rbk folders are not touched.
