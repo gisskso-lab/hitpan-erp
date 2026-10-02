@@ -655,6 +655,50 @@ function Get-StagingZipRefusal {
     return $null
 }
 
+# 1.3.50 N5 R-21c (design 19-7 - issue 21): a previous-version zip fetched by the API (rollback + manual_zip only)
+# is allowed only when the version history says so - same rule and same strength as the API (T3 "history unknown = refuse"):
+# history file present, readable, last readable line == from, nearest line above with another version == to.
+# Lines are read like the API (RollbackMaterialFinder.TryReadPreviousVersion): "M.m.b|UTC", two cells, numeric parts.
+# Returns $null when allowed, otherwise why not. staging_zip / prev / update never come here.
+function ConvertTo-LedgerVersion([string]$v) {
+    if ([string]::IsNullOrWhiteSpace($v)) { return $null }
+    $p = $v.Trim().Split('.')
+    if ($p.Length -lt 3) { return $null }
+    $n = New-Object int[] 3
+    for ($i = 0; $i -lt 3; $i++) {
+        $x = 0
+        if (-not [int]::TryParse($p[$i], [ref]$x) -or $x -lt 0) { return $null }
+        $n[$i] = $x
+    }
+    return ([string]$n[0] + '.' + [string]$n[1] + '.' + [string]$n[2])
+}
+
+function Get-FetchedZipHistoryRefusal {
+    $now = ConvertTo-LedgerVersion ([string]$script:Req.from)
+    $to = ConvertTo-LedgerVersion ([string]$script:Req.to)
+    if ($null -eq $now -or $null -eq $to) { return ('from/to unreadable from=' + $script:Req.from + ' to=' + $script:Req.to) }
+    $seen = Join-Path $script:AppRoot 'rollback\versions-seen.txt'
+    if (-not (Test-Path -LiteralPath $seen -PathType Leaf)) { return 'version history missing' }
+    $vers = New-Object System.Collections.ArrayList
+    try {
+        foreach ($line in [System.IO.File]::ReadAllLines($seen, $Utf8)) {
+            $cells = $line.Trim().Split('|')
+            if ($cells.Length -ne 2) { continue }
+            $v = ConvertTo-LedgerVersion $cells[0]
+            if ($null -ne $v) { [void]$vers.Add($v) }
+        }
+    } catch {
+        return ('version history unreadable: ' + $_.Exception.Message)
+    }
+    if ($vers.Count -lt 2) { return 'version history too short' }
+    if ($vers[$vers.Count - 1] -ne $now) { return ('version history last ' + $vers[$vers.Count - 1] + ' is not from ' + $now) }
+    $before = $null
+    for ($i = $vers.Count - 2; $i -ge 0; $i--) { if ($vers[$i] -ne $now) { $before = $vers[$i]; break } }
+    if ($null -eq $before) { return ('version history has no other version before ' + $now) }
+    if ($before -ne $to) { return ('zip ' + $to + ' is not the version installed right before ' + $now + ' (' + $before + ')') }
+    return $null
+}
+
 # returns $null when ready, otherwise a reason code
 function Initialize-Material {
     $mat = $script:Req.material
@@ -676,6 +720,12 @@ function Initialize-Material {
         if ($Mode -eq 'rollback') {
             $skip = Get-StagingZipRefusal
             if ($null -ne $skip) { Write-Log ('S1 staging zip refused: ' + $skip); return 'material_invalid' }
+        }
+        # 1.3.50 N5 R-21c: fetched previous-version zip - history unknown or not matching = refused (S1, nothing touched).
+        # (written kind-first on purpose: the p2 line below is searched by its exact text, this one must not look the same)
+        if ($mat.kind -eq 'manual_zip' -and $Mode -eq 'rollback') {
+            $unknown = Get-FetchedZipHistoryRefusal
+            if ($null -ne $unknown) { Write-Log ('S1 fetched zip refused: ' + $unknown); return 'material_invalid' }
         }
         if ($Mode -eq 'update') {
             $h = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
