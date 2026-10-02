@@ -1,0 +1,253 @@
+using System.Text;
+using HitPan.API.Services.LocalSwap;
+
+namespace HitPan.API.Services.LocalRollback;
+
+/// <summary>
+/// 20260930작1 1.3.50 확대 갈래 N1 — 서명 확인된 업데이트 안내 파일(manifest) 저장본을
+/// <c>{app}\rollback\manifests\{M.m.b}.json</c> 에 남기고 꺼내는 파일 담당(설계 §19-1 조각 A).
+///
+/// ■ 무엇을 모르나 — 워치독 형식(<c>UpdateManifest</c>)을 모른다. 글자로만 받고 글자로만 돌려준다.
+///   직렬화·서명 재검증은 <see cref="ManualUpdate.WatchdogUpdateCoreAdapter"/> 안에서만 한다(어댑터 머리말 「워치독 형식은 이 파일 밖으로 나가지 않는다」).
+///   서명을 새로 만들지 않는다 — 사본 보관일 뿐이고, 진위는 쓸 때 기존 검증기로 다시 본다(폴더 안 파일이 바뀌어도 위조 불가).
+///
+/// ■ 어디에 — 작1 작업 폴더(<see cref="LocalSwapLauncher.WorkFolderName"/>) 아래 <see cref="FolderName"/>.
+///   쓰기 전 기존 문지기 <see cref="ISwapFolderGuard.EnsureSafe"/>(판 이력 기록기 <see cref="InstalledVersionLedger"/> 와 같은 입구).
+///   🔴 워치독 폴더(staging) 쓰기 0.
+///
+/// ■ 보관 규칙(숫자 상수 0 · §9 「바로 이전 한 판」 몫만)
+///   지금 판 이상 전부 + 지금 판 아래는 하나만 — 판 이력이 아는 직전 설치 판(<see cref="RollbackMaterialFinder.TryReadPreviousVersion"/> ·
+///   되돌리기 세 번째 길이 같은 함수로 판을 정한다). 이력으로 못 정하면 저장본 중 지금 판 아래 가장 높은 것 하나. 나머지는 지운다.
+///
+/// ■ 실패 — 이 클래스의 쓰기는 예외를 던진다(문지기 거부·디스크). 부르는 쪽(어댑터)이 경고 한 줄로 받고 확인 결과는 그대로 둔다(#15 · #30).
+///   지난 저장본 지우기 실패만 여기서 파일마다 경고 한 줄로 끝낸다(남김 자체는 이미 끝났다).
+/// </summary>
+public sealed class SignedManifestKeeper
+{
+    /// <summary>작업 폴더 아래 저장본 폴더 이름.</summary>
+    public const string FolderName = "manifests";
+
+    private const string Extension = ".json";
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+    private readonly ILocalSwapEnvironment _env;
+    private readonly ISwapFolderGuard _guard;
+    private readonly ILogger<SignedManifestKeeper> _logger;
+
+    public SignedManifestKeeper(ILocalSwapEnvironment env, ISwapFolderGuard guard, ILogger<SignedManifestKeeper> logger)
+    {
+        _env = env;
+        _guard = guard;
+        _logger = logger;
+    }
+
+    // ── 20260930작1 1.3.50 확대 갈래 N5 — R-21b 판 이력 빈칸 메우기(설계 §19-7 · 작업지시서 18-8 X-9 (ㄱ)) ──────────
+    //   기존 3인자 생성자는 그대로(메우기 없음 = 전과 똑같다). 이 생성자로 만들었을 때만(운영 DI — 인자 많은 쪽을 고른다) 메운다.
+    //   기록기는 새로 짓지 않는다 — 기존 InstalledVersionLedger 를 같은 env·guard 로 만들어 Record() 만 부른다(그 파일 diff 0).
+    private readonly InstalledVersionLedger? _ledger;
+
+    /// <summary>운영(DI) — 기존 생성자 + 판 이력 기록기(같은 env·문지기). <c>Program.cs</c> 등록은 그대로다.</summary>
+    public SignedManifestKeeper(ILocalSwapEnvironment env, ISwapFolderGuard guard, ILogger<SignedManifestKeeper> logger, ILoggerFactory loggerFactory)
+        : this(env, guard, logger)
+    {
+        _ledger = new InstalledVersionLedger(env, guard, loggerFactory.CreateLogger<InstalledVersionLedger>());
+    }
+
+    /// <summary><c>{appRoot}\rollback\manifests</c>. 설치 루트를 모르면 null.</summary>
+    public static string? ManifestsDir(string? appRoot)
+        => appRoot is null ? null : Path.Combine(appRoot, LocalSwapLauncher.WorkFolderName, FolderName);
+
+    /// <summary>
+    /// 판 <paramref name="version"/> 의 저장본을 쓴다(임시 파일 → 이름 바꾸기) · 쓰고 나면 보관 규칙으로 지난 것을 지운다.
+    /// 반환 = 실제로 썼는가(윈도우 아님·설치 루트 없음·판 형식 불량 = false). 문지기 거부·쓰기 실패 = 예외(부르는 쪽이 받는다).
+    /// </summary>
+    public bool Keep(string version, string manifestJson)
+    {
+        if (!_env.IsWindows) return false;
+        var dir = ManifestsDir(_env.AppRoot);
+        if (dir is null)
+        {
+            _logger.LogDebug("[ManifestKeeper] 설치 루트를 찾지 못해 안내 파일을 남기지 않습니다(개발 실행 등).");
+            return false;
+        }
+        if (!RollbackMaterialFinder.TryParse(version, out var v))
+        {
+            _logger.LogWarning("[ManifestKeeper] 안내 파일의 판({Version})이 M.m.b 로 읽히지 않아 남기지 않습니다.", version);
+            return false;
+        }
+
+        // 판 이력 기록기와 같은 입구 — 작업 폴더 · 그 아래 저장본 폴더 둘 다(재분석 지점·넓은 권한 줄이면 던진다).
+        _guard.EnsureSafe(Path.Combine(_env.AppRoot!, LocalSwapLauncher.WorkFolderName));
+        _guard.EnsureSafe(dir);
+        // 실제 문지기는 폴더를 만들어 두지만, 그 일을 문지기에 기대지 않는다(문지기 통과 뒤라 재분석 지점을 거쳐 만들 틈 0 · 있으면 아무 일 없음).
+        Directory.CreateDirectory(dir);
+
+        // 파일 이름은 받은 글자가 아니라 정규화한 판으로만 만든다(경로 조각이 끼어들 틈 0).
+        var path = Path.Combine(dir, RollbackMaterialFinder.Format(v) + Extension);
+        var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, manifestJson, Utf8NoBom);
+            File.Move(tmp, path, overwrite: true);
+        }
+        finally
+        {
+            DeleteQuietly(tmp, "임시 파일");
+        }
+        _logger.LogInformation("[ManifestKeeper] {Version} 판 안내 파일을 남겼습니다.", RollbackMaterialFinder.Format(v));
+
+        // N5 R-21b — 남긴 판 == 지금 판이면 「지금 이 판이 돈다」가 사실인 순간 ⇒ 기존 판 이력 기록기를 한 번 더 부른다(Prune 이 이력을 읽기 전).
+        //   마지막 줄 == 지금 판이면 기록기가 아무것도 안 한다(멱등) · 문지기 거부·읽기·쓰기 실패는 기록기 안에서 경고 한 줄로 끝난다(그 밖의 예외는 위 문지기 호출이 먼저 던졌을 것).
+        if (_ledger is not null && RollbackMaterialFinder.TryParse(_env.CurrentVersion, out var running) && running == v)
+            _ledger.Record();
+
+        Prune(dir);
+        return true;
+    }
+
+    /// <summary>
+    /// 판 <paramref name="version"/> 의 저장본 글자. 없음·윈도우 아님·설치 루트 없음·판 형식 불량 = null.
+    /// 읽기 실패(IO·권한) = 경고 한 줄 + null. 진위는 이 글자를 받은 쪽이 기존 서명 검증기로 본다.
+    /// </summary>
+    public string? Read(string version)
+    {
+        if (!_env.IsWindows) return null;
+        var dir = ManifestsDir(_env.AppRoot);
+        if (dir is null || !RollbackMaterialFinder.TryParse(version, out var v)) return null;
+
+        var path = Path.Combine(dir, RollbackMaterialFinder.Format(v) + Extension);
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "[ManifestKeeper] 안내 파일을 읽지 못했습니다: {Path}", path);
+            return null;
+        }
+    }
+
+    /// <summary>보관 규칙(머리말) — 지금 판 이상 전부 + 아래 하나. 지금 판을 못 읽으면 아무것도 지우지 않는다.</summary>
+    private void Prune(string dir)
+    {
+        if (!RollbackMaterialFinder.TryParse(_env.CurrentVersion, out var current))
+        {
+            _logger.LogWarning("[ManifestKeeper] 지금 판({Version})이 M.m.b 로 읽히지 않아 지난 안내 파일을 정리하지 않습니다.", _env.CurrentVersion);
+            return;
+        }
+
+        var stored = new List<(Version Version, string Path)>();
+        foreach (var file in Directory.GetFiles(dir, "*" + Extension))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            // 정규화한 판 이름 그대로인 파일만 다룬다(다른 이름은 손대지 않는다).
+            if (!RollbackMaterialFinder.TryParse(name, out var sv) || RollbackMaterialFinder.Format(sv) != name) continue;
+            stored.Add((sv, file));
+        }
+
+        var below = stored.Where(s => s.Version < current).ToList();
+        if (below.Count == 0) return;
+
+        Version keep;
+        if (TryPreviousFromLedger(current, out var prev))
+            keep = prev;
+        else
+            keep = below.Max(s => s.Version)!;
+
+        foreach (var s in below)
+        {
+            if (s.Version == keep) continue;
+            DeleteQuietly(s.Path, "지난 안내 파일");
+        }
+    }
+
+    private bool TryPreviousFromLedger(Version current, out Version previous)
+    {
+        previous = new Version(0, 0, 0);
+        var app = _env.AppRoot;
+        if (app is null) return false;
+        var ledger = Path.Combine(app, LocalSwapLauncher.WorkFolderName, LocalSwapLauncher.VersionsSeenFileName);
+        try
+        {
+            return RollbackMaterialFinder.TryReadPreviousVersion(ledger, current, out previous);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "[ManifestKeeper] 판 이력을 읽지 못해 저장본 중 가장 높은 이전 판을 남깁니다: {Path}", ledger);
+            return false;
+        }
+    }
+
+    // ── 20260930작1 1.3.50 확대 갈래 N6 — 첫 회 「이력이 막 태어난 상태」(설계 §19-8 판정 4·4a · 작업지시서 18-9 X-12) ──────────
+    //   위 기존 줄은 그대로 두고 덧붙이기만 했다(#1). 판 숫자 0 — 지금 판·저장본 이름·판 이력만 본다.
+    //   · 「막 태어난 상태」 = 판 이력에서 읽힌 줄이 1개 이상이고 전부 == 지금 판(읽는 규칙 = TryReadPreviousVersion 과 같다: 두 칸 · 판 모양).
+    //   · 저장본 목록 = 이 폴더의 정규화한 판 이름 파일 중 지금 판 아래(Prune 과 같은 이름 규칙).
+    //   · 첫 회 받기(어댑터 CheckAsync)는 「막 태어남 + 아래 0개」일 때만 · 되돌리기 T3 은 「막 태어남 + 아래 정확히 1개」일 때만 그 판을 쓴다.
+
+    /// <summary>판 이력이 「막 태어난 상태」인가 — 읽힌 줄 1개 이상 · 전부 == <paramref name="current"/>. 파일 없음 = false. 읽기 실패 = 예외(부르는 쪽).</summary>
+    public static bool IsLedgerJustBorn(string appRoot, Version current)
+    {
+        var ledger = Path.Combine(appRoot, LocalSwapLauncher.WorkFolderName, LocalSwapLauncher.VersionsSeenFileName);
+        if (!File.Exists(ledger)) return false;
+        var count = 0;
+        foreach (var line in File.ReadAllLines(ledger))
+        {
+            var cells = line.Trim().Split('|');
+            if (cells.Length != 2 || !RollbackMaterialFinder.TryParse(cells[0], out var v)) continue;
+            if (v != current) return false;
+            count++;
+        }
+        return count > 0;
+    }
+
+    /// <summary>저장본 중 <paramref name="current"/> 아래 판들(정규화한 판 이름 파일만). 폴더 없음 = 빈 목록. 읽기 실패 = 예외(부르는 쪽).</summary>
+    public static List<Version> StoredBelow(string appRoot, Version current)
+    {
+        var below = new List<Version>();
+        var dir = ManifestsDir(appRoot);
+        if (dir is null || !Directory.Exists(dir)) return below;
+        foreach (var file in Directory.GetFiles(dir, "*" + Extension))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (!RollbackMaterialFinder.TryParse(name, out var sv) || RollbackMaterialFinder.Format(sv) != name) continue;
+            if (sv < current) below.Add(sv);
+        }
+        return below;
+    }
+
+    /// <summary>
+    /// 되돌리기 T3 덧붙임(판정 4a) — 판 이력이 「막 태어난 상태」이고 저장본 중 지금 판 아래가 <b>정확히 1개</b>이면 그 판(&lt; 지금 판).
+    /// 그 밖 = false(모름 · 지금 규칙 그대로). 읽기 실패 = 예외(부르는 쪽 catch 가 같은 사유로 받는다).
+    /// </summary>
+    public static bool TryFirstRunPrevious(string appRoot, Version current, out Version previous)
+    {
+        previous = new Version(0, 0, 0);
+        if (!IsLedgerJustBorn(appRoot, current)) return false;
+        var below = StoredBelow(appRoot, current);
+        if (below.Count != 1 || below[0] >= current) return false;
+        previous = below[0];
+        return true;
+    }
+
+    /// <summary>
+    /// 첫 회 받기를 물을 때인가(판정 4) — 윈도우 · 설치 루트 있음 · 판 이력 「막 태어난 상태」 · 저장본 중 지금 판 아래 0개.
+    /// 읽기 실패 = 예외(부르는 쪽 어댑터가 경고 한 줄로 받는다).
+    /// </summary>
+    public bool NeedsFirstRunPrevious(Version current)
+    {
+        if (!_env.IsWindows || _env.AppRoot is not { } app) return false;
+        return IsLedgerJustBorn(app, current) && StoredBelow(app, current).Count == 0;
+    }
+
+    private void DeleteQuietly(string path, string what)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "[ManifestKeeper] {What}을 지우지 못했습니다: {Path}", what, path);
+        }
+    }
+}

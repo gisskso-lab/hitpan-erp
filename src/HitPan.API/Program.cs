@@ -412,6 +412,38 @@ builder.Services.AddSingleton<IMigrationProgressService, MigrationProgressServic
 // 배관(SignalR)은 위 마이그 진행률용으로 이미 검증돼 있어 패턴만 복제한다.
 builder.Services.AddSingleton<INotificationService, SignalRNotificationService>();
 
+// 2026-09-30 작1 갈래 U — 수동 업데이트(자료관리 「최신 버전 확인/업데이트」 · 설계 §13). 워치독과 독립된 모듈.
+//   어댑터 하나가 세 창구를 맡는다(링크 컴파일한 워치독 원본을 감쌈 · 워치독 형식은 DI 에 안 흩어진다).
+//   서비스는 단일 인스턴스 — 한 PC 에서 수동 업데이트는 한 번에 하나.
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>();
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IUpdateFeed>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IPackageFetcher>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.IAutoUpdateLockProbe>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddSingleton(_ => new HitPan.API.Services.ManualUpdate.ManualFolders());
+builder.Services.AddSingleton(HitPan.API.Services.ManualUpdate.ManualUpdateEnvironment.Default);
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUsageLog>();
+builder.Services.AddSingleton<HitPan.API.Services.ManualUpdate.ManualUpdateService>();
+// ⬛ (⏳ 갈래 A DI 줄 자리 — 20260930작1 I-API 가 아래 5줄로 채웠다 · A 개발명세서 §2 「U 가 넣을 줄」 그대로)
+// 교체 일꾼 런처·수동 되돌리기 — 확인 번호를 메모리에 쥐고(LocalRollbackService) 한 번에 하나 lock 을 쥐므로(LocalSwapLauncher) Singleton 필수.
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapEnvironment, HitPan.API.Services.LocalSwap.LocalSwapEnvironment>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISchtasksRunner, HitPan.API.Services.LocalSwap.SchtasksRunner>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ISwapFolderGuard, HitPan.API.Services.LocalSwap.SwapFolderGuard>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalSwap.ILocalSwapLauncher, HitPan.API.Services.LocalSwap.LocalSwapLauncher>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.ILocalRollbackService, HitPan.API.Services.LocalRollback.LocalRollbackService>();
+// 20260930작1 봉합 05ⓑ(PM 결재 S-2) — 기동 때 한 번 {app}\rollback\versions-seen.txt 에 자기 판 한 줄. 실패해도 경고만 · 기동 계속.
+builder.Services.AddHostedService<HitPan.API.Services.LocalSwap.InstalledVersionLedger>();
+// 20260930작1 1.3.50 확대 갈래 N1(설계 §19-1 조각 A · 작업지시서 18-5 X-2 (나)) — 서명 안내 파일을 {app}\rollback\manifests 에 남긴다.
+//   저장본 담당을 등록하면 위 어댑터는 그것을 받는 생성자로 만들어진다(DI 는 채울 수 있는 인자가 가장 많은 생성자를 고른다).
+//   IPreviousPackageFeed 는 같은 어댑터 한 벌(되돌리기 세 번째 길이 저장본을 기존 검증기로 다시 확인).
+//   기동 확인은 판 이력 기록기 뒤에 한 번만 · 기동을 막지 않는다 · 실패는 경고 한 줄 · 재시도 0.
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.SignedManifestKeeper>();
+builder.Services.AddSingleton<HitPan.API.Services.LocalRollback.IPreviousPackageFeed>(sp =>
+    sp.GetRequiredService<HitPan.API.Services.ManualUpdate.WatchdogUpdateCoreAdapter>());
+builder.Services.AddHostedService<HitPan.API.Services.LocalRollback.SignedManifestStartupCheck>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("BlazorWasmDev", policy =>

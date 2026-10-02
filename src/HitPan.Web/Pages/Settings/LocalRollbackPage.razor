@@ -1,0 +1,317 @@
+@page "/data/rollback"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 🔴 20260930작1 갈래 F — 자료관리 「이전 버전으로 되돌리기」 = 사장님 용어로 **수동 되돌리기**.
+     사장님 9/30 원문: "1. 바로 이전버젼으로 되돌리는 것으로 한정해야지. / 2. … 메인컴퓨터에 관리자만 가능해야됨 / 3. 경고는 당연히 해야지."
+     L-2(PM 결재): 업데이트가 안 막혔어도 **늘 열림** — 메인PC + 관리자 + 이전 판 재료가 있을 때(서버 판정).
+     경고는 두 번 보인다 — 화면에 늘 한 줄 + [예] 전 팝업(설계 §8 · §13-8).
+     되돌리기는 프로그램만 바꾼다 — 입력한 자료는 지워지지 않는다(설계 §0·§5). *@
+@attribute [Authorize]
+@implements IDisposable
+@using HitPan.Web.Helpers
+@inject LocalRollbackClient Api
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+
+<PageTitle>이전 버전으로 되돌리기</PageTitle>
+
+<MudPaper Elevation="0" Class="pa-4" Style="max-width:760px;">
+    <MudText Typo="Typo.h6" Class="mb-1">@LocalSwapUiText.MenuRollback</MudText>
+    <MudText Typo="Typo.body2" Class="mb-1">@LocalSwapUiText.FirstLine</MudText>
+    <MudText Typo="Typo.caption" Class="d-block mb-3" Style="color:var(--mud-palette-text-secondary)">@LocalSwapUiText.WhoCanUse</MudText>
+
+    <MudAlert Severity="Severity.Warning" Class="mb-3">
+        <div><b>@LocalSwapUiText.RollbackWarning</b></div>
+        <div>@LocalSwapUiText.DataKept</div>
+        <div>@LocalSwapUiText.RollbackOnlyOneStep</div>
+    </MudAlert>
+
+    @* 🔴 20260930작1 확대 1.3.50 N3 — 「끝났습니다」 팝업 한 번(설계 19-1 조각 C · X-3 · X-4). 아무것도 그리지 않는다. *@
+    <SwapDoneNotice @ref="_doneNotice" />
+
+    @if (_roleChecking)
+    {
+        <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+    }
+    else if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">@LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonAdminOnly)</MudAlert>
+    }
+    else
+    {
+        <MainPcOnly OnAllowed="LoadAsync">
+            @if (_loading)
+            {
+                <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+            }
+            else if (_started)
+            {
+                <MudAlert Severity="Severity.Success">@LocalSwapUiText.RollbackStarted</MudAlert>
+            }
+            else if (_stageText is not null)
+            {
+                @* 확대 1.3.50 N3 — 세 번째 길(본사 보관본 받기) [예] 뒤 넘기기 전까지 받기 진행 단계(설계 19-1 조각 C · 19-3). *@
+                <div class="d-flex align-center pa-4" style="gap:12px;">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">@_stageText</MudText>
+                </div>
+            }
+            else
+            {
+                @* C-7 — 지난 교체 결과(계약 §7 · 두 모드 공통 · 다음 로그인 뒤 알림). 낡은 기록은 안 보인다. *@
+                @if (_lastText is not null)
+                {
+                    <MudAlert Severity="@_lastSeverity" Dense="true" Class="mb-3">
+                        <div style="font-size:12px; opacity:.8;">@_lastCaption</div>
+                        <div>@_lastText</div>
+                    </MudAlert>
+                }
+
+                <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                    <tbody>
+                        <tr><td style="width:160px;">지금 쓰시는 버전</td><td><b>@(_status?.CurrentVersion ?? "-")</b></td></tr>
+                        <tr><td>되돌아갈 버전</td><td><b>@(_status?.TargetVersion ?? "-")</b></td></tr>
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_message is not null)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">@_message</MudAlert>
+                }
+
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">다시 확인</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_busy || !CanRollback"
+                               StartIcon="@Icons.Material.Filled.Restore" OnClick="StartAsync">@LocalSwapUiText.MenuRollback</MudButton>
+                </MudStack>
+            }
+        </MainPcOnly>
+    }
+</MudPaper>
+
+@code {
+    private bool _roleChecking = true;
+    private bool _isAdmin;
+    private bool _loading;
+    private bool _busy;
+    private bool _started;
+    private LocalRollbackStatus? _status;
+    private string? _message;
+    private string? _lastText;
+    private string? _lastCaption;
+    private Severity _lastSeverity = Severity.Info;
+    // 🔴 확대 1.3.50 N3 — 완료 팝업 조각 · 받기 진행(수동 업데이트 화면 PollEvery·PollLimit 과 같은 방식 · 설계 19-1 조각 C)
+    private SwapDoneNotice? _doneNotice;
+    private string? _stageText;
+    private readonly CancellationTokenSource _cts = new();
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan PollLimit = TimeSpan.FromMinutes(30);
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    // C-5 — 확인 번호가 있어야 [예] 를 보낼 수 있다(번호 없이 보내면 서버가 ticket_invalid 로 거절).
+    private bool CanRollback => _status is { CanRollback: true }
+                                && !string.IsNullOrWhiteSpace(_status.TargetVersion)
+                                && !string.IsNullOrWhiteSpace(_status.Ticket);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        _roleChecking = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _message = null;
+        StateHasChanged();
+
+        var r = await Api.GetStatusAsync();
+        _loading = false;
+
+        if (!r.Ok)
+        {
+            _status = null;
+            _message = r.Status == 0 ? LocalSwapUiText.CheckFailed : r.FailureText;
+            return;
+        }
+
+        _status = r.Data;
+        ShowLast(_status?.Last, _status?.CurrentVersion);
+        if (_status is { CanRollback: false })
+        {
+            // 재료 없음이 가장 흔하다 — 코드가 비어 있으면 그 문구로 본다(설계 §13 「되돌릴 이전 버전이 없습니다」).
+            // C-1 — 서버 이름은 no_previous_version(⬛ F 잠정 이름 no_material).
+            // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_message = LocalSwapUiText.ReasonText(` — X-3 보정: 메뉴가 잠겨 거부될 때만 한 줄.
+            _message = LocalSwapUiText.CustomerReasonText(
+                string.IsNullOrWhiteSpace(_status.Reason) ? LocalSwapUiText.ReasonNoPreviousVersion : _status.Reason);
+        }
+
+        // 🔴 확대 1.3.50 N3 — 결과를 먼저 그린 뒤(기존 한 줄 그대로) 아직 안 본 성공이면 팝업 한 번.
+        StateHasChanged();
+        if (_doneNotice is not null) await _doneNotice.TryShowAsync(_status?.Last, _status?.CurrentVersion);
+    }
+
+    /// <summary>지난 교체 결과 한 줄(계약 §7) — 낡은 기록은 안 보인다(<see cref="LocalSwapUiText.ShouldShowLast"/>).</summary>
+    private void ShowLast(LocalSwapLast? last, string? current)
+    {
+        _lastText = null;
+        if (last is null || !LocalSwapUiText.ShouldShowLast(last.State, last.From, last.To, last.AtUtc, current, DateTime.UtcNow)) return;
+        // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_lastText = LocalSwapUiText.EndStateText(last.Mode, last.State, last.Reason, last.From, last.To);`
+        //   — X-3 보정: 성공 + 옛 파일 정리 남음은 성공 줄 하나 · 잠김 거부는 한 줄 · 첨부 옮김 남음은 그대로(자리는 그대로).
+        _lastText = LocalSwapUiText.CustomerEndStateText(last.Mode, last.State, last.Reason, last.From, last.To);
+        _lastCaption = LocalSwapUiText.LastCaption(last.AtUtc);
+        _lastSeverity = LocalSwapUiText.EndStateLevel(last.State) switch
+        {
+            3 => Severity.Success,
+            2 => Severity.Error,
+            1 => Severity.Warning,
+            _ => Severity.Info,
+        };
+    }
+
+    private async Task StartAsync()
+    {
+        if (_busy || !CanRollback) return;
+        var to = _status!.TargetVersion!;
+        var ticket = _status.Ticket;
+        // 🔴 확대 1.3.50 N3 — 세 번째 길(재료 manual_zip)이면 [예] 뒤 받기가 첫 단계다(설계 19-1 조각 B · C).
+        //   확인창 덧붙임 — [예] 전에 두 경우(받기 / 넣어 둔 파일)를 가를 표지가 상태 응답(설계 19-3 계약)에 없다(N3 §5) ⇒
+        //   18-7 PM 판정 (b): 두 경우 모두 사실인 한 문장(RollbackThirdPathConfirmNote)을 붙인다.
+        var fetchFirst = string.Equals((_status.MaterialKind ?? string.Empty).Trim(), LocalSwapUiText.MaterialManualZip,
+            StringComparison.OrdinalIgnoreCase);
+
+        var yes = await ConfirmDialog.ShowAsync(
+            Dialog,
+            title: LocalSwapUiText.MenuRollback,
+            message: fetchFirst
+                ? LocalSwapUiText.RollbackConfirm(to) + " " + LocalSwapUiText.RollbackThirdPathConfirmNote // 18-7 PM 판정 (b)
+                : LocalSwapUiText.RollbackConfirm(to),
+            confirmText: "예",
+            cancelText: "아니요",
+            severity: Severity.Warning);
+        if (!yes) return;
+
+        _busy = true;
+        try
+        {
+            // 🔴 적발 04 — 버전·경로는 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용). C-5 — 확인 번호 하나만.
+            var r = await Api.StartAsync(ticket);
+            if (r.Ok && r.Data?.Started == true && fetchFirst)
+            {
+                // 받기·확인·넘기기를 따라간다(넘기면 기존 RollbackStarted).
+                await FollowFetchAsync();
+                return;
+            }
+            if (r.Ok && r.Data?.Started == true)
+            {
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.RollbackStarted, Severity.Success);
+                return;
+            }
+
+            // 409 { started:false, reason } · 403 — 고객 문구로.
+            // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전]
+            //   `var failText = r.Ok ? LocalSwapUiText.ReasonText(r.Data?.Reason) : (r.Status == 0 ? LocalSwapUiText.StartFailed : r.FailureText);`
+            //   — X-3 보정: 메뉴가 잠겨 거부될 때만 한 줄(잠김 사유 밖은 그대로).
+            var failText = r.Ok ? LocalSwapUiText.CustomerReasonText(r.Data?.Reason)
+                : r.Status == 0 ? LocalSwapUiText.StartFailed
+                : LocalSwapUiText.IsMenuLockedReason(r.Reason) ? LocalSwapUiText.MenuLockedLine : r.FailureText;
+
+            // 확인 번호는 한 번 쓰면 사라진다 — 새 번호를 받아 두고(문구는 유지) 다시 누를 수 있게 한다.
+            await LoadAsync();
+            _message = failText;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 확대 1.3.50 N3 — 세 번째 길 [예] 뒤: 상태 응답의 받기 진행(<c>Fetch</c> · 설계 19-3)을 몇 초마다 물어 단계 문구를 보인다.
+    /// 넘김(<c>handed_off</c>) = 기존 <see cref="LocalSwapUiText.RollbackStarted"/> · 멈춤(<c>refused</c>) = 받기 실패 문구 + 새 확인 번호(기존 실패 처리와 같게).
+    /// 연결이 끊기면 넘긴 뒤 히트판이 멈춘 것으로 본다(수동 업데이트 화면과 같다).
+    /// </summary>
+    private async Task FollowFetchAsync()
+    {
+        var until = DateTime.UtcNow + PollLimit;
+        var seen = false;
+        _stageText = LocalSwapUiText.FetchStageText(null);
+        StateHasChanged();
+        while (true)
+        {
+            if (_cts.IsCancellationRequested) return;   // 화면을 떠났다
+            if (DateTime.UtcNow > until)
+            {
+                _stageText = null;
+                await LoadAsync();
+                _message = LocalSwapUiText.StartFailed;
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(PollEvery, _cts.Token);
+            }
+            catch (TaskCanceledException)
+            {
+                // 화면을 떠났다 — 더 볼 필요가 없다(서버 받기는 그대로 진행된다).
+                return;
+            }
+
+            var r = await Api.GetStatusAsync(_cts.Token);
+            if (!r.Ok)
+            {
+                _stageText = null;
+                if (r.Status == 0)
+                {
+                    // 연결이 끊겼다 = 넘긴 뒤 교체가 시작돼 히트판이 멈춘 것(계약 §7).
+                    _started = true;
+                    return;
+                }
+                _message = r.FailureText;
+                return;
+            }
+
+            var fetch = r.Data?.Fetch;
+            if (fetch is null)
+            {
+                // 받기 진행은 서버 메모리에만 있다(설계 19-3) — 한 번 본 뒤 사라지면 서버가 다시 뜬 것 ⇒ 결과는 기존 지난 결과 한 줄로.
+                if (!seen) continue;
+                _stageText = null;
+                await LoadAsync();
+                if (_lastText is null) _message = LocalSwapUiText.UpdateStatusLost;
+                return;
+            }
+
+            seen = true;
+            var stage = (fetch.Stage ?? string.Empty).Trim().ToLowerInvariant();
+            if (stage == LocalSwapUiText.StageHandedOff)
+            {
+                _stageText = null;
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.RollbackStarted, Severity.Success);
+                return;
+            }
+            if (stage == LocalSwapUiText.StageRefused)
+            {
+                _stageText = null;
+                var failText = LocalSwapUiText.FetchFailText(fetch.Reason);
+                // 확인 번호는 한 번 쓰면 사라진다 — 새 번호를 받아 두고(문구는 유지) 다시 누를 수 있게 한다.
+                await LoadAsync();
+                _message = failText;
+                return;
+            }
+
+            _stageText = LocalSwapUiText.FetchStageText(stage);
+            StateHasChanged();
+        }
+    }
+}
