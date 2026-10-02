@@ -378,5 +378,122 @@ public static class LocalSwapUiText
     /// </remarks>
     public static string PostLoginPath(bool goManualUpdate) => goManualUpdate ? UpdatePath : "/";
 
+    // ═════════════ 20260930작1 확대 1.3.50 갈래 N3 — 설계 §19 조각 B 화면 몫 · 조각 C ═════════════
+    // 근거: 작업지시서 §18(18-5 X-3 보정 · X-4 · 18-6 X-8 보정) · 설계 19-1 조각 C · 19-3 화면 문구.
+    // 기존 상수·ReasonText·EndStateText·StageText·ShouldShowLast 는 한 글자도 안 바꾼다(덧붙이기만 · #1).
+
+    // ───────────── 「끝났습니다」 팝업 (조각 C) ─────────────
+    public const string DoneTitleUpdate = "업데이트가 끝났습니다";
+    public const string DoneTitleRollback = "되돌리기가 끝났습니다";
+
+    /// <summary>「한 번」 표 — 이 브라우저 localStorage 한 칸(설계 19-1 조각 C).</summary>
+    public const string DoneSeenStorageKey = "hitpan_swap_done_seen";
+
+    /// <summary>모드로 팝업 제목을 고른다(되돌리기만 「되돌리기가」 · 그 밖은 「업데이트가」 — <see cref="EndStateText"/> 와 같은 갈림).</summary>
+    public static string DoneTitle(string? mode) =>
+        (mode ?? string.Empty).Trim().ToLowerInvariant() == ModeRollback ? DoneTitleRollback : DoneTitleUpdate;
+
+    /// <summary>「한 번」 표에 적는 값 — <c>{mode}|{to}|{atUtc}</c>(설계 19-1). 같은 결과면 같은 글자.</summary>
+    public static string DonePopupStamp(string? mode, string? to, DateTime atUtc) =>
+        (mode ?? string.Empty).Trim().ToLowerInvariant() + "|" + (to ?? string.Empty).Trim() + "|" +
+        DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// G-ND1 — 완료 팝업을 띄울지(순수 판정 · 화면 비의존).
+    /// </summary>
+    /// <param name="mode">지난 결과의 모드(update·rollback).</param>
+    /// <param name="state">지난 결과의 끝 상태 — <c>success</c> 만 팝업(X-3 · refused·reverted·broken 은 기존 한 줄만).</param>
+    /// <param name="from">지난 결과의 옛 판.</param>
+    /// <param name="to">지난 결과의 새 판.</param>
+    /// <param name="atUtc">지난 결과 시각.</param>
+    /// <param name="currentVersion">지금 쓰는 판.</param>
+    /// <param name="nowUtc">지금 시각.</param>
+    /// <param name="storageOk">「한 번」 표를 읽을 수 있었나 — 못 읽으면 띄우지 않는다(매번 뜨는 쪽보다 한 줄만 남는 쪽 · 설계 19-1).</param>
+    /// <param name="seenStamp">「한 번」 표에 이미 적힌 값(없으면 null).</param>
+    /// <param name="updatePromptFirst">
+    /// #43 업데이트 안내가 먼저인가 — 이번 접속에서 그 안내 차례이거나, 그 차례인지 아직 모르거나, 로그인 직후 첫 화면이면 true(X-4 · 설계 19-1 겹침 ②③).
+    /// </param>
+    /// <remarks>
+    /// 기존 결과 한 줄과 같은 기준(<see cref="ShouldShowLast"/> — 24시간 안 · 성공은 지금 판 == <paramref name="to"/>)을 먼저 지나야 한다.
+    /// </remarks>
+    public static bool ShouldShowDonePopup(
+        string? mode, string? state, string? from, string? to, DateTime atUtc,
+        string? currentVersion, DateTime nowUtc, bool storageOk, string? seenStamp, bool updatePromptFirst)
+    {
+        if (updatePromptFirst) return false;
+        if (!storageOk) return false;
+        if ((state ?? string.Empty).Trim().ToLowerInvariant() != StateSuccess) return false;
+        if (!ShouldShowLast(state, from, to, atUtc, currentVersion, nowUtc)) return false;
+        return !string.Equals(seenStamp, DonePopupStamp(mode, to, atUtc), StringComparison.Ordinal);
+    }
+
+    // ───────────── X-3 보정 — 내부 사정은 고객에게 안 보인다 ─────────────
+
+    /// <summary>수동 메뉴가 잠겨 거부될 때만 보이는 한 줄(X-3 보정 · 사장님 S-1 「메뉴가 잠길 때만 한 줄 안내」).</summary>
+    public const string MenuLockedLine = "잠시 쓸 수 없습니다. 업무에는 지장 없습니다.";
+
+    /// <summary>
+    /// 「메뉴가 잠겨 거부」로 보는 사유 — 지난 교체·자동 업데이트의 정리가 안 끝나 메뉴가 거부하는 두 코드.
+    /// <c>carry_pending</c>(첨부 일부가 안 열릴 수 있음)은 고객에게 실제 영향이 있어 여기에 넣지 않는다(X-3 보정).
+    /// </summary>
+    public static bool IsMenuLockedReason(string? code) => (code ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        ReasonCleanupPending or ReasonUpdateCleanupPending => true,
+        _ => false,
+    };
+
+    /// <summary>화면에 보일 사유 문구 — 잠김 사유면 <see cref="MenuLockedLine"/>, 그 밖은 기존 <see cref="ReasonText"/> 그대로.</summary>
+    public static string CustomerReasonText(string? code) => IsMenuLockedReason(code) ? MenuLockedLine : ReasonText(code);
+
+    /// <summary>
+    /// 화면에 보일 지난 결과 한 줄(기존 <c>ShowLast</c> 자리 · X-3 보정) — 성공 + <c>cleanup_pending</c> 은 성공 줄 하나로
+    /// (「옛 파일 일부 못 치움」을 따로 붙이지 않는다) · 거부 + 잠김 사유는 <see cref="MenuLockedLine"/> ·
+    /// <c>carry_pending</c> 과 그 밖은 기존 <see cref="EndStateText"/> 그대로.
+    /// </summary>
+    public static string? CustomerEndStateText(string? mode, string? state, string? reason, string? from, string? to)
+    {
+        var st = (state ?? string.Empty).Trim().ToLowerInvariant();
+        var rs = (reason ?? string.Empty).Trim().ToLowerInvariant();
+        if (st == StateSuccess && rs == ReasonCleanupPending)
+            return EndStateText(mode, state, null, from, to);
+        if (st == StateRefused && IsMenuLockedReason(reason))
+        {
+            var what = (mode ?? string.Empty).Trim().ToLowerInvariant() == ModeRollback ? "되돌리기" : "업데이트";
+            return $"지난번 {what}는 시작하지 않았습니다(바뀐 것은 없습니다). " + MenuLockedLine;
+        }
+        return EndStateText(mode, state, reason, from, to);
+    }
+
+    // ───────────── 세 번째 길 — 본사 보관본 받기 (조각 B 화면 몫 · 설계 19-3) ─────────────
+    /// <summary>재료 종류 글자 — 서버가 세 번째 길에서 주는 값(설계 19-1 · 화면은 보이지 않는다).</summary>
+    public const string MaterialManualZip = "manual_zip";
+
+    /// <summary>확인창 덧붙임 — 본사 보관본을 받아 오는 경우(설계 19-3 초안).</summary>
+    public const string RollbackFetchConfirmNote =
+        "이 컴퓨터에 이전 버전 파일이 없어 본사에 보관된 파일을 받아 옵니다. 인터넷 속도에 따라 몇 분 더 걸릴 수 있습니다.";
+
+    /// <summary>확인창 덧붙임 — 넣어 둔 파일을 쓰는 경우(받지 않음 · 18-6 X-8 PM 보정).</summary>
+    public const string RollbackPlacedConfirmNote = "준비된 이전 버전 파일로 되돌립니다.";
+
+    /// <summary>받기 진행 단계 → 고객 문구(설계 19-3). 넘김(<c>handed_off</c>)은 기존 <see cref="RollbackStarted"/>.</summary>
+    public static string FetchStageText(string? stage) => (stage ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        StageDownloading => "이전 버전 파일을 받는 중입니다… 다 받을 때까지 히트판은 그대로 쓰실 수 있습니다.",
+        StageVerifying => "받은 파일이 히트판 정품인지 확인하는 중입니다…",
+        StageHandingOff => "되돌리기를 시작합니다…",
+        StageHandedOff => RollbackStarted,
+        _ => "준비하는 중입니다…",
+    };
+
+    /// <summary>받기 실패 사유 → 고객 문구(설계 19-3 · 네 가지만 받기 전용 · 그 밖은 기존 <see cref="CustomerReasonText"/>).</summary>
+    public static string FetchFailText(string? code) => (code ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        ReasonDownloadFailed => "이전 버전 파일을 끝까지 받지 못했습니다. 바뀐 것은 없습니다. 인터넷 연결을 확인한 뒤 다시 해 주세요.",
+        ReasonHashMismatch => "받은 이전 버전 파일이 온전하지 않아 쓰지 않았습니다. 바뀐 것은 없습니다. 다시 해 주세요.",
+        ReasonSignatureInvalid => "이전 버전 파일이 히트판 정품인지 확인되지 않아 멈췄습니다. 바뀐 것은 없습니다. 고객센터로 연락 주세요.",
+        ReasonNoPreviousVersion => "본사에도 이 이전 버전 파일이 더 이상 없습니다. 바뀐 것은 없습니다. 고객센터로 연락 주세요.",
+        _ => CustomerReasonText(code),
+    };
+
     private static string Ver(string? v) => string.IsNullOrWhiteSpace(v) ? "확인 중" : v.Trim();
 }
