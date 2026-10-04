@@ -1,4 +1,7 @@
 using System.IO.Compression;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using HitPan.API.Services.LocalRollback;
 using HitPan.API.Services.LocalSwap;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -380,5 +383,44 @@ public sealed class LocalSwapSealGateTests : IDisposable
         var ok = launcher.Launch(With(hex));
         Assert.True(ok.Started, ok.Reason);
         Assert.Equal(1, sc.CountStartingWith("/Create"));
+    }
+
+    // ── 작1 §21 G-OWN1 — 「남이 먼저 만들어 가진 폴더」 소유자 줄(BackupService C-12 ⓐ)을 지키는 게이트 ──
+    // 시험 계정은 비상승이라 남 소유 폴더를 새로 못 만든다(선행검증서 20261005 G5 M-1) ⇒ 이미 있는 TrustedInstaller 소유
+    // 시스템 폴더를 **읽기만** 한다. 🟡 대리 측정 — 판정식 「소유자 ∉ 허용 셋」 한 줄을 잰다(실제 공격 모양은 일반 사용자 소유).
+    // 대조: BackupService 소유자 throw 를 뺀 사본이면 같은 폴더가 ⓑ 그룹 문구로 던져 이 게이트가 FAIL 한다(개발명세서 H §4).
+    [Fact(DisplayName = "G-OWN1 🔴 공용 폴더 문지기 — 소유자가 허용 셋(SYSTEM·Administrators·실행 계정) 밖인 기존 폴더는 소유자 문구로 거부 (읽기만 · 대리 측정)")]
+    public void Folder_owned_outside_allowed_set_is_refused_by_owner_line()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Fail("G-OWN1: Windows 밖이라 재지 못했다 — 소유자 판정은 Windows 에서만 선다");
+            return;
+        }
+        var target = Path.Combine(Environment.SystemDirectory, "drivers", "etc");
+        var unmeasurable = WhyOwnerAxisUnmeasurable(target);
+        Assert.True(unmeasurable is null, "G-OWN1: 재지 못했다 — " + unmeasurable + " (공용 입구를 부르지 않았다)");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => HitPan.Application.Services.BackupService.EnsureRestrictedSystemFolder(target));
+        Assert.Contains("소유자가 허용된 계정", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>G-OWN1 전제 — 있다 · 폴더와 상위에 재분석 지점 0 · 소유자가 허용 셋 밖. 하나라도 아니면 그 이유(부르면 만들기·다른 줄로 샐 수 있다).</summary>
+    [SupportedOSPlatform("windows")]
+    private static string? WhyOwnerAxisUnmeasurable(string path)
+    {
+        var dir = new DirectoryInfo(path);
+        if (!dir.Exists) return "폴더가 없다(부르면 공용 입구가 만들기를 시도한다)";
+        for (var d = dir; d is not null; d = d.Parent)
+            if (d.Attributes.HasFlag(FileAttributes.ReparsePoint)) return "재분석 지점이 있다: " + d.FullName;
+        if (dir.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner)
+            return "소유자를 읽지 못했다";
+        var allowed = new[]
+        {
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            WindowsIdentity.GetCurrent().User!,
+        };
+        return allowed.Contains(owner) ? "소유자가 허용 셋 안이다: " + owner.Value : null;
     }
 }
