@@ -415,11 +415,12 @@ public sealed class LocalSwapSealGateTests : IDisposable
             if (d.Attributes.HasFlag(FileAttributes.ReparsePoint)) return "재분석 지점이 있다: " + d.FullName;
         if (dir.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner)
             return "소유자를 읽지 못했다";
+        using var me = WindowsIdentity.GetCurrent();
         var allowed = new[]
         {
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
-            WindowsIdentity.GetCurrent().User!,
+            me.User!,
         };
         return allowed.Contains(owner) ? "소유자가 허용 셋 안이다: " + owner.Value : null;
     }
