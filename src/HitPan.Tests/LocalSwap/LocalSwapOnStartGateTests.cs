@@ -111,4 +111,63 @@ public sealed class LocalSwapOnStartGateTests
         Assert.Equal(SwapStates.Success, final.State);
         Assert.Equal(new[] { NetTask }, left); // 원본이면 Empty — Success_removes_net 이 이것을 잡는다
     }
+
+    // ── 작1 §19 G-ENV1 — 부모 셸(CI 의 pwsh 7)이 물려준 PSModulePath 에 일꾼이 흔들리지 않는다 ──
+    // 독 = pwsh 7.4.6 `Modules\Microsoft.PowerShell.Utility` 와 같은 모양 — psd1 하나 · 내보내기 목록 116개 그대로 · dll 은 폴더에 없음.
+    // 5.1 이 이것을 먼저 찾으면 Get-Date·Add-Type 은 되고 Get-FileHash 만 「not recognized」(10/5 실측 · CI 와 같은 문구 ·
+    // 선행검증서 20261002 PR449 CI75). ⚠️ Get-FileHash 하나만 내보내는 가짜는 일꾼이 먼저 쓰는 다른 명령에 정품이 불려 와 풀린다(실측).
+    private static readonly string[] Pwsh7UtilityCmdlets =
+    {
+        "'Export-Alias','Get-Alias','Import-Alias','New-Alias','Remove-Alias','Set-Alias','Export-Clixml','Import-Clixml','Measure-Command'",
+        "'Trace-Command','ConvertFrom-Csv','ConvertTo-Csv','Export-Csv','Import-Csv','Get-Culture','Format-Custom','Get-Date','Set-Date'",
+        "'Write-Debug','Wait-Debugger','Register-EngineEvent','Write-Error','Get-Event','New-Event','Remove-Event','Unregister-Event','Wait-Event'",
+        "'Get-EventSubscriber','Invoke-Expression','Out-File','Unblock-File','Get-FileHash','Export-FormatData','Get-FormatData','Update-FormatData','New-Guid'",
+        "'Format-Hex','Get-Host','Read-Host','Write-Host','ConvertTo-Html','Write-Information','ConvertFrom-Json','ConvertTo-Json','Test-Json'",
+        "'Format-List','Import-LocalizedData','Send-MailMessage','ConvertFrom-Markdown','Show-Markdown','Get-MarkdownOption','Set-MarkdownOption','Add-Member','Get-Member'",
+        "'Compare-Object','Group-Object','Measure-Object','New-Object','Select-Object','Sort-Object','Tee-Object','Register-ObjectEvent','Write-Output'",
+        "'Import-PowerShellDataFile','Write-Progress','Disable-PSBreakpoint','Enable-PSBreakpoint','Get-PSBreakpoint','Remove-PSBreakpoint','Set-PSBreakpoint','Get-PSCallStack','Export-PSSession'",
+        "'Import-PSSession','Get-Random','Get-SecureRandom','Invoke-RestMethod','Debug-Runspace','Get-Runspace','Disable-RunspaceDebug','Enable-RunspaceDebug','Get-RunspaceDebug'",
+        "'ConvertFrom-SddlString','Start-Sleep','Join-String','Out-String','Select-String','ConvertFrom-StringData','Format-Table','New-TemporaryFile','New-TimeSpan'",
+        "'Get-TraceSource','Set-TraceSource','Add-Type','Get-TypeData','Remove-TypeData','Update-TypeData','Get-UICulture','Get-Unique','Get-Uptime'",
+        "'Clear-Variable','Get-Variable','New-Variable','Remove-Variable','Set-Variable','Get-Verb','Write-Verbose','Write-Warning','Invoke-WebRequest'",
+        "'Format-Wide','ConvertTo-Xml','Select-Xml','Get-Error','Update-List','Out-GridView','Show-Command','Out-Printer'",
+    };
+
+    private static string PoisonedParentPsModulePath(string root)
+    {
+        var dir = Path.Combine(root, "pwsh7-modules", "Microsoft.PowerShell.Utility");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "Microsoft.PowerShell.Utility.psd1"),
+            "@{ GUID = '1DA87E53-152B-403E-98DC-74D7B4D63D59'; ModuleVersion = '7.0.0.0'; CompatiblePSEditions = @('Core'); "
+            + "PowerShellVersion = '3.0'; CmdletsToExport = @(" + string.Join(",", Pwsh7UtilityCmdlets) + "); "
+            + "NestedModules = @('Microsoft.PowerShell.Commands.Utility.dll') }");
+        return Path.Combine(root, "pwsh7-modules") + Path.PathSeparator + (Environment.GetEnvironmentVariable("PSModulePath") ?? "");
+    }
+
+    private static (SwapRequest Final, string Log, string[] Left) RunPoisoned(bool controlKeep)
+    {
+        using var rig = LocalSwapWorkerRig.Rollback(DateTime.UtcNow);
+        rig.SimulatedParentPsModulePath = PoisonedParentPsModulePath(rig.Root);
+        rig.ControlKeepPsModulePath = controlKeep;
+        var exit = rig.Run(null, null);
+        Assert.True(exit == 0, "일꾼 종료 코드 " + exit + " / " + rig.Log());
+        return (rig.Final(), rig.Log(), rig.LeftoverTasks());
+    }
+
+    [Fact(DisplayName = "G-ENV1 🟢 부모가 pwsh 7 모듈 경로를 물려줘도 일꾼은 끝까지 간다 — success · 안전망 잔존 0")]
+    public void Parent_pwsh7_module_path_does_not_break_worker()
+    {
+        var (final, log, left) = RunPoisoned(controlKeep: false);
+        Assert.True(final.State == SwapStates.Success, "끝 " + final.State + "/" + final.Reason + " / " + log);
+        Assert.DoesNotContain("Get-FileHash", log);
+        Assert.Empty(left);
+    }
+
+    [Fact(DisplayName = "G-ENV1 대조군 🔴 PSModulePath 를 빼지 않고 넘김 → Get-FileHash 를 못 찾아 broken(게이트가 FAIL 을 낸다 · CI 75 실패의 모양)")]
+    public void Control_keeping_module_path_breaks_worker()
+    {
+        var (final, log, _) = RunPoisoned(controlKeep: true);
+        Assert.True(final.State == SwapStates.Broken, "끝 " + final.State + " — 독이 안 섰다(G-ENV1 초록은 무효) / " + log); // success 면 독이 안 선 것
+        Assert.Contains("Get-FileHash", log);
+    }
 }

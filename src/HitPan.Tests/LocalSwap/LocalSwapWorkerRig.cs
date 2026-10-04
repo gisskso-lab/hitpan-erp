@@ -28,6 +28,12 @@ internal sealed class LocalSwapWorkerRig : IDisposable
     /// <summary>일꾼 <c>-Mode</c> — 기본 rollback(작1 봉합 K2 가 update 판을 더했다).</summary>
     public string Mode { get; private set; } = SwapModes.Rollback;
 
+    /// <summary>부모 셸이 물려준 <c>PSModulePath</c> 를 흉내 낸다(시험 전용 · 작1 §19 G-ENV1). null = 흉내 없음.</summary>
+    public string? SimulatedParentPsModulePath { get; set; }
+
+    /// <summary>대조군 전용 — true 면 <c>PSModulePath</c> 를 빼지 않고 넘긴다(작1 §19 G-ENV1 대조).</summary>
+    public bool ControlKeepPsModulePath { get; set; }
+
     private LocalSwapWorkerRig(string root) => Root = root;
 
     /// <summary>되돌리기 한 판을 차린다. <paramref name="requestedAtUtc"/> = 요청서 발급 시각.</summary>
@@ -111,6 +117,10 @@ internal sealed class LocalSwapWorkerRig : IDisposable
         foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
                      "-Mode", Mode, "-Ticket", ticketArg ?? Ticket, "-TestRoot", Root })
             psi.ArgumentList.Add(a);
+        if (SimulatedParentPsModulePath is not null) psi.Environment["PSModulePath"] = SimulatedParentPsModulePath;
+        // pwsh 7 이 물려준 PSModulePath 를 5.1 에 넘기면 Get-FileHash 를 못 찾는다(선행검증서 20261002 PR449 CI75) ·
+        // 제품은 작업 스케줄러(SYSTEM)가 깨끗한 환경으로 띄운다 ⇒ 시험도 같은 조건으로 뺀다(5.1 이 기본 경로를 스스로 만든다).
+        if (!ControlKeepPsModulePath) psi.Environment.Remove("PSModulePath");
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("powershell 을 못 띄웠다");
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();
