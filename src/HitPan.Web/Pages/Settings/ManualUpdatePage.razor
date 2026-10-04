@@ -1,0 +1,292 @@
+@page "/data/update"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 🔴 20260930작1 갈래 F — 자료관리 「최신 버전 확인/업데이트」 = 사장님 용어로 **수동 업데이트**.
+     사장님 9/30 원문: "업데이트 팝업이 안돌면 강제로 업데이트 할 수 있도록 자료관리 메뉴에 최신버젼확인/업데이트 메뉴를 신설"
+                      "버젼업그레이드, 자료관리 메뉴는 메인컴퓨터에서만 … 메인컴퓨터에 관리자만 가능해야됨"
+     ① 계정 — [Authorize](로그인만) + 화면 안에서 관리자 판정. Roles 로 막으면 직원은 로그인 창으로 튕겨
+        이유를 모른다 ⇒ 여기서 「관리자 계정으로만」 한 줄을 보여 준다. 실제로 막는 것은 서버(TenantAdminOnly).
+     ② 자리 — <MainPcOnly> 로 메인PC 왕복을 거친 뒤에만 조회한다(20260924작1 절D 규칙 그대로).
+     ③ 자동 경로(update-consent·update-consent-local)는 부르지 않는다(G-43 · G-L1). *@
+@attribute [Authorize]
+@implements IDisposable
+@using HitPan.Web.Helpers
+@inject ManualUpdateClient Api
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+
+<PageTitle>최신 버전 확인/업데이트</PageTitle>
+
+<MudPaper Elevation="0" Class="pa-4" Style="max-width:760px;">
+    <MudText Typo="Typo.h6" Class="mb-1">@LocalSwapUiText.MenuUpdate</MudText>
+    <MudText Typo="Typo.body2" Class="mb-1">@LocalSwapUiText.FirstLine</MudText>
+    <MudText Typo="Typo.caption" Class="d-block mb-3" Style="color:var(--mud-palette-text-secondary)">@LocalSwapUiText.WhoCanUse</MudText>
+
+    @* 🔴 20260930작1 확대 1.3.50 N3 — 「끝났습니다」 팝업 한 번(설계 19-1 조각 C · X-3 · X-4). 아무것도 그리지 않는다. *@
+    <SwapDoneNotice @ref="_doneNotice" />
+
+    @if (_roleChecking)
+    {
+        <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+    }
+    else if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">@LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonAdminOnly)</MudAlert>
+    }
+    else
+    {
+        <MainPcOnly OnAllowed="LoadAsync">
+            @if (_loading)
+            {
+                <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Size="Size.Medium" /></div>
+            }
+            else if (_started)
+            {
+                <MudAlert Severity="Severity.Success">@LocalSwapUiText.UpdateStarted</MudAlert>
+            }
+            else if (_stageText is not null)
+            {
+                @* C-7/U — [예] 뒤 일꾼에 넘기기 전까지(받기·확인·백업) 진행 단계. 이 동안 히트판은 아직 켜져 있다. *@
+                <div class="d-flex align-center pa-4" style="gap:12px;">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">@_stageText</MudText>
+                </div>
+            }
+            else
+            {
+                @* C-7 — 지난 교체 결과(계약 §7 · 다음 로그인 뒤 알림). ⚠️ 서버 check 응답에 last 칸이 아직 없다(명세서 I-WEB §4). *@
+                @if (_lastText is not null)
+                {
+                    <MudAlert Severity="@_lastSeverity" Dense="true" Class="mb-3">
+                        <div style="font-size:12px; opacity:.8;">@_lastCaption</div>
+                        <div>@_lastText</div>
+                    </MudAlert>
+                }
+
+                <MudSimpleTable Dense="true" Elevation="0" Class="mb-3">
+                    <tbody>
+                        <tr><td style="width:160px;">지금 쓰시는 버전</td><td><b>@(_status?.CurrentVersion ?? "-")</b></td></tr>
+                        <tr><td>받을 수 있는 최신 버전</td><td><b>@(_status?.LatestVersion ?? "-")</b></td></tr>
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_message is not null)
+                {
+                    <MudAlert Severity="@_messageSeverity" Dense="true" Class="mb-3">@_message</MudAlert>
+                }
+
+                <MudStack Row="true" Spacing="2" Class="mb-3">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy"
+                               StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">최신 버전 확인</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || !CanStart"
+                               StartIcon="@Icons.Material.Filled.SystemUpdateAlt" OnClick="StartAsync">업데이트 하기</MudButton>
+                </MudStack>
+
+                <MudText Typo="Typo.caption" Class="d-block" Style="color:var(--mud-palette-text-secondary)">
+                    @LocalSwapUiText.NextStepRollback
+                    <MudLink Href="@LocalSwapUiText.RollbackPath" Typo="Typo.caption">@LocalSwapUiText.MenuRollback</MudLink>
+                </MudText>
+            }
+        </MainPcOnly>
+    }
+</MudPaper>
+
+@code {
+    private bool _roleChecking = true;
+    private bool _isAdmin;
+    private bool _loading;
+    private bool _busy;
+    private bool _started;
+    private ManualUpdateStatus? _status;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+    private string? _stageText;
+    private string? _lastText;
+    private string? _lastCaption;
+    private Severity _lastSeverity = Severity.Info;
+    private readonly CancellationTokenSource _cts = new();
+    private SwapDoneNotice? _doneNotice;
+
+    /// <summary>진행 상태를 몇 초마다 · 최대 얼마 동안 볼지(받기가 길 수 있다).</summary>
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan PollLimit = TimeSpan.FromMinutes(30);
+
+    // ⬛ F: _status is { CanStart: true, UpdateAvailable: true } — 서버 check 응답에는 CanStart 칸이 없다(C-6). 판정은 DTO 가 한다.
+    private bool CanStart => _status is { CanStart: true };
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        _roleChecking = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _message = null;
+        StateHasChanged();
+
+        var r = await Api.CheckAsync();
+        _loading = false;
+
+        if (!r.Ok)
+        {
+            _status = null;
+            _message = r.Status == 0 ? LocalSwapUiText.CheckFailed : r.FailureText;
+            _messageSeverity = Severity.Warning;
+            return;
+        }
+
+        _status = r.Data;
+        ShowLast(_status?.Last, _status?.CurrentVersion);
+        if (_status is null) return;
+
+        // C-2 — 사유 코드는 서버 ManualUpdateReasons 그대로(ok · no_newer_version · feed_unreachable · signature_invalid · not_windows …).
+        var reason = (_status.Reason ?? string.Empty).Trim().ToLowerInvariant();
+        if (_status.Busy)
+        {
+            _message = LocalSwapUiText.ReasonText(LocalSwapUiText.ReasonUpdateInProgress);
+            _messageSeverity = Severity.Warning;
+        }
+        else if (!_status.UpdateAvailable && (reason is "" or LocalSwapUiText.ReasonOk or LocalSwapUiText.ReasonNoNewerVersion))
+        {
+            _message = LocalSwapUiText.AlreadyLatest;
+            _messageSeverity = Severity.Info;
+        }
+        else if (!_status.CanStart)
+        {
+            // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_message = LocalSwapUiText.ReasonText(_status.Reason);`
+            //   — X-3 보정: 메뉴가 잠겨 거부될 때만 한 줄(잠김 사유 밖은 ReasonText 그대로).
+            _message = LocalSwapUiText.CustomerReasonText(_status.Reason);
+            _messageSeverity = Severity.Warning;
+        }
+
+        // 🔴 확대 1.3.50 N3 — 결과를 먼저 그린 뒤(기존 한 줄 그대로) 아직 안 본 성공이면 팝업 한 번.
+        StateHasChanged();
+        if (_doneNotice is not null) await _doneNotice.TryShowAsync(_status.Last, _status.CurrentVersion);
+    }
+
+    /// <summary>지난 교체 결과 한 줄(계약 §7) — 낡은 기록은 안 보인다(<see cref="LocalSwapUiText.ShouldShowLast"/>).</summary>
+    private void ShowLast(LocalSwapLast? last, string? current)
+    {
+        _lastText = null;
+        if (last is null || !LocalSwapUiText.ShouldShowLast(last.State, last.From, last.To, last.AtUtc, current, DateTime.UtcNow)) return;
+        // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_lastText = LocalSwapUiText.EndStateText(last.Mode, last.State, last.Reason, last.From, last.To);`
+        //   — X-3 보정: 성공 + 옛 파일 정리 남음은 성공 줄 하나 · 잠김 거부는 한 줄 · 첨부 옮김 남음은 그대로(자리는 그대로).
+        _lastText = LocalSwapUiText.CustomerEndStateText(last.Mode, last.State, last.Reason, last.From, last.To);
+        _lastCaption = LocalSwapUiText.LastCaption(last.AtUtc);
+        _lastSeverity = LocalSwapUiText.EndStateLevel(last.State) switch
+        {
+            3 => Severity.Success,
+            2 => Severity.Error,
+            1 => Severity.Warning,
+            _ => Severity.Info,
+        };
+    }
+
+    /// <summary>
+    /// [예] 뒤 진행 — 서버가 받기·확인·백업을 마치고 일꾼에 넘기면(<c>handed_off</c>) 곧 히트판이 멈춘다.
+    /// 넘기기 전에 멈추면(<c>refused</c>) 그 사유를 보인다. 연결이 끊기면 넘긴 뒤 멈춘 것으로 본다.
+    /// </summary>
+    private async Task FollowJobAsync(ManualUpdateJob? job)
+    {
+        var until = DateTime.UtcNow + PollLimit;
+        while (true)
+        {
+            var stage = (job?.Stage ?? string.Empty).Trim().ToLowerInvariant();
+            if (stage == LocalSwapUiText.StageHandedOff)
+            {
+                _stageText = null;
+                _started = true;
+                Snackbar.Add(LocalSwapUiText.UpdateStarted, Severity.Success);
+                return;
+            }
+            if (stage == LocalSwapUiText.StageRefused)
+            {
+                _stageText = null;
+                // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_message = LocalSwapUiText.ReasonText(job?.Reason);` — X-3 보정(잠김만 한 줄).
+                _message = LocalSwapUiText.CustomerReasonText(job?.Reason);
+                _messageSeverity = Severity.Warning;
+                return;
+            }
+
+            _stageText = LocalSwapUiText.StageText(stage);
+            StateHasChanged();
+            if (DateTime.UtcNow > until || _cts.IsCancellationRequested)
+            {
+                _stageText = null;
+                _message = LocalSwapUiText.StartFailed;
+                _messageSeverity = Severity.Warning;
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(PollEvery, _cts.Token);
+            }
+            catch (TaskCanceledException)
+            {
+                // 화면을 떠났다 — 더 볼 필요가 없다(서버 작업은 그대로 진행된다).
+                return;
+            }
+
+            var r = await Api.GetJobAsync(_cts.Token);
+            if (r.Ok) { job = r.Data; continue; }
+            _stageText = null;
+            if (r.Status == 0)
+            {
+                // 연결이 끊겼다 = 교체가 시작돼 히트판이 멈춘 것(넘긴 뒤 API 가 멈춘다 · 계약 §7).
+                _started = true;
+                return;
+            }
+            _message = r.Status == 204 ? LocalSwapUiText.UpdateStatusLost : r.FailureText;
+            _messageSeverity = Severity.Warning;
+            return;
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        if (_busy || !CanStart) return;
+        var to = _status!.LatestVersion!;
+
+        var yes = await ConfirmDialog.ShowAsync(
+            Dialog,
+            title: LocalSwapUiText.MenuUpdate,
+            message: LocalSwapUiText.UpdateConfirm(to),
+            confirmText: "예",
+            cancelText: "아니요",
+            severity: Severity.Warning);
+        if (!yes) return;
+
+        _busy = true;
+        try
+        {
+            var r = await Api.StartAsync();   // 🔴 적발 04 — 버전은 본문에 안 싣는다(서버 계산 · to 는 확인창 표시용)
+            if (r.Ok)
+            {
+                // 202 = 받아들임 + 진행 상태(ManualUpdateJobStatus). 넘길 때까지 따라간다.
+                await FollowJobAsync(r.Data);
+                return;
+            }
+
+            // 409 { reason } · 403 { error: main_pc_only } · 403 본문없음(관리자 아님) — 전부 고객 문구로.
+            // ⬛ [낡은 줄 · 확대 1.3.50 N3 이전] `_message = r.Status == 0 ? LocalSwapUiText.StartFailed : r.FailureText;`
+            //   — X-3 보정: 메뉴가 잠겨 거부(409 잠김 사유)면 한 줄.
+            _message = r.Status == 0 ? LocalSwapUiText.StartFailed
+                : LocalSwapUiText.IsMenuLockedReason(r.Reason) ? LocalSwapUiText.MenuLockedLine : r.FailureText;
+            _messageSeverity = Severity.Warning;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

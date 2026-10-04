@@ -84,6 +84,9 @@ builder.Services.AddScoped<NotificationClient>();
 builder.Services.AddScoped<ApprovalLineService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddScoped<BackupService>();
+// 🔴 20260930작1 갈래 F — 자료관리 「최신 버전 확인/업데이트」·「이전 버전으로 되돌리기」(수동 업데이트·수동 되돌리기)
+builder.Services.AddScoped<ManualUpdateClient>();
+builder.Services.AddScoped<LocalRollbackClient>();
 builder.Services.AddScoped<DataResetService>();
 builder.Services.AddScoped<LogService>();
 builder.Services.AddScoped<BillsCardsBankService>();

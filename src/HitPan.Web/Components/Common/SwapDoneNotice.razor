@@ -1,0 +1,139 @@
+@* 🔴 20260930작1 확대 1.3.50 갈래 N3 — 「끝났습니다」 팝업 한 번(설계 §19 조각 C · 작업지시서 18-5 X-3 · X-4).
+     사장님 원문(S-1): "『업데이트가 끝났습니다』 팝업 한 번, 그리고 메뉴가 잠길 때만 한 줄 안내".
+     자료관리 두 결과 화면(ManualUpdatePage · LocalRollbackPage)만 쓴다 — 화면이 지난 결과를 읽은 뒤 TryShowAsync 를 부른다.
+     🔴 #43 업데이트 안내가 먼저다(X-4):
+       ① 로그인 자리(MainLayout · UpdateConsentGate · UpdatePromptPlan)는 손대지 않는다 — 읽기만(UpdatePromptPlan.Decide · SessionKey · UpdatePromptBus.Latest).
+       ② 이번 접속에서 #43 안내 차례이거나, 그 차례인지 아직 모르면(안내 쪽이 상태를 아직 안 흘림) 띄우지 않는다 · 「한 번」 표도 안 남긴다.
+       ③ 로그인 직후 첫 화면이면 띄우지 않는다(#43 안내가 그 화면 위에 떠 있을 수 있다 · MudBlazor 9.3 에 「지금 열린 상자」 조회가 없다).
+     기존 결과 한 줄은 화면이 그대로 그린다 — 이 조각은 아무것도 그리지 않는다. *@
+@using System.Text.Json
+@using Microsoft.Extensions.Logging
+@inject IJSRuntime JS
+@inject IDialogService Dialog
+@inject NavigationManager Nav
+@inject UpdatePromptBus PromptBus
+@inject ILogger<SwapDoneNotice> Logger
+
+@code {
+    // 이 앱이 뜬 뒤(로그인은 forceLoad 로 새로 뜬다 · Login.razor) 화면 안 이동이 한 번이라도 있었나.
+    private static bool s_navigated;
+    private static bool s_subscribed;
+    private bool _showing;
+
+    protected override void OnInitialized()
+    {
+        if (s_subscribed) return;
+        s_subscribed = true;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    // 정적 표만 바꾼다 — 구독은 앱 수명 동안 한 번(화면마다 늘지 않는다).
+    // 정적 구독(앱 수명 1회)이라 화면을 떠나도 떼지 않는다 — 떼면 다음 화면이 「이동 있었음」을 놓친다.
+    private static void OnLocationChanged(object? sender, LocationChangedEventArgs e) => s_navigated = true;
+
+    /// <summary>
+    /// 지난 결과를 읽은 뒤 화면이 부른다 — 아직 안 본 성공 결과면 [확인] 하나짜리 상자를 한 번 띄운다.
+    /// 무엇이 실패해도 화면은 그대로(기존 결과 한 줄은 이미 그려져 있다).
+    /// </summary>
+    public async Task TryShowAsync(LocalSwapLast? last, string? currentVersion)
+    {
+        if (_showing || last is null) return;
+        // 성공이 아니면 JS 를 부를 일도 없다(판정 함수가 다시 본다).
+        if (!string.Equals((last.State ?? string.Empty).Trim(), LocalSwapUiText.StateSuccess, StringComparison.OrdinalIgnoreCase)) return;
+        _showing = true;
+        try
+        {
+            var updatePromptFirst = await IsFirstScreenAsync() || await IsUpdatePromptTurnAsync();
+
+            var storageOk = true;
+            string? seen = null;
+            try
+            {
+                seen = await JS.InvokeAsync<string?>("localStorage.getItem", LocalSwapUiText.DoneSeenStorageKey);
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+            {
+                storageOk = false;
+                Logger.LogWarning(ex, "[SwapDoneNotice] 「한 번」 표 읽기 실패 — 팝업 생략(한 줄만)");
+            }
+
+            if (!LocalSwapUiText.ShouldShowDonePopup(last.Mode, last.State, last.From, last.To, last.AtUtc,
+                    currentVersion, DateTime.UtcNow, storageOk, seen, updatePromptFirst))
+                return;
+
+            // 표를 먼저 쓴다 — 못 쓰면 띄우지 않는다(매번 뜨는 쪽보다 한 줄만 남는 쪽 · 설계 19-1).
+            try
+            {
+                await JS.InvokeVoidAsync("localStorage.setItem", LocalSwapUiText.DoneSeenStorageKey,
+                    LocalSwapUiText.DonePopupStamp(last.Mode, last.To, last.AtUtc));
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+            {
+                Logger.LogWarning(ex, "[SwapDoneNotice] 「한 번」 표 쓰기 실패 — 팝업 생략(한 줄만)");
+                return;
+            }
+
+            var body = LocalSwapUiText.CustomerEndStateText(last.Mode, last.State, last.Reason, last.From, last.To);
+            if (string.IsNullOrWhiteSpace(body)) return;
+            // 게이트가 쓰는 한 버튼 상자와 같은 모양([확인] 하나).
+            await Dialog.ShowMessageBoxAsync(LocalSwapUiText.DoneTitle(last.Mode), body, yesText: "확인");
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "[SwapDoneNotice] 완료 팝업 생략 — 화면은 그대로");
+        }
+        finally
+        {
+            _showing = false;
+        }
+    }
+
+    /// <summary>
+    /// ③ 로그인 직후 첫 화면인가 — 이 앱이 뜬 뒤 화면 안 이동이 없었고, 지금 주소가 처음 불러온 주소면 첫 화면이다.
+    /// 처음 불러온 주소는 브라우저 기록(<c>performance.getEntriesByType("navigation")</c>)에서 읽는다. 못 읽으면 첫 화면으로 본다(안 띄우는 쪽).
+    /// </summary>
+    private async Task<bool> IsFirstScreenAsync()
+    {
+        if (s_navigated) return false;
+        try
+        {
+            var entries = await JS.InvokeAsync<JsonElement[]>("performance.getEntriesByType", "navigation");
+            if (entries is null || entries.Length == 0) return true;
+            if (entries[0].ValueKind != JsonValueKind.Object || !entries[0].TryGetProperty("name", out var name)) return true;
+            var loaded = name.GetString();
+            if (string.IsNullOrWhiteSpace(loaded)) return true;
+            return string.Equals(WithoutFragment(loaded), WithoutFragment(Nav.Uri), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException or JsonException)
+        {
+            Logger.LogWarning(ex, "[SwapDoneNotice] 첫 화면 판별 실패 — 첫 화면으로 본다(팝업 생략)");
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// ② #43 업데이트 안내 차례인가 — 안내 쪽이 흘린 마지막 상태(<see cref="UpdatePromptBus.Latest"/>)와 그 「이미 안내했다」 표로
+    /// 같은 판정(<see cref="UpdatePromptPlan.Decide"/>)을 읽기만 한다. 상태가 아직 없으면 모른다 = 차례로 본다(안 띄우는 쪽).
+    /// </summary>
+    private async Task<bool> IsUpdatePromptTurnAsync()
+    {
+        var latest = PromptBus.Latest;
+        if (latest is null) return true;
+        try
+        {
+            var shown = await JS.InvokeAsync<string?>("sessionStorage.getItem", UpdatePromptPlan.SessionKey);
+            return UpdatePromptPlan.Decide(latest, shown, force: false).Show;
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "[SwapDoneNotice] 업데이트 안내 표 읽기 실패 — 안내 차례로 본다(팝업 생략)");
+            return true;
+        }
+    }
+
+    private static string WithoutFragment(string url)
+    {
+        var i = url.IndexOf('#');
+        return (i >= 0 ? url[..i] : url).TrimEnd('/');
+    }
+}

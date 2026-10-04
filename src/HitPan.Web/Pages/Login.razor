@@ -123,7 +123,7 @@
                        FullWidth="true"
                        Class="mt-3"
                        Disabled="_updateChecking || _updateStarting"
-                       OnClick="ManualUpdateAsync"
+                       OnClick="GoManualUpdateAfterLogin"
                        StartIcon="@Icons.Material.Filled.SystemUpdateAlt"
                        Style="font-family: 'Noto Sans KR', sans-serif;">
                 @if (_updateChecking)
@@ -148,6 +148,11 @@
                     <text>최신버젼업데이트</text>
                 }
             </MudButton>
+            @* 🔴 20260930작1 갈래 F (L-1 (가)) — 버튼을 누르면 이 한 줄이 뜨고, 로그인 뒤 곧장 수동 업데이트 화면. *@
+            @if (_goManualUpdateAfterLogin)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">@LocalSwapUiText.LoginButtonNotice</MudAlert>
+            }
             @if (!_updateChecking && !_updateAvailable && !_updateCheckFailed && !string.IsNullOrWhiteSpace(_currentVersion))
             {
                 <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-1" Align="Align.Center">
@@ -287,6 +292,19 @@
         }
 
         await StartUpdateAsync();
+    }
+
+    // 🔴 20260930작1 갈래 F — 로그인창 [최신버젼업데이트] (PM 결재 L-1 = (가)).
+    //   사장님 9/30: "버젼업그레이드, 자료관리 메뉴는 메인컴퓨터에서만 … 메인컴퓨터에 관리자만 가능해야됨"
+    //   ⇒ 버튼은 **예약을 걸지 않는다**. 관리자 로그인 뒤 곧장 「최신 버전 확인/업데이트」(/data/update) 로 간다.
+    //   익명 API(update-consent-local) 호출 0 — G-L1. 로그인 전에는 메인PC 를 가를 수 없다(서버 판정) ⇒
+    //   메인PC·관리자 판정은 그 화면(MainPcOnly · 서버 문)이 한다.
+    //   ⬛ [낡은 목적지] OnClick="ManualUpdateAsync" → StartUpdateAsync(익명 예약). 두 함수는 지우지 않는다(#1 · 설계 §13-4).
+    private bool _goManualUpdateAfterLogin;
+
+    private void GoManualUpdateAfterLogin()
+    {
+        _goManualUpdateAfterLogin = true;
     }
 
     private async Task StartUpdateAsync()
@@ -436,7 +454,10 @@
             }
             else
             {
-                Navigation.NavigateTo("/", forceLoad: true);
+                // ⬛ [낡은 줄] Navigation.NavigateTo("/", forceLoad: true);
+                // 🔴 20260930작1 갈래 F (L-1 (가)) — [최신버젼업데이트] 를 눌렀으면 수동 업데이트 화면으로.
+                //   약관·승인 대기·첫 설정(welcome) 은 위에서 먼저 간다(그 흐름을 끊지 않는다 #20).
+                Navigation.NavigateTo(LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin), forceLoad: true);
             }
         }
         finally

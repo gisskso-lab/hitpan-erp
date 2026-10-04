@@ -1,0 +1,98 @@
+namespace HitPan.API.Services.LocalSwap;
+
+/// <summary>
+/// 교체 일꾼 런처 — 설계 §13-7 이음매 셋 가운데 하나. 수동 되돌리기(갈래 A)와 수동 업데이트(갈래 U)가 같은 런처를 쓴다.
+/// 하는 일: 바쁨 판정 → 한 번에 하나 잠금 → <c>request.json</c> → 일꾼 사본 → 1회용 SYSTEM 작업 <c>HitPan-LocalSwap</c> 등록·실행.
+/// </summary>
+/// <remarks>
+/// 🔴 런처는 자료(업무 데이터)에 닿지 않는다 — 생성자에 자료 연결·저장소 주입 0(G-D1). 자료 백업은 U 가 <b>부르기 전에</b> 끝낸다.
+/// </remarks>
+public interface ILocalSwapLauncher
+{
+    /// <summary>
+    /// 지금 교체를 시작할 수 없는 이유. 없으면 null. 두 모드 공통(계약 §4 · G-U5 · 병렬이슈 03 쿨다운 포함).
+    /// 봉합 L: <b>누구의 예약이든</b>(<see cref="TryReserve"/>) 있으면 <c>swap_in_progress</c>.
+    /// </summary>
+    string? CheckBusy();
+
+    /// <summary>마지막 요청서(끝 상태 알림용 · 읽기만). 없거나 못 읽으면 null.</summary>
+    SwapRequest? ReadLast();
+
+    /// <summary>
+    /// 교체를 건다. 판·재료는 호출부가 <b>서버에서 계산한 값</b>만 넘긴다(병렬이슈 04).
+    /// 실패하면 작업 등록 0 · 잠금 풀림.
+    /// </summary>
+    SwapLaunchResult Launch(SwapLaunchInput input);
+
+    // ── 20260930작1 봉합 07·F-4 런처 쪽(설계 §14-2 · 계약 §4 봉합 합의) — 호출부 연결은 갈래 M ──
+
+    /// <summary>
+    /// 사전 판정(07) — <see cref="Launch"/> 앞 정적 판정만: 윈도 아님 · 설치 루트·슬롯 없음 · 일꾼 원본 없음 · 작업 폴더 문지기 실패.
+    /// 되면 null. 바쁨은 보지 않는다(→ <see cref="CheckBusy()"/>). 호출부는 받기·백업·번호 발급 <b>전</b>, <see cref="CheckBusy()"/> 앞에서 부른다.
+    /// </summary>
+    string? CheckReady();
+
+    /// <summary>
+    /// <see cref="CheckBusy()"/> 와 같되 <paramref name="owner"/> 자신의 예약은 바쁨으로 보지 않는다(남의 예약만 <c>swap_in_progress</c>).
+    /// owner 가 null 이면 <see cref="CheckBusy()"/> 와 같다.
+    /// </summary>
+    string? CheckBusy(string? owner);
+
+    /// <summary>
+    /// 프로세스 안 예약(F-4) — 받기·백업처럼 교체 <b>전</b> 긴 준비 구간을 남이 끼어들지 못하게 잡는다.
+    /// 비었거나 같은 주인이면 잡고(시각 갱신) true · 남이 쥐고 있으면 false. 30분 갱신이 없으면 풀린 것으로 본다.
+    /// </summary>
+    bool TryReserve(string owner);
+
+    /// <summary>예약을 푼다 — 주인이 같을 때만(남의 것·빈 것은 무시).</summary>
+    void Release(string owner);
+}
+
+/// <summary>설치 환경 읽기 — 시험에서 대역으로 바꾼다.</summary>
+public interface ILocalSwapEnvironment
+{
+    /// <summary>윈도인가. 아니면 교체를 걸지 않는다.</summary>
+    bool IsWindows { get; }
+
+    /// <summary><c>{app}</c> — API 실행 폴더의 상위에 <c>watchdog</c> 폴더가 있을 때만. 못 찾으면 null.</summary>
+    string? AppRoot { get; }
+
+    /// <summary>API 출력 폴더 안의 일꾼 원본(<c>{api}\Rollback\local-swap.ps1</c>).</summary>
+    string ScriptSourcePath { get; }
+
+    /// <summary>지금 판 <c>M.m.b</c>(<c>VersionInfo.Current</c>).</summary>
+    string CurrentVersion { get; }
+
+    /// <summary>작업 이름 번호(설치 설정의 SLOT_INDEX). 못 읽으면 null.</summary>
+    int? Slot { get; }
+
+    /// <summary>로컬 API 포트(설치 설정의 API_PORT · 기본 5257).</summary>
+    int ApiPort { get; }
+
+    /// <summary>워치독이 받아 둔 zip 폴더(워치독 <c>UpdateOrchestrator</c> 와 같은 규칙 · 읽기만).</summary>
+    string WatchdogStagingDir { get; }
+
+    /// <summary>지금 UTC(시험에서 바꾼다).</summary>
+    DateTime UtcNow { get; }
+
+    /// <summary>
+    /// 20260930작1 봉합2 N-3(설계 §15-0 M3·M4) — 살아 있는 워치독 판 <c>M.m.b</c>
+    /// (<c>{app}\watchdog\HitPan.Watchdog.exe</c> FileVersion). 못 읽으면 null(= 판정표 M3 「못 읽음」). 읽기만.
+    /// </summary>
+    string? WatchdogVersion { get; }
+}
+
+/// <summary>schtasks 실행 — 시험에서 대역으로 바꾼다. 반환 = 종료 코드.</summary>
+public interface ISchtasksRunner
+{
+    int Run(string arguments);
+}
+
+/// <summary>
+/// 작업 폴더 안전 판정(병렬이슈 01) — 소유자·넓은 그룹 권한 줄·재분석 지점.
+/// 안전하지 않으면 예외. 기본 구현은 <c>BackupService.EnsureRestrictedSystemFolder</c>(C-8·C-12) 를 그대로 부른다.
+/// </summary>
+public interface ISwapFolderGuard
+{
+    void EnsureSafe(string path);
+}

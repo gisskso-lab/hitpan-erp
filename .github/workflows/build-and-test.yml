@@ -40,6 +40,43 @@ jobs:
         run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
         continue-on-error: false
 
+      # 🔴 20260930작1 I-API 8 — 수동 업데이트·수동 되돌리기 게이트를 **이름으로** 문다(db-gate 잡의 GATES 방식 그대로).
+      #   왜 이 잡인가: DB 불필요 · 교체 일꾼(local-swap.ps1)을 Windows PowerShell 로 실제로 돌리는 게이트가 있다(-TestRoot 대역 폴더)
+      #     ⇒ ubuntu 인 db-gate 잡에는 못 넣는다. 위 전체 시험에도 들어 있지만, 전체 시험 초록은 「이 게이트가 돌았다」의 증거가 아니다
+      #     (이름이 바뀌거나 클래스가 빠져도 초록). 그래서 목록으로 따로 돌리고, **클래스마다 한 건 이상 돌았는지** trx 로 센다.
+      #   목록: 이벤트 번호(계약 §9) · 병렬이슈 03 한 번에 하나 · 병렬이슈 04 미들웨어 통과(익명 401·비메인PC 403·비관리자 403·양성)
+      #         · ONSTART 부팅 안전망 삭제 · 수동 업데이트 자체 점검 · 화면 계약(F)
+      #   대조 실측(9/30 로컬 · 개발명세서 I-API §8): LocalRollbackController [MainPcOnly] 한 줄 뺌 → G-IN3a 2건 FAIL
+      #     · 목록에 없는 이름 한 개 추가 → 「0건」 FAIL(exit 1) · 원복 뒤 양성 65건(1·8·25·8·11·12) PASS
+      - name: 작1 게이트 — 수동 업데이트·되돌리기 (목록으로 · 클래스별 실행 수 확인)
+        shell: bash
+        run: |
+          set -o pipefail
+          GATES="LocalSwapEventIdGateTests|LocalSwapOneAtATimeGateTests|LocalSwapPipelineGateTests|LocalSwapOnStartGateTests"
+          GATES="$GATES|ManualUpdateSelfCheckTests|LocalSwapUiGateTests"
+          # 20260930작1 봉합 차수(작업지시서 §12-1 M) — K1 원위치·조기종료·겹침 · K2 첨부 옮겨 싣기 · L 런처·재료 · M 연결(판 이력·사전 판정·예약)
+          GATES="$GATES|LocalSwapRevertGateTests|LocalSwapWorkerSealGateTests|LocalSwapChatFilesGateTests|LocalSwapSealGateTests|LocalSwapWiringGateTests"
+          # 20260930작1 봉합 2차(작업지시서 §13) — 남은 찌꺼기 처리(A 갈래) · 런처 쪽 찌꺼기 판정(B 갈래)
+          GATES="$GATES|LocalSwapLeftoverGateTests|LocalSwapLeftoverLauncherGateTests"
+          # 20260930작1 확대 1.3.50(작업지시서 §18 · 설계 §19-2) — 남기기(G-NK) · 세 번째 길(G-NP) · 일꾼 rollback+manual_zip(G-NW) · 완료 팝업 판정(G-ND)
+          GATES="$GATES|LocalSwapManifestKeepGateTests|LocalSwapPrevFetchGateTests|LocalSwapPrevFetchWorkerGateTests|LocalSwapDonePopupGateTests"
+          echo "▶ 이 단계가 무는 게이트: $GATES"
+          FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~$FILTER" \
+            --logger "trx;LogFileName=swap-gate-results.trx" 2>&1 | tee "$RUNNER_TEMP/swapgate.log"
+          TRX=$(find . -name 'swap-gate-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::swap-gate-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          MISSING=""
+          for g in $(echo "$GATES" | tr '|' ' '); do
+            n=$(grep -o "className=\"[^\"]*\.$g\"" "$TRX" | wc -l)
+            echo "  $g : $n 건"
+            if [ "$n" -eq 0 ]; then MISSING="$MISSING $g"; fi
+          done
+          if [ -n "$MISSING" ]; then echo "::error::목록에 있는데 한 건도 안 돈 게이트:$MISSING"; exit 1; fi
+          echo "작1 게이트 전부 실제로 돌았다."
+
       # 🔴 20260928작2 개정3 W-3 — storage.js 의 「비교 후 지움」·「옮겨 오기 표식」을 node 로 **실제로** 돌려 잰다
       #   (글자 검사 아님 · 파일을 vm 에서 올려 window.hitpanStorage_* 를 부른다). 러너(windows-latest)에 node 가 있다.
       #   ⚠️ 디렉터리가 아니라 파일을 준다 — node 22 는 `--test <디렉터리>` 를 파일로 읽어 실패한다(로컬 실측).
