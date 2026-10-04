@@ -18,7 +18,8 @@ public sealed class LocalRollbackService : ILocalRollbackService
     /// <summary>1회용 확인 번호 유효 시간(병렬이슈 03).</summary>
     public static readonly TimeSpan TicketLifetime = TimeSpan.FromMinutes(10);
 
-    private sealed record Issued(string UserId, string Kind, string Path, string To, DateTime IssuedUtc);
+    // 작1 §20 A — 발급한 번호(Ticket)를 함께 보관한다: Start 는 사전 조회 뒤 요청 글자 대신 이 값으로 잇는다.
+    private sealed record Issued(string UserId, string Kind, string Path, string To, DateTime IssuedUtc, string Ticket);
 
     private readonly ILocalSwapLauncher _launcher;
     private readonly ILocalSwapEnvironment _env;
@@ -77,7 +78,7 @@ public sealed class LocalRollbackService : ILocalRollbackService
             return new LocalRollbackStatus(false, reason, current, null, null, null, (int)TicketLifetime.TotalMinutes, last, fetch);
 
         var ticket = LocalSwapLauncher.NewTicket();
-        _tickets[ticket] = new Issued(userId, material.Kind, material.Path, material.Version, _env.UtcNow);
+        _tickets[ticket] = new Issued(userId, material.Kind, material.Path, material.Version, _env.UtcNow, ticket);
         return new LocalRollbackStatus(true, SwapReasons.Ok, current, material.Version, material.Kind, ticket,
             (int)TicketLifetime.TotalMinutes, last, fetch);
     }
@@ -89,6 +90,8 @@ public sealed class LocalRollbackService : ILocalRollbackService
             return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
         if (!string.Equals(issued.UserId, userId, StringComparison.Ordinal) || _env.UtcNow - issued.IssuedUtc > TicketLifetime)
             return SwapLaunchResult.Refuse(SwapReasons.TicketInvalid);
+        // 작1 §20 A — 여기부터는 서버가 발급해 보관한 번호로 잇는다(요청 글자는 위 사전 조회에만 · Ordinal 이라 같은 글자 · CodeQL 경로 끊기).
+        ticket = issued.Ticket;
 
         // 봉합 F-4(계약 §4) — 이 되돌리기 한 번의 예약 주인. 판정(CheckBusy(owner))·예약·Launch(Owner) 에 같은 값.
         var owner = ReservationOwner(ticket);

@@ -252,7 +252,11 @@ public sealed class PreviousPackageFetch
             }
 
             // ⑨ 교체 일꾼에 넘김 — 같은 번호·같은 예약 주인 · 재료 manual_zip · sha256 소문자(설계 19-3 · 일꾼 p1·p2 가 다시 잰다)
-            if (!MoveRenewed(job, ManualUpdateStages.HandingOff)) { if (weDownloaded) TryDelete(target); return; }
+            if (!MoveRenewed(job, ManualUpdateStages.HandingOff))
+            {
+                if (weDownloaded) { TryDelete(target); }
+                return;
+            }
             var result = _launcher.Launch(new SwapLaunchInput(
                 Mode: SwapModes.Rollback,
                 From: job.From,

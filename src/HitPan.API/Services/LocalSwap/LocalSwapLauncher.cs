@@ -37,7 +37,8 @@ public sealed class LocalSwapLauncher : ILocalSwapLauncher
     public const int MaxTaskCommandLength = 261;
 
     private static readonly string[] Parts = { "api", "web", "watchdog" };
-    private static readonly Regex TicketShape = new("^[0-9a-f]{32}$", RegexOptions.CultureInvariant);
+    // 작1 §20 B — 끝은 \z: .NET 의 $ 는 마지막 \n 앞에서도 맞아 「32자리+줄바꿈」을 통과시켰다(선행검증서 20261005 CodeQL6 §2).
+    private static readonly Regex TicketShape = new("^[0-9a-f]{32}\\z", RegexOptions.CultureInvariant);
 
     private readonly ILocalSwapEnvironment _env;
     private readonly ISchtasksRunner _schtasks;

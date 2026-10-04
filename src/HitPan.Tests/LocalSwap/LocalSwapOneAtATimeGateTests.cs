@@ -364,4 +364,33 @@ public sealed class LocalSwapOneAtATimeGateTests : IDisposable
         Assert.True(third.Accepted, third.Reason);
         await svc.LastRun;
     }
+
+    // ── 작1 §20 G-CQ2 — 되돌리기 [예] 는 발급 번호와 글자 하나까지 같아야 하고, 런처에는 서버가 보관한 번호가 간다 ──
+    // 대조: 사전 비교자를 OrdinalIgnoreCase 로 바꾼 사본이면 대문자 줄이 시작해 버린다(개발명세서 G §4).
+    [Fact(DisplayName = "G-CQ2 🔴 되돌리기 확인 번호 — 끝 줄바꿈·대문자·앞뒤 공백은 ticket_invalid · 작업 등록 0 / 발급 번호 그대로면 시작 · 명령줄 -Ticket = 발급 번호")]
+    public void Rollback_ticket_must_match_issued_exactly_and_launcher_gets_issued_value()
+    {
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "cq2"));
+        Prev(env);
+        env.UtcNow = new DateTime(2026, 9, 30, 1, 0, 0, DateTimeKind.Utc);
+        var sc = new FakeSchtasks();
+        var svc = new LocalRollbackService(Launcher(env, sc), env, NullLogger<LocalRollbackService>.Instance);
+
+        foreach (var variant in new Func<string, string>[] { t => t + "\n", t => t.ToUpperInvariant(), t => " " + t, t => t + " " })
+        {
+            var status = svc.GetStatus("u1");
+            Assert.True(status.CanRollback, status.Reason);
+            var bad = svc.Start("u1", variant(status.Ticket!));
+            Assert.False(bad.Started);
+            Assert.Equal(SwapReasons.TicketInvalid, bad.Reason);
+        }
+        Assert.Equal(0, sc.CountStartingWith("/Create"));
+
+        var issued = svc.GetStatus("u1");
+        var ok = svc.Start("u1", issued.Ticket);
+        Assert.True(ok.Started, ok.Reason);
+        Assert.Equal(issued.Ticket, ok.Ticket);
+        var create = Assert.Single(sc.Calls, c => c.StartsWith("/Create", StringComparison.Ordinal));
+        Assert.Contains("-Ticket " + issued.Ticket + "\"", create, StringComparison.Ordinal);
+    }
 }

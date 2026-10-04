@@ -355,4 +355,30 @@ public sealed class LocalSwapSealGateTests : IDisposable
         Assert.Null(l2.CheckBusy());
         Assert.True(l2.TryReserve("rollback"));
     }
+
+    // ── 작1 §20 G-CQ1 — 런처 번호 모양의 끝은 \z(선행검증서 20261005 CodeQL6 §2) ──
+    // 대조: TicketShape 를 옛 "^[0-9a-f]{32}$" 로 되돌리면 「32자리+\n」이 통과해 /Create 가 1 이 된다(개발명세서 G §4).
+    [Fact(DisplayName = "G-CQ1 🔴 런처 — 32자리 번호 끝에 줄바꿈이 붙으면 ticket_invalid · 작업 등록 0 · 명령줄 조립도 거부 (양성 대조: 32자리 그대로는 시작)")]
+    public void Ticket_with_trailing_newline_is_refused()
+    {
+        const string hex = "0123456789abcdef0123456789abcdef";
+        SwapLaunchInput With(string ticket) => new(
+            SwapModes.Rollback, N2, N1, new SwapMaterial { Kind = SwapMaterialKinds.Prev, Path = "x" },
+            "gate-user", SwapEntries.Menu, null, ticket);
+
+        var env = FakeSwapEnvironment.Under(Path.Combine(_root, "cq1"));
+        env.UtcNow = T0;
+        var sc = new FakeSchtasks();
+        var launcher = Launcher(env, sc);
+
+        var bad = launcher.Launch(With(hex + "\n"));
+        Assert.False(bad.Started);
+        Assert.Equal(SwapReasons.TicketInvalid, bad.Reason);
+        Assert.Equal(0, sc.CountStartingWith("/Create"));
+        Assert.Throws<ArgumentException>(() => LocalSwapLauncher.BuildTaskCommand("C:\\x\\local-swap.ps1", SwapModes.Rollback, hex + "\n"));
+
+        var ok = launcher.Launch(With(hex));
+        Assert.True(ok.Started, ok.Reason);
+        Assert.Equal(1, sc.CountStartingWith("/Create"));
+    }
 }
