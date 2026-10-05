@@ -63,7 +63,8 @@ else
               </tr>
             </thead>
             <tbody>
-              @foreach (var perm in user.Permissions)
+              @* ⬛ [작5 §8-5 U-1 전] @foreach (var perm in user.Permissions) — USERS_ACCOUNT·USERS_SEAT 가 체크박스 줄로 따로 보였다 *@
+              @foreach (var perm in user.Permissions.Where(p => !IsHiddenUsersLevelCode(p.MenuCode)))
               {
                 <tr style="border-bottom:0.5px solid var(--mud-palette-lines-default)">
                   <td style="padding:6px 12px;font-weight:500">@perm.MenuName</td>
@@ -114,7 +115,8 @@ private async Task SavePermissions(UserPermissionModel user)
 
 private static void SelectAll(UserPermissionModel user, bool value)
 {
-    foreach (var p in user.Permissions)
+    // ⬛ [작5 §8-5 U-1 전] foreach (var p in user.Permissions) — 안 보이는 두 줄까지 켜서 「구독계정추가」 단계로 조용히 올라갔다
+    foreach (var p in user.Permissions.Where(x => !IsHiddenUsersLevelCode(x.MenuCode)))
     {
         p.CanView = value;
         p.CanCreate = value;
@@ -123,6 +125,13 @@ private static void SelectAll(UserPermissionModel user, bool value)
         p.CanExport = value;
     }
 }
+
+// 작5 §8-5 U-1 — 옛 화면은 새 두 코드를 그리지 않는다(V5-05 「옛 화면은 새 코드 미표시」). 단계를 바꾸는 곳은 권한설정 한 곳.
+// 저장은 종전 그대로 Permissions 전체 — 숨긴 줄은 받은 값 그대로 가고, 서버가 세 줄을 다시 맞춘다(NormalizeUsersLevelRows).
+private static readonly string[] HiddenUsersLevelCodes = { "USERS_ACCOUNT", "USERS_SEAT" };
+
+private static bool IsHiddenUsersLevelCode(string? code) =>
+    HiddenUsersLevelCodes.Contains(code ?? "", StringComparer.OrdinalIgnoreCase);
 
 private static string GetRoleLabel(string role)
     => role switch

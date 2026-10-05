@@ -221,6 +221,13 @@ else
                                             <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">퇴사</MudText>
                                         </MudTooltip>
                                     }
+                                    else if (_usersLevel >= 2 && AccountCreateBlockedByRole(context))
+                                    {
+                                        @* 작5 §8-5 U-3 — 2단계 직원에게 관리자 직무 사원 줄은 비활성 + 이유(서버 P1-01 409 는 그대로 2중) *@
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.PersonAdd" Disabled="true">계정 만들기</MudButton>
+                                        <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">관리자 직무 사원은 대표님만 만들 수 있습니다</MudText>
+                                    }
                                     else if (_usersLevel >= 2)
                                     {
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
@@ -314,7 +321,8 @@ else
                 }
                 else
                 {
-                    @foreach (var perm in _selectedPermUser.Permissions)
+                    @* ⬛ [작5 §8-5 U-2 전] @foreach (var perm in _selectedPermUser.Permissions) — USERS_ACCOUNT·USERS_SEAT 도 5칸 체크박스로 따로 보였다 *@
+                    @foreach (var perm in _selectedPermUser.Permissions.Where(p => !IsHiddenUsersLevelCode(p.MenuCode)))
                     {
                         <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid var(--mud-palette-lines-default);padding:4px 0">
                             <MudText Style="font-size:12px">@perm.MenuName</MudText>
@@ -327,6 +335,19 @@ else
                             </div>
                         </div>
                     }
+                    @* 작5 §8-5 U-2 — 「직원 계정 관리」 단계는 읽기 전용 한 줄. 바꾸는 곳은 권한설정 한 곳. *@
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;border-bottom:0.5px solid var(--mud-palette-lines-default);padding:6px 0">
+                        <MudText Style="font-size:12px">직원 계정 관리: <b>@AccountLinkLabels.UsersLevelLabel(SelectedUsersLevel(_selectedPermUser))</b></MudText>
+                        @if (_usersIsAdmin)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                       EndIcon="@Icons.Material.Filled.ArrowForward" Href="/users/permissions">권한설정에서 바꾸기</MudButton>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">권한설정에서 바꿉니다 — 대표님께 요청하세요</MudText>
+                        }
+                    </div>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="SavePermissionsAsync" Class="mt-2">권한 저장</MudButton>
                 }
             </MudPaper>

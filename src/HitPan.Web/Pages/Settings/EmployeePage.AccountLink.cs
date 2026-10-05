@@ -46,6 +46,30 @@ public partial class EmployeePage
         _seatApi ??= new AccountSeatApi(Http, SeatLog);
         var me = await _linkApi.GetMyLevelAsync().ConfigureAwait(false);
         _usersLevel = me?.Level ?? 0;
+        _usersIsAdmin = me?.IsAdmin ?? false;
+    }
+
+    // ── 작5 §8-5 U-3 — 2단계 직원(대표·관리자 아님)은 일반 직무 사원에게만 계정을 만든다(서버 P1-01 과 같은 규칙) ──
+    /// <summary>내가 대표·관리자인가(서버 my-level isAdmin = account_type tenant_admin · CreateForEmployee 의 actorIsAdmin 과 같은 값). 못 읽으면 false.</summary>
+    private bool _usersIsAdmin;
+
+    /// <summary>이 사원 줄의 [계정 만들기]를 막아야 하나 — 누르고 나서 409 로 거절당하지 않게(서버 409 는 그대로 2중).</summary>
+    private bool AccountCreateBlockedByRole(EmployeeListItemModel emp) =>
+        !_usersIsAdmin && !AccountLinkLabels.IsGeneralEmployeeRole(emp.Role);
+
+    // ── 작5 §8-5 U-2 — 사원관리 「ERP 메뉴 권한」 카드는 USERS_ACCOUNT·USERS_SEAT 를 따로 그리지 않는다 ──
+    //   단계를 바꾸는 곳은 권한설정 한 곳. 카드에는 읽기 전용 한 줄만. 저장은 종전 그대로 Permissions 전체(숨긴 줄은 받은 값 그대로 간다).
+    private static readonly string[] HiddenUsersLevelCodes = { "USERS_ACCOUNT", "USERS_SEAT" };
+
+    /// <summary>카드에서 따로 그리지 않는 코드인가.</summary>
+    private static bool IsHiddenUsersLevelCode(string? code) =>
+        HiddenUsersLevelCodes.Contains(code ?? "", StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>선택한 사원 계정의 단계 — 서버 판정(GetUsersLevelAsync)과 같은 순서: 위 단계가 켜져 있으면 그 단계.</summary>
+    private static int SelectedUsersLevel(UserPermissionModel user)
+    {
+        bool On(string code) => user.Permissions.Any(p => string.Equals(p.MenuCode, code, StringComparison.OrdinalIgnoreCase) && p.CanView);
+        return On("USERS_SEAT") ? 3 : On("USERS_ACCOUNT") ? 2 : On("USERS") ? 1 : 0;
     }
 
     private static Color AccountStatusColor(string? status) => status switch
