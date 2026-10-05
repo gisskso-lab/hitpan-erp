@@ -706,13 +706,22 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
             [await InsertEmployeeAsync(db, "1205", "옛삭제", gone)] = null,
             [await InsertEmployeeAsync(db, "1206", "미등록")] = null,
         };
+        // V5-02/V5-08(§8-2) — user_id='' 행 두 줄: NULL 로 정리돼야 UNIQUE 가 실제로 걸린다('' 는 서로 중복)
+        var blank1 = await InsertEmployeeAsync(db, "1207", "빈칸1", "");
+        var blank2 = await InsertEmployeeAsync(db, "1208", "빈칸2", "");
 
         await db.ExecuteAsync(sql);
         await db.ExecuteAsync(sql);                                  // 2회 — 멱등(오류 없음 · 값 그대로)
         foreach (var (emp, want) in e)
             Assert.True(want == (await EmpLinkAsync(db, emp)).loginId, $"{emp} login_id 기대 {want ?? "NULL"}");
+        Assert.Equal((null, null), await EmpLinkAsync(db, blank1));
+        Assert.Equal((null, null), await EmpLinkAsync(db, blank2));
         Assert.Equal(shipShape, await LoginIdShapeAsync(db));
-        Assert.Equal(shipUq, await UniqueColsAsync(db));
+        Assert.Equal(shipUq, await UniqueColsAsync(db));             // 빈칸 2줄이 있어도 UNIQUE 가 걸렸다
+        // UNIQUE 가 실제로 문다 — 같은 user_id 를 두 번째 사원에 넣으면 1062
+        var ex = await Assert.ThrowsAsync<MySqlException>(() =>
+            db.ExecuteAsync("UPDATE employees SET user_id=@U WHERE employee_id=@E", new { U = live, E = blank1 }));
+        Assert.Equal(1062, ex.Number);
     }
 
     [Fact(DisplayName = "G-E12d 🔴 DB-137 — user_id 중복 있는 DB(P-9) → 실패 없이 끝남 · UNIQUE 건너뜀 · 칸은 생김 · 대조군(선검사 없이 UNIQUE 를 걸면 1062)")]
