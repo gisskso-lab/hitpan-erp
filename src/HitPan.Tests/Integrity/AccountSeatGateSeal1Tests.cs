@@ -261,6 +261,30 @@ public sealed class AccountSeatGateSeal1Tests : IDisposable
         Assert.Equal(200, await CallBusinessApiAsync(db, d, sd));
     }
 
+    // ══ [4] 2차 N-1① — 수정(PUT) 으로 1→0 도 출입증을 끊는다 ══
+
+    [Fact(DisplayName = "G-S1i 🔴 [4]2차 N-1① — 수정 저장으로 사용 안 함(1→0) 직후 출입증 401 · refresh 폐기 · 대조군(이름만 바꾼 저장 200)")]
+    public async Task S1i_Update_To_Inactive_Cuts_Tokens()
+    {
+        if (!Ready("G-S1i")) return;
+        await using var db = await OpenAsync();
+        await SeedAsync(db, 8);
+        var svc = new UserService(db, new NoOpAudit());
+        var a = await svc.CreateAsync(NewUser("pa@t.kr"), _tenantId);
+        var b = await svc.CreateAsync(NewUser("pb@t.kr"), _tenantId);
+        var sa = await FakeLoginAsync(db, a);
+        var sb = await FakeLoginAsync(db, b);
+
+        await svc.UpdateAsync(a, new UpdateUserDto { UserName = "가", Role = "User", IsActive = false }, _tenantId);
+        Assert.Equal(401, await CallBusinessApiAsync(db, a, sa));
+        Assert.Equal(0, await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = @A AND is_revoked = 0", new { A = a }));
+
+        // 대조군 — 사용 중인 채로 이름만 바꾼 저장은 출입증을 건드리지 않는다
+        await svc.UpdateAsync(b, new UpdateUserDto { UserName = "나2", Role = "User", IsActive = true }, _tenantId);
+        Assert.Equal(200, await CallBusinessApiAsync(db, b, sb));
+    }
+
     // ══ P1-02 — 대표 보호 ══
 
     [Fact(DisplayName = "G-S1b 🔴 P1-02 — 대표 권한 변경·비번 초기화 거절 · 값 그대로 · 대조군(같은 권한 저장 통과 · 직원 초기화 통과)")]

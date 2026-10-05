@@ -324,6 +324,11 @@ public sealed class UserService : IUserService
                 // ⬛ cancellationToken: ct)).ConfigureAwait(false);   ← 20261005작3: 트랜잭션 안으로
                 transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
+        // 🔴 10/5 [4] 2차 N-1① — 수정 화면·API 로 「사용 중 → 사용 안 함」(1→0)이 되면 [사용 안 함] 버튼과 같이 출입증을 끊는다.
+        //   안 끊으면 PUT 한 번으로 끄고 다른 계정을 만드는 「한도 돌려쓰기」가 이 길로 그대로 된다(병렬이슈 01 재발 자리).
+        if (current is not null && current.IsActive && !dto.IsActive)
+            await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
+
         tx.Commit();
 
         // 감사로그 — 사용자 수정
