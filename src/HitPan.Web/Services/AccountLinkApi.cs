@@ -79,6 +79,42 @@ public static class AccountLinkLabels
             _ => r
         };
     }
+
+    /// <summary>「직원 계정 관리」 단계 0~3 → 화면 글자(권한설정 4선택과 같은 말 · 작5 §8-5 U-2).</summary>
+    public static string UsersLevelLabel(int level) => level switch
+    {
+        3 => "구독계정추가",
+        2 => "계정설정",
+        1 => "조회",
+        _ => "없음"
+    };
+
+    /// <summary>
+    /// 일반(직원) 직무인가 — 서버 <c>UserService.IsGeneralEmployeeRole</c>(P1-01)과 <b>같은 규칙</b>(작5 §8-5 U-3).
+    /// 2단계 직원(대표·관리자 아님)은 일반 직무 사원에게만 계정을 만들 수 있다. 화면은 미리 막는 편의 · 서버 409 가 정본.
+    /// </summary>
+    /// <remarks>Web 은 Domain 을 참조하지 않으므로 <c>UserRole</c> 값을 <see cref="ServerUserRole"/> 로 옮겨 적었다(1·2·3·4 — 바뀌면 함께).
+    /// 빈 값 · User · Readonly(숫자 3·4 포함) · <c>*_user</c>(admin 글자 없는 것)만 일반.</remarks>
+    public static bool IsGeneralEmployeeRole(string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role)) return true;
+        var r = role.Trim();
+        if (int.TryParse(r, out var n))
+            return n == (int)ServerUserRole.User || n == (int)ServerUserRole.Readonly;
+        if (Enum.TryParse<ServerUserRole>(r, ignoreCase: true, out var parsed))
+            return parsed is ServerUserRole.User or ServerUserRole.Readonly;
+        var lower = r.ToLowerInvariant();
+        return lower.EndsWith("_user", StringComparison.Ordinal) && !lower.Contains("admin", StringComparison.Ordinal);
+    }
+
+    /// <summary>서버 <c>HitPan.Domain.Enums.UserRole</c> 값 그대로(판정 짝 맞춤용 · 화면 표시에 쓰지 않는다).</summary>
+    private enum ServerUserRole
+    {
+        TenantAdmin = 1,
+        Manager = 2,
+        User = 3,
+        Readonly = 4
+    }
 }
 
 /// <summary>
