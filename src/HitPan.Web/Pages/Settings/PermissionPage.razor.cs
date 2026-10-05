@@ -99,6 +99,7 @@ public partial class PermissionPage : ComponentBase
         "ANNUAL_LEAVE_GRANT", "RESIGNATION",
         // 20261005작5 §5-2 · §8-3 — 서버가 [RequireUsersLevel(n)] 로 강제한다(2 = USERS_ACCOUNT · 3 = USERS_SEAT · UserController).
         //   ⚠️ 화면은 USERS·USERS_ACCOUNT·USERS_SEAT 를 「직원 계정 관리」 한 줄 4선택으로 그린다(갈래 3 몫) — 그 전까지는 줄이 따로 보인다.
+        //   → 갈래 3 반영(10/5): PermissionPage.razor 표에서 세 줄을 빼고 한 줄 MudSelect(UsersLevelOf·SetUsersLevel).
         "USERS_ACCOUNT", "USERS_SEAT"
     };
 
@@ -251,6 +252,41 @@ public partial class PermissionPage : ComponentBase
             }
         }
         user.Permissions = normalized;
+    }
+
+    // ── 20261005작5 §5-1·§5-4 — 「직원 계정 관리」 3단계를 한 줄 4선택으로 ──
+    //   저장은 종전 그대로 Permissions 전체를 보낸다. 세 코드는 EnforcedMenus 에 있어 EnsureErpMenus 가 늘 세 줄을 채워 두므로
+    //   「세 줄 늘 함께」(V5-05)가 보장된다. 서버도 저장 때 위→아래로 다시 맞춘다(NormalizeUsersLevelRows).
+    private static readonly string[] UsersLevelCodes = { "USERS", "USERS_ACCOUNT", "USERS_SEAT" };
+
+    /// <summary>표에서 따로 그리지 않는 코드(「직원 계정 관리」 한 줄로 묶음).</summary>
+    private static bool IsUsersLevelCode(string code) =>
+        UsersLevelCodes.Contains(code, StringComparer.OrdinalIgnoreCase);
+
+    private static bool ViewOf(UserPermissionModel user, string code) =>
+        user.Permissions.Any(p => string.Equals(p.MenuCode, code, StringComparison.OrdinalIgnoreCase) && p.CanView);
+
+    /// <summary>지금 단계 — 서버 판정(GetUsersLevelAsync)과 같은 순서: 위 단계가 켜져 있으면 아래 줄과 상관없이 그 단계.</summary>
+    private static int UsersLevelOf(UserPermissionModel user) =>
+        ViewOf(user, "USERS_SEAT") ? 3
+        : ViewOf(user, "USERS_ACCOUNT") ? 2
+        : ViewOf(user, "USERS") ? 1
+        : 0;
+
+    /// <summary>단계 고르기 — 세 줄의 조회(CanView)를 함께 바꾼다. 위 단계는 아래 단계를 품는다.</summary>
+    private static void SetUsersLevel(UserPermissionModel user, int level)
+    {
+        for (var i = 0; i < UsersLevelCodes.Length; i++)
+        {
+            var code = UsersLevelCodes[i];
+            var row = user.Permissions.FirstOrDefault(p => string.Equals(p.MenuCode, code, StringComparison.OrdinalIgnoreCase));
+            if (row is null)
+            {
+                row = new MenuPermissionModel { MenuCode = code, MenuName = code };
+                user.Permissions.Add(row);
+            }
+            row.CanView = level >= i + 1;
+        }
     }
 
     /// <summary>

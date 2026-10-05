@@ -199,6 +199,8 @@ public partial class EmployeePage : ComponentBase
         {
             _loading = true;
             await ReloadAllAsync().ConfigureAwait(false);
+            // 20261005작5 §5-4 — 「직원 계정 관리」 단계([계정 만들기]·[직원계정 화면으로] 노출). EmployeePage.AccountLink.cs
+            await LoadAccountLinkLevelAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
