@@ -285,6 +285,36 @@ public sealed class AccountSeatGateSeal1Tests : IDisposable
         Assert.Equal(200, await CallBusinessApiAsync(db, b, sb));
     }
 
+    // ══ [5] CTO G-1 — 사원 퇴사로 계정이 지워질 때 출입증도 끊긴다(N-1②) ══
+
+    [Fact(DisplayName = "G-S1j 🔴 CTO G-1 · N-1② — 사원 퇴사 직후 그 계정 출입증 401 · refresh 폐기 · 세션 0 · 퇴사 저장 성공 · 대조군(다른 사원 계정 200)")]
+    public async Task S1j_Resign_Cuts_Tokens()
+    {
+        if (!Ready("G-S1j")) return;
+        await using var db = await OpenAsync();
+        await SeedAsync(db, 8);
+        var users = new UserService(db, new NoOpAudit());
+        var a = await users.CreateAsync(NewUser("ra@t.kr"), _tenantId);
+        var b = await users.CreateAsync(NewUser("rb@t.kr"), _tenantId);
+        var sa = await FakeLoginAsync(db, a);
+        var sb = await FakeLoginAsync(db, b);
+        var empA = await db.ExecuteScalarAsync<string>(
+            "SELECT employee_id FROM employees WHERE tenant_id = @T AND user_id = @U", new { T = _tenantId, U = a });
+        Assert.False(string.IsNullOrEmpty(empA));
+
+        var blocked = await new EmployeeService(db, new NoOpAudit()).ResignAsync(_tenantId, empA!, null, null);
+
+        Assert.True(blocked);                                           // 퇴사 저장 자체는 성공(흐름 안 끊김 #20)
+        Assert.Equal(401, await CallBusinessApiAsync(db, a, sa));       // 끊김
+        Assert.Equal(0, await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = @A AND is_revoked = 0", new { A = a }));
+        Assert.Equal(0, await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM user_sessions WHERE user_id = @A", new { A = a }));
+
+        // 대조군 — 다른 사원의 계정은 그대로 열린다
+        Assert.Equal(200, await CallBusinessApiAsync(db, b, sb));
+    }
+
     // ══ P1-02 — 대표 보호 ══
 
     [Fact(DisplayName = "G-S1b 🔴 P1-02 — 대표 권한 변경·비번 초기화 거절 · 값 그대로 · 대조군(같은 권한 저장 통과 · 직원 초기화 통과)")]
