@@ -74,7 +74,11 @@ public sealed class DeviceAuthMiddleware
 
         // 승인제와 같은 스위치를 쓴다 — 승인을 안 받는데 인증 번호를 요구하면 앞뒤가 안 맞는다.
         //   개발 중에는 꺼둔다(우리가 우리 기능에 막히지 않도록 · 사장님 지적).
-        _enabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-5)] `_enabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;`
+        //   사유: 승인제·인증키를 걷었다. 설정을 읽지 않고 **늘 통과**(:83-87 갈래)한다.
+        //   클래스·`Program.cs` 등록 줄은 남긴다 — 되돌림 판독용(9/28 설계 §2 ④). 승인제와 **같은 값 하나**를 본다.
+        _ = config;
+        _enabled = HitPan.Application.Common.DeviceApprovalRetirement.ApprovalEnabled;
     }
 
     public async Task InvokeAsync(HttpContext context, IDbConnection db,

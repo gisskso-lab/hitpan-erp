@@ -232,8 +232,12 @@ public sealed class ProofSubscription
     public int AiTokenExtra { get; set; }
     public string? AnthropicKeyLast4 { get; set; }
     public string AnthropicKeyStatus { get; set; } = "none";
-    public int MaxUsers { get; set; } = 3;
+    // ⬛ public int MaxUsers { get; set; } = 3;
+    // 20261005작3 §6 — 본사가 값을 안 보낼 때의 기본만 5(베이직 · 대표 포함). 본사가 보내면 그 값이다.
+    public int MaxUsers { get; set; } = 5;
     public int ExtraDeviceSlots { get; set; }
+    // 20261005작3 P-5 — 추가 구매 계정 수. 없으면 null = 덮지 않음(설계 §10②).
+    public int? ExtraAccounts { get; set; }
     public string? ResellerId { get; set; }
     public int ResellerTier { get; set; }
     public DateTime? TrialEndsAt { get; set; }

@@ -269,6 +269,7 @@ public sealed class DeviceSlotSeedGateTests : IDisposable
     // G-20 — 시드된 값이 안전망(FallbackLimits)·마이그(DB-104)와 일치한다
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — FallbackLimits·ResolveLimits 를 걷었다. 시드(표)는 남지만 읽는 곳 0(작3 G-A15) · 지우지 않음(#1)
     [Fact(DisplayName = "G-20 🔴 시드된 값이 안전망(FallbackLimits) 숫자와 정확히 같다")]
     public async Task G20_시드값이_안전망과_일치한다()
     {
@@ -304,6 +305,7 @@ public sealed class DeviceSlotSeedGateTests : IDisposable
             TenantDeviceService.ResolveLimits("basic", 3, empty),
             TenantDeviceService.ResolveLimits("basic", 3, seeded));
     }
+#endif
 
     /// <summary>
     /// 🔴 <b>값 갈라짐 방지의 핵심</b> — 코드 정의와 마이그 DB-104 를 <b>전수 대조</b>한다.

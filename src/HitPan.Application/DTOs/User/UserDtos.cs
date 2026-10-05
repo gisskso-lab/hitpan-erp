@@ -51,6 +51,11 @@ public class BulkCreateResultDto
     public int SuccessCount { get; set; }
     public int FailedCount { get; set; }
     public List<BulkRowError> Errors { get; set; } = new();
+
+    // 20261005작3 E-2 — 한도 사전 판정으로 한 줄도 안 넣었을 때 true (F-5)
+    public bool SeatFull { get; set; }
+    public int Active { get; set; }
+    public int Limit { get; set; }
 }
 
 public class BulkRowError

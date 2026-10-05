@@ -13,6 +13,10 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject IDialogService DialogService
+@* 20261005작3 — 계정 과금 호출(AccountSeatApi · DI 등록 없이 여기서 만든다) *@
+@inject HttpClient Http
+@inject ILogger<AccountSeatApi> SeatLog
+@using HitPan.Web.Components.Users
 
 <PageTitle>사용자 추가·관리</PageTitle>
 
@@ -27,14 +31,50 @@
         <MudButton Variant="Variant.Outlined" Size="Size.Small"
             StartIcon="@Icons.Material.Filled.Lock"
             OnClick="@(() => Nav.NavigateTo("/users/permissions"))">권한 설정</MudButton>
+        @* ⬛ OnClick="@(() => _showBulk = true)" — 20261005작3: 누르기 전 한도 확인(차 있으면 안내 창) *@
         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
             StartIcon="@Icons.Material.Filled.UploadFile"
-            OnClick="@(() => _showBulk = true)">엑셀 일괄등록</MudButton>
+            OnClick="OpenBulkDialog">엑셀 일괄등록</MudButton>
+        @* 20261005작3 D-15 — [구독계정추가] 상시 표시(한도가 안 찼어도 보인다) *@
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
+            StartIcon="@Icons.Material.Filled.GroupAdd"
+            OnClick="@(() => OpenSeatNotice(false))">구독계정추가</MudButton>
         <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
             StartIcon="@Icons.Material.Filled.PersonAdd"
             OnClick="OpenCreateDialog">사용자 추가</MudButton>
     </div>
 </div>
+
+@* 20261005작3 D-11 — 계정 카드 3개(DeviceManagePage 모양 그대로 · 공용 KpiCard) *@
+@if (_seats is not null)
+{
+    <MudGrid Spacing="3" Class="mb-3">
+        <MudItem xs="12" sm="4" md="4">
+            <KpiCard Color="@(_seats.Active > _seats.Limit ? KpiCard.KpiColor.Error : KpiCard.KpiColor.Primary)"
+                     Label="계정사용한도"
+                     Value="@($"{_seats.Active} / {_seats.Limit}")"
+                     Sub="@SeatSub"
+                     EmphasizeValue="true" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="4">
+            <KpiCard Color="KpiCard.KpiColor.Warning"
+                     Label="추가구매계정"
+                     Value="@($"{_seats.Extra}")"
+                     Sub="@($"기본 {_seats.BaseLimit}개 + 추가 {_seats.Extra}개")"
+                     EmphasizeValue="true" />
+        </MudItem>
+        <MudItem xs="12" sm="4" md="4">
+            <KpiCard Color="KpiCard.KpiColor.Purple"
+                     Label="구독티어"
+                     Value="@(_seats.Tier.ToUpperInvariant())"
+                     Sub="현재 가입 상품"
+                     EmphasizeValue="true" />
+        </MudItem>
+    </MudGrid>
+}
+
+<AccountSeatNoticeDialog @bind-Visible="_showSeatNotice" Blocked="_seatNoticeBlocked"
+                         Active="@(_seats?.Active ?? 0)" Limit="@(_seats?.Limit ?? 0)" />
 
 @if (_loading)
 {
@@ -71,6 +111,7 @@ else
     <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
         여기서 추가하는 계정은 <b>직원계정</b>입니다. 대표계정만 직원계정을 만들 수 있으며, 본사에는 노출되지 않습니다.
         대표계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
+        <br />계정 한도는 <b>사용 중인 계정</b>만 셉니다(대표 포함).
     </MudAlert>
 
     <MudPaper Elevation="0" Class="pa-2 hitpan-card">
@@ -123,7 +164,8 @@ else
                 <MudTd Style="text-align:center">
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
                         Color="@(context.IsActive ? Color.Success : Color.Default)">
-                        @(context.IsActive ? "활성" : "비활성")
+                        @* ⬛ @(context.IsActive ? "활성" : "비활성") — 20261005작3 고객 노출 어휘 *@
+                        @(context.IsActive ? "사용 중" : "사용 안 함")
                     </MudChip>
                 </MudTd>
                 <MudTd Style="text-align:center">
@@ -131,10 +173,28 @@ else
                         OnClick="@(() => OpenEditDialog(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Color="Color.Info"
                         OnClick="@(() => OpenResetPwDialog(context))" />
-                    @if (context.IsActive && !context.IsParent)
+                    @* ⬛ 옛 [비활성화] 아이콘 한 개(PersonOff → OpenDeactivateDialog) — 20261005작3 §5:
+                       사용 중 행 = [사용 안 함]·[계정폐기] · 사용 안 함 행 = [다시 사용]·[계정폐기] *@
+                    @if (!context.IsParent)
                     {
-                        <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small" Color="Color.Warning"
-                            OnClick="@(() => OpenDeactivateDialog(context))" />
+                        @if (context.IsActive)
+                        {
+                            <MudTooltip Text="사용 안 함">
+                                <MudIconButton Icon="@Icons.Material.Filled.PauseCircle" Size="Size.Small" Color="Color.Warning"
+                                    OnClick="@(() => OpenSuspendDialog(context))" />
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudTooltip Text="다시 사용">
+                                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Size="Size.Small" Color="Color.Success"
+                                    OnClick="@(() => ResumeAsync(context))" />
+                            </MudTooltip>
+                        }
+                        <MudTooltip Text="계정폐기">
+                            <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small" Color="Color.Error"
+                                OnClick="@(() => OpenDeactivateDialog(context))" />
+                        </MudTooltip>
                     }
                     else if (context.IsParent)
                     {
@@ -267,19 +327,38 @@ else
 <MudDialog @bind-Visible="_showDeactivate" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent>
         <MudText Typo="Typo.h6" Style="color:var(--mud-palette-warning)">
-            <MudIcon Icon="@Icons.Material.Filled.Warning" /> 사용자 비활성화
+            @* ⬛ 사용자 비활성화 — 20261005작3: 이 창은 「계정폐기」 확인 창이다(DELETE 의 뜻이 바뀜) *@
+            <MudIcon Icon="@Icons.Material.Filled.Warning" /> 계정폐기
         </MudText>
     </TitleContent>
     <DialogContent>
+        @* ⬛ 「계정을 비활성화합니다 · 해당 사용자는 더 이상 로그인할 수 없습니다」 *@
         <MudAlert Severity="Severity.Warning" Class="mb-3">
-            <strong>@_deactivateTarget?.Email</strong> 계정을 비활성화합니다.<br />
-            해당 사용자는 더 이상 로그인할 수 없습니다.
+            <strong>@_deactivateTarget?.Email</strong> 계정을 폐기합니다. 아이디가 비워져 같은 아이디로 새 계정을 만들 수 있습니다.<br />
+            폐기한 계정은 되살릴 수 없습니다. 직원(사원) 정보는 그대로 남습니다.
         </MudAlert>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _showDeactivate = false)" Disabled="_busy">취소</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_busy" OnClick="SubmitDeactivate">
-            @(_busy ? "처리 중..." : "비활성화")
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="_busy" OnClick="SubmitDeactivate">
+            @(_busy ? "처리 중..." : "계정폐기")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 20261005작3 §5 — 「사용 안 함」 확인 창 *@
+<MudDialog @bind-Visible="_showSuspend" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">사용 안 함</MudText></TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            <strong>@_suspendTarget?.Email</strong> 계정을 사용 안 함으로 바꿉니다. 이 계정으로는 로그인할 수 없고, 계정 한도에서 빠집니다.<br />
+            나중에 [다시 사용]으로 되살릴 수 있습니다.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showSuspend = false)" Disabled="_busy">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="_busy" OnClick="SubmitSuspend">
+            @(_busy ? "처리 중..." : "사용 안 함")
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -403,8 +482,79 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _seatApi = new AccountSeatApi(Http, SeatLog);
         await LoadAsync();
         await LoadDepartmentsAsync();
+    }
+
+    // ── 20261005작3 계정 과금 (설계 §5) — 판정은 서버가 정본 · 화면 검사는 편의 ──
+    private AccountSeatApi _seatApi = null!;
+    private AccountSeatsModel? _seats;
+    private bool _showSeatNotice, _seatNoticeBlocked, _showSuspend;
+    private UserListModel? _suspendTarget;
+
+    // §10④ — 한도보다 많으면 음수 「남은 계정 -2개」 대신 넘친 수를 알린다
+    private string SeatSub => _seats is null ? ""
+        : _seats.Active > _seats.Limit
+            ? $"한도보다 {_seats.Active - _seats.Limit}개 많습니다 — 새 계정·다시 사용이 막힙니다"
+            : $"남은 계정 {_seats.Limit - _seats.Active}개";
+
+    private async Task LoadSeatsAsync() => _seats = await _seatApi.GetSeatsAsync();
+
+    private bool SeatsFull => _seats is not null && _seats.Active >= _seats.Limit;
+
+    private void OpenSeatNotice(bool blocked)
+    {
+        _seatNoticeBlocked = blocked;
+        _showSeatNotice = true;
+    }
+
+    private async Task OpenBulkDialog()
+    {
+        await LoadSeatsAsync();
+        if (SeatsFull) { OpenSeatNotice(true); return; }
+        _showBulk = true;
+    }
+
+    private async Task OpenSuspendDialog(UserListModel user)
+    {
+        var stepUp = await StepUpDialog.RequestAsync(DialogService, $"{user.Email} 사용 안 함");
+        if (!stepUp) return;
+        _suspendTarget = user;
+        _showSuspend = true;
+    }
+
+    private async Task SubmitSuspend()
+    {
+        if (_suspendTarget == null) return;
+        _busy = true;
+        var r = await _seatApi.SuspendAsync(_suspendTarget.UserId);
+        _busy = false;
+        if (r.Ok)
+        {
+            Snackbar.Add($"{_suspendTarget.Email} 사용 안 함으로 바꿨습니다", Severity.Success);
+            _showSuspend = false;
+            await LoadAsync();
+        }
+        else Snackbar.Add($"처리하지 못했습니다: {r.Error}", Severity.Error);
+    }
+
+    private async Task ResumeAsync(UserListModel user)
+    {
+        _busy = true;
+        var r = await _seatApi.ResumeAsync(user.UserId);
+        _busy = false;
+        if (r.Ok)
+        {
+            Snackbar.Add($"{user.Email} 다시 사용합니다", Severity.Success);
+            await LoadAsync();
+        }
+        else if (r.SeatFull)
+        {
+            await LoadSeatsAsync();
+            OpenSeatNotice(true);
+        }
+        else Snackbar.Add($"처리하지 못했습니다: {r.Error}", Severity.Error);
     }
 
     /// <summary>
@@ -447,6 +597,8 @@ else
             {
                 _users = list;
             }
+            // 20261005작3 — 목록과 카드 숫자를 같이 새로 읽는다
+            if (_seatApi is not null) await LoadSeatsAsync();
         }
         finally
         {
@@ -456,8 +608,11 @@ else
     }
 
     // ── 추가 ──
-    private void OpenCreateDialog()
+    // ⬛ private void OpenCreateDialog() — 20261005작3: 누르기 전 한도 확인(차 있으면 입력창 대신 안내 창)
+    private async Task OpenCreateDialog()
     {
+        await LoadSeatsAsync();
+        if (SeatsFull) { OpenSeatNotice(true); return; }
         _createModel = new() { Role = "User" };
         _showCreatePassword = false; // 항상 마스킹 상태로 시작
         _showCreate = true;
@@ -471,8 +626,18 @@ else
     private async Task SubmitCreate()
     {
         _busy = true;
-        var (ok, error) = await UserSvc.CreateAsync(_createModel);
+        // ⬛ var (ok, error) = await UserSvc.CreateAsync(_createModel);
+        var created = await _seatApi.CreateAsync(_createModel);
+        var (ok, error) = (created.Ok, created.Error);
         _busy = false;
+        if (!ok && created.SeatFull)
+        {
+            // 서버가 막았다(경쟁·화면 낡음) — 같은 안내 창
+            _showCreate = false;
+            await LoadSeatsAsync();
+            OpenSeatNotice(true);
+            return;
+        }
         if (ok)
         {
             _showCreate = false;
@@ -528,15 +693,22 @@ else
     {
         if (_editTarget == null) return;
         _busy = true;
-        var ok = await UserSvc.UpdateAsync(_editTarget.UserId, _editModel);
+        // ⬛ var ok = await UserSvc.UpdateAsync(_editTarget.UserId, _editModel);
+        var updated = await _seatApi.UpdateAsync(_editTarget.UserId, _editModel);
         _busy = false;
-        if (ok)
+        if (updated.Ok)
         {
             Snackbar.Add("수정되었습니다.", Severity.Success);
             _showEdit = false;
             await LoadAsync();
         }
-        else Snackbar.Add("수정 실패", Severity.Error);
+        else if (updated.SeatFull)
+        {
+            _showEdit = false;
+            await LoadSeatsAsync();
+            OpenSeatNotice(true);
+        }
+        else Snackbar.Add($"수정 실패: {updated.Error}", Severity.Error);
     }
 
     // ── 비활성화 ──
@@ -555,15 +727,16 @@ else
     {
         if (_deactivateTarget == null) return;
         _busy = true;
-        var ok = await UserSvc.DeactivateAsync(_deactivateTarget.UserId);
+        // ⬛ var ok = await UserSvc.DeactivateAsync(_deactivateTarget.UserId); — 20261005작3: 계정폐기
+        var retired = await _seatApi.RetireAsync(_deactivateTarget.UserId);
         _busy = false;
-        if (ok)
+        if (retired.Ok)
         {
-            Snackbar.Add($"{_deactivateTarget.Email} 비활성화 완료", Severity.Success);
+            Snackbar.Add($"{_deactivateTarget.Email} 계정을 폐기했습니다", Severity.Success);
             _showDeactivate = false;
             await LoadAsync();
         }
-        else Snackbar.Add("비활성화 실패", Severity.Error);
+        else Snackbar.Add($"계정폐기 실패: {retired.Error}", Severity.Error);
     }
 
     // ── 임시 비밀번호 ──
@@ -621,8 +794,17 @@ else
         _busy = true;
         _bulkResult = null;
         using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB
-        _bulkResult = await UserSvc.BulkUploadAsync(stream, file.Name);
+        // ⬛ _bulkResult = await UserSvc.BulkUploadAsync(stream, file.Name);
+        var bulk = await _seatApi.BulkUploadAsync(stream, file.Name);
+        _bulkResult = bulk;
         _busy = false;
+        if (bulk is { SeatFull: true })
+        {
+            // F-5 — 한도 때문에 한 줄도 안 넣었다 · 같은 안내 창
+            await LoadSeatsAsync();
+            OpenSeatNotice(true);
+            return;
+        }
         if (_bulkResult != null && _bulkResult.SuccessCount > 0)
         {
             Snackbar.Add($"{_bulkResult.SuccessCount}건 등록 성공", Severity.Success);

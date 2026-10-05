@@ -1,0 +1,866 @@
+⬛ 보존본 — 「등록 기기 관리」 옛 화면 전문(2026-10-05 이전 · c6f0ade1)
+   10/5 작4 B-3 으로 「접속기기 확인」(조회만)으로 재구성되며 걷힌 원본이다. 헌법 #1(덮어쓰기 금지) — 지우지 않고 여기 남긴다.
+   빌드 대상 아님(.txt). 되살릴 일이 있으면 이 파일과 git 이력(c6f0ade1)을 함께 본다.
+──────────────────────────────────────────────────────────────
+@page "/settings/devices"
+@namespace HitPan.Web.Pages.SettingsUi
+@* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
+     메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
+@using System.Net.Http.Json
+@using HitPan.Web.Components.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@* 슬롯 구매 시 랜딩페이지 이동용 (20260811작1 (C)) *@
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILogger<DeviceManagePage> _logger
+
+<PageTitle>등록 기기 관리 — 히트판 ERP</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    <PageHeader Title="등록 기기 관리"
+                Subtitle="히트판은 디바이스 개수 과금 — 계정 수는 무제한, 총 기기 수만 제한됩니다.">
+        <Actions>
+            @* 모바일기기 등록 (사장님 오더 2026-08-11, 20260811작1 (D)):
+               "등록기기 관리메뉴에 '모바일기기 등록' 버튼을 만들어" *@
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.QrCode2"
+                       OnClick="OpenMobileRegisterAsync"
+                       Class="mr-2">
+                모바일기기 등록
+            </MudButton>
+            @* 🔵 메인PC 연결 (20260922작2 절F · 사장님 전결 2026-09-22)
+                 사장님: *"되돌리는 기능도 있어야됨. 고객사가 컴퓨터를 새로 구입해서
+                          메인PC를 변경할수도 있으니까"*
+                 *"메인pc연결 → 변경하실 메인PC에 히트판이 설치되어 있습니까 (y/n)
+                   y : 자동연결 / n : 설치후 연결"*
+               ⚠️ 없으면 고객이 컴퓨터를 바꾸는 순간 메인PC 를 **영영 못 옮긴다** —
+                 옛 등록이 남아 있어 새 PC 에서 안내가 안 뜨기 때문이다. *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.SwapHoriz"
+                       OnClick="@(() => _connectStep = ConnectStep.Ask)"
+                       Class="mr-2">
+                메인PC 연결
+            </MudButton>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                           Color="Color.Primary"
+                           Size="Size.Medium"
+                           OnClick="LoadAsync"
+                           title="새로고침" />
+        </Actions>
+    </PageHeader>
+
+    @* ── 승인 대기 구역 (20260811작1 (B)) ──
+       사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
+       대기 기기가 있을 때만 나타난다. 없으면 화면이 조용하다 — 평소엔 안 보이는 게 맞다. *@
+    @if (_pending.Count > 0)
+    {
+        <MudPaper Elevation="0" Class="pa-4 mb-4"
+                  Style="border:1px solid var(--mud-palette-warning); border-radius:12px; background:rgba(255,152,0,0.06)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" />
+                <MudText Typo="Typo.subtitle2">
+                    승인을 기다리는 기기 @_pending.Count 대
+                </MudText>
+            </div>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="color:var(--mud-palette-text-secondary)">
+                요청한 기기 화면에 <b>같은 번호</b>가 떠 있습니다. 번호를 확인하고 승인해 주세요.<br />
+                모르는 기기라면 <b>거부</b>해 주세요. 승인하면 그 기기에서 히트판을 쓸 수 있고, 슬롯 1대를 차지합니다.
+            </MudText>
+
+            @foreach (var d in _pending)
+            {
+                <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:0.5px solid var(--mud-palette-lines-default)">
+                    <MudIcon Icon="@(d.DeviceType == "pc" ? Icons.Material.Filled.Computer : Icons.Material.Filled.PhoneAndroid)"
+                             Color="Color.Default" />
+                    <div style="flex:1">
+                        <MudText Typo="Typo.body2" Style="font-weight:600">
+                            @* 🔴 사장님 문구 (2026-08-16): "0000기기가 등록을 요청합니다. 등록을 하시겠습니까?"
+                               확인번호를 함께 보여준다 — 그 기기 화면에도 **같은 번호**가 떠 있어
+                               대표가 눈으로 대조한다. 같은 기종이 여러 대여도 이것으로 갈린다. *@
+                            @(string.IsNullOrWhiteSpace(d.DeviceName) ? "(이름없음)" : d.DeviceName)
+                            @if (!string.IsNullOrEmpty(d.ConfirmCode))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                                         Variant="Variant.Filled" Class="ml-2"
+                                         Style="letter-spacing:.15rem;font-weight:700;">@d.ConfirmCode</MudChip>
+                            }
+                            <span> 가 등록을 요청합니다.</span>
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                            @(d.UserName ?? "-") · @(d.IpAddress ?? "-") · @d.RegisteredAt.ToLocalTime().ToString("MM-dd HH:mm")
+                        </MudText>
+                    </div>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="@(async () => await ApproveAsync(d))">승인</MudButton>
+                    @* 🔴 20260818작1 (1-8) — 사장님 결재 4: *"1회용 + 재발급 화면 필요 — 버튼 [인증키 재발급]"*
+
+                       [왜 필요한가] 인증키는 **1회용**이다(1-1). 직원이 **오타를 내거나** 키를 잃으면
+                         되살릴 길이 없어 **영구 차단**된다 — 8/10 사고와 같은 모양이다.
+                         그래서 1-1 과 1-8 은 **한 작업**이고 쪼개면 안 된다.
+
+                       ⚠️ 새 키는 **화면에만** 뜬다. 알림·메일·문자에 싣지 않는다
+                         (사장님 8/16 오더 — *"옆에서 보면 샌다"*). *@
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary"
+                               OnClick="@(async () => await ReissueKeyAsync(d))">인증키 재발급</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                               OnClick="@(async () => await RejectAsync(d))">거부</MudButton>
+                </div>
+            }
+        </MudPaper>
+    }
+
+    @* ── KPI 카드 4개 (PC / Mobile / 추가슬롯 / 구독티어) — 공용 KpiCard 사용 ── *@
+    <MudGrid Spacing="3" Class="mb-4">
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Color="KpiCard.KpiColor.Primary"
+                     Label="PC 사용 / 한도"
+                     Value="@($"{_quota?.PcUsed ?? 0} / {_quota?.PcLimit ?? 0}")"
+                     Sub="@($"남은 PC 슬롯 {GetRemaining(_quota?.PcUsed, _quota?.PcLimit)}대")"
+                     EmphasizeValue="true" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Color="KpiCard.KpiColor.Info"
+                     Label="모바일 사용 / 한도"
+                     Value="@($"{_quota?.MobileUsed ?? 0} / {_quota?.MobileLimit ?? 0}")"
+                     Sub="@($"남은 모바일 슬롯 {GetRemaining(_quota?.MobileUsed, _quota?.MobileLimit)}대")"
+                     EmphasizeValue="true" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Color="KpiCard.KpiColor.Warning"
+                     Label="추가 구매 슬롯"
+                     Value="@($"{_quota?.ExtraSlots ?? 0}")"
+                     Sub="1슬롯 = PC 1 또는 모바일 2"
+                     EmphasizeValue="true" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Color="KpiCard.KpiColor.Purple"
+                     Label="구독 티어"
+                     Value="@((_quota?.SubscriptionTier ?? "-").ToUpperInvariant())"
+                     Sub="현재 가입 상품"
+                     EmphasizeValue="true" />
+        </MudItem>
+    </MudGrid>
+
+    @* ── 기기 목록 테이블 ── *@
+    <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.subtitle2" Class="mb-3">등록된 기기 목록</MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_devices.Count == 0)
+        {
+            <EmptyState Icon="@Icons.Material.Outlined.DevicesOther"
+                        Title="등록된 기기가 없습니다"
+                        Subtitle="로그인할 때마다 기기가 자동 등록됩니다." />
+        }
+        else
+        {
+            <MudTable Items="_devices" Dense="true" Hover="true" Bordered="true" Striped="false">
+                <HeaderContent>
+                    <MudTh>기기명</MudTh>
+                    <MudTh Style="width:90px">유형</MudTh>
+                    <MudTh Style="width:140px">사용자</MudTh>
+                    <MudTh Style="width:140px">IP</MudTh>
+                    <MudTh Style="width:140px">등록일</MudTh>
+                    <MudTh Style="width:140px">최근 접속</MudTh>
+                    <MudTh Style="width:100px">상태</MudTh>
+                    <MudTh Style="width:90px;text-align:center">액션</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="기기명">
+                        @(string.IsNullOrWhiteSpace(context.DeviceName) ? "(이름없음)" : context.DeviceName)
+                        @* 메인PC 표식 — 고객지원이 "그 컴퓨터가 회사 서버인가" 를 화면으로 확인해야
+                           응대가 갈린다. 회사 서버면 그 컴퓨터를 살려야 하고, 아니면 회사 서버가
+                           꺼졌는지부터 물어야 한다. 설치 담당 직원이 없어도 목록만 보면 알 수 있게 한다. *@
+                        @if (context.IsMainPc)
+                        {
+                            <MudChip T="string" Size="Size.Small" Class="ml-2"
+                                     Color="Color.Primary" Variant="Variant.Filled"
+                                     Icon="@Icons.Material.Filled.Dns"
+                                     title="히트판이 설치되어 자료를 보관하는 컴퓨터입니다. 이 컴퓨터가 꺼지면 다른 컴퓨터에서도 히트판을 쓸 수 없습니다.">
+                                회사 서버
+                            </MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="유형">
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@GetTypeColor(context.DeviceType)"
+                                 Variant="Variant.Filled">
+                            @GetTypeLabel(context.DeviceType)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="사용자">@(context.UserName ?? "-")</MudTd>
+                    <MudTd DataLabel="IP">@(context.IpAddress ?? "-")</MudTd>
+                    <MudTd DataLabel="등록일">@context.RegisteredAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+                    <MudTd DataLabel="최근 접속">
+                        @(context.LastSeenAt is null ? "-" : context.LastSeenAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
+                    </MudTd>
+                    <MudTd DataLabel="상태">
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@GetStatusColor(context.Status)"
+                                 Variant="Variant.Filled">
+                            @GetStatusLabel(context.Status)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="액션" Style="text-align:center">
+                        @* 🔴 회사 서버는 폐기할 수 없다.
+                           폐기하면 그 컴퓨터로 로그인이 막히는데, 되살리는 기능이 없다
+                           (고객이 스스로 풀 방법이 0개다). 그리고 그 컴퓨터는 회사 자료를
+                           전부 가진 컴퓨터다. 실수 한 번이 복구 불가로 이어지므로 버튼을 막는다. *@
+                        @if (context.IsMainPc)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock"
+                                           Color="Color.Default"
+                                           Size="Size.Small"
+                                           Disabled="true"
+                                           title="회사 서버는 해제할 수 없습니다. 자료를 보관하는 컴퓨터입니다." />
+                        }
+                        else if (context.Status == "approved")
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Block"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           OnClick="@(async () => await RevokeAsync(context))"
+                                           title="기기 폐기" />
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+@* ══════════════════════════════════════════════════════════════════════
+   🔵 메인PC 연결 — 20260922작2 절F (사장님 전결 2026-09-22)
+
+   사장님 설계 그대로:
+     메인pc연결 → "변경하실 메인PC에 히트판이 설치되어 있습니까 (y/n)"
+       y : 자동연결   n : 설치후 연결
+
+   🔴 고객은 이 버튼 하나만 누른다. 그 뒤는 히트판이 길을 알려 준다.
+   ⚠️ 실제 연결은 **새 컴퓨터에서** 일어난다 — 그 컴퓨터에서 로그인하는 순간
+     MainPcGate 의 왕복 증명이 봉인이 안 풀리는 것을 보고 스스로 안내한다.
+     여기서는 **어디로 가면 되는지**만 알려 준다.
+══════════════════════════════════════════════════════════════════════ *@
+@if (_connectStep != ConnectStep.None)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9000" />
+    <div style="position:fixed;inset:0;z-index:9001;display:flex;align-items:center;justify-content:center;padding:16px;">
+        <MudPaper Elevation="8" Class="pa-6" Style="max-width:560px;margin:0 auto;">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Primary" Style="font-size:32px;" Class="mr-3" />
+                <MudText Typo="Typo.h6">메인PC 연결</MudText>
+            </div>
+
+            @if (_connectStep == ConnectStep.Ask)
+            {
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    연결하실 컴퓨터에 <b>히트판이 설치되어 있습니까?</b>
+                </MudText>
+                <div class="d-flex justify-end" style="gap:8px;">
+                    <MudButton Variant="Variant.Text" OnClick="@(() => _connectStep = ConnectStep.None)">닫기</MudButton>
+                    <MudButton Variant="Variant.Outlined" OnClick="@(() => _connectStep = ConnectStep.NeedInstall)">아니요</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="@(() => _connectStep = ConnectStep.AlreadyInstalled)">예</MudButton>
+                </div>
+            }
+            else if (_connectStep == ConnectStep.AlreadyInstalled)
+            {
+                <MudText Typo="Typo.body1" Class="mb-2">
+                    <b>그 컴퓨터에서 히트판에 접속해 로그인</b>해 주세요.
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-4">
+                    접속하시면 <b>"회사 자료 컴퓨터를 이 컴퓨터로 바꿀까요?"</b> 안내가 뜹니다.
+                    <b>[이 컴퓨터로 바꾸기]</b> 를 누르시면 연결이 끝납니다.
+                </MudText>
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+                    지금 쓰시던 컴퓨터는 꺼져 있어도 괜찮습니다.
+                </MudAlert>
+                <div class="d-flex justify-end">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="@(() => _connectStep = ConnectStep.None)">알겠습니다</MudButton>
+                </div>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1" Class="mb-2">
+                    먼저 그 컴퓨터에 <b>히트판을 설치</b>해 주세요.
+                </MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    아래에서 설치 파일을 받으신 뒤, <b>받은 파일을 한 번 눌러</b> 설치해 주세요.
+                    설치가 끝나고 그 컴퓨터에서 로그인하시면 연결 안내가 뜹니다.
+                </MudText>
+
+                @* 🔴 정직하게 적는다 — 브라우저는 받은 프로그램을 **대신 실행할 수 없다**(Windows 차단).
+                     자동으로 되는 것처럼 써 두면 고객이 기다리다 전화한다. *@
+                <MudText Typo="Typo.body2" Class="mb-4">
+                    회사 자료는 새 컴퓨터에서 <b>[자료관리 → 자료복구]</b> 로 가져오시면 됩니다.
+                </MudText>
+
+                <div class="d-flex justify-end" style="gap:8px;">
+                    <MudButton Variant="Variant.Text" OnClick="@(() => _connectStep = ConnectStep.None)">닫기</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               OnClick="GoDownloadPage">설치 파일 받으러 가기</MudButton>
+                </div>
+            }
+        </MudPaper>
+    </div>
+}
+
+</MudContainer>
+
+@* ── 모바일기기 등록 QR (20260811작1 (D), 사장님 오더 5단계) ──
+   "모바일 등록기기 버튼 클릭시 QR생성. 아래엔 '스마트폰으로으로 QR코드를 찍어 주세요' 라고 표기" *@
+<MudDialog @bind-Visible="_showQr" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">모바일기기 등록</MudText></TitleContent>
+    <DialogContent>
+        <div style="text-align:center;padding:8px 0">
+            @if (string.IsNullOrEmpty(_qrImage))
+            {
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            }
+            else
+            {
+                <img src="@_qrImage" alt="모바일 등록 QR 코드"
+                     style="width:220px;height:220px;border:1px solid var(--mud-palette-lines-default);border-radius:12px;padding:8px;background:#fff" />
+                <MudText Typo="Typo.body1" Class="mt-3" Style="font-weight:600">
+                    스마트폰으로 QR코드를 찍어 주세요
+                </MudText>
+                <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--mud-palette-text-secondary)">
+                    이 코드는 10분 뒤 사라집니다. 시간이 지나면 다시 눌러 주세요.
+                </MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showQr = false)">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ── 슬롯 판매 알림 (20260811작1 (C), 사장님 오더) ──
+   "비인증 PC에서 접속이 시도되었습니다. 슬롯1개를 추가하시겠습니까?"
+     Y → 랜딩페이지로 이동 / N → 등록기기 변경 or 기기차단 *@
+@* 승인 완료 — 인증키 전달 (20260811작3 (A), 사장님 확정)
+   "메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+    그 메인PC에서 키를 주는 방식은 대표 마음이지."
+   ⚠️ 이 값은 지금 한 번만 볼 수 있다 — 서버는 대조용 흔적만 갖는다. *@
+<MudDialog @bind-Visible="_showAuthKey" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = false })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Class="mr-1" />
+            승인했습니다 — 아래 번호를 알려주세요
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            <b>@_issuedForDevice</b> 를 승인했습니다.<br />
+            이 번호를 그 컴퓨터를 쓰는 직원에게 알려주세요.
+            직원이 자기 화면에 이 번호를 넣으면 바로 쓸 수 있습니다.
+        </MudText>
+
+        <MudPaper Elevation="0" Class="pa-3 mb-3"
+                  Style="background:var(--mud-palette-background-grey); word-break:break-all;">
+            <MudText Typo="Typo.body1" Style="font-family:monospace; font-size:1.05rem; letter-spacing:0.5px;">
+                @_issuedAuthKey
+            </MudText>
+        </MudPaper>
+
+        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.ContentCopy"
+                   OnClick="CopyAuthKeyAsync" Class="mb-3">
+            번호 복사
+        </MudButton>
+
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
+            이 번호는 <b>지금 한 번만</b> 보입니다. 창을 닫으면 다시 볼 수 없습니다 —
+            그때는 이 기기를 해제하고 다시 승인하셔야 합니다.
+        </MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CloseAuthKey">
+            알려줬습니다
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_showSlotOffer" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Warning" Class="mr-1" />
+            기기 슬롯이 부족합니다
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            비인증 @(_offerDeviceLabel)에서 접속이 시도되었습니다.<br />
+            <b>슬롯 1개를 추가하시겠습니까?</b>
+        </MudText>
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            슬롯 1개당 1만원입니다. 추가하지 않으셔도 됩니다 — 쓰지 않는 기기를 정리해 자리를 만들 수 있습니다.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        @* 🔴 2026-08-11 문구 정정 (사장님 지시 "거짓문구는 모두 삭제").
+             "네, 추가합니다" 를 눌러도 자리가 늘지 않는다 — 결제가 아직 연결되지 않아
+             가격 안내 화면으로 넘어가기만 한다(사장님 확인 2026-08-11 "아직").
+             버튼 글자가 하는 일 그대로여야 한다. *@
+        <MudButton OnClick="OnSlotOfferNo">아니오</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnSlotOfferYes">
+            가격 보러 가기
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* N 선택 시 — "등록기기를 변경하시겠습니까? or 기기차단을 하시겠습니까?" (사장님 오더) *@
+<MudDialog @bind-Visible="_showSlotAlt" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">어떻게 할까요?</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            슬롯을 추가하지 않으면 아래 둘 중 하나를 고르실 수 있습니다.
+        </MudText>
+        <MudList T="string" Dense="true">
+            <MudListItem T="string" Icon="@Icons.Material.Filled.SwapHoriz">
+                <b>등록기기 변경</b> — 쓰지 않는 기기를 해제하고 그 자리를 내줍니다
+            </MudListItem>
+            <MudListItem T="string" Icon="@Icons.Material.Filled.Block">
+                <b>기기차단</b> — 그 접속을 막습니다
+            </MudListItem>
+        </MudList>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showSlotAlt = false)">닫기</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="OnChooseBlock">기기차단</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnChooseSwap">등록기기 변경</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // ── 🔵 메인PC 연결 (20260922작2 절F · 사장님 전결) ──────────────────
+    private enum ConnectStep { None, Ask, AlreadyInstalled, NeedInstall }
+
+    private ConnectStep _connectStep = ConnectStep.None;
+
+    /// <summary>
+    /// 설치 파일을 받으러 보낸다 — <b>랜딩페이지가 배포한다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 ERP 는 설치본을 들고 있지 않는다(3시스템 분리 — 랜딩 = 가입·결제·<b>다운로드</b>).
+    /// <para>
+    /// ⚠️ <b>정확한 다운로드 경로가 아직 확인되지 않았다.</b> 랜딩 홈으로 보낸다 —
+    /// 같은 파일 안에서 이미 쓰고 있는 주소 체계를 그대로 따랐다(<c>landing.hitpan.kr/pricing</c>).
+    /// 다운로드 전용 주소가 확정되면 <b>이 한 줄만</b> 바꾸면 된다.
+    /// </para>
+    /// </remarks>
+    private void GoDownloadPage()
+    {
+        _connectStep = ConnectStep.None;
+        Nav.NavigateTo("https://landing.hitpan.kr", forceLoad: true);
+    }
+
+    // ── DTO (서버 응답 매핑용) ──
+    private sealed class DeviceListDto
+    {
+        public string DeviceId { get; set; } = "";
+        public string DeviceType { get; set; } = "";
+        public string? DeviceName { get; set; }
+        public string? UserId { get; set; }
+        public string? UserName { get; set; }
+        public string? IpAddress { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime RegisteredAt { get; set; }
+        public DateTime? LastSeenAt { get; set; }
+        /// <summary>회사 서버(히트판 본체·자료를 가진 컴퓨터) 여부. 회사당 1대.</summary>
+        public bool IsMainPc { get; set; }
+
+        /// <summary>
+        /// 등록 확인번호 4자리 — 승인 대기 기기만 값이 있다 (20260816작2 · 사장님 결재).
+        /// 요청한 기기 화면에도 같은 번호가 떠 있어 대표가 눈으로 대조한다.
+        /// ⚠️ 서버 DeviceListDto.ConfirmCode 와 **이름이 같아야** 채워진다(DTO 가 세 벌이다).
+        /// </summary>
+        public string? ConfirmCode { get; set; }
+    }
+
+    private sealed class DeviceQuotaDto
+    {
+        public int PcLimit { get; set; }
+        public int MobileLimit { get; set; }
+        public int PcUsed { get; set; }
+        public int MobileUsed { get; set; }
+        public int ExtraSlots { get; set; }
+        public string SubscriptionTier { get; set; } = "";
+    }
+
+    private List<DeviceListDto> _devices = new();
+    private DeviceQuotaDto? _quota;
+    private bool _loading = true;
+
+    // ── 승인 대기 (20260811작1 (B)) ──
+    //   목록에서 pending 만 추린다. 별도 API 를 만들지 않는다 — 진실원이 둘이 되면
+    //   한쪽만 갱신되는 사고가 난다(과거 버전 하드코딩 8곳 계통).
+    private List<DeviceListDto> _pending = new();
+
+    // ── 모바일 QR (20260811작1 (D)) ──
+    private bool _showQr;
+    private string? _qrImage;
+
+    // ── 슬롯 판매 알림 (20260811작1 (C)) ──
+    private bool _showSlotOffer;
+    private bool _showSlotAlt;
+    private string _offerDeviceLabel = "PC";
+
+    // ── 승인 시 발급된 인증키 (20260811작3 (A)) ──
+    //   ⚠️ 이 값은 이 화면에서만, 이 한 번만 볼 수 있다. 서버는 해시만 갖는다.
+    private bool _showAuthKey;
+    private string? _issuedAuthKey;
+    private string _issuedForDevice = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            // 병렬 호출 — 목록 + 쿼터
+            var listTask = Http.GetFromJsonAsync<List<DeviceListDto>>("api/devices");
+            var quotaTask = Http.GetFromJsonAsync<DeviceQuotaDto>("api/devices/quota");
+            await Task.WhenAll(listTask, quotaTask);
+            _devices = listTask.Result ?? new();
+            _quota = quotaTask.Result;
+
+            // 승인 대기분을 따로 추린다 (20260811작1 (B)). 오래 기다린 것이 위로.
+            _pending = _devices
+                .Where(d => d.Status == "pending")
+                .OrderBy(d => d.RegisteredAt)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"기기 목록 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RevokeAsync(DeviceListDto device)
+    {
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "기기 폐기",
+            message: $"'{device.DeviceName ?? "(이름없음)"}' 기기를 폐기하시겠습니까?\n폐기된 기기는 더 이상 로그인할 수 없습니다.",
+            confirmText: "폐기",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!confirmed) return;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/revoke/{device.DeviceId}", new { reason = "관리자 폐기" });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("기기가 폐기되었습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add($"폐기 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"폐기 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 기기 승인 (20260811작1 (B)) ──
+    //   사장님 설계: "승인대기. 대표에게 기기승인의 권한을 주기"
+    private async Task ApproveAsync(DeviceListDto device)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/approve/{device.DeviceId}", new { });
+            if (resp.IsSuccessStatusCode)
+            {
+                // 🔴 승인하면 **인증키**가 만들어진다. 그 키를 화면에 띄워
+                //   대표가 직원에게 알려주게 한다 (사장님 확정 2026-08-11:
+                //   *"메인PC에서 인증키가 생성되면, 요청한 클라이언트PC에서 입력하는 방식.
+                //     그 메인PC에서 키를 주는 방식은 대표 마음이지."*)
+                //
+                //   ⚠️ 이 값은 **지금 한 번만** 볼 수 있다. 서버는 해시만 갖고 있어
+                //     나중에 다시 알려줄 수 없다. 그래서 스낵바(잠깐 떴다 사라짐)가 아니라
+                //     **대표가 닫기 전까지 남는 창**으로 보여준다.
+                var approved = await resp.Content.ReadFromJsonAsync<ApproveResult>();
+                if (!string.IsNullOrWhiteSpace(approved?.AuthKey))
+                {
+                    _issuedAuthKey = approved.AuthKey;
+                    _issuedForDevice = device.DeviceName ?? "기기";
+                    _showAuthKey = true;
+                }
+                else
+                {
+                    Snackbar.Add($"'{device.DeviceName ?? "기기"}' 를 승인했습니다.", Severity.Success);
+                }
+                await LoadAsync();
+                return;
+            }
+
+            // 한도 초과 — 여기가 판매 경로의 입구다 (사장님 설계 (C)).
+            //   승인하려는데 슬롯이 없으면 "안 됩니다" 로 끝내지 않고 슬롯 구매를 제안한다.
+            var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+            var msg = body?.Message ?? $"승인 실패 ({(int)resp.StatusCode})";
+
+            if (msg.Contains("한도초과"))
+            {
+                _offerDeviceLabel = device.DeviceType == "pc" ? "PC" : "모바일 기기";
+                _showSlotOffer = true;
+                return;
+            }
+            Snackbar.Add(msg, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"승인 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 🔴 인증키 재발급 (20260818작1 (1-8)) ── 사장님 결재 4
+    //
+    //   사장님 문구 그대로: *"1회용 + 재발급 화면 필요 — 버튼 [인증키 재발급]"*
+    //
+    //   🔴 [왜 이 버튼이 반드시 있어야 하나] 인증키는 1회용이다(1-1).
+    //     직원이 **오타를 내거나** 종이를 잃으면 되살릴 길이 없어 **영구 차단**된다.
+    //     그것이 8/10 사고(쓰던 사람이 새 규칙에 막힘)와 **같은 모양**이라,
+    //     1-1 과 1-8 은 **한 작업**으로 묶여 있다. 쪼개면 직원이 갇힌다.
+    //
+    //   [보여주는 방식] 승인 때와 **같은 창**을 쓴다 — 대표가 이미 아는 화면이라 배울 것이 없다.
+    //     ⚠️ 이 값은 **지금 한 번만** 볼 수 있다. 서버는 해시만 갖는다.
+    //     ⚠️ 알림·메일·문자에 싣지 않는다 (사장님 8/16 — *"옆에서 보면 샌다"*).
+    private async Task ReissueKeyAsync(DeviceListDto device)
+    {
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "인증키 재발급",
+            message: $"'{device.DeviceName ?? "(이름없음)"}' 의 인증키를 다시 발급할까요?\n"
+                   + "먼저 알려주신 번호는 그 즉시 쓸 수 없게 됩니다.",
+            confirmText: "재발급",
+            cancelText: "취소",
+            severity: Severity.Warning);
+        if (!confirmed) return;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/reissue-key/{device.DeviceId}", new { });
+            if (resp.IsSuccessStatusCode)
+            {
+                var issued = await resp.Content.ReadFromJsonAsync<ApproveResult>();
+                if (!string.IsNullOrWhiteSpace(issued?.AuthKey))
+                {
+                    _issuedAuthKey = issued.AuthKey;
+                    _issuedForDevice = device.DeviceName ?? "기기";
+                    _showAuthKey = true;
+                }
+                else
+                {
+                    Snackbar.Add("인증키를 다시 발급했습니다.", Severity.Success);
+                }
+                await LoadAsync();
+                return;
+            }
+
+            var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+            Snackbar.Add(body?.Message ?? $"재발급 실패 ({(int)resp.StatusCode})", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"재발급 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 기기 승인 거부 (20260811작1 (B)) ──
+    private async Task RejectAsync(DeviceListDto device)
+    {
+        var confirmed = await ConfirmDialog.ShowAsync(
+            DialogService,
+            title: "기기 등록 거부",
+            message: $"'{device.DeviceName ?? "(이름없음)"}' 의 등록을 거부하시겠습니까?\n그 기기에서는 히트판을 쓸 수 없습니다.",
+            confirmText: "거부",
+            cancelText: "취소",
+            severity: Severity.Error);
+        if (!confirmed) return;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync($"api/devices/reject/{device.DeviceId}", new { reason = "대표계정 승인 거부" });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("기기 등록을 거부했습니다.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var body = await resp.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(body?.Message ?? $"거부 실패 ({(int)resp.StatusCode})", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"거부 실패: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── 모바일기기 등록 QR (20260811작1 (D)) ──
+    //   사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
+    private async Task OpenMobileRegisterAsync()
+    {
+        _qrImage = null;
+        _showQr = true;
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/devices/mobile-token", new { });
+            if (resp.IsSuccessStatusCode)
+            {
+                var data = await resp.Content.ReadFromJsonAsync<MobileTokenResponse>();
+                _qrImage = data?.QrImage;
+            }
+            else
+            {
+                Snackbar.Add($"QR 생성 실패 ({(int)resp.StatusCode})", Severity.Error);
+                _showQr = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"QR 생성 실패: {ex.Message}", Severity.Error);
+            _showQr = false;
+        }
+    }
+
+    // ── 슬롯 판매 알림 (20260811작1 (C)) ──
+    //   사장님 오더: "Y로 선택하면 바로 랜딩페이지로 이동"
+    private void OnSlotOfferYes()
+    {
+        _showSlotOffer = false;
+        // ⚠️ 결제 미연동 (사장님 확인 2026-08-11 "아직"). 지금은 랜딩 이동까지가 범위다.
+        //   토스 결제는 공영정보(주) 명의 신청 후 이 자리에 얹는다.
+        Nav.NavigateTo("https://landing.hitpan.kr/pricing", forceLoad: true);
+    }
+
+    //   사장님 오더: "N로 선택하면 '등록기기를 변경하시겠습니까? or 기기차단을 하시겠습니까?'"
+    private void OnSlotOfferNo()
+    {
+        _showSlotOffer = false;
+        _showSlotAlt = true;
+    }
+
+    // 등록기기 변경 — 쓰지 않는 기기를 해제하도록 목록으로 보낸다.
+    private void OnChooseSwap()
+    {
+        _showSlotAlt = false;
+        Snackbar.Add("아래 목록에서 사용하지 않는 기기를 해제하면 자리가 생깁니다.", Severity.Info);
+    }
+
+    // 기기차단 — 대기 중인 그 기기를 거부한다.
+    private async Task OnChooseBlock()
+    {
+        _showSlotAlt = false;
+        var target = _pending.FirstOrDefault();
+        if (target is null)
+        {
+            Snackbar.Add("차단할 대기 기기가 없습니다.", Severity.Info);
+            return;
+        }
+        await RejectAsync(target);
+    }
+
+    // ── 인증키 전달 (20260811작3 (A)) ──
+    private async Task CopyAuthKeyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_issuedAuthKey)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _issuedAuthKey);
+            Snackbar.Add("번호를 복사했습니다.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            // 브라우저가 복사를 막는 경우가 있다(주소가 https 가 아닐 때 등).
+            // 화면에 번호가 그대로 보이므로 직접 옮겨 적으면 된다 — 흐름을 끊지 않는다.
+            _logger.LogWarning(ex, "인증키 복사 실패 — 사용자가 직접 옮겨 적어야 함");
+            Snackbar.Add("복사가 안 됩니다. 화면의 번호를 직접 알려주세요.", Severity.Info);
+        }
+    }
+
+    private void CloseAuthKey()
+    {
+        _showAuthKey = false;
+        // 화면 변수에서도 지운다 — 남겨둘 이유가 없다.
+        _issuedAuthKey = null;
+        _issuedForDevice = "";
+    }
+
+    private sealed class ApiMessage
+    {
+        public string? Message { get; set; }
+    }
+
+    private sealed class ApproveResult
+    {
+        public string? Message { get; set; }
+        /// <summary>승인 시 발급된 인증키 원문. 이미 승인돼 있던 기기면 null.</summary>
+        public string? AuthKey { get; set; }
+    }
+
+    private sealed class MobileTokenResponse
+    {
+        /// <summary>QR 이미지 (data:image/png;base64,...)</summary>
+        public string? QrImage { get; set; }
+        public string? Token { get; set; }
+    }
+
+    // ── UI 헬퍼 ──
+    private static int GetRemaining(int? used, int? limit)
+    {
+        var u = used ?? 0; var l = limit ?? 0;
+        var r = l - u;
+        return r < 0 ? 0 : r;
+    }
+
+    private static Color GetTypeColor(string type) => type switch
+    {
+        "pc" => Color.Primary,
+        "mobile" => Color.Info,
+        "tablet" => Color.Secondary,
+        _ => Color.Default
+    };
+
+    private static string GetTypeLabel(string type) => type switch
+    {
+        "pc" => "PC",
+        "mobile" => "모바일",
+        "tablet" => "태블릿",
+        _ => type
+    };
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "approved" => Color.Success,
+        "pending" => Color.Warning,
+        "revoked" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "approved" => "승인",
+        "pending" => "대기",
+        "revoked" => "폐기",
+        _ => status
+    };
+}

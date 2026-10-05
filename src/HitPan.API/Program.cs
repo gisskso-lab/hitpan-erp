@@ -681,9 +681,11 @@ app.UseMiddleware<SessionValidityMiddleware>();
 //     이번 작업으로 행이 생기는 순간 소리 없이 켜지고, 한도 초과 고객은 그날부터 429 다.
 //     ⇒ 플래그가 명시적으로 true 일 때만 태운다. 값이 없으면(조회 실패 포함) 끈 것이다.
 //   ⚠️ **「살리되 꺼둔다」** — 지운 게 아니다(헌법 #1·#37). 켜는 날 테넌트별 활성 사용자 수를 먼저 잰다.
-app.UseWhen(
-    ctx => ctx.Items[SessionValidityMiddleware.TenantSessionLimitFlag] as bool? == true,
-    branch => branch.UseMiddleware<SessionLimitMiddleware>());
+// 🔴 20261005작3 §7 (D-12 · P-4) — 슬롯 폐기: 축 A 를 파이프라인에서 걷는다. 클래스는 남긴다(#1).
+//   대체 없음 — PC 총량은 활성 계정 수(AccountSeatGuard)가 이미 자른다. 게이트 G-A15 가 등록 0 을 잰다.
+// ⬛ app.UseWhen(
+// ⬛     ctx => ctx.Items[SessionValidityMiddleware.TenantSessionLimitFlag] as bool? == true,
+// ⬛     branch => branch.UseMiddleware<SessionLimitMiddleware>());
 app.UseMiddleware<TermsConsentMiddleware>();  // 헌법 #24: 첫 로그인 약관 4건 강제 동의 검증
 
 // 기기 인증 검사 (20260811작3 (A)) — 인증 번호가 없으면 업무 기능만 막는다.

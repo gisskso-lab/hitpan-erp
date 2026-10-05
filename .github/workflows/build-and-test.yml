@@ -442,6 +442,12 @@ jobs:
           #    ⬛ 위 두 줄은 폐기된 갈래 W 전제. 🟢 9/30 갈래 Y — A 출처 = 시도 표 local_update_attempts(가림 표 +1).
           #       출하 DDL 에 시도 표가 없으면 FAIL · 대조: apply_status 에만 blocked 가 있으면 requested(옛 출처 안 읽음).
           GATES="$GATES|UpdateStatusDdlGate"
+          # 🔴 2026-10-05 작4 — 슬롯 폐기 · 「접속기기 확인」(설계 20261005_설계_접속기기확인_슬롯폐기 §8). 작3 줄과 따로 한 줄.
+          #    ⚠️ 지금 파일의 몫은 DB 불필요 14건 — DB 몫(G-AR1ⓐⓒ·AR2~5·AR9~11·AR13·AR14)은 개발명세서 「남은 일」.
+          GATES="$GATES|ApprovalRetiredAccessGate"
+          # 🔴 20261005작3 계정 과금 G-A1~A17 (AccountSeatGateTests · 격리 DB · 실물 UserService/Bootstrap/Webhook). 작3 전용 한 줄(반증 P2 · 작4 줄과 따로).
+          #    대조군·SKIP 근거: docs/개발/erp/20261005작3_직원계정관리_계정과금_개발명세서.md §4
+          GATES="$GATES|AccountSeatGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
