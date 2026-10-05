@@ -35,10 +35,14 @@
         }
     </DialogContent>
     <DialogActions>
+        @* ⬛ [작5 §8-8 V5-16 전] Blocked && CanSubscribe == true 이면 [구독계정추가] 버튼(OnClick=SubscribeAsync) —
+           눌러도 같은 「계정 추가 구독 안내」 창이 첫 줄만 바뀌어 다시 떴다(같은 창 반복).
+           구독 신청이 열리기 전까지는 버튼 대신 한 줄 안내. OnSubscribe 매개변수는 부모 화면 호환을 위해 둔다. *@
         @if (Blocked && CanSubscribe == true)
         {
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.GroupAdd" OnClick="SubscribeAsync">구독계정추가</MudButton>
+            <MudText Typo="Typo.body2" Class="mr-auto ml-2" Style="color:var(--mud-palette-text-secondary)">
+                구독 계정 추가는 준비 중입니다. 본사 안내 후 열립니다.
+            </MudText>
         }
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CloseAsync">닫기</MudButton>
     </DialogActions>
@@ -59,6 +63,7 @@
     /// <summary>[구독계정추가]를 눌렀을 때 — 부모 화면이 숫자를 다시 읽고 이 창을 「안내」 모양으로 바꾼다.</summary>
     [Parameter] public EventCallback OnSubscribe { get; set; }
 
+    // ⬛ 작5 §8-8 V5-16 — 지금은 이 창에서 부르지 않는다(구독 신청이 열리면 버튼과 함께 다시 잇는다).
     private async Task SubscribeAsync() => await OnSubscribe.InvokeAsync();
 
     private string FirstLine => Blocked

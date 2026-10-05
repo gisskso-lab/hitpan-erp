@@ -1181,12 +1181,8 @@ else
         _createModel.Password = NewTempPassword();
     }
 
-    private static string NewTempPassword()
-    {
-        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-        var rand = new Random();
-        return new string(Enumerable.Range(0, 12).Select(_ => chars[rand.Next(chars.Length)]).ToArray());
-    }
+    // ⬛ 종전 본문: 문자표 + new Random() + 12자 — 작5 §8-8(CodeQL insecure-randomness): 사원관리와 같은 함수 하나(AccountTempPassword)로
+    private static string NewTempPassword() => AccountTempPassword.New();
 
     private static string PasswordHint(string pw)
     {

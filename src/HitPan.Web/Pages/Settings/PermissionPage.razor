@@ -144,6 +144,15 @@ else
                                             <MudSelectItem T="int" Value="2">2 계정설정 — 사원에게 계정 만들기 · 사용 안 함 · 다시 사용</MudSelectItem>
                                             <MudSelectItem T="int" Value="3">3 구독계정추가 — 계정 추가 구독까지</MudSelectItem>
                                         </MudSelect>
+                                        @* 작5 §8-8 사장님 P2-14 결재 — 2단계(계정설정)부터는 계정을 만들 때 임시 비밀번호를 이 직원이 정한다.
+                                           3단계는 2단계를 품으므로 같은 경고. 첫 로그인 비밀번호 변경 강제는 별건 트랙. *@
+                                        @if (UsersLevelOf(_selectedUser) >= 2)
+                                        {
+                                            <MudText Typo="Typo.caption" Class="mt-1" Style="color:var(--mud-palette-warning-darken);display:flex;align-items:center;gap:4px">
+                                                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Size="Size.Small" Color="Color.Warning" />
+                                                이 직원은 다른 직원의 비밀번호를 정할 수 있습니다
+                                            </MudText>
+                                        }
                                     </td>
                                 </tr>
                             </tbody>
