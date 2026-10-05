@@ -364,6 +364,8 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
     }
 
     // ══ G-E4 ══
+    // 🔴 작5 §8-7 P2-04 — 이 본체는 좌석 잠금이 먼저 줄 세워 FOR UPDATE·조건부 UPDATE 를 빼도 초록이다([3-V] 2차).
+    //   실물 함수의 장치를 하나씩 재는 몫은 G-E4b(좌석) · G-E4c(사원 행 · INSERT 앞) · G-E4s(구조 · 대조군 셋)에 있다(…Seal2.cs).
 
     [Fact(DisplayName = "G-E4 🔴 두 연결이 같은 사원 동시 연결 → 정확히 1 성공 · users +1 · 사원은 성공한 계정에 연결 · 대조군(FOR UPDATE·조건부 UPDATE 없는 옛 흐름은 2 성공 · 조건부 UPDATE 하나만 있어도 두 번째 affected=0)")]
     public async Task E4_Concurrent_Link_Exactly_One()
