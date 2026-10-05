@@ -4,6 +4,8 @@
 @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin,hr_manager")]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
+@* 20261005작5 — 계정 한도 안내 창(작3 공용 컴포넌트) *@
+@using HitPan.Web.Components.Users
 @* 작(2026-08-13) 단계4: 고용형태 표시 이름은 HitPan.Web.Models.EmployeeTypeLabels 한 곳에서만 정한다. *@
 
 <PageTitle>사원관리</PageTitle>
@@ -182,6 +184,9 @@ else
                         <MudTh>이름</MudTh>
                         <MudTh>부서</MudTh>
                         <MudTh>직급</MudTh>
+                        @* 20261005작5 §2 — 계정 상태(사용중·사용중지·미등록·대표) · 사원계정(로그인 아이디 · 사원 이메일과 별개) *@
+                        <MudTh Style="min-width:120px">계정</MudTh>
+                        <MudTh>사원계정</MudTh>
                         <MudTh Style="text-align:right;min-width:90px">연차 부여</MudTh>
                         <MudTh Style="text-align:right;min-width:90px">연차 사용</MudTh>
                         <MudTh Style="text-align:right;min-width:80px">잔여</MudTh>
@@ -197,6 +202,41 @@ else
                         <MudTd DataLabel="이름">@context.EmpName</MudTd>
                         <MudTd DataLabel="부서">@context.DeptName</MudTd>
                         <MudTd DataLabel="직급">@context.Position</MudTd>
+                        @* 20261005작5 §2·§3·§5-4 — 사원관리는 보기 + 미등록 사원에게 계정 만들기까지(C).
+                           사용 안 함·다시 사용은 여기서 안 바꾼다 — [직원계정 화면으로] 보낸다(계정을 바꾸는 곳은 한 군데). *@
+                        <MudTd DataLabel="계정">
+                            @{ var accountLabel = AccountLinkLabels.StatusLabel(context.AccountStatus); }
+                            <div class="d-flex align-center gap-1" style="flex-wrap:wrap">
+                                @if (!string.IsNullOrEmpty(accountLabel))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                             Color="@AccountStatusColor(context.AccountStatus)">@accountLabel</MudChip>
+                                }
+                                @if (context.AccountStatus == "none")
+                                {
+                                    @if (context.IsLeaver)
+                                    {
+                                        @* (B) 퇴사 사원은 계정을 못 만든다 — 버튼 대신 이유를 글자로 *@
+                                        <MudTooltip Text="퇴사한 사원은 계정을 만들 수 없습니다">
+                                            <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">퇴사</MudText>
+                                        </MudTooltip>
+                                    }
+                                    else if (_usersLevel >= 2)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.PersonAdd"
+                                                   OnClick="@(() => OpenCreateAccountAsync(context))">계정 만들기</MudButton>
+                                    }
+                                }
+                                else if ((context.AccountStatus == "active" || context.AccountStatus == "suspended") && _usersLevel >= 1)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                               EndIcon="@Icons.Material.Filled.ArrowForward"
+                                               Href="/users">직원계정 화면으로</MudButton>
+                                }
+                            </div>
+                        </MudTd>
+                        <MudTd DataLabel="사원계정">@context.LoginId</MudTd>
                         <MudTd DataLabel="연차 부여" Style="text-align:right">
                             <MudNumericField T="decimal" @bind-Value="context.AnnualLeaveTotal"
                                              Min="0" Max="365" Step="0.5m" Variant="Variant.Outlined"
@@ -255,8 +295,11 @@ else
                         <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.Phone ?? "-")</MudText></MudItem>
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">이메일</MudText></MudItem>
                         <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.Email ?? "-")</MudText></MudItem>
-                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">계정 연결</MudText></MudItem>
-                        <MudItem xs="7"><MudText Style="font-size:12px">@(!string.IsNullOrWhiteSpace(_selectedDetail.UserId) ? "연결됨" : "미연결")</MudText></MudItem>
+                        @* ⬛ 「계정 연결」 연결됨/미연결 (UserId 유무) — 20261005작5 F-4: 목록과 같은 기준(AccountStatus) 한 가지로 *@
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">계정</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@(string.IsNullOrEmpty(AccountLinkLabels.StatusLabel(_selectedDetail.AccountStatus)) ? "-" : AccountLinkLabels.StatusLabel(_selectedDetail.AccountStatus))</MudText></MudItem>
+                        <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">사원계정</MudText></MudItem>
+                        <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.LoginId ?? "-")</MudText></MudItem>
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">역할</MudText></MudItem>
                         <MudItem xs="7"><MudText Style="font-size:12px">@_selectedDetail.Role</MudText></MudItem>
                     </MudGrid>
@@ -362,3 +405,49 @@ else
 </MudTabPanel>
 
 </MudTabs>
+
+@* 20261005작5 §3 — [계정 만들기] 창. 그 사원에 계정을 붙인다(사원을 새로 만들지 않는다).
+   아이디·임시 비밀번호만 넣는다. 이름·부서·직급·직무는 사원 정보 그대로(R-3 — 역할을 고르지 않는다). *@
+<MudDialog @bind-Visible="_showAccountCreate" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">계정 만들기</MudText></TitleContent>
+    <DialogContent>
+        @if (_accountTarget is not null)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+                <MudText Typo="Typo.body2"><b>@_accountTarget.EmpName</b> (@_accountTarget.EmpNo)</MudText>
+                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                    부서 @(string.IsNullOrWhiteSpace(_accountTarget.DeptName) ? "-" : _accountTarget.DeptName)
+                    · 직급 @(string.IsNullOrWhiteSpace(_accountTarget.Position) ? "-" : _accountTarget.Position)
+                    · 직무 @AccountLinkLabels.RoleLabel(_accountTarget.Role)
+                </MudText>
+                <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                    이름·부서·직급·직무는 위 사원 정보 그대로 씁니다.
+                </MudText>
+            </MudPaper>
+        }
+        <MudTextField T="string" @bind-Value="_accountModel.LoginId" Label="아이디 *" Variant="Variant.Outlined" Class="mb-2"
+                      HelperText="로그인할 때 쓰는 아이디입니다 (공백 없이 4자 이상)" />
+        <div class="d-flex gap-2 mb-2 align-center">
+            <MudTextField T="string" @bind-Value="_accountModel.Password" Label="임시 비밀번호 *" Variant="Variant.Outlined"
+                          InputType="@(_accountShowPassword ? InputType.Text : InputType.Password)"
+                          Adornment="Adornment.End"
+                          AdornmentIcon="@(_accountShowPassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                          OnAdornmentClick="@(() => _accountShowPassword = !_accountShowPassword)"
+                          AdornmentAriaLabel="비밀번호 표시 전환"
+                          HelperText="@AccountPasswordHint(_accountModel.Password)" Class="flex-grow-1" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="GenerateAccountPassword">랜덤생성</MudButton>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showAccountCreate = false)" Disabled="_accountBusy">취소</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_accountBusy || !CanSubmitAccount)"
+                   OnClick="SubmitCreateAccountAsync">
+            @(_accountBusy ? "만드는 중..." : "계정 만들기")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 20261005작5 A · P-5 — 한도가 찼으면 막고 「계정을 추가 구매하세요」. 3단계면 [구독계정추가], 아니면 「대표님께 계정 추가를 요청하세요」 *@
+<AccountSeatNoticeDialog @bind-Visible="_showSeatNotice" Blocked="_seatNoticeBlocked"
+                         Active="@(_seats?.Active ?? 0)" Limit="@(_seats?.Limit ?? 0)"
+                         CanSubscribe="@(_usersLevel >= 3)" OnSubscribe="OpenSubscribeFromEmployeeAsync" />
