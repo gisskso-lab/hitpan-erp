@@ -1,0 +1,31 @@
+  Failed G-E16 🔴 R-1 — 2단계 직원의 [사용 안 함] 도중 대상이 관리자로 승격(미커밋 · 행 잠금) → 직원 UPDATE 가 잠금을 기다린 뒤 승격 커밋 → 403 protected_account · 대상 그대로 사용중 · 대조군(옛 두 단계 = 판정 따로 → SuspendAsync 는 같은 경쟁에서 관리자를 끈다) [21 s]
+  Error Message:
+   MySqlConnector.MySqlException : Failed to read the result set.
+---- System.NotSupportedException :  This method may not be called when another read operation is pending.
+  Stack Trace:
+     at MySqlConnector.MySqlDataReader.ActivateResultSet(CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlDataReader.cs:line 136
+   at MySqlConnector.MySqlDataReader.InitAsync(CommandListPosition commandListPosition, ICommandPayloadCreator payloadCreator, IDictionary`2 cachedProcedures, IMySqlCommand command, CommandBehavior behavior, Activity activity, IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlDataReader.cs:line 489
+   at MySqlConnector.Core.CommandExecutor.ExecuteReaderAsync(CommandListPosition commandListPosition, ICommandPayloadCreator payloadCreator, CommandBehavior behavior, Activity activity, IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/Core/CommandExecutor.cs:line 58
+   at MySqlConnector.MySqlCommand.ExecuteNonQueryAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlCommand.cs:line 304
+   at MySqlConnector.MySqlTransaction.DoRollback(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlTransaction.cs:line 267
+   at MySqlConnector.MySqlTransaction.DoDisposeAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlTransaction.cs:line 237
+   at MySqlConnector.MySqlConnection.CloseDatabaseAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlConnection.cs:line 1276
+   at MySqlConnector.MySqlConnection.DoCloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1244
+   at MySqlConnector.MySqlConnection.DoCloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1266
+   at MySqlConnector.MySqlConnection.CloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1196
+   at MySqlConnector.MySqlConnection.DisposeAsync() in /_/src/MySqlConnector/MySqlConnection.cs:line 845
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 231
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 231
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 233
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Security.SslStream.ReadAsyncInternal[TIOAdapter](Memory`1 buffer, CancellationToken cancellationToken)
+   at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource<TResult>.GetResult(Int16 token)
+   at MySqlConnector.Protocol.Serialization.StreamByteHandler.<ReadBytesAsync>g__DoReadBytesAsync|6_2(Memory`1 buffer) in /_/src/MySqlConnector/Protocol/Serialization/StreamByteHandler.cs:line 67
+   at MySqlConnector.Protocol.Serialization.BufferedByteReader.ReadBytesAsync(IByteHandler byteHandler, ArraySegment`1 buffer, Int32 totalBytesToRead, IOBehavior ioBehavior) in /_/src/MySqlConnector/Protocol/Serialization/BufferedByteReader.cs:line 34
+   at MySqlConnector.Protocol.Serialization.ProtocolUtility.ReadPayloadAsync(BufferedByteReader bufferedByteReader, IByteHandler byteHandler, Func`1 getNextSequenceNumber, ArraySegmentHolder`1 previousPayloads, ProtocolErrorBehavior protocolErrorBehavior, IOBehavior ioBehavior) in /_/src/MySqlConnector/Protocol/Serialization/ProtocolUtility.cs:line 422
+   at MySqlConnector.Core.ServerSession.ReceiveReplyAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/Core/ServerSession.cs:line 1114
+   at MySqlConnector.Core.ResultSet.ReadResultSetHeaderAsync(IOBehavior ioBehavior) in /_/src/MySqlConnector/Core/ResultSet.cs:line 37
+  Passed G-S1c2 대조군 — 행 없음 · 이름 잠금 없이 판정만 부르면 거절(조용히 열지 않는다) · 봉합 전 틈 잠금은 서로 안 막는다 [1 s]
+  Passed G-M8k 🔴 표식 없는 대기 서버줄로 로그인 — 가드 사유 · 표 무변화(local: False) [2 s]
+  Passed G-E6 🔴 죽은 연결(users is_deleted=1 · 행 없음) → 상태 none · 만들기 성공 · user_id 새 계정으로 교체 [1 s]
