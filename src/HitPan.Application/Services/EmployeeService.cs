@@ -95,7 +95,9 @@ public sealed class EmployeeService : IEmployeeService
                    WHEN ua.is_active = 1 THEN 'active'
                    ELSE 'suspended' END AS AccountStatus,
               -- 퇴사 판별(C-1) — MDB 이관 퇴사자(is_active=1 · is_resigned=1)도 퇴사. [계정 만들기] 금지에만 쓴다.
-              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 THEN 1 ELSE 0 END AS IsLeaver,
+              --   [3-V] P3-11 — MDB 이관은 SW_OUT(is_resigned)·SW_OUTDT(resign_date)를 따로 옮긴다(MdbMigrationService:1918-1919)
+              --   ⇒ 퇴사일만 찬 사원이 있을 수 있다. 지난 퇴사일이면 퇴사로 본다(앞날 퇴사일 = 예정 · 아직 재직).
+              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 OR (e.resign_date IS NOT NULL AND e.resign_date <= NOW(6)) THEN 1 ELSE 0 END AS IsLeaver,
               e.login_id AS LoginId
             FROM employees e
             LEFT JOIN departments d
@@ -266,7 +268,7 @@ public sealed class EmployeeService : IEmployeeService
                    WHEN ua.is_parent = 1 THEN 'owner'
                    WHEN ua.is_active = 1 THEN 'active'
                    ELSE 'suspended' END AS AccountStatus,
-              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 THEN 1 ELSE 0 END AS IsLeaver,
+              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 OR (e.resign_date IS NOT NULL AND e.resign_date <= NOW(6)) THEN 1 ELSE 0 END AS IsLeaver,
               e.login_id AS LoginId
             FROM employees e
             LEFT JOIN departments d

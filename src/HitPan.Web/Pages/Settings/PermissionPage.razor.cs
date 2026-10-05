@@ -61,7 +61,11 @@ public partial class PermissionPage : ComponentBase
         ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),
         ("SETTINGS", "사용환경설정"),
-        ("USERS", "사용자관리")
+        ("USERS", "사용자관리"),
+        // 20261005작5 §5-1 — 백엔드 MenuList 와 같은 코드(CI 정합 검사). 「직원 계정 관리」 한 줄 4선택으로 그리는 일은 갈래 3 몫.
+        //   EnforcedMenus 에는 아직 안 넣는다 — 넣으면 VisibleMenus 가 따로 한 줄씩 그린다(갈래 3 이 화면과 함께 정한다).
+        ("USERS_ACCOUNT", "계정설정"),
+        ("USERS_SEAT", "구독계정추가")
     };
 
     /// <summary>

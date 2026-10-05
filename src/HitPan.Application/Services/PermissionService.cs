@@ -55,8 +55,16 @@ public class PermissionService : IPermissionService
         ("CERTIFICATE", "범용인증서"),
         ("DASHBOARD", "대시보드"),
         ("SETTINGS", "사용환경설정"),
-        ("USERS", "사용자관리")
+        ("USERS", "사용자관리"),
+        // 20261005작5 §5-1 (P-1) — 「직원 계정 관리」 3단계. USERS = 1 조회 · USERS_ACCOUNT = 2 계정설정 · USERS_SEAT = 3 구독계정추가.
+        // 🔴 기존 USERS 의 can_create/update 를 2단계로 재해석하지 않는다 — 옛 체크가 몰래 계정 권한으로 승격된다. 새 코드는 0 에서 시작(#11).
+        // 판정은 GetUsersLevelAsync 하나(위가 아래를 포함) · 강제는 API [RequireUsersLevel(n)].
+        ("USERS_ACCOUNT", "계정설정"),
+        ("USERS_SEAT", "구독계정추가")
     ];
+
+    /// <summary>20261005작5 — 「직원 계정 관리」 단계 코드(단계 1·2·3 순).</summary>
+    public static readonly string[] UsersLevelCodes = ["USERS", "USERS_ACCOUNT", "USERS_SEAT"];
 
     public PermissionService(IDbConnection db, ICurrentTenant currentTenant)
     {
@@ -204,6 +212,10 @@ public class PermissionService : IPermissionService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 20261005작5 §5-1 · [3-V] V5-05 — 「직원 계정 관리」 세 줄은 늘 함께 저장한다(위→아래 채움).
+        //   세 줄 중 하나라도 왔으면 단계를 하나로 정하고 세 줄을 다시 만든다. 하나도 안 왔으면 손대지 않는다.
+        NormalizeUsersLevelRows(dto);
+
         foreach (var p in dto.Permissions)
         {
             await _db.ExecuteAsync(new CommandDefinition(
@@ -277,6 +289,77 @@ public class PermissionService : IPermissionService
             cancellationToken: ct)).ConfigureAwait(false);
 
         return result == 1;
+    }
+
+    /// <summary>
+    /// 20261005작5 §5-1 — 「직원 계정 관리」 단계. 대표·관리자(Layer 0 · <see cref="HasPermissionAsync"/> 와 같은 조건) = 3 ·
+    /// 아니면 저장된 세 코드 중 <c>can_view=1</c> 인 가장 높은 단계(USERS_SEAT 3 · USERS_ACCOUNT 2 · USERS 1 · 없음 0).
+    /// 아래 단계 행이 없어도 위가 포함된다(판정이 보장 — 저장이 어긋나도 안전).
+    /// </summary>
+    public async Task<int> GetUsersLevelAsync(string userId, string tenantId, CancellationToken ct = default)
+    {
+        if (userId == _currentTenant.UserId &&
+            _currentTenant.AccountType == "tenant_admin")
+        {
+            return 3;
+        }
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var level = await _db.ExecuteScalarAsync<int?>(new CommandDefinition(
+            """
+            SELECT MAX(CASE menu_code
+                         WHEN 'USERS_SEAT'    THEN 3
+                         WHEN 'USERS_ACCOUNT' THEN 2
+                         WHEN 'USERS'         THEN 1
+                         ELSE 0 END)
+            FROM user_permissions
+            WHERE user_id = @UserId
+              AND tenant_id = @TenantId
+              AND menu_code IN ('USERS', 'USERS_ACCOUNT', 'USERS_SEAT')
+              AND can_view = 1
+            """,
+            new { UserId = userId, TenantId = tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return level ?? 0;
+    }
+
+    /// <summary>20261005작5 V5-05 — 세 줄을 단계 하나로 맞춘다. USERS 줄의 나머지 칸(create 등 · 옛 값)은 온 그대로 둔다.</summary>
+    internal static void NormalizeUsersLevelRows(SavePermissionsDto dto)
+    {
+        var rows = dto.Permissions
+            .Where(p => UsersLevelCodes.Contains(p.MenuCode, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (rows.Count == 0) return;
+
+        var level = 0;
+        for (var i = 0; i < UsersLevelCodes.Length; i++)
+        {
+            if (rows.Any(r => string.Equals(r.MenuCode, UsersLevelCodes[i], StringComparison.OrdinalIgnoreCase) && r.CanView))
+                level = i + 1;
+        }
+
+        for (var i = 0; i < UsersLevelCodes.Length; i++)
+        {
+            var code = UsersLevelCodes[i];
+            var row = rows.FirstOrDefault(r => string.Equals(r.MenuCode, code, StringComparison.OrdinalIgnoreCase));
+            if (row is null)
+            {
+                row = new MenuPermissionDto { MenuCode = code };
+                dto.Permissions.Add(row);
+            }
+            row.MenuCode = code;
+            row.CanView = level >= i + 1;
+            if (i > 0)
+            {
+                // 새 두 코드는 「보기」 한 칸만 뜻을 가진다 — 나머지 칸은 늘 0(안 먹는 값을 남기지 않는다).
+                row.CanCreate = false;
+                row.CanUpdate = false;
+                row.CanDelete = false;
+                row.CanExport = false;
+            }
+        }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

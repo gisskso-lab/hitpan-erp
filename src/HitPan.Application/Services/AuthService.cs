@@ -13,7 +13,9 @@ namespace HitPan.Application.Services;
 
 public class AuthService : IAuthService
 {
-    private const string InvalidCredentialMessage = "이메일 또는 비밀번호가 틀립니다";
+    // ⬛ private const string InvalidCredentialMessage = "이메일 또는 비밀번호가 틀립니다";
+    // 20261005작5 §6 — 계정 칸 이름은 「아이디」(사원 이메일 칸과 헷갈리지 않게)
+    private const string InvalidCredentialMessage = "아이디 또는 비밀번호가 틀립니다";
     // 사장님 결재 (2026-06-19): ERP는 고객사 직원이 하루 종일 쓰는 업무 도구.
     //   AccessToken 15분은 너무 짧아 근무 중 잦은 만료로 끊김(헌법 #19·#27 위반) → 근무 하루 8시간으로 상향.
     //   추가 안전망: 만료돼도 HitPanApiAuthHandler 가 401 시 RefreshToken 으로 자동 재발급+재시도(사용자 무자각).
@@ -63,7 +65,8 @@ public class AuthService : IAuthService
             }
 
             await _unitOfWork.SaveChangesAsync(ct);
-            throw new UnauthorizedAccessException($"이메일 또는 비밀번호가 올바르지 않습니다. (실패 {user.FailedLoginCount}/5)");
+            // ⬛ throw new UnauthorizedAccessException($"이메일 또는 비밀번호가 올바르지 않습니다. (실패 {user.FailedLoginCount}/5)");
+            throw new UnauthorizedAccessException($"아이디 또는 비밀번호가 올바르지 않습니다. (실패 {user.FailedLoginCount}/5)");
         }
 
         if (!user.IsActive)

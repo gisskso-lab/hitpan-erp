@@ -46,6 +46,13 @@ UPDATE `employees` e
    AND u.`email` NOT LIKE 'resigned+%'
    AND u.`email` NOT LIKE 'retired+%';
 
+-- 🔴 [3-V] P2-05 — 빈 문자열 user_id 는 「계정 없음」과 같은 뜻이다(코드 전부 IS NULL OR = '' 로 읽는다)
+--   그대로 두면 빈 문자열끼리 중복으로 세어져 UNIQUE 가 조용히 빠진다 ⇒ 선검사 전에 NULL 로 맞춘다
+--   updated_at 은 안 건드린다(뜻이 바뀌지 않는 정리)
+UPDATE `employees`
+   SET `user_id` = NULL
+ WHERE `user_id` = '';
+
 SET @idx_exists := (
   SELECT COUNT(*) FROM information_schema.statistics
    WHERE table_schema = DATABASE()
@@ -57,7 +64,7 @@ SET @dup_groups := (
   SELECT COUNT(*) FROM (
     SELECT `tenant_id`, `user_id`
       FROM `employees`
-     WHERE `user_id` IS NOT NULL
+     WHERE `user_id` IS NOT NULL AND `user_id` <> ''
      GROUP BY `tenant_id`, `user_id`
     HAVING COUNT(*) >= 2
   ) AS `dup`
@@ -78,7 +85,7 @@ SELECT UUID(), g.`tenant_id`, NULL, 'db137_user_dup', 'employees', NULL,
   FROM (SELECT d.`tenant_id`, COUNT(*) AS `cnt`
           FROM (SELECT `tenant_id`, `user_id`
                   FROM `employees`
-                 WHERE `user_id` IS NOT NULL
+                 WHERE `user_id` IS NOT NULL AND `user_id` <> ''
                  GROUP BY `tenant_id`, `user_id`
                 HAVING COUNT(*) >= 2) d
          GROUP BY d.`tenant_id`) g

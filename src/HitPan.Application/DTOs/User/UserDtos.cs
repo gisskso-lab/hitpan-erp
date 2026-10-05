@@ -30,6 +30,24 @@ public class CreateUserDto
     public string Role { get; set; } = "User";
     public DateTime? HireDate { get; set; }
     public string? Memo { get; set; }
+
+    // 20261005작5 V5-06 ② — 같은 이름의 재직·미등록 사원이 있어도 「다른 사람이다」라고 확인했을 때만 새 사원과 함께 만든다.
+    public bool ConfirmDifferentPerson { get; set; }
+}
+
+/// <summary>
+/// 20261005작5 §3 — 기존 사원에게 계정 만들기(<c>POST /api/users/for-employee</c>). 사원 행은 새로 만들지 않는다.
+/// </summary>
+public class CreateForEmployeeDto
+{
+    public string EmployeeId { get; set; } = "";
+    /// <summary>로그인 아이디(<c>users.email</c> 에 저장 · 칸 이름만 email). 공백 없이 4자 이상.</summary>
+    public string LoginId { get; set; } = "";
+    public string Password { get; set; } = "";
+    /// <summary>비우면 사원 이름.</summary>
+    public string? UserName { get; set; }
+    /// <summary>대표·관리자만 뜻이 있다. 2단계 직원이 보내면 무시하고 일반(User)으로 만든다(§5-3).</summary>
+    public string? Role { get; set; }
 }
 
 public class UpdateUserDto
@@ -56,6 +74,9 @@ public class BulkCreateResultDto
     public bool SeatFull { get; set; }
     public int Active { get; set; }
     public int Limit { get; set; }
+
+    // 20261005작5 V5-06 ③ — 같은 이름의 재직·미등록 사원이 이미 있던 행(막지 않고 알린다 · 쌍둥이 사원 의심)
+    public List<HitPan.Application.Services.BulkSameNameWarning> SameNameWarnings { get; set; } = new();
 }
 
 public class BulkRowError

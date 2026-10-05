@@ -7,7 +7,9 @@ namespace HitPan.Application.DTOs.User;
 
 public class CreateChildUserRequest
 {
-    [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+    // ⬛ [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+    // 20261005작5 §6 — 계정은 「아이디」(act0226 · test1234 처럼 이메일 모양이 아니다). 남은 유일한 형식 강요를 걷는다(칸 이름 Email 은 그대로 · I-1).
+    [Required] public string Email { get; set; } = string.Empty;
     [Required] public string EmpName { get; set; } = string.Empty;
     [Required, StringLength(64, MinimumLength = 8)] public string Password { get; set; } = string.Empty;
     [Required] public string Role { get; set; } = "User"; // User · hr_manager · accountant 등
