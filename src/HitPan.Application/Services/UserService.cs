@@ -809,17 +809,94 @@ public sealed class UserService : IUserService
     }
 
     /// <summary>2단계 직원의 [사용 안 함] — 대상이 일반 계정이고 단계 0 일 때만(§5-3 · P3-08).</summary>
+    /// <remarks>🔴 작5 §8-4 R-1 — 울타리 판정을 조건부 UPDATE 의 WHERE 에 넣었다(원자). 판정 뒤 대상이 관리자로 바뀌어도
+    /// UPDATE 가 그 순간의 행을 다시 보고 0행 ⇒ 403. users 잠금 읽기 없음(P3-10 — 잠금은 UPDATE 자신의 행 잠금뿐).</remarks>
     public async Task SuspendAsStaffAsync(string userId, string actorUserId, string tenantId, CancellationToken ct = default)
     {
-        await EnsureStaffMayTouchAsync(userId, actorUserId, tenantId, ct).ConfigureAwait(false);
-        await SuspendAsync(userId, tenantId, ct).ConfigureAwait(false);
+        // ⬛ [R-1 전] 판정(따로 읽기) → 바꾸기(따로 트랜잭션) 두 단계 — 그 사이 대상이 관리자로 바뀌면 관리자를 끌 수 있었다.
+        // ⬛ await EnsureStaffMayTouchAsync(userId, actorUserId, tenantId, ct).ConfigureAwait(false);
+        // ⬛ await SuspendAsync(userId, tenantId, ct).ConfigureAwait(false);
+        RejectSelf(userId, actorUserId);
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        using (var tx = _db.BeginTransaction())
+        {
+            var affected = await _db.ExecuteAsync(new CommandDefinition(
+                $"""
+                UPDATE users u SET u.is_active = 0, u.updated_at = NOW(6)
+                WHERE u.user_id = @UserId AND u.tenant_id = @TenantId AND u.is_deleted = 0
+                  AND {StaffTouchablePredicate}
+                """,
+                new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            if (affected == 1)
+            {
+                await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
+                tx.Commit();
+                await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"suspend\",\"is_active\":false}", ct: ct);
+                return;
+            }
+            tx.Rollback();
+        }
+        await ThrowStaffRefusalAsync(userId, actorUserId, tenantId, "사용자를 찾을 수 없습니다.", ct).ConfigureAwait(false);
     }
 
     /// <summary>2단계 직원의 [다시 사용] — 대상이 일반 계정이고 단계 0 일 때만(§5-3 · P3-08).</summary>
+    /// <remarks>🔴 작5 §8-4 R-1 — <see cref="SuspendAsStaffAsync"/> 와 같은 원자 UPDATE. 첫 문장은 좌석 잠금(작3 E-5 그대로).</remarks>
     public async Task ResumeAsStaffAsync(string userId, string actorUserId, string tenantId, CancellationToken ct = default)
     {
+        // ⬛ [R-1 전] await EnsureStaffMayTouchAsync(userId, actorUserId, tenantId, ct).ConfigureAwait(false);
+        // ⬛ await ResumeAsync(userId, tenantId, ct).ConfigureAwait(false);
+        RejectSelf(userId, actorUserId);
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        using (var tx = _db.BeginTransaction())
+        {
+            await using (var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false))
+            {
+                await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
+
+                var affected = await _db.ExecuteAsync(new CommandDefinition(
+                    $"""
+                    UPDATE users u SET u.is_active = 1, u.updated_at = NOW(6)
+                    WHERE u.user_id = @UserId AND u.tenant_id = @TenantId AND u.is_deleted = 0 AND u.is_active = 0
+                      AND {StaffTouchablePredicate}
+                    """,
+                    new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                if (affected == 1)
+                {
+                    tx.Commit();
+                    await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"resume\",\"is_active\":true}", ct: ct);
+                    return;
+                }
+                tx.Rollback();
+            }
+        }
+        await ThrowStaffRefusalAsync(userId, actorUserId, tenantId, "다시 사용할 계정을 찾을 수 없습니다.", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🔴 작5 §8-4 R-1 — 2단계 직원이 바꿔도 되는 대상(§5-3 · P3-08)의 술어. <see cref="EnsureStaffMayTouchAsync"/> 와 같은 판정을
+    /// UPDATE 의 WHERE 로 옮긴 것 — 대표 아님 · 관리자 아님 · USERS 세 코드 중 하나도 can_view=1 아님. 별칭 <c>u</c> = users.
+    /// </summary>
+    private const string StaffTouchablePredicate =
+        "u.is_parent = 0 AND COALESCE(u.account_type, '') <> 'tenant_admin' "
+        + "AND NOT EXISTS (SELECT 1 FROM user_permissions p WHERE p.user_id = u.user_id AND p.tenant_id = u.tenant_id "
+        + "AND p.menu_code IN ('USERS', 'USERS_ACCOUNT', 'USERS_SEAT') AND p.can_view = 1)";
+
+    private static void RejectSelf(string userId, string actorUserId)
+    {
+        if (string.Equals(userId, actorUserId, StringComparison.Ordinal))
+            throw new AccountActionForbiddenException("self_account", "본인 계정은 여기서 바꿀 수 없습니다.");
+    }
+
+    /// <summary>
+    /// 원자 UPDATE 가 0행일 때 <b>왜</b> 막혔는지 알려 준다(트랜잭션을 되돌린 뒤 · 잠금 읽기 없음). 판정은 이미 UPDATE 가 했다 —
+    /// 여기는 문구만 고른다. 울타리 사유가 없으면(대상 없음 · 이미 그 상태) <paramref name="notFoundMessage"/>.
+    /// </summary>
+    private async Task ThrowStaffRefusalAsync(string userId, string actorUserId, string tenantId, string notFoundMessage, CancellationToken ct)
+    {
         await EnsureStaffMayTouchAsync(userId, actorUserId, tenantId, ct).ConfigureAwait(false);
-        await ResumeAsync(userId, tenantId, ct).ConfigureAwait(false);
+        throw new InvalidOperationException(notFoundMessage);
     }
 
     private sealed class StaffTargetRow
@@ -828,7 +905,9 @@ public sealed class UserService : IUserService
         public string? AccountType { get; set; }
     }
 
-    // ⚠️ 판정과 바꾸기가 한 트랜잭션이 아니다 — 그 사이 대표가 대상에게 권한을 주면 한 번 빠질 수 있다(권한 부여는 대표·관리자만 · 개발명세서 「남은 위험」).
+    // ⬛ [R-1 전] ⚠️ 판정과 바꾸기가 한 트랜잭션이 아니다 — 그 사이 대표가 대상에게 권한을 주면 한 번 빠질 수 있다(권한 부여는 대표·관리자만 · 개발명세서 「남은 위험」).
+    // 🔴 작5 §8-4 R-1 이후 — 이 함수는 판정을 하지 않는다. 판정은 StaffTouchablePredicate(조건부 UPDATE)가 하고,
+    //   이 함수는 그 UPDATE 가 0행일 때 거절 사유(문구)를 고르는 데만 쓴다(ThrowStaffRefusalAsync).
     private async Task EnsureStaffMayTouchAsync(string userId, string actorUserId, string tenantId, CancellationToken ct)
     {
         if (string.Equals(userId, actorUserId, StringComparison.Ordinal))
