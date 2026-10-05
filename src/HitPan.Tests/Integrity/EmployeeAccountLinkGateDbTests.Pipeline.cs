@@ -164,6 +164,38 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         Assert.DoesNotContain("forbidden_terms_consent", r.Body);
     }
 
+    /// <summary>
+    /// 작5 §8-8 V5-15 — 정책을 지나 <see cref="EmployeeController.GetList"/> 본문까지 간 호출자(직원 토큰과 같은 클레임)의 응답.
+    /// 파이프라인에선 클래스 <c>TenantAdminOnly</c> 가 직원을 403 으로 끊어 본문의 가림이 안 닿는다 ⇒ 본문을 직접 부른다.
+    /// 서비스·권한 판정은 실물(<see cref="EmployeeService"/> · <see cref="PermissionService"/>).
+    /// </summary>
+    private async Task<Res> EmployeeListBodyAsync(MySqlConnection db, Who who)
+    {
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            {
+                new Claim("account_type", who.AccountType), new Claim("tenant_id", _tenantA),
+                new Claim("user_id", who.UserId), new Claim("sid", who.Sid),
+                new Claim("role", who.AccountType == "tenant_admin" ? "admin" : "user"),
+            }, authenticationType: "GateJwt")),
+        };
+        http.Items["TenantId"] = _tenantA;
+        http.Items["UserId"] = who.UserId;
+        var controller = new EmployeeController(new EmployeeService(db, new NoOpAudit()))
+        {
+            ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = http },
+        };
+        var result = await controller.GetList(true, new PermissionService(db, new CurrentTenant()), default);
+        return result switch
+        {
+            Microsoft.AspNetCore.Mvc.ObjectResult o => new Res(o.StatusCode ?? 200,
+                System.Text.Json.JsonSerializer.Serialize(o.Value, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))),
+            Microsoft.AspNetCore.Mvc.Infrastructure.IStatusCodeActionResult s => new Res(s.StatusCode ?? 0, string.Empty),
+            _ => new Res(0, result.GetType().Name),
+        };
+    }
+
     // ⬛ [합류 전] 키를 몰라 "email" 도 함께 보냈다 — 계약(개발명세서 §4 ④) 키만 보낸다: employeeId·loginId·password·role
     private static string ForEmployeeJson(string emp, string login, string role = "User") =>
         $"{{\"employeeId\":\"{emp}\",\"loginId\":\"{login}\",\"password\":\"{Pw}\",\"role\":\"{role}\"}}";
@@ -334,10 +366,27 @@ public sealed partial class EmployeeAccountLinkGateDbTests
 
         // P2-02 — 권한 0 직원이 사원목록을 열어도 남의 로그인 아이디(사본)는 안 보인다 · 대표는 보인다(짝)
         var e0 = await PipeAsync(db, "GET", "/api/employees?includeResigned=true", s0);
-        if (e0.Status == 200) Assert.DoesNotContain("lk1312", e0.Body);
+        // ⬛ if (e0.Status == 200) Assert.DoesNotContain("lk1312", e0.Body);
+        // 🔴 작5 §8-8 V5-15 — 조건문이면 403 일 때 아무것도 안 잰다. 기대 상태를 못박는다:
+        //   EmployeeController 클래스 TenantAdminOnly + GetList TenantOnly = 둘 다 통과해야 ⇒ 직원(tenant_user)은 403.
+        //   이 단언이 깨지면(직원에게 200 이 열리면) 아래 「200 받는 호출자 경로」의 가림 단언이 파이프라인으로 옮겨져야 한다.
+        AssertFilter403(e0, "권한 0 직원 사원목록(파이프라인)");
+        Assert.DoesNotContain("lk1312", e0.Body);
         var eo = await PipeAsync(db, "GET", "/api/employees?includeResigned=true", owner);
         Assert.True(eo.Status == 200, $"대표 사원목록 → {eo.Status}");
         Assert.Contains("ok1310", eo.Body);                     // 사본이 실제로 실린다(가림이 「원래 없음」이 아님)
+
+        // 🔴 V5-15 — 가림은 「200 받는 호출자 경로」에서 따로 잰다: 정책을 지나 GetList 본문까지 간 직원(tenant_user).
+        //   지금 파이프라인엔 그 경로가 없어(위 403) 컨트롤러 본문을 직접 부른다 — 가림 판정(CanSeeAccountColumnsAsync)과
+        //   GetList 의 비우기가 실물 그대로 돈다. 단계 0 = 비움 · 단계 1 = 보임(짝 — 비움이 「원래 없음」이 아님).
+        var g0 = await EmployeeListBodyAsync(db, s0);
+        Assert.True(g0.Status == 200, $"권한 0 직원 GetList 본문(직접) → {g0.Status} · {g0.Body}");
+        Assert.DoesNotContain("ok1310", g0.Body);
+        Assert.DoesNotContain("lk1312", g0.Body);
+        Assert.Contains("1310", g0.Body);                       // 행 자체는 실린다(사원 목록은 열린다 · 아이디만 비운다)
+        var g1 = await EmployeeListBodyAsync(db, s1);
+        Assert.True(g1.Status == 200, $"단계1 직원 GetList 본문(직접) → {g1.Status}");
+        Assert.Contains("ok1310", g1.Body);
 
         // V5-06(§8-2) — 대표가 「새 사원과 함께」로 같은 이름의 재직·미등록 사원이 있는데 만들면 409(후보 안내) · 사원 행 불변.
         //   ⬛ [합류 전] 「다른 사람 확인」 플래그로 생성되는 쪽은 요청 칸 이름이 계약 미정 ⇒ 미작성.
