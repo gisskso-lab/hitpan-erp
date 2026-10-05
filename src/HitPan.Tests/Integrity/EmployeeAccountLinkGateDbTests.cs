@@ -355,12 +355,28 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
         Assert.Equal(emps0, await CountAsync(db, "employees"));
         Assert.Equal((null, null), await EmpLinkAsync(db, emp));
 
-        // 🔴 대조군 — 판정기 호출이 빠지면 막을 것이 없다: 같은 회사에 6번째 활성 계정 INSERT 가 DB 에서 그냥 된다(되돌림)
-        await using var tx = await db.BeginTransactionAsync();
-        var n = await db.ExecuteAsync(@"INSERT INTO users (user_id, tenant_id, email, password_hash, user_name, role, account_type, is_active, is_deleted, created_at, updated_at)
-                                        VALUES (UUID(), @T, 'nojudge', 'x', 'n', 'User', 'tenant_user', 1, 0, NOW(6), NOW(6))", new { T = _tenantA }, tx);
-        Assert.Equal(1, n);
-        await tx.RollbackAsync();
+        // ⬛ 🔴 대조군 — 판정기 호출이 빠지면 막을 것이 없다: 같은 회사에 6번째 활성 계정 INSERT 가 DB 에서 그냥 된다(되돌림)
+        // ⬛ await using var tx = await db.BeginTransactionAsync();
+        // ⬛ var n = await db.ExecuteAsync(@"INSERT INTO users (...) VALUES (UUID(), @T, 'nojudge', ...)", new { T = _tenantA }, tx);
+        // ⬛ Assert.Equal(1, n);
+        // ⬛ await tx.RollbackAsync();
+        //   ↑ 작5 §8-8 V5-21 — 날 INSERT 가 된다는 것은 동어반복(아무것도 증명 안 함). 옛 경로를 실물로 재현한다.
+
+        // 🔴 V5-21 대조군 — 옛 경로(계정 추가가 사원을 새로 INSERT = UserService.CreateAsync)를 실물로 돌리면
+        //   이미 있는 사원 「한도막힘」에게 계정을 주려던 자리에서 같은 이름 사원이 하나 더 생긴다(쌍둥이).
+        //   for-employee 는 위에서 사원 행을 하나도 안 만들었다(emps0 불변) — 갈라지는 지점이 여기다.
+        //   한도가 차 있으면 옛 경로도 좌석에서 막히므로 한 자리를 비운다(실물 SuspendAsync).
+        var fill0 = await db.ExecuteScalarAsync<string>(
+            "SELECT user_id FROM users WHERE tenant_id=@T AND email='fill0'", new { T = _tenantA });
+        await svc.SuspendAsync(fill0!, _tenantA);
+        var oldUser = await svc.CreateAsync(new CreateUserDto { Email = "old0301", UserName = "한도막힘", Password = Pw, Role = "User" }, _tenantA);
+        Assert.Equal(emps0 + 1, await CountAsync(db, "employees"));                       // 옛 경로는 사원 행을 새로 만든다
+        Assert.Equal(2L, await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_name='한도막힘'", new { T = _tenantA }));   // 쌍둥이
+        Assert.Equal(oldUser, await db.ExecuteScalarAsync<string?>(
+            "SELECT user_id FROM employees WHERE tenant_id=@T AND emp_name='한도막힘' AND employee_id<>@E",
+            new { T = _tenantA, E = emp }));                                                  // 새 계정은 새 사원에 붙고
+        Assert.Equal((null, null), await EmpLinkAsync(db, emp));                              // 원래 사원은 여전히 계정 없음
     }
 
     // ══ G-E4 ══
