@@ -164,8 +164,39 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         Assert.DoesNotContain("forbidden_terms_consent", r.Body);
     }
 
+    // ⬛ [합류 전] 키를 몰라 "email" 도 함께 보냈다 — 계약(개발명세서 §4 ④) 키만 보낸다: employeeId·loginId·password·role
     private static string ForEmployeeJson(string emp, string login, string role = "User") =>
-        $"{{\"employeeId\":\"{emp}\",\"loginId\":\"{login}\",\"email\":\"{login}\",\"password\":\"{Pw}\",\"role\":\"{role}\"}}";
+        $"{{\"employeeId\":\"{emp}\",\"loginId\":\"{login}\",\"password\":\"{Pw}\",\"role\":\"{role}\"}}";
+
+    /// <summary>JSON 본문의 문자열 칸 하나(없으면 null) — 409 의 <c>code</c> 를 계약대로 읽는다(§4).</summary>
+    private static string? JsonStr(Res r, string name)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(r.Body);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String
+                ? v.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            Console.Error.WriteLine($"[EmployeeAccountLinkGate] JSON 아님({r.Status}): {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary><c>GET /api/users/my-level</c> 계약 ① <c>{ level, isAdmin }</c> 의 level.</summary>
+    private static int MyLevel(Res r)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(r.Body);
+        return doc.RootElement.GetProperty("level").GetInt32();
+    }
+
+    private static void Assert409Code(Res r, string code, string what)
+    {
+        Assert.True(r.Status == 409, $"{what} → {r.Status} (기대 409 {code}) · {r.Body}");
+        Assert.Equal(code, JsonStr(r, "code"));
+    }
 
     // ══ G-E9 · G-E10 ══
 
@@ -184,10 +215,12 @@ public sealed partial class EmployeeAccountLinkGateDbTests
             var s = await StaffAsync(db, $"s{lv}", lv);
             var emp = await InsertEmployeeAsync(db, $"09{lv}1", $"사원{lv}");
 
-            // 단계 판정 함수(§5-1) — my-level 이 그 값을 돌려준다(갈래2 합류 후 연결)
+            // 단계 판정 함수(§5-1) — my-level 이 그 값을 돌려준다(§연결: 계약 ① { level, isAdmin })
             var my = await PipeAsync(db, "GET", "/api/users/my-level", s);
             Assert.True(my.Status == 200, $"my-level 단계{lv} → {my.Status} · {my.Body}");
-            Assert.Matches(new Regex($@"(^|\D){lv}(\D|$)"), my.Body);
+            // ⬛ [합류 전] Assert.Matches(new Regex($@"(^|\D){lv}(\D|$)"), my.Body);  — 숫자가 아무 데나 있어도 통과했다
+            Assert.Equal(lv, MyLevel(my));
+            Assert.Contains("\"isAdmin\":false", my.Body);
 
             foreach (var p in new[] { "/api/users", "/api/users/seats" })
             {
@@ -195,9 +228,13 @@ public sealed partial class EmployeeAccountLinkGateDbTests
                 if (lv >= 1) Assert.True(r.Status == 200, $"단계{lv} GET {p} → {r.Status}"); else AssertFilter403(r, $"단계0 GET {p}");
             }
             var link = await PipeAsync(db, "GET", "/api/users/linkable-employees", s);
-            var fe = await PipeAsync(db, "POST", "/api/users/for-employee", s, ForEmployeeJson(emp, $"fe{lv}", "TenantAdmin"));
+            // ⬛ [CI 1차 G-E9] 아이디 $"fe{lv}"·$"cu{lv}"(3자) — P3-09 아이디 규칙(공백 없이 4자 이상)을 시험 입력이 어겨 400 invalid_input.
+            //   규칙은 그대로 두고 입력값만 규칙에 맞춘다(5자).
+            var feId = $"fe09{lv}";
+            var cuId = $"cu09{lv}";
+            var fe = await PipeAsync(db, "POST", "/api/users/for-employee", s, ForEmployeeJson(emp, feId, "TenantAdmin"));
             var cu = await PipeAsync(db, "POST", "/api/users", s,
-                $"{{\"email\":\"cu{lv}\",\"userName\":\"cu{lv}\",\"password\":\"{Pw}\",\"role\":\"TenantAdmin\"}}");
+                $"{{\"email\":\"{cuId}\",\"userName\":\"{cuId}\",\"password\":\"{Pw}\",\"role\":\"TenantAdmin\"}}");
             var su = await PipeAsync(db, "POST", $"/api/users/{target}/suspend", s);
             var re = await PipeAsync(db, "POST", $"/api/users/{target}/resume", s);
             if (lv >= 2)
@@ -207,7 +244,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests
                 Assert.True(Ok2xx(su) && Ok2xx(re), $"단계{lv} suspend/resume → {su.Status}/{re.Status}");
                 // 울타리(§5-3 · P-4) — 요청 role=TenantAdmin 이어도 일반으로
                 Assert.Equal("tenant_user", await db.ExecuteScalarAsync<string>(
-                    "SELECT account_type FROM users WHERE tenant_id=@T AND email=@E", new { T = _tenantA, E = $"fe{lv}" }));
+                    "SELECT account_type FROM users WHERE tenant_id=@T AND email=@E", new { T = _tenantA, E = feId }));
             }
             else
             {
@@ -221,7 +258,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests
             if (lv < 2)
             {
                 Assert.Equal(0L, await db.ExecuteScalarAsync<long>(
-                    "SELECT COUNT(*) FROM users WHERE tenant_id=@T AND email=@E", new { T = _tenantA, E = $"fe{lv}" }));
+                    "SELECT COUNT(*) FROM users WHERE tenant_id=@T AND email=@E", new { T = _tenantA, E = feId }));
             }
             // P-3 — 수정·계정폐기·비번 초기화는 단계와 무관하게 대표·관리자만
             AssertFilter403(await PipeAsync(db, "PUT", $"/api/users/{target}", s, "{\"userName\":\"x\",\"role\":\"User\"}"), $"단계{lv} PUT");
@@ -240,13 +277,16 @@ public sealed partial class EmployeeAccountLinkGateDbTests
                 var adminJob = await InsertEmployeeAsync(db, "0929", "관리직무");
                 await db.ExecuteAsync("UPDATE employees SET role='tenant_admin' WHERE employee_id=@E", new { E = adminJob });
                 var aj = await PipeAsync(db, "POST", "/api/users/for-employee", s, ForEmployeeJson(adminJob, "aj0929"));
-                Assert.True(aj.Status == 409, $"관리자 직무 사원 for-employee → {aj.Status} (기대 409) · {aj.Body}");
+                Assert409Code(aj, "employee_role_not_general", "관리자 직무 사원 for-employee");
                 Assert.Null((await EmpLinkAsync(db, adminJob)).userId);
             }
         }
 
         // 대표·관리자 = 늘 3 · 권한설정 200(E10 의 403 이 경로 없음 404 가 아님을 보이는 짝)
-        Assert.Matches(new Regex(@"(^|\D)3(\D|$)"), (await PipeAsync(db, "GET", "/api/users/my-level", manager)).Body);
+        // ⬛ [합류 전] Assert.Matches(new Regex(@"(^|\D)3(\D|$)"), (await PipeAsync(db, "GET", "/api/users/my-level", manager)).Body);
+        var mgrLevel = await PipeAsync(db, "GET", "/api/users/my-level", manager);
+        Assert.Equal(3, MyLevel(mgrLevel));
+        Assert.Contains("\"isAdmin\":true", mgrLevel.Body);
         var ownerPerm = await PipeAsync(db, "POST", "/api/permissions", owner,
             $"{{\"userId\":\"{target}\",\"permissions\":[{{\"menuCode\":\"USERS\",\"canView\":true}}]}}");
         Assert.True(Ok2xx(ownerPerm), $"대표 POST permissions → {ownerPerm.Status}");
@@ -287,9 +327,10 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         var fe = await PipeAsync(db, "POST", "/api/users/for-employee", s2, ForEmployeeJson(free, "ok1310"));
         Assert.True(Ok2xx(fe), $"for-employee 단계2 → {fe.Status} · {fe.Body}");
         var dup = await PipeAsync(db, "POST", "/api/users/for-employee", s2, ForEmployeeJson(free, "again1310"));
-        Assert.True(dup.Status == 409, $"같은 사원 두 번째 → {dup.Status} (기대 409)");
+        // ⬛ [합류 전] 상태 409 만 쟀다 — 계약(§4 ④)의 code 로 사유까지 가른다
+        Assert409Code(dup, "employee_has_account", "같은 사원 두 번째");
         var lv = await PipeAsync(db, "POST", "/api/users/for-employee", s2, ForEmployeeJson(leaver, "lv1311"));
-        Assert.True(lv.Status == 409, $"MDB 퇴사자 → {lv.Status} (기대 409)");
+        Assert409Code(lv, "employee_leaver", "MDB 퇴사자");
 
         // P2-02 — 권한 0 직원이 사원목록을 열어도 남의 로그인 아이디(사본)는 안 보인다 · 대표는 보인다(짝)
         var e0 = await PipeAsync(db, "GET", "/api/employees?includeResigned=true", s0);
@@ -299,14 +340,36 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         Assert.Contains("ok1310", eo.Body);                     // 사본이 실제로 실린다(가림이 「원래 없음」이 아님)
 
         // V5-06(§8-2) — 대표가 「새 사원과 함께」로 같은 이름의 재직·미등록 사원이 있는데 만들면 409(후보 안내) · 사원 행 불변.
-        //   「다른 사람 확인」 플래그로 생성되는 쪽은 요청 칸 이름이 계약 미정 ⇒ 갈래2 합류 후 연결(명세 목록).
+        //   ⬛ [합류 전] 「다른 사람 확인」 플래그로 생성되는 쪽은 요청 칸 이름이 계약 미정 ⇒ 미작성.
+        //   🟢 §연결 — 계약 ⑤ `confirmDifferentPerson` 로 다시 보내면 201 · 사원 +1(동명이인 허용) — 아래에서 잰다.
         await InsertEmployeeAsync(db, "1320", "동명이인");
         var emps = await CountAsync(db, "employees");
-        var same = await PipeAsync(db, "POST", "/api/users", owner,
-            $"{{\"email\":\"same1320\",\"userName\":\"동명이인\",\"empName\":\"동명이인\",\"password\":\"{Pw}\",\"role\":\"User\"}}");
-        Assert.True(same.Status == 409, $"같은 이름 미등록 사원 있음 → {same.Status} (기대 409) · {same.Body}");
+        var usersBefore = await CountAsync(db, "users");
+        string SameJson(bool confirm) =>
+            $"{{\"email\":\"same1320\",\"userName\":\"동명이인\",\"empName\":\"동명이인\",\"password\":\"{Pw}\",\"role\":\"User\",\"confirmDifferentPerson\":{(confirm ? "true" : "false")}}}";
+        var same = await PipeAsync(db, "POST", "/api/users", owner, SameJson(false));
+        Assert409Code(same, "same_name_employee", "같은 이름 미등록 사원 있음");
         Assert.Contains("1320", same.Body);                      // 후보(사번)를 돌려준다
+        Assert.Contains("\"candidates\"", same.Body);
         Assert.Equal(emps, await CountAsync(db, "employees"));
+        Assert.Equal(usersBefore, await CountAsync(db, "users"));
+
+        // 🟢 §연결 V5-06 — 「다른 사람입니다」 확인(confirmDifferentPerson:true)으로만 새 사원과 함께 만든다
+        var confirmed = await PipeAsync(db, "POST", "/api/users", owner, SameJson(true));
+        Assert.True(confirmed.Status == 201, $"다른 사람 확인 뒤 → {confirmed.Status} (기대 201) · {confirmed.Body}");
+        Assert.Equal(emps + 1, await CountAsync(db, "employees"));                 // 동명이인 사원 행 +1
+        Assert.Equal(usersBefore + 1, await CountAsync(db, "users"));
+        Assert.Equal(2L, await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM employees WHERE tenant_id=@T AND emp_name='동명이인'", new { T = _tenantA }));
+        Assert.Equal("same1320", await db.ExecuteScalarAsync<string?>(
+            "SELECT login_id FROM employees WHERE tenant_id=@T AND emp_name='동명이인' AND emp_no<>'1320'", new { T = _tenantA }));
+        Assert.Null((await db.QuerySingleAsync<(string? u, string? l)>(
+            "SELECT user_id, login_id FROM employees WHERE tenant_id=@T AND emp_no='1320'", new { T = _tenantA })).u);   // 기존 사원은 그대로 미등록
+        // 대조군 — 플래그 칸을 빼면(기본 false) 409 로 되돌아간다 = 201 은 플래그가 연 것이다
+        await InsertEmployeeAsync(db, "1321", "동명이인둘");
+        var noFlag = await PipeAsync(db, "POST", "/api/users", owner,
+            $"{{\"email\":\"same1321\",\"userName\":\"동명이인둘\",\"empName\":\"동명이인둘\",\"password\":\"{Pw}\",\"role\":\"User\"}}");
+        Assert409Code(noFlag, "same_name_employee", "플래그 없는 같은 이름");
 
         // 🔴 대조군 ① — 약관 미동의 직원 ⇒ 약관 미들웨어 403(본문 코드로 필터 403 과 구별) = 요청이 그 미들웨어를 실제로 지난다
         var noTerms = await StaffAsync(db, "p1309", 2, terms: false);

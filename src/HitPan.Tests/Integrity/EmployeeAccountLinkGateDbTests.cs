@@ -1,4 +1,3 @@
-using System.Reflection;
 using Dapper;
 using HitPan.API.Services;
 using HitPan.Application.DTOs.Employee;
@@ -23,6 +22,8 @@ namespace HitPan.Tests.Integrity;
 /// <c>EmployeeListDto.AccountStatus/IsLeaver/LoginId</c> · <c>UserService.CreateForEmployeeAsync</c> · <c>DB-137_*.sql</c>)가 아직 없었다.
 /// 그래서 그 자리는 <b>리플렉션·SQL·파일 경로</b>로 부른다(빌드 0/0 유지). 없으면 「갈래N 합류 전」 문구로 <b>FAIL</b> 한다 —
 /// SKIP 이 아니다(없는 봉합을 통과로 세지 않는다). 표시: <c>// 갈래2 합류 후 연결</c>.</para>
+/// <para>🟢 10/5 §연결 — 갈래2 합류 뒤 리플렉션 호출은 <b>직접 호출</b>로 바꿨다(<c>CreateForEmployeeAsync</c> · DTO 칸).
+/// 남은 「갈래1 합류 전」 문구는 SQL·파일 경로 판정이라 그대로 둔다(칸·파일이 없으면 FAIL).</para>
 /// <para>⚠️ 개발 PC 는 SKIP 이 정상(<c>hitpan</c> 은 CREATE DATABASE 거부) — CI <c>db-gate</c>(<c>HITPAN_REQUIRE_DB=1</c>)가 FAIL 로 바꾼다.
 /// <b>로컬 초록은 증거가 아니다.</b> draft PR 의 <c>db-gate</c> 가 유일한 계측 경로.</para>
 /// <para>🔴 대조군 — 각 시험 안에서 <b>봉합 전 판정(옛 SQL·옛 경로)</b>이 같은 줄을 어떻게 봤는지 다시 잰다. 대조군이 「뚫렸을 것」을
@@ -216,71 +217,20 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
         await db.QuerySingleAsync<(string?, string?)>(
             "SELECT user_id, login_id FROM employees WHERE employee_id=@E", new { E = employeeId });   // login_id = DB-137(갈래1)
 
-    // ══ 새 제품 함수 — 리플렉션으로 부른다(// 갈래2 합류 후 연결) ══
+    // ══ 새 제품 함수 — 실물 직접 호출(§연결 · 10/5 갈래2 합류 후) ══
+    // ⬛ [합류 전] 리플렉션(GetMethod("CreateForEmployeeAsync") + BuildArg 이름 맞추기)으로 불렀다. 갈래2 의 계약
+    //   (개발명세서 §4 게이트 진입점)이 들어와 직접 호출로 바꿨다 — 인자 이름이 바뀌면 이제 빌드가 깨진다(조용한 오배선 없음).
+    //   ⚠️ 리플렉션 판은 bool actorIsAdmin 을 Activator 기본값(false)으로 넘겼다 — 같은 뜻을 기본값으로 유지한다.
 
     /// <summary>
-    /// <c>UserService.CreateForEmployeeAsync(employeeId, dto, tenantId)</c>(설계 §3) 를 이름으로 찾아 부른다.
-    /// 인자는 이름·형식으로 맞춘다 — 직원 id·테넌트·취소 토큰·요청 DTO(<c>LoginId</c>/<c>Email</c>·<c>Password</c>·<c>UserName</c>·<c>Role</c>).
+    /// <see cref="UserService.CreateForEmployeeAsync"/>(설계 §3 · 개발명세서 §4) — 요청 DTO <see cref="CreateForEmployeeDto"/>.
+    /// <paramref name="actorIsAdmin"/> 거짓 = 2단계 직원이 부른 것(일반 직무만 · 만드는 계정 User 고정).
     /// </summary>
-    // 갈래2 합류 후 연결 — 형식이 생기면 리플렉션 대신 직접 호출로 바꿔도 된다(동작은 같다).
-    private static async Task CreateForEmployeeAsync(UserService svc, string tenantId, string employeeId, string loginId,
-        string? role = null)
-    {
-        var m = typeof(UserService).GetMethod("CreateForEmployeeAsync", BindingFlags.Public | BindingFlags.Instance)
-                ?? throw new Xunit.Sdk.XunitException(
-                    "갈래2 합류 전 — UserService.CreateForEmployeeAsync 가 없다(설계 §3). 이 게이트는 봉합이 들어와야 초록이다.");
-        var args = m.GetParameters().Select(p => BuildArg(p, tenantId, employeeId, loginId, role)).ToArray();
-        object? ret;
-        try
-        {
-            ret = m.Invoke(svc, args);
-        }
-        catch (TargetInvocationException tie) when (tie.InnerException is not null)
-        {
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tie.InnerException).Throw();
-            throw;
-        }
-        if (ret is Task t) await t;
-    }
-
-    private static object? BuildArg(ParameterInfo p, string tenantId, string employeeId, string loginId, string? role)
-    {
-        var name = (p.Name ?? "").ToLowerInvariant();
-        if (p.ParameterType == typeof(CancellationToken)) return CancellationToken.None;
-        if (p.ParameterType == typeof(string))
-        {
-            if (name.Contains("tenant")) return tenantId;
-            if (name.Contains("employee") || name.Contains("emp")) return employeeId;
-            if (name.Contains("login") || name.Contains("email")) return loginId;
-            if (name.Contains("password")) return Pw;
-            throw new Xunit.Sdk.XunitException($"CreateForEmployeeAsync 인자 {p.Name} 를 못 맞춘다 — 게이트 BuildArg 를 같이 고쳐라.");
-        }
-        var dto = Activator.CreateInstance(p.ParameterType)
-                  ?? throw new Xunit.Sdk.XunitException($"DTO {p.ParameterType.Name} 를 못 만든다.");
-        foreach (var prop in p.ParameterType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(x => x.CanWrite))
-        {
-            var pn = prop.Name.ToLowerInvariant();
-            object? v = pn switch
-            {
-                "loginid" or "email" => loginId,
-                "password" => Pw,
-                "employeeid" => employeeId,
-                "role" => role,
-                _ => null
-            };
-            if (v is not null && prop.PropertyType == typeof(string)) prop.SetValue(dto, v);
-        }
-        return dto;
-    }
-
-    /// <summary><c>EmployeeListDto</c> 의 새 칸(설계 §2-1)을 이름으로 읽는다. 없으면 「갈래2 합류 전」 FAIL.</summary>
-    // 갈래2 합류 후 연결 — EmployeeListDto.AccountStatus/IsLeaver/LoginId
-    private static object? Prop(object row, string name)
-    {
-        var p = row.GetType().GetProperty(name)
-                ?? throw new Xunit.Sdk.XunitException($"갈래2 합류 전 — {row.GetType().Name}.{name} 칸이 없다(설계 §2-1).");
-        return p.GetValue(row);
-    }
+    private static Task<string> CreateForEmployeeAsync(UserService svc, string tenantId, string employeeId, string loginId,
+        string? role = null, bool actorIsAdmin = false) =>
+        svc.CreateForEmployeeAsync(
+            new CreateForEmployeeDto { EmployeeId = employeeId, LoginId = loginId, Password = Pw, Role = role },
+            tenantId, actorIsAdmin, CancellationToken.None);
 
     private static async Task<List<EmployeeListDto>> ListAsync(MySqlConnection db, string tenantId) =>
         await new EmployeeService(db, new NoOpAudit()).GetListAsync(tenantId, includeResigned: true);
@@ -365,8 +315,9 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
 
         foreach (var (emp, id) in new[] { (gone, "gone0201"), (mdb, "mdb0202") })
         {
-            var ex = await Assert.ThrowsAnyAsync<Exception>(() => CreateForEmployeeAsync(svc, _tenantA, emp, id));
-            Assert.IsNotType<AccountSeatFullException>(ex);
+            // ⬛ [합류 전] ThrowsAnyAsync<Exception> + 문구 「퇴사」만 — 계약(§4 ④)이 들어와 코드까지 잰다
+            var ex = await Assert.ThrowsAsync<AccountLinkConflictException>(() => CreateForEmployeeAsync(svc, _tenantA, emp, id));
+            Assert.Equal("employee_leaver", ex.Code);
             Assert.Contains("퇴사", ex.Message);
         }
         Assert.Equal(users0, await CountAsync(db, "users"));
@@ -374,7 +325,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
 
         var rows = await ListAsync(db, _tenantA);
         foreach (var e in new[] { gone, mdb })
-            Assert.True(Convert.ToInt32(Prop(rows.Single(r => r.EmployeeId == e), "IsLeaver")) == 1, $"IsLeaver 가 1 이 아니다: {e}");
+            Assert.True(rows.Single(r => r.EmployeeId == e).IsLeaver, $"IsLeaver 가 참이 아니다: {e}");
 
         // 🔴 대조군 — 판별을 is_active 만으로 하면(옛 판정) MDB 모양 사원은 「재직」 = 만들기가 통과했을 자리
         var oldLeaver = await db.ExecuteScalarAsync<int>(
@@ -440,7 +391,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
                 Console.Error.WriteLine($"[G-E4] 진 쪽: {ex.GetType().Name} {ex.Message}");
             }
         }
-        // 「갈래2 합류 전」 FAIL 은 위 when 절로 그대로 올라온다(진 쪽으로 세지 않는다).
+        // 게이트 자체 실패(XunitException)는 위 when 절로 그대로 올라온다(진 쪽으로 세지 않는다).
         await using var db = await OpenAsync();
         Assert.Equal(1, ok);
         Assert.Equal(users0 + 1, await CountAsync(db, "users"));
@@ -484,8 +435,9 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
         var svc = new UserService(db, new NoOpAudit());
         var users0 = await CountAsync(db, "users");
 
-        var ex = await Assert.ThrowsAnyAsync<Exception>(() => CreateForEmployeeAsync(svc, _tenantA, emp, "second0501"));
-        Assert.IsNotType<AccountSeatFullException>(ex);
+        // ⬛ [합류 전] ThrowsAnyAsync<Exception> + 문구만 — 계약(§4 ④ employee_has_account)으로 잰다
+        var ex = await Assert.ThrowsAsync<AccountLinkConflictException>(() => CreateForEmployeeAsync(svc, _tenantA, emp, "second0501"));
+        Assert.Equal("employee_has_account", ex.Code);
         Assert.Contains("이미 계정", ex.Message);
         Assert.Equal(users0, await CountAsync(db, "users"));
         Assert.Equal(sus, (await EmpLinkAsync(db, emp)).userId);
@@ -509,7 +461,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
 
         var rows = await ListAsync(db, _tenantA);
         foreach (var e in new[] { empDeleted, empGhost })
-            Assert.Equal("none", Prop(rows.Single(r => r.EmployeeId == e), "AccountStatus")?.ToString());
+            Assert.Equal("none", rows.Single(r => r.EmployeeId == e).AccountStatus);
 
         var svc = new UserService(db, new NoOpAudit());
         await CreateForEmployeeAsync(svc, _tenantA, empDeleted, "new0601");
@@ -542,7 +494,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
 
         var rows = await ListAsync(db, _tenantA);
         foreach (var (emp, st) in expect)
-            Assert.True(st == Prop(rows.Single(r => r.EmployeeId == emp), "AccountStatus")?.ToString(),
+            Assert.True(st == rows.Single(r => r.EmployeeId == emp).AccountStatus,
                 $"{emp} 상태 기대 {st}");
 
         // 기존 HasUserAccount 는 그대로(§2-1 · 읽는 화면 3곳) — 옛 식으로 따로 잰 값과 같아야 한다
