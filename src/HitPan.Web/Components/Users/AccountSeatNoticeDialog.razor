@@ -20,8 +20,26 @@
         <MudText Typo="Typo.caption" Class="mt-3" Style="color:var(--mud-palette-text-secondary)">
             「사용 안 함」이나 「계정폐기」로 바꾼 계정은 한도에서 빠집니다.
         </MudText>
+        @* 20261005작5 A · P-5 — 막혀 열렸을 때 다음 걸음. 구독계정추가 권한(3단계)이 있으면 버튼, 없으면 누구에게 말할지.
+           CanSubscribe 를 안 준 곳(작3 화면)은 종전 그대로다. *@
+        @if (Blocked && CanSubscribe is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                계정을 추가 구매하세요.
+                @if (CanSubscribe == false)
+                {
+                    <br />
+                    <span>대표님께 계정 추가를 요청하세요.</span>
+                }
+            </MudAlert>
+        }
     </DialogContent>
     <DialogActions>
+        @if (Blocked && CanSubscribe == true)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.GroupAdd" OnClick="SubscribeAsync">구독계정추가</MudButton>
+        }
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CloseAsync">닫기</MudButton>
     </DialogActions>
 </MudDialog>
@@ -34,6 +52,14 @@
     [Parameter] public bool Blocked { get; set; }
     [Parameter] public int Active { get; set; }
     [Parameter] public int Limit { get; set; }
+
+    /// <summary>20261005작5 — null = 종전(작3) 그대로 · true = [구독계정추가] 버튼 · false = 「대표님께 계정 추가를 요청하세요」.</summary>
+    [Parameter] public bool? CanSubscribe { get; set; }
+
+    /// <summary>[구독계정추가]를 눌렀을 때 — 부모 화면이 숫자를 다시 읽고 이 창을 「안내」 모양으로 바꾼다.</summary>
+    [Parameter] public EventCallback OnSubscribe { get; set; }
+
+    private async Task SubscribeAsync() => await OnSubscribe.InvokeAsync();
 
     private string FirstLine => Blocked
         ? $"계정 사용 한도({Limit}개)가 찼습니다."
