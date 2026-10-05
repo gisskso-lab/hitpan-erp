@@ -226,7 +226,8 @@ else
                                         @* 작5 §8-5 U-3 — 2단계 직원에게 관리자 직무 사원 줄은 비활성 + 이유(서버 P1-01 409 는 그대로 2중) *@
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                                                    StartIcon="@Icons.Material.Filled.PersonAdd" Disabled="true">계정 만들기</MudButton>
-                                        <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">관리자 직무 사원은 대표님만 만들 수 있습니다</MudText>
+                                        @* ⬛ [작5 §8-9 전] 「관리자 직무 사원은 대표님만 만들 수 있습니다」 — 직무 이름 없이(판정 함수는 그대로) *@
+                                        <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">이 사원은 관리 권한이 있어 대표님만 계정을 만들 수 있습니다</MudText>
                                     }
                                     else if (_usersLevel >= 2)
                                     {
@@ -308,8 +309,8 @@ else
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">사원계정</MudText></MudItem>
                         <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.LoginId ?? "-")</MudText></MudItem>
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">역할</MudText></MudItem>
-                        @* ⬛ [작5 §8-8 V5-17 전] @_selectedDetail.Role — sales_user 같은 코드가 그대로 보였다 *@
-                        <MudItem xs="7"><MudText Style="font-size:12px">@AccountLinkLabels.RoleLabel(_selectedDetail.Role)</MudText></MudItem>
+                        @* ⬛ [작5 §8-9 되돌림] §8-8 V5-17 에서 RoleLabel 로 바꿨던 것을 이번 판 이전(761e1ffe) 표시로 되돌렸다 — 직무 이름은 히트판이 정하지 않는다 *@
+                        <MudItem xs="7"><MudText Style="font-size:12px">@_selectedDetail.Role</MudText></MudItem>
                     </MudGrid>
                 }
             </MudPaper>
@@ -438,9 +439,8 @@ else
             <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:var(--mud-palette-background-grey);border-radius:8px">
                 <MudText Typo="Typo.body2"><b>@_accountTarget.EmpName</b> (@_accountTarget.EmpNo)</MudText>
                 <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
-                    부서 @(string.IsNullOrWhiteSpace(_accountTarget.DeptName) ? "-" : _accountTarget.DeptName)
-                    · 직급 @(string.IsNullOrWhiteSpace(_accountTarget.Position) ? "-" : _accountTarget.Position)
-                    · 직무 @AccountLinkLabels.RoleLabel(_accountTarget.Role)
+                    @* ⬛ [작5 §8-9 전] 부서 -·직급 -·직무 RoleLabel — 히트판이 지은 직무 이름은 걷고, 고객이 입력한 부서·직급만(없으면 비움) *@
+                    @AccountLinkLabels.DeptPositionLine(_accountTarget.DeptName, _accountTarget.Position)
                 </MudText>
                 <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
                     이름·부서·직급·직무는 위 사원 정보 그대로 씁니다.

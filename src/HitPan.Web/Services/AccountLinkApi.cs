@@ -14,7 +14,7 @@ public sealed class LinkableEmployeeModel
     public string EmpName { get; set; } = "";
     public string? DeptName { get; set; }
     public string? Position { get; set; }
-    /// <summary>사원 직무(employees.role 원값). 화면은 <see cref="AccountLinkLabels.RoleLabel"/> 로 보여 준다.</summary>
+    /// <summary>사원 직무(employees.role 원값). 권한 판정(<see cref="AccountLinkLabels.IsGeneralEmployeeRole"/>)에만 쓴다 — 화면에 직무 이름으로 보이지 않는다(작5 §8-9).</summary>
     public string? Role { get; set; }
 }
 
@@ -65,30 +65,22 @@ public static class AccountLinkLabels
         _ => ""
     };
 
-    /// <summary>사원 직무(employees.role) → 화면 글자. 사원관리 [역할] 선택지와 같은 말을 쓴다.</summary>
-    public static string RoleLabel(string? role)
-    {
-        if (string.IsNullOrWhiteSpace(role)) return "일반사용자";
-        var r = role.Trim();
-        return r.ToLowerInvariant() switch
-        {
-            "tenantadmin" or "tenant_admin" or "1" => "관리자",
-            "manager" or "2" => "매니저",
-            "readonly" or "4" => "조회 전용",
-            "user" or "3" or "sales_user" or "tenant_user" => "일반사용자",
-            // 작5 §8-8 V5-17 — 서버 정책 역할 코드(Program.cs RequireRole)도 한글로. 화면에 hr_manager 같은 글자가 나가지 않게.
-            "system_admin" => "관리자",
-            "hr_manager" => "인사 담당",
-            "account_manager" or "accountant" => "회계 담당",
-            "sales_manager" => "영업 관리",
-            "purchase_manager" => "구매 관리",
-            // ⬛ 종전: _ => r (모르는 코드도 원문 그대로 보였다) — 고객사가 한글로 적은 직무는 그대로, 영문 코드면 「기타 직무」
-            _ => IsAsciiCode(r) ? "기타 직무" : r
-        };
-    }
+    // ⬛ [작5 §8-9 사장님 결재 10/5] RoleLabel(직무 코드 → 「관리자」·「매니저」·「인사 담당」·「기타 직무」 …)은 화면에서 걷었다.
+    //    직무 이름은 히트판이 정하지 않는다(고객 권한 · 헌법 #11 과 같은 결). 계정 만들기 · 기존 사원 고르기 · 같은 이름 질문은
+    //    고객이 입력한 부서·직급(DeptPositionLine)만 보여 준다. 권한 판정(IsGeneralEmployeeRole · 서버 409)은 그대로.
+    //    옛 본문(작5 §8-5 신설 · §8-8 V5-17 확장)은 커밋 bbe9e48c 의 이 파일에 있다 — 쓰는 곳이 0 이 되어 걷었다.
 
-    /// <summary>영문·숫자·밑줄만으로 된 값인가(= 사람이 읽을 이름이 아니라 코드).</summary>
-    private static bool IsAsciiCode(string s) => s.All(c => c < 128);
+    /// <summary>
+    /// 고객이 사원관리에서 직접 입력한 부서·직급 한 줄(작5 §8-9). 「부서 영업부 · 직급 대리」 — 없는 칸은 비운다(둘 다 없으면 빈 문자열).
+    /// 히트판이 지은 이름은 섞지 않는다.
+    /// </summary>
+    public static string DeptPositionLine(string? deptName, string? position)
+    {
+        var parts = new List<string>(2);
+        if (!string.IsNullOrWhiteSpace(deptName)) parts.Add($"부서 {deptName.Trim()}");
+        if (!string.IsNullOrWhiteSpace(position)) parts.Add($"직급 {position.Trim()}");
+        return string.Join(" · ", parts);
+    }
 
     /// <summary>「직원 계정 관리」 단계 0~3 → 화면 글자(권한설정 4선택과 같은 말 · 작5 §8-5 U-2).</summary>
     public static string UsersLevelLabel(int level) => level switch
