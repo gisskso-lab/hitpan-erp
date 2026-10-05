@@ -213,17 +213,18 @@ public sealed class UserService : IUserService
 
         var empNo = (maxNo ?? 0) + 1;
 
+        // ⬛ [20261005작5 전] INSERT 칸에 login_id 가 없었다 — 사원계정 칸(DB-137)을 같은 INSERT 에서 채운다(설계 §2-2).
         await _db.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO employees (
-                employee_id, tenant_id, user_id,
+                employee_id, tenant_id, user_id, login_id,
                 emp_no, emp_name,
                 position, emp_type,
                 join_date, is_active, role,
                 annual_leave_total, annual_leave_used,
                 created_at, created_by, updated_at, updated_by)
             VALUES (
-                @EmpId, @TenantId, @UserId,
+                @EmpId, @TenantId, @UserId, @LoginId,
                 @EmpNo, @EmpName,
                 @Position, 'regular',
                 @JoinDate, 1, @Role,
@@ -235,6 +236,7 @@ public sealed class UserService : IUserService
                 EmpId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
                 UserId = userId,
+                LoginId = dto.Email,
                 EmpNo = $"EMP-{empNo:D3}",
                 EmpName = string.IsNullOrWhiteSpace(dto.EmpName) ? dto.UserName : dto.EmpName,
                 Position = dto.Position ?? string.Empty,
@@ -553,8 +555,10 @@ public sealed class UserService : IUserService
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         if (affected == 0) throw new InvalidOperationException("사용자를 찾을 수 없습니다.");
 
+        // ⬛ [20261005작5 전] "UPDATE employees SET user_id = NULL, updated_at = NOW(6) WHERE tenant_id = @TenantId AND user_id = @UserId"
+        //   사원계정 칸(login_id · DB-137)도 같은 UPDATE 에서 비운다(설계 §2-2).
         await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE employees SET user_id = NULL, updated_at = NOW(6) WHERE tenant_id = @TenantId AND user_id = @UserId",
+            "UPDATE employees SET user_id = NULL, login_id = NULL, updated_at = NOW(6) WHERE tenant_id = @TenantId AND user_id = @UserId",
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         // 🔴 10/5 봉합1 P1-01 — 폐기한 계정의 출입증도 그 자리에서 끊는다.

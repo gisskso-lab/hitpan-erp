@@ -1128,6 +1128,8 @@ CREATE TABLE `employees` (
   `employee_id` varchar(36) NOT NULL,
   `tenant_id` varchar(36) NOT NULL,
   `user_id` varchar(36) DEFAULT NULL,
+  -- 20261005작5 DB-137 — 사원계정(그 사원의 로그인 아이디 사본 · 진실원 users.email · 계정 없으면 NULL). 사원 이메일(email)과 별개.
+  `login_id` varchar(100) DEFAULT NULL COMMENT '사원계정 — users.email 사본 · 계정 없으면 NULL · DB-137',
   `emp_no` varchar(20) NOT NULL,
   `emp_name` varchar(50) NOT NULL,
   `dept_id` varchar(36) DEFAULT NULL,
@@ -1187,6 +1189,8 @@ CREATE TABLE `employees` (
   `salary_country` tinyint(4) DEFAULT NULL COMMENT '?? ?? ?? (SW_PAYkuk)',
   PRIMARY KEY (`employee_id`),
   UNIQUE KEY `uq_tenant_empno` (`tenant_id`,`emp_no`),
+  -- 20261005작5 DB-137 — 한 계정 = 한 사원(쌍둥이 사원 차단). NULL 은 걸리지 않는다.
+  UNIQUE KEY `uq_employees_tenant_user` (`tenant_id`,`user_id`),
   KEY `idx_employees_resigned` (`tenant_id`,`is_resigned`),
   KEY `idx_employees_dept` (`tenant_id`,`department`),
   -- 작(2026-08-13) DB-99 — "지금 누가 휴직인가" 를 조직도·급여·연차가 매번 묻는다.
@@ -3618,7 +3622,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
