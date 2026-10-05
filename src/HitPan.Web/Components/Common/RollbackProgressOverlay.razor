@@ -1,0 +1,202 @@
+@* 🔴 20261005작2 — 되돌리기 [예] 뒤 전체 덮개(사장님 10/5 확정 화면 전개 · 설계 §1·§3·§5).
+     ① 「이전 버전으로 되돌리는 중입니다. 잠시만 기다려 주세요」 — 히트판이 꺼져 있는 동안에도 그대로(브라우저에 이미 떠 있는 화면)
+     ② 되돌린 판이 살아서 답하면 「이전 버전(V)으로 되돌리기가 완료되었습니다」 + [확인]
+     ③ [확인] → 새로 불러와 첫 화면("/") — 로그인이 살아 있으면 메인, 아니면 로그인 화면. 🔴 지금 화면 주소로 가지 않는다
+        (되돌린 판에 이 화면 주소가 없을 수 있다 — 10/5 「페이지를 찾을 수 없습니다」).
+     판정은 전부 RollbackWatch.cs(순수 · 게이트가 잰다) — 여기는 그리기만 한다.
+     자동 업데이트 덮개(UpdateProgressOverlay)·#43 안내 조각은 건드리지 않는다(설계 §0 무접촉). *@
+@using Microsoft.Extensions.Logging
+@implements IDisposable
+@inject HttpClient Http
+@inject LocalRollbackClient Api
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILogger<RollbackProgressOverlay> Logger
+
+@if (_visible)
+{
+    @* 전체를 덮는다. 뒤 화면(꺼진 히트판의 옛 화면)이 보이면 안 된다. *@
+    <div class="hp-rbk-overlay" role="alertdialog" aria-live="polite">
+        <div class="hp-rbk-card">
+            @switch (_phase)
+            {
+                case Phase.Done:
+                    <div class="hp-rbk-check">✅</div>
+                    <div class="hp-rbk-title">@LocalSwapUiText.RollbackDone(_doneVersion)</div>
+                    <button class="hp-rbk-btn" @onclick="GoHome">확인</button>
+                    break;
+                case Phase.BackOnline:
+                    <div class="hp-rbk-body">@LocalSwapUiText.RollbackBackOnline</div>
+                    <button class="hp-rbk-btn" @onclick="GoHome">확인</button>
+                    break;
+                case Phase.Stalled:
+                    <div class="hp-rbk-title">@LocalSwapUiText.RollbackStalledTitle</div>
+                    <div class="hp-rbk-body">@LocalSwapUiText.RollbackStalledBody</div>
+                    <button class="hp-rbk-btn" disabled="@_checking" @onclick="RetryAsync">다시 확인</button>
+                    break;
+                default:
+                    <div class="hp-rbk-title">@LocalSwapUiText.RollbackInProgress</div>
+                    <div class="hp-rbk-dots"><span></span><span></span><span></span></div>
+                    break;
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private enum Phase { Waiting, Done, BackOnline, Stalled }
+
+    /// <summary>
+    /// 덮개를 걷는 끝(히트판은 옛 판 그대로) — 거절(J-6 · 받기 거절 포함) · [다시 확인] 때 결과 없음(Unconfirmed).
+    /// 화면이 기존 「지난 결과」 한 줄·기존 문구로 다시 그린다(새 문구 0 · 설계 §3 · 봉합1 병렬이슈 26).
+    /// ⬛ [낡은 줄 · 봉합1 이전] `EventCallback OnRefused` — 무엇으로 끝났는지 화면이 몰랐다.
+    /// </summary>
+    [Parameter] public EventCallback<RollbackWatchResult> OnRefused { get; set; }
+
+    // 덮개 수명 — 화면을 떠나면 취소된다(병렬이슈 27 (b) · [다시 확인] 결과가 떠난 뒤 새 감시를 걸지 않게).
+    private readonly CancellationTokenSource _life = new();
+
+    private bool _visible;
+    private bool _checking;
+    private Phase _phase;
+    private string? _from;
+    private string? _to;
+    private string? _doneVersion;
+    private DateTime _startedUtc;
+    private CancellationTokenSource? _cts;
+    private RollbackWatcher? _watcher;
+
+    /// <summary>
+    /// 시작이 받아들여진 직후 화면이 부른다. 즉시 덮고 감시를 시작한다.
+    /// **await 하지 않는다** — 부르는 쪽(버튼 처리)을 붙잡으면 화면이 안 그려진다(업데이트 덮개와 같은 모양).
+    /// </summary>
+    public void Start(string from, string to)
+    {
+        _from = from;
+        _to = to;
+        _doneVersion = null;
+        _phase = Phase.Waiting;
+        _visible = true;
+        _startedUtc = DateTime.UtcNow;
+        var probe = new RollbackWatchProbe(Http, Api, Logger);
+        _watcher = new RollbackWatcher(probe.GetVersionAsync, probe.GetStatusAsync, Task.Delay, () => DateTime.UtcNow);
+        StateHasChanged();
+        Watch();
+    }
+
+    private void Watch()
+    {
+        if (_life.IsCancellationRequested) return;   // 화면을 떠났다 — 새 감시 금지(병렬이슈 27 (b))
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+        _ = WatchAsync(_cts.Token);
+    }
+
+    private async Task WatchAsync(CancellationToken ct)
+    {
+        try
+        {
+            var r = await _watcher!.RunAsync(_from!, _to!, _startedUtc, DateTime.UtcNow + RollbackWatchPlan.GiveUp, ct);
+            await ShowAsync(r);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 화면을 떠났거나 [다시 확인] 이 새 감시로 갈아끼웠다 — 정상 종료(서버 되돌리기는 그대로 진행된다).
+            // ⬛ [낡은 줄 · 봉합1 이전] `catch (OperationCanceledException)` — 다른 원인의 취소까지 말없이 삼켜 덮개를 멈춰 둘 수 있었다(병렬이슈 27 (a)).
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or HttpRequestException or JSException)
+        {
+            // #15 — 남기고, 고객에게는 빠져나갈 길([다시 확인])을 준다. 덮개를 말없이 걷지 않는다.
+            Logger.LogWarning(ex, "[RollbackProgressOverlay] 감시 중단 — [다시 확인] 으로 넘긴다");
+            _phase = Phase.Stalled;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ShowAsync(RollbackWatchResult r)
+    {
+        switch (r.Verdict)
+        {
+            case RollbackWatchVerdict.Done:
+                if (r.Last is not null) await WriteDoneStampAsync(r.Last);   // 카드를 보이기 전에(P6)
+                _doneVersion = r.Version;
+                _phase = Phase.Done;
+                break;
+            case RollbackWatchVerdict.Refused:
+            case RollbackWatchVerdict.Unconfirmed:
+                _visible = false;
+                await InvokeAsync(StateHasChanged);
+                await OnRefused.InvokeAsync(r);
+                return;
+            case RollbackWatchVerdict.LoginLost:
+            case RollbackWatchVerdict.Other:
+                _phase = Phase.BackOnline;
+                break;
+            case RollbackWatchVerdict.Stalled:
+                _phase = Phase.Stalled;
+                break;
+            default:
+                _phase = Phase.Waiting;
+                break;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// [다시 확인] — 한 번 본다. 결론이 나면 그 카드로, 아직이면 새 10분으로 다시 기다린다
+    /// (업데이트 덮개 RetryAsync ① 과 같은 모양 · F5 를 권하지 않는다 — 히트판이 아직 안 떴으면 F5 가 곧 빈 화면이다).
+    /// </summary>
+    private async Task RetryAsync()
+    {
+        if (_checking || _watcher is null) return;
+        _checking = true;
+        try
+        {
+            // ⬛ [낡은 줄 · 봉합1 이전] `CheckOnceAsync(…, CancellationToken.None)` — 기다리는 사이 화면을 떠나면 돌아와 새 10분 감시를 걸었다(병렬이슈 27 (b)).
+            var r = await _watcher.CheckOnceAsync(_from!, _to!, _startedUtc, _life.Token);
+            if (_life.IsCancellationRequested) return;
+            if (r.Verdict == RollbackWatchVerdict.Waiting)
+            {
+                _phase = Phase.Waiting;
+                StateHasChanged();
+                Watch();
+                return;
+            }
+            await ShowAsync(r);
+        }
+        catch (OperationCanceledException) when (_life.IsCancellationRequested)
+        {
+            // [다시 확인] 을 기다리는 사이 화면을 떠났다 — 정상 종료.
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+
+    private async Task WriteDoneStampAsync(LocalSwapLast last)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", LocalSwapUiText.DoneSeenStorageKey, RollbackWatchPlan.DoneStampFor(last));
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            // 못 써도 완료 안내는 띄운다 — 나중에 결과 화면에서 한 번 더 뜨는 쪽이 완료 안내를 빼먹는 쪽보다 낫다(설계 §4).
+            Logger.LogWarning(ex, "[RollbackProgressOverlay] 「한 번」 표 쓰기 실패 — 완료 안내는 그대로 띄운다");
+        }
+    }
+
+    /// <summary>[확인] — 새로 불러와 첫 화면으로. 로그인이 살아 있으면 메인, 아니면 로그인 화면(AuthorizeRouteView).</summary>
+    private void GoHome() => Nav.NavigateTo(RollbackWatchPlan.HomeUrl, forceLoad: true);
+
+    public void Dispose()
+    {
+        _life.Cancel();
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+        _life.Dispose();
+    }
+}

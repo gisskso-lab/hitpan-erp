@@ -503,5 +503,23 @@ public static class LocalSwapUiText
         _ => CustomerReasonText(code),
     };
 
+    // ═════════════ 20261005작2 — 되돌리기 [예] 뒤 화면 전개(덮개 RollbackProgressOverlay) ═════════════
+    // 근거: 작업지시서 20261005작2 §0(사장님 오더 원문) · §8(Q-1 문구 확정) · 설계 §7. 기존 상수 한 글자도 안 바꾼다(#1).
+
+    /// <summary>덮개 — 되돌리는 동안(오더 ② 원문 그대로).</summary>
+    public const string RollbackInProgress = "이전 버전으로 되돌리는 중입니다. 잠시만 기다려 주세요";
+
+    /// <summary>덮개 — 되돌린 판이 살아서 답한 뒤(오더 ③ 원문 그대로 · v = 실제 되돌린 판).</summary>
+    public static string RollbackDone(string? v) => $"이전 버전({Ver(v)})으로 되돌리기가 완료되었습니다";
+
+    /// <summary>덮개 — 10분 안에 끝났는지 확인이 안 될 때 제목(사장님 Q-1 확정 10/5).</summary>
+    public const string RollbackStalledTitle = "되돌리기가 예상보다 오래 걸립니다";
+
+    /// <summary>덮개 — 10분 안에 끝났는지 확인이 안 될 때 본문(사장님 Q-1 확정 10/5).</summary>
+    public const string RollbackStalledBody = "히트판은 계속 되돌리기를 진행하고 있습니다. 아래 버튼을 눌러 다시 확인해 주세요.";
+
+    /// <summary>덮개 — 히트판은 다시 켜졌는데 로그인이 끊겨 결과를 못 읽었을 때(사장님 Q-1 확정 10/5).</summary>
+    public const string RollbackBackOnline = "히트판이 다시 켜졌습니다. [확인]을 누르면 첫 화면으로 갑니다.";
+
     private static string Ver(string? v) => string.IsNullOrWhiteSpace(v) ? "확인 중" : v.Trim();
 }
