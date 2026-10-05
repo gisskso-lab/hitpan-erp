@@ -10,6 +10,7 @@ using HitPan.API.Middleware;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.Infrastructure.Security;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -35,7 +36,8 @@ namespace HitPan.Tests.Integrity;
 /// (:666 인증 → :667 권한 → :671 <see cref="TenantMiddleware"/> → :676 <see cref="SessionValidityMiddleware"/> →
 /// :689 <see cref="TermsConsentMiddleware"/> → :694 <see cref="DeviceAuthMiddleware"/> → :698 컨트롤러)를 세운다.
 /// 빠진 것: 예외·IP 화이트리스트·감사·속도제한·멱등 미들웨어(판정과 무관 · 이 게이트의 관심사는 위 넷). 인증(JWT 검증)만 대역 —
-/// 검증을 통과한 뒤의 <c>User</c> 를 꽂는다.</para>
+/// 검증을 통과한 뒤의 <c>User</c> 를 꽂는다. 기본 인증 방식은 실물 JwtBearer(<c>AuthExtensions.cs:51</c>) — 출입증 없는 요청의
+/// 401 은 권한 단계의 Challenge 가 낸다(10/5 CI 6차 교정: 이 등록이 빠져 예외가 났고, 「TenantMiddleware 401」 서술도 틀렸다).</para>
 /// <para>DB 는 출하 DDL 격리 DB(실물) — 세션·약관·기기 줄·사람이 전부 실제 표에서 판정된다. 서비스도 실물
 /// (<see cref="TenantDeviceService"/> · <see cref="UserService"/>). 컨트롤러도 실물(<see cref="AccessStatusController"/> ·
 /// 업무 API 대표로 <see cref="UnifiedCalendarController"/> <c>GET /api/dashboard/unified-calendar</c> — DeviceAuth 통과 목록에 없는 업무 경로).</para>
@@ -49,7 +51,7 @@ public sealed partial class ApprovalRetiredAccessGateDbTests
 {
     private const string BusinessPath = "/api/dashboard/unified-calendar";
 
-    private sealed record PipeOutcome(int Status, string Body);
+    private sealed record PipeOutcome(int Status, string Body, string WwwAuthenticate);
 
     [Fact(DisplayName = "G-AR13 🔴 진짜 파이프라인(인증→권한→Tenant→SessionValidity→약관→DeviceAuth→컨트롤러) — 인증키 없는 새 직원 PC 업무 API 200 · 직원 access-status 403 · 대표 200 · 출입증 없음 401 · 대조군(DeviceAuth 옛 판정 → 같은 직원 403 forbidden_device_auth)")]
     public async Task AR13_Real_Pipeline()
@@ -88,9 +90,11 @@ public sealed partial class ApprovalRetiredAccessGateDbTests
         var cur = await PipeAsync(db, "/api/access-status/current", owner, "tenant_admin", ownerSid, null, oldDeviceJudge: false);
         Assert.Contains(staff, cur.Body);                                  // 실물 서비스가 실제 표를 읽었다
 
-        // ④ 출입증 없음 → TenantMiddleware 401(파이프라인이 실제로 판정한다)
+        // ④ 출입증 없음 → 권한 단계(:667)가 JwtBearer Challenge 로 401 — TenantMiddleware 까지 안 간다(실제 앱과 같은 길).
+        //    WWW-Authenticate: Bearer = 그 401 을 낸 것이 인증 처리기라는 표식(TenantMiddleware 401 은 이 머리글이 없다)
         var anon = await PipeAsync(db, "/api/access-status/current", null, null, null, null, oldDeviceJudge: false);
         Assert.Equal(401, anon.Status);
+        Assert.StartsWith("Bearer", anon.WwwAuthenticate);
 
         // 🔴 음성 대조군 — DeviceAuth 판정만 옛 판(설정 true 를 읽음)으로 되돌린 같은 파이프라인 ⇒ 같은 직원·같은 요청 403
         var ctl = await PipeAsync(db, BusinessPath + "?year=2026&month=10", staff, "tenant_user", staffSid, reg.deviceId, oldDeviceJudge: true);
@@ -140,7 +144,9 @@ public sealed partial class ApprovalRetiredAccessGateDbTests
         services.AddSingleton<IWebHostEnvironment>(new Ar13HostEnvironment());
         services.AddSingleton<IHostEnvironment>(sp => sp.GetRequiredService<IWebHostEnvironment>());
         services.AddRouting();
-        services.AddAuthentication();
+        // AuthExtensions.cs:51 과 같은 기본 방식(JwtBearer 실물) — 출입증 없는 요청을 권한 단계가 401 로 돌려보내는 주체.
+        // 검증(토큰 읽기)은 아래 대역이 대신하므로 이 처리기는 Challenge·Forbid 만 맡는다. (10/5 CI 6차: 이게 빠져 ④ 에서 예외)
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
         services.AddAuthorization(o =>
         {
             // Program.cs:383 · :394 와 같은 조건
@@ -212,7 +218,8 @@ public sealed partial class ApprovalRetiredAccessGateDbTests
         ctx.Response.Body = body;
 
         await pipeline(ctx);
-        return new PipeOutcome(ctx.Response.StatusCode, Encoding.UTF8.GetString(body.ToArray()));
+        return new PipeOutcome(ctx.Response.StatusCode, Encoding.UTF8.GetString(body.ToArray()),
+            ctx.Response.Headers.WWWAuthenticate.ToString());
     }
 
     private sealed class Ar13HostEnvironment : IWebHostEnvironment
