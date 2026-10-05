@@ -59,7 +59,7 @@ jobs:
           # 20260930작1 봉합 2차(작업지시서 §13) — 남은 찌꺼기 처리(A 갈래) · 런처 쪽 찌꺼기 판정(B 갈래)
           GATES="$GATES|LocalSwapLeftoverGateTests|LocalSwapLeftoverLauncherGateTests"
           # 20260930작1 확대 1.3.50(작업지시서 §18 · 설계 §19-2) — 남기기(G-NK) · 세 번째 길(G-NP) · 일꾼 rollback+manual_zip(G-NW) · 완료 팝업 판정(G-ND)
-          GATES="$GATES|LocalSwapManifestKeepGateTests|LocalSwapPrevFetchGateTests|LocalSwapPrevFetchWorkerGateTests|LocalSwapDonePopupGateTests"
+          GATES="$GATES|LocalSwapManifestKeepGateTests|LocalSwapPrevFetchGateTests|LocalSwapPrevFetchWorkerGateTests|LocalSwapDonePopupGateTests|RollbackWatchGateTests"
           echo "▶ 이 단계가 무는 게이트: $GATES"
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \

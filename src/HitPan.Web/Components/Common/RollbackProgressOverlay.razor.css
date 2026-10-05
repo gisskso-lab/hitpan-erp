@@ -1,0 +1,84 @@
+/* 되돌리기 중 안내화면 (20261005작2 · 설계 §5)
+   UpdateProgressOverlay.razor.css 의 값을 복사했다 — 격리 CSS 라 같이 쓸 수 없고, 원본은 건드리지 않는다(#1 · #43).
+   이 화면이 떠 있는 동안 히트판은 꺼져 있다 ⇒ 외부 폰트·이미지 없이 브라우저 기본으로만 그린다. */
+
+.hp-rbk-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20000;              /* MudBlazor 다이얼로그(1400대)보다 위 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f7f8fa;         /* 어둡게 덮지 않는다 — 고장난 느낌을 주지 않기 위해 */
+    font-family: inherit;
+}
+
+.hp-rbk-card {
+    text-align: center;
+    padding: 48px 40px;
+    max-width: 420px;
+}
+
+.hp-rbk-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+.hp-rbk-body {
+    font-size: 16px;
+    line-height: 1.7;
+    color: #4a4a4a;
+}
+
+.hp-rbk-btn {
+    margin-top: 28px;
+    padding: 12px 32px;
+    font-size: 16px;
+    font-family: inherit;
+    color: #fff;
+    background: #2b6ef2;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.hp-rbk-btn:hover  { background: #245fd6; }
+.hp-rbk-btn:active { background: #1f52ba; }
+.hp-rbk-btn:disabled { background: #b8bdc7; cursor: default; }
+
+.hp-rbk-check {
+    font-size: 44px;
+    line-height: 1;
+    margin-bottom: 16px;
+}
+
+/* 진행 표시 — "멈춘 게 아니라 돌고 있다"를 보여주는 유일한 신호라 반드시 움직여야 한다. */
+.hp-rbk-dots {
+    margin-top: 28px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.hp-rbk-dots span {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #b8bdc7;
+    animation: hp-rbk-bounce 1.4s infinite ease-in-out both;
+}
+
+.hp-rbk-dots span:nth-child(1) { animation-delay: -0.32s; }
+.hp-rbk-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes hp-rbk-bounce {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40%           { opacity: 1;   transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hp-rbk-dots span { animation-duration: 2.4s; }
+}
