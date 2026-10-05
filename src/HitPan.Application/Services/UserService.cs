@@ -100,6 +100,9 @@ public sealed class UserService : IUserService
         ValidatePassword(dto.Password);
         // 🔴 20261005작5 [3-V] P3-09 — 이메일 형식 강요([EmailAddress])를 걷은 뒤 남는 아이디 서버 검증(부트스트랩과 같은 규칙).
         ValidateLoginId(dto.Email);
+        // 🔴 작5 §8-7 P3-16 — 검사는 trim 값인데 저장·중복 검사는 원문이었다(" hong01" 통과 → 앞 공백째 저장 → hong01 로그인 실패).
+        //   for-employee(CreateForEmployeeAsync)와 같이 검사·중복·저장·사본·감사 전부 trim 값 하나로 쓴다.
+        var loginId = dto.Email.Trim();
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var dup = await _db.ExecuteScalarAsync<long>(
@@ -110,7 +113,8 @@ public sealed class UserService : IUserService
                   AND email = @Email
                   AND is_deleted = 0
                 """,
-                new { TenantId = tenantId, dto.Email },
+                // ⬛ new { TenantId = tenantId, dto.Email },
+                new { TenantId = tenantId, Email = loginId },
                 cancellationToken: ct)).ConfigureAwait(false);
 
         if (dup > 0)
@@ -126,7 +130,8 @@ public sealed class UserService : IUserService
         var heldByDeleted = await _db.ExecuteScalarAsync<long>(
             new CommandDefinition(
                 "SELECT COUNT(*) FROM users WHERE tenant_id = @TenantId AND email = @Email AND is_deleted = 1",
-                new { TenantId = tenantId, dto.Email },
+                // ⬛ new { TenantId = tenantId, dto.Email },
+                new { TenantId = tenantId, Email = loginId },
                 cancellationToken: ct)).ConfigureAwait(false);
         if (heldByDeleted > 0)
             throw new InvalidOperationException(DeletedHoldsLoginIdMessage);
@@ -178,7 +183,8 @@ public sealed class UserService : IUserService
                 {
                     UserId = userId,
                     TenantId = tenantId,
-                    dto.Email,
+                    // ⬛ dto.Email,  (P3-16 — 원문 저장)
+                    Email = loginId,
                     Hash = hash,
                     UserName = dto.UserName,
                     EmpName = string.IsNullOrWhiteSpace(dto.EmpName) ? dto.UserName : dto.EmpName,
@@ -240,7 +246,8 @@ public sealed class UserService : IUserService
                 EmpId = Guid.NewGuid().ToString(),
                 TenantId = tenantId,
                 UserId = userId,
-                LoginId = dto.Email,
+                // ⬛ LoginId = dto.Email,  (P3-16 — 사본도 계정 아이디와 같은 trim 값)
+                LoginId = loginId,
                 EmpNo = $"EMP-{empNo:D3}",
                 EmpName = string.IsNullOrWhiteSpace(dto.EmpName) ? dto.UserName : dto.EmpName,
                 Position = dto.Position ?? string.Empty,
@@ -254,7 +261,9 @@ public sealed class UserService : IUserService
         tx.Commit();
 
         // 감사로그 — 사용자 생성
-        var afterJson = $"{{\"email\":\"{dto.Email}\",\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\"}}";
+        // ⬛ var afterJson = $"{{\"email\":\"{dto.Email}\",\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\"}}";
+        // 🔴 작5 §8-7 P3-17 — 문자열 붙이기는 이름 칸의 따옴표로 기록 모양을 바꿀 수 있다(`x","role":"TenantAdmin`). 직렬화기로(키 모양은 그대로).
+        var afterJson = AuditCreateJson(loginId, dto.UserName, roleStr, accountType, employeeId: null);
         await _audit.LogAsync("create", "user", userId, afterJson: afterJson, ct: ct);
 
         return userId;
@@ -533,16 +542,47 @@ public sealed class UserService : IUserService
         await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
         await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
 
+        // ⬛ [작5 §8-7 P2-13 전] users 만 봤다 — 옛 퇴사자 계정(is_active=0 · is_deleted=0)을 대표 손으로도 되살렸다.
+        // ⬛ UPDATE users SET is_active = 1, updated_at = NOW(6)
+        // ⬛ WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 AND is_active = 0
+        //   🔴 연결 사원이 퇴사(LeaverPredicate)면 0행 — 판정을 WHERE 안에 둔다(원자 · 판정 뒤 퇴사 처리가 끼어도 같은 행을 다시 본다).
+        //   대표·관리자 경로도 막는다(퇴사 취소가 먼저 · 작업지시서 §8-7).
         var affected = await _db.ExecuteAsync(new CommandDefinition(
-            """
-            UPDATE users SET is_active = 1, updated_at = NOW(6)
-            WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 AND is_active = 0
+            $"""
+            UPDATE users u SET u.is_active = 1, u.updated_at = NOW(6)
+            WHERE u.user_id = @UserId AND u.tenant_id = @TenantId AND u.is_deleted = 0 AND u.is_active = 0
+              AND {LinkedNotLeaverPredicate}
             """,
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-        if (affected == 0) throw new InvalidOperationException("다시 사용할 계정을 찾을 수 없습니다.");
+        if (affected == 0)
+        {
+            await ThrowIfLinkedLeaverAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
+            throw new InvalidOperationException("다시 사용할 계정을 찾을 수 없습니다.");
+        }
 
         tx.Commit();
         await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"resume\",\"is_active\":true}", ct: ct);
+    }
+
+    /// <summary>🔴 작5 §8-7 P2-13 — 퇴사한 사원의 계정은 다시 사용하지 않는다(409 · 화면은 message 를 그대로 보인다).</summary>
+    public const string ResumeLeaverMessage = "퇴사한 사원의 계정은 다시 사용할 수 없습니다";
+
+    /// <summary>
+    /// 🔴 작5 §8-7 P2-13 — 다시 사용 UPDATE 의 WHERE 조각(별칭 <c>u</c> = users): 연결 사원 중 퇴사(<see cref="LeaverPredicate"/>)가 없다.
+    /// 연결 사원이 없는 계정은 통과(사원 행 없는 옛 계정 · 대표 경로 그대로).
+    /// </summary>
+    private const string LinkedNotLeaverPredicate =
+        "NOT EXISTS (SELECT 1 FROM employees e WHERE e.tenant_id = u.tenant_id AND e.user_id = u.user_id AND "
+        + LeaverPredicate + ")";
+
+    /// <summary>다시 사용 UPDATE 가 0행일 때 — 연결 사원이 퇴사라서인지 가린다(문구만 고른다 · 판정은 UPDATE 가 했다).</summary>
+    private async Task ThrowIfLinkedLeaverAsync(string userId, string tenantId, IDbTransaction? tx, CancellationToken ct)
+    {
+        var leaver = await _db.ExecuteScalarAsync<long>(new CommandDefinition(
+            $"SELECT COUNT(*) FROM employees e WHERE e.tenant_id = @TenantId AND e.user_id = @UserId AND {LeaverPredicate}",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (leaver > 0)
+            throw new AccountLinkConflictException("employee_leaver", ResumeLeaverMessage);
     }
 
     /// <summary>
@@ -777,10 +817,27 @@ public sealed class UserService : IUserService
 
         tx.Commit();
 
-        var afterJson = $"{{\"email\":\"{loginId}\",\"user_name\":\"{userName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\",\"employee_id\":\"{dto.EmployeeId}\"}}";
+        // ⬛ var afterJson = $"{{\"email\":\"{loginId}\",\"user_name\":\"{userName}\",\"role\":\"{roleStr}\",\"account_type\":\"{accountType}\",\"employee_id\":\"{dto.EmployeeId}\"}}";
+        // 🔴 작5 §8-7 P3-17 — 직렬화기로(2단계 직원이 이름 칸으로 기록에 가짜 키를 넣던 길 차단).
+        var afterJson = AuditCreateJson(loginId, userName, roleStr, accountType, dto.EmployeeId);
         await _audit.LogAsync("create", "user", userId, afterJson: afterJson, ct: ct);
         return userId;
     }
+
+    /// <summary>
+    /// 🔴 작5 §8-7 P3-17 — 계정 생성 감사기록(after_json). 키 모양은 옛 문자열 붙이기와 같다
+    /// (<c>email · user_name · role · account_type</c> + 연결이면 <c>employee_id</c>) — 값은 직렬화기가 따옴표·역슬래시를 escape 한다.
+    /// </summary>
+    public static string AuditCreateJson(string email, string? userName, string role, string accountType, string? employeeId) =>
+        employeeId is null
+            ? System.Text.Json.JsonSerializer.Serialize(new { email, user_name = userName, role, account_type = accountType }, AuditJsonOptions)
+            : System.Text.Json.JsonSerializer.Serialize(new { email, user_name = userName, role, account_type = accountType, employee_id = employeeId }, AuditJsonOptions);
+
+    // 한글은 그대로 읽히게(옛 기록과 같은 모양) — 따옴표·역슬래시·HTML 민감 글자는 기본 규칙대로 escape 한다.
+    private static readonly System.Text.Json.JsonSerializerOptions AuditJsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Create(System.Text.Unicode.UnicodeRanges.All)
+    };
 
     /// <summary>
     /// 계정을 만들 수 있는 사원 — 재직(C-1 아님) + 계정 없음(연결 없음 또는 죽은 연결). <paramref name="name"/> 이 있으면 그 이름만(같은 이름 확인 V5-06).
@@ -819,15 +876,21 @@ public sealed class UserService : IUserService
         RejectSelf(userId, actorUserId);
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 작5 §8-7 P2-12 — 연결 사원 직무(출입증 role 의 출처)가 일반이 아니면 손대지 않는다. 판정은 P1-01 과 같은
+        //   IsGeneralEmployeeRole(정규화 함수 하나) · 원자성은 「읽은 직무 그대로일 때만」 조건(LinkedRoleUnchangedPredicate)이 UPDATE 안에서 지킨다.
+        var seenRoles = await ReadLinkedEmployeeRolesAsync(userId, tenantId, ct).ConfigureAwait(false);
+        if (seenRoles.All(IsGeneralEmployeeRole))
         using (var tx = _db.BeginTransaction())
         {
             var affected = await _db.ExecuteAsync(new CommandDefinition(
+                // ⬛ [P2-12 전] ... AND {StaffTouchablePredicate}  (직무 조건 없음)
                 $"""
                 UPDATE users u SET u.is_active = 0, u.updated_at = NOW(6)
                 WHERE u.user_id = @UserId AND u.tenant_id = @TenantId AND u.is_deleted = 0
                   AND {StaffTouchablePredicate}
+                  AND {LinkedRoleUnchangedPredicate(seenRoles)}
                 """,
-                new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                new { UserId = userId, TenantId = tenantId, SeenRoles = seenRoles }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             if (affected == 1)
             {
                 await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
@@ -849,6 +912,9 @@ public sealed class UserService : IUserService
         RejectSelf(userId, actorUserId);
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 작5 §8-7 P2-12 — 끄기와 같다(연결 사원 직무 일반만 · 읽은 직무 그대로일 때만). 트랜잭션 밖 읽기 — 좌석 판정의 첫 읽기(G-A6) 순서는 그대로.
+        var seenRoles = await ReadLinkedEmployeeRolesAsync(userId, tenantId, ct).ConfigureAwait(false);
+        if (seenRoles.All(IsGeneralEmployeeRole))
         using (var tx = _db.BeginTransaction())
         {
             await using (var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false))
@@ -856,12 +922,15 @@ public sealed class UserService : IUserService
                 await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
 
                 var affected = await _db.ExecuteAsync(new CommandDefinition(
+                    // ⬛ [P2-12·P2-13 전] ... AND {StaffTouchablePredicate}  (직무·퇴사 조건 없음)
                     $"""
                     UPDATE users u SET u.is_active = 1, u.updated_at = NOW(6)
                     WHERE u.user_id = @UserId AND u.tenant_id = @TenantId AND u.is_deleted = 0 AND u.is_active = 0
                       AND {StaffTouchablePredicate}
+                      AND {LinkedRoleUnchangedPredicate(seenRoles)}
+                      AND {LinkedNotLeaverPredicate}
                     """,
-                    new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+                    new { UserId = userId, TenantId = tenantId, SeenRoles = seenRoles }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
                 if (affected == 1)
                 {
                     tx.Commit();
@@ -871,8 +940,30 @@ public sealed class UserService : IUserService
                 tx.Rollback();
             }
         }
-        await ThrowStaffRefusalAsync(userId, actorUserId, tenantId, "다시 사용할 계정을 찾을 수 없습니다.", ct).ConfigureAwait(false);
+        // ⬛ await ThrowStaffRefusalAsync(userId, actorUserId, tenantId, "다시 사용할 계정을 찾을 수 없습니다.", ct).ConfigureAwait(false);
+        // 🔴 작5 §8-7 P2-13 — 거절 사유 순서: 울타리(403) → 연결 사원 퇴사(409) → 못 찾음.
+        await EnsureStaffMayTouchAsync(userId, actorUserId, tenantId, ct).ConfigureAwait(false);
+        await ThrowIfLinkedLeaverAsync(userId, tenantId, null, ct).ConfigureAwait(false);
+        throw new InvalidOperationException("다시 사용할 계정을 찾을 수 없습니다.");
     }
+
+    /// <summary>🔴 작5 §8-7 P2-12 — 그 계정에 연결된 사원의 직무(<c>employees.role</c> · NOT NULL). 연결 없으면 빈 목록. 잠금 없는 읽기.</summary>
+    private async Task<List<string>> ReadLinkedEmployeeRolesAsync(string userId, string tenantId, CancellationToken ct) =>
+        (await _db.QueryAsync<string>(new CommandDefinition(
+            "SELECT e.role FROM employees e WHERE e.tenant_id = @TenantId AND e.user_id = @UserId",
+            new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false))
+        .Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// 🔴 작5 §8-7 P2-12 — 끄기·켜기 UPDATE 의 WHERE 조각(별칭 <c>u</c>): 연결 사원 직무가 <b>읽었을 때 그대로</b>다.
+    /// 판정(일반이냐)은 C# <see cref="IsGeneralEmployeeRole"/> 이 읽은 값으로 하고, 이 조각은 그 사이 바뀌었으면 0행으로 만든다(원자).
+    /// UPDATE 안 하위질의는 잠금 읽기(공유 잠금)라 최신 커밋 값을 본다 · 승격이 미커밋이면 기다린다.
+    /// 읽을 때 연결이 없었으면 「연결 사원 없음」 그대로여야 한다(닫힌 쪽).
+    /// </summary>
+    private static string LinkedRoleUnchangedPredicate(IReadOnlyCollection<string> seenRoles) =>
+        seenRoles.Count == 0
+            ? "NOT EXISTS (SELECT 1 FROM employees e WHERE e.tenant_id = u.tenant_id AND e.user_id = u.user_id)"
+            : "NOT EXISTS (SELECT 1 FROM employees e WHERE e.tenant_id = u.tenant_id AND e.user_id = u.user_id AND e.role NOT IN @SeenRoles)";
 
     /// <summary>
     /// 🔴 작5 §8-4 R-1 — 2단계 직원이 바꿔도 되는 대상(§5-3 · P3-08)의 술어. <see cref="EnsureStaffMayTouchAsync"/> 와 같은 판정을
@@ -920,6 +1011,11 @@ public sealed class UserService : IUserService
         if (target is null) throw new InvalidOperationException("사용자를 찾을 수 없습니다.");
 
         if (target.IsParent || string.Equals(target.AccountType, "tenant_admin", StringComparison.OrdinalIgnoreCase))
+            throw new AccountActionForbiddenException("protected_account", "대표·관리자 계정은 대표님만 바꿀 수 있습니다.");
+
+        // 🔴 작5 §8-7 P2-12 — 출입증 role 은 연결 사원 직무가 먼저(AuthService CreateLoginResponse) ⇒ 그 직무가 일반이 아니면 관리자와 같다.
+        var linkedRoles = await ReadLinkedEmployeeRolesAsync(userId, tenantId, ct).ConfigureAwait(false);
+        if (!linkedRoles.All(IsGeneralEmployeeRole))
             throw new AccountActionForbiddenException("protected_account", "대표·관리자 계정은 대표님만 바꿀 수 있습니다.");
 
         var hasLevel = await _db.ExecuteScalarAsync<long>(new CommandDefinition(
