@@ -740,29 +740,6 @@ public sealed class EmployeeService : IEmployeeService
             //     담당자가 사라지면 지난 장부를 못 읽는다(헌법 #1·#3).
             if (accountBlocked > 0)
             {
-                // 🔴 10/5 [4] 2차 N-1② — 퇴사로 계정을 지우면 그 계정의 출입증도 끊는다(직원계정관리 [계정폐기]와 같은 순서:
-                //   ① refresh 폐기 ② 세션 행 삭제 → SessionValidityMiddleware 가 401). 안 끊으면 지운 계정이 최대 8시간 더 쓴다.
-                //   사원과 계정의 연결을 끊기 **전에** 한다 — 끊고 나면 어느 계정인지 못 찾는다. 대표는 위 UPDATE 에서 이미 빠졌다.
-                await _db.ExecuteAsync(new CommandDefinition(
-                    """
-                    UPDATE refresh_tokens
-                    SET is_revoked = 1
-                    WHERE is_revoked = 0
-                      AND user_id = (SELECT e.user_id FROM employees e
-                                      WHERE e.tenant_id = @TenantId AND e.employee_id = @EmployeeId)
-                    """,
-                    new { TenantId = tenantId, EmployeeId = employeeId },
-                    transaction: tx,
-                    cancellationToken: ct)).ConfigureAwait(false);
-                await _db.ExecuteAsync(new CommandDefinition(
-                    """
-                    DELETE FROM user_sessions
-                    WHERE user_id = (SELECT e.user_id FROM employees e
-                                      WHERE e.tenant_id = @TenantId AND e.employee_id = @EmployeeId)
-                    """,
-                    new { TenantId = tenantId, EmployeeId = employeeId },
-                    transaction: tx,
-                    cancellationToken: ct)).ConfigureAwait(false);
 
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
