@@ -17,6 +17,14 @@ public sealed class EmployeeListDto
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
 
+    // ── 20261005작5 §2-1 계정 상태 · 사원계정 (Web EmployeeListItemModel 과 짝 · #12) ──
+    /// <summary><c>owner</c>(대표) · <c>active</c>(사용중) · <c>suspended</c>(사용중지) · <c>none</c>(미등록). <see cref="HasUserAccount"/> 와 별개.</summary>
+    public string AccountStatus { get; set; } = "none";
+    /// <summary>퇴사자인가 — <c>is_active=0 OR is_resigned=1</c>(MDB 이관 퇴사자 포함). [계정 만들기] 금지 판정용.</summary>
+    public bool IsLeaver { get; set; }
+    /// <summary>사원계정(로그인 아이디 사본 · <c>employees.login_id</c>). 계정 없으면 null. 사원 이메일(<see cref="Email"/>)과 별개.</summary>
+    public string? LoginId { get; set; }
+
     // ── 재직 상태 (작 2026-08-14, 사장님 지시 "퇴사직원 숨김처리") ──
     // 🔴 종전엔 IsActive 하나뿐이라 화면이 **퇴사·휴직·단순비활성을 구분할 수 없었다.**
     //    셋 다 "비활성" 한 마디로 뭉개져, 퇴사자인지 휴직자인지 보고도 알 수 없었다.
@@ -94,6 +102,14 @@ public sealed class EmployeeDetailDto
     public string? UpdatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    // ── 20261005작5 §2-1 — 목록과 같은 기준(Web EmployeeDetailModel 과 짝 · #12) ──
+    /// <summary><c>owner</c> · <c>active</c> · <c>suspended</c> · <c>none</c></summary>
+    public string AccountStatus { get; set; } = "none";
+    /// <summary>퇴사자인가(<c>is_active=0 OR is_resigned=1</c>)</summary>
+    public bool IsLeaver { get; set; }
+    /// <summary>사원계정(로그인 아이디 사본). 없으면 null.</summary>
+    public string? LoginId { get; set; }
 }
 
 /// <summary>

@@ -78,6 +78,16 @@ public class PermissionEnforcementGuardTests
                 .Select(m => m.Groups[1].Value))
             .ToHashSet(StringComparer.Ordinal);
 
+        // 20261005작5 §5-2 — 「직원 계정 관리」 3단계는 [RequireUsersLevel(n)] 이 강제한다(n 이상 = 그 단계 코드까지).
+        //   1 → USERS · 2 → USERS_ACCOUNT · 3 → USERS_SEAT. 위가 아래를 포함하므로 n 이하 코드가 모두 강제된다.
+        var levelCodes = new[] { "USERS", "USERS_ACCOUNT", "USERS_SEAT" };
+        foreach (var n in Directory.EnumerateFiles(controllers, "*.cs", SearchOption.AllDirectories)
+                     .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"^\s*\[RequireUsersLevel\((\d)\)\]", RegexOptions.Multiline)
+                         .Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))))
+        {
+            enforced.Add(levelCodes[Math.Clamp(n, 1, 3) - 1]);
+        }
+
         var lying = declared.Except(enforced).ToArray();
         Assert.True(lying.Length == 0,
             "화면이 '강제된다' 고 보여주는데 서버에 [RequirePermission] 이 없는 메뉴: "

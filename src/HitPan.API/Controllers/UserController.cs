@@ -21,7 +21,8 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpGet]
-    [RequirePermission("USERS", "view")]
+    // ⬛ [RequirePermission("USERS", "view")]  ← 20261005작5 V5-04 주소마다 판정 하나(§5-2 표 · 개발명세서 단계표)
+    [RequireUsersLevel(1)]
     public async Task<IActionResult> GetList(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -35,7 +36,8 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [RequirePermission("USERS", "view")]
+    // ⬛ [RequirePermission("USERS", "view")]  ← 20261005작5 V5-04
+    [RequireUsersLevel(1)]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -55,13 +57,33 @@ public sealed class UserController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "create")]
+    // ⬛ [RequirePermission("USERS", "create")]  ← 20261005작5 V5-04 · 「새 사원과 함께」는 대표·관리자만(V5-06 ①)
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
         {
             return Forbid();
+        }
+
+        // 🔴 20261005작5 V5-06 ② — 같은 이름의 재직·미등록 사원이 있으면 쌍둥이 사원 의심 ⇒ 409 + 후보.
+        //   「다른 사람이다」(ConfirmDifferentPerson=true)로 다시 보낼 때만 새 사원과 함께 만든다(동명이인 허용).
+        if (!dto.ConfirmDifferentPerson)
+        {
+            var name = string.IsNullOrWhiteSpace(dto.EmpName) ? dto.UserName : dto.EmpName;
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var candidates = await _userService.ListLinkableEmployeesAsync(tenantId, name, false, ct).ConfigureAwait(false);
+                if (candidates.Count > 0)
+                {
+                    return Conflict(new
+                    {
+                        code = "same_name_employee",
+                        message = $"같은 이름의 사원 {name.Trim()}(이)가 이미 있습니다. 그 사원에 계정을 연결할까요?",
+                        candidates
+                    });
+                }
+            }
         }
 
         try
@@ -82,7 +104,7 @@ public sealed class UserController : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "update")]
+    // ⬛ [RequirePermission("USERS", "update")]  ← 20261005작5 V5-04 · 수정은 대표·관리자만(P-3)
     public async Task<IActionResult> Update(string id, [FromBody] UpdateUserDto dto, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -112,7 +134,8 @@ public sealed class UserController : ControllerBase
     // ── 20261005작3 계정 과금 (설계 §4) — tenant 는 전부 JWT 클레임(TenantMiddleware 가 넣은 Items)만(#2) ──
 
     [HttpGet("seats")]
-    [RequirePermission("USERS", "view")]
+    // ⬛ [RequirePermission("USERS", "view")]  ← 20261005작5 V5-04
+    [RequireUsersLevel(1)]
     public async Task<IActionResult> GetSeats(CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -123,16 +146,26 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpPost("{id}/suspend")]
-    [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "update")]
+    // ⬛ [Authorize(Policy = "TenantAdminOnly")]
+    // ⬛ [RequirePermission("USERS", "update")]  ← 20261005작5 V5-04 · 2단계 이상(§5-2)
+    [RequireUsersLevel(2)]
     public async Task<IActionResult> Suspend(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         try
         {
-            await _userService.SuspendAsync(id, tenantId, ct).ConfigureAwait(false);
+            // ⬛ await _userService.SuspendAsync(id, tenantId, ct).ConfigureAwait(false);
+            // 20261005작5 §5-3 · P3-08 — 대표·관리자가 아니면 울타리(대표·관리자·본인·권한 가진 직원 거절)
+            if (IsTenantAdminCaller())
+                await _userService.SuspendAsync(id, tenantId, ct).ConfigureAwait(false);
+            else
+                await _userService.SuspendAsStaffAsync(id, CallerUserId(), tenantId, ct).ConfigureAwait(false);
             return Ok();
+        }
+        catch (AccountActionForbiddenException ex)
+        {
+            return StaffForbidden(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -141,20 +174,30 @@ public sealed class UserController : ControllerBase
     }
 
     [HttpPost("{id}/resume")]
-    [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "update")]
+    // ⬛ [Authorize(Policy = "TenantAdminOnly")]
+    // ⬛ [RequirePermission("USERS", "update")]  ← 20261005작5 V5-04 · 2단계 이상(§5-2)
+    [RequireUsersLevel(2)]
     public async Task<IActionResult> Resume(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
         try
         {
-            await _userService.ResumeAsync(id, tenantId, ct).ConfigureAwait(false);
+            // ⬛ await _userService.ResumeAsync(id, tenantId, ct).ConfigureAwait(false);
+            // 20261005작5 §5-3 · P3-08 — 대표·관리자가 아니면 울타리
+            if (IsTenantAdminCaller())
+                await _userService.ResumeAsync(id, tenantId, ct).ConfigureAwait(false);
+            else
+                await _userService.ResumeAsStaffAsync(id, CallerUserId(), tenantId, ct).ConfigureAwait(false);
             return Ok();
         }
         catch (AccountSeatFullException ex)
         {
             return SeatFull(ex);
+        }
+        catch (AccountActionForbiddenException ex)
+        {
+            return StaffForbidden(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -167,7 +210,7 @@ public sealed class UserController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "delete")]
+    // ⬛ [RequirePermission("USERS", "delete")]  ← 20261005작5 V5-04 · 계정폐기는 대표·관리자만(P-3)
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -192,7 +235,7 @@ public sealed class UserController : ControllerBase
 
     [HttpPost("{id}/reset-password")]
     [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "update")]
+    // ⬛ [RequirePermission("USERS", "update")]  ← 20261005작5 V5-04 · 비번 초기화는 대표·관리자만(P-3)
     public async Task<IActionResult> ResetPassword(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -214,12 +257,15 @@ public sealed class UserController : ControllerBase
 
     /// <summary>엑셀 일괄 업로드 템플릿 다운로드</summary>
     [HttpGet("bulk/template")]
-    [RequirePermission("USERS", "create")]
+    // ⬛ [RequirePermission("USERS", "create")]  ← 20261005작5 V5-04 · 엑셀 일괄은 대표·관리자만(P-3)
+    [Authorize(Policy = "TenantAdminOnly")]
     public IActionResult GetBulkTemplate()
     {
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("사용자");
-        ws.Cell(1, 1).Value = "이메일";
+        // ⬛ ws.Cell(1, 1).Value = "이메일";
+        // 20261005작5 §6 — 계정 칸 이름은 「아이디」. 읽기는 열 위치(1열)라 옛 양식도 그대로 읽힌다.
+        ws.Cell(1, 1).Value = "아이디";
         ws.Cell(1, 2).Value = "이름";
         ws.Cell(1, 3).Value = "임시비밀번호";
         ws.Cell(1, 4).Value = "부서";
@@ -227,7 +273,8 @@ public sealed class UserController : ControllerBase
         ws.Cell(1, 6).Value = "전화번호";
         ws.Cell(1, 7).Value = "역할(User/Manager)";
         // 예시 1행
-        ws.Cell(2, 1).Value = "hong@example.com";
+        // ⬛ ws.Cell(2, 1).Value = "hong@example.com";
+        ws.Cell(2, 1).Value = "hong01";
         ws.Cell(2, 2).Value = "홍길동";
         ws.Cell(2, 3).Value = "Temp1234!";
         ws.Cell(2, 4).Value = "영업";
@@ -250,7 +297,7 @@ public sealed class UserController : ControllerBase
     /// <summary>엑셀 일괄 업로드 실행 — 각 행 독립 처리</summary>
     [HttpPost("bulk")]
     [Authorize(Policy = "TenantAdminOnly")]
-    [RequirePermission("USERS", "create")]
+    // ⬛ [RequirePermission("USERS", "create")]  ← 20261005작5 V5-04 · 엑셀 일괄은 대표·관리자만(P-3)
     public async Task<IActionResult> BulkCreate(IFormFile file, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
@@ -298,6 +345,99 @@ public sealed class UserController : ControllerBase
         var result = await _userService.BulkCreateAsync(rows, tenantId, ct).ConfigureAwait(false);
         return Ok(result);
     }
+
+    // ── 20261005작5 사원 ↔ 계정 연결 (설계 §3·§4·§5) — tenant 는 JWT 클레임(Items)만(#2) · employeeId 는 같은 tenant 조건으로만 조회 ──
+
+    /// <summary>내 「직원 계정 관리」 단계(0~3). 화면이 버튼·사이드바 한 줄을 가른다(§5-4).</summary>
+    [HttpGet("my-level")]
+    [Authorize(Policy = "TenantOnly")]
+    public async Task<IActionResult> GetMyLevel([FromServices] IPermissionService permission, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = CallerUserId();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
+
+        var level = await permission.GetUsersLevelAsync(userId, tenantId, ct).ConfigureAwait(false);
+        return Ok(new { level, isAdmin = IsTenantAdminCaller() });
+    }
+
+    /// <summary>계정을 만들 수 있는 사원(재직 · 계정 없음 · 2단계 직원이면 일반 직무만). 「기존 사원 고르기」(§4).</summary>
+    [HttpGet("linkable-employees")]
+    [RequireUsersLevel(2)]
+    public async Task<IActionResult> GetLinkableEmployees([FromQuery] string? name, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var list = await _userService.ListLinkableEmployeesAsync(tenantId, name, !IsTenantAdminCaller(), ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
+    /// <summary>기존 사원에게 계정 만들기(§3 · 사원 행 새로 안 만듦). 사원관리 [계정 만들기]와 직원계정 「기존 사원 고르기」가 같은 주소.</summary>
+    [HttpPost("for-employee")]
+    [RequireUsersLevel(2)]
+    public async Task<IActionResult> CreateForEmployee([FromBody] CreateForEmployeeDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        try
+        {
+            var id = await _userService.CreateForEmployeeAsync(dto, tenantId, IsTenantAdminCaller(), ct).ConfigureAwait(false);
+            return CreatedAtAction(nameof(Get), new { id }, new { id });
+        }
+        catch (AccountSeatFullException ex)
+        {
+            // 작3 과 같은 응답 모양(code = account_seat_full) — 화면은 AccountSeatNoticeDialog 를 그대로 연다(A)
+            return SeatFull(ex);
+        }
+        catch (EmployeeNotFoundForAccountException ex)
+        {
+            return NotFound(new { code = "employee_not_found", message = ex.Message });
+        }
+        catch (AccountLinkConflictException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 비밀번호 규칙 · 아이디 규칙
+            return BadRequest(new { code = "invalid_input", message = ex.Message });
+        }
+    }
+
+    // Web AccountPricing.ExtraAccountMonthlyWon 과 같은 값(#4 decimal). 한 곳으로 모으는 일은 개발명세서 「남은 일」.
+    private const decimal ExtraAccountMonthlyWon = 10000m;
+
+    /// <summary>
+    /// 20261005작5 §8-3 ② — [구독계정추가] 창이 부르는 조회(지금 한도·추가 단가). 「구독계정추가」(USERS_SEAT · 3단계)의 서버 강제 주소.
+    /// 구매 API 가 생기면 그것도 3단계로(P-2).
+    /// </summary>
+    [HttpGet("seat-subscription")]
+    [RequireUsersLevel(3)]
+    public async Task<IActionResult> GetSeatSubscription(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var s = await _userService.GetSeatsAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(new
+        {
+            active = s.Active,
+            baseLimit = s.BaseLimit,
+            extra = s.Extra,
+            limit = s.Limit,
+            tier = s.Tier,
+            extraAccountMonthlyWon = ExtraAccountMonthlyWon
+        });
+    }
+
+    private bool IsTenantAdminCaller() => User.HasClaim("account_type", "tenant_admin");
+
+    private string CallerUserId() => HttpContext.Items["UserId"]?.ToString() ?? string.Empty;
+
+    private ObjectResult StaffForbidden(AccountActionForbiddenException ex) =>
+        StatusCode(StatusCodes.Status403Forbidden, new { error = ex.Code, code = ex.Code, message = ex.Message });
 
     // ── 작10 자식 계정 발급 스켈레톤 (W2 매니저 가도) ─────────────────────────
     // 부모(대표) 계정만 호출 가능 — TenantAdminOnly Policy

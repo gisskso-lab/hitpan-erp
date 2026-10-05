@@ -539,6 +539,27 @@ var app = builder.Build();
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔴 20261005작5 P-6 — 사원계정 칸(employees.login_id · DB-137) 기동 1회 재맞춤.
+//   되돌림(옛 판) 동안 만든·폐기한 계정은 이 칸을 안 맞춘다 ⇒ 재전진 때 사본이 어긋난다(설계 §10 R-3).
+//   멱등(어긋난 행만) · 칸이 없으면 건너뜀 · 실패해도 기동은 계속(위 마이그 블록과 같은 원칙 · #15 로그 남김).
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    using var syncScope = app.Services.CreateScope();
+    var syncLogger = syncScope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("HitPan.Startup.EmployeeLoginIdSync");
+    try
+    {
+        var syncDb = syncScope.ServiceProvider.GetRequiredService<System.Data.IDbConnection>();
+        await HitPan.Application.Services.EmployeeLoginIdSync.ResyncAsync(syncDb, syncLogger).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        syncLogger.LogWarning(ex,
+            "[Startup/EmployeeLoginIdSync] 사원계정 재맞춤 실패 — 기동은 계속합니다. 사원관리 「사원계정」 칸이 옛 값일 수 있습니다.");
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();

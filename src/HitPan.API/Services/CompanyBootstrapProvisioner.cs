@@ -362,18 +362,21 @@ public sealed class CompanyBootstrapProvisioner
     private static Task SeedOwnerEmployeeAsync(
         MySqlConnection db, IDbTransaction? tx, string tenantId, string userId, string employeeId,
         string name, string loginId, CancellationToken ct)
+        // ⬛ [20261005작5 전] 칸 목록 끝이 「role, email」 · 값 끝이 「'tenant_admin', @Email」 이었다.
+        //   🔴 20261005작5 — 사원계정 칸(login_id · DB-137)을 더한다(설계 §2-2). email 칸은 **그대로**다 —
+        //      설치 때 대표 사원 이메일 칸에 아이디를 넣는 것을 멈추는 일은 설계 §7 ⏸보류(백오피스 수집 경로 · P-7).
         => db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO employees
                   (employee_id, tenant_id, user_id, emp_no, emp_name,
-                   position, emp_type, join_date, is_active, created_at, updated_at, role, email)
+                   position, emp_type, join_date, is_active, created_at, updated_at, role, email, login_id)
                 SELECT @EmployeeId, @TenantId, @UserId, '0001', @Name,
-                   @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email
+                   @Position, 'regular', UTC_TIMESTAMP(6), 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'tenant_admin', @Email, @LoginId
                 WHERE NOT EXISTS (
                     SELECT 1 FROM employees
                     WHERE tenant_id = @TenantId AND (user_id = @UserId OR emp_no = '0001')
                 )",
             new { EmployeeId = employeeId, TenantId = tenantId, UserId = userId, Name = name,
-                  Position = OwnerPositionName, Email = loginId },
+                  Position = OwnerPositionName, Email = loginId, LoginId = loginId },
             transaction: tx, cancellationToken: ct));
 
     /// <summary>기본 창고 1행 (10차 P0-4) — NOT EXISTS 로 마이그 고객 보호.</summary>

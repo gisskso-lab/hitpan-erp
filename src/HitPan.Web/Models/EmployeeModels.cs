@@ -17,6 +17,14 @@ public sealed class EmployeeListItemModel
     public bool IsActive { get; set; }
     public bool HasUserAccount { get; set; }
 
+    // ── 20261005작5 §2-1 — 서버 EmployeeListDto 와 짝(#12) ──
+    /// <summary><c>owner</c>(대표) · <c>active</c>(사용중) · <c>suspended</c>(사용중지) · <c>none</c>(미등록). HasUserAccount 와 별개.</summary>
+    public string AccountStatus { get; set; } = "none";
+    /// <summary>퇴사자인가(<c>is_active=0 OR is_resigned=1</c> · MDB 이관 퇴사자 포함)</summary>
+    public bool IsLeaver { get; set; }
+    /// <summary>사원계정(로그인 아이디). 없으면 null. 사원 이메일(Email)과 별개.</summary>
+    public string? LoginId { get; set; }
+
     // ── 재직 상태 (작 2026-08-14, 사장님 지시 "퇴사직원 숨김처리") ──
     // 서버 EmployeeListDto 와 짝이다. 한쪽만 고치면 값이 안 실려 온다(헌법 #12).
     /// <summary>퇴사자인가.</summary>
@@ -242,6 +250,14 @@ public sealed class EmployeeDetailModel
     public string? UpdatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    // ── 20261005작5 §2-1 — 서버 EmployeeDetailDto 와 짝(#12) ──
+    /// <summary><c>owner</c>(대표) · <c>active</c>(사용중) · <c>suspended</c>(사용중지) · <c>none</c>(미등록)</summary>
+    public string AccountStatus { get; set; } = "none";
+    /// <summary>퇴사자인가(<c>is_active=0 OR is_resigned=1</c>)</summary>
+    public bool IsLeaver { get; set; }
+    /// <summary>사원계정(로그인 아이디). 없으면 null.</summary>
+    public string? LoginId { get; set; }
 }
 
 /// <summary>

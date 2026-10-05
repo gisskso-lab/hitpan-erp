@@ -115,7 +115,8 @@ public sealed class AuthService : IAuthService
                 return new AuthLoginResult
                 {
                     Success = false,
-                    ErrorMessage = err?.Message ?? "이메일 또는 비밀번호가 틀립니다"
+                    // ⬛ ErrorMessage = err?.Message ?? "이메일 또는 비밀번호가 틀립니다"  ← 20261005작5 §6 「아이디」
+                    ErrorMessage = err?.Message ?? "아이디 또는 비밀번호가 틀립니다"
                 };
             }
 
