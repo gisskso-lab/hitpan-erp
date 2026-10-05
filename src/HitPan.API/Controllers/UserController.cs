@@ -199,6 +199,11 @@ public sealed class UserController : ControllerBase
         {
             return StaffForbidden(ex);
         }
+        catch (AccountLinkConflictException ex)
+        {
+            // 🔴 작5 §8-7 P2-13 — 연결 사원 퇴사(employee_leaver) · 화면(AccountSeatApi)은 message 를 그대로 보인다
+            return Conflict(new { code = ex.Code, message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { success = false, message = ex.Message });
