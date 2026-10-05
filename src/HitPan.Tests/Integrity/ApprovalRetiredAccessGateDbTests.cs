@@ -29,7 +29,7 @@ namespace HitPan.Tests.Integrity;
 /// <para>🔴 메인PC 서버줄 갈래(옛 :274-501)·G-M8* 는 재지 않는다 — 모든 기기 줄은 지문 <c>HFPv2-</c> · <c>is_main_pc=0</c> · 터널 접속(<c>IsLocalConsole=false</c>).</para>
 /// </remarks>
 [Collection("ApprovalRetiredAccessGateDb")]
-public sealed class ApprovalRetiredAccessGateDbTests : IDisposable
+public sealed partial class ApprovalRetiredAccessGateDbTests : IDisposable
 {
     private readonly string _dbName = "hitpan_arg_" + Guid.NewGuid().ToString("N")[..8];
     private bool _created;
