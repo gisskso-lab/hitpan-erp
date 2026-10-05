@@ -319,9 +319,8 @@ else
                     <MudPaper Elevation="0" Class="pa-3 mb-2" Style="background:var(--mud-palette-background-grey);border-radius:8px">
                         <MudText Typo="Typo.body2"><b>@_linkPicked.EmpName</b> (@_linkPicked.EmpNo)</MudText>
                         <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
-                            부서 @(string.IsNullOrWhiteSpace(_linkPicked.DeptName) ? "-" : _linkPicked.DeptName)
-                            · 직급 @(string.IsNullOrWhiteSpace(_linkPicked.Position) ? "-" : _linkPicked.Position)
-                            · 직무 @AccountLinkLabels.RoleLabel(_linkPicked.Role)
+                            @* ⬛ [작5 §8-9 전] 부서 -·직급 -·직무 RoleLabel — 히트판이 지은 직무 이름은 걷고, 고객이 입력한 부서·직급만(없으면 비움) *@
+                            @AccountLinkLabels.DeptPositionLine(_linkPicked.DeptName, _linkPicked.Position)
                         </MudText>
                         <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
                             이름·부서·직급·직무는 사원 정보 그대로 씁니다. 바꾸려면 [사원관리]에서 고치세요.
@@ -408,9 +407,8 @@ else
                 <div>
                     <MudText Typo="Typo.body2">같은 이름의 사원 <b>@c.EmpName</b>(@c.EmpNo)이 있습니다. 이 사원에 연결할까요?</MudText>
                     <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
-                        부서 @(string.IsNullOrWhiteSpace(c.DeptName) ? "-" : c.DeptName)
-                        · 직급 @(string.IsNullOrWhiteSpace(c.Position) ? "-" : c.Position)
-                        · 직무 @AccountLinkLabels.RoleLabel(c.Role)
+                        @* ⬛ [작5 §8-9 전] 부서 -·직급 -·직무 RoleLabel — 히트판이 지은 직무 이름은 걷고, 고객이 입력한 부서·직급만(없으면 비움) *@
+                        @AccountLinkLabels.DeptPositionLine(c.DeptName, c.Position)
                     </MudText>
                 </div>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
@@ -722,7 +720,8 @@ else
     {
         var dept = string.IsNullOrWhiteSpace(e.DeptName) ? "" : $" · {e.DeptName}";
         var pos = string.IsNullOrWhiteSpace(e.Position) ? "" : $" · {e.Position}";
-        return $"{e.EmpNo} {e.EmpName}{dept}{pos} · 직무 {AccountLinkLabels.RoleLabel(e.Role)}";
+        // ⬛ [작5 §8-9 전] 끝에 「 · 직무 {RoleLabel(e.Role)}」 — 히트판이 지은 직무 이름은 걷었다(부서·직급은 고객 입력 그대로 · 없으면 비움)
+        return $"{e.EmpNo} {e.EmpName}{dept}{pos}";
     }
 
     private bool CanSubmitLink =>
