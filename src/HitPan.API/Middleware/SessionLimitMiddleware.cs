@@ -50,8 +50,11 @@ public sealed class SessionLimitMiddleware
 
     private static int TierSessionLimit(string tier)
     {
-        var pc = SlotPolicyDefaults.Value($"tier.{tier}.pc_limit", 0);
-        var mobile = SlotPolicyDefaults.Value($"tier.{tier}.mobile_limit", 0);
+        // 🔴 20261005작3 반증 F6 — 슬롯 기준값을 읽지 않는다(D-12 · 파이프라인 등록도 걷힘). 클래스는 남긴다(#1).
+        // ⬛ var pc = SlotPolicyDefaults.Value($"tier.{tier}.pc_limit", 0);
+        // ⬛ var mobile = SlotPolicyDefaults.Value($"tier.{tier}.mobile_limit", 0);
+        var pc = 0;
+        var mobile = 0;
 
         // 기기 한도를 아는 요금제면 그 합에 여유를 준다.
         var fromDevices = (pc == 0 && mobile == 0)

@@ -82,14 +82,16 @@ public sealed class DeviceController : ControllerBase
         return Ok(await _svc.GetAdminContactAsync(tid, ct));
     }
 
-    /// <summary>현재 테넌트의 기기 쿼터 (한도·사용량).</summary>
-    [HttpGet("quota")]
-    public async Task<IActionResult> GetQuota(CancellationToken ct)
-    {
-        var tid = HttpContext.Items["TenantId"]?.ToString();
-        if (string.IsNullOrEmpty(tid)) return Forbid();
-        return Ok(await _svc.GetQuotaAsync(tid, ct));
-    }
+    // ⬛ [낡은 엔드포인트 · 2026-10-05 슬롯 폐기(작4 A-10 · 설계 §2-2)] `GET api/devices/quota` — 화면 KPI 카드 4개가 부르던 길.
+    //   사유: 한도 계산을 걷었다(`GetQuotaAsync` ⬛). 화면이 부르는 곳 0(B-3 · G-AR12). `DeviceQuotaDto` 클래스는 남긴다.
+    // ⬛ /// <summary>현재 테넌트의 기기 쿼터 (한도·사용량).</summary>
+    // ⬛ [HttpGet("quota")]
+    // ⬛ public async Task<IActionResult> GetQuota(CancellationToken ct)
+    // ⬛ {
+    // ⬛     var tid = HttpContext.Items["TenantId"]?.ToString();
+    // ⬛     if (string.IsNullOrEmpty(tid)) return Forbid();
+    // ⬛     return Ok(await _svc.GetQuotaAsync(tid, ct));
+    // ⬛ }
 
     /// <summary>
     /// 지금 보고 있는 이 화면이 **메인PC(자료보관 컴퓨터)에서 열린 것인지** 알려준다.

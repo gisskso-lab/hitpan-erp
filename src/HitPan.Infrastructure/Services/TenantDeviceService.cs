@@ -89,7 +89,12 @@ public sealed class TenantDeviceService : ITenantDeviceService
         _db = db;
         _audit = audit;
         // 설정이 없으면 꺼짐(false) — 안전측. 종전 동작 그대로다.
-        _approvalEnabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-2)] `_approvalEnabled = config?.GetValue<bool>("DeviceApproval:Enabled") ?? false;`
+        //   사유: 승인제를 걷었다. 출하 appsettings.json 에 `"Enabled": true` 가 남아 있어도(#21 무접촉)
+        //   **이 값을 읽지 않는다** ⇒ 새 기기 줄은 늘 `approved`(:759). 미들웨어(④)와 같은 값 하나를 본다.
+        //   ⚠️ `config` 매개변수는 남긴다 — DI·시험 생성자 호출부가 그대로 돈다(#1).
+        _ = config;
+        _approvalEnabled = DeviceApprovalRetirement.ApprovalEnabled;
         _logger = logger ?? NullLogger<TenantDeviceService>.Instance;
     }
 
@@ -129,45 +134,94 @@ public sealed class TenantDeviceService : ITenantDeviceService
         return rows;
     }
 
-    // ── 쿼터 계산 (approved 기기 수 기반) ──
-    public async Task<DeviceQuotaDto> GetQuotaAsync(string tenantId, CancellationToken ct = default)
-    {
-        await EnsureOpenAsync(ct);
-
-        // 화면에 보여주기만 한다 — 여기서는 한도를 비교하지 않는다(P0 스냅샷 경우 6).
-        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
-        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
-
-        // 화면에 그대로 보여줄 값이라 요금제 이름은 저장된 원문을 쓴다
-        // (설정 열쇠용 정규화값 NormalizeTier 와 다르다 — 'default' 를 고객에게 보이면 안 된다).
-        // 🔴 2026-08-16 CR2-5 — 같은 행을 **두 번 읽던 것을 한 번으로** 합쳤다.
-        //   요금제 이름과 추가슬롯 수는 `local_subscription` 의 **같은 한 행**에 있다.
-        //   따로 읽으면 두 번째 조회 사이에 값이 바뀔 때 **서로 안 맞는 짝**이 나올 수 있고,
-        //   무엇보다 화면 한 번 그리는 데 왕복이 늘어난다.
-        //   ⚠️ 행이 없을 수 있다(부트스트랩 전) — 그때는 둘 다 기본값으로 떨어진다.
-        var sub = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)?>(new CommandDefinition(
-            """
-            SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra
-            FROM local_subscription WHERE tenant_id = @TenantId
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct));
-
-        var tier = sub?.tier;
-        var extra = sub?.extra ?? 0;
-
-        return new DeviceQuotaDto
-        {
-            PcLimit = pcLimit,
-            MobileLimit = mobileLimit,
-            PcUsed = pcUsed,
-            MobileUsed = mobileUsed,
-            ExtraSlots = extra,
-            SubscriptionTier = tier ?? "basic"
-        };
-    }
+    // ⬛ [낡은 메서드 · 2026-10-05 슬롯 폐기(작4 A-9 · 설계 §2-2 `:138`·`:150`)] GetQuotaAsync — 화면 KPI 카드 4개의 숫자.
+    //   사유: 카드는 이 화면에서 빠지고(E-3 · 작3 D-11) 한도 계산을 걷었다. `ITenantDeviceService` 선언·`DeviceController` quota 도 함께 ⬛(#12).
+    //   `DeviceQuotaDto` 클래스는 남긴다(되돌림 판독용).
+    // ⬛ // ── 쿼터 계산 (approved 기기 수 기반) ──
+    // ⬛ public async Task<DeviceQuotaDto> GetQuotaAsync(string tenantId, CancellationToken ct = default)
+    // ⬛ {
+    // ⬛     await EnsureOpenAsync(ct);
+    // ⬛ 
+    // ⬛     // 화면에 보여주기만 한다 — 여기서는 한도를 비교하지 않는다(P0 스냅샷 경우 6).
+    // ⬛     var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+    // ⬛     var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
+    // ⬛ 
+    // ⬛     // 화면에 그대로 보여줄 값이라 요금제 이름은 저장된 원문을 쓴다
+    // ⬛     // (설정 열쇠용 정규화값 NormalizeTier 와 다르다 — 'default' 를 고객에게 보이면 안 된다).
+    // ⬛     // 🔴 2026-08-16 CR2-5 — 같은 행을 **두 번 읽던 것을 한 번으로** 합쳤다.
+    // ⬛     //   요금제 이름과 추가슬롯 수는 `local_subscription` 의 **같은 한 행**에 있다.
+    // ⬛     //   따로 읽으면 두 번째 조회 사이에 값이 바뀔 때 **서로 안 맞는 짝**이 나올 수 있고,
+    // ⬛     //   무엇보다 화면 한 번 그리는 데 왕복이 늘어난다.
+    // ⬛     //   ⚠️ 행이 없을 수 있다(부트스트랩 전) — 그때는 둘 다 기본값으로 떨어진다.
+    // ⬛     var sub = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)?>(new CommandDefinition(
+    // ⬛         """
+    // ⬛         SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra
+    // ⬛         FROM local_subscription WHERE tenant_id = @TenantId
+    // ⬛         """,
+    // ⬛         new { TenantId = tenantId }, cancellationToken: ct));
+    // ⬛ 
+    // ⬛     var tier = sub?.tier;
+    // ⬛     var extra = sub?.extra ?? 0;
+    // ⬛ 
+    // ⬛     return new DeviceQuotaDto
+    // ⬛     {
+    // ⬛         PcLimit = pcLimit,
+    // ⬛         MobileLimit = mobileLimit,
+    // ⬛         PcUsed = pcUsed,
+    // ⬛         MobileUsed = mobileUsed,
+    // ⬛         ExtraSlots = extra,
+    // ⬛         SubscriptionTier = tier ?? "basic"
+    // ⬛     };
+    // ⬛ }
 
     // ── 로그인 시 호출: 기존 기기면 last_seen 갱신, 신규면 한도 검사 후 등록 ──
+    //
+    // 🔴 2026-10-05 슬롯 폐기(작4 A-4 · 9/28 설계 §2 ③) — **반환 직전 한 자리**에서 `allowed=true`.
+    //   [무엇이 바뀌나] 대기·폐기·거부 줄이어도, 표식 없는 옛 서버줄이어도 로그인은 막지 않는다.
+    //     줄 상태(`status`)는 지우지 않고 **표시용으로만** 남는다(#37 — 칸·값 무접촉).
+    //   [왜 안쪽 return 을 고치지 않나] 안쪽(`RegisterOrRefreshCoreAsync`)의 메인PC 구제·표식 정리 갈래
+    //     (옛 줄번호 :274-501 · P0 3회 이력)를 **한 줄도 안 건드리기 위해서**다. 안쪽은 종전 그대로 돈다.
+    //   ⬛ [낡은 계약] *"allowed=false + deviceId ⇒ 승인 대기(관문) · allowed=false + null ⇒ 401"*
+    //     — 사유: 승인제·관문을 걷었다. AuthController 의 그 두 갈래(:180-196)는 이제 **닿지 않는 줄**이다(묶음 C · 작2 파일 0줄).
+    //   ⚠️ deviceId 는 안쪽이 준 그대로 돌려준다(null 일 수 있다 — 그때 로그인 응답에 장비넘버가 비어 갈 뿐이다).
     public async Task<(bool allowed, string reason, string? deviceId, bool newlyRegistered)> RegisterOrRefreshAsync(
+        string tenantId,
+        string userId,
+        RegisterDeviceRequest req,
+        string ipAddress,
+        CancellationToken ct = default)
+    {
+        var (allowed, reason, deviceId, newlyRegistered) =
+            await RegisterOrRefreshCoreAsync(tenantId, userId, req, ipAddress, ct);
+
+        // 🔴 2026-10-05 봉합2 (PM 결정) — **메인PC(서버줄) 갈래의 거부·가드는 슬롯이 아니다. 그대로 돌려준다.**
+        //   [무엇이 났나] 「늘 허용」이 안쪽 서버줄 가드(`isServerRowWithoutMark && status != "approved"` ⇒
+        //     `StaleServerRow`)까지 지워 사유 '' · allowed=true 가 나갔다 ⇒ AuthController 가 대표에게
+        //     로그인마다 알림을 보내던 병렬이슈35 · 합류 화면 갇힘 방지(장비넘버 반환) 축이 무너졌다
+        //     (CI `db-gate` G-M8b·M8e·M8k 빨강 · job 111616295679).
+        //   [고침] 안쪽 본문은 무접촉. 바깥 판정 한 자리에서 **서버줄 가드 결과만** 통과시킨다.
+        //     안쪽에서 서버줄 갈래가 내는 거부는 이 사유 하나뿐이다(`return (false, …)` 3곳 중
+        //     나머지 2곳 「폐기된 기기」(`status == "revoked" && !isMainPc`)·「승인 대기」는 일반 직원 줄 몫 ⇒ 늘 허용).
+        if (!allowed && reason == DeviceMessages.StaleServerRow)
+        {
+            return (allowed, reason, deviceId, newlyRegistered);
+        }
+
+        if (!allowed)
+        {
+            _logger.LogInformation(
+                "[TenantDeviceService] 기기 줄이 승인 상태가 아니지만 로그인은 막지 않는다(2026-10-05 슬롯 폐기). "
+                + "tenant={TenantId} device={DeviceId} reason={Reason}",
+                tenantId, deviceId, reason);
+        }
+
+        // 🔴 늘 허용 — 사유 글자는 비운다(대기 안내가 화면으로 새지 않게 · 고객 문구에 「승인 대기」 0).
+        return (true, "", deviceId, newlyRegistered);
+    }
+
+    // ⬛ [옛 이름 · 2026-10-05 작4 A-4] 아래가 종전 `RegisterOrRefreshAsync` 본문이다 — 이름만 바꿨고 본문은 한 글자도 안 고쳤다
+    //   (한도 읽기·거절 줄의 ⬛ 주석은 A-3·A-9 몫). 바깥이 반환 한 자리에서 허용으로 바꾼다.
+    private async Task<(bool allowed, string reason, string? deviceId, bool newlyRegistered)> RegisterOrRefreshCoreAsync(
         string tenantId,
         string userId,
         RegisterDeviceRequest req,
@@ -559,29 +613,33 @@ public sealed class TenantDeviceService : ITenantDeviceService
             // ══════════════════════════════════════════════════════════════
             var normalizedType = ResolveDeviceType(req.DeviceType, req.UserAgent);
 
-            // 🔴 승격(휴대기기 → 컴퓨터)일 때만 한도를 다시 본다.
-            //   ⚠️ 자기 자신이 지금 휴대기기 칸에 세어지고 있으므로, 컴퓨터 칸만 보면 된다.
-            var isPromotionToPc = normalizedType == "pc" && curType != "pc";
-
-            if (isPromotionToPc)
-            {
-                var (promoPcLimit, _) = await GetLimitsAsync(tenantId, ct);
-                var (promoPcUsed, _) = await CountUsedSlotsAsync(tenantId, ct);
-
-                if (promoPcUsed >= promoPcLimit)
-                {
-                    // 🔴 **막지 않는다. 안 바꿀 뿐이다.** 그 기기는 종전 칸으로 계속 쓴다.
-                    //   ⇒ 아래 UPDATE 에 null 을 주면 COALESCE 가 기존 값을 보존한다.
-                    //   ⚠️ return 하지 않는다 — return 하면 그것이 곧 "막는다" 이고 8/10 사고다.
-                    normalizedType = null;
-
-                    _logger.LogInformation(
-                        "[TenantDeviceService] 기기 종류 승격을 보류했다 — 컴퓨터 칸이 찼다. "
-                        + "그 기기는 종전 칸({CurType})으로 계속 쓴다(막지 않는다). "
-                        + "device={DeviceId} pcUsed={PcUsed} pcLimit={PcLimit}",
-                        curType, id, promoPcUsed, promoPcLimit);
-                }
-            }
+            // ⬛ [낡은 블록 · 2026-10-05 슬롯 폐기(작4 A-9 · 설계 §2-2 `:568`)] 승격(휴대폰→컴퓨터) 때 컴퓨터 칸 한도 재검사.
+            //   사유: 칸을 세는 곳이 없어졌다 ⇒ **늘 승격**한다. 기기 종류는 이제 표시용이다(세는 곳 0).
+            //   ⚠️ 한 아이디 컴퓨터 1대 판정(작2)은 요청의 UA 로 따로 한다(`DeviceTypeResolver`) — 이 줄의 종류를 안 읽는다(G-AR10).
+            //   🔴 위쪽 메인PC 갈래(:274-501)는 한 줄도 안 건드렸다.
+            // ⬛ // 🔴 승격(휴대기기 → 컴퓨터)일 때만 한도를 다시 본다.
+            // ⬛ //   ⚠️ 자기 자신이 지금 휴대기기 칸에 세어지고 있으므로, 컴퓨터 칸만 보면 된다.
+            // ⬛ var isPromotionToPc = normalizedType == "pc" && curType != "pc";
+            // ⬛ 
+            // ⬛ if (isPromotionToPc)
+            // ⬛ {
+            // ⬛     var (promoPcLimit, _) = await GetLimitsAsync(tenantId, ct);
+            // ⬛     var (promoPcUsed, _) = await CountUsedSlotsAsync(tenantId, ct);
+            // ⬛ 
+            // ⬛     if (promoPcUsed >= promoPcLimit)
+            // ⬛     {
+            // ⬛         // 🔴 **막지 않는다. 안 바꿀 뿐이다.** 그 기기는 종전 칸으로 계속 쓴다.
+            // ⬛         //   ⇒ 아래 UPDATE 에 null 을 주면 COALESCE 가 기존 값을 보존한다.
+            // ⬛         //   ⚠️ return 하지 않는다 — return 하면 그것이 곧 "막는다" 이고 8/10 사고다.
+            // ⬛         normalizedType = null;
+            // ⬛ 
+            // ⬛         _logger.LogInformation(
+            // ⬛             "[TenantDeviceService] 기기 종류 승격을 보류했다 — 컴퓨터 칸이 찼다. "
+            // ⬛             + "그 기기는 종전 칸({CurType})으로 계속 쓴다(막지 않는다). "
+            // ⬛             + "device={DeviceId} pcUsed={PcUsed} pcLimit={PcLimit}",
+            // ⬛             curType, id, promoPcUsed, promoPcLimit);
+            // ⬛     }
+            // ⬛ }
 
             // 🔴 2026-08-20 20260820작2 ([3-V] 실재 판정 ②③) — **회사서버 줄의 정체는 서버가 정한다.**
             //
@@ -628,8 +686,9 @@ public sealed class TenantDeviceService : ITenantDeviceService
 
         // 2) 신규 기기 — 티어별 한도 검사
         //   🔴 20260815작3 P1 — 계수와 한도를 단일 메서드로 모았다.
-        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
-        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-9)] 신규 기기 한도 읽기 — 아래 거절 두 갈래와 함께 걷었다.
+        // ⬛ var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        // ⬛ var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
 
         // 🔴 20260811작2 — 판정을 NormalizeDeviceType 한 곳으로 모았다.
         //   종전엔 이 자리에만 있었고, 갱신 경로(위)는 종류를 아예 안 봤다.
@@ -711,25 +770,28 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //
         // ⚠️ allowed=false 이지만 **로그인 거부가 아니다.** 사장님: "일단 로그인, 접속까지는 가능하게 해."
         //   호출부가 이 값을 기기 상태로 실어 보내고, 화면이 메뉴를 잠근 채 안내문을 띄운다.
-        const string LimitExceededMessage = "인증기기 한도초과. 관리자에게 문의하세요.";
-
-        if (type == "pc" && pcUsed >= pcLimit)
-        {
-            await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
-            return (false, LimitExceededMessage, null, false);
-        }
-        // ⚠️ 2026-08-16 CR2-4 — 여기 `type == "tablet"` 은 **죽은 가지다.**
-        //   위 `type` 은 NormalizeDeviceType 을 거쳐 오는데 그 함수가 tablet 을 이미
-        //   mobile 로 흡수한다(:972). 그래서 이 비교는 참이 될 수 없다.
-        //   🔴 그래도 **지우지 않는다** — 지워도 동작이 1도 안 바뀌는 대신,
-        //     나중에 정규화를 건너뛰는 경로가 생기면 조용히 새는 자리가 된다(헌법 #1 가산 원칙).
-        //   ⚠️ 혼동 금지: ApproveAsync:475 의 똑같이 생긴 검사는 **살아 있다.**
-        //     거기 `devType` 은 DB 에서 읽은 값이라 옛 행에 'tablet' 이 남아 있을 수 있다.
-        if ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit)
-        {
-            await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
-            return (false, LimitExceededMessage, null, false);
-        }
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-3)] 새 기기 한도 거절 두 갈래(컴퓨터 :716 · 휴대폰 :728) + 기록 `denied_limit`.
+        //   사유: 기기 수로 사람을 막지 않는다. 칸이 찬 회사의 새 직원이 **로그인에서 401** 에 걸리던 자리다(9/28 §2 ②).
+        //   ⚠️ 한 아이디 컴퓨터 1대 규칙은 여기가 아니라 로그인(AuthService · 작2)이 사람 단위로 지킨다.
+        // ⬛ const string LimitExceededMessage = "인증기기 한도초과. 관리자에게 문의하세요.";
+        // ⬛ 
+        // ⬛ if (type == "pc" && pcUsed >= pcLimit)
+        // ⬛ {
+        // ⬛     await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
+        // ⬛     return (false, LimitExceededMessage, null, false);
+        // ⬛ }
+        // ⬛ // ⚠️ 2026-08-16 CR2-4 — 여기 `type == "tablet"` 은 **죽은 가지다.**
+        // ⬛ //   위 `type` 은 NormalizeDeviceType 을 거쳐 오는데 그 함수가 tablet 을 이미
+        // ⬛ //   mobile 로 흡수한다(:972). 그래서 이 비교는 참이 될 수 없다.
+        // ⬛ //   🔴 그래도 **지우지 않는다** — 지워도 동작이 1도 안 바뀌는 대신,
+        // ⬛ //     나중에 정규화를 건너뛰는 경로가 생기면 조용히 새는 자리가 된다(헌법 #1 가산 원칙).
+        // ⬛ //   ⚠️ 혼동 금지: ApproveAsync:475 의 똑같이 생긴 검사는 **살아 있다.**
+        // ⬛ //     거기 `devType` 은 DB 에서 읽은 값이라 옛 행에 'tablet' 이 남아 있을 수 있다.
+        // ⬛ if ((type == "mobile" || type == "tablet") && mobileUsed >= mobileLimit)
+        // ⬛ {
+        // ⬛     await LogDeniedAsync(tenantId, userId, ipAddress, null, "denied_limit", ct);
+        // ⬛     return (false, LimitExceededMessage, null, false);
+        // ⬛ }
 
         // 3) INSERT — 승인제가 켜져 있으면 'pending', 꺼져 있으면 종전대로 'approved'
         //
@@ -903,13 +965,15 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //     🔴 계수 대상을 pending 까지 넓히면 승인하려는 그 기기가 자기를 세어
         //       남은 자리가 있어도 `pcUsed >= pcLimit` 이 참이 되어 **승인이 영원히 막힌다**
         //       (P0 실측 D-4). I-7 게이트가 이 경계를 지킨다.
-        var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
-        var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
-
-        if (devType == "pc" && pcUsed >= pcLimit)
-            throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
-        if ((devType == "mobile" || devType == "tablet") && mobileUsed >= mobileLimit)
-            throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-9)] 승인 시점 한도 재검사 — 사유: 기기 수로 막지 않는다.
+        //   승인 API 는 화면에서 안 부르게 됐지만(B-3) 남는 동안 **한도로 실패하지 않게** 한다(G-AR11).
+        // ⬛ var (pcLimit, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        // ⬛ var (pcUsed, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
+        // ⬛ 
+        // ⬛ if (devType == "pc" && pcUsed >= pcLimit)
+        // ⬛     throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
+        // ⬛ if ((devType == "mobile" || devType == "tablet") && mobileUsed >= mobileLimit)
+        // ⬛     throw new InvalidOperationException("인증기기 한도초과. 슬롯을 추가하거나 사용하지 않는 기기를 해제해 주세요.");
 
         // 🔴 승인하는 **그 순간** 인증키를 발급한다 (20260811작3 · 사장님 오더).
         //   *"사용PC에는 물리적으로 간단한 인증서 같은 인증키를 부여"*
@@ -1523,16 +1587,18 @@ public sealed class TenantDeviceService : ITenantDeviceService
         //     "일관성" 을 이유로 컴퓨터 한도까지 검사하게 만들면
         //     **종전에 통과하던 QR 등록이 갑자기 막힌다.**
         //     ⇒ 계수를 모으는 일은 호출부의 비교식까지 같게 만드는 일이 아니다.
-        var (_, mobileLimit) = await GetLimitsAsync(tenantId, ct);
-        var (_, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
-
-        if (mobileUsed >= mobileLimit)
-        {
-            // 🔴 한도가 찼을 때야말로 **대표에게 말해야 하는 자리**다 — 직원 혼자서는 못 푼다.
-            //   슬롯을 늘리거나 안 쓰는 기기를 해제하는 것은 대표만 할 수 있다.
-            return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null,
-                await GetAdminContactAsync(tenantId, ct));
-        }
+        // ⬛ [낡은 줄 · 2026-10-05 슬롯 폐기(작4 A-9)] 휴대폰 QR 등록의 한도 거절 — 사유: 기기 수로 막지 않는다.
+        //   QR 입구는 화면에서 걷었지만(A-7) API 가 남는 동안 **한도로 실패하지 않게** 한다(G-AR11).
+        // ⬛ var (_, mobileLimit) = await GetLimitsAsync(tenantId, ct);
+        // ⬛ var (_, mobileUsed) = await CountUsedSlotsAsync(tenantId, ct);
+        // ⬛ 
+        // ⬛ if (mobileUsed >= mobileLimit)
+        // ⬛ {
+        // ⬛     // 🔴 한도가 찼을 때야말로 **대표에게 말해야 하는 자리**다 — 직원 혼자서는 못 푼다.
+        // ⬛     //   슬롯을 늘리거나 안 쓰는 기기를 해제하는 것은 대표만 할 수 있다.
+        // ⬛     return (false, "인증기기 한도초과. 관리자에게 문의하세요.", null,
+        // ⬛         await GetAdminContactAsync(tenantId, ct));
+        // ⬛ }
 
         // 🔴 2026-08-16 20260816작2 — **QR 도 대표 승인을 거친다** (사장님 전결).
         //
@@ -1744,46 +1810,48 @@ public sealed class TenantDeviceService : ITenantDeviceService
     // 슬롯 계수·한도 — 🔴 여기가 유일한 자리다 (20260815작3 P1·P2)
     // ══════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 지금 몇 슬롯을 쓰고 있는가 — <b>슬롯을 세는 유일한 자리</b>.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>종전엔 이 SQL 이 네 곳에 복제돼 있었다</b>(:97 · :245 · :410 · :597).
-    /// 네 곳이 <b>모양까지 서로 달라서</b> 한 곳을 고쳐도 나머지가 옛 규칙으로 돌았다.
-    /// 요금이 걸린 계산이라 갈리면 안 된다.
-    ///
-    /// <para>
-    /// ⚠️ <b>세는 규칙 — 바꾸면 요금이 샌다. P0 스냅샷 ①-4 가 봉인한 현행이다.</b>
-    /// </para>
-    /// <list type="bullet">
-    /// <item><b><c>status='approved'</c> 만 센다.</b> pending·revoked 는 안 센다.
-    ///   🔴 <c>pending</c> 을 넣으면 <see cref="ApproveAsync"/> 가 <b>영원히 막힌다</b> —
-    ///   승인하려는 그 기기가 자기 자신을 세어 버려 한도가 항상 꽉 찬 것으로 보인다
-    ///   (P0 실측 D-4). I-7 게이트가 이것을 지킨다.</item>
-    /// <item><b><c>tablet</c> 은 휴대기기 칸에 합산한다.</b> 사장님 판정 — 컴퓨터 운영체제가 아니다.
-    ///   🔴 등호(<c>= 'mobile'</c>)로 비교하면 <b>태블릿이 어느 칸에도 안 잡혀 공짜로 쓰인다.</b>
-    ///   G-13 게이트가 이것을 지킨다.</item>
-    /// <item>🔴 <b><c>is_main_pc</c> 를 빼지 않는다.</b> 메인PC 도 1대로 센다(사장님 확정).
-    ///   <c>AND is_main_pc = 0</c> 을 넣으면 <b>적게 세어 요금이 샌다</b>(P0 실측 D-3).</item>
-    /// </list>
-    /// </remarks>
-    /// <returns>(컴퓨터 사용 대수, 휴대기기 사용 대수)</returns>
-    private async Task<(int pcUsed, int mobileUsed)> CountUsedSlotsAsync(string tenantId, CancellationToken ct)
-    {
-        await EnsureOpenAsync(ct);
-
-        // 한 번의 조회로 두 칸을 다 만든다. 칸별로 따로 물으면 그 사이에 값이 바뀔 수 있다.
-        var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
-            """
-            SELECT device_type AS t, COUNT(*) AS c
-            FROM tenant_devices
-            WHERE tenant_id = @TenantId AND status = 'approved'
-            GROUP BY device_type
-            """,
-            new { TenantId = tenantId }, cancellationToken: ct))).ToList();
-
-        return (PcUsedFrom(counts), MobileUsedFrom(counts));
-    }
+    // ⬛ [낡은 메서드 · 2026-10-05 슬롯 폐기(작4 A-9)] CountUsedSlotsAsync — 한도와 비교할 셈. 부르는 곳 0(한도를 걷었다).
+    //   ⚠️ 칸 셈 순수 함수 PcUsedFrom·MobileUsedFrom 은 남긴다(시험 G-13·I-7 이 부른다 · 판정에 안 쓰임).
+    // ⬛ /// <summary>
+    // ⬛ /// 지금 몇 슬롯을 쓰고 있는가 — <b>슬롯을 세는 유일한 자리</b>.
+    // ⬛ /// </summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// 🔴 <b>종전엔 이 SQL 이 네 곳에 복제돼 있었다</b>(:97 · :245 · :410 · :597).
+    // ⬛ /// 네 곳이 <b>모양까지 서로 달라서</b> 한 곳을 고쳐도 나머지가 옛 규칙으로 돌았다.
+    // ⬛ /// 요금이 걸린 계산이라 갈리면 안 된다.
+    // ⬛ ///
+    // ⬛ /// <para>
+    // ⬛ /// ⚠️ <b>세는 규칙 — 바꾸면 요금이 샌다. P0 스냅샷 ①-4 가 봉인한 현행이다.</b>
+    // ⬛ /// </para>
+    // ⬛ /// <list type="bullet">
+    // ⬛ /// <item><b><c>status='approved'</c> 만 센다.</b> pending·revoked 는 안 센다.
+    // ⬛ ///   🔴 <c>pending</c> 을 넣으면 <see cref="ApproveAsync"/> 가 <b>영원히 막힌다</b> —
+    // ⬛ ///   승인하려는 그 기기가 자기 자신을 세어 버려 한도가 항상 꽉 찬 것으로 보인다
+    // ⬛ ///   (P0 실측 D-4). I-7 게이트가 이것을 지킨다.</item>
+    // ⬛ /// <item><b><c>tablet</c> 은 휴대기기 칸에 합산한다.</b> 사장님 판정 — 컴퓨터 운영체제가 아니다.
+    // ⬛ ///   🔴 등호(<c>= 'mobile'</c>)로 비교하면 <b>태블릿이 어느 칸에도 안 잡혀 공짜로 쓰인다.</b>
+    // ⬛ ///   G-13 게이트가 이것을 지킨다.</item>
+    // ⬛ /// <item>🔴 <b><c>is_main_pc</c> 를 빼지 않는다.</b> 메인PC 도 1대로 센다(사장님 확정).
+    // ⬛ ///   <c>AND is_main_pc = 0</c> 을 넣으면 <b>적게 세어 요금이 샌다</b>(P0 실측 D-3).</item>
+    // ⬛ /// </list>
+    // ⬛ /// </remarks>
+    // ⬛ /// <returns>(컴퓨터 사용 대수, 휴대기기 사용 대수)</returns>
+    // ⬛ private async Task<(int pcUsed, int mobileUsed)> CountUsedSlotsAsync(string tenantId, CancellationToken ct)
+    // ⬛ {
+    // ⬛     await EnsureOpenAsync(ct);
+    // ⬛ 
+    // ⬛     // 한 번의 조회로 두 칸을 다 만든다. 칸별로 따로 물으면 그 사이에 값이 바뀔 수 있다.
+    // ⬛     var counts = (await _db.QueryAsync<(string t, int c)>(new CommandDefinition(
+    // ⬛         """
+    // ⬛         SELECT device_type AS t, COUNT(*) AS c
+    // ⬛         FROM tenant_devices
+    // ⬛         WHERE tenant_id = @TenantId AND status = 'approved'
+    // ⬛         GROUP BY device_type
+    // ⬛         """,
+    // ⬛         new { TenantId = tenantId }, cancellationToken: ct))).ToList();
+    // ⬛ 
+    // ⬛     return (PcUsedFrom(counts), MobileUsedFrom(counts));
+    // ⬛ }
 
     /// <summary>컴퓨터 칸으로 세는 것 — <c>pc</c> 하나뿐이다.</summary>
     /// <remarks>⚠️ internal 인 이유는 시험이 직접 부르기 때문이다(G-13 · I-7).</remarks>
@@ -1798,157 +1866,164 @@ public sealed class TenantDeviceService : ITenantDeviceService
     internal static int MobileUsedFrom(IEnumerable<(string t, int c)> counts)
         => counts.Where(x => x.t == "mobile" || x.t == "tablet").Sum(x => x.c);
 
-    /// <summary>
-    /// 이 회사가 쓸 수 있는 한도는 몇 대인가 — <b>한도를 만드는 유일한 자리</b>.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>종전엔 한도 계산도 네 곳에 복제돼 있었다</b>(:93-94 · :242-243 · :407-408 · :595).
-    /// 계수만 모으고 한도를 안 모으면 <b>여전히 네 곳이 갈린다</b>(P0 실측 D-7).
-    ///
-    /// <para>
-    /// 🔴 <b>숫자는 코드에 없다</b> — <c>device_slot_policy_settings</c>(DB-104)에서 읽는다.
-    /// 요금제는 사업이 정하는 것이라 <b>고칠 때 재배포가 필요하면 안 된다</b>(헌법 #11).
-    /// 상수로 옮기는 것은 설정화가 아니다 — 자리만 옮긴 것이다(DB-96 이 같은 판단을 했다).
-    /// </para>
-    ///
-    /// <para>
-    /// 추가슬롯: <b>1개 = 컴퓨터 +1 · 휴대기기 +1</b> (사장님 확정 "추가슬롯 1+1당 1만원").
-    /// ⚠️ 종전 코드는 휴대기기에 <c>extra * 2</c> 를 줬다. 배수도 설정에서 읽는다.
-    /// </para>
-    /// </remarks>
-    private async Task<(int pcLimit, int mobileLimit)> GetLimitsAsync(string tenantId, CancellationToken ct)
-    {
-        await EnsureOpenAsync(ct);
-
-        var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
-            "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
-            new { TenantId = tenantId }, cancellationToken: ct));
-
-        // 설정표를 한 번에 읽는다 — 열쇠마다 따로 물으면 왕복이 늘어난다.
-        var settings = await LoadSlotPolicyAsync(tenantId, ct);
-
-        return ResolveLimits(tenant.tier, tenant.extra, settings);
-    }
-
-    /// <summary>
-    /// 설정값 + 요금제 + 추가슬롯 → <b>실제 한도</b>. 판정의 전부가 여기 있다.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>DB 를 타지 않는 순수 계산</b>으로 떼어 둔 이유는 <b>시험 때문</b>이다(G-8).
-    ///
-    /// <para>
-    /// 작업지시서 §5 가 고정했다 — <i>"코드에 리터럴이 없는지"</i> 를 보는 게이트는
-    /// <b>상수를 옮기면 통과하는 가짜</b>다. 8/15 메신저 사고(<c>ChatWindowGuardTests</c> 가
-    /// 글자만 봐서 통과시켰다)를 근거로 든 지적이다.
-    /// ⇒ 게이트가 물어야 할 것은 <b>"설정값을 바꾸면 실제 한도가 바뀌는가"</b> 하나다.
-    /// 그러려면 시험이 이 판정을 <b>직접 부를 수 있어야</b> 한다.
-    /// </para>
-    /// </remarks>
-    /// <param name="rawTier">저장된 요금제 이름 원문(정규화 전).</param>
-    /// <param name="extraSlots">구매한 추가슬롯 개수.</param>
-    /// <param name="settings">DB-104 설정표. 비어 있으면 종전 숫자로 떨어진다.</param>
-    internal static (int pcLimit, int mobileLimit) ResolveLimits(
-        string? rawTier, int extraSlots, IReadOnlyDictionary<string, int> settings)
-    {
-        var tier = NormalizeTier(rawTier);
-        var (fbPc, fbMobile) = FallbackLimits(tier);
-
-        var pcLimit     = Pick(settings, $"tier.{tier}.pc_limit",     fbPc);
-        var mobileLimit = Pick(settings, $"tier.{tier}.mobile_limit", fbMobile);
-
-        // 🔴 1+1 — 사장님 확정. 배수도 설정값이라 사업이 바뀌면 값만 갈아끼운다.
-        var pcPerSlot     = Pick(settings, "extra_slot.pc_per_slot",     1);
-        var mobilePerSlot = Pick(settings, "extra_slot.mobile_per_slot", 1);
-
-        pcLimit     += extraSlots * pcPerSlot;
-        mobileLimit += extraSlots * mobilePerSlot;
-
-        return (pcLimit, mobileLimit);
-    }
-
-    /// <summary>기기 슬롯 기준값 표(DB-104)를 통째로 읽는다.</summary>
-    /// <remarks>
-    /// ⚠️ 표가 아직 없는 DB(마이그레이션 전)에서도 죽지 않아야 한다 —
-    /// 로그인 경로에서 불리므로 여기서 던지면 <b>고객이 로그인을 못 한다.</b>
-    /// 못 읽으면 빈 사전을 돌려주고 호출부가 종전 숫자로 떨어진다.
-    /// </remarks>
-    private async Task<Dictionary<string, int>> LoadSlotPolicyAsync(string tenantId, CancellationToken ct)
-    {
-        try
-        {
-            var rows = await _db.QueryAsync<(string k, int v)>(new CommandDefinition(
-                """
-                SELECT policy_key AS k, policy_value AS v
-                FROM device_slot_policy_settings
-                WHERE tenant_id = @TenantId
-                """,
-                new { TenantId = tenantId }, cancellationToken: ct));
-
-            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (k, v) in rows) map[k] = v;
-            return map;
-        }
-        catch (Exception ex)
-        {
-            // 🔴 헌법 #15 — 빈 catch 금지. 왜 종전 숫자로 떨어졌는지 남긴다.
-            //   ⚠️ 종전엔 Debug.WriteLine 이었다 — Release 에서 사라져 **운영에 아무 기록도 안 남았다**(B-5).
-            //     운영에서 사라지는 기록은 기록이 아니다. 요금이 걸린 신호라 더욱.
-            _logger.LogWarning(ex,
-                "[TenantDeviceService] 기기 슬롯 기준값 표(device_slot_policy_settings)를 못 읽었다 — "
-                + "종전 숫자(안전망)로 진행한다. tenant={TenantId}", tenantId);
-            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
-    private static int Pick(IReadOnlyDictionary<string, int> settings, string key, int fallback)
-        => settings.TryGetValue(key, out var v) ? v : fallback;
-
-    /// <summary>
-    /// 요금제 이름을 설정 열쇠로 쓸 수 있게 정리한다.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b><c>enterprise</c> 가 실제로 발급되는 최상위 값이다</b>(명세서 §17-4 · PI-14).
-    /// 코드만 <c>premium</c> 이라 쓰고 있었고 DDL·시리얼 발급·백오피스는 전부 <c>enterprise</c> 라,
-    /// 최상위 고객이 갈래를 못 찾아 <b>basic 한도로 떨어지고 있었다.</b>
-    /// ⚠️ <c>premium</c> 도 살려 둔다 — 옛 데이터에 남아 있을 수 있다(P0 실측 D-16).
-    /// 모르는 값은 <c>default</c> 로 보내 종전 <c>_ =&gt; (5,3)</c> 과 같게 만든다.
-    /// </remarks>
-    private static string NormalizeTier(string? tier)
-    {
-        var t = (tier ?? "basic").Trim().ToLowerInvariant();
-        return t switch
-        {
-            "basic" or "pro" or "enterprise" or "premium" or "trial" => t,
-            _ => "default"
-        };
-    }
-
-    /// <summary>
-    /// 설정표를 못 읽었을 때 쓰는 숫자 — <b>종전 코드와 한 글자도 다르지 않다.</b>
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// ⚠️ 이것은 <b>설정의 대체물이 아니라 안전망</b>이다. 마이그레이션이 아직 안 돈 DB 나
-    /// 표가 비어 있는 회사에서 <b>로그인이 죽지 않게</b> 하는 것이 유일한 목적이다.
-    /// 🔴 이 숫자를 고쳐서 요금제를 바꾸려 하면 안 된다 — 설정표(DB-104)를 고쳐야 한다.
-    /// 정상 경로에서는 이 값이 <b>쓰이지 않는다</b>(G-8 이 그것을 시험한다).
-    /// </para>
-    /// <para>
-    /// 🔴 <b>2026-08-16 (20260816작1) — 숫자를 여기 적지 않는다.</b>
-    /// 종전엔 이 <c>switch</c> 안에 <c>(5,3)·(10,8)…</c> 이 직접 적혀 있어,
-    /// 회사 생성 시드(<see cref="SlotPolicyDefaults"/>)와 <b>같은 숫자가 두 벌</b>이 됐다.
-    /// 한쪽만 고치면 <b>신규 고객과 안전망이 서로 다른 한도로 돈다</b> —
-    /// 이 차수가 계수 8곳을 모으며 없앤 바로 그 병이다.
-    /// ⇒ 안전망도 <b>시드와 같은 정의를 읽는다.</b> 갈라질 수가 없다(G-20).
-    /// </para>
-    /// </remarks>
-    private static (int pc, int mobile) FallbackLimits(string normalizedTier)
-    {
-        // 모르는 요금제는 NormalizeTier 가 이미 "default" 로 보낸다(종전 `_ => (5,3)` 과 동일).
-        var pc     = SlotPolicyDefaults.Value($"tier.{normalizedTier}.pc_limit");
-        var mobile = SlotPolicyDefaults.Value($"tier.{normalizedTier}.mobile_limit");
-        return (pc, mobile);
-    }
+    // ══════════════════════════════════════════════════════════════
+    // ⬛ [낡은 메서드 묶음 · 2026-10-05 슬롯 폐기(작4 A-9)] GetLimitsAsync · ResolveLimits · LoadSlotPolicyAsync · Pick · NormalizeTier · FallbackLimits
+    //   사유: 기기 수로 사람을 막는 일이 없어졌다(사장님 10/5 「슬롯제한 기능을 폐기」). 부르는 곳 0 이 된 뒤 메서드째 주석으로 남긴다(#1).
+    //   ⇒ 이 파일에서 `extra_device_slots` 읽기 · `device_slot_policy_settings` · `SlotPolicyDefaults` 기본 한도 참조가 0 이 된다(작3 G-A15).
+    //   🔴 DB 칸·표는 지우지 않는다(E-4 · #37) — 웹훅은 계속 적고(작3 소유) 여기서는 읽지 않을 뿐이다.
+    //   되살리기 = 이전 판 재게시. 이 블록의 주석을 풀어 다시 부르면 작3 G-A15 가 FAIL 한다(의도).
+    // ══════════════════════════════════════════════════════════════
+    // ⬛ /// <summary>
+    // ⬛ /// 이 회사가 쓸 수 있는 한도는 몇 대인가 — <b>한도를 만드는 유일한 자리</b>.
+    // ⬛ /// </summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// 🔴 <b>종전엔 한도 계산도 네 곳에 복제돼 있었다</b>(:93-94 · :242-243 · :407-408 · :595).
+    // ⬛ /// 계수만 모으고 한도를 안 모으면 <b>여전히 네 곳이 갈린다</b>(P0 실측 D-7).
+    // ⬛ ///
+    // ⬛ /// <para>
+    // ⬛ /// 🔴 <b>숫자는 코드에 없다</b> — <c>device_slot_policy_settings</c>(DB-104)에서 읽는다.
+    // ⬛ /// 요금제는 사업이 정하는 것이라 <b>고칠 때 재배포가 필요하면 안 된다</b>(헌법 #11).
+    // ⬛ /// 상수로 옮기는 것은 설정화가 아니다 — 자리만 옮긴 것이다(DB-96 이 같은 판단을 했다).
+    // ⬛ /// </para>
+    // ⬛ ///
+    // ⬛ /// <para>
+    // ⬛ /// 추가슬롯: <b>1개 = 컴퓨터 +1 · 휴대기기 +1</b> (사장님 확정 "추가슬롯 1+1당 1만원").
+    // ⬛ /// ⚠️ 종전 코드는 휴대기기에 <c>extra * 2</c> 를 줬다. 배수도 설정에서 읽는다.
+    // ⬛ /// </para>
+    // ⬛ /// </remarks>
+    // ⬛ private async Task<(int pcLimit, int mobileLimit)> GetLimitsAsync(string tenantId, CancellationToken ct)
+    // ⬛ {
+    // ⬛     await EnsureOpenAsync(ct);
+    // ⬛ 
+    // ⬛     var tenant = await _db.QueryFirstOrDefaultAsync<(string? tier, int extra)>(new CommandDefinition(
+    // ⬛         "SELECT subscription_tier AS tier, COALESCE(extra_device_slots, 0) AS extra FROM local_subscription WHERE tenant_id = @TenantId",
+    // ⬛         new { TenantId = tenantId }, cancellationToken: ct));
+    // ⬛ 
+    // ⬛     // 설정표를 한 번에 읽는다 — 열쇠마다 따로 물으면 왕복이 늘어난다.
+    // ⬛     var settings = await LoadSlotPolicyAsync(tenantId, ct);
+    // ⬛ 
+    // ⬛     return ResolveLimits(tenant.tier, tenant.extra, settings);
+    // ⬛ }
+    // ⬛ 
+    // ⬛ /// <summary>
+    // ⬛ /// 설정값 + 요금제 + 추가슬롯 → <b>실제 한도</b>. 판정의 전부가 여기 있다.
+    // ⬛ /// </summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// 🔴 <b>DB 를 타지 않는 순수 계산</b>으로 떼어 둔 이유는 <b>시험 때문</b>이다(G-8).
+    // ⬛ ///
+    // ⬛ /// <para>
+    // ⬛ /// 작업지시서 §5 가 고정했다 — <i>"코드에 리터럴이 없는지"</i> 를 보는 게이트는
+    // ⬛ /// <b>상수를 옮기면 통과하는 가짜</b>다. 8/15 메신저 사고(<c>ChatWindowGuardTests</c> 가
+    // ⬛ /// 글자만 봐서 통과시켰다)를 근거로 든 지적이다.
+    // ⬛ /// ⇒ 게이트가 물어야 할 것은 <b>"설정값을 바꾸면 실제 한도가 바뀌는가"</b> 하나다.
+    // ⬛ /// 그러려면 시험이 이 판정을 <b>직접 부를 수 있어야</b> 한다.
+    // ⬛ /// </para>
+    // ⬛ /// </remarks>
+    // ⬛ /// <param name="rawTier">저장된 요금제 이름 원문(정규화 전).</param>
+    // ⬛ /// <param name="extraSlots">구매한 추가슬롯 개수.</param>
+    // ⬛ /// <param name="settings">DB-104 설정표. 비어 있으면 종전 숫자로 떨어진다.</param>
+    // ⬛ internal static (int pcLimit, int mobileLimit) ResolveLimits(
+    // ⬛     string? rawTier, int extraSlots, IReadOnlyDictionary<string, int> settings)
+    // ⬛ {
+    // ⬛     var tier = NormalizeTier(rawTier);
+    // ⬛     var (fbPc, fbMobile) = FallbackLimits(tier);
+    // ⬛ 
+    // ⬛     var pcLimit     = Pick(settings, $"tier.{tier}.pc_limit",     fbPc);
+    // ⬛     var mobileLimit = Pick(settings, $"tier.{tier}.mobile_limit", fbMobile);
+    // ⬛ 
+    // ⬛     // 🔴 1+1 — 사장님 확정. 배수도 설정값이라 사업이 바뀌면 값만 갈아끼운다.
+    // ⬛     var pcPerSlot     = Pick(settings, "extra_slot.pc_per_slot",     1);
+    // ⬛     var mobilePerSlot = Pick(settings, "extra_slot.mobile_per_slot", 1);
+    // ⬛ 
+    // ⬛     pcLimit     += extraSlots * pcPerSlot;
+    // ⬛     mobileLimit += extraSlots * mobilePerSlot;
+    // ⬛ 
+    // ⬛     return (pcLimit, mobileLimit);
+    // ⬛ }
+    // ⬛ 
+    // ⬛ /// <summary>기기 슬롯 기준값 표(DB-104)를 통째로 읽는다.</summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// ⚠️ 표가 아직 없는 DB(마이그레이션 전)에서도 죽지 않아야 한다 —
+    // ⬛ /// 로그인 경로에서 불리므로 여기서 던지면 <b>고객이 로그인을 못 한다.</b>
+    // ⬛ /// 못 읽으면 빈 사전을 돌려주고 호출부가 종전 숫자로 떨어진다.
+    // ⬛ /// </remarks>
+    // ⬛ private async Task<Dictionary<string, int>> LoadSlotPolicyAsync(string tenantId, CancellationToken ct)
+    // ⬛ {
+    // ⬛     try
+    // ⬛     {
+    // ⬛         var rows = await _db.QueryAsync<(string k, int v)>(new CommandDefinition(
+    // ⬛             """
+    // ⬛             SELECT policy_key AS k, policy_value AS v
+    // ⬛             FROM device_slot_policy_settings
+    // ⬛             WHERE tenant_id = @TenantId
+    // ⬛             """,
+    // ⬛             new { TenantId = tenantId }, cancellationToken: ct));
+    // ⬛ 
+    // ⬛         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    // ⬛         foreach (var (k, v) in rows) map[k] = v;
+    // ⬛         return map;
+    // ⬛     }
+    // ⬛     catch (Exception ex)
+    // ⬛     {
+    // ⬛         // 🔴 헌법 #15 — 빈 catch 금지. 왜 종전 숫자로 떨어졌는지 남긴다.
+    // ⬛         //   ⚠️ 종전엔 Debug.WriteLine 이었다 — Release 에서 사라져 **운영에 아무 기록도 안 남았다**(B-5).
+    // ⬛         //     운영에서 사라지는 기록은 기록이 아니다. 요금이 걸린 신호라 더욱.
+    // ⬛         _logger.LogWarning(ex,
+    // ⬛             "[TenantDeviceService] 기기 슬롯 기준값 표(device_slot_policy_settings)를 못 읽었다 — "
+    // ⬛             + "종전 숫자(안전망)로 진행한다. tenant={TenantId}", tenantId);
+    // ⬛         return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    // ⬛     }
+    // ⬛ }
+    // ⬛ 
+    // ⬛ private static int Pick(IReadOnlyDictionary<string, int> settings, string key, int fallback)
+    // ⬛     => settings.TryGetValue(key, out var v) ? v : fallback;
+    // ⬛ 
+    // ⬛ /// <summary>
+    // ⬛ /// 요금제 이름을 설정 열쇠로 쓸 수 있게 정리한다.
+    // ⬛ /// </summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// 🔴 <b><c>enterprise</c> 가 실제로 발급되는 최상위 값이다</b>(명세서 §17-4 · PI-14).
+    // ⬛ /// 코드만 <c>premium</c> 이라 쓰고 있었고 DDL·시리얼 발급·백오피스는 전부 <c>enterprise</c> 라,
+    // ⬛ /// 최상위 고객이 갈래를 못 찾아 <b>basic 한도로 떨어지고 있었다.</b>
+    // ⬛ /// ⚠️ <c>premium</c> 도 살려 둔다 — 옛 데이터에 남아 있을 수 있다(P0 실측 D-16).
+    // ⬛ /// 모르는 값은 <c>default</c> 로 보내 종전 <c>_ =&gt; (5,3)</c> 과 같게 만든다.
+    // ⬛ /// </remarks>
+    // ⬛ private static string NormalizeTier(string? tier)
+    // ⬛ {
+    // ⬛     var t = (tier ?? "basic").Trim().ToLowerInvariant();
+    // ⬛     return t switch
+    // ⬛     {
+    // ⬛         "basic" or "pro" or "enterprise" or "premium" or "trial" => t,
+    // ⬛         _ => "default"
+    // ⬛     };
+    // ⬛ }
+    // ⬛ 
+    // ⬛ /// <summary>
+    // ⬛ /// 설정표를 못 읽었을 때 쓰는 숫자 — <b>종전 코드와 한 글자도 다르지 않다.</b>
+    // ⬛ /// </summary>
+    // ⬛ /// <remarks>
+    // ⬛ /// <para>
+    // ⬛ /// ⚠️ 이것은 <b>설정의 대체물이 아니라 안전망</b>이다. 마이그레이션이 아직 안 돈 DB 나
+    // ⬛ /// 표가 비어 있는 회사에서 <b>로그인이 죽지 않게</b> 하는 것이 유일한 목적이다.
+    // ⬛ /// 🔴 이 숫자를 고쳐서 요금제를 바꾸려 하면 안 된다 — 설정표(DB-104)를 고쳐야 한다.
+    // ⬛ /// 정상 경로에서는 이 값이 <b>쓰이지 않는다</b>(G-8 이 그것을 시험한다).
+    // ⬛ /// </para>
+    // ⬛ /// <para>
+    // ⬛ /// 🔴 <b>2026-08-16 (20260816작1) — 숫자를 여기 적지 않는다.</b>
+    // ⬛ /// 종전엔 이 <c>switch</c> 안에 <c>(5,3)·(10,8)…</c> 이 직접 적혀 있어,
+    // ⬛ /// 회사 생성 시드(<see cref="SlotPolicyDefaults"/>)와 <b>같은 숫자가 두 벌</b>이 됐다.
+    // ⬛ /// 한쪽만 고치면 <b>신규 고객과 안전망이 서로 다른 한도로 돈다</b> —
+    // ⬛ /// 이 차수가 계수 8곳을 모으며 없앤 바로 그 병이다.
+    // ⬛ /// ⇒ 안전망도 <b>시드와 같은 정의를 읽는다.</b> 갈라질 수가 없다(G-20).
+    // ⬛ /// </para>
+    // ⬛ /// </remarks>
+    // ⬛ private static (int pc, int mobile) FallbackLimits(string normalizedTier)
+    // ⬛ {
+    // ⬛     // 모르는 요금제는 NormalizeTier 가 이미 "default" 로 보낸다(종전 `_ => (5,3)` 과 동일).
+    // ⬛     var pc     = SlotPolicyDefaults.Value($"tier.{normalizedTier}.pc_limit");
+    // ⬛     var mobile = SlotPolicyDefaults.Value($"tier.{normalizedTier}.mobile_limit");
+    // ⬛     return (pc, mobile);
+    // ⬛ }
 
     private async Task LogLoginAsync(string tenantId, string userId, string ip, string deviceId, string result, CancellationToken ct)
     {
@@ -2017,6 +2092,161 @@ public sealed class TenantDeviceService : ITenantDeviceService
                 cancellationToken: ct));
         }
         catch { /* 로그 실패는 주 로직 보호를 위해 무시 */ }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 2026-10-05 작4 B-2 「접속기기 확인」 조회 — **읽기만** (설계 §3 · 9/28 §4)
+    //   · 한 연결 `QueryMultipleAsync`(#16) · tenant 는 호출부가 Items["TenantId"] 에서만(#2) · 로컬 DB 만(#18)
+    //   · #13 출하 DDL 확인(10/5): users(user_id·tenant_id·email·user_name·is_deleted) · user_sessions(session_id·user_id·
+    //     device_kind enum pc/mobile·login_at·last_active_at **UTC**·is_active·expires_at) · security_alerts(alert_type·user_id·
+    //     created_at **DB 시계**) · audit_trail(entity_type='user_session'·action_type='login'·entity_id=session_id·after_value.$.user_agent)
+    //   · 설계 §9-1 판독: 로그아웃은 줄을 **지운다**(AuthController:424 · AuthService:658) — `is_active` 를 0 으로 만드는 곳 0.
+    //     그래도 두 조건을 다 건다(`is_active = 1 AND expires_at > UTC_TIMESTAMP(6)`).
+    //   · 사용자 열(user_sessions.tenant_id 는 NULL 허용) 대신 **users.tenant_id 로 잇는다** — 남의 회사 줄이 못 섞인다(G-AR5).
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>막힌 로그인 기록의 고객용 유형 — 기술 경고(<c>session_insert_failed</c> 등)는 넣지 않는다(대표가 할 일이 없다).</summary>
+    internal static readonly string[] CustomerAlertTypes = { "pc_login_blocked", "pc_session_forced_out" };
+
+    private static readonly TimeSpan KstOffset = TimeSpan.FromHours(9);
+
+    public async Task<AccessStatusDto> GetAccessStatusAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+
+        using var multi = await _db.QueryMultipleAsync(new CommandDefinition(
+            """
+            SELECT u.user_id AS UserId, u.user_name AS UserName, u.email AS LoginId
+            FROM users u
+            WHERE u.tenant_id = @TenantId AND u.is_deleted = 0
+            ORDER BY u.user_name;
+
+            SELECT s.user_id        AS UserId,
+                   s.device_kind    AS DeviceKind,
+                   s.login_at       AS LoginAtUtc,
+                   s.last_active_at AS LastActiveAtUtc,
+                   (SELECT JSON_VALUE(a.after_value, '$.user_agent')
+                      FROM audit_trail a
+                     WHERE a.tenant_id = @TenantId AND a.entity_type = 'user_session'
+                       AND a.action_type = 'login' AND a.entity_id = s.session_id
+                     ORDER BY a.created_at DESC LIMIT 1) AS UserAgent
+            FROM user_sessions s
+            JOIN users u ON u.user_id = s.user_id AND u.tenant_id = @TenantId AND u.is_deleted = 0
+            WHERE s.is_active = 1 AND s.expires_at > UTC_TIMESTAMP(6)
+            ORDER BY s.last_active_at DESC;
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct));
+
+        var users = (await multi.ReadAsync<(string UserId, string UserName, string LoginId)>()).ToList();
+        var sessions = (await multi.ReadAsync<(string UserId, string DeviceKind, DateTime LoginAtUtc, DateTime LastActiveAtUtc, string? UserAgent)>()).ToList();
+
+        var people = new List<AccessPersonDto>();
+        foreach (var u in users)
+        {
+            var mine = sessions.Where(s => s.UserId == u.UserId).ToList();
+            var pc = mine.FirstOrDefault(s => s.DeviceKind == "pc");
+            var person = new AccessPersonDto
+            {
+                UserId = u.UserId,
+                UserName = u.UserName ?? "",
+                LoginId = u.LoginId ?? "",
+                Pc = pc.UserId is null ? null : ToSession(pc.LoginAtUtc, pc.LastActiveAtUtc, pc.UserAgent),
+                Mobiles = mine.Where(s => s.DeviceKind != "pc")
+                              .Select(s => ToSession(s.LoginAtUtc, s.LastActiveAtUtc, s.UserAgent)).ToList(),
+                LastUsedAtKst = mine.Count == 0 ? null : mine.Max(s => s.LastActiveAtUtc) + KstOffset
+            };
+            people.Add(person);
+        }
+
+        return new AccessStatusDto
+        {
+            PcUsersNow = people.Count(p => p.Pc is not null),
+            MobileSessionsNow = people.Sum(p => p.Mobiles.Count),
+            People = people.OrderBy(p => p.LastUsedAtKst is null ? 1 : 0)
+                           .ThenByDescending(p => p.LastUsedAtKst)
+                           .ThenBy(p => p.UserName, StringComparer.Ordinal).ToList()
+        };
+    }
+
+    public async Task<List<LoginConflictAlertDto>> GetLoginConflictAlertsAsync(string tenantId, int days = 30, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct);
+        if (days < 1) days = 1;
+        if (days > 365) days = 365;
+
+        // security_alerts.created_at 은 DB 시계(서버 시간대)로 찍힌다 — 같은 연결에서 시계 차를 재서 한국 시각으로 맞춘다.
+        using var multi = await _db.QueryMultipleAsync(new CommandDefinition(
+            """
+            SELECT TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), NOW()) AS OffsetMin;
+
+            SELECT a.alert_type AS Kind,
+                   a.created_at AS CreatedAtDb,
+                   u.user_name  AS UserName,
+                   u.email      AS LoginId
+            FROM security_alerts a
+            LEFT JOIN users u ON u.user_id = a.user_id AND u.tenant_id = @TenantId
+            WHERE a.tenant_id = @TenantId
+              AND a.alert_type IN @Types
+              AND a.created_at >= NOW(6) - INTERVAL @Days DAY
+            ORDER BY a.created_at DESC
+            LIMIT 200;
+            """,
+            new { TenantId = tenantId, Types = CustomerAlertTypes, Days = days }, cancellationToken: ct));
+
+        var offsetMin = await multi.ReadSingleAsync<int>();
+        var rows = (await multi.ReadAsync<(string Kind, DateTime CreatedAtDb, string? UserName, string? LoginId)>()).ToList();
+
+        return rows.Select(r => new LoginConflictAlertDto
+        {
+            AtKst = r.CreatedAtDb - TimeSpan.FromMinutes(offsetMin) + KstOffset,
+            UserName = r.UserName ?? "",
+            LoginId = r.LoginId ?? "",
+            Kind = r.Kind,
+            Message = DescribeAlert(r.Kind, r.UserName, r.LoginId)
+        }).ToList();
+    }
+
+    private static AccessSessionDto ToSession(DateTime loginAtUtc, DateTime lastActiveAtUtc, string? ua) => new()
+    {
+        LoginAtKst = loginAtUtc + KstOffset,
+        LastActiveAtKst = lastActiveAtUtc + KstOffset,
+        Browser = DescribeBrowser(ua)
+    };
+
+    /// <summary>고객 문장(설계 §5-2) — 원문 description(UTC·개발 문장)은 쓰지 않는다.</summary>
+    internal static string DescribeAlert(string kind, string? userName, string? loginId)
+    {
+        var who = string.IsNullOrWhiteSpace(userName)
+            ? "(지금은 없는 계정)"
+            : string.IsNullOrWhiteSpace(loginId) ? userName : $"{userName}({loginId})";
+        return kind == "pc_session_forced_out"
+            ? $"{who} — 다른 컴퓨터에서 로그인해서, 쓰던 컴퓨터의 접속이 끝났습니다."
+            : $"{who} — 다른 컴퓨터에서 로그인하려 했지만, 이미 쓰는 컴퓨터가 있어 막았습니다.";
+    }
+
+    /// <summary>
+    /// 브라우저 표시 이름 — 「엣지·크롬·웨일·사파리·삼성 인터넷·파이어폭스」 × 「윈도우·맥·안드로이드·아이폰」만(9/28 §4).
+    /// 🔴 표시용이다 — 어떤 판정에도 쓰지 않는다.
+    /// </summary>
+    internal static string DescribeBrowser(string? ua)
+    {
+        if (string.IsNullOrWhiteSpace(ua)) return "알 수 없음";
+        string? b =
+            ua.Contains("Edg/", StringComparison.Ordinal) || ua.Contains("EdgA/", StringComparison.Ordinal) || ua.Contains("EdgiOS/", StringComparison.Ordinal) ? "엣지"
+            : ua.Contains("Whale/", StringComparison.Ordinal) ? "웨일"
+            : ua.Contains("SamsungBrowser/", StringComparison.Ordinal) ? "삼성 인터넷"
+            : ua.Contains("Firefox/", StringComparison.Ordinal) || ua.Contains("FxiOS/", StringComparison.Ordinal) ? "파이어폭스"
+            : ua.Contains("Chrome/", StringComparison.Ordinal) || ua.Contains("CriOS/", StringComparison.Ordinal) ? "크롬"
+            : ua.Contains("Safari/", StringComparison.Ordinal) ? "사파리"
+            : null;
+        string? os =
+            ua.Contains("Android", StringComparison.Ordinal) ? "안드로이드"
+            : ua.Contains("iPhone", StringComparison.Ordinal) ? "아이폰"
+            : ua.Contains("Windows", StringComparison.Ordinal) ? "윈도우"
+            : ua.Contains("Macintosh", StringComparison.Ordinal) || ua.Contains("Mac OS X", StringComparison.Ordinal) ? "맥"
+            : null;
+        if (b is null && os is null) return "알 수 없음";
+        return b is null ? os! : os is null ? b : $"{b} · {os}";
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

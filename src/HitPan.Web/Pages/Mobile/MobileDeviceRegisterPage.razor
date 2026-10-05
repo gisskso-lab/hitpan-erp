@@ -9,6 +9,19 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
+@* ⬛ 2026-10-05 슬롯 폐기(작4 A-7 · 9/28 설계 §6-2) — 휴대폰 QR 등록 입구를 걷었다. 옛 QR 주소로 오면 안내문 + [로그인] 만 보인다.
+     휴대폰은 등록 없이 로그인만 하면 된다. 아래 옛 화면은 지우지 않고(#1) `_showRetiredQrScreen`(늘 false) 안에 남긴다. *@
+<PageTitle>히트판 휴대폰 로그인 안내</PageTitle>
+<div class="mreg-wrap">
+    <div class="mreg-card">
+        <div class="mreg-title">히트판</div>
+        <p class="mreg-ask">이제 등록 없이 휴대폰에서 로그인하시면 됩니다.</p>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="GoLogin">로그인</MudButton>
+    </div>
+</div>
+
+@if (_showRetiredQrScreen)
+{
 <PageTitle>히트판 모바일기기등록</PageTitle>
 
 @* 사장님 오더 3단계: "휴대폰으로 QR 촬영시 바로 '히트판 모바일기기등록' 화면단으로 넘어감" *@
@@ -204,7 +217,11 @@
     .mreg-contact { display: inline-block; margin-top: 6px; color: #0F6E56; font-weight: 600; }
 </style>
 
+}
 @code {
+    // ⬛ 2026-10-05 작4 A-7 — 옛 QR 등록 화면은 그리지 않는다(늘 false · static readonly 라 경고 0). 되돌림 판독용.
+    private static readonly bool _showRetiredQrScreen = false;
+    private void GoLogin() => Nav.NavigateTo("/login", forceLoad: true);
     private enum State { Asking, Done, Failed, Cancelled }
 
     private State _state = State.Asking;

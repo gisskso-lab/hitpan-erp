@@ -414,6 +414,7 @@ public class DeviceApprovalGateTests
     /// <b>칸을 만드는 것과 배선하는 것은 다른 일이다.</b>
     /// </para>
     /// </summary>
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 승인 대기 분기(Login.razor)·관문을 걷었다(A-6). 뒤집힌 단언은 G-AR8(관문이 화면에 없다)이 대신 잰다
     [Fact]
     public void G28_로그인화면이_승인대기를_받아_관문을_켠다()
     {
@@ -427,6 +428,7 @@ public class DeviceApprovalGateTests
             login.Contains("MarkAwaitingApproval", StringComparison.Ordinal),
             "로그인 화면이 관문을 켜지 않는다. 값만 받고 아무것도 안 하면 관문이 없는 것과 같다.");
     }
+#endif
 
     /// <summary>
     /// 🔴 <b>G-28-b. 서버가 그 값을 실제로 채운다.</b>

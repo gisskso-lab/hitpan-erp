@@ -786,13 +786,14 @@ public sealed class DeviceTypeQrGateTests : IDisposable
         Assert.True(tabletType == "tablet",
             $"태블릿이 '{tabletType}' 로 저장됐다 — 나중에 '태블릿은 따로 받자' 하실 때 과거 자료가 없다.");
 
-        // 🔴 판정 ② — **과금은 한 칸.** 둘이 합쳐 2 로 세어지는가.
-        var quota = await svc.GetQuotaAsync(TenantId);
-        Assert.True(quota.MobileUsed == 2,
-            $"휴대기기 칸이 {quota.MobileUsed} 대로 세어졌다 — 2 여야 한다. "
-            + "태블릿이 어느 칸에도 안 잡혀 **공짜로 쓰인다**는 뜻이다.");
-        Assert.True(quota.PcUsed == 0,
-            $"태블릿이 컴퓨터 칸({quota.PcUsed})으로 샜다 — 가격표 2칸 구조가 깨진다.");
+        // ⬛ [낡은 판정 ② · 2026-10-05 슬롯 폐기(작4 A-11 재분류)] 과금 칸 셈(GetQuotaAsync) — 사유: 한도·셈 메서드 ⬛. 판정 ①(저장 갈림)은 그대로 돈다.
+        // ⬛ // 🔴 판정 ② — **과금은 한 칸.** 둘이 합쳐 2 로 세어지는가.
+        // ⬛ var quota = await svc.GetQuotaAsync(TenantId);
+        // ⬛ Assert.True(quota.MobileUsed == 2,
+        // ⬛     $"휴대기기 칸이 {quota.MobileUsed} 대로 세어졌다 — 2 여야 한다. "
+        // ⬛     + "태블릿이 어느 칸에도 안 잡혀 **공짜로 쓰인다**는 뜻이다.");
+        // ⬛ Assert.True(quota.PcUsed == 0,
+        // ⬛     $"태블릿이 컴퓨터 칸({quota.PcUsed})으로 샜다 — 가격표 2칸 구조가 깨진다.");
     }
 
     // ══════════════════════════════════════════════════════════════

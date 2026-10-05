@@ -2191,8 +2191,9 @@ CREATE TABLE `local_subscription` (
   `google_key_saved_at` datetime DEFAULT NULL COMMENT '제미나이 키 저장 시각',
   `google_key_verified_at` datetime DEFAULT NULL COMMENT '제미나이 키 연결확인 시각 (실제 외부 호출 성공 시각)',
   `ai_provider` varchar(20) NOT NULL DEFAULT 'anthropic' COMMENT '현재 사용 AI 공급자: anthropic(클로드AI) / openai(챗GPT) / google(제미나이)',
-  `max_users` tinyint(3) unsigned NOT NULL DEFAULT 3,
-  `extra_device_slots` int(11) NOT NULL DEFAULT 0,
+  `max_users` tinyint(3) unsigned NOT NULL DEFAULT 5 COMMENT '기본 제공 총 계정 수 — 대표 포함(베이직 5 · 프로 8 · 본사가 보냄). 한도 = max_users + extra_accounts (DB-136)',
+  `extra_device_slots` int(11) NOT NULL DEFAULT 0 COMMENT '2026-10-05 폐기 · 읽지 않음(계정 과금 전환 · D-12 · DB-136). 본사가 보내면 받아 적기만 한다',
+  `extra_accounts` int(11) NOT NULL DEFAULT 0 COMMENT '추가 구매 계정 수(본사가 보냄 · 10/5 작3 · DB-136)',
   `reseller_id` varchar(36) DEFAULT NULL,
   `reseller_tier` tinyint(3) unsigned NOT NULL DEFAULT 0,
   `last_sync_at` datetime(6) DEFAULT NULL COMMENT '백오피스→ERP 마지막 동기화 시각',
@@ -3617,7 +3618,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4062,7 +4063,7 @@ CREATE TABLE `device_slot_policy_settings` (
   PRIMARY KEY (`policy_id`),
   UNIQUE KEY `uk_slot_policy_tenant_key` (`tenant_id`,`policy_key`),
   KEY `idx_slot_policy_lookup` (`tenant_id`,`policy_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='기기 슬롯 기준값 — 요금제가 바뀌면 값만 갈아끼운다(코드 재배포 없이). DB-104';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='2026-10-05 폐기 · 읽지 않음(계정 과금 전환 · D-12 · DB-136). 옛 뜻: 기기 슬롯 기준값(DB-104)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -4194,7 +4195,7 @@ CREATE TABLE `tenants` (
   `tel` varchar(100) DEFAULT NULL,
   `address` varchar(200) DEFAULT NULL,
   `reseller_id` varchar(36) DEFAULT NULL,
-  `max_users` tinyint(3) unsigned NOT NULL DEFAULT 3,
+  `max_users` tinyint(3) unsigned NOT NULL DEFAULT 5,
   `status` varchar(20) NOT NULL DEFAULT 'trial',
   `is_locked_from_landing` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=랜딩에서 들어온 회사정보, ERP 내 수정 금지 (헌법 #35)',
   `bootstrap_at` datetime(6) DEFAULT NULL COMMENT 'ERP 첫 부팅 자동 반영 시점 (헌법 #20 워크플로우 검증용)',
@@ -4222,7 +4223,7 @@ CREATE TABLE `tenants` (
   `anthropic_api_key_last4` varchar(8) DEFAULT NULL COMMENT 'BYOK 키 마지막 4자리 (UI 표시용)',
   `anthropic_key_status` varchar(20) NOT NULL DEFAULT 'none' COMMENT 'none / valid / invalid / expired',
   `subscription_tier` varchar(20) NOT NULL DEFAULT 'basic' COMMENT 'basic / pro / enterprise (subscriptions.plan_type 미러)',
-  `extra_device_slots` int(11) NOT NULL DEFAULT 0 COMMENT '추가 구매 디바이스 슬롯 (1슬롯 = PC 1 또는 모바일 2)',
+  `extra_device_slots` int(11) NOT NULL DEFAULT 0 COMMENT '2026-10-05 폐기 · 읽지 않음(계정 과금 전환 · D-12 · DB-136). 옛 뜻: 추가 구매 디바이스 슬롯',
   `homepage` varchar(200) DEFAULT NULL,
   `initial_date` date DEFAULT NULL,
   `e_invoice_server` varchar(200) DEFAULT NULL,

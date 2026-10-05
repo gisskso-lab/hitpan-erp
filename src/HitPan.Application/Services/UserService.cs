@@ -4,6 +4,7 @@ using Dapper;
 using HitPan.Application.DTOs.User;
 using HitPan.Application.Interfaces;
 using HitPan.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace HitPan.Application.Services;
 
@@ -11,11 +12,20 @@ public sealed class UserService : IUserService
 {
     private readonly IDbConnection _db;
     private readonly IAuditService _audit;
+    // 20261005작3 — 판정기 바닥값(5)으로 간 경우 LogWarning(설계 §2 ③). 없으면 로그만 빠진다.
+    private readonly ILogger<UserService>? _logger;
 
     public UserService(IDbConnection db, IAuditService audit)
     {
         _db = db;
         _audit = audit;
+    }
+
+    // 20261005작3 — DI 는 채울 수 있는 가장 긴 생성자(이것)를 쓴다. 위 생성자는 지우지 않는다(#1 · 시험이 직접 만든다).
+    public UserService(IDbConnection db, IAuditService audit, ILogger<UserService> logger)
+        : this(db, audit)
+    {
+        _logger = logger;
     }
 
     public async Task<List<UserListDto>> GetListAsync(string tenantId, CancellationToken ct = default)
@@ -106,6 +116,17 @@ public sealed class UserService : IUserService
             throw new InvalidOperationException("이미 사용 중인 이메일입니다.");
         }
 
+        // 🔴 10/5 봉합1 P2-07 — 옛 DELETE(DeactivateAsync)로 지운 행은 아이디를 그대로 쥐고 있다(uq_tenant_email).
+        //   위 검사는 is_deleted=0 만 봐서 통과하고 INSERT 에서 UNIQUE 예외 ⇒ 500 이었다. DB-136 이 표식을 붙이지만
+        //   아직 안 돈 DB 를 위해 여기서 409 친절 문구로 먼저 막는다.
+        var heldByDeleted = await _db.ExecuteScalarAsync<long>(
+            new CommandDefinition(
+                "SELECT COUNT(*) FROM users WHERE tenant_id = @TenantId AND email = @Email AND is_deleted = 1",
+                new { TenantId = tenantId, dto.Email },
+                cancellationToken: ct)).ConfigureAwait(false);
+        if (heldByDeleted > 0)
+            throw new InvalidOperationException(DeletedHoldsLoginIdMessage);
+
         var userId = Guid.NewGuid().ToString();
 
         var role = ParseUserRole(dto.Role);
@@ -123,6 +144,11 @@ public sealed class UserService : IUserService
         //
         //    이제 둘 중 하나라도 실패하면 **둘 다 없던 일**이 된다. 반쪽 계정이 안 생긴다.
         using var tx = _db.BeginTransaction();
+
+        // 🔴 20261005작3 E-1 — 계정 사용 한도 판정. **트랜잭션 첫 문장**이어야 한다(설계 §2 · G-A1·G-A6).
+        // 🔴 10/5 봉합1 P2-05 — 첫 문장은 잠금 손잡이(행 없으면 이름 잠금). 판정은 그 뒤.
+        await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
+        await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
 
         await _db.ExecuteAsync(
             new CommandDefinition(
@@ -236,6 +262,31 @@ public sealed class UserService : IUserService
         var roleStr = role.ToString();
         var accountType = role == UserRole.TenantAdmin ? "tenant_admin" : "tenant_user";
 
+        // 🔴 20261005작3 E-4 — 트랜잭션으로 감싼다. 첫 문장 = 판정기 잠금과 **같은 행**(잠금 순서 고정 · 반증 F10).
+        //    ① 대표(is_parent=1) 를 is_active=0 으로 바꾸는 요청 거절(반증 F3 · 기존 :284-289 문구 재사용)
+        //    ② 0→1 일 때만 판정(API 직접 호출 우회 차단 · G-A5)
+        using var tx = _db.BeginTransaction();
+        // ⬛ [봉합1 전] await _db.ExecuteScalarAsync<string?>(... "SELECT tenant_id FROM local_company ... FOR UPDATE" ...);
+        //   🔴 10/5 봉합1 P2-05 — 같은 행 잠금 + 행 없으면 이름 잠금(AcquireAsync). 잠금 순서는 그대로(첫 문장).
+        await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
+
+        // ⬛ [봉합1 전] "SELECT is_parent AS IsParent, is_active AS IsActive FROM users ... FOR UPDATE" — role 을 같이 읽는다(P1-02).
+        var current = await _db.QueryFirstOrDefaultAsync<SeatStateRow>(new CommandDefinition(
+            "SELECT is_parent AS IsParent, is_active AS IsActive, role AS Role FROM users WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 FOR UPDATE",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        if (current is not null && current.IsParent && !dto.IsActive)
+            throw new InvalidOperationException("부모 계정은 삭제할 수 없습니다. 회사 정보·라이선스의 마스터 계정입니다.");
+
+        // 🔴 10/5 봉합1 P1-02 — 대표(is_parent=1)의 권한은 못 바꾼다. 직원 관리자가 대표를 User 로 내리면
+        //   대표가 관리자 화면·API 에서 전부 403 이 되고 스스로 못 되돌린다(#38·#40). 같은 값으로 보내는 저장은 통과.
+        if (current is not null && current.IsParent
+            && !string.Equals(ParseUserRole(current.Role?.Replace("_", "")).ToString(), roleStr, StringComparison.Ordinal))
+            throw new InvalidOperationException(ParentRoleGuardMessage);
+
+        if (current is not null && !current.IsActive && dto.IsActive)
+            await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
+
         await _db.ExecuteAsync(
             new CommandDefinition(
                 """
@@ -270,13 +321,22 @@ public sealed class UserService : IUserService
                     HireDate = dto.HireDate,
                     Memo = dto.Memo
                 },
-                cancellationToken: ct)).ConfigureAwait(false);
+                // ⬛ cancellationToken: ct)).ConfigureAwait(false);   ← 20261005작3: 트랜잭션 안으로
+                transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🔴 10/5 [4] 2차 N-1① — 수정 화면·API 로 「사용 중 → 사용 안 함」(1→0)이 되면 [사용 안 함] 버튼과 같이 출입증을 끊는다.
+        //   안 끊으면 PUT 한 번으로 끄고 다른 계정을 만드는 「한도 돌려쓰기」가 이 길로 그대로 된다(병렬이슈 01 재발 자리).
+        if (current is not null && current.IsActive && !dto.IsActive)
+            await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
+
+        tx.Commit();
 
         // 감사로그 — 사용자 수정
         var afterJson = $"{{\"user_name\":\"{dto.UserName}\",\"role\":\"{roleStr}\",\"is_active\":{(dto.IsActive ? "true" : "false")}}}";
         await _audit.LogAsync("update", "user", userId, afterJson: afterJson, ct: ct);
     }
 
+    // ⬛ DELETE 경로는 20261005작3 부터 RetireAsync(계정폐기 · 아이디 비움)다. 부르는 곳 0 — 지우지 않는다(#1).
     public async Task DeactivateAsync(string userId, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -311,6 +371,9 @@ public sealed class UserService : IUserService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 10/5 봉합1 P1-02 — 대표 대상은 거절. 응답에 임시 비번 원문이 실려 직원 관리자가 대표로 로그인할 수 있었다(#40).
+        await RejectParentAsync(userId, tenantId, null, ParentResetGuardMessage, ct).ConfigureAwait(false);
+
         var temp = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
         var hash = BCrypt.Net.BCrypt.HashPassword(temp);
 
@@ -342,6 +405,26 @@ public sealed class UserService : IUserService
     {
         var result = new BulkCreateResultDto { TotalRows = rows.Count };
 
+        // 🔴 20261005작3 E-2 — 한도 사전 판정(F-5): 남은 자리 < 올린 행 수 ⇒ 한 줄도 안 넣는다.
+        //    통과해도 행마다 CreateAsync 의 판정은 그대로 돈다(경쟁 대비).
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        var seats = await AccountSeatGuard.GetSeatsAsync(_db, tenantId, ct).ConfigureAwait(false);
+        if (seats.Limit - seats.Active < rows.Count)
+        {
+            result.SeatFull = true;
+            result.Active = seats.Active;
+            result.Limit = seats.Limit;
+            result.FailedCount = rows.Count;
+            result.Errors.Add(new BulkRowError
+            {
+                Row = 0,
+                Reason = $"계정 사용 한도({seats.Limit}개) 때문에 한 줄도 등록하지 않았습니다. 남은 계정 {Math.Max(seats.Limit - seats.Active, 0)}개 · 올린 행 {rows.Count}개"
+            });
+            await _audit.LogAsync("create", "user_bulk", null,
+                afterJson: $"{{\"total\":{result.TotalRows},\"success\":0,\"seat_full\":true}}", ct: ct);
+            return result;
+        }
+
         // 각 행 독립 처리 — 한 행 실패해도 나머지 진행
         for (var i = 0; i < rows.Count; i++)
         {
@@ -369,6 +452,148 @@ public sealed class UserService : IUserService
             ct: ct);
 
         return result;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 20261005작3 — 계정 과금: 「사용 안 함」 · [다시 사용] · 「계정폐기」 · 카드 숫자 (설계 §1·§4)
+    // ══════════════════════════════════════════════════════════════
+
+    private sealed class SeatStateRow
+    {
+        public bool IsParent { get; set; }
+        public bool IsActive { get; set; }
+        // 10/5 봉합1 P1-02 — 대표 권한 변경 거절 판정용
+        public string? Role { get; set; }
+    }
+
+    private const string ParentGuardMessage = "부모 계정은 삭제할 수 없습니다. 회사 정보·라이선스의 마스터 계정입니다.";
+
+    // 10/5 봉합1 — 기존 「부모 계정은 …」 문구 틀 재사용(P1-02 · P2-07)
+    public const string ParentRoleGuardMessage = "부모 계정은 권한을 바꿀 수 없습니다. 회사 정보·라이선스의 마스터 계정입니다.";
+    public const string ParentResetGuardMessage = "부모 계정은 여기서 비밀번호를 초기화할 수 없습니다. 회사 정보·라이선스의 마스터 계정입니다.";
+    public const string DeletedHoldsLoginIdMessage = "예전에 삭제한 계정이 이 아이디를 아직 쥐고 있습니다. 다른 아이디로 만들어 주세요.";
+
+    public async Task<AccountSeatSnapshot> GetSeatsAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        var snap = await AccountSeatGuard.GetSeatsAsync(_db, tenantId, ct).ConfigureAwait(false);
+        if (snap.UsedFloor)
+            _logger?.LogWarning("[AccountSeat] 기본 계정 수가 바닥값보다 작거나 없다 — {Floor} 으로 본다", AccountSeatGuard.DefaultBaseAccounts);
+        return snap;
+    }
+
+    /// <summary>사용 중 → 사용 안 함. 판정 없음(자리가 줄 뿐). 대표는 거절(#38·#40).</summary>
+    public async Task SuspendAsync(string userId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        // ⬛ [봉합1 전] await RejectParentAsync(userId, tenantId, null, ct) · UPDATE 는 트랜잭션 없이 — 출입증을 안 끊었다(P1-01)
+        //   🔴 10/5 봉합1 P1-01 — 끄기와 출입증 끊기를 한 트랜잭션으로(반쪽 상태 없음).
+        using var tx = _db.BeginTransaction();
+        await RejectParentAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
+
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE users SET is_active = 0, updated_at = NOW(6)
+            WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 AND is_parent = 0
+            """,
+            // ⬛ new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (affected == 0) throw new InvalidOperationException("사용자를 찾을 수 없습니다.");
+
+        await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
+        tx.Commit();
+
+        await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"suspend\",\"is_active\":false}", ct: ct);
+    }
+
+    /// <summary>사용 안 함 → 사용 중([다시 사용]). <b>판정기 통과 후</b>에만(D-10 · G-A4).</summary>
+    public async Task ResumeAsync(string userId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        using var tx = _db.BeginTransaction();
+
+        // E-5 — 첫 문장 = 판정기(잠금 포함).
+        // 🔴 10/5 봉합1 P2-05 — 첫 문장은 잠금 손잡이(행 없으면 이름 잠금).
+        await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
+        await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
+
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE users SET is_active = 1, updated_at = NOW(6)
+            WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 AND is_active = 0
+            """,
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (affected == 0) throw new InvalidOperationException("다시 사용할 계정을 찾을 수 없습니다.");
+
+        tx.Commit();
+        await _audit.LogAsync("update", "user", userId, afterJson: "{\"action\":\"resume\",\"is_active\":true}", ct: ct);
+    }
+
+    /// <summary>
+    /// 계정폐기 — 퇴사 선례(<c>EmployeeService:709·741-753</c>) 그대로. 아이디 자리를 비워 같은 아이디 재등록이
+    /// <c>uq_tenant_email</c> 에 안 걸린다(F-2). 사원 행은 남고 <c>employees.user_id</c> 만 끊는다(D-2). 되살림 없음.
+    /// </summary>
+    public async Task RetireAsync(string userId, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        using var tx = _db.BeginTransaction();
+        await RejectParentAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
+
+        // retired+(8) + GUID(36) + '+'(1) + 40 = 85 ≤ varchar(100)
+        var affected = await _db.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE users SET
+                is_active = 0,
+                is_deleted = 1,
+                email = CONCAT('retired+', user_id, '+', LEFT(email, 40)),
+                deleted_at = NOW(6),
+                updated_at = NOW(6)
+            WHERE user_id = @UserId AND tenant_id = @TenantId AND is_deleted = 0 AND is_parent = 0
+            """,
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (affected == 0) throw new InvalidOperationException("사용자를 찾을 수 없습니다.");
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE employees SET user_id = NULL, updated_at = NOW(6) WHERE tenant_id = @TenantId AND user_id = @UserId",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🔴 10/5 봉합1 P1-01 — 폐기한 계정의 출입증도 그 자리에서 끊는다.
+        await CutAccessAsync(userId, tx, ct).ConfigureAwait(false);
+
+        tx.Commit();
+        await _audit.LogAsync("delete", "user", userId, afterJson: "{\"action\":\"retire\"}", ct: ct);
+    }
+
+    /// <summary>
+    /// 🔴 10/5 봉합1 P1-01 — 그 계정의 출입증을 끊는다. 로그아웃 선례(<c>AuthController</c> 절C·K)의 순서 그대로
+    /// ① refresh 폐기 ② 세션 행 삭제 — 범위만 「그 로그인 하나」가 아니라 「그 계정 전부」다.
+    /// </summary>
+    /// <remarks>
+    /// <para>끊기는 자리 = <c>SessionValidityMiddleware</c>: 접근 토큰의 <c>sid</c> 로 <c>user_sessions</c> 행을 찾고 없으면 401
+    /// (생존 캐시 10초 뒤). 갱신은 <c>is_revoked=1</c> 로 막힌다.</para>
+    /// <para>부르는 쪽이 <c>user_id</c> 가 그 회사 것임을 먼저 확인했다(tenant 조건 UPDATE 의 affected) — <c>refresh_tokens</c> 에는 tenant 칸이 없다.</para>
+    /// </remarks>
+    private async Task CutAccessAsync(string userId, IDbTransaction tx, CancellationToken ct)
+    {
+        await _db.ExecuteAsync(new CommandDefinition(
+            "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND is_revoked = 0",
+            new { UserId = userId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        await _db.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM user_sessions WHERE user_id = @UserId",
+            new { UserId = userId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private Task RejectParentAsync(string userId, string tenantId, IDbTransaction? tx, CancellationToken ct) =>
+        RejectParentAsync(userId, tenantId, tx, ParentGuardMessage, ct);
+
+    // 10/5 봉합1 P1-02 — 같은 판정에 문구만 다르게(비번 초기화 거절)
+    private async Task RejectParentAsync(string userId, string tenantId, IDbTransaction? tx, string message, CancellationToken ct)
+    {
+        // TINYINT(1) 은 Boolean 으로 온다 — int 로 받지 않는다
+        var isParent = await _db.QueryFirstOrDefaultAsync<bool?>(new CommandDefinition(
+            "SELECT is_parent FROM users WHERE user_id = @UserId AND tenant_id = @TenantId",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        if (isParent == true) throw new InvalidOperationException(message);
     }
 
     private static UserRole ParseUserRole(string? role)

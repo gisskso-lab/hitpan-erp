@@ -170,6 +170,12 @@ public sealed class CompanyBootstrapProvisioner
                     sub.ResellerTier,
                     SyncSource = input.SyncSource
                 });
+
+            // 20261005작3 P-5 — 추가 구매 계정 수(본사가 보냄). 증표에 없으면(null) 덮지 않는다(설계 §10②).
+            //   위 UPSERT 문장은 무접촉(#1) — 한 줄을 따로 더한다.
+            await db.ExecuteAsync(
+                "UPDATE local_subscription SET extra_accounts = COALESCE(@ExtraAccounts, extra_accounts) WHERE tenant_id = @TenantId",
+                new { TenantId = tenantId, sub.ExtraAccounts });
         }
 
         // 🔴 CR2-1 봉합 — 회사 행이 생긴 **이 시점**이 기준값을 깔 수 있는 가장 이른 자리다.
@@ -241,6 +247,9 @@ public sealed class CompanyBootstrapProvisioner
             //     = 로그인 500 진범. (읽기측 관용 컨버터 W1-1과 한 세트 — 쓰기도 정본 어휘로 통일.)
             //   users.account_type = 'tenant_admin' 그대로 유지 — JWT claim·Authorization 정책(TenantOnly 등)이
             //     snake_case를 사용하므로 여기는 손대면 안 된다(다른 사전).
+            // 🔴 20261005작3 E-3 — 모든 입구가 판정기를 거친다(트랜잭션 첫 문장 · 설치 직후 활성 0 이라 통과가 정상 · G-A3).
+            await AccountSeatGuard.EnsureSeatAsync(db, tx, tenantId, 1, _logger, ct);
+
             await db.ExecuteAsync(new CommandDefinition(@"
                 INSERT INTO users
                   (user_id, tenant_id, email, password_hash, user_name,

@@ -39,13 +39,76 @@ public class WebhookInboundController : ControllerBase
         _logger = logger;
     }
 
+    // ⬛ [HttpPost("subscription")]
+    // ⬛ public Task<IActionResult> Subscription(CancellationToken ct) => HandleAsync(ct);
+    // 20261005작3 P-5·§10⑥ — subscription 만 ExtraAccounts 를 받고 응답에 activeChildAccounts 한 칸. device-slot 길은 그대로.
     [HttpPost("subscription")]
-    public Task<IActionResult> Subscription(CancellationToken ct) => HandleAsync(ct);
+    public Task<IActionResult> Subscription(CancellationToken ct) => HandleAsync(ct, isSubscription: true);
+
+    /// <summary>
+    /// 테스트 전용 연결 문자열(null 이면 db.conf). 컨트롤러 속성은 모델 바인딩되지 않는다(<c>[BindProperty]</c> 없음).
+    /// </summary>
+    public string? ConnectionStringForTests { get; set; }
+
+    /// <summary>
+    /// 🔴 20261005작3 §10⑥ (D-17) — 본사가 당겨 가는 「활성 자식계정 수 N」. 응답 키는 <c>activeChildAccounts</c>·<c>asOf</c> 둘뿐.
+    /// </summary>
+    /// <remarks>
+    /// 서명 검증은 subscription 과 같은 <see cref="VerifySignature"/>(새 비밀 0). tenant 는 <b>서명된 본문</b>의 TenantId 이고,
+    /// 이 PC DB(<c>local_company</c>)에 그 회사가 없으면 403(반증 F2). 이름·아이디·사원 정보 0(#18·#22).
+    /// 읽기만 하므로 nonce 를 적지 않는다(재전송돼도 숫자만 다시 나간다) — 시각 창(±10분)은 본다.
+    /// </remarks>
+    [HttpPost("account-count")]
+    public async Task<IActionResult> AccountCount(CancellationToken ct)
+    {
+        try
+        {
+            string body;
+            using (var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true))
+                body = await reader.ReadToEndAsync(ct);
+            if (string.IsNullOrWhiteSpace(body))
+                return BadRequest(new { success = false, message = "빈 본문" });
+
+            var sigHeader = Request.Headers["X-Hitpan-Signature"].ToString();
+            var nonceHeader = Request.Headers["X-Hitpan-Nonce"].ToString();
+            if (string.IsNullOrWhiteSpace(sigHeader) || string.IsNullOrWhiteSpace(nonceHeader))
+                return Unauthorized(new { success = false, message = "서명·nonce 헤더 누락" });
+            if (!VerifySignature(body, sigHeader))
+            {
+                _logger.LogWarning("[WebhookInbound] account-count 서명 불일치");
+                return Unauthorized(new { success = false, message = "서명 불일치" });
+            }
+
+            var payload = JsonSerializer.Deserialize<WebhookPayload>(body,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (payload is null || string.IsNullOrEmpty(payload.TenantId))
+                return BadRequest(new { success = false, message = "페이로드 파싱 실패" });
+            if (Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - payload.Iat) > MaxClockSkewSeconds)
+                return Unauthorized(new { success = false, message = "타임스탬프 만료" });
+
+            await using var db = new MySqlConnection(ConnectionStringForTests ?? BuildConnectionString());
+            await db.OpenAsync(ct);
+
+            var here = await db.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM local_company WHERE tenant_id = @TenantId", new { payload.TenantId });
+            if (here == 0)
+                return StatusCode(403, new { success = false, message = "이 PC 의 회사가 아닙니다" });
+
+            var n = await HitPan.Application.Services.AccountSeatGuard.CountActiveChildrenAsync(db, payload.TenantId, ct);
+            return Ok(new { activeChildAccounts = n, asOf = DateTime.UtcNow });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[WebhookInbound] account-count 처리 중 예외");
+            return StatusCode(500, new { success = false, message = "내부 오류" });
+        }
+    }
 
     [HttpPost("device-slot")]
     public Task<IActionResult> DeviceSlot(CancellationToken ct) => HandleAsync(ct);
 
-    private async Task<IActionResult> HandleAsync(CancellationToken ct)
+    // ⬛ private async Task<IActionResult> HandleAsync(CancellationToken ct)
+    private async Task<IActionResult> HandleAsync(CancellationToken ct, bool isSubscription = false)
     {
         try
         {
@@ -141,6 +204,17 @@ public class WebhookInboundController : ControllerBase
 
             _logger.LogInformation("[WebhookInbound] {Event} 동기화 완료 tenant={Tid}",
                 payload.EventType, payload.TenantId);
+
+            if (isSubscription)
+            {
+                // 20261005작3 P-5 — 없으면(null) 덮지 않는다. 위 UPSERT 는 무접촉(#1).
+                await db.ExecuteAsync(
+                    "UPDATE local_subscription SET extra_accounts = COALESCE(@ExtraAccounts, extra_accounts) WHERE tenant_id = @TenantId",
+                    new { payload.TenantId, payload.ExtraAccounts });
+                // §10⑥ 덤 — 결제 직후 본사가 바로 안다(숫자 한 칸 · 기존 필드 무접촉)
+                var n = await HitPan.Application.Services.AccountSeatGuard.CountActiveChildrenAsync(db, payload.TenantId, ct);
+                return Ok(new { success = true, message = "동기화 완료", activeChildAccounts = n });
+            }
             return Ok(new { success = true, message = "동기화 완료" });
         }
         catch (Exception ex)
@@ -153,9 +227,15 @@ public class WebhookInboundController : ControllerBase
     private bool VerifySignature(string body, string sigHeader)
     {
         // 봉합 2026-06-17 1.2.12 — TenantConfigReader 정합
-        var key = TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY")
-                 ?? _config["Bootstrap:TokenKey"]
-                 ?? "DEV-bootstrap-token-key-change-in-production-32+chars";
+        // ⬛ [봉합1 전] 세 번째 대안 = 레포에 적힌 개발용 키 문자열(SerialProofVerifier 의 개발 갈래와 같은 값) — 값은 옮겨 적지 않는다.
+        //   🔴 10/5 봉합1 P1-03 — 키 설정이 없는 설치는 누구나 그 공개된 값으로 서명할 수 있었다(터널로 인터넷 노출 · [AllowAnonymous]).
+        //   SerialProofVerifier 와 같은 방향 — 키가 없으면 대신 검증하지 않고 거절(호출부가 401).
+        var key = ResolveSigningKey(TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY"), _config["Bootstrap:TokenKey"]);
+        if (key is null)
+        {
+            _logger.LogWarning("[WebhookInbound] 서명 키 설정 없음(db.conf HITPAN_BOOTSTRAP_TOKEN_KEY · Bootstrap:TokenKey) — 서명 검증 거절");
+            return false;
+        }
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(body));
         var expected = Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -163,6 +243,16 @@ public class WebhookInboundController : ControllerBase
         var actualBytes = Encoding.UTF8.GetBytes(sigHeader);
         if (expectedBytes.Length != actualBytes.Length) return false;
         return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
+    }
+
+    /// <summary>
+    /// 서명 키 고르기 — db.conf 값 → 설정 값 순. 둘 다 비면 <c>null</c>(대신 쓰는 키 없음 · 10/5 봉합1 P1-03).
+    /// </summary>
+    public static string? ResolveSigningKey(string? fromDbConf, string? fromConfig)
+    {
+        if (!string.IsNullOrWhiteSpace(fromDbConf)) return fromDbConf;
+        if (!string.IsNullOrWhiteSpace(fromConfig)) return fromConfig;
+        return null;
     }
 
     // 봉합 2026-06-16: TenantConfigReader 영역 통일 (db.conf 직접 읽음)
@@ -191,6 +281,8 @@ public class WebhookInboundController : ControllerBase
         public int AiTokenExtra { get; set; }
         public int MaxUsers { get; set; }
         public int ExtraDeviceSlots { get; set; }
+        // 20261005작3 P-5 — 추가 구매 계정 수. 본사가 아직 안 보낸다 ⇒ null = 덮지 않음
+        public int? ExtraAccounts { get; set; }
         public string? ResellerId { get; set; }
         public int ResellerTier { get; set; }
         public string Nonce { get; set; } = "";

@@ -1,0 +1,58 @@
+@namespace HitPan.Web.Components.Users
+@using HitPan.Web.Services
+@* 20261005작3 §5 — 「계정 추가 구독 안내」 창. 구매 연결·링크 0(D-5) · 가격 한 줄(D-16 · AccountPricing 한 곳).
+   차서 막혔을 때와 [구독계정추가] 버튼으로 열 때 **같은 창** — 첫 줄만 다르다. 개발 용어 노출 0. *@
+<MudDialog @bind-Visible="VisibleProxy" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.GroupAdd" Color="Color.Primary" Class="mr-1" /> 계정 추가 구독 안내
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body1" Class="mb-2" Style="font-weight:600">@FirstLine</MudText>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            지금 @(Active)개 / 한도 @(Limit)개를 쓰고 있습니다. 계정을 더 쓰려면 계정 추가 구독이 필요합니다.
+            계정 추가 구독 신청은 곧 이 창에서 바로 할 수 있도록 준비 중입니다.
+        </MudText>
+        <MudPaper Elevation="0" Class="pa-3" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+            <MudText Typo="Typo.body2" Style="font-weight:600">@AccountPricing.ExtraAccountLine</MudText>
+        </MudPaper>
+        <MudText Typo="Typo.caption" Class="mt-3" Style="color:var(--mud-palette-text-secondary)">
+            「사용 안 함」이나 「계정폐기」로 바꾼 계정은 한도에서 빠집니다.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CloseAsync">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>true = 한도가 차서 막혀 열림 · false = [구독계정추가] 버튼으로 열림</summary>
+    [Parameter] public bool Blocked { get; set; }
+    [Parameter] public int Active { get; set; }
+    [Parameter] public int Limit { get; set; }
+
+    private string FirstLine => Blocked
+        ? $"계정 사용 한도({Limit}개)가 찼습니다."
+        : $"지금 {Active}개 / 한도 {Limit}개를 쓰고 있습니다.";
+
+    private bool VisibleProxy
+    {
+        get => Visible;
+        set
+        {
+            if (value == Visible) return;
+            Visible = value;
+            _ = VisibleChanged.InvokeAsync(value);
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        Visible = false;
+        await VisibleChanged.InvokeAsync(false);
+    }
+}

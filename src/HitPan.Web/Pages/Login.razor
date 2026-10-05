@@ -421,12 +421,8 @@
             //
             //   ⚠️ 여기서 막아도 **로그인 실패가 아니다.** 사장님 결재(20260815 §3):
             //     *"401 을 내지 않는다. 로그인은 통과, 중간 화면에서 제어"*
-            if (result.Data?.DeviceAwaitingApproval == true)
-            {
-                DeviceAuthState.MarkAwaitingApproval();
-                Navigation.NavigateTo("/", forceLoad: true);
-                return;
-            }
+            // ⬛ [낡은 분기 · 2026-10-05 슬롯 폐기(작4 A-6)] 승인 대기면 관문 표시 후 첫 화면으로 — 사유: 서버가 더는 대기를 주지 않는다(늘 허용).
+            // ⬛ if (result.Data?.DeviceAwaitingApproval == true)             // ⬛ {             // ⬛     DeviceAuthState.MarkAwaitingApproval();             // ⬛     Navigation.NavigateTo("/", forceLoad: true);             // ⬛     return;             // ⬛ }
 
             if (result.Data?.DeviceNewlyRegistered == true)
             {

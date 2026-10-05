@@ -69,6 +69,11 @@ public sealed class UserController : ControllerBase
             var id = await _userService.CreateAsync(dto, tenantId, ct).ConfigureAwait(false);
             return CreatedAtAction(nameof(Get), new { id }, new { id });
         }
+        catch (AccountSeatFullException ex)
+        {
+            // 20261005작3 — 한도 초과는 InvalidOperationException 보다 먼저 잡는다(설계 §4).
+            return SeatFull(ex);
+        }
         catch (InvalidOperationException ex)
         {
             return Conflict(new { message = ex.Message });
@@ -86,9 +91,79 @@ public sealed class UserController : ControllerBase
             return Forbid();
         }
 
-        await _userService.UpdateAsync(id, dto, tenantId, ct).ConfigureAwait(false);
-        return Ok();
+        // ⬛ await _userService.UpdateAsync(id, dto, tenantId, ct).ConfigureAwait(false);
+        // ⬛ return Ok();
+        // 20261005작3 E-4 — 0→1 이 차면 409 · 대표를 끄는 요청은 400(반증 F3)
+        try
+        {
+            await _userService.UpdateAsync(id, dto, tenantId, ct).ConfigureAwait(false);
+            return Ok();
+        }
+        catch (AccountSeatFullException ex)
+        {
+            return SeatFull(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
+
+    // ── 20261005작3 계정 과금 (설계 §4) — tenant 는 전부 JWT 클레임(TenantMiddleware 가 넣은 Items)만(#2) ──
+
+    [HttpGet("seats")]
+    [RequirePermission("USERS", "view")]
+    public async Task<IActionResult> GetSeats(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var s = await _userService.GetSeatsAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(new { active = s.Active, baseLimit = s.BaseLimit, extra = s.Extra, limit = s.Limit, tier = s.Tier });
+    }
+
+    [HttpPost("{id}/suspend")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "update")]
+    public async Task<IActionResult> Suspend(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _userService.SuspendAsync(id, tenantId, ct).ConfigureAwait(false);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id}/resume")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    [RequirePermission("USERS", "update")]
+    public async Task<IActionResult> Resume(string id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+        try
+        {
+            await _userService.ResumeAsync(id, tenantId, ct).ConfigureAwait(false);
+            return Ok();
+        }
+        catch (AccountSeatFullException ex)
+        {
+            return SeatFull(ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    private ObjectResult SeatFull(AccountSeatFullException ex) =>
+        Conflict(new { code = "account_seat_full", active = ex.Active, limit = ex.Limit, message = ex.Message });
 
     [HttpDelete("{id}")]
     [Authorize(Policy = "TenantAdminOnly")]
@@ -103,7 +178,9 @@ public sealed class UserController : ControllerBase
 
         try
         {
-            await _userService.DeactivateAsync(id, tenantId, ct).ConfigureAwait(false);
+            // ⬛ await _userService.DeactivateAsync(id, tenantId, ct).ConfigureAwait(false);
+            // 20261005작3 — DELETE 의 뜻이 「계정폐기」로 바뀐다(아이디 비움 · 사원 연결 끊기 · 설계 §1·§4).
+            await _userService.RetireAsync(id, tenantId, ct).ConfigureAwait(false);
             return Ok();
         }
         catch (InvalidOperationException ex)

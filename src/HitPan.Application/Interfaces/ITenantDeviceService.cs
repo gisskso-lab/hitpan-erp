@@ -12,8 +12,9 @@ public interface ITenantDeviceService
     /// <summary>테넌트의 전체 기기 목록 (TenantAdmin용).</summary>
     Task<List<DeviceListDto>> GetAllAsync(string tenantId, CancellationToken ct = default);
 
-    /// <summary>남은 슬롯 정보 — KPI 카드 노출용.</summary>
-    Task<DeviceQuotaDto> GetQuotaAsync(string tenantId, CancellationToken ct = default);
+    // ⬛ [낡은 선언 · 2026-10-05 슬롯 폐기(작4 A-10)] 구현체 1(`TenantDeviceService`) · 시험 가짜 3(`Mock.Of`) — #12 grep 10/5. 사유: 한도 계산 폐기.
+    // ⬛ /// <summary>남은 슬롯 정보 — KPI 카드 노출용.</summary>
+    // ⬛ Task<DeviceQuotaDto> GetQuotaAsync(string tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// 로그인 시 호출. 지문(fingerprint)이 있으면 last_seen_at 갱신,
@@ -233,4 +234,13 @@ public interface ITenantDeviceService
         string? userAgent,
         string? knownDeviceId = null,
         CancellationToken ct = default);
+
+    // ── 🔴 2026-10-05 작4 B-2 「접속기기 확인」 조회 — 읽기만 (설계 §3 · P-B: 새 서비스 대신 여기 더해 `Program.cs` 0줄) ──
+    //   #12 — 구현체 1(`TenantDeviceService`) · 시험 가짜 3(`Mock.Of` — 기본값 반환이라 무변경 컴파일). grep 10/5.
+
+    /// <summary>지금 접속 중 — 사람마다 컴퓨터/휴대폰 · 마지막 사용(한국 시각). tenant 는 호출부가 <c>Items["TenantId"]</c> 에서만 준다(#2).</summary>
+    Task<AccessStatusDto> GetAccessStatusAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>막힌 로그인 기록 — 최근 <paramref name="days"/>일(사장님 E-8 · 30일). 문장은 서버가 고객 언어로 만든다(원문 description 비노출).</summary>
+    Task<List<LoginConflictAlertDto>> GetLoginConflictAlertsAsync(string tenantId, int days = 30, CancellationToken ct = default);
 }

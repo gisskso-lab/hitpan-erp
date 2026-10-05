@@ -53,6 +53,7 @@ public class DeviceSlotGuardTests
     // G-7 — 계수가 단일 메서드를 통과한다 (복제를 되살리면 FAIL)
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void G7_슬롯을_세는_SQL은_한_곳뿐이다()
     {
@@ -68,7 +69,9 @@ public class DeviceSlotGuardTests
             $"슬롯을 세는 SQL 이 {groupByCount} 곳이다 — 한 곳(CountUsedSlotsAsync)이어야 한다. "
             + "복제가 되살아나면 한 곳만 고쳐지고 나머지가 옛 규칙으로 돌아 요금이 갈린다.");
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void G7_한도를_만드는_자리도_한_곳뿐이다()
     {
@@ -84,7 +87,9 @@ public class DeviceSlotGuardTests
             $"추가슬롯을 한도에 더하는 자리가 {extraAdds} 곳이다 — ResolveLimits 안의 2줄(PC·모바일)이어야 한다. "
             + "복제가 되살아나면 요금 산식이 갈린다.");
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G7_추가슬롯_모바일은_1배다_1더하기1()
     {
@@ -104,11 +109,13 @@ public class DeviceSlotGuardTests
         Assert.Equal(5 + 3, pc);        // 5 + 3*1
         Assert.Equal(3 + 3, mobile);    // 🔴 3 + 3*1 = 6. 종전 1+2 였다면 9 가 나온다
     }
+#endif
 
     // ══════════════════════════════════════════════════════════════
     // G-8 — 🔴 설정값을 바꾸면 실제 한도가 바뀐다 (동작 검사)
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G8_설정값을_바꾸면_실제_한도가_바뀐다()
     {
@@ -142,7 +149,9 @@ public class DeviceSlotGuardTests
             "설정값을 바꿨는데 한도가 그대로다 — 숫자가 아직 코드에 묶여 있다는 뜻이다. "
             + "요금제를 고치려면 재배포가 필요한 상태이며 헌법 #11 위반이다.");
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G8_추가슬롯_배수도_설정에서_읽는다()
     {
@@ -160,7 +169,9 @@ public class DeviceSlotGuardTests
         Assert.Equal(10 + 4, pc);       // 10 + 2*2
         Assert.Equal(8 + 6, mobile);    // 8 + 2*3
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G8_설정이_비어도_종전_숫자로_떨어진다()
     {
@@ -172,7 +183,9 @@ public class DeviceSlotGuardTests
         Assert.Equal((10, 8), TenantDeviceService.ResolveLimits("pro", 0, empty));
         Assert.Equal((10, 5), TenantDeviceService.ResolveLimits("trial", 0, empty));
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G8_enterprise가_basic으로_떨어지지_않는다()
     {
@@ -193,7 +206,9 @@ public class DeviceSlotGuardTests
         // ⚠️ premium(옛 이름)도 살아 있어야 한다 — 옛 데이터에 남아 있을 수 있다(D-16).
         Assert.Equal((100, 80), TenantDeviceService.ResolveLimits("premium", 0, empty));
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — ResolveLimits(한도 계산)를 걷었다. 지킬 대상이 사라짐 · 지우지 않음(#1) · 기호를 정의하면 다시 컴파일된다
     [Fact]
     public void G8_모르는_요금제는_종전처럼_기본값을_받는다()
     {
@@ -202,6 +217,7 @@ public class DeviceSlotGuardTests
         Assert.Equal((5, 3), TenantDeviceService.ResolveLimits("아무거나", 0, empty));
         Assert.Equal((5, 3), TenantDeviceService.ResolveLimits(null, 0, empty));
     }
+#endif
 
     // ══════════════════════════════════════════════════════════════
     // G-13 — tablet 이 어느 칸에도 안 빠진다
@@ -326,6 +342,7 @@ public class DeviceSlotGuardTests
     // I-7 — status='approved' 만 계수한다
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void I7_승인된_기기만_센다()
     {
@@ -348,7 +365,9 @@ public class DeviceSlotGuardTests
             countSql.Value.Contains("pending", StringComparison.OrdinalIgnoreCase),
             "계수에 pending 이 들어갔다 — 승인하려는 기기가 자기를 세어 승인이 영원히 막힌다(D-4).");
     }
+#endif
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void I7_메인PC를_계수에서_빼지_않는다()
     {
@@ -369,6 +388,7 @@ public class DeviceSlotGuardTests
             "계수 SQL 이 is_main_pc 를 보고 있다 — 메인PC 를 빼면 적게 세어 요금이 샌다(D-3). "
             + "사장님 확정은 '메인PC 포함' 이다.");
     }
+#endif
 
     [Fact]
     public void D3_틀린_주석이_되살아나지_않는다()
@@ -400,6 +420,7 @@ public class DeviceSlotGuardTests
     // D-1 — QR 경로는 휴대기기 칸만 본다 (통합하며 깨지기 쉬운 자리)
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void D1_QR경로는_컴퓨터_한도를_보지_않는다()
     {
@@ -423,11 +444,13 @@ public class DeviceSlotGuardTests
             Regex.IsMatch(qr.Value, @"mobileUsed\s*>=\s*mobileLimit", RegexOptions.IgnoreCase),
             "QR 경로에 휴대기기 한도 검사가 없다 — 슬롯 규칙이 QR 로 우회된다.");
     }
+#endif
 
     // ══════════════════════════════════════════════════════════════
     // D-5 — 갱신 경로는 한도를 보지 않는다 (쓰던 사람이 안 막힌다)
     // ══════════════════════════════════════════════════════════════
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작4 A-11 재분류) — 한도 계산·셈 SQL(CountUsedSlotsAsync·GetLimitsAsync)과 그 호출 5곳을 걷었다. 글자로 지키던 대상이 사라짐 · 지우지 않음(#1)
     [Fact]
     public void D5_기존기기_갱신경로는_한도검사를_하지_않는다()
     {
@@ -469,6 +492,7 @@ public class DeviceSlotGuardTests
             "기존 기기 갱신 경로가 한도초과로 거부를 돌려준다 — "
             + "'막는다' 가 아니라 '안 바꾼다' 여야 한다(20260818작2 §2 2-1).");
     }
+#endif
 
     // ══════════════════════════════════════════════════════════════
     // P2.5 — DDL 칸 분리
@@ -575,6 +599,7 @@ public class DeviceSlotGuardTests
         Assert.Matches(@"'extra_slot\.price_krw',\s*10000\b", sql);
     }
 
+#if HITPAN_SLOT_LIMIT_RESTORED   // ⬛ 2026-10-05 슬롯 폐기(작3 F6 · PM) — SessionLimitMiddleware 가 파이프라인에서 빠지고 슬롯 한도(SlotPolicyDefaults tier.*) 읽기가 ⬛ 처리됐다. 세션 제한과 기기 한도를 대조할 대상이 둘 다 사라짐 · 지우지 않음(#1)
     /// <summary>
     /// 🔴 <b>B-4</b> — 동시 세션 제한이 기기 한도보다 먼저 막지 않는가.
     /// </summary>
@@ -608,6 +633,7 @@ public class DeviceSlotGuardTests
                 + "[반증] SessionLimitMiddleware 에서 enterprise 를 빼면 FAIL 한다.");
         }
     }
+#endif
 
     /// <summary>
     /// 🔴 <b>B-3</b> — 백오피스 <c>pricing_plans</c> 시드의 기기 대수가 ERP 정본과 같은가.
