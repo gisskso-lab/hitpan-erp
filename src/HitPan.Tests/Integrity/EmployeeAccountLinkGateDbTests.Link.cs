@@ -158,24 +158,128 @@ public sealed partial class EmployeeAccountLinkGateDbTests
     /// <paramref name="waiter"/> 연결의 트랜잭션이 행 잠금을 기다리는 상태(<c>LOCK WAIT</c>)에 들어갈 때까지 본다 —
     /// 「판정 뒤 · 바꾸기 전」 틈에 승격이 끼어드는 순간을 결정적으로 만든다. 그 전에 작업이 끝나면 경쟁이 재현되지 않은 것이다(FAIL).
     /// </summary>
+    /// <remarks>
+    /// 🔴 작5 §CI3 G-E16 — <c>information_schema.INNODB_TRX</c> 는 서버의 중간 캐시를 읽는다. 그 캐시는
+    /// <b>마지막으로 읽힌 지 0.1초가 넘었을 때만</b> 새로 채워진다(MariaDB <c>trx0i_s.cc</c> <c>CACHE_MIN_IDLE_TIME_NS</c> ·
+    /// <c>can_cache_be_updated</c> · <c>trx_i_s_cache_end_read</c> 가 읽을 때마다 <c>last_read</c> 를 갱신).
+    /// 옛 탐침은 50ms 마다 읽어 <b>자기 읽기로 캐시를 얼렸다</b> — 첫 읽기가 낡은 스냅숏이면(같은 시험 안 직전 블록의 탐침이
+    /// 0.1초 안에 읽었으면) 20초 내내 같은 스냅숏을 본다. G-E16 은 한 시험 안에서 탐침을 두 번 연달아 쓰는 유일한 게이트다.
+    /// ⇒ 읽기 사이를 <see cref="TrxProbeIntervalMs"/>(&gt; 100ms) 로 벌리고, 첫 읽기 전에도 그만큼 쉰다(직전 탐침 읽기와 띄움).
+    /// </remarks>
     private async Task WaitForLockWaitAsync(MySqlConnection waiter, Task work, string what)
     {
         await using var probe = await OpenAsync();
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
+            // ⬛ [§CI3 전] 읽은 뒤 Task.Delay(50) — 0.1초 캐시를 스스로 얼렸다
+            await Task.Delay(TrxProbeIntervalMs);
             if (work.IsCompleted)
             {
-                var err = work.Exception?.GetBaseException().Message ?? "예외 없음";
-                throw new Xunit.Sdk.XunitException($"{what} — 승격 커밋 전에 끝났다(행 잠금을 안 기다렸다 · 경쟁 미재현): {err}");
+                // ⬛ var err = work.Exception?.GetBaseException().Message ?? "예외 없음";
+                throw new Xunit.Sdk.XunitException($"{what} — 승격 커밋 전에 끝났다(행 잠금을 안 기다렸다 · 경쟁 미재현): {DescribeWork(work)}");
             }
             var waiting = await probe.ExecuteScalarAsync<long>(
                 "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT' AND trx_mysql_thread_id = @Id",
                 new { Id = waiter.ServerThread });
             if (waiting > 0) return;
-            await Task.Delay(50);
         }
-        throw new Xunit.Sdk.XunitException($"{what} — 20초 안에 행 잠금 대기에 들어가지 않았다(경쟁 미재현)");
+        // ⬛ throw new Xunit.Sdk.XunitException($"{what} — 20초 안에 행 잠금 대기에 들어가지 않았다(경쟁 미재현)");
+        throw new Xunit.Sdk.XunitException(
+            $"{what} — 20초 안에 행 잠금 대기에 들어가지 않았다(경쟁 미재현)\n{await LockDiagnosticsAsync(probe, waiter.ServerThread, work)}");
+    }
+
+    /// <summary>INNODB_TRX 캐시 최소 쉼(0.1초)보다 길게 — 매 읽기가 새 스냅숏이 되게.</summary>
+    private const int TrxProbeIntervalMs = 150;
+
+    /// <summary>작업 상태 한 줄 — 실패면 예외 종류·글(안쪽 예외까지). 예외를 읽어 「관찰 안 된 예외」로 남지 않게 한다.</summary>
+    private static string DescribeWork(Task work)
+    {
+        if (!work.IsCompleted) return $"작업 상태={work.Status}(안 끝남)";
+        if (work.Exception is null) return $"작업 상태={work.Status}";
+        var parts = work.Exception.Flatten().InnerExceptions.Select(e =>
+        {
+            var s = $"{e.GetType().Name}: {e.Message}";
+            for (var inner = e.InnerException; inner is not null; inner = inner.InnerException)
+                s += $" ← {inner.GetType().Name}: {inner.Message}";
+            return s;
+        });
+        return $"작업 상태={work.Status} · 작업 예외=[{string.Join(" | ", parts)}]";
+    }
+
+    /// <summary>
+    /// 🔴 작5 §CI3 G-E16 — 잠금 대기를 못 봤을 때 남기는 표: 작업 상태 · 기다리는 쪽 스레드 · INNODB_TRX(새 스냅숏) ·
+    /// 잠금 대기 대상(INNODB_LOCK_WAITS × INNODB_LOCKS) · PROCESSLIST(기다리는 쪽의 상태 — MDL 대기 등 InnoDB 밖 대기를 가른다).
+    /// 진단 읽기 전에 캐시 쉼보다 길게 쉰다 — 여기서 기다리는 쪽이 LOCK WAIT 이면 「탐침이 낡은 스냅숏을 봤다」가 확정된다.
+    /// 각 조회 실패는 표 자리에 그 글을 적는다(진단이 원래 실패를 가리지 않게).
+    /// </summary>
+    private static async Task<string> LockDiagnosticsAsync(MySqlConnection probe, int waiterThread, Task work)
+    {
+        await Task.Delay(TrxProbeIntervalMs);
+        var sb = new System.Text.StringBuilder();
+        sb.Append("── 진단 · ").Append(DescribeWork(work)).Append(" · 기다리는 쪽 스레드=").Append(waiterThread).AppendLine();
+
+        async Task Table(string title, string sql)
+        {
+            sb.Append("[").Append(title).AppendLine("]");
+            try
+            {
+                var rows = (await probe.QueryAsync(sql, new { Id = waiterThread })).ToList();
+                if (rows.Count == 0) sb.AppendLine("  (행 없음)");
+                foreach (IDictionary<string, object?> r in rows)
+                    sb.Append("  ").AppendLine(string.Join(" · ", r.Select(kv => $"{kv.Key}={kv.Value}")));
+            }
+            catch (MySqlException ex)
+            {
+                sb.Append("  조회 실패: ").AppendLine(ex.Message);
+            }
+        }
+
+        await Table("INNODB_TRX(새 스냅숏)", @"
+            SELECT trx_mysql_thread_id AS thread, trx_state AS state, trx_started AS started, trx_wait_started AS wait_started,
+                   trx_requested_lock_id AS req_lock, LEFT(IFNULL(trx_query, ''), 160) AS query
+            FROM information_schema.INNODB_TRX ORDER BY trx_started LIMIT 20");
+        await Table("잠금 대기 대상(INNODB_LOCK_WAITS × INNODB_LOCKS)", @"
+            SELECT w.requesting_trx_id AS req_trx, w.blocking_trx_id AS blk_trx,
+                   l.lock_mode AS mode, l.lock_type AS type, l.lock_table AS tbl, l.lock_index AS idx, l.lock_data AS data
+            FROM information_schema.INNODB_LOCK_WAITS w
+            LEFT JOIN information_schema.INNODB_LOCKS l ON l.lock_id = w.requested_lock_id
+            LIMIT 20");
+        await Table("PROCESSLIST(기다리는 쪽)", @"
+            SELECT ID AS id, COMMAND AS cmd, STATE AS state, TIME AS secs, LEFT(IFNULL(INFO, ''), 160) AS info
+            FROM information_schema.PROCESSLIST WHERE ID = @Id");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 🔴 작5 §CI3 G-E16 — 블록 안에서 실패했을 때 <b>연결 정리 전에</b> 작업을 끝까지 기다린다. 옛 판은 작업(Task.Run)이 아직 돌 때
+    /// <c>await using</c> 정리(연결 DisposeAsync → 트랜잭션 Rollback)가 같은 연결에서 부딪혀 원래 예외를
+    /// <c>NullReferenceException</c> · <c>another read operation is pending</c> 로 가렸다(CI 3차 로그 1·2차).
+    /// 잠금을 쥔 트랜잭션을 먼저 되돌려(작업이 깨어나게) 최대 30초 기다리고, 원래 예외에 작업 결과를 붙여 다시 던진다.
+    /// </summary>
+    private static async Task<Exception> DrainOnFailureAsync(Exception first, Task work, MySqlTransaction holderTx, string what)
+    {
+        var notes = new System.Text.StringBuilder();
+        if (!work.IsCompleted)
+        {
+            try
+            {
+                await holderTx.RollbackAsync();
+                notes.Append("잠금 쥔 트랜잭션 되돌림 · ");
+            }
+            catch (InvalidOperationException rex)                    // 이미 커밋된 뒤 — 잠금은 이미 풀렸다
+            {
+                notes.Append("잠금 쥔 트랜잭션 되돌림 불가(").Append(rex.Message).Append(") · ");
+            }
+            catch (MySqlException mex)
+            {
+                notes.Append("잠금 쥔 트랜잭션 되돌림 실패(").Append(mex.Message).Append(") · ");
+            }
+            if (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(30))) != work)
+                notes.Append("작업이 30초 안에 안 끝났다(연결 정리가 부딪힐 수 있다) · ");
+        }
+        notes.Append(DescribeWork(work));
+        return new Xunit.Sdk.XunitException($"{first.Message}\n── [{what}] 정리 전 작업 결과: {notes}", first);
     }
 
     private static async Task<bool> IsActiveAsync(MySqlConnection db, string userId) =>
@@ -203,11 +307,19 @@ public sealed partial class EmployeeAccountLinkGateDbTests
             await promoter.ExecuteAsync(promote, new { U = target }, ptx);                  // 대상 행 X 잠금(미커밋)
 
             var staff = Task.Run(() => new UserService(staffConn, new NoOpAudit()).SuspendAsStaffAsync(target, actor, _tenantA));
-            await WaitForLockWaitAsync(staffConn, staff, "봉합");
-            await ptx.CommitAsync();                                                      // 판정 시점 뒤에 대상이 관리자가 됐다
+            // 🔴 §CI3 — 실패하면 연결 정리 전에 작업을 끝까지 기다리고 그 결과를 붙인다(원래 예외가 정리 예외에 가리지 않게).
+            try
+            {
+                await WaitForLockWaitAsync(staffConn, staff, "봉합");
+                await ptx.CommitAsync();                                                  // 판정 시점 뒤에 대상이 관리자가 됐다
 
-            var ex = await Assert.ThrowsAsync<AccountActionForbiddenException>(() => staff);
-            Assert.Equal("protected_account", ex.Code);
+                var ex = await Assert.ThrowsAsync<AccountActionForbiddenException>(() => staff);
+                Assert.Equal("protected_account", ex.Code);
+            }
+            catch (Exception first)
+            {
+                throw await DrainOnFailureAsync(first, staff, ptx, "봉합");
+            }
         }
         await using var db = await OpenAsync();
         Assert.True(await IsActiveAsync(db, target), "R-1 — 관리자로 바뀐 대상이 직원 손에 꺼졌다(원자화 실패)");
@@ -225,9 +337,16 @@ public sealed partial class EmployeeAccountLinkGateDbTests
                 Assert.True(await OldStaffJudgeAsync(staffConn, targetOld), "대조군 전제 — 판정 시점(커밋된 값)엔 바꿔도 되는 대상");
                 await new UserService(staffConn, new NoOpAudit()).SuspendAsync(targetOld, _tenantA);
             });
-            await WaitForLockWaitAsync(staffConn, old, "대조군");
-            await ptx.CommitAsync();
-            await old;                                                                    // 옛 흐름은 성공한다
+            try
+            {
+                await WaitForLockWaitAsync(staffConn, old, "대조군");
+                await ptx.CommitAsync();
+                await old;                                                                // 옛 흐름은 성공한다
+            }
+            catch (Exception first)
+            {
+                throw await DrainOnFailureAsync(first, old, ptx, "대조군");
+            }
         }
         Assert.False(await IsActiveAsync(db, targetOld), "대조군 무효 — 옛 두 단계가 같은 경쟁에서 막혔다(경쟁 재현 실패)");
         Assert.Equal("tenant_admin", await db.ExecuteScalarAsync<string>("SELECT account_type FROM users WHERE user_id=@U", new { U = targetOld }));
