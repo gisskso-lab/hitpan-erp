@@ -59,7 +59,9 @@ public partial class EmployeePage
 
     // ── 작5 §8-5 U-2 — 사원관리 「ERP 메뉴 권한」 카드는 USERS_ACCOUNT·USERS_SEAT 를 따로 그리지 않는다 ──
     //   단계를 바꾸는 곳은 권한설정 한 곳. 카드에는 읽기 전용 한 줄만. 저장은 종전 그대로 Permissions 전체(숨긴 줄은 받은 값 그대로 간다).
-    private static readonly string[] HiddenUsersLevelCodes = { "USERS_ACCOUNT", "USERS_SEAT" };
+    // ⬛ [작5 §8-8 U-2 추가 전] { "USERS_ACCOUNT", "USERS_SEAT" } — USERS(사용자관리) 줄은 5칸 체크박스로 남아 단계 1 을 여기서 바꿀 수 있었다
+    //   작5 §8-8 PM 결재: USERS 도 뺀다. 단계를 바꾸는 곳 = 권한설정 한 곳. 카드에는 「직원 계정 관리: 단계」 한 줄만.
+    private static readonly string[] HiddenUsersLevelCodes = { "USERS", "USERS_ACCOUNT", "USERS_SEAT" };
 
     /// <summary>카드에서 따로 그리지 않는 코드인가.</summary>
     private static bool IsHiddenUsersLevelCode(string? code) =>
@@ -104,12 +106,8 @@ public partial class EmployeePage
         && !string.IsNullOrWhiteSpace(_accountModel.LoginId)
         && _accountModel.Password.Length >= 8;
 
-    private void GenerateAccountPassword()
-    {
-        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-        var rand = new Random();
-        _accountModel.Password = new string(Enumerable.Range(0, 12).Select(_ => chars[rand.Next(chars.Length)]).ToArray());
-    }
+    // ⬛ 종전 본문: 문자표 + new Random() + 12자 — 작5 §8-8(CodeQL insecure-randomness): [직원 계정 관리]와 같은 함수 하나로
+    private void GenerateAccountPassword() => _accountModel.Password = AccountTempPassword.New();
 
     private static string AccountPasswordHint(string pw) =>
         string.IsNullOrEmpty(pw) ? "8자 이상 · 처음 로그인한 뒤 본인이 바꾸도록 알려 주세요"

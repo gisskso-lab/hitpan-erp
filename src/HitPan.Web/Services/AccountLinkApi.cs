@@ -76,9 +76,19 @@ public static class AccountLinkLabels
             "manager" or "2" => "매니저",
             "readonly" or "4" => "조회 전용",
             "user" or "3" or "sales_user" or "tenant_user" => "일반사용자",
-            _ => r
+            // 작5 §8-8 V5-17 — 서버 정책 역할 코드(Program.cs RequireRole)도 한글로. 화면에 hr_manager 같은 글자가 나가지 않게.
+            "system_admin" => "관리자",
+            "hr_manager" => "인사 담당",
+            "account_manager" or "accountant" => "회계 담당",
+            "sales_manager" => "영업 관리",
+            "purchase_manager" => "구매 관리",
+            // ⬛ 종전: _ => r (모르는 코드도 원문 그대로 보였다) — 고객사가 한글로 적은 직무는 그대로, 영문 코드면 「기타 직무」
+            _ => IsAsciiCode(r) ? "기타 직무" : r
         };
     }
+
+    /// <summary>영문·숫자·밑줄만으로 된 값인가(= 사람이 읽을 이름이 아니라 코드).</summary>
+    private static bool IsAsciiCode(string s) => s.All(c => c < 128);
 
     /// <summary>「직원 계정 관리」 단계 0~3 → 화면 글자(권한설정 4선택과 같은 말 · 작5 §8-5 U-2).</summary>
     public static string UsersLevelLabel(int level) => level switch
@@ -114,6 +124,29 @@ public static class AccountLinkLabels
         Manager = 2,
         User = 3,
         Readonly = 4
+    }
+}
+
+/// <summary>
+/// 20261005작5 §8-8 — 임시 비밀번호 한 곳. [직원 계정 관리](Users.razor 두 칸)와 사원관리 [계정 만들기]가 같은 함수를 쓴다.
+/// </summary>
+/// <remarks>⬛ 종전: 두 화면이 각자 <c>new Random()</c> 으로 뽑았다(CodeQL cs/insecure-randomness 3건) — 문자표·12자는 그대로,
+/// 뽑는 방법만 <see cref="System.Security.Cryptography.RandomNumberGenerator.GetInt32(int)"/> 로 바꿨다.</remarks>
+public static class AccountTempPassword
+{
+    /// <summary>헷갈리는 글자(I·l·O·0·1)를 뺀 문자표 — 종전 두 화면과 같은 글자.</summary>
+    private const string Chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+
+    /// <summary>임시 비밀번호 길이 — 종전 그대로 12자.</summary>
+    public const int Length = 12;
+
+    /// <summary>임시 비밀번호 한 개.</summary>
+    public static string New()
+    {
+        var buf = new char[Length];
+        for (var i = 0; i < buf.Length; i++)
+            buf[i] = Chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(Chars.Length)];
+        return new string(buf);
     }
 }
 

@@ -308,7 +308,8 @@ else
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">사원계정</MudText></MudItem>
                         <MudItem xs="7"><MudText Style="font-size:12px">@(_selectedDetail.LoginId ?? "-")</MudText></MudItem>
                         <MudItem xs="5"><MudText Style="font-size:12px;color:var(--mud-palette-text-secondary)">역할</MudText></MudItem>
-                        <MudItem xs="7"><MudText Style="font-size:12px">@_selectedDetail.Role</MudText></MudItem>
+                        @* ⬛ [작5 §8-8 V5-17 전] @_selectedDetail.Role — sales_user 같은 코드가 그대로 보였다 *@
+                        <MudItem xs="7"><MudText Style="font-size:12px">@AccountLinkLabels.RoleLabel(_selectedDetail.Role)</MudText></MudItem>
                     </MudGrid>
                 }
             </MudPaper>
