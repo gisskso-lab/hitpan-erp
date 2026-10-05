@@ -78,3 +78,4 @@
 | [next_session_prompt_20260515.md](next_session_prompt_20260515.md) | 5/15 인수인계서 — 마이그 봉합 진척 + 학습과제 | 2026-07-28 |
 | [next_session_prompt_20260514_dawn.md](next_session_prompt_20260514_dawn.md) | 인수인계서 — 2026-05-14 새벽 | 2026-07-28 |
 | [next_session_prompt_20260513_night.md](next_session_prompt_20260513_night.md) | 인수인계표 — 2026-05-13 야간 (Bulk INSERT 마이그 재작성 중단점) | 2026-07-23 |
+| [20261005작5_사원계정연결_개발명세서_게이트.md](20261005작5_사원계정연결_개발명세서_게이트.md) | 작5 갈래4 게이트 G-E1~E14 — 동작·대조군·「갈래2 합류 후 연결」 목록 · 🟡 합류 전 FAIL 정상 | 2026-10-05 |

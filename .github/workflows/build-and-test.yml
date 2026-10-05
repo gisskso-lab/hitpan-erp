@@ -448,6 +448,9 @@ jobs:
           # 🔴 20261005작3 계정 과금 G-A1~A17 (AccountSeatGateTests · 격리 DB · 실물 UserService/Bootstrap/Webhook). 작3 전용 한 줄(반증 P2 · 작4 줄과 따로).
           #    대조군·SKIP 근거: docs/개발/erp/20261005작3_직원계정관리_계정과금_개발명세서.md §4
           GATES="$GATES|AccountSeatGate"
+          # 🔴 20261005작5 사원↔계정 연결 G-E1~E14 (EmployeeAccountLinkGateTests · …DbTests · …DbTests.Pipeline). 작5 전용 한 줄.
+          #    갈래1·2·3 합류 전에는 FAIL 이 정상(「갈래N 합류 전」 문구) · 대조군·연결 목록: docs/개발/erp/20261005작5_사원계정연결_개발명세서_게이트.md
+          GATES="$GATES|EmployeeAccountLinkGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
