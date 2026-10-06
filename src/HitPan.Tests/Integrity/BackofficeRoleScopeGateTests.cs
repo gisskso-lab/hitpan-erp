@@ -34,6 +34,23 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
         "/api/backoffice/reseller-serials",
     };
 
+    /// <summary>
+    /// 🔴 <b>봉합 전 상태를 정확히 만든다.</b> 선행검증 §2-3-c 가 적은 대로, 봉합 전 36엔드포인트의
+    /// <b>유일한 장벽은 <c>bo_permissions.allowed_roles</c> CSV</b> 하나였다.
+    /// 그래서 CSV 를 그대로 둔 채 필터만 떼면 403 이 계속 나오는데 그것은 <b>CSV 가 막은 403</b>
+    /// (본문: 「권한이 없습니다 (필요 권한: …)」)이고 필터의 증거가 아니다 — 실제로 그렇게 한 번 틀렸다.
+    /// <para>설계 G-2·G-3 의 FAIL 재현이 「CSV 에 대리점 역할 1회 추가」를 포함하는 이유가 이것이다.
+    /// 본사가 권한 화면에서 체크 한 번 하면 만들어지는 상태이고(헌법 #11), 그 한 번이
+    /// <b>전 고객사 유출</b>로 이어지던 것이 이 사이클이 닫은 구멍이다.</para>
+    /// </summary>
+    private async Task WidenCsvAsync()
+    {
+        await using var db = await _h.OpenAsync();
+        var n = await db.ExecuteAsync(
+            "UPDATE bo_permissions SET allowed_roles = CONCAT(allowed_roles, ',reseller_admin,reseller_user')");
+        Assert.True(n > 0, "bo_permissions 행이 0 — 90_seed_permissions.sql 이 안 깔렸다(전제 붕괴).");
+    }
+
     // ══════════════════════════════════════════════════════════════
     // G-1 라우트 버킷 전수
     // ══════════════════════════════════════════════════════════════
@@ -94,19 +111,34 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
         // 토큰이 정말 대리점 토큰인지 먼저 본다(아니면 403 이 다른 이유일 수 있다).
         Assert.Equal(_h.ResellerA, BackofficeRoleGateHarness.ClaimOf(tokenA, "reseller_id"));
 
+        // ── 봉합 후: CSV 를 넓히기 전에도 뒤에도 전부 403 (G-4 가 넓힌 뒤를 다시 잰다) ──
         foreach (var route in HqOnlyRoutes)
         {
-            // ── 봉합 후 ──
             var after = await _h.SendAsync(tokenA, route);
             Assert.True(after.Status == 403,
                 $"[G-2] {route} — 대리점 토큰이 403 이 아니다(실측 {after.Status}). 본문: {Trim(after.Body)}");
-
-            // ── 봉합 전 FAIL 재현 (전역 필터 2줄 없음) ──
-            var before = await _h.SendAsync(tokenA, route, withGuard: false);
-            Assert.True(before.Status != 403,
-                $"[G-2] {route} — 봉합 전에도 403 이다. 그렇다면 403 은 이 필터의 증거가 아니다(다른 것이 막고 있다).");
-            Console.WriteLine($"[G-2] {route} — 봉합 전 {before.Status} → 봉합 후 {after.Status}");
         }
+
+        // ── 봉합 전 FAIL 재현 (전역 필터 2줄 없음 + CSV 1회 추가 = 설계 G-2 가 적은 재현 절차) ──
+        await WidenCsvAsync();
+        foreach (var route in HqOnlyRoutes)
+        {
+            var before = await _h.SendAsync(tokenA, route, withGuard: false);
+            Assert.True(before.Status == 200,
+                $"[G-2] {route} — 봉합 전 재현이 200 이 아니다(실측 {before.Status}). "
+              + $"재현을 못 하면 403 은 이 필터의 증거가 아니다. 본문: {Trim(before.Body)}");
+
+            var after = await _h.SendAsync(tokenA, route);
+            Assert.True(after.Status == 403,
+                $"[G-2] {route} — CSV 를 넓히자 통과했다(실측 {after.Status}). 본문: {Trim(after.Body)}");
+            Console.WriteLine($"[G-2] {route} — 봉합 전(CSV 넓힘) {before.Status} → 봉합 후 {after.Status}");
+        }
+
+        // 🔴 「200」이 아니라 「**전 고객사**가 나왔다」를 찍는다 — 유출 규모가 증거다.
+        var leak = await _h.SendAsync(tokenA, "/api/backoffice/tenants", withGuard: false);
+        Assert.Contains("고객사A", leak.Body);
+        Assert.Contains("고객사B", leak.Body);   // 남의 대리점 고객사까지 나온다
+        Console.WriteLine($"[G-2] 봉합 전 유출 규모 — 남의 대리점(B) 고객사까지 반환: {Trim(leak.Body)}");
     }
 
     [Fact(DisplayName = "G-2음 🔴 음성 대조군 — 본사 토큰은 같은 4라우트 200 · 대리점 A 는 자기 포털에서 자기 행만 200(B 행 0건)")]
@@ -157,9 +189,21 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
         }
 
         // 🔴 봉합 전 FAIL 재현 — ⓐ(비움)가 **전건**을 돌려주는 것을 찍는다. 이것이 설계가 지목한 위험 모양이다.
+        //    봉합 전의 유일한 장벽은 CSV 였으므로 재현에는 CSV 1회 추가가 들어간다(WidenCsvAsync 머리말).
+        await WidenCsvAsync();
         var before = await _h.SendAsync(tokenA, "/api/backoffice/reseller-settlements", withGuard: false);
         Console.WriteLine($"[G-3] 봉합 전 resellerId 비움 → {before.Status} 본문: {Trim(before.Body)}");
-        Assert.True(before.Status != 403, "[G-3] 봉합 전에도 403 — 전건 누출 모양을 재현하지 못했다.");
+        Assert.True(before.Status == 200,
+            $"[G-3] 봉합 전 재현이 200 이 아니다(실측 {before.Status}) — 전건 누출 모양을 재현하지 못했다.");
+        // 「비우면 WHERE 미부착 = 전건」 — A 것(200000)과 B 것(300000)이 **같이** 나온다.
+        Assert.Contains("200000", before.Body);
+        Assert.Contains("300000", before.Body);
+        Console.WriteLine("[G-3] 봉합 전 — resellerId 비움이 A·B 정산을 모두 반환(전건 확인)");
+
+        // 같은 요청을 봉합 후로 다시 — 403.
+        var afterSameReq = await _h.SendAsync(tokenA, "/api/backoffice/reseller-settlements");
+        Assert.True(afterSameReq.Status == 403, $"[G-3] 봉합 후 {afterSameReq.Status}: {Trim(afterSameReq.Body)}");
+        Console.WriteLine($"[G-3] 같은 요청 — 봉합 전 200(전건) → 봉합 후 {afterSameReq.Status}");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -173,13 +217,8 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
         var tokenA = await _h.LoginResellerAsync(_h.EmailA);
 
         // CSV 에 대리점 역할을 **직접 밀어 넣는다**(저장 API 를 우회 — 최악 상황을 만든다).
-        await using (var db = await _h.OpenAsync())
-        {
-            var n = await db.ExecuteAsync(
-                "UPDATE bo_permissions SET allowed_roles = CONCAT(allowed_roles, ',reseller_admin,reseller_user')");
-            Assert.True(n > 0, "[G-4] bo_permissions 행이 0 — 90_seed_permissions.sql 이 안 깔렸다(전제 붕괴).");
-            Console.WriteLine($"[G-4] allowed_roles 에 대리점 역할 강제 주입 {n}행");
-        }
+        await WidenCsvAsync();
+        Console.WriteLine("[G-4] allowed_roles 에 대리점 역할 강제 주입 완료");
 
         foreach (var route in HqOnlyRoutes)
         {
