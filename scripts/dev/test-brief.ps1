@@ -34,6 +34,7 @@ $failures = @($all | Where-Object { $_ -match '^\s*Failed\s+\S' -or $_ -match ':
 "TEST exit=$code project=$Project filter=$Filter"
 if (-not $env:HITPAN_REQUIRE_DB) { "note: HITPAN_REQUIRE_DB is not set - DB gate tests may be skipped (check Skipped)" }
 if (-not $env:HITPAN_GATE_SKIP_OK -and -not $env:HITPAN_BO_GATE_DB) { "note: neither HITPAN_BO_GATE_DB nor HITPAN_GATE_SKIP_OK is set - work10 backoffice gates will FAIL (by design). Give one of them." }
+if ($env:HITPAN_GATE_SKIP_OK) { "WARNING: HITPAN_GATE_SKIP_OK is set - work10 backoffice gates are being SKIPPED. This green is NOT evidence. (merge-gate M-2)" }
 $summary | Select-Object -Last 5
 $failures | Select-Object -First $MaxLines
 

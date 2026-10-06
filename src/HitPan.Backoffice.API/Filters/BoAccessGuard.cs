@@ -57,9 +57,14 @@ public sealed class BoAccessGuard : IAsyncAuthorizationFilter
         //    그래서 익명 라우트가 **대리점 토큰에만** 403 이 되는 비대칭이 있었다
         //    (실측: /api/payments/toss/config — 무토큰 200 · 본사 200 · 대리점 403 · G-9 가 그 FAIL 을 재현한다).
         //    로그아웃 방문자는 되는데 로그인한 대리점은 안 되는 입구는 보호가 아니다.
-        // 🔴 「이 라우트가 익명이어도 되는가」의 판정은 이 가드 소관이 아니다 —
-        //    작11 게이트(BackofficeAnonymousAdminApiGate)가 그 축을 문다. 토큰 없는 요청은 어차피
+        // 🔴 「이 라우트가 익명이어도 되는가」의 판정은 이 가드 소관이 아니다. 토큰 없는 요청은 어차피
         //    여기를 통과하므로, 가드가 그 일을 대신하면 **막는 척**이 된다.
+        // 🔴 **보증인을 정확히 적는다**(머지 전 교정 M-1 · [5] CTO 쟁점 1):
+        //    · 이 면제가 범위를 넓히지 못하게 막는 자물쇠 = **작10 G-1**.
+        //      `[AllowAnonymous]` 와 `[ResellerScoped]` 를 **같이 달면 리플렉션 전수로 FAIL** 한다
+        //      (BackofficeRoleScopeGateTests.cs:75-84 · 「버킷 2개」). ⇒ G-1 을 지우면 그 순간 #2 구멍이 열린다.
+        //    · 작11 게이트(BackofficeAnonymousAdminApiGate)는 **관리 표면만** 본다
+        //      (라우트 접두어 규약 의존 — 그 파일 :339 자백). 익명 버킷 **전수**의 보증인이 아니다.
         if (context.ActionDescriptor.EndpointMetadata.OfType<IAllowAnonymous>().Any()) return;
 
         var user = context.HttpContext.User;
