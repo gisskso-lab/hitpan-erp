@@ -361,7 +361,18 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
 
         // ⓔ 🔴 음성 대조군 — 종전 경로(SkipOrFail)는 **여전히 조용히 true** 를 준다.
         //    호출 101곳을 이번에 안 바꿨다는 사실을 게이트가 들고 있어야 다음 사람이 범위를 오해하지 않는다(2차수 과녁).
-        Assert.True(DbGateEnvironment.SkipOrFail("G-10 음성대조군(종전 경로 · 일부러 조용하다)"));
+        //    🔴 단 **환경에 따라 다르게** 군다 — CI(db-gate)에서는 **던지는 것이 설계**다(작14 W1 봉합).
+        //    이 줄이 처음엔 로컬만 보고 `Assert.True` 하나였고, 그래서 **CI db-gate 에서 FAIL** 했다.
+        //    「로컬 초록은 CI 의 증거가 아니다」를 이 게이트가 자기 몸으로 겪었다 ⇒ 두 갈래를 다 단언한다.
+        if (DbGateEnvironment.IsCi)
+        {
+            Assert.Throws<Xunit.Sdk.XunitException>(
+                () => DbGateEnvironment.SkipOrFail("G-10 음성대조군(CI 갈래 — 던져야 한다)"));
+        }
+        else
+        {
+            Assert.True(DbGateEnvironment.SkipOrFail("G-10 음성대조군(로컬 갈래 — 일부러 조용하다)"));
+        }
 
         Console.WriteLine("[G-10] 선언없음=실패 · 선언=건너뛰기 · CI=실패 · 종전경로=조용한 true(대조군) 확인");
     }
