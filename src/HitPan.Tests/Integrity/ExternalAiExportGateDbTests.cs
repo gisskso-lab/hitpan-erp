@@ -334,5 +334,193 @@ public sealed class ExternalAiExportGateDbTests
         Assert.True(wire.Count == 0,
             $"동의 기록 0건인데 외부 호출 {wire.Count}건이 떠났다 → {wire.Hosts}");
         Assert.Contains("도움말", answer.Answer); // KB-only 폴백 본문
+        // 안내 한 줄 (§4-4 초안 — 확정 시 여기 글자도 함께 교체).
+        Assert.Contains("외부 도우미 연결은 이용 안내 동의 절차가 마련된 뒤 열립니다", answer.Answer);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-3 — 동의 0건 → ② 경로: 문②(엔진 진입 0) · 문③(CompleteWithToolsAsync 미도달) 각각 측정
+    // ─────────────────────────────────────────────────────────────
+    [Fact]
+    public async Task G3a_동의0건이면_문2_엔진진입_0()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-3a 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+        SeedValidKey(db, tid);
+
+        var (svc, wire, agentSpy) = BuildChatbot(db);
+
+        await svc.AskAsync(Ask(KbMissQuestion), tid, "user-1");
+
+        Assert.Equal(0, agentSpy.Entered);   // 문②: 키 valid 여도 엔진(RunAsync)에 못 들어간다
+        Assert.Equal(0, wire.Count);
+    }
+
+    [Fact]
+    public async Task G3b_동의0건이면_문3_CompleteWithToolsAsync_미도달()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-3b 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+
+        // 문③ 직접 측정 — 문②를 우회하는 새 호출자를 흉내 내 AiAgentService.RunAsync 를 바로 부른다.
+        var wire = new RecordingHandler();
+        var claude = new AnthropicChatProvider(new FakeHttpFactory(wire), NullLogger<AnthropicChatProvider>.Instance);
+        var agent = new AiAgentService(claude, new EmptyToolRegistry(), new EmptyAgentPrompt(),
+            RealGate(db), NullLogger<AiAgentService>.Instance);
+
+        var result = await agent.RunAsync("sk-gate-test-decrypted", KbMissQuestion,
+            Array.Empty<ChatHistoryTurn>(),
+            new ToolContext { TenantId = tid, UserId = "user-1" });
+
+        Assert.False(result.Handled);        // 미처리 반환(호출부 폴백)
+        Assert.Equal(0, wire.Count);         // 외부 왕복(CompleteWithToolsAsync) 미도달
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-4 — X-2 실측: 매출 수치 든 history + 공급자 openai/gemini + ① 질문 → 외부 호출 0
+    // ─────────────────────────────────────────────────────────────
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("google")]
+    public async Task G4_X2_매출수치_history가_타사로도_안_나간다(string provider)
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-4 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+        SeedValidKey(db, tid, provider);
+
+        var (svc, wire, _) = BuildChatbot(db);
+
+        // X-2 재료: ②가 만든 답(매출·이익 수치)이 history 에 실린 상태.
+        var answer = await svc.AskAsync(
+            Ask(KbMissQuestion,
+                ("user", "이번 달 수익 분석해줘"),
+                ("assistant", "10월 매출 83,450,000원 · 이익 12,300,000원 · 이익률 14.7% (상위: 가나상사 23,000,000원)")),
+            tid, "user-1");
+
+        Assert.True(wire.Count == 0,
+            $"X-2: 매출 수치 history 가 {provider} 로 {wire.Count}건 떠났다 → {wire.Hosts}");
+        Assert.NotEqual("", answer.Answer);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-5 — 대조군(재개 경로 생존): 동의 기록 1건 INSERT → ①·② 호출이 가짜 핸들러에 도달
+    //  (죽은 문이 아님을 증명 — 이 게이트가 글자 검사가 아니라 동작임의 음성 대조군이기도 하다)
+    // ─────────────────────────────────────────────────────────────
+    private static void InsertConsent(IDbConnection db, string tenantId)
+        => db.Execute("""
+            INSERT INTO ai_export_consents (tenant_id, terms_version, agreed_by, agreed_ip)
+            VALUES (@T, 'gate-test-v0', 'gate-test-user', '127.0.0.1')
+            """, new { T = tenantId });
+
+    [Fact]
+    public async Task G5a_동의1건이면_문12가_다시_열린다()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-5a 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+        SeedValidKey(db, tid);
+        InsertConsent(db, tid);   // TEMPORARY 표 — 연결이 닫히면 함께 사라진다(공용 DB 무접촉)
+
+        var (svc, wire, agentSpy) = BuildChatbot(db);
+
+        var answer = await svc.AskAsync(Ask(KbMissQuestion), tid, "user-1");
+
+        Assert.Equal(1, agentSpy.Entered);   // 문② 재개 — 엔진 진입
+        Assert.True(wire.Count >= 1,         // 문① 재개 — 외부 호출이 (가짜 핸들러에) 도달
+            "동의 기록이 있는데도 외부 호출 0건 — 게이트가 죽은 문이다(재개 경로 사망)");
+        Assert.Contains("게이트 시험 응답", answer.Answer);
+    }
+
+    [Fact]
+    public async Task G5b_동의1건이면_문3도_외부왕복에_도달한다()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-5b 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+        InsertConsent(db, tid);
+
+        var wire = new RecordingHandler();
+        var claude = new AnthropicChatProvider(new FakeHttpFactory(wire), NullLogger<AnthropicChatProvider>.Instance);
+        var agent = new AiAgentService(claude, new EmptyToolRegistry(), new EmptyAgentPrompt(),
+            RealGate(db), NullLogger<AiAgentService>.Instance);
+
+        var result = await agent.RunAsync("sk-gate-test-decrypted", "시험 명령",
+            Array.Empty<ChatHistoryTurn>(),
+            new ToolContext { TenantId = tid, UserId = "user-1" });
+
+        Assert.True(result.Handled);
+        Assert.True(wire.Count >= 1, "동의 기록이 있는데 CompleteWithToolsAsync 가 외부 왕복에 못 닿았다");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-6 — fail-closed: 동의 표 조회 실패(표 부재 DB) → 닫힘 · 던지지 않고 경고 로그
+    // ─────────────────────────────────────────────────────────────
+    private sealed class WarnCountLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public int Warnings;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning) Warnings++;
+        }
+    }
+
+    [Fact]
+    public async Task G6_표가_없는_DB면_닫힘이고_던지지_않는다()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-6 외부반출게이트")); return; }
+        // information_schema 에는 ai_export_consents 가 없다(어느 환경이든 확정) — 표 부재 조회 실패 경로.
+        using var db = new MySqlConnection(ConnString("information_schema"));
+        db.Open();
+        var log = new WarnCountLogger<ExternalAiGate>();
+        var gate = new ExternalAiGate(db, log);
+
+        var open = await gate.IsOpenAsync(Guid.NewGuid().ToString());
+
+        Assert.False(open);              // fail-closed — 조회 실패는 닫힘이다
+        Assert.Equal(1, log.Warnings);   // 조용히 닫히지 않는다(#15 — 경고 한 줄)
+    }
+
+    [Fact]
+    public async Task G6b_테넌트_식별이_비면_닫힘()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-6b 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var gate = RealGate(db);
+
+        Assert.False(await gate.IsOpenAsync(""));
+        Assert.False(await gate.IsOpenAsync("   "));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-7 — 장부: G-5 상태에서 외부 호출 1건 → ai_usage_logs.charge_mode='byok'
+    // ─────────────────────────────────────────────────────────────
+    [Fact]
+    public async Task G7_외부호출_1건의_장부는_byok_로_적힌다()
+    {
+        if (!ServerAvailable()) { Assert.True(Skip("G-7 외부반출게이트")); return; }
+        using var db = ShadowedDb();
+        var tid = Guid.NewGuid().ToString();
+        SeedValidKey(db, tid);
+        InsertConsent(db, tid);
+
+        var (svc, wire, _) = BuildChatbot(db);
+
+        await svc.AskAsync(Ask(KbMissQuestion), tid, "user-1");
+
+        Assert.True(wire.Count >= 1, "전제 불성립 — 외부 호출이 떠나지 않았다(G-5 참조)");
+        var row = db.QuerySingle<(string ChargeMode, string Provider)>("""
+            SELECT charge_mode AS ChargeMode, ai_provider AS Provider
+            FROM ai_usage_logs WHERE tenant_id = @T ORDER BY usage_id DESC LIMIT 1
+            """, new { T = tid });
+        // 종전엔 'hitpan_pool' 하드코딩 — 고객 자기 키 호출이 본사 과금으로 적혔다([1-V] §3).
+        Assert.Equal("byok", row.ChargeMode);
+        Assert.Equal("anthropic", row.Provider);
     }
 }

@@ -458,6 +458,13 @@ jobs:
           # 🔴 20261005작5 사원↔계정 연결 G-E1~E14 (EmployeeAccountLinkGateTests · …DbTests · …DbTests.Pipeline). 작5 전용 한 줄.
           #    갈래1·2·3 합류 전에는 FAIL 이 정상(「갈래N 합류 전」 문구) · 대조군·연결 목록: docs/개발/erp/20261005작5_사원계정연결_개발명세서_게이트.md
           GATES="$GATES|EmployeeAccountLinkGate"
+          # 🔴 20261006작9 외부 AI 반출 봉합 — ExternalAiExportGateDbTests(G-2~G-7 · 실물 ChatbotService/
+          #    AiAgentService/ExternalAiGate · TEMPORARY 표로 공용 DB 무접촉 · 가짜 HTTP 핸들러 — 외부 실호출 0)
+          #    + ExternalAiExportGateTests(G-8 문구·#36 동시반영·Tool 등록부 무접촉 — DB 불필요).
+          #    등록 근거는 초록불이 아니라 **봉합 전 FAIL 실측**(#32): 동의 0건·키 valid 에서 외부 호출
+          #    1건이 api.anthropic.com 으로 떠남 → 봉합 후 0건. 봉합 빼고 FAIL 재확인 포함 —
+          #    표 전문: docs/개발/erp/20261006작9_외부AI반출봉합_개발명세서.md §4
+          GATES="$GATES|ExternalAiExportGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
