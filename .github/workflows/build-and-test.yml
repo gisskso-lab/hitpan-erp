@@ -517,6 +517,13 @@ jobs:
           #      · 봉합 후([Authorize(Policy="PlatformAdmin")])     → 17/17 PASS
           #          실물 실측: 토큰없음 401 · 대리점 토큰 403 · platform_admin/platform_owner 200
           #    음성 대조군(G_W11_6~9)은 되돌림 여부와 무관하게 PASS — 로그인·랜딩가입·설치 부트스트랩·/healthz 는 계속 익명.
+          #    🔴 2026-10-07 [3-V] 머지 전 교정 — 클래스 필터라 신설 3건도 자동으로 물린다(20건):
+          #      · M-1 G_W11_10 — 이 게이트는 실제 호스트를 띄우므로 WebhookDispatcher 도 깨어나고 첫 틱을
+          #        지연 없이 돈다. 연결문자열을 안 덮으면 시험이 pending 행을 읽어 **외부 웹훅을 실제 발송**할 수
+          #        있었다(작9 「외부 실호출 0」 위반). 없는 DB·Port=1 로 덮었고 G_W11_10 이 그 덮개를 검산한다.
+          #      · M-2 G_W11_5 확장 — 판정식을 리플렉션 전수로(감시 10 → 21개) · [Authorize] 단독은 불합격.
+          #        G_W11_11(전수 분류 미분류 0건) · G_W11_12(예외표 썩음 방지) 신설.
+          #        FAIL 확인: 예외표 OwnerMfaController 한 줄을 어긋나게 하면 G_W11_5·G_W11_12 2건 FAIL.
           GATES="$GATES|BackofficeAnonymousAdminApiGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
