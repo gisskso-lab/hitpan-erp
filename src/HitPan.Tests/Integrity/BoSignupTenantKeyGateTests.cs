@@ -4,6 +4,7 @@ using HitPan.Backoffice.API.Controllers;
 using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;   // [4] 교정 2026-10-07 — G-1f 가 응답 상태코드를 직접 센다
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using MySqlConnector;
@@ -367,6 +368,56 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
         OkValue(await admin.Approve(sId, CancellationToken.None));
         Assert.Equal("33333333-cccc-4ccc-8ccc-333333333333", await db.QueryFirstAsync<string>(
             "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
+    }
+
+    /// <summary>
+    /// 🔴 G-1f ([3-V] I-1 · [4] 발견② 교정 2026-10-07) — <b>키가 있으면 폴백 금지(fail-closed)</b>.
+    /// <para>사고 경로: 가입서에 tenant_id 키가 <b>있는데</b> 그 tenant 가 pending 이 아니면(재승인·이미 활성)
+    /// 종전 코드는 키 유무를 보지 않고 회사명 글자 폴백으로 내려갔다 ⇒ 동명의 <b>다른</b> 고객사(T2)를
+    /// 승인하고, 가입서의 기존 키(T1)를 T2 로 <b>덮어썼다</b>.</para>
+    /// <para>이 시험은 그 길을 실물 컨트롤러로 태운다. 가드가 없으면 Approve 가 200 을 내며
+    /// 남의 tenant 를 활성화하므로 아래 단언이 <b>전부 깨진다</b>(봉합 전 FAIL 재현 — 2026-10-07 실측).</para>
+    /// <para>대조군은 G-1e — 키가 <b>없는</b> 옛 행은 글자 폴백으로 계속 승인돼야 한다(#20 · 폴백 자체는 살린다).</para>
+    /// </summary>
+    [Fact]
+    public async Task G1f_키가있고_그tenant가_pending아니면_글자폴백으로_남의tenant를_승인하지_않는다()
+    {
+        if (!TrySetUpDb(nameof(G1f_키가있고_그tenant가_pending아니면_글자폴백으로_남의tenant를_승인하지_않는다))) return;
+        await RunRealMigratorAsync();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        // 동명 2개사 — T1 = 이 가입서의 자기 tenant(이미 active · pending 아님) · T2 = 동명 타사(pending)
+        var at = new DateTime(2026, 10, 7, 9, 0, 0, DateTimeKind.Utc);
+        await db.ExecuteAsync(@"
+            INSERT INTO tenants (tenant_id, tenant_code, company_name, tel, status, db_host, db_name,
+                                 license_key_hash, reseller_tier, created_at, updated_at)
+            VALUES (@T1, 'T-921', @C, '010-0000-0021', 'active',  '', '', 'hash-t1', 0, @At, @At),
+                   (@T2, 'T-922', @C, '010-0000-0022', 'pending', '', '', '',        0, @At, @At);
+            INSERT INTO landing_signups (signup_token, biz_no_hash, company_name, email, phone, plan_type,
+                                         agree_terms, agree_privacy, status, submitted_at, tenant_id)
+            VALUES ('sgn-g1f', 'bizhash-f', @C, 'f@gate.test', '010-0000-0021', 'basic', 1, 1,
+                    'submitted', @At, @T1);",
+            new { C = Company, T1, T2, At = at });
+        var sId = await db.QueryFirstAsync<long>(
+            "SELECT signup_id FROM landing_signups WHERE signup_token = 'sgn-g1f'");
+
+        // 키가 있는데 그 tenant 가 조건에 안 맞는다 ⇒ 글자 폴백 금지 · 명확한 실패로 끝낸다
+        var result = await NewSignupsAdmin().Approve(sId, CancellationToken.None);
+        var code = Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode;
+        Assert.InRange(code ?? 0, 400, 499);                 // 4xx — 성공(200)으로 끝나면 남의 tenant 가 승인됐다
+
+        // ① 가입서의 기존 키가 덮이지 않았다 (T2 로 바뀌면 오귀속)
+        Assert.Equal(T1, await db.QueryFirstAsync<string>(
+            "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
+        // ② 가입서 상태도 그대로 — 승인 처리되지 않았다
+        Assert.Equal("submitted", await db.QueryFirstAsync<string>(
+            "SELECT status FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
+        // ③ 동명 타사(T2) 무접촉 — 활성화도, 시리얼 발급도 없었다
+        var t2 = await db.QueryFirstAsync<(string Status, string Hash)>(
+            "SELECT status, license_key_hash FROM tenants WHERE tenant_id = @T", new { T = T2 });
+        Assert.Equal("pending", t2.Status);
+        Assert.Equal("", t2.Hash);
     }
 
     // ══════════════════════════════════════════════════════════════
