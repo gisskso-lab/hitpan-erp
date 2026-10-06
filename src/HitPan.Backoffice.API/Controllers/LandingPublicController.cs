@@ -190,11 +190,15 @@ public class LandingPublicController : ControllerBase
             }
 
             // 사업자번호 해시 매칭 (landing_signups에 저장된 해시와 비교)
-            // 같은 회사명이 여러 가입에 저장될 수 있어 tenant.CompanyName과 함께 좁힘
+            // Z2 (20261006작8 갈래 가): tenant_id 키로 좁힌다 — 동명 타사의 가입서 해시로
+            //   남의 라이선스가 통과하던 글자 매칭 구멍 봉합(C-1). 키가 없는 옛 행(NULL)만
+            //   기존 회사명 글자 매칭으로 읽기 폴백(#20).
             var bizMatch = await db.QueryFirstOrDefaultAsync<int>(@"
                 SELECT COUNT(*) FROM landing_signups
-                WHERE biz_no_hash = @BizHash AND company_name = @CompanyName",
-                new { BizHash = bizHash, tenant.CompanyName });
+                WHERE biz_no_hash = @BizHash
+                  AND (tenant_id = @TenantId
+                       OR (tenant_id IS NULL AND company_name = @CompanyName))",
+                new { BizHash = bizHash, tenant.TenantId, tenant.CompanyName });
 
             if (bizMatch == 0)
             {

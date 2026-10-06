@@ -23,6 +23,10 @@
          전부 통과하고도 살아남았다. 소스 글자를 읽는 시험으로는 절대 못 잡는다.
          ⇒ 시험이 CompanyBootstrapProvisioner 를 직접 불러 **표에 행이 생기는지 눈으로 본다.** -->
     <ProjectReference Include="..\HitPan.API\HitPan.API.csproj" />
+    <!-- 🔴 20261006작8 갈래 가 (Z2) — BoSignupTenantKeyGate 가 백오피스 실물
+         (SchemaMigrator·SignupsAdminController·InstallerBootstrapController)을 직접 불러
+         동명 회사 격리·backfill 검산을 동작으로 잰다. SQL 복사본 판정 금지(작14 F-2 재발 방지). -->
+    <ProjectReference Include="..\HitPan.Backoffice.API\HitPan.Backoffice.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>
