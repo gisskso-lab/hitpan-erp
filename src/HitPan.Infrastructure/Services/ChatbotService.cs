@@ -68,6 +68,15 @@ public sealed class ChatbotService : IChatbotService
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 키 출처 판정 — ai_usage_logs.charge_mode 의 **한 곳** (2026-10-06, 20261006작9 §4-5)
+    //   종전: 적재 3곳(chat·agent·analysis)이 전부 'hitpan_pool' 하드코딩 — 고객 자기 키(BYOK)로
+    //   나간 호출이 "본사 pool 과금"으로 적혔다(장부 거짓 · [1-V] §3). pool 키 경로는 미구현이 사실.
+    //   현 구조는 BYOK 단일이므로 'byok'. 향후 pool 실구현 시 **이 자리만** 바뀐다(상수 재하드코딩 금지).
+    //   기존 적재 행은 불변 — 봉합 배포 이전 행의 'hitpan_pool' 은 전부 BYOK 였음(경계는 작업지시서 §4-5 기록).
+    // ─────────────────────────────────────────────────────────────
+    private static string ResolveChargeMode() => "byok";
+
+    // ─────────────────────────────────────────────────────────────
     // 질의 → 답변
     // ─────────────────────────────────────────────────────────────
     public async Task<ChatAnswerDto> AskAsync(
@@ -254,7 +263,7 @@ public sealed class ChatbotService : IChatbotService
               tenant_id, conv_id, ai_provider, input_tokens, output_tokens,
               total_tokens, charge_mode, usage_type, ym)
             VALUES (
-              @TenantId, @ConvId, @Provider, @In, @Out, @Total, 'hitpan_pool', 'chat', @Ym)
+              @TenantId, @ConvId, @Provider, @In, @Out, @Total, @ChargeMode, 'chat', @Ym)
             """,
             new
             {
@@ -264,6 +273,8 @@ public sealed class ChatbotService : IChatbotService
                 In = inTokens,
                 Out = outTokens,
                 Total = tokensUsed,
+                // 키 출처 판정 한 곳 경유 (20261006작9 §4-5) — 종전 'hitpan_pool' 하드코딩.
+                ChargeMode = ResolveChargeMode(),
                 Ym = ym
             },
             cancellationToken: ct)).ConfigureAwait(false);
@@ -511,9 +522,10 @@ public sealed class ChatbotService : IChatbotService
               tenant_id, conv_id, ai_provider, input_tokens, output_tokens,
               total_tokens, charge_mode, usage_type, ym)
             VALUES (
-              @TenantId, @ConvId, 'anthropic', @In, @Out, @Total, 'hitpan_pool', 'agent', @Ym)
+              @TenantId, @ConvId, 'anthropic', @In, @Out, @Total, @ChargeMode, 'agent', @Ym)
             """,
-            new { TenantId = tenantId, ConvId = convId, In = agent.InputTokens, Out = agent.OutputTokens, Total = tokensUsed, Ym = ym },
+            // 키 출처 판정 한 곳 경유 (20261006작9 §4-5) — 종전 'hitpan_pool' 하드코딩.
+            new { TenantId = tenantId, ConvId = convId, In = agent.InputTokens, Out = agent.OutputTokens, Total = tokensUsed, ChargeMode = ResolveChargeMode(), Ym = ym },
             cancellationToken: ct)).ConfigureAwait(false);
 
         await _audit.LogAsync(
@@ -593,9 +605,10 @@ public sealed class ChatbotService : IChatbotService
               tenant_id, conv_id, ai_provider, input_tokens, output_tokens,
               total_tokens, charge_mode, usage_type, ym)
             VALUES (
-              @TenantId, @ConvId, 'local', 0, 0, 0, 'hitpan_pool', 'analysis', @Ym)
+              @TenantId, @ConvId, 'local', 0, 0, 0, @ChargeMode, 'analysis', @Ym)
             """,
-            new { TenantId = tenantId, ConvId = convId, Ym = ym },
+            // 키 출처 판정 한 곳 경유 (20261006작9 §4-5) — 로컬 분석(토큰 0)도 같은 판정을 지난다.
+            new { TenantId = tenantId, ConvId = convId, ChargeMode = ResolveChargeMode(), Ym = ym },
             cancellationToken: ct)).ConfigureAwait(false);
 
         await _audit.LogAsync(
