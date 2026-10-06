@@ -43,6 +43,20 @@ internal sealed class BackofficeRoleGateHarness : IDisposable
 {
     // 시험용 JWT 시크릿 — "DEV-" 로 시작하면 실물 코드가 기동을 거부한다(Program.cs:54). 그 규칙을 지킨 값.
     private const string JwtSecret = "work10-gate-bo-jwt-secret-0123456789abcdef";
+
+    /// <summary>
+    /// 🔴 실물 <c>IssueTokens</c> 와 <b>같은 우선순위</b>로 시크릿을 고른다
+    /// (<c>BackofficeAuthController.cs:162</c> — 환경변수 <c>HITPAN_BO_JWT_SECRET</c> 가 <c>Jwt:Secret</c> 를 <b>이긴다</b>).
+    /// <para>⚠️ 이 줄이 없으면 발급과 검증이 서로 다른 열쇠를 써서 모든 요청이
+    /// <c>401 invalid_token "The signature key was not found"</c> 이 된다 — 실제로 그렇게 한 번 틀렸다.
+    /// 이 PC 에는 그 환경변수가 실제로 들어 있고(정식설치 실물), CI 에는 없어 설정값으로 떨어진다.
+    /// 값은 어디에도 찍지 않는다(자격증명 문서화 금지).</para>
+    /// </summary>
+    private static string EffectiveSecret()
+    {
+        var env = Environment.GetEnvironmentVariable("HITPAN_BO_JWT_SECRET");
+        return string.IsNullOrWhiteSpace(env) ? JwtSecret : env;
+    }
     private const string Issuer = "hitpan-backoffice";
     private const string Audience = "backoffice";
     public const string Password = "GatePass1234!";
@@ -323,7 +337,7 @@ internal sealed class BackofficeRoleGateHarness : IDisposable
                     ValidateIssuer = true, ValidateAudience = true,
                     ValidateLifetime = true, ValidateIssuerSigningKey = true,
                     ValidIssuer = Issuer, ValidAudience = Audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtSecret)),
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(EffectiveSecret())),
                 };
             });
         services.AddAuthorization(o =>
@@ -377,7 +391,19 @@ internal sealed class BackofficeRoleGateHarness : IDisposable
         var body = new MemoryStream();
         ctx.Response.Body = body;
 
+        // 🔴 호스팅 계층 대역 — 실제 운영에서는 HostingApplication.CreateContext 가 이 한 줄을 해 준다
+        //    (IHttpContextAccessor 가 등록돼 있으면). 맨손 ApplicationBuilder 파이프라인에는 그 계층이 없어
+        //    IResellerScope 가 null 을 보고 컨트롤러가 Forbid() 를 냈다 — 실제로 그렇게 한 번 틀렸다.
+        //    ⚠️ 이것은 판정을 대역하는 것이 아니다(가드·범위서비스·컨트롤러는 전부 실물).
+        sp.GetRequiredService<IHttpContextAccessor>().HttpContext = ctx;
+
         await pipeline(ctx);
+        var wwwAuth = ctx.Response.Headers.WWWAuthenticate.ToString();
+        if (ctx.Response.StatusCode == 401 && bearer is not null)
+        {
+            // 401 은 이 게이트가 재려는 것이 아니다(403 을 재려는 것이다) — 왜 인증이 안 됐는지 바로 보여 준다.
+            Console.WriteLine($"[harness] 401 {pathAndQuery} WWW-Authenticate: {wwwAuth}");
+        }
         return new Outcome(ctx.Response.StatusCode, Encoding.UTF8.GetString(body.ToArray()));
     }
 
