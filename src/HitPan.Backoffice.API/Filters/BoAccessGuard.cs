@@ -1,4 +1,5 @@
 using HitPan.Backoffice.API.Attributes;
+using Microsoft.AspNetCore.Authorization;
 using HitPan.Backoffice.API.Security;
 using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +18,7 @@ namespace HitPan.Backoffice.API.Filters;
 ///
 /// <para><b>순서</b>(이 필터 안에서 차례로):
 /// <list type="number">
-/// <item>인증 안 된 요청 → <b>통과</b>. 익명 입구는 이 필터 소관이 아니다(설계 §1-2).
+/// <item><c>[AllowAnonymous]</c> 라우트 → <b>통과</b>(토큰이 실려 와도 · 20261007작10 §2-7 교정②). 이어서 인증 안 된 요청 → <b>통과</b>. 익명 입구는 이 필터 소관이 아니다(설계 §1-2).
 ///       <c>[Authorize]</c> 는 이 필터보다 앞인 <c>UseAuthorization()</c> 미들웨어가 이미 판정했다.</item>
 /// <item>ⓞ <b>라이브 계정 판독</b>(캐시 없음) — 없음·비활성·소속변경 ⇒ <b>즉시 403</b>.
 ///       토큰 수명(8시간) 안에 권한을 낮추거나 계정을 꺼도 <b>다음 요청부터</b> 끊긴다.</item>
@@ -25,7 +26,7 @@ namespace HitPan.Backoffice.API.Filters;
 ///       본사 갈래는 이 단계를 지나간다(전건 조회가 정당하다).</item>
 /// </list></para>
 ///
-/// <para>🔴 <b>유효역할 = 좁은 쪽</b>(토큰 역할, DB 역할 중 낮은 등급). 올리는 쪽은 토큰이 좁으므로
+/// <para>🔴 <b>유효역할 = 좁은 쪽</b>(토큰 역할, DB 역할 중 낮은 등급) — ⚠️ <b>이 값을 실제 권한 판정에 쓰는 갈래는 대리점 사다리뿐이다</b>(아래 본문 주석 · 20261007작10 §2-7 교정①). 올리는 쪽은 토큰이 좁으므로
 /// 재로그인까지 안 바뀐다 — 이 <b>비대칭은 의도</b>다(메뉴는 토큰 클레임에서 그려지므로 상향을 즉시 먹이면
 /// 「API 는 되는데 메뉴에 없다」가 된다 · 설계 §3-3 표 · 게이트 G-8음 이 이 비대칭을 지킨다).</para>
 ///
@@ -51,6 +52,16 @@ public sealed class BoAccessGuard : IAsyncAuthorizationFilter
 
     public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
+        // ── [AllowAnonymous] 면제 (20261007작10 §2-7 교정② · [4] 리뷰서 §3-②) ────────
+        // 🔴 토큰이 실려 오면 인증은 **성공**하므로 아래 「미인증 면제」에 걸리지 않는다.
+        //    그래서 익명 라우트가 **대리점 토큰에만** 403 이 되는 비대칭이 있었다
+        //    (실측: /api/payments/toss/config — 무토큰 200 · 본사 200 · 대리점 403 · G-9 가 그 FAIL 을 재현한다).
+        //    로그아웃 방문자는 되는데 로그인한 대리점은 안 되는 입구는 보호가 아니다.
+        // 🔴 「이 라우트가 익명이어도 되는가」의 판정은 이 가드 소관이 아니다 —
+        //    작11 게이트(BackofficeAnonymousAdminApiGate)가 그 축을 문다. 토큰 없는 요청은 어차피
+        //    여기를 통과하므로, 가드가 그 일을 대신하면 **막는 척**이 된다.
+        if (context.ActionDescriptor.EndpointMetadata.OfType<IAllowAnonymous>().Any()) return;
+
         var user = context.HttpContext.User;
 
         // ── 익명은 이 필터 소관이 아니다(설계 §1-2) ─────────────────────
@@ -129,6 +140,13 @@ public sealed class BoAccessGuard : IAsyncAuthorizationFilter
         if (!BoRoles.IsReseller(effective))
         {
             // 본사 갈래 — 이 필터 소관 아님(행 범위 제한이 없는 것이 정당). [BoPermission]·Policy 가 뒤에서 판정한다.
+            // 🔴 정정(20261007작10 §2-7 교정① · [4] 리뷰서 §3-①) — **본사 갈래는 역할 하향이 강제되지 않는다.**
+            //    위에서 접은 유효역할(EffectiveRoleItemKey)을 **읽는 곳이 레포 전체에 0곳**이고,
+            //    실제 판정자 BoPermissionAttribute.cs:37 은 **토큰의 raw role 클레임**을 읽는다.
+            //    실측: super_admin → readonly 로 낮춰도 tenants·owner/bo-users·resellers 전부 200
+            //         (비활성·소속변경·삭제는 본사에도 즉시 403 — 그쪽은 사실이다).
+            //    ⇒ 「하향 즉시」가 실제로 끊는 것은 **대리점 사다리**뿐이다. 본사 갈래 강제는 **2차수 과녁 F-5**
+            //      (조건부 교정 ⑦ IsAllowedAsync 의 CSV 어휘 전환과 한 몸 — 한쪽만 고치면 권한 화면이 잠긴다).
             return;
         }
 
