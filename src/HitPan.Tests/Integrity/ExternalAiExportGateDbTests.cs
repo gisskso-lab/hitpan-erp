@@ -145,6 +145,19 @@ public sealed class ExternalAiExportGateDbTests
               created_at datetime(6) NOT NULL DEFAULT current_timestamp(6)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """);
+        // 동의 표 — DB-138 과 같은 모양(TEMPORARY 로 가려 공용 DB 실표 무접촉 · 시드 0건 그대로).
+        db.Execute("""
+            CREATE TEMPORARY TABLE ai_export_consents (
+              id bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
+              tenant_id varchar(36) NOT NULL,
+              terms_version varchar(50) NOT NULL,
+              agreed_by varchar(64) NOT NULL,
+              agreed_at datetime(6) NOT NULL DEFAULT current_timestamp(6),
+              agreed_ip varchar(45) NOT NULL DEFAULT '',
+              created_at datetime(6) NOT NULL DEFAULT current_timestamp(6),
+              KEY idx_ai_export_consents_tenant (tenant_id, agreed_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """);
         return db;
     }
 
@@ -253,6 +266,10 @@ public sealed class ExternalAiExportGateDbTests
     // ══ 조립 ══
     //   ISalesService 는 Moq — 이 시험의 경로(질문→답변)는 부르지 않는다(부르면 Mock 이 기본값 반환).
 
+    /// <summary>실물 게이트 — 같은 연결(TEMPORARY 표가 보이는)을 쓴다. 운영 DI 도 Scoped 한 연결이다.</summary>
+    private static ExternalAiGate RealGate(MySqlConnection db)
+        => new(db, NullLogger<ExternalAiGate>.Instance);
+
     private static (ChatbotService svc, RecordingHandler wire, SpyAgent agentSpy) BuildChatbot(
         MySqlConnection db, bool realAgent = false)
     {
@@ -264,10 +281,11 @@ public sealed class ExternalAiExportGateDbTests
         var gemini = new GeminiChatProvider(httpFactory, NullLogger<GeminiChatProvider>.Instance);
         var factory = new AiProviderFactory(claude, gpt, gemini, NullLogger<AiProviderFactory>.Instance);
 
+        var gate = RealGate(db);
         var agentSpy = new SpyAgent();
         IAiAgentService agent = realAgent
             ? new AiAgentService(claude, new EmptyToolRegistry(), new EmptyAgentPrompt(),
-                NullLogger<AiAgentService>.Instance)
+                gate, NullLogger<AiAgentService>.Instance)
             : agentSpy;
 
         var svc = new ChatbotService(
@@ -280,6 +298,7 @@ public sealed class ExternalAiExportGateDbTests
             agent,
             new Moq.Mock<HitPan.Application.Interfaces.ISalesService>().Object,
             factory,
+            gate,
             NullLogger<ChatbotService>.Instance);
 
         return (svc, wire, agentSpy);

@@ -304,6 +304,10 @@ builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanTool,
 builder.Services.AddScoped<HitPan.Application.Services.Ai.IHitpanTool,
     HitPan.Application.Services.Ai.Tools.CreateDeliveryDraftTool>();
 
+// 🔴 외부 AI 반출 게이트 (2026-10-06, 20261006작9 §4-2 · PM 결재 §8-1) — 서버 단일 판정(fail-closed).
+//   동의 기록(ai_export_consents · DB-138) 존재 시에만 열림. 문①②(ChatbotService)·문③(AiAgentService)이 본다.
+//   ⚠️ 위 Tool 등록부 3줄은 무접촉 — 정적 제거 대신 런타임 문③(작지 §4-2 · 재개 경로 G-5 대조군 생존).
+builder.Services.AddScoped<IExternalAiGate, HitPan.Application.Services.Ai.ExternalAiGate>();
 builder.Services.AddScoped<IChatbotService, ChatbotService>();
 builder.Services.AddScoped<ExcelExportService>();
 builder.Services.AddScoped<PdfExportService>();

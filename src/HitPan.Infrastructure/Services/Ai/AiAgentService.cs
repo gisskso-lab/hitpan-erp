@@ -52,17 +52,21 @@ public sealed class AiAgentService : IAiAgentService
     private readonly IChatCompletionProvider _provider;
     private readonly IHitpanToolRegistry _registry;
     private readonly IAiAgentSystemPrompt _systemPrompt;
+    // 신규(2026-10-06, 20261006작9 §4-2): 외부 반출 게이트 — 문③(심층방어).
+    private readonly HitPan.Application.Interfaces.IExternalAiGate _exportGate;
     private readonly ILogger<AiAgentService> _logger;
 
     public AiAgentService(
         IChatCompletionProvider provider,
         IHitpanToolRegistry registry,
         IAiAgentSystemPrompt systemPrompt,
+        HitPan.Application.Interfaces.IExternalAiGate exportGate,
         ILogger<AiAgentService> logger)
     {
         _provider = provider;
         _registry = registry;
         _systemPrompt = systemPrompt;
+        _exportGate = exportGate;
         _logger = logger;
     }
 
@@ -75,6 +79,18 @@ public sealed class AiAgentService : IAiAgentService
     {
         if (string.IsNullOrWhiteSpace(decryptedApiKey) || string.IsNullOrWhiteSpace(userMessage))
         {
+            return AgentRunResult.NotHandled();
+        }
+
+        // 🔴 문③ (2026-10-06, 20261006작9 §4-2 · PM 결재 §8-1): 외부 반출 게이트 — 심층방어.
+        //    문②(ChatbotService)를 우회하는 새 호출자가 생겨도 CompleteWithToolsAsync(외부 왕복)에
+        //    닿기 전에 여기서 끊긴다. Tool 등록부(Program.cs)는 정적 제거하지 않는다 — 등록은
+        //    테넌트 무관 기동 시점이라 동의 조건을 걸 수 없고, 재개 경로(G-5 대조군)를 살려 둔다.
+        if (!await _exportGate.IsOpenAsync(ctx.TenantId, ct).ConfigureAwait(false))
+        {
+            _logger.LogInformation(
+                "AI 직원 엔진 — 외부 반출 게이트 닫힘(동의 기록 없음). 미처리 반환. tenant={Tenant}",
+                ctx.TenantId);
             return AgentRunResult.NotHandled();
         }
 

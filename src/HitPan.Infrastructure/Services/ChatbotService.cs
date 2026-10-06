@@ -31,7 +31,15 @@ public sealed class ChatbotService : IChatbotService
     private readonly ISalesService _sales;
     // 신규(2026-08-12): AI 3사 확장 — 공급자 식별자로 호출 어댑터를 고른다(20260812작1).
     private readonly HitPan.Application.Services.Ai.IAiProviderFactory _providerFactory;
+    // 신규(2026-10-06, 20261006작9 §4-2): 외부 AI 반출 게이트 — 동의 기록 존재(서버 판정)일 때만
+    //   외부 호출이 열린다. fail-closed. 문①(외부 폴백)·문②(엔진 분기)가 이 하나를 본다.
+    private readonly IExternalAiGate _exportGate;
     private readonly ILogger<ChatbotService> _logger;
+
+    // 🔴 고객 노출 문구 (20261006작9 §4-4 — **사장님 확인 전 초안** · §8-4 상신 중 — 확정되면 글자만 교체).
+    //    어휘 기준(#23): 업체명·개발용어 0. AiAssistantPage.razor 의 안내와 같은 기준이다(게이트 G-8).
+    private const string ExportClosedNotice =
+        "외부 도우미 연결은 이용 안내 동의 절차가 마련된 뒤 열립니다.";
 
     public ChatbotService(
         IDbConnection db,
@@ -43,8 +51,10 @@ public sealed class ChatbotService : IChatbotService
         HitPan.Application.Services.Ai.IAiAgentService agent,
         ISalesService sales,
         HitPan.Application.Services.Ai.IAiProviderFactory providerFactory,
+        IExternalAiGate exportGate,
         ILogger<ChatbotService> logger)
     {
+        _exportGate = exportGate;
         _db = db;
         _audit = audit;
         _encryption = encryption;
@@ -156,7 +166,13 @@ public sealed class ChatbotService : IChatbotService
         else
         {
             // KB 매칭 실패 → 외부 도우미 시도 (저장된 BYOK 키가 'valid' 일 때만). 직전 대화(history) 전달.
-            var providerAnswer = await TryProviderAnswerAsync(req.Message, tenantId, history, ct).ConfigureAwait(false);
+            // 🔴 문① (2026-10-06, 20261006작9 §4-2 · PM 결재 §8-1): 외부 반출 게이트가 닫혀 있으면
+            //    ① 진입 0 — 질문·직전 8턴 history 가 밖으로 나가지 않는다(X-2 교차 누출 봉합).
+            //    키가 valid 여도 동의 기록(ai_export_consents) 없으면 KB-only 로 답한다. fail-closed.
+            var exportOpen = await _exportGate.IsOpenAsync(tenantId, ct).ConfigureAwait(false);
+            var providerAnswer = exportOpen
+                ? await TryProviderAnswerAsync(req.Message, tenantId, history, ct).ConfigureAwait(false)
+                : null;
 
             if (providerAnswer is not null && providerAnswer.Succeeded)
             {
@@ -175,6 +191,11 @@ public sealed class ChatbotService : IChatbotService
                     "💡 지금 바로 도움이 필요하면:\n" +
                     "- 사이드바에서 관련 메뉴를 찾아보기\n" +
                     "- 일반 사용문의는 담당자에게 연락";
+                // 문① 닫힘으로 KB-only 가 된 경우의 안내 한 줄 (20261006작9 §4-4 — 사장님 확인 전 초안).
+                if (!exportOpen)
+                {
+                    answer += "\n\n" + ExportClosedNotice;
+                }
                 confidence = 0.2m;
             }
         }
@@ -409,6 +430,15 @@ public sealed class ChatbotService : IChatbotService
         //       클로드 키가 없으면 AI 직원은 안 돌고 일반 대화로 폴백한다(정상 동작).
         //    사장님 "챗봇은 나중에 할거야" 범위 밖이라 이번엔 여기까지다.
         //    다음 차수(챗봇)에서 공급자 중립 Tool Use 추상화를 만들 때 함께 푼다.
+
+        // 🔴 문② (2026-10-06, 20261006작9 §4-2 · PM 결재 §8-1): 외부 반출 게이트가 닫혀 있으면
+        //    엔진 진입 0 — 키가 valid 여도 질문·history·Tool 반출(사업자번호·매출수치)이 나가지 않는다.
+        //    null 반환 = 기존 폴백 흐름 그대로(하드코딩 분석 → KB → 문①). fail-closed.
+        if (!await _exportGate.IsOpenAsync(tenantId, ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
         var keyRow = await _db.QueryFirstOrDefaultAsync<ByokKeyRow?>(new CommandDefinition(
             """
             SELECT anthropic_api_key_encrypted AS Encrypted,
