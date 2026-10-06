@@ -78,11 +78,109 @@ public class PermissionEnforcementGuardTests
                 .Select(m => m.Groups[1].Value))
             .ToHashSet(StringComparer.Ordinal);
 
+        // 20261005작5 §5-2 — 「직원 계정 관리」 3단계는 [RequireUsersLevel(n)] 이 강제한다(n 이상 = 그 단계 코드까지).
+        //   1 → USERS · 2 → USERS_ACCOUNT · 3 → USERS_SEAT. 위가 아래를 포함하므로 n 이하 코드가 모두 강제된다.
+        var levelCodes = new[] { "USERS", "USERS_ACCOUNT", "USERS_SEAT" };
+        foreach (var n in Directory.EnumerateFiles(controllers, "*.cs", SearchOption.AllDirectories)
+                     .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"^\s*\[RequireUsersLevel\((\d)\)\]", RegexOptions.Multiline)
+                         .Select(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))))
+        {
+            enforced.Add(levelCodes[Math.Clamp(n, 1, 3) - 1]);
+        }
+
         var lying = declared.Except(enforced).ToArray();
         Assert.True(lying.Length == 0,
             "화면이 '강제된다' 고 보여주는데 서버에 [RequirePermission] 이 없는 메뉴: "
             + string.Join(", ", lying)
             + "\n안 먹는 체크박스를 보여주면 관리자가 권한을 줬다고 믿는다.");
+    }
+
+    // ══ 20261005작5 §8-8 V5-20 — 주소별 단계표 ══
+    //   위 게이트는 「코드당 한 곳이라도 있으면」 판정이라, for-employee 의 [RequireUsersLevel(2)] 를 빼도
+    //   같은 단계 주소(linkable·suspend·resume)가 가려 초록이었다(작업리뷰서 2차 2-3 실측).
+    //   여기서는 주소 하나하나에 「판정 하나 · 그 단계」가 붙어 있는지 본다 — 개발명세서 §3 주소별 단계표가 정본.
+
+    /// <summary>개발명세서 §3 주소별 단계표(UserController · <c>api/users</c>). 키 = "동사 경로꼬리".</summary>
+    private static readonly IReadOnlyDictionary<string, int> UsersLevelTable = new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        ["GET "] = 1,
+        ["GET {id}"] = 1,
+        ["GET seats"] = 1,
+        ["POST {id}/suspend"] = 2,
+        ["POST {id}/resume"] = 2,
+        ["GET linkable-employees"] = 2,
+        ["POST for-employee"] = 2,
+        ["GET seat-subscription"] = 3,
+    };
+
+    /// <summary>
+    /// UserController 의 메서드마다 (주소, 붙은 RequireUsersLevel 값들). 주석 줄(⬛ 옛 줄)은 세지 않는다.
+    /// 속성 영역 = 메서드 선언 바로 위로 이어진 속성·주석 줄.
+    /// </summary>
+    private static Dictionary<string, List<int>> UsersControllerLevels()
+    {
+        var lines = ReadSource("src", "HitPan.API", "Controllers", "UserController.cs").Replace("\r\n", "\n").Split('\n');
+        var decl = new Regex(@"^\s*public\s+(?:async\s+)?[\w<>\[\],\s]+?\s+\w+\(", RegexOptions.CultureInvariant);
+        var http = new Regex(@"\[Http(Get|Post|Put|Delete|Patch)(?:\(""([^""]*)""\))?\]", RegexOptions.CultureInvariant);
+        var lvl = new Regex(@"\[RequireUsersLevel\((\d+)\)\]", RegexOptions.CultureInvariant);
+        var result = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!decl.IsMatch(lines[i]) || lines[i].Contains(" class ", StringComparison.Ordinal)) continue;
+            string? address = null;
+            var levels = new List<int>();
+            for (var j = i - 1; j >= 0; j--)
+            {
+                var t = lines[j].Trim();
+                if (t.StartsWith("//", StringComparison.Ordinal)) continue;     // ⬛ 옛 줄·설명 — 세지 않는다
+                if (!t.StartsWith('[')) break;
+                var h = http.Match(t);
+                if (h.Success) address = h.Groups[1].Value.ToUpperInvariant() + " " + h.Groups[2].Value;
+                foreach (Match m in lvl.Matches(t))
+                    levels.Add(int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+            }
+            if (address is null) continue;
+            Assert.False(result.ContainsKey(address), $"UserController 에 같은 주소가 두 번 — {address}");
+            result[address] = levels;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 🔴 V5-20 — 표의 주소마다 <c>[RequireUsersLevel(n)]</c> 이 <b>정확히 하나 · 표의 n</b> 으로 붙어 있다.
+    /// 그 주소에서 속성을 빼거나 n 을 바꾸면 그 줄이 FAIL(대조군: for-employee 속성 임시 제거 → FAIL 실측 · 개발명세서_게이트 §8-8).
+    /// </summary>
+    [Theory]
+    [InlineData("GET ")]
+    [InlineData("GET {id}")]
+    [InlineData("GET seats")]
+    [InlineData("POST {id}/suspend")]
+    [InlineData("POST {id}/resume")]
+    [InlineData("GET linkable-employees")]
+    [InlineData("POST for-employee")]
+    [InlineData("GET seat-subscription")]
+    public void 직원계정관리_주소마다_단계_판정이_붙어있다(string address)
+    {
+        var expected = UsersLevelTable[address];
+        var actual = UsersControllerLevels();
+        Assert.True(actual.TryGetValue(address, out var levels),
+            $"UserController 에 주소 '{address}' 가 없다 — 표(개발명세서 §3)와 코드가 갈라졌다");
+        Assert.True(levels!.Count == 1 && levels[0] == expected,
+            $"'{address}' 는 [RequireUsersLevel({expected})] 하나여야 한다 — 실제: "
+            + (levels.Count == 0 ? "없음" : string.Join(",", levels.Select(n => $"RequireUsersLevel({n})")))
+            + "\n같은 단계의 다른 주소가 있다고 이 주소가 막히는 것이 아니다(V5-20).");
+    }
+
+    /// <summary>🔴 V5-20 짝 — 표에 없는 주소에 단계 판정이 붙으면 표가 낡은 것이다(표를 정본으로 유지).</summary>
+    [Fact]
+    public void 직원계정관리_단계_판정은_표에_있는_주소에만_붙는다()
+    {
+        var unlisted = UsersControllerLevels()
+            .Where(kv => kv.Value.Count > 0 && !UsersLevelTable.ContainsKey(kv.Key))
+            .Select(kv => kv.Key)
+            .ToArray();
+        Assert.True(unlisted.Length == 0,
+            "표(개발명세서 §3)에 없는 주소에 [RequireUsersLevel] 이 붙었다: " + string.Join(", ", unlisted));
     }
 
     /// <summary>

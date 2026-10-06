@@ -1,0 +1,31 @@
+  Failed G-E16 🔴 R-1 — 2단계 직원의 [사용 안 함] 도중 대상이 관리자로 승격(미커밋 · 행 잠금) → 직원 UPDATE 가 잠금을 기다린 뒤 승격 커밋 → 403 protected_account · 대상 그대로 사용중 · 대조군(옛 두 단계 = 판정 따로 → SuspendAsync 는 같은 경쟁에서 관리자를 끈다) [21 s]
+  Error Message:
+   System.NullReferenceException : Object reference not set to an instance of an object.
+  Stack Trace:
+     at MySqlConnector.MySqlDataReader.ActivateResultSet(CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlDataReader.cs:line 136
+   at MySqlConnector.MySqlDataReader.InitAsync(CommandListPosition commandListPosition, ICommandPayloadCreator payloadCreator, IDictionary`2 cachedProcedures, IMySqlCommand command, CommandBehavior behavior, Activity activity, IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlDataReader.cs:line 489
+   at MySqlConnector.Core.CommandExecutor.ExecuteReaderAsync(CommandListPosition commandListPosition, ICommandPayloadCreator payloadCreator, CommandBehavior behavior, Activity activity, IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/Core/CommandExecutor.cs:line 58
+   at MySqlConnector.MySqlCommand.ExecuteNonQueryAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlCommand.cs:line 304
+   at MySqlConnector.MySqlTransaction.DoRollback(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlTransaction.cs:line 267
+   at MySqlConnector.MySqlTransaction.DoDisposeAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlTransaction.cs:line 237
+   at MySqlConnector.MySqlConnection.CloseDatabaseAsync(IOBehavior ioBehavior, CancellationToken cancellationToken) in /_/src/MySqlConnector/MySqlConnection.cs:line 1276
+   at MySqlConnector.MySqlConnection.DoCloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1244
+   at MySqlConnector.MySqlConnection.DoCloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1266
+   at MySqlConnector.MySqlConnection.CloseAsync(Boolean changeState, IOBehavior ioBehavior) in /_/src/MySqlConnector/MySqlConnection.cs:line 1196
+   at MySqlConnector.MySqlConnection.DisposeAsync() in /_/src/MySqlConnector/MySqlConnection.cs:line 845
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 231
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 231
+   at HitPan.Tests.Integrity.EmployeeAccountLinkGateDbTests.E16_Staff_Suspend_Atomic_Against_Promotion() in /home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/Integrity/EmployeeAccountLinkGateDbTests.Link.cs:line 233
+--- End of stack trace from previous location ---
+  Passed G-S1b 🔴 P1-02 — 대표 권한 변경·비번 초기화 거절 · 값 그대로 · 대조군(같은 권한 저장 통과 · 직원 초기화 통과) [1 s]
+  Passed G10-3 🔴 반품(IO2 음수) = 출고수량만 줄이고 금액 안 씀 — 「반품 = 입고 절대값」이면 FAIL [9 ms]
+  Passed G10-9 🔴 99999999 실번호 우선 3사례 — 99999999 가 앞줄이어도 실번호 · 실번호 없으면 99999999 · 둘 다 없으면 0 [< 1 ms]
+  Passed G10-7 대조군 — 최신 DOCFC(같은 달) 는 가드 미발동 · 이어 계산 0개월 = DOCFC 최종과 같다 [< 1 ms]
+  Passed G10-4 🔴 움직임 없는 달 = 기말 그대로(끝전 포함) · 수량 0 금액만 남은 키(P/L) → 0 · 수량 0 금액 줄은 빼고 건수·금액 기록 [< 1 ms]
+  Passed G10-6 🔴 기준일 = min(DOCFB 마지막 달 말일, 이관일) 양방향 [< 1 ms]
+  Passed G10-8 S1 안내 문구 — 개월 수 자리 1개 · 결재 문구 그대로 [< 1 ms]
+  Passed G10-5 구간 — DOCFC 마지막 달 이하·기준일 뒤 줄 제외 · DOCFB 에만 있는 키 0 에서 시작 · 창고 합산 · MaxYm = 기준일 달 [11 ms]
+  Passed G10-1 🔴 규칙③ 입고 있는 달 = 월 총평균 (기초+입고)/(기초수량+입고수량) · 기말 = ROUND(수량×단가,0) [< 1 ms]
+  Passed G10-2 🔴 입고 없는 달(출고만) = 상품마스터 S_IDAN · 0/없으면 직전 단가 · (기초+입고)수량 0 이면 마스터 [< 1 ms]
+  Passed G-A4 🔴 in_progress 가 T2(30분)를 넘으면 중간에 멈춘 것으로 다시 묻는다 [31 ms]
+  Passed G-A4 대조 🔴 옛 출처 apply_status 의 blocked 는 판정에 안 쓴다 — 시도 표가 비면 requested [15 ms]

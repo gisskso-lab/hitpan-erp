@@ -68,6 +68,7 @@ CHECKS=(
   "local_company address_detail"            # DB-85 상세주소 분리(20260809작4 ⑤) — 없으면 회사정보 저장·조회 500
   "local_company seal_url"                  # DB-85 인장 — 없으면 회사정보 화면 500
   "local_company header_url"                # DB-85 출력 헤더 — 없으면 회사정보 화면 500
+  "employees login_id"                      # DB-137 사원계정(20261005작5) — 없으면 사원관리 목록 500
 )
 MISSING=0
 for chk in "${CHECKS[@]}"; do

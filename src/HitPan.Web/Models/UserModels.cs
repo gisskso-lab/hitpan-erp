@@ -30,6 +30,9 @@ public class CreateUserModel
     public string Role { get; set; } = "User";
     public DateTime? HireDate { get; set; }
     public string? Memo { get; set; }
+
+    /// <summary>20261005작5 V5-06 ② — 같은 이름 사원이 있어도 「다른 사람입니다」로 확인했을 때만 true. 서버 CreateUserDto 와 짝(#12).</summary>
+    public bool ConfirmDifferentPerson { get; set; }
 }
 
 public class UpdateUserModel
@@ -57,6 +60,17 @@ public class BulkCreateResult
     public int SuccessCount { get; set; }
     public int FailedCount { get; set; }
     public List<BulkRowErrorModel> Errors { get; set; } = new();
+
+    /// <summary>20261005작5 V5-06 ③ — 같은 이름의 재직·미등록 사원이 이미 있던 행(막지 않고 알린다). 서버 BulkCreateResultDto 와 짝(#12).</summary>
+    public List<BulkSameNameWarningModel> SameNameWarnings { get; set; } = new();
+}
+
+/// <summary>엑셀 일괄 결과의 같은 이름 경고 한 줄.</summary>
+public class BulkSameNameWarningModel
+{
+    public int Row { get; set; }
+    public string Name { get; set; } = "";
+    public List<HitPan.Web.Services.LinkableEmployeeModel> Candidates { get; set; } = new();
 }
 
 public class BulkRowErrorModel

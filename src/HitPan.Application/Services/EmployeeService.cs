@@ -86,7 +86,19 @@ public sealed class EmployeeService : IEmployeeService
               --     이번 봉합 전에 퇴사한 사람은 계정이 `is_active=0` 으로만 꺼져 있고
               --     `is_deleted` 는 0 이다. 그 자리를 안 걸면 **퇴사자가 계속 "계정 있음"** 이 된다.
               --     쓸 수 없는 계정은 없는 계정과 같다 — 로그인이 안 되기 때문이다.
-              CASE WHEN u.user_id IS NULL THEN 0 ELSE 1 END AS HasUserAccount
+              CASE WHEN u.user_id IS NULL THEN 0 ELSE 1 END AS HasUserAccount,
+              -- 🔴 20261005작5 §2-1 — 계정 상태 4종. 위 HasUserAccount 는 **그대로**다(읽는 화면 3곳 · #1).
+              --   두 번째 조인 ua 는 is_active 를 거르지 않는다 — 「사용중지」가 「계정 없음」으로 보이면
+              --   두 번째 계정이 생긴다(F-2). 죽은 연결(is_deleted=1)은 미등록으로 본다(C-4).
+              CASE WHEN ua.user_id IS NULL OR ua.is_deleted = 1 THEN 'none'
+                   WHEN ua.is_parent = 1 THEN 'owner'
+                   WHEN ua.is_active = 1 THEN 'active'
+                   ELSE 'suspended' END AS AccountStatus,
+              -- 퇴사 판별(C-1) — MDB 이관 퇴사자(is_active=1 · is_resigned=1)도 퇴사. [계정 만들기] 금지에만 쓴다.
+              --   [3-V] P3-11 — MDB 이관은 SW_OUT(is_resigned)·SW_OUTDT(resign_date)를 따로 옮긴다(MdbMigrationService:1918-1919)
+              --   ⇒ 퇴사일만 찬 사원이 있을 수 있다. 지난 퇴사일이면 퇴사로 본다(앞날 퇴사일 = 예정 · 아직 재직).
+              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 OR (e.resign_date IS NOT NULL AND e.resign_date <= NOW(6)) THEN 1 ELSE 0 END AS IsLeaver,
+              e.login_id AS LoginId
             FROM employees e
             LEFT JOIN departments d
               ON d.dept_id = e.dept_id
@@ -96,6 +108,9 @@ public sealed class EmployeeService : IEmployeeService
              AND u.tenant_id = e.tenant_id
              AND u.is_deleted = 0
              AND u.is_active = 1
+            LEFT JOIN users ua
+              ON ua.user_id = e.user_id
+             AND ua.tenant_id = e.tenant_id
             WHERE e.tenant_id = @TenantId
               AND (@IncludeResigned = 1 OR e.is_active = 1)
             ORDER BY e.is_active DESC, e.emp_no
@@ -247,11 +262,21 @@ public sealed class EmployeeService : IEmployeeService
               e.created_by AS CreatedBy,
               e.updated_by AS UpdatedBy,
               e.created_at AS CreatedAt,
-              e.updated_at AS UpdatedAt
+              e.updated_at AS UpdatedAt,
+              -- 🔴 20261005작5 §2-1 — 상세도 목록과 같은 기준(F-4 · 「연결됨/미연결」을 같은 4종 문구로)
+              CASE WHEN ua.user_id IS NULL OR ua.is_deleted = 1 THEN 'none'
+                   WHEN ua.is_parent = 1 THEN 'owner'
+                   WHEN ua.is_active = 1 THEN 'active'
+                   ELSE 'suspended' END AS AccountStatus,
+              CASE WHEN e.is_active = 0 OR e.is_resigned = 1 OR (e.resign_date IS NOT NULL AND e.resign_date <= NOW(6)) THEN 1 ELSE 0 END AS IsLeaver,
+              e.login_id AS LoginId
             FROM employees e
             LEFT JOIN departments d
               ON d.dept_id = e.dept_id
              AND d.tenant_id = e.tenant_id
+            LEFT JOIN users ua
+              ON ua.user_id = e.user_id
+             AND ua.tenant_id = e.tenant_id
             WHERE e.tenant_id = @TenantId
               AND e.employee_id = @EmployeeId
             """;
@@ -764,10 +789,12 @@ public sealed class EmployeeService : IEmployeeService
                     transaction: tx,
                     cancellationToken: ct)).ConfigureAwait(false);
 
+                // ⬛ [20261005작5 전] SET user_id = NULL, updated_at = NOW(6) — 사원계정 칸(login_id · DB-137)도 같은 UPDATE 에서 비운다(설계 §2-2).
                 await _db.ExecuteAsync(new CommandDefinition(
                     """
                     UPDATE employees
                     SET user_id = NULL,
+                        login_id = NULL,
                         updated_at = NOW(6)
                     WHERE tenant_id = @TenantId
                       AND employee_id = @EmployeeId

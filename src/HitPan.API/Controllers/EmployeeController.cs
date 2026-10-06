@@ -36,7 +36,8 @@ public sealed class EmployeeController : ControllerBase
     /// </param>
     [Authorize(Policy = "TenantOnly")]
     [HttpGet]
-    public async Task<IActionResult> GetList([FromQuery] bool includeResigned, CancellationToken ct)
+    public async Task<IActionResult> GetList([FromQuery] bool includeResigned,
+        [FromServices] IPermissionService permission, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
@@ -45,7 +46,31 @@ public sealed class EmployeeController : ControllerBase
         }
 
         var list = await _employeeService.GetListAsync(tenantId, includeResigned, ct).ConfigureAwait(false);
+
+        // 🔴 20261005작5 [3-V] P2-02 — 사원계정(로그인 아이디)·계정 상태는 대표·관리자·hr(사원관리 화면 인가와 같은 조건)
+        //   또는 「직원 계정 관리」 1단계 이상에게만 싣는다. 아니면 비운다(아이디 목록이 모든 직원에게 가지 않게).
+        //   사원관리 인가 자체는 무변경(P2-03).
+        if (!await CanSeeAccountColumnsAsync(permission, tenantId, ct).ConfigureAwait(false))
+        {
+            foreach (var row in list)
+            {
+                row.LoginId = null;
+                row.AccountStatus = string.Empty;
+            }
+        }
+
         return Ok(list);
+    }
+
+    // 사원관리 화면 인가(EmployeePage.razor:4 Roles = system_admin,tenant_admin,TenantAdmin,hr_manager)와 같은 조건 + USERS 1단계 이상
+    private async Task<bool> CanSeeAccountColumnsAsync(IPermissionService permission, string tenantId, CancellationToken ct)
+    {
+        if (User.HasClaim("account_type", "tenant_admin")) return true;
+        if (User.IsInRole("system_admin") || User.IsInRole("tenant_admin") || User.IsInRole("TenantAdmin") || User.IsInRole("hr_manager"))
+            return true;
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(userId)) return false;
+        return await permission.GetUsersLevelAsync(userId, tenantId, ct).ConfigureAwait(false) >= 1;
     }
 
     /// <summary>

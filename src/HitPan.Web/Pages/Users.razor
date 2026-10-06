@@ -2,7 +2,10 @@
 @namespace HitPan.Web.Pages.UsersUi
 @* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
      메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
-@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
+@* ⬛ @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
+     ← 20261005작5 §5-4: 「직원 계정 관리」 권한(1단계 이상)을 받은 직원도 연다. 화면 안에서 단계 0 이면 막고,
+        서버가 주소마다 [RequireUsersLevel(n)] 로 다시 막는다(메뉴·화면·서버 세 겹). *@
+@attribute [Authorize]
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 @using HitPan.Web.Components.Common
@@ -16,10 +19,29 @@
 @* 20261005작3 — 계정 과금 호출(AccountSeatApi · DI 등록 없이 여기서 만든다) *@
 @inject HttpClient Http
 @inject ILogger<AccountSeatApi> SeatLog
+@* 20261005작5 — 사원 ↔ 계정 연결 호출(AccountLinkApi · DI 등록 없이 여기서 만든다) *@
+@inject ILogger<AccountLinkApi> LinkLog
 @using HitPan.Web.Components.Users
 
 <PageTitle>사용자 추가·관리</PageTitle>
 
+@* 20261005작5 §5-4 — 내 단계를 먼저 읽는다. 못 읽었거나 0 이면 화면을 열지 않는다(열어 주고 막는 것보다 처음부터 안 연다). *@
+@if (!_levelLoaded)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_level < 1)
+{
+    <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px">
+        <MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
+        <MudText Typo="Typo.h6" Class="mt-3">이 화면을 볼 권한이 없습니다</MudText>
+        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary)">
+            대표님께 「직원 계정 관리」 권한을 요청하세요.
+        </MudText>
+    </MudPaper>
+}
+else
+{
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
     <div>
         <MudText Typo="Typo.h6">사용자 추가·관리</MudText>
@@ -28,6 +50,9 @@
         </MudText>
     </div>
     <div class="d-flex gap-2">
+        @* 20261005작5 §5-4 — 버튼은 단계표대로. 권한 설정·엑셀 일괄은 대표·관리자만(서버도 TenantAdminOnly). *@
+        @if (_isAdmin)
+        {
         <MudButton Variant="Variant.Outlined" Size="Size.Small"
             StartIcon="@Icons.Material.Filled.Lock"
             OnClick="@(() => Nav.NavigateTo("/users/permissions"))">권한 설정</MudButton>
@@ -35,13 +60,21 @@
         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Success"
             StartIcon="@Icons.Material.Filled.UploadFile"
             OnClick="OpenBulkDialog">엑셀 일괄등록</MudButton>
-        @* 20261005작3 D-15 — [구독계정추가] 상시 표시(한도가 안 찼어도 보인다) *@
+        }
+        @* 20261005작3 D-15 — [구독계정추가] 상시 표시(한도가 안 찼어도 보인다)
+           20261005작5 — 3단계(구독계정추가)만. ⬛ OnClick="@(() => OpenSeatNotice(false))" → 3단계 서버 주소로 숫자를 읽고 연다 *@
+        @if (_level >= 3)
+        {
         <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary"
             StartIcon="@Icons.Material.Filled.GroupAdd"
-            OnClick="@(() => OpenSeatNotice(false))">구독계정추가</MudButton>
+            OnClick="OpenSubscribeAsync">구독계정추가</MudButton>
+        }
+        @if (_level >= 2)
+        {
         <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Primary"
             StartIcon="@Icons.Material.Filled.PersonAdd"
             OnClick="OpenCreateDialog">사용자 추가</MudButton>
+        }
     </div>
 </div>
 
@@ -73,8 +106,10 @@
     </MudGrid>
 }
 
+@* 20261005작5 A · P-5 — CanSubscribe: 3단계면 [구독계정추가] 버튼, 아니면 「대표님께 계정 추가를 요청하세요」 *@
 <AccountSeatNoticeDialog @bind-Visible="_showSeatNotice" Blocked="_seatNoticeBlocked"
-                         Active="@(_seats?.Active ?? 0)" Limit="@(_seats?.Limit ?? 0)" />
+                         Active="@(_seats?.Active ?? 0)" Limit="@(_seats?.Limit ?? 0)"
+                         CanSubscribe="@(_level >= 3)" OnSubscribe="OpenSubscribeAsync" />
 
 @if (_loading)
 {
@@ -94,12 +129,16 @@ else if (_users.Count == 0)
     <MudPaper Elevation="0" Class="pa-8 text-center" Style="border:0.5px dashed var(--mud-palette-lines-default);border-radius:12px">
         <MudIcon Icon="@Icons.Material.Outlined.PeopleAlt" Size="Size.Large" Style="color:var(--mud-palette-text-secondary);font-size:64px" />
         <MudText Typo="Typo.h6" Class="mt-3">아직 등록된 사용자가 없습니다</MudText>
+        @* ⬛ 「첫 사용자를 추가해보세요. (옛 낱말)·임시비밀번호만 있으면 1분이면 됩니다.」 — 20261005작5 §6 계정은 「아이디」 *@
         <MudText Typo="Typo.body2" Class="mb-3" Style="color:var(--mud-palette-text-secondary)">
-            첫 사용자를 추가해보세요. 이메일·임시비밀번호만 있으면 1분이면 됩니다.
+            첫 사용자를 추가해보세요. 아이디·임시비밀번호만 있으면 1분이면 됩니다.
         </MudText>
+        @if (_level >= 2)
+        {
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
             StartIcon="@Icons.Material.Filled.PersonAdd"
             OnClick="OpenCreateDialog">첫 사용자 추가</MudButton>
+        }
     </MudPaper>
 }
 else
@@ -108,8 +147,9 @@ else
        용어 정정 (사장님 오더 2026-08-10, 20260810작4): "부모계정, 자식계정 이라고 하는 개발용어는
        숨기고 대표계정, 직원계정 이라고 바꾸자." → 화면에 보이는 글자만 바꾼다.
        DB 컬럼(is_parent)·C# 속성(IsParent)·내부 판정 로직은 그대로다(헌법 #38·#40 구조 불변). *@
+    @* ⬛ 「대표계정만 직원계정을 만들 수 있으며」 — 20261005작5 §5: 「직원 계정 관리」 계정설정 권한을 받은 직원도 만든다 *@
     <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.AccountTree">
-        여기서 추가하는 계정은 <b>직원계정</b>입니다. 대표계정만 직원계정을 만들 수 있으며, 본사에는 노출되지 않습니다.
+        여기서 추가하는 계정은 <b>직원계정</b>입니다. 대표계정과 대표님이 권한을 준 직원만 직원계정을 만들 수 있으며, 본사에는 노출되지 않습니다.
         대표계정은 가입 시점에 자동 생성되며 삭제할 수 없습니다.
         <br />계정 한도는 <b>사용 중인 계정</b>만 셉니다(대표 포함).
     </MudAlert>
@@ -117,7 +157,8 @@ else
     <MudPaper Elevation="0" Class="pa-2 hitpan-card">
         <MudTable Items="_users" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
             <HeaderContent>
-                <MudTh>이메일</MudTh>
+                @* ⬛ 옛 머리 글자(계정 = 메일 주소) — 20261005작5 §6 사장님 캡처: 계정은 「아이디」(DB 칸 users.email 은 그대로) *@
+                <MudTh>아이디</MudTh>
                 <MudTh>이름</MudTh>
                 <MudTh>부서·직책</MudTh>
                 @* "계층" 도 개발용어다 — 고객은 대표/직원 구분으로 읽는다 (20260810작4) *@
@@ -169,14 +210,21 @@ else
                     </MudChip>
                 </MudTd>
                 <MudTd Style="text-align:center">
+                    @* 20261005작5 §5-4 — 수정·비밀번호 초기화·계정폐기는 대표·관리자만(서버 TenantAdminOnly) ·
+                       사용 안 함·다시 사용은 2단계 이상(서버 RequireUsersLevel(2) + 대상 울타리) *@
+                    @if (_isAdmin)
+                    {
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Default"
                         OnClick="@(() => OpenEditDialog(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Color="Color.Info"
                         OnClick="@(() => OpenResetPwDialog(context))" />
+                    }
                     @* ⬛ 옛 [비활성화] 아이콘 한 개(PersonOff → OpenDeactivateDialog) — 20261005작3 §5:
                        사용 중 행 = [사용 안 함]·[계정폐기] · 사용 안 함 행 = [다시 사용]·[계정폐기] *@
                     @if (!context.IsParent)
                     {
+                        @if (_level >= 2)
+                        {
                         @if (context.IsActive)
                         {
                             <MudTooltip Text="사용 안 함">
@@ -191,10 +239,14 @@ else
                                     OnClick="@(() => ResumeAsync(context))" />
                             </MudTooltip>
                         }
+                        }
+                        @if (_isAdmin)
+                        {
                         <MudTooltip Text="계정폐기">
                             <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small" Color="Color.Error"
                                 OnClick="@(() => OpenDeactivateDialog(context))" />
                         </MudTooltip>
+                        }
                     }
                     else if (context.IsParent)
                     {
@@ -207,12 +259,93 @@ else
         </MudTable>
     </MudPaper>
 }
+}
+@* ↑ 20261005작5 — 단계 1 이상 화면 끝(위 `else` 블록) *@
 
 @* 사용자 추가 다이얼로그 *@
 <MudDialog @bind-Visible="_showCreate" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent><MudText Typo="Typo.h6">사용자 추가</MudText></TitleContent>
     <DialogContent>
-        <MudTextField T="string" @bind-Value="_createModel.Email" Label="이메일 *" Variant="Variant.Outlined" Class="mb-2" />
+        @* 20261005작5 §4 (D) — 맨 위에서 두 갈래. 기본 = 「기존 사원에서 고르기」(쌍둥이 사원 차단).
+           「새 사원과 함께 만들기」는 대표·관리자만(V5-06 ① · 서버도 TenantAdminOnly) — 직원에게는 갈래 선택 자체가 안 보인다. *@
+        @if (_isAdmin)
+        {
+            <MudRadioGroup T="bool" Value="_createFromEmployee" ValueChanged="OnCreateModeChanged" Class="mb-2">
+                <MudRadio T="bool" Value="true" Color="Color.Primary">기존 사원에서 고르기</MudRadio>
+                <MudRadio T="bool" Value="false" Color="Color.Primary">새 사원과 함께 만들기</MudRadio>
+            </MudRadioGroup>
+        }
+        @if (_createFromEmployee)
+        {
+            @if (_linkableLoading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+            }
+            else if (_linkable is null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                    사원 목록을 불러오지 못했습니다. 창을 닫았다가 다시 열어 주세요.
+                </MudAlert>
+            }
+            else if (_linkable.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                    계정을 만들 수 있는 사원이 없습니다. 재직 중이고 아직 계정이 없는 사원만 여기에 나옵니다.
+                    @if (_isAdmin)
+                    {
+                        <br />
+                        <span>새로 온 사람이면 위에서 「새 사원과 함께 만들기」를 고르세요.</span>
+                    }
+                    else
+                    {
+                        <br />
+                        <span>사원 등록은 대표님이나 인사 담당자에게 요청하세요.</span>
+                    }
+                </MudAlert>
+            }
+            else
+            {
+                <MudSelect T="string" Value="_linkModel.EmployeeId" ValueChanged="OnLinkEmployeeChanged"
+                           Label="사원 선택 *" Variant="Variant.Outlined" Class="mb-2"
+                           HelperText="재직 중이고 아직 계정이 없는 사원입니다">
+                    @foreach (var emp in _linkable)
+                    {
+                        <MudSelectItem T="string" Value="@emp.EmployeeId">@LinkableLine(emp)</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (_linkPicked is not null)
+                {
+                    @* R-3 — 역할은 고르지 않는다. 그 사원의 직무가 그대로 쓰인다(바꾸려면 사원관리에서). *@
+                    <MudPaper Elevation="0" Class="pa-3 mb-2" Style="background:var(--mud-palette-background-grey);border-radius:8px">
+                        <MudText Typo="Typo.body2"><b>@_linkPicked.EmpName</b> (@_linkPicked.EmpNo)</MudText>
+                        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                            @* ⬛ [작5 §8-9 전] 부서 -·직급 -·직무 RoleLabel — 히트판이 지은 직무 이름은 걷고, 고객이 입력한 부서·직급만(없으면 비움) *@
+                            @AccountLinkLabels.DeptPositionLine(_linkPicked.DeptName, _linkPicked.Position)
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                            이름·부서·직급·직무는 사원 정보 그대로 씁니다. 바꾸려면 [사원관리]에서 고치세요.
+                        </MudText>
+                    </MudPaper>
+                }
+                <MudTextField T="string" @bind-Value="_linkModel.LoginId" Label="아이디 *" Variant="Variant.Outlined" Class="mb-2"
+                              HelperText="로그인할 때 쓰는 아이디입니다 (공백 없이 4자 이상)" />
+                <div class="d-flex gap-2 mb-2 align-center">
+                    <MudTextField T="string" @bind-Value="_linkModel.Password" Label="임시 비밀번호 *" Variant="Variant.Outlined"
+                        InputType="@(_showCreatePassword ? InputType.Text : InputType.Password)"
+                        Adornment="Adornment.End"
+                        AdornmentIcon="@(_showCreatePassword ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                        OnAdornmentClick="@(() => _showCreatePassword = !_showCreatePassword)"
+                        AdornmentAriaLabel="비밀번호 표시 전환"
+                        HelperText="@PasswordHint(_linkModel.Password)" Class="flex-grow-1" />
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="GenerateLinkTempPassword">랜덤생성</MudButton>
+                </div>
+            }
+        }
+        else
+        {
+        @* ⬛ Label="(옛 낱말) *" — 20261005작5 §6 계정은 「아이디」 *@
+        <MudTextField T="string" @bind-Value="_createModel.Email" Label="아이디 *" Variant="Variant.Outlined" Class="mb-2"
+                      HelperText="로그인할 때 쓰는 아이디입니다 (공백 없이 4자 이상)" />
         <MudTextField T="string" @bind-Value="_createModel.UserName" Label="이름 *" Variant="Variant.Outlined" Class="mb-2" />
         <div class="d-flex gap-2 mb-2 align-center">
             <MudTextField T="string" @bind-Value="_createModel.Password" Label="임시 비밀번호 *" Variant="Variant.Outlined"
@@ -249,12 +382,46 @@ else
         <MudAlert Severity="Severity.Success" Class="mt-2" Dense="true">
             추가 시 사원 정보도 자동 등록됩니다. (사원관리에서 추가 정보 입력 가능)
         </MudAlert>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _showCreate = false)" Disabled="_busy">취소</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || !CanSubmitCreate" OnClick="SubmitCreate">
+        @* ⬛ Disabled="_busy || !CanSubmitCreate" OnClick="SubmitCreate" — 20261005작5: 갈래에 따라 *@
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(_busy || (_createFromEmployee ? !CanSubmitLink : !CanSubmitCreate))"
+                   OnClick="SubmitCreateAnyAsync">
             @(_busy ? "저장 중..." : "추가")
         </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* 20261005작5 V5-06 ② — 「새 사원과 함께」인데 같은 이름의 재직·미등록 사원이 이미 있다(쌍둥이 사원 의심).
+   [연결] = 그 사원에 계정을 붙인다(사원을 새로 안 만든다) · [다른 사람입니다] = 동명이인 — 확인 표시를 붙여 다시 보낸다. *@
+<MudDialog @bind-Visible="_showSameName" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">같은 이름의 사원이 있습니다</MudText></TitleContent>
+    <DialogContent>
+        @foreach (var c in _sameNameCandidates)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-2 d-flex align-center justify-space-between gap-2"
+                      Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:8px">
+                <div>
+                    <MudText Typo="Typo.body2">같은 이름의 사원 <b>@c.EmpName</b>(@c.EmpNo)이 있습니다. 이 사원에 연결할까요?</MudText>
+                    <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+                        @* ⬛ [작5 §8-9 전] 부서 -·직급 -·직무 RoleLabel — 히트판이 지은 직무 이름은 걷고, 고객이 입력한 부서·직급만(없으면 비움) *@
+                        @AccountLinkLabels.DeptPositionLine(c.DeptName, c.Position)
+                    </MudText>
+                </div>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Disabled="_busy"
+                           OnClick="@(() => LinkSameNameAsync(c))">연결</MudButton>
+            </MudPaper>
+        }
+        <MudText Typo="Typo.caption" Style="color:var(--mud-palette-text-secondary)">
+            [연결]을 누르면 그 사원에 계정이 붙고, 사원이 새로 생기지 않습니다. 이름만 같은 다른 사람이면 [다른 사람입니다]를 누르세요.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showSameName = false)" Disabled="_busy">취소</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="_busy" OnClick="CreateAsDifferentPersonAsync">다른 사람입니다</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -280,14 +447,28 @@ else
                 계정 만들기 ✓ → <b>권한 설정</b> → 사원 정보 → 직원 현황
             </MudText>
         </MudPaper>
+        @* 20261005작5 — 권한 설정 화면은 대표·관리자만 연다. 직원이 만들었으면 누구에게 말할지 알려 준다. *@
+        @if (!_isAdmin)
+        {
+            <MudText Typo="Typo.body2" Class="mt-3">
+                권한은 대표님이 [권한 설정]에서 정합니다. 대표님께 이 직원의 권한을 요청하세요.
+            </MudText>
+        }
     </DialogContent>
     <DialogActions>
+        @if (_isAdmin)
+        {
         <MudButton OnClick="@(() => _showNextStep = false)">나중에</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.Lock"
                    OnClick="@(() => Nav.NavigateTo("/users/permissions"))">
             권한 설정하러 가기
         </MudButton>
+        }
+        else
+        {
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => _showNextStep = false)">확인</MudButton>
+        }
     </DialogActions>
 </MudDialog>
 
@@ -403,12 +584,36 @@ else
                     <MudText Typo="Typo.body2" Class="mt-3" Style="font-weight:600">실패한 행:</MudText>
                     <MudSimpleTable Dense="true" Class="mt-1" Style="font-size:12px">
                         <thead>
-                            <tr><th>행</th><th>이메일</th><th>실패 사유</th></tr>
+                            @* ⬛ 옛 머리 「행 · (옛 낱말) · 실패 사유」 — 20261005작5 §6 「아이디」 *@
+                            <tr><th>행</th><th>아이디</th><th>실패 사유</th></tr>
                         </thead>
                         <tbody>
                             @foreach (var e in _bulkResult.Errors)
                             {
                                 <tr><td>@e.Row</td><td>@e.Email</td><td style="color:var(--mud-palette-error)">@e.Reason</td></tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+                @* 20261005작5 V5-06 ③ — 같은 이름의 사원이 이미 있던 행. 막지 않았다(동명이인일 수 있다) — 쌍둥이인지 사람이 본다. *@
+                @if (_bulkResult.SameNameWarnings.Any())
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                        같은 이름의 사원이 이미 있던 행이 @(_bulkResult.SameNameWarnings.Count)건 있습니다.
+                        같은 사람이면 사원이 둘이 됐을 수 있으니 [사원관리]에서 확인하세요.
+                    </MudAlert>
+                    <MudSimpleTable Dense="true" Class="mt-1" Style="font-size:12px">
+                        <thead>
+                            <tr><th>행</th><th>이름</th><th>이미 있던 사원</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var w in _bulkResult.SameNameWarnings)
+                            {
+                                <tr>
+                                    <td>@w.Row</td>
+                                    <td>@w.Name</td>
+                                    <td>@string.Join(", ", w.Candidates.Select(c => $"{c.EmpName}({c.EmpNo})"))</td>
+                                </tr>
                             }
                         </tbody>
                     </MudSimpleTable>
@@ -483,8 +688,143 @@ else
     protected override async Task OnInitializedAsync()
     {
         _seatApi = new AccountSeatApi(Http, SeatLog);
+        // 20261005작5 §5-4 — 단계를 먼저. 0 이면 목록을 부르지 않는다(서버가 어차피 403 — 「못 불러왔다」로 보이면 거짓말이 된다).
+        _linkApi = new AccountLinkApi(Http, LinkLog);
+        var me = await _linkApi.GetMyLevelAsync();
+        _level = me?.Level ?? 0;
+        _isAdmin = me?.IsAdmin ?? false;
+        _levelLoaded = true;
+        if (_level < 1) { _loading = false; return; }
         await LoadAsync();
         await LoadDepartmentsAsync();
+    }
+
+    // ── 20261005작5 사원 ↔ 계정 연결 (설계 §4·§5-4) — 단계는 버튼을 숨기는 편의 · 판정은 서버가 정본 ──
+    private AccountLinkApi _linkApi = null!;
+    private bool _levelLoaded;
+    /// <summary>「직원 계정 관리」 단계 0~3 (대표·관리자 = 3).</summary>
+    private int _level;
+    /// <summary>대표·관리자인가 — 수정·비번 초기화·계정폐기·엑셀·권한 설정·「새 사원과 함께」.</summary>
+    private bool _isAdmin;
+
+    private bool _createFromEmployee = true;
+    private bool _linkableLoading;
+    private List<LinkableEmployeeModel>? _linkable = new();
+    private CreateForEmployeeModel _linkModel = new();
+    private LinkableEmployeeModel? _linkPicked;
+
+    private bool _showSameName;
+    private List<LinkableEmployeeModel> _sameNameCandidates = new();
+
+    private static string LinkableLine(LinkableEmployeeModel e)
+    {
+        var dept = string.IsNullOrWhiteSpace(e.DeptName) ? "" : $" · {e.DeptName}";
+        var pos = string.IsNullOrWhiteSpace(e.Position) ? "" : $" · {e.Position}";
+        // ⬛ [작5 §8-9 전] 끝에 「 · 직무 {RoleLabel(e.Role)}」 — 히트판이 지은 직무 이름은 걷었다(부서·직급은 고객 입력 그대로 · 없으면 비움)
+        return $"{e.EmpNo} {e.EmpName}{dept}{pos}";
+    }
+
+    private bool CanSubmitLink =>
+        _linkPicked is not null
+        && !string.IsNullOrWhiteSpace(_linkModel.LoginId)
+        && _linkModel.Password.Length >= 8;
+
+    private async Task LoadLinkableAsync()
+    {
+        _linkableLoading = true;
+        _linkable = await _linkApi.GetLinkableEmployeesAsync();
+        _linkableLoading = false;
+    }
+
+    private async Task OnCreateModeChanged(bool fromEmployee)
+    {
+        _createFromEmployee = fromEmployee;
+        if (fromEmployee && (_linkable is null || _linkable.Count == 0)) await LoadLinkableAsync();
+    }
+
+    private void OnLinkEmployeeChanged(string employeeId)
+    {
+        _linkModel.EmployeeId = employeeId;
+        _linkPicked = _linkable?.FirstOrDefault(e => e.EmployeeId == employeeId);
+    }
+
+    private void GenerateLinkTempPassword() => _linkModel.Password = NewTempPassword();
+
+    /// <summary>[추가] — 갈래에 따라 기존 사원 연결 또는 새 사원과 함께.</summary>
+    private async Task SubmitCreateAnyAsync()
+    {
+        if (_createFromEmployee) await SubmitLinkAsync();
+        else await SubmitCreate();
+    }
+
+    private async Task SubmitLinkAsync()
+    {
+        if (_linkPicked is null) return;
+        _busy = true;
+        var r = await _linkApi.CreateForEmployeeAsync(new CreateForEmployeeModel
+        {
+            EmployeeId = _linkPicked.EmployeeId,
+            LoginId = _linkModel.LoginId.Trim(),
+            Password = _linkModel.Password
+        });
+        _busy = false;
+        await AfterLinkAsync(r, _linkPicked.EmpName);
+    }
+
+    /// <summary>연결 결과 공통 처리 — 성공·한도·그 밖(서버 문구 그대로).</summary>
+    private async Task AfterLinkAsync(AccountLinkCallResult r, string name)
+    {
+        if (r.Ok)
+        {
+            _showCreate = false;
+            _showSameName = false;
+            await LoadAsync();
+            _createdUserName = name;
+            _showNextStep = true;
+        }
+        else if (r.SeatFull)
+        {
+            _showCreate = false;
+            _showSameName = false;
+            await LoadSeatsAsync();
+            OpenSeatNotice(true);
+        }
+        else Snackbar.Add(r.Error ?? "처리하지 못했습니다.", Severity.Error);
+    }
+
+    /// <summary>같은 이름 확인 창 [연결] — 입력한 아이디·비밀번호로 그 사원에 계정을 붙인다(사원 새로 안 만듦).</summary>
+    private async Task LinkSameNameAsync(LinkableEmployeeModel c)
+    {
+        _busy = true;
+        var r = await _linkApi.CreateForEmployeeAsync(new CreateForEmployeeModel
+        {
+            EmployeeId = c.EmployeeId,
+            LoginId = _createModel.Email.Trim(),
+            Password = _createModel.Password
+        });
+        _busy = false;
+        await AfterLinkAsync(r, c.EmpName);
+    }
+
+    /// <summary>같은 이름 확인 창 [다른 사람입니다] — 확인 표시를 붙여 같은 요청을 다시 보낸다.</summary>
+    private async Task CreateAsDifferentPersonAsync()
+    {
+        _createModel.ConfirmDifferentPerson = true;
+        _showSameName = false;
+        await SubmitCreate();
+    }
+
+    /// <summary>[구독계정추가] — 3단계 서버 주소로 숫자를 다시 읽고 안내 창을 연다(USERS_SEAT 서버 강제 · P-2).</summary>
+    private async Task OpenSubscribeAsync()
+    {
+        var sub = await _linkApi.GetSeatSubscriptionAsync();
+        if (sub is null)
+        {
+            Snackbar.Add("구독 정보를 불러오지 못했습니다. 잠시 후 다시 해 주세요.", Severity.Warning);
+            return;
+        }
+        _seats = new AccountSeatsModel { Active = sub.Active, BaseLimit = sub.BaseLimit, Extra = sub.Extra, Limit = sub.Limit, Tier = sub.Tier };
+        OpenSeatNotice(false);
     }
 
     // ── 20261005작3 계정 과금 (설계 §5) — 판정은 서버가 정본 · 화면 검사는 편의 ──
@@ -615,7 +955,12 @@ else
         if (SeatsFull) { OpenSeatNotice(true); return; }
         _createModel = new() { Role = "User" };
         _showCreatePassword = false; // 항상 마스킹 상태로 시작
+        // 20261005작5 §4 — 기본은 「기존 사원에서 고르기」. 목록은 열 때마다 새로 읽는다(다른 창에서 막 연결됐을 수 있다).
+        _createFromEmployee = true;
+        _linkModel = new();
+        _linkPicked = null;
         _showCreate = true;
+        await LoadLinkableAsync();
     }
 
     private bool CanSubmitCreate =>
@@ -627,9 +972,17 @@ else
     {
         _busy = true;
         // ⬛ var (ok, error) = await UserSvc.CreateAsync(_createModel);
-        var created = await _seatApi.CreateAsync(_createModel);
+        // ⬛ var created = await _seatApi.CreateAsync(_createModel);  ← 20261005작5: 같은 이름 사원 응답(후보)까지 읽는 호출로
+        var created = await _linkApi.CreateWithNewEmployeeAsync(_createModel);
         var (ok, error) = (created.Ok, created.Error);
         _busy = false;
+        if (!ok && created.SameNameEmployee && created.Candidates.Count > 0)
+        {
+            // 20261005작5 V5-06 ② — 같은 이름의 재직·미등록 사원이 있다 ⇒ 연결할지 묻는다(막지는 않는다 — 동명이인)
+            _sameNameCandidates = created.Candidates.ToList();
+            _showSameName = true;
+            return;
+        }
         if (!ok && created.SeatFull)
         {
             // 서버가 막았다(경쟁·화면 낡음) — 같은 안내 창
@@ -823,10 +1176,12 @@ else
     // ── 유틸 ──
     private void GenerateTempPassword()
     {
-        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-        var rand = new Random();
-        _createModel.Password = new string(Enumerable.Range(0, 12).Select(_ => chars[rand.Next(chars.Length)]).ToArray());
+        // ⬛ 본문(문자표·Random·12자)은 NewTempPassword 로 옮겼다 — 20261005작5: 「기존 사원에서 고르기」 칸도 같은 규칙
+        _createModel.Password = NewTempPassword();
     }
+
+    // ⬛ 종전 본문: 문자표 + new Random() + 12자 — 작5 §8-8(CodeQL insecure-randomness): 사원관리와 같은 함수 하나(AccountTempPassword)로
+    private static string NewTempPassword() => AccountTempPassword.New();
 
     private static string PasswordHint(string pw)
     {
