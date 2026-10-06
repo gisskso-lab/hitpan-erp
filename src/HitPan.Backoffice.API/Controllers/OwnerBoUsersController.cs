@@ -13,7 +13,13 @@ namespace HitPan.Backoffice.API.Controllers;
 // 흐름:
 //   - List/Get: 즉시 실행
 //   - Create/Delete: 4-eyes — 요청자 1명 + 다른 Owner 1명 승인 필요
-//   - Update (role 변경): 4-eyes
+//   - Update (role 변경): 4-eyes   ⚠️ **미구현** (머지 전 교정 M-4 · [5] CTO 쟁점 4 · 2026-10-07)
+//       이 컨트롤러에 **역할을 바꾸는 경로가 없다.** `UPDATE bo_users` 는 레포 전체에 2곳이고 둘 다 `is_active` 다
+//       (여기 :184 · OwnerApprovalController.cs:192 — PM·CTO 가 각각 grep 으로 확인).
+//       🔴 그래서 지금은 「본사 역할 하향이 즉시 안 먹는다」(설계 「정정 1」)가 **피해를 내지 않는다** —
+//          역할을 바꿀 제품 경로 자체가 0건이기 때문이다.
+//       🔴🔴 **봉인 조건**: 본사 역할 변경 UI·API 를 **2차수 F-5 보다 먼저 내보내지 마라.**
+//          토큰 수명이 기본 8시간이므로 먼저 내보내면 「권한을 낮췄는데 8시간 안 먹는다」가 그 즉시 생긴다.
 //   - Update (name/is_active 토글): 즉시 실행, 감사로그 남김
 //
 // 헌법 정합:

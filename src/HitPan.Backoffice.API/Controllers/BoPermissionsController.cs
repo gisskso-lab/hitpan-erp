@@ -68,6 +68,13 @@ public class BoPermissionsController : ControllerBase
                 return NotFound(new { success = false, message = "권한을 찾을 수 없습니다." });
             return Ok(new { success = true, message = "권한이 갱신되었습니다.", allowedRoles = filtered });
         }
+        // 🔴 20261007작10 ①사이클 갈래 ㄱ (설계 §1-4) — 저장 거부는 서버 오류가 아니다. 400 + 사유 문장(한글).
+        //    사유를 그대로 내보내는 이유: 「저장했는데 왜 안 되냐」를 화면에서 바로 알 수 있어야 한다.
+        catch (BoPermissionRoleRejectedException ex)
+        {
+            _logger.LogWarning(ex, "[BoPermissions] 저장 거부 key={Key}", key);
+            return BadRequest(new { success = false, message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[BoPermissions] 갱신 실패 key={Key}", key);

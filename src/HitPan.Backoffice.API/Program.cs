@@ -19,8 +19,26 @@ public class Program
 
         var builder = WebApplication.CreateBuilder(args);
 
-        builder.Services.AddControllers();
+        // 🔴🔴 20261007작10 ①사이클 갈래 ㄱ — 백오피스 서버 강제 **등록 한 곳** (설계 §1-2 · PM 결재 P-1·P-5).
+        //   ⓞ 라이브 계정 판독(캐시 없음) + ① 거부 기본값 = BoAccessGuard (전역 인증필터)
+        //   ② 범위값 덮어쓰기                              = ResellerScopeArgumentFilter (전역 액션필터)
+        //   ⇒ 대리점 토큰은 [ResellerScoped] 가 붙은 액션 외에는 **전부 403**.
+        //      그래서 기존 10컨트롤러 36엔드포인트를 **한 줄도 고치지 않고** 닫았다(헌법 #1 추가만).
+        //   🔴 이 두 줄을 지우면 36엔드포인트가 다시 열린다 — 게이트 G-1·G-2·G-4 가 그 상태를 빨간불로 잡는다.
+        //      (봉합 전 FAIL 실측: 이 두 줄 없이 대리점 토큰으로 api/backoffice/tenants 호출 → 200 + 전 고객사 반환)
+        builder.Services.AddControllers(o =>
+        {
+            o.Filters.Add<HitPan.Backoffice.API.Filters.BoAccessGuard>();
+            o.Filters.Add<HitPan.Backoffice.API.Filters.ResellerScopeArgumentFilter>();
+        });
         builder.Services.AddEndpointsApiExplorer();
+        // ⓞ 판독기 — 요청당 1회 · **캐시 없음**(설계 §3-3-나). IMemoryCache 를 끼우지 마라(G-8ㄷ 가 잡는다).
+        builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IBoLiveAccountReader,
+                                      HitPan.Backoffice.API.Services.BoLiveAccountReader>();
+        // ③ 행 범위의 유일한 출처 — 토큰만 읽는다(헌법 #2).
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddScoped<HitPan.Backoffice.API.Services.IResellerScope,
+                                   HitPan.Backoffice.API.Services.ResellerScope>();
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IEmailSender, HitPan.Backoffice.API.Services.EmailSender>();
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.IContractPdfGenerator, HitPan.Backoffice.API.Services.ContractPdfGenerator>();

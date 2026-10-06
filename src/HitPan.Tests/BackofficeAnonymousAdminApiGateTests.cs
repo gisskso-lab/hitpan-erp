@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,13 @@ using Microsoft.Extensions.Hosting;
 
 namespace HitPan.Tests;
 
+// 🔴🔴 머지 전 교정 M-3 ([5] CTO 쟁점 3) — **이 게이트의 초록은 `BoAccessGuard` 의 증거가 아니다.**
+//   20261007작10 교정⑤ 로 이 호스트는 `IBoLiveAccountReader` 를 대역으로 바꾼다(아래 Factory).
+//   게다가 여기서 발급하는 토큰은 `sub` + `account_type` 뿐이라 `role`·`reseller_id` 가 없다
+//   ⇒ 가드의 ⓞ 라이브 판독과 ① 거부 기본값이 이 게이트에서 **통째로 무력**이다.
+//   거짓 초록은 없다(이 게이트가 재는 축 = 관리 API 가 익명으로 열려 있지 않은가 · 그 축은 실물 그대로 돈다).
+//   그러나 **가드 fail-closed·갈래 판정의 커버는 작10 G-8(격리 실DB)뿐**이다 — 여기 초록을 그 증거로 쓰지 마라.
+//
 // 🔴 20261007작11 게이트 3 — 「익명으로 열린 **관리** API 가 생기면 빨간불」
 //
 // 왜 이 게이트가 필요했나 (사고 사실 · 작11 §1):
@@ -77,6 +85,24 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
         internal const string NoDbConnectionString =
             "Server=127.0.0.1;Port=1;Database=hitpan_w11_gate_nonexistent";
 
+        /// <summary>
+        /// 🔴 교정⑤ 대역 — ⓞ 라이브 판독만 대신한다(살아 있는 본사 계정 1개). 어느 <c>sub</c> 든 같은 답을 준다:
+        /// 이 게이트가 발급하는 토큰의 <c>sub</c> 는 하나뿐이고, 대리점 토큰의 403 은 **실물 정책**
+        /// (<c>PlatformAdmin</c>)이 내는 것이어야 이 게이트가 재려는 것을 잰다.
+        /// </summary>
+        private sealed class W11LiveAccountStub : HitPan.Backoffice.API.Services.IBoLiveAccountReader
+        {
+            public Task<HitPan.Backoffice.API.Services.BoLiveAccount> ReadAsync(
+                string sub, CancellationToken ct = default) =>
+                Task.FromResult(new HitPan.Backoffice.API.Services.BoLiveAccount
+                {
+                    Found = true,
+                    IsActive = true,
+                    EffectiveRole = HitPan.Backoffice.API.Security.BoRoles.PlatformOwner,
+                    ResellerId = null,
+                });
+        }
+
         protected override IHost CreateHost(IHostBuilder builder)
         {
             // Program.cs:51-57 — 시크릿 미설정·DEV- 접두어면 기동 중단. 게이트 전용 값을 넣는다.
@@ -96,6 +122,21 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
                     ["ConnectionStrings:BackofficeDb"] = NoDbConnectionString,
                     ["ConnectionStrings:Default"] = NoDbConnectionString
                 }));
+
+            // 🔴 20261007작10 §2-7 교정⑤ — **합류 상호작용** (작10 가드 × 작11 게이트)
+            //   작10 BoAccessGuard 는 인증된 요청마다 **라이브 계정 판독**을 하고, 판독이 실패하면
+            //   fail-closed 403 을 낸다(의도된 보안 성질). 이 게이트는 외부 실호출 0 을 위해 연결문자열을
+            //   **죽은 포트**로 덮으므로(위 M-1) 그 판독이 반드시 실패한다 ⇒ 본사관리자 양성 2건
+            //   (G-W11-3 · G-W11-4, 역할값 2개 = 4건)이 403 으로 FAIL 했다.
+            //   🔴 격리 실측: 교정 ①②④ 를 적용하기 **전**, 합류 커밋(eea96c13)에서도 **같은 4건이 FAIL** 이다
+            //      ⇒ 교정이 낸 회귀가 아니라 **합류 자체의 사고**다(10/7 작8 「갈래별 0/0 ≠ 합류 0/0」과 같은 모양).
+            //   이 게이트가 재는 축은 「관리 API 가 익명으로 열려 있지 않은가」다. 계정 판독의 즉시성은
+            //   **작10 G-8** 의 축이고 그쪽은 격리 DB 로 따로 잰다. 그래서 **판독만** 대역으로 바꾼다 —
+            //   인증(JwtBearer) · 인가(Policy) · 가드 · 컨트롤러는 **전부 실물 그대로** 돈다.
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton<HitPan.Backoffice.API.Services.IBoLiveAccountReader, W11LiveAccountStub>();
+            });
         }
     }
 
