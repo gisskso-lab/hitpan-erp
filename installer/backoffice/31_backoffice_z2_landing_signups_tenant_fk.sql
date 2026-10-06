@@ -1,9 +1,17 @@
 -- ════════════════════════════════════════════════════════════════════════
--- 30_backoffice_z2_landing_signups_tenant_fk.sql
+-- 31_backoffice_z2_landing_signups_tenant_fk.sql
 -- 작업지시서 20261006작8 §1 (Z2) 갈래 가 — 대리점 꼬리표 사슬: FK 신설 + backfill 1회
 --
+-- 🔧 번호 교정 2026-10-07 ([4] 작업리뷰서 §5-1 · 머지 전 필수):
+--   이 파일은 갈래 가에서 `30_backoffice_z2_...` 로 났고, 같은 사이클 갈래 다가
+--   `30_backoffice_tenants_extra_accounts.sql` 로 **같은 번호 30** 을 썼다.
+--   SchemaMigrator 는 파일명 **전체** Ordinal 정렬 + _schema_migrations 의 file_name PK 라
+--   skip 사고는 없지만, 작업지시서 §6 「번호 겹침 금지」 위반이다.
+--   멱등 키가 **파일명** 이므로 배포 후 개명은 재실행을 부른다 ⇒ 미배포 상태인 머지 전에 31 로 개명.
+--
 -- 적용 방식 (백오피스 진실원 — SchemaMigrator.cs 실측 2026-10-06):
---   - installer/backoffice/*.sql 을 파일명 Ordinal 번호순으로 적용 (00→10→20→30→90→91).
+--   - installer/backoffice/*.sql 을 파일명 Ordinal 번호순으로 적용
+--     (실측 2026-10-07 현재 순서: 00→10→11→20→30→31→90→91).
 --   - _schema_migrations (파일명 PK + 내용 SHA256) 로 같은 내용은 1회만 — 멱등.
 --   - 파일 자체도 재실행 안전해야 한다: 전부 IF NOT EXISTS · backfill 은 tenant_id IS NULL 행만.
 --   - ERP 의 DB-NN 방식(src/HitPan.API/Migrations/SQL)이 아니다 — 백오피스는 이 폴더가 진실원.
