@@ -26,6 +26,13 @@
     <!-- 🔴 20261006작8 갈래 가 (Z2) — BoSignupTenantKeyGate 가 백오피스 실물
          (SchemaMigrator·SignupsAdminController·InstallerBootstrapController)을 직접 불러
          동명 회사 격리·backfill 검산을 동작으로 잰다. SQL 복사본 판정 금지(작14 F-2 재발 방지). -->
+    <!-- 🔴 20261006작8 갈래 나(Z3) — 정산 집계(ResellerSettlementCalculator)·SchemaMigrator 를
+         **실제로 불러** 재기 위해 참조한다. 사고: 토스는 'confirmed' 를 기록하는데 정산은
+         'approved' 를 찾아 정산 0원 — 글자검사로는 못 잡는다. 게이트가 격리 DB 에
+         실물 마이그레이터로 스키마를 올리고 실물 계산기를 불러 금액을 본다. -->
+    <!-- 🔴 20261006작8 갈래 다(Z5) — 웹훅 송신·수신 실물(WebhookOutboundService·WebhookInboundController)을
+         불러 ExtraAccounts 전환을 payload·수신 반영까지 동작으로 잰다. -->
+
     <ProjectReference Include="..\HitPan.Backoffice.API\HitPan.Backoffice.API.csproj" />
   </ItemGroup>
 

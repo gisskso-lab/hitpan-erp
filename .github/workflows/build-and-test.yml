@@ -487,6 +487,15 @@ jobs:
           #    🔴 개발 PC 는 CREATE DATABASE 거부라 로컬 무력화 실측은 격리 인스턴스(33306 선례)로만 가능 —
           #       실측 기록: docs/개발/백오피스/20261006작8_갈래다_Z5_개발명세서.md §4
           GATES="$GATES|WebhookAccountVocabGate"
+          # 🔴 20261006작8 갈래 나(Z3) G-2 (BackofficeSettlementStatusGateTests · 격리 DB ·
+          #    실물 SchemaMigrator + ResellerSettlementCalculator). 토스는 'confirmed' 기록,
+          #    정산은 'approved' 판독 → 정산 0원(선행검증 A-②). 사장님 Q-2 결재 통일값 = 'confirmed'.
+          #    등록 근거는 "초록불이라서" 가 아니라 **전후 대조**다(20261006 로컬 빌린 시험 DB 실측):
+          #      · 봉합 전(Calculator 'approved' 판독) → G-2② FAIL "정산 0원 재현 — gross 실측: 0"
+          #      · 봉합 후('confirmed' 판독)           → gross 110,000 일치 PASS
+          #    대조군: pending 결제·다른 달 confirmed 결제가 섞이면 G-2③ 빨간불.
+          #    근거: docs/개발/백오피스/20261006작8_갈래나_Z3_개발명세서.md §4
+          GATES="$GATES|BackofficeSettlementStatusGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
