@@ -89,10 +89,16 @@
          둘 다 Blazor·ASP.NET 파이프라인 비의존(Dapper·MySqlConnector·IConfiguration·ILogger 만).
          HitPan.Backoffice.API 는 Web SDK 라 통째 참조하지 않는다(ApiErrorText 선례).
          ⚠️ 두 파일은 Web SDK 암시 using 에 기대므로 아래 Using 2줄이 필요하다. -->
-    <Compile Include="..\HitPan.Backoffice.API\Services\WebhookOutboundService.cs"
+    <!-- ⬛ <Compile Include="..\HitPan.Backoffice.API\Services\WebhookOutboundService.cs"
              Link="Linked\WebhookOutboundService.cs" />
     <Compile Include="..\HitPan.Backoffice.API\Services\SchemaMigrator.cs"
-             Link="Linked\SchemaMigrator.cs" />
+             Link="Linked\SchemaMigrator.cs" /> -->
+    <!-- 🔴 [4]·[3-V] 교정 2026-10-07 (⓪사이클 머지 산물) — 위 2줄 철회.
+         갈래 다는 "Web SDK 라 통째 참조 못 한다" 전제로 소스를 **링크**했고, 같은 사이클의
+         갈래 가·나는 같은 어셈블리를 **ProjectReference**(위 36행)로 끌어왔다. 4갈래 합류 후
+         같은 형이 소스·어셈블리 양쪽에 생겨 CS0436 7건(#19 위반) + CS0535 1건으로 빌드가 끊겼다.
+         ⇒ ProjectReference 가 이미 같은 형을 주므로 링크는 불필요 — 전제가 틀렸음이 실측으로 확인됐다
+           (Backoffice.API 통째 참조는 가·나 갈래에서 실제로 되고 있다). 기록 보존을 위해 지우지 않고 ⬛. -->
   </ItemGroup>
 
   <ItemGroup>

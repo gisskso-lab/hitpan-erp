@@ -464,6 +464,9 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
     {
         public Task EmitSubscriptionChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
         public Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
+        // [4]·[3-V] 교정 2026-10-07 — 같은 사이클 갈래 다(Z5)가 인터페이스에 더한 구현체(#12 전수).
+        //   이 대역이 없어 4갈래 합류 빌드가 CS0535 로 끊겼다. 이 게이트는 웹훅을 재지 않으므로 빈 대역.
+        public Task EmitAccountChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class FakeEmail : IEmailSender
