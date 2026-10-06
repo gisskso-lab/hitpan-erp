@@ -19,6 +19,12 @@ jobs:
     name: Build (errors 0 + warnings 0)
     runs-on: windows-latest
     timeout-minutes: 30
+    # 🔴 20261007작10 §2-7 교정④ — 이 잡은 **DB 를 안 띄운다**. 그 사실을 선언한다.
+    #   작10 게이트는 선언 없이 DB 가 없으면 **실패**한다(조용한 초록 차단 · DbGateEnvironment.SkipOrFailStrict).
+    #   ⇒ 여기서 선언하지 않으면 build 잡 전체가 빨간불이 된다. 그리고 **이 잡의 초록은 그 게이트의 증거가 아니다**
+    #     (증거는 db-gate 잡뿐 — 9/22 「build 잡 초록은 증거 아님」과 같은 규칙).
+    env:
+      HITPAN_GATE_SKIP_OK: "1"
 
     steps:
       - name: Checkout
