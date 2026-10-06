@@ -458,6 +458,15 @@ jobs:
           # 🔴 20261005작5 사원↔계정 연결 G-E1~E14 (EmployeeAccountLinkGateTests · …DbTests · …DbTests.Pipeline). 작5 전용 한 줄.
           #    갈래1·2·3 합류 전에는 FAIL 이 정상(「갈래N 합류 전」 문구) · 대조군·연결 목록: docs/개발/erp/20261005작5_사원계정연결_개발명세서_게이트.md
           GATES="$GATES|EmployeeAccountLinkGate"
+          # 🔴 20261006작8 갈래 다(Z5) G-3 — 계정 과금 어휘 전환(보내는 쪽만 · WebhookAccountVocabGateTests).
+          #    G-Z5a 송신 payload 캡처(실물 WebhookOutboundService + 실물 SchemaMigrator 로 installer/backoffice 00·30 적용):
+          #      ExtraAccounts 실림 + ExtraDeviceSlots·device-slot 라우트 병행(#37) + account_changed → subscription 라우트.
+          #    G-Z5b 수신부 일치(실물 WebhookInboundController — ERP 수신 코드 무접촉 · 불러서 본다):
+          #      송신 payload 그대로 → local_subscription.extra_accounts 반영 · **대조군** = 키 이름 틀린 payload(값 9)는
+          #      200 인데 값 무변(받지만 안 읽는다). 대조군이 시험 안에 있다 — 송신이 키를 바꾸면 Z5b 양성이 빨간불.
+          #    🔴 개발 PC 는 CREATE DATABASE 거부라 로컬 무력화 실측은 격리 인스턴스(33306 선례)로만 가능 —
+          #       실측 기록: docs/개발/백오피스/20261006작8_갈래다_Z5_개발명세서.md §4
+          GATES="$GATES|WebhookAccountVocabGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
