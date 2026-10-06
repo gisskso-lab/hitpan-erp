@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace HitPan.Tests;
@@ -40,9 +42,11 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
     private const string TestSecret = "W11-GATE-TEST-ONLY-SECRET-32CHARS-MINIMUM-abcdef";
 
     private readonly HttpClient _http;
+    private readonly Factory _factory;
 
     public BackofficeAnonymousAdminApiGate(Factory factory)
     {
+        _factory = factory;
         _http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -51,6 +55,26 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
 
     public class Factory : WebApplicationFactory<HitPan.Backoffice.API.Program>
     {
+        // 🔴 M-1 (2026-10-07 [3-V] 보안상무 병렬검증 교정) — 「시험은 밖으로 나가지 않는다」를 못 박는다.
+        //   이 게이트는 글자 검사가 아니라 실제 호스트를 띄운다(위 주석). 그러면 Program.cs:31 이 등록한
+        //   WebhookDispatcher(BackgroundService) 도 함께 깨어난다. 그 ExecuteAsync 는 **첫 틱을 지연 없이**
+        //   돈다 — Task.Delay 가 TickAsync **뒤에** 있다(WebhookDispatcher.cs:46-57).
+        //   TickAsync 는 ConnectionStrings:BackofficeDb 로 접속해 status='pending' 행을 읽고
+        //   그 행의 target_url 로 **실제 HTTP POST** 를 보낸 다음 행을 UPDATE 한다.
+        //   appsettings.json:12-14 의 기본값이 localhost/hitpan_backoffice 이므로, 그 DB 가 있는 PC·CI 에서는
+        //   시험이 외부 웹훅을 실제 발송하고 데이터를 갱신한다 — 작9 게이트가 지킨 「외부 실호출 0」 과
+        //   헌법 #39(운영 무접촉) 를 깨는 모양이다.
+        //   ⇒ 연결문자열을 **시험 쪽에서** 없는 DB·닫힌 포트로 덮는다. appsettings.json 은 안 고친다(#21).
+        //   Port=1 은 loopback 에서 즉시 거절되므로 바깥으로 나가는 패킷이 0이고, 틱은 OpenAsync 에서
+        //   끊겨 SELECT·POST·UPDATE 어디에도 닿지 못한다. 그 예외는 Dispatcher 의 catch 가 로그로 남긴다(#15).
+        //   이 덮개가 실제로 먹었는지는 G_W11_10 이 돌아가는 앱의 IConfiguration 을 읽어 검산한다.
+        //   🔴 자격증명(Uid·Pwd)은 **가짜여도 적지 않는다.** Port=1 에서 TCP 가 먼저 거절되므로
+        //      인증 단계에 애초에 닿지 않아 불필요하고, TruffleHog SQLServer 탐지기는 가짜 값도
+        //      1건으로 잡는다(실측 run 37518580451). 「가짜니까 괜찮다」로 자격증명 모양을 남기면
+        //      다음 사람이 같은 모양을 복사한다.
+        internal const string NoDbConnectionString =
+            "Server=127.0.0.1;Port=1;Database=hitpan_w11_gate_nonexistent";
+
         protected override IHost CreateHost(IHostBuilder builder)
         {
             // Program.cs:51-57 — 시크릿 미설정·DEV- 접두어면 기동 중단. 게이트 전용 값을 넣는다.
@@ -63,6 +87,13 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            // 앱 자신의 설정 원천(appsettings.json) **뒤에** 얹히므로 이 값이 이긴다.
+            builder.ConfigureAppConfiguration(cfg => cfg.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:BackofficeDb"] = NoDbConnectionString,
+                    ["ConnectionStrings:Default"] = NoDbConnectionString
+                }));
         }
     }
 
@@ -249,5 +280,24 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
         Assert.DoesNotContain("PricingPublicController", names);
         Assert.DoesNotContain("BackofficeAuthController", names);
         Assert.DoesNotContain("LandingSignupController", names);
+    }
+
+    // ── M-1 음성 대조군 — 「시험이 외부로 실제 송신할 수 없다」를 돌아가는 앱에서 검산한다 ──────────
+    //   Factory 의 덮개(위 주석)는 적어 두기만 하면 다음 사람이 지운다. 이 시험은 **실제로 기동한 호스트**의
+    //   IConfiguration 을 읽어, WebhookDispatcher 가 보게 될 연결문자열이 실 DB 를 가리키지 않음을 못 박는다.
+    //   덮개가 빠지거나 먹지 않으면 이 시험이 빨간불이 된다.
+    [Fact]
+    public void G_W11_10_게이트가_실DB를_가리키지_않는다()
+    {
+        var cfg = _factory.Services.GetRequiredService<IConfiguration>();
+        foreach (var key in new[] { "BackofficeDb", "Default" })
+        {
+            var cs = cfg.GetConnectionString(key) ?? "";
+            Assert.Equal(Factory.NoDbConnectionString, cs);
+            // 실 DB 이름·기본 포트가 남아 있으면 WebhookDispatcher 가 첫 틱에 pending 행을 읽고 밖으로 POST 한다.
+            Assert.DoesNotContain("hitpan_backoffice", cs, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("hitpan_erp", cs, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("3306", cs);
+        }
     }
 }
