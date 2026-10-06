@@ -6,7 +6,11 @@ namespace HitPan.Backoffice.API.Services;
 // 대리점 월별 정산 산출 (사장님 결재 2026-06-04, W9)
 //
 // 산출 룰:
-//   1) 해당 월 reseller_id별 tenants에서 발생한 결제 합산 (tenant_payments.status='approved')
+//   1) 해당 월 reseller_id별 tenants에서 발생한 결제 합산 (tenant_payments.status='confirmed')
+//      🔴 20261006작8 Z3 (사장님 Q-2 결재): 결제 상태 통일값 = 'confirmed'.
+//      종전 'approved' 판독은 기록 코드가 0건(선행검증 A-②) — 토스가 'confirmed' 로 적는
+//      결제가 전부 빠져 정산 0원이었다(G-2 전후 대조 실측). 월 축은 approved_at_dt(DATETIME,
+//      11_z3 신설)를 먼저 보고, 옛 행은 varchar approved_at → created_at 순 폴백(#1 병행 보존).
 //   2) commission_amount = gross × (resellers.commission_rate ?? 기본 0.15)
 //   3) incentive_amount = 본 차수 0 (추후 룰 추가 — 분기·연간 보너스)
 //   4) draft 상태로 INSERT, settlement_lines에 산출 근거 저장
@@ -70,8 +74,8 @@ public class ResellerSettlementCalculator : IResellerSettlementCalculator
                 FROM tenants t
                 LEFT JOIN landing_signups ls ON ls.company_name = t.company_name
                 LEFT JOIN tenant_payments tp ON tp.signup_token = ls.signup_token
-                    AND tp.status = 'approved'
-                    AND DATE_FORMAT(COALESCE(tp.approved_at, tp.created_at), '%Y-%m') = @Month
+                    AND tp.status = 'confirmed'
+                    AND DATE_FORMAT(COALESCE(tp.approved_at_dt, tp.approved_at, tp.created_at), '%Y-%m') = @Month
                 WHERE t.reseller_id = @Rid
                 GROUP BY t.tenant_id, t.tenant_code, t.company_name",
                 new { Rid = resellerId, Month = month })).ToList();

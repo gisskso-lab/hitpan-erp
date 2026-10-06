@@ -112,7 +112,15 @@ public class TenantsAdminController : ControllerBase
                     LEFT(t.license_key_hash, 12) AS LicenseHashPrefix,
                     t.subscription_tier AS SubscriptionTier,
                     t.ai_mode AS AiMode,
-                    t.ai_token_monthly_limit AS AiTokenMonthlyLimit
+                    t.ai_token_monthly_limit AS AiTokenMonthlyLimit,
+                    -- Z2 (20261006작8 갈래 가 · 작지 §5 확인 실물): 이 고객사가 어느 가입서에
+                    --   키(FK)로 묶였나 — 화면 글자 한 줄의 받침. NULL = 옛 데이터(글자 폴백).
+                    (SELECT ls.signup_id FROM landing_signups ls
+                      WHERE ls.tenant_id = t.tenant_id
+                      ORDER BY ls.submitted_at DESC LIMIT 1) AS LinkedSignupId,
+                    (SELECT ls.submitted_at FROM landing_signups ls
+                      WHERE ls.tenant_id = t.tenant_id
+                      ORDER BY ls.submitted_at DESC LIMIT 1) AS LinkedSignupSubmittedAt
                 FROM tenants t
                 LEFT JOIN resellers r ON r.reseller_id = t.reseller_id
                 WHERE t.tenant_id = @Id",
@@ -376,6 +384,9 @@ public class TenantsAdminController : ControllerBase
         public string? SubscriptionTier { get; set; }
         public string? AiMode { get; set; }
         public int AiTokenMonthlyLimit { get; set; }
+        // Z2 (20261006작8 갈래 가 · 작지 §5): 키(FK)로 묶인 가입서 — NULL = 옛 데이터(글자 폴백)
+        public long? LinkedSignupId { get; set; }
+        public DateTime? LinkedSignupSubmittedAt { get; set; }
     }
 
     public class PaymentMetaRow

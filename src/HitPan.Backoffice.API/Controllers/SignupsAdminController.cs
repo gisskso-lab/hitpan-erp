@@ -86,13 +86,16 @@ public class SignupsAdminController : ControllerBase
                 -- license_key_plain 폐기 (사장님 결재 2026-06-18, 보안 P0): 평문 시리얼키 영구저장 금지.
                 --   목록에서 시리얼 평문 노출 제거. 분실 시 재발송 API가 신규 시리얼을 재발급(해시만 저장).
                 FROM landing_signups s
-                LEFT JOIN tenants t ON t.tenant_id = (
+                -- Z2 (20261006작8 갈래 가): s.tenant_id 키 조인 우선.
+                --   키가 없는 옛 행(NULL)만 기존 글자+시각 규칙으로 읽기 폴백(#20).
+                --   동명 회사 2건이 같은 tenant 로 겹쳐 보이던 글자 조인 결함 봉합(C-1).
+                LEFT JOIN tenants t ON t.tenant_id = COALESCE(s.tenant_id, (
                     SELECT t2.tenant_id FROM tenants t2
                     WHERE t2.company_name = s.company_name
                       AND t2.created_at >= s.submitted_at
                     ORDER BY t2.created_at ASC
                     LIMIT 1
-                )
+                ))
                 -- 삭제 처리분은 화면에서 뺀다 (2026-08-02 사장님 직권 결재).
                 --   논리삭제라 행은 남지만(결제·정산 추적 고리 보존) 목록에는 보이지 않는다.
                 --   이 한 줄이 빠지면 지웠는데 그대로 보이는 상태가 된다.
@@ -118,7 +121,7 @@ public class SignupsAdminController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
-                "SELECT company_name, email, status, submitted_at FROM landing_signups WHERE signup_id = @Id",
+                "SELECT company_name, email, status, submitted_at, CAST(tenant_id AS CHAR) AS tenant_id FROM landing_signups WHERE signup_id = @Id",
                 new { Id = signupId });
 
             if (signup is null)
@@ -130,24 +133,59 @@ public class SignupsAdminController : ControllerBase
 
             string companyName = signup.company_name;
             DateTime submittedAt = signup.submitted_at;
+            string? signupTenantId = signup.tenant_id;
 
+            // Z2 (20261006작8 갈래 가): 가입서에 tenant_id 키가 있으면 그 키로만 집는다 —
+            //   동명 회사가 몇 건이든 글자 매칭을 타지 않는다(C-1 봉합).
+            string? tenantId = null;
+            if (!string.IsNullOrEmpty(signupTenantId))
+            {
+                tenantId = await db.QueryFirstOrDefaultAsync<string?>(@"
+                    SELECT CAST(tenant_id AS CHAR)
+                    FROM tenants
+                    WHERE tenant_id = @Tid AND status = 'pending'",
+                    new { Tid = signupTenantId });
+            }
+
+            // 🔴 [3-V] I-1 · [4] 발견② 교정 2026-10-07 — **키가 있으면 폴백 금지(fail-closed)**.
+            //   종전엔 키가 있어도 그 tenant 가 pending 이 아니면 아래 글자 폴백으로 내려갔다 ⇒
+            //   동명의 **다른** 고객사를 승인하고 가입서의 기존 키를 그 키로 덮어썼다(오귀속 · 게이트 G-1f).
+            //   키가 있는데 조건에 안 맞으면 사람에게 돌린다 — 추측으로 잇지 않는다(반자동 원칙).
+            //   폴백 자체는 살린다(#20) — 키가 **없는** 옛 행만 아래 글자 경로를 탄다(대조군 G-1e).
+            if (!string.IsNullOrEmpty(signupTenantId) && string.IsNullOrEmpty(tenantId))
+            {
+                _logger.LogWarning(
+                    "[SignupsAdmin] approve 거부 — 가입서에 연결된 고객사가 승인대기(pending)가 아니다. "
+                    + "글자 폴백 금지(오귀속 차단) signupId={Id} signupTenantId={Tid}",
+                    signupId, signupTenantId);
+                return Conflict(new
+                {
+                    success = false,
+                    message = "이 신청에 연결된 고객사가 승인 대기 상태가 아닙니다. 고객사 상태를 확인해 주세요."
+                });
+            }
+
+            // 키가 없는 옛 행(NULL)만 읽기 폴백(#20) —
             // 사고 #5 봉합 (2026-06-10): signup ↔ tenant 1:1 매칭 — submitted_at에 가장 가까운 pending tenant 1건만
             // 이전 버그: WHERE company_name AND status='pending' → 같은 회사명 여러 pending이면 모두 같은 키 저장
-            var tenantId = await db.QueryFirstOrDefaultAsync<string?>(@"
-                SELECT CAST(tenant_id AS CHAR)
-                FROM tenants
-                WHERE company_name = @CompanyName AND status = 'pending'
-                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
-                LIMIT 1",
-                new { CompanyName = companyName, SubmittedAt = submittedAt });
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                tenantId = await db.QueryFirstOrDefaultAsync<string?>(@"
+                    SELECT CAST(tenant_id AS CHAR)
+                    FROM tenants
+                    WHERE company_name = @CompanyName AND status = 'pending'
+                    ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                    LIMIT 1",
+                    new { CompanyName = companyName, SubmittedAt = submittedAt });
+            }
 
             if (string.IsNullOrEmpty(tenantId))
                 return NotFound(new { success = false, message = "신청에 대응하는 고객사를 찾을 수 없습니다." });
 
-            // 1) signup 승인 처리
+            // 1) signup 승인 처리 + Z2: 승인 시점에 tenant_id 기록 — 이후 생기는 행은 전부 키로 연결
             await db.ExecuteAsync(
-                "UPDATE landing_signups SET status = 'approved' WHERE signup_id = @Id",
-                new { Id = signupId });
+                "UPDATE landing_signups SET status = 'approved', tenant_id = @TenantId WHERE signup_id = @Id",
+                new { Id = signupId, TenantId = tenantId });
 
             // 2) 시리얼(라이선스 키) 발급 — HITP-XXXX-XXXX-XXXX-XXXX, Crockford Base32 (어벤져스 A안)
             //    헌법 #18·#22 정합 — DB에는 HMAC 해시만 저장, 평문은 응답 1회만 노출
@@ -260,7 +298,7 @@ public class SignupsAdminController : ControllerBase
             await using var db = await OpenAsync(ct);
 
             var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
-                "SELECT company_name, email, status, submitted_at FROM landing_signups WHERE signup_id = @Id",
+                "SELECT company_name, email, status, submitted_at, CAST(tenant_id AS CHAR) AS tenant_id FROM landing_signups WHERE signup_id = @Id",
                 new { Id = signupId });
 
             if (signup is null)
@@ -273,16 +311,33 @@ public class SignupsAdminController : ControllerBase
             string companyName = signup.company_name;
             string customerEmail = signup.email;
             DateTime submittedAt = signup.submitted_at;
+            string? signupTenantId = signup.tenant_id;
 
+            // Z2 (20261006작8 갈래 가): 가입서의 tenant_id 키로만 집는다 — 동명 회사가 있어도
+            //   엉뚱한 회사의 시리얼을 갈아끼우는 사고가 원리적으로 불가능해진다(C-1).
+            TenantInfoRow? info = null;
+            if (!string.IsNullOrEmpty(signupTenantId))
+            {
+                info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(@"
+                    SELECT CAST(tenant_id AS CHAR) AS TenantId, domain_alias AS DomainAlias
+                    FROM tenants
+                    WHERE tenant_id = @Tid",
+                    new { Tid = signupTenantId });
+            }
+
+            // 키가 없는 옛 행(NULL)만 읽기 폴백(#20) —
             // 봉합 2026-06-17 (v1.2.13 P0-D): 동명 회사 사고 차단 — submitted_at에 가장 가까운 tenant 1건만
             //   이전 사고: ORDER BY created_at DESC = 같은 회사명 신규 가입자에게 발송 사고
-            var info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(@"
-                SELECT CAST(tenant_id AS CHAR) AS TenantId, domain_alias AS DomainAlias
-                FROM tenants
-                WHERE company_name = @CompanyName
-                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
-                LIMIT 1",
-                new { CompanyName = companyName, SubmittedAt = submittedAt });
+            if (info is null)
+            {
+                info = await db.QueryFirstOrDefaultAsync<TenantInfoRow>(@"
+                    SELECT CAST(tenant_id AS CHAR) AS TenantId, domain_alias AS DomainAlias
+                    FROM tenants
+                    WHERE company_name = @CompanyName
+                    ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                    LIMIT 1",
+                    new { CompanyName = companyName, SubmittedAt = submittedAt });
+            }
 
             if (info is null || string.IsNullOrWhiteSpace(info.TenantId))
                 return BadRequest(new { success = false, message = "이 고객사의 고객사 정보를 찾을 수 없습니다." });
@@ -395,7 +450,8 @@ public class SignupsAdminController : ControllerBase
 
             var signup = await db.QueryFirstOrDefaultAsync<dynamic>(
                 @"SELECT signup_id, signup_token, company_name, email, phone, plan_type,
-                         desired_domain, reseller_code, status, submitted_at
+                         desired_domain, reseller_code, status, submitted_at,
+                         CAST(tenant_id AS CHAR) AS tenant_id
                   FROM landing_signups WHERE signup_id = @Id",
                 new { Id = signupId });
 
@@ -408,16 +464,32 @@ public class SignupsAdminController : ControllerBase
 
             string companyName = signup.company_name;
             DateTime submittedAt = signup.submitted_at;
+            string? signupTenantId = signup.tenant_id;
 
-            // 대응 tenant 조회 — approve 와 동일한 매칭 규칙(회사명 + 신청시각 근접).
-            //   사고 #5(동명 회사) 재발 차단: 2건 이상이면 지우지 않고 사람에게 돌린다.
-            var tenants = (await db.QueryAsync<dynamic>(@"
-                SELECT CAST(tenant_id AS CHAR) AS tenant_id, tenant_code, domain_alias, status
-                FROM tenants
-                WHERE company_name = @CompanyName
-                ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
-                LIMIT 2",
-                new { CompanyName = companyName, SubmittedAt = submittedAt })).ToList();
+            // Z2 (20261006작8 갈래 가): 가입서에 tenant_id 키가 있으면 그 1건만 집는다 —
+            //   동명 회사가 몇 건이든 기계가 단정할 수 있으므로 Conflict 로 돌리지 않는다.
+            //   키가 없는 옛 행(NULL)만 기존 글자 매칭 폴백(#20) — 2건 이상이면 종전대로 fail-closed.
+            List<dynamic> tenants;
+            if (!string.IsNullOrEmpty(signupTenantId))
+            {
+                tenants = (await db.QueryAsync<dynamic>(@"
+                    SELECT CAST(tenant_id AS CHAR) AS tenant_id, tenant_code, domain_alias, status
+                    FROM tenants
+                    WHERE tenant_id = @Tid",
+                    new { Tid = signupTenantId })).ToList();
+            }
+            else
+            {
+                // 대응 tenant 조회 — approve 와 동일한 매칭 규칙(회사명 + 신청시각 근접).
+                //   사고 #5(동명 회사) 재발 차단: 2건 이상이면 지우지 않고 사람에게 돌린다.
+                tenants = (await db.QueryAsync<dynamic>(@"
+                    SELECT CAST(tenant_id AS CHAR) AS tenant_id, tenant_code, domain_alias, status
+                    FROM tenants
+                    WHERE company_name = @CompanyName
+                    ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, @SubmittedAt))
+                    LIMIT 2",
+                    new { CompanyName = companyName, SubmittedAt = submittedAt })).ToList();
+            }
 
             string? removedTenantCode = null;
             string? freedAlias = null;

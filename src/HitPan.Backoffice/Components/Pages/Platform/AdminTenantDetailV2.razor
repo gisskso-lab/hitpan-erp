@@ -116,6 +116,20 @@ else
                         }
                     </div>
                 </div>
+                @* Z2 (20261006작8 갈래 가 · 작지 §5 확인 실물): 이 고객사가 어느 가입서에 묶였나 — 글자 한 줄 *@
+                <div class="bo-row">
+                    <div class="bo-row-label">가입서 연결</div>
+                    <div class="bo-row-value">
+                        @if (_item.LinkedSignupId.HasValue)
+                        {
+                            <span>가입서 #@_item.LinkedSignupId (@(_item.LinkedSignupSubmittedAt?.ToString("yyyy-MM-dd")) 신청)에 키로 묶임</span>
+                        }
+                        else
+                        {
+                            <span style="color:#9CA3AF;">연결된 가입서 없음 — 옛 데이터는 회사명으로만 짐작합니다</span>
+                        }
+                    </div>
+                </div>
                 @if (_item.TrialEndsAt.HasValue)
                 {
                     @RowText("체험 만료", _item.TrialEndsAt.Value.ToString("yyyy-MM-dd"))
@@ -352,6 +366,9 @@ else
         public string? SubscriptionTier { get; set; }
         public string? AiMode { get; set; }
         public int AiTokenMonthlyLimit { get; set; }
+        // Z2 (20261006작8 갈래 가 · 작지 §5): 키(FK)로 묶인 가입서 — NULL = 옛 데이터
+        public long? LinkedSignupId { get; set; }
+        public DateTime? LinkedSignupSubmittedAt { get; set; }
     }
 
     public class PaymentMeta

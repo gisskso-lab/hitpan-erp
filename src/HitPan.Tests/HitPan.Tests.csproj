@@ -23,6 +23,17 @@
          전부 통과하고도 살아남았다. 소스 글자를 읽는 시험으로는 절대 못 잡는다.
          ⇒ 시험이 CompanyBootstrapProvisioner 를 직접 불러 **표에 행이 생기는지 눈으로 본다.** -->
     <ProjectReference Include="..\HitPan.API\HitPan.API.csproj" />
+    <!-- 🔴 20261006작8 갈래 가 (Z2) — BoSignupTenantKeyGate 가 백오피스 실물
+         (SchemaMigrator·SignupsAdminController·InstallerBootstrapController)을 직접 불러
+         동명 회사 격리·backfill 검산을 동작으로 잰다. SQL 복사본 판정 금지(작14 F-2 재발 방지). -->
+    <!-- 🔴 20261006작8 갈래 나(Z3) — 정산 집계(ResellerSettlementCalculator)·SchemaMigrator 를
+         **실제로 불러** 재기 위해 참조한다. 사고: 토스는 'confirmed' 를 기록하는데 정산은
+         'approved' 를 찾아 정산 0원 — 글자검사로는 못 잡는다. 게이트가 격리 DB 에
+         실물 마이그레이터로 스키마를 올리고 실물 계산기를 불러 금액을 본다. -->
+    <!-- 🔴 20261006작8 갈래 다(Z5) — 웹훅 송신·수신 실물(WebhookOutboundService·WebhookInboundController)을
+         불러 ExtraAccounts 전환을 payload·수신 반영까지 동작으로 잰다. -->
+
+    <ProjectReference Include="..\HitPan.Backoffice.API\HitPan.Backoffice.API.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -72,10 +83,29 @@
     <!-- 🔴 20261005작2 — 되돌리기 [예] 뒤 감시 판정·루프(순수 C#) — 가짜 시계·응답으로 실제 루프를 돌린다(G-W1~W9). -->
     <Compile Include="..\HitPan.Web\Services\RollbackWatch.cs"
              Link="Linked\RollbackWatch.cs" />
+
+    <!-- 🔴 20261006작8 갈래 다(Z5) G-3 — 웹훅 송신 payload 에 ExtraAccounts 가 **실제로 실리는지** 재려고
+         백오피스 송신 서비스와 스키마 적용기를 소스로 링크한다(같은 이유 — 글자검사가 아니라 불러서 본다).
+         둘 다 Blazor·ASP.NET 파이프라인 비의존(Dapper·MySqlConnector·IConfiguration·ILogger 만).
+         HitPan.Backoffice.API 는 Web SDK 라 통째 참조하지 않는다(ApiErrorText 선례).
+         ⚠️ 두 파일은 Web SDK 암시 using 에 기대므로 아래 Using 2줄이 필요하다. -->
+    <!-- ⬛ <Compile Include="..\HitPan.Backoffice.API\Services\WebhookOutboundService.cs"
+             Link="Linked\WebhookOutboundService.cs" />
+    <Compile Include="..\HitPan.Backoffice.API\Services\SchemaMigrator.cs"
+             Link="Linked\SchemaMigrator.cs" /> -->
+    <!-- 🔴 [4]·[3-V] 교정 2026-10-07 (⓪사이클 머지 산물) — 위 2줄 철회.
+         갈래 다는 "Web SDK 라 통째 참조 못 한다" 전제로 소스를 **링크**했고, 같은 사이클의
+         갈래 가·나는 같은 어셈블리를 **ProjectReference**(위 36행)로 끌어왔다. 4갈래 합류 후
+         같은 형이 소스·어셈블리 양쪽에 생겨 CS0436 7건(#19 위반) + CS0535 1건으로 빌드가 끊겼다.
+         ⇒ ProjectReference 가 이미 같은 형을 주므로 링크는 불필요 — 전제가 틀렸음이 실측으로 확인됐다
+           (Backoffice.API 통째 참조는 가·나 갈래에서 실제로 되고 있다). 기록 보존을 위해 지우지 않고 ⬛. -->
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- 20261006작8 Z5 — 위 백오피스 소스 링크용(Web SDK 암시 using 대체). 기존 파일의 명시 using 과 중복돼도 경고 없음. -->
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
 
 </Project>
