@@ -540,6 +540,9 @@ public sealed class UserService : IUserService
         // E-5 — 첫 문장 = 판정기(잠금 포함).
         // 🔴 10/5 봉합1 P2-05 — 첫 문장은 잠금 손잡이(행 없으면 이름 잠금).
         await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
+        // ⬛ [작5 §8-12 V5-22 전] 좌석 잠금 → users X(UPDATE) → employees S(하위질의) — 퇴사(employees → users)와 역순 ⇒ 1213.
+        //   🔴 좌석 잠금 바로 뒤 · users 보다 먼저 연결 사원 행을 잠근다(좌석 → employees → users · CreateForEmployeeAsync P3-10 과 같은 순서).
+        await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
         await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
 
         // ⬛ [작5 §8-7 P2-13 전] users 만 봤다 — 옛 퇴사자 계정(is_active=0 · is_deleted=0)을 대표 손으로도 되살렸다.
@@ -882,6 +885,9 @@ public sealed class UserService : IUserService
         if (seenRoles.All(IsGeneralEmployeeRole))
         using (var tx = _db.BeginTransaction())
         {
+            // ⬛ [작5 §8-12 V5-22 전] 첫 문장이 UPDATE users(X) → 하위질의 employees S — 퇴사(employees → users)와 역순 ⇒ 1213.
+            //   🔴 트랜잭션 첫 문장 = 연결 사원 행 잠금(퇴사와 같은 순서 employees → users). 원자 UPDATE 술어는 그대로.
+            await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
             var affected = await _db.ExecuteAsync(new CommandDefinition(
                 // ⬛ [P2-12 전] ... AND {StaffTouchablePredicate}  (직무 조건 없음)
                 $"""
@@ -919,6 +925,9 @@ public sealed class UserService : IUserService
         {
             await using (var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false))
             {
+                // ⬛ [작5 §8-12 V5-22 전] 좌석 → users X → employees S(하위질의 ×2) — 퇴사와 역순 ⇒ 1213.
+                //   🔴 좌석 잠금 바로 뒤 · users 보다 먼저 연결 사원 행(좌석 → employees → users).
+                await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
                 await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
 
                 var affected = await _db.ExecuteAsync(new CommandDefinition(
@@ -953,6 +962,34 @@ public sealed class UserService : IUserService
             "SELECT e.role FROM employees e WHERE e.tenant_id = @TenantId AND e.user_id = @UserId",
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false))
         .Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// 🔴 작5 §8-12 V5-22 — 그 계정에 연결된 사원 행을 <b>users 보다 먼저</b> 잠근다(퇴사 <c>EmployeeService.ResignAsync</c> 와 같은 순서
+    /// employees → users · 1213 교착 방지). 연결 사원이 없으면 아무것도 안 잠그고 그냥 진행(사원 행 없는 옛 계정).
+    /// </summary>
+    /// <remarks>
+    /// <para>① 어느 사원 행인지는 <b>잠금 없는 읽기</b>로 찾고 ② <b>기본키</b>(<c>employee_id</c>)로 <c>FOR UPDATE</c> 한다.
+    /// 보조 색인 <c>uq_employees_tenant_user</c>(tenant_id, user_id)로 바로 <c>FOR UPDATE</c> 하면 InnoDB 는 <b>보조 색인 줄을 먼저</b> 잠그고
+    /// 기본키 줄을 기다린다 — 퇴사는 기본키 줄을 쥔 채 마지막에 <c>SET user_id = NULL</c> 로 그 보조 색인 줄을 고치러 오므로
+    /// 그 자리에서 다시 교착이 난다(G-E21 이 잡는다). 기본키로만 잠그면 퇴사가 기본키를 쥔 동안 이쪽은 employees 의 아무것도 쥐지 않고 기다린다.</para>
+    /// <para>users 는 잠금 읽기 금지(P3-10) 그대로 — 여기는 employees 만 본다. 판정은 하지 않는다(판정은 원자 UPDATE 의 술어 몫).</para>
+    /// <para>⚠️ ①과 ② 사이에 연결이 바뀌면(다른 사원으로 다시 연결) 옛 행을 잠근 채 진행한다 — 자료는 원자 UPDATE 술어가 지킨다 · 순서만 옛 판과 같아진다.</para>
+    /// </remarks>
+    private async Task LockLinkedEmployeeRowsAsync(string userId, string tenantId, IDbTransaction tx, CancellationToken ct)
+    {
+        var employeeIds = (await _db.QueryAsync<string>(new CommandDefinition(
+            "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND user_id = @UserId ORDER BY employee_id",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false)).ToList();
+        if (employeeIds.Count == 0) return;   // 사원 행 없는 옛 계정 — 아무것도 안 잠그고 그냥 진행
+
+        // 보통 한 줄(uq_employees_tenant_user) — 한 줄씩 기본키 동등(const 접근)으로 잠근다. 여러 줄이면 employee_id 순(순서 고정).
+        foreach (var employeeId in employeeIds)
+        {
+            await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT employee_id FROM employees WHERE employee_id = @EmployeeId AND tenant_id = @TenantId FOR UPDATE",
+                new { EmployeeId = employeeId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>
     /// 🔴 작5 §8-7 P2-12 — 끄기·켜기 UPDATE 의 WHERE 조각(별칭 <c>u</c>): 연결 사원 직무가 <b>읽었을 때 그대로</b>다.
