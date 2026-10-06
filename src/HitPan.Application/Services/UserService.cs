@@ -598,6 +598,11 @@ public sealed class UserService : IUserService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
         using var tx = _db.BeginTransaction();
+        // ⬛ [작5 §8-13 전] 첫 문장이 RejectParentAsync → UPDATE users(X) → UPDATE employees(user_id NULL) — users → employees.
+        //   V5-22 봉합 뒤 세 함수(ResumeAsync·ResumeAsStaffAsync·SuspendAsStaffAsync)와 퇴사(ResignAsync)는 employees → users ⇒ 역순 1213(V5-26 포함).
+        //   🔴 트랜잭션 첫 문장 = 연결 사원 행 잠금(기본키 FOR UPDATE · 좌석 잠금 없는 함수라 맨 앞). users 는 그 뒤에만 건드린다.
+        //   하는 일(계정폐기 표식 · user_id NULL 끊기 · login_id NULL · 출입증 끊기)은 그대로.
+        await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
         await RejectParentAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
 
         // retired+(8) + GUID(36) + '+'(1) + 40 = 85 ≤ varchar(100)
@@ -689,7 +694,7 @@ public sealed class UserService : IUserService
     /// <remarks>
     /// <para>🔴 잠금 순서 고정(P3-10 · 1213 교착 방지): ① 좌석 잠금(<see cref="AccountSeatGuard.AcquireAsync"/> · 첫 문장) →
     /// ② 사원 행 <c>FOR UPDATE</c> → ③ users 는 <b>잠금 읽기 금지</b>(그냥 SELECT) · INSERT 만.
-    /// 계정폐기(<see cref="RetireAsync"/>)는 users → 사원 순이지만 이 함수가 users 행을 잠그지 않으므로 고리가 안 생긴다.</para>
+    /// 계정폐기(<see cref="RetireAsync"/>)는 작5 §8-13 부터 사원 → users 순(같은 순서) — ⬛ [§8-13 전] users → 사원 순이었고, 이 함수가 users 행을 잠그지 않아 이 둘 사이엔 고리가 없었다.</para>
     /// <para>🔴 <paramref name="actorIsAdmin"/> 이 아니면(2단계 직원): 만드는 계정은 일반(User) 고정(§5-3 · P-4) ·
     /// 대상 사원 직무가 일반이 아니면 409(P1-01 — 출입증 role 은 사원 role 이 먼저다 · <c>AuthService</c> CreateLoginResponse).</para>
     /// </remarks>

@@ -192,6 +192,172 @@ public sealed partial class EmployeeAccountLinkGateDbTests
             $"대조군② 무효 — 보조 색인으로 잠갔는데 1213 이 안 났다 · 퇴사={r2?.GetBaseException().Message ?? "성공"} · 조작={o2?.GetBaseException().Message ?? "성공"}");
     }
 
+    // ══ G-E21(작5 §8-13) — 계정폐기 RetireAsync 잠금 순서(employees → users) ══
+
+    /// <summary>
+    /// 같은 사람(사원 <paramref name="emp"/>)에 대해 <paramref name="first"/> 와 <paramref name="second"/> 를 <b>결정적으로</b> 겹친다 —
+    /// <see cref="RaceWithResignAsync"/> 의 두 조작판. ① 시험이 사원 행(기본키)을 쥔다 ② <paramref name="first"/> 가 그 행 앞에서 기다린다(LOCK WAIT 확인)
+    /// ③ <paramref name="second"/> 가 기다림에 들어간다(LOCK WAIT 확인) ④ 시험이 놓는다 — <paramref name="first"/> 가 줄 맨 앞이라 먼저 깨어나 users 로 간다.
+    /// <paramref name="second"/> 가 users 를 이미 쥐고 있으면(옛 계정폐기 순서) 여기서 1213 이 난다. 실패하면 연결 정리 전에 두 작업을 끝까지 기다린다.
+    /// </summary>
+    private async Task<(Exception? First, Exception? Second)> RaceOnEmployeeRowAsync(
+        string emp, Func<MySqlConnection, Task> first, Func<MySqlConnection, Task> second, string what)
+    {
+        await using var holder = await OpenAsync();
+        await using var firstConn = await OpenAsync();
+        await using var secondConn = await OpenAsync();
+        await using var htx = await holder.BeginTransactionAsync();
+        await holder.ExecuteAsync("SELECT employee_id FROM employees WHERE employee_id = @E FOR UPDATE", new { E = emp }, htx);
+
+        var t1 = Task.Run(() => first(firstConn));
+        Task t2 = Task.CompletedTask;
+        try
+        {
+            await WaitForLockWaitAsync(firstConn, t1, $"G-E21 {what} — 먼저");
+            t2 = Task.Run(() => second(secondConn));
+            await WaitForLockWaitAsync(secondConn, t2, $"G-E21 {what} — 나중");
+            await htx.RollbackAsync();
+        }
+        catch (Exception failure)
+        {
+            throw await DrainOnFailureAsync(failure, Task.WhenAll(t1, t2), htx, $"G-E21 {what}");
+        }
+
+        return (await OutcomeAsync(t1), await OutcomeAsync(t2));
+    }
+
+    /// <summary>§8-13 전 <c>RetireAsync</c> 의 두 UPDATE 원문(옛 순서 재현 · 대조군 전용) — users X 를 먼저 쥐고 employees 를 고치러 간다.
+    /// 출입증 끊기(refresh_tokens·user_sessions)는 잠금 고리와 무관해 뺐다.</summary>
+    private static async Task OldRetireUsersFirstAsync(MySqlConnection c, string userId, string tenantId)
+    {
+        await using var otx = await c.BeginTransactionAsync();
+        await c.ExecuteAsync(@"
+            UPDATE users SET is_active = 0, is_deleted = 1, email = CONCAT('retired+', user_id, '+', LEFT(email, 40)),
+                deleted_at = NOW(6), updated_at = NOW(6)
+            WHERE user_id = @U AND tenant_id = @T AND is_deleted = 0 AND is_parent = 0", new { U = userId, T = tenantId }, otx);
+        await c.ExecuteAsync(
+            "UPDATE employees SET user_id = NULL, login_id = NULL, updated_at = NOW(6) WHERE tenant_id = @T AND user_id = @U",
+            new { U = userId, T = tenantId }, otx);
+        await otx.CommitAsync();
+    }
+
+    [Fact(DisplayName = "G-E21 🔴 작5 §8-13 계정폐기 잠금 순서 — 같은 사람에 계정폐기(실물 RetireAsync)와 [사용 안 함](직원 SuspendAsStaffAsync · 대표 SuspendAsync)·퇴사(실물 ResignAsync · V5-26)를 겹쳐도 1213 0 · 계정폐기 끝에 계정 지움·사원 연결 끊김 · 대표 SuspendAsync 는 사원 행 앞에서 기다리는 계정폐기에 막히지 않는다(users 를 아직 안 건드렸다) · 대조군③(§8-13 전 users 먼저 계정폐기를 시험이 재현하면 직원 [사용 안 함]과 1213) · 대조군④(같은 재현이 퇴사와 1213)")]
+    public async Task E21_Retire_Vs_Suspend_Resign_No_Deadlock()
+    {
+        if (!Ready("G-E21")) return;
+        string actor, rvStaff, rvOwner, rvResign, ctl3, ctl4;
+        string eRvStaff, eRvOwner, eRvResign, eCtl3, eCtl4;
+        await using (var seed = await OpenAsync())
+        {
+            await SeedCompanyAsync(seed);
+            actor = await InsertUserAsync(seed, "act2111", "2단계직원");
+            rvStaff = await InsertUserAsync(seed, "rv2112", "폐기직원사용안함");
+            rvOwner = await InsertUserAsync(seed, "rv2113", "폐기대표사용안함");
+            rvResign = await InsertUserAsync(seed, "rv2114", "폐기퇴사");
+            ctl3 = await InsertUserAsync(seed, "c32115", "대조군옛폐기직원");
+            ctl4 = await InsertUserAsync(seed, "c42116", "대조군옛폐기퇴사");
+            eRvStaff = await LinkedEmployeeAsync(seed, "2112", rvStaff, "sales_user");
+            eRvOwner = await LinkedEmployeeAsync(seed, "2113", rvOwner, "sales_user");
+            eRvResign = await LinkedEmployeeAsync(seed, "2114", rvResign, "sales_user");
+            eCtl3 = await LinkedEmployeeAsync(seed, "2115", ctl3, "sales_user");
+            eCtl4 = await LinkedEmployeeAsync(seed, "2116", ctl4, "sales_user");
+        }
+
+        await using var db = await OpenAsync();
+        // 경우별 첫 실패 한 줄을 모아 끝에 한 번 단언한다(봉합 빼면 어느 경우가 FAIL 하는지 한 번에 본다 · 경우끼리 다른 사원·계정).
+        var failures = new List<string>();
+
+        async Task CheckRetiredAsync(string what, string user, string emp)
+        {
+            if (!await db.ExecuteScalarAsync<bool>("SELECT is_deleted FROM users WHERE user_id=@U", new { U = user }))
+                failures.Add($"{what} — 계정이 지워지지 않았다");
+            else if (await EmpLinkAsync(db, emp) != (null, null))
+                failures.Add($"{what} — 사원 연결(user_id·login_id)이 남았다");
+        }
+
+        // ① 계정폐기 ↔ 직원 [사용 안 함] — 직원 끄기가 줄 맨 앞(employees → users) · 계정폐기가 뒤에서 기다린다.
+        //   봉합 뒤: 계정폐기는 사원 행 앞에서 아무것도 안 쥔 채 기다리다 끄기 커밋 뒤 정상 폐기(끈 계정도 폐기 대상).
+        {
+            const string what = "계정폐기 ↔ 직원 SuspendAsStaffAsync";
+            var (suspendErr, retireErr) = await RaceOnEmployeeRowAsync(eRvStaff,
+                c => new UserService(c, new NoOpAudit()).SuspendAsStaffAsync(rvStaff, actor, _tenantA),
+                c => new UserService(c, new NoOpAudit()).RetireAsync(rvStaff, _tenantA),
+                what);
+            if (IsDeadlock(suspendErr) || IsDeadlock(retireErr))
+                failures.Add($"{what} 1213 교착 · 끄기={suspendErr?.GetBaseException().Message ?? "성공"} · 폐기={retireErr?.GetBaseException().Message ?? "성공"}");
+            else if (suspendErr is not null || retireErr is not null)
+                failures.Add($"{what} — 둘 다 정상이어야 한다 · 끄기={suspendErr} · 폐기={retireErr}");
+            else
+                await CheckRetiredAsync(what, rvStaff, eRvStaff);
+        }
+
+        // ② 계정폐기 ↔ 대표 [사용 안 함] — 대표 끄기(SuspendAsync)는 사원 행을 안 잡는다. 계정폐기가 사원 행 앞에서 기다리는 동안
+        //   users 를 아직 안 쥐었으므로 끄기는 기다림 없이 끝나야 한다(옛 순서면 계정폐기가 users X 를 쥐고 있어 끄기가 막힌다).
+        {
+            const string what = "계정폐기 ↔ 대표 SuspendAsync";
+            await using var holder = await OpenAsync();
+            await using var retireConn = await OpenAsync();
+            await using var opConn = await OpenAsync();
+            await using var htx = await holder.BeginTransactionAsync();
+            await holder.ExecuteAsync("SELECT employee_id FROM employees WHERE employee_id = @E FOR UPDATE", new { E = eRvOwner }, htx);
+            var retire = Task.Run(() => new UserService(retireConn, new NoOpAudit()).RetireAsync(rvOwner, _tenantA));
+            Task suspend = Task.CompletedTask;
+            var suspendBlocked = false;
+            try
+            {
+                await WaitForLockWaitAsync(retireConn, retire, $"G-E21 {what} — 계정폐기");
+                suspend = Task.Run(() => new UserService(opConn, new NoOpAudit()).SuspendAsync(rvOwner, _tenantA));
+                suspendBlocked = await Task.WhenAny(suspend, Task.Delay(TimeSpan.FromSeconds(10))) != suspend;
+                await htx.RollbackAsync();
+            }
+            catch (Exception failure)
+            {
+                throw await DrainOnFailureAsync(failure, Task.WhenAll(retire, suspend), htx, $"G-E21 {what}");
+            }
+            var retireErr = await OutcomeAsync(retire);
+            var suspendErr = await OutcomeAsync(suspend);
+            if (IsDeadlock(retireErr) || IsDeadlock(suspendErr))
+                failures.Add($"{what} 1213 교착 · 폐기={retireErr?.GetBaseException().Message ?? "성공"} · 끄기={suspendErr?.GetBaseException().Message ?? "성공"}");
+            else if (suspendBlocked)
+                failures.Add($"{what} — 사원 행 앞에서 기다리는 계정폐기가 users 를 이미 쥐었다(끄기가 10초 넘게 막힘 · 옛 순서) · 끄기={suspendErr?.GetBaseException().Message ?? "성공"}");
+            else if (retireErr is not null || suspendErr is not null)
+                failures.Add($"{what} — 둘 다 정상이어야 한다 · 폐기={retireErr} · 끄기={suspendErr}");
+            else
+                await CheckRetiredAsync(what, rvOwner, eRvOwner);
+        }
+
+        // ③ 계정폐기 ↔ 퇴사(V5-26) — 퇴사가 줄 맨 앞 · 계정폐기는 기다린 뒤 「찾을 수 없음」 정상 거절(퇴사가 이미 계정을 지웠다).
+        {
+            const string what = "계정폐기 RetireAsync ↔ 퇴사(V5-26)";
+            var (resignErr, deleted, retireErr) = await RaceWithResignAsync(eRvResign,
+                c => new UserService(c, new NoOpAudit()).RetireAsync(rvResign, _tenantA), what);
+            if (IsDeadlock(resignErr) || IsDeadlock(retireErr))
+                failures.Add($"{what} 1213 교착 · 퇴사={resignErr?.GetBaseException().Message ?? "성공"} · 폐기={retireErr?.GetBaseException().Message ?? "성공"}");
+            else if (resignErr is not null)
+                failures.Add($"{what} — 퇴사가 실패했다: {resignErr}");
+            else if (!deleted)
+                failures.Add($"{what} — 퇴사가 계정을 지우지 않았다(연결 계정 없음?)");
+            else if (retireErr is not InvalidOperationException)
+                failures.Add($"{what} — 기다린 뒤 정상 거절이 아니다: {retireErr?.GetType().Name} {retireErr?.Message}");
+            else
+                await CheckRetiredAsync(what, rvResign, eRvResign);
+        }
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+
+        // ── 🔴 대조군③ — §8-13 전 계정폐기 순서(UPDATE users 먼저 → UPDATE employees)를 시험이 재현하면 직원 [사용 안 함]과 1213 ──
+        var (s3, o3) = await RaceOnEmployeeRowAsync(eCtl3,
+            c => new UserService(c, new NoOpAudit()).SuspendAsStaffAsync(ctl3, actor, _tenantA),
+            c => OldRetireUsersFirstAsync(c, ctl3, _tenantA),
+            "대조군③ 옛 계정폐기 ↔ 직원 사용 안 함");
+        Assert.True(IsDeadlock(s3) || IsDeadlock(o3),
+            $"대조군③ 무효 — 옛 계정폐기(users 먼저)인데 1213 이 안 났다 · 끄기={s3?.GetBaseException().Message ?? "성공"} · 옛 폐기={o3?.GetBaseException().Message ?? "성공"}");
+
+        // ── 🔴 대조군④ — 같은 재현이 퇴사와 1213(V5-26 이 실제로 있던 자리) ──
+        var (r4, _, o4) = await RaceWithResignAsync(eCtl4, c => OldRetireUsersFirstAsync(c, ctl4, _tenantA), "대조군④ 옛 계정폐기 ↔ 퇴사");
+        Assert.True(IsDeadlock(r4) || IsDeadlock(o4),
+            $"대조군④ 무효 — 옛 계정폐기(users 먼저)인데 1213 이 안 났다 · 퇴사={r4?.GetBaseException().Message ?? "성공"} · 옛 폐기={o4?.GetBaseException().Message ?? "성공"}");
+    }
+
     // ══ G-E9v — V5-23 for-employee 변형 직무 ══
 
     [Fact(DisplayName = "G-E9v 🔴 V5-23 P1-01 변형 직무 — 2단계 직원 경로 for-employee 에 사원 직무 \"1\"·\"TenantAdmin\"·\"TENANT_ADMIN\"·\" TenantAdmin \"·\" tenant_admin \" 는 전부 409 employee_role_not_general · users 무변화 · 연결 없음 · 일반 변형(\"3\"·\" sales_user \")은 된다 · 대조군(문자열 그대로 비교 판정 role == \"tenant_admin\" 은 변형 다섯을 전부 일반으로 본다 ⇒ 201)")]
