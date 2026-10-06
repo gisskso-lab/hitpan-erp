@@ -191,6 +191,13 @@ jobs:
           done
           echo "::error::MariaDB 서비스 컨테이너 기동 실패"; exit 1
 
+      - name: Raise max_connections (작6 — CI DB 연결 한도)
+        # 작6(20261006) 실측: 병렬 DB 게이트만으로 Threads_connected 151/151 · Max_used 152 · 1040 Too many connections
+        #   → 무관 시험이 접속 시간초과로 깜빡였다(G3-D3·G10-D2·WG-D3·BK). 게이트 47 클래스 중 42 가 격리 DB 마다 연결 풀.
+        #   CI 시험용 DB 만의 설정 — 고객 PC·운영 DB 무관. 재시도로 감싸지 않는다(값 단언을 숨기지 않기).
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -u root -pdbgate_ci -e "SET GLOBAL max_connections = 500; SHOW GLOBAL VARIABLES LIKE 'max_connections';"
+
       - name: Create gate database (출하 DDL 적재)
         # 일부 게이트는 자기 DB 를 스스로 만들지만(CREATE DATABASE),
         # TrialBalance 처럼 HITPAN_TEST_DB 가 이미 있다고 보고 붙는 게이트가 있다.
