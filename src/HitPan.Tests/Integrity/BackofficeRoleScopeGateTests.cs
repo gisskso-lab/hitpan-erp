@@ -270,6 +270,102 @@ public sealed class BackofficeRoleScopeGateTests : IDisposable
         Console.WriteLine("[G-4저장] 음성 대조군 통과 — 본사 역할은 저장된다");
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-9 익명 라우트 동작 대조 — 20261007작10 §2-7 교정② ([4] 리뷰서 §3-②)
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>🔴 가드가 면제해야 하는 익명 라우트 — 둘 다 DB 표를 읽지 않는다(설정만 읽거나 미설정 사유를 낸다).</summary>
+    private static readonly string[] AnonymousRoutes =
+    {
+        "/api/payments/toss/config",
+        "/api/landing/license/public-key",
+    };
+
+    /// <summary>가드가 거부할 때 내는 본문 — 이 글자가 나오면 가드가 막은 것이다(다른 403 과 구별).</summary>
+    private const string GuardDenyBody = "대리점 계정은 이 기능을 사용할 수 없습니다";
+
+    [Fact(DisplayName = "G-9 🔴 익명 라우트는 토큰을 실어도 가드가 면제한다 — 무토큰과 같은 대우 · 봉합 전에는 대리점 토큰만 가드 403")]
+    public async Task G9_Anonymous_Routes_Are_Exempt_Even_With_Token()
+    {
+        if (!await _h.TrySetUpAsync("G-9")) return;
+        var tokenA = await _h.LoginResellerAsync(_h.EmailA);
+        var tokenHq = await _h.LoginHqAsync();
+        Assert.Equal(_h.ResellerA, BackofficeRoleGateHarness.ClaimOf(tokenA, "reseller_id"));
+
+        foreach (var route in AnonymousRoutes)
+        {
+            var none = await _h.SendAsync(null, route);
+            var hq = await _h.SendAsync(tokenHq, route);
+            var reseller = await _h.SendAsync(tokenA, route);
+
+            // 전제 — 무토큰이 그 라우트에 실제로 닿아야 이 시험이 무언가를 잰다(404·401 이면 과녁이 틀렸다).
+            Assert.True(none.Status is not (403 or 404 or 401),
+                $"[G-9] 전제 붕괴 — 무토큰이 {route} 에서 {none.Status}. 이 라우트는 익명 과녁이 아니다.");
+
+            // 🔴 재는 것: **같은 라우트, 토큰만 다르다.** 익명 입구는 토큰 유무로 대우가 갈리면 안 된다.
+            Assert.True(reseller.Status == none.Status,
+                $"[G-9] {route} — 무토큰 {none.Status} 인데 대리점 토큰은 {reseller.Status}. "
+              + $"가드가 익명 라우트를 막았다(같은 파일 주석·설계는 「익명은 이 필터 소관 아님」이라 적혀 있다). 본문: {Trim(reseller.Body)}");
+            Assert.True(hq.Status == none.Status,
+                $"[G-9] {route} — 무토큰 {none.Status} 인데 본사 토큰은 {hq.Status}. 본문: {Trim(hq.Body)}");
+            Assert.DoesNotContain(GuardDenyBody, reseller.Body);
+
+            Console.WriteLine($"[G-9] {route} — 무토큰 {none.Status} · 본사 {hq.Status} · 대리점 {reseller.Status}");
+        }
+    }
+
+    [Fact(DisplayName = "G-9음 🔴 음성 대조군 — 면제가 새지 않는다 · 무표식 본사 전용 라우트는 대리점 토큰에 여전히 가드 403")]
+    public async Task G9_Negative_Control_Exemption_Does_Not_Leak()
+    {
+        if (!await _h.TrySetUpAsync("G-9음")) return;
+        var tokenA = await _h.LoginResellerAsync(_h.EmailA);
+
+        foreach (var route in HqOnlyRoutes)
+        {
+            var r = await _h.SendAsync(tokenA, route);
+            Assert.True(r.Status == 403,
+                $"[G-9음] {route} — 익명 면제가 본사 전용 라우트까지 새어 통과했다(실측 {r.Status}). 본문: {Trim(r.Body)}");
+            Assert.Contains(GuardDenyBody, r.Body);
+        }
+        Console.WriteLine($"[G-9음] 본사 전용 {HqOnlyRoutes.Length}라우트 — 대리점 토큰 전부 403(가드 본문 확인)");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-10 조용한 초록 차단 — 20261007작10 §2-7 교정④ ([4] 리뷰서 §3-④)
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-10 🔴 DB 없이 조용한 초록이 안 나온다 — 선언 없으면 실패 · 선언하면 건너뛰기 · CI 는 선언으로도 못 넘김")]
+    public void G10_No_Silent_Green_Without_Db()
+    {
+        // ⓐ CI(db-gate 잡) — DB 를 주기로 한 자리에서 못 붙으면 실패. 사람의 선언이 이것을 못 이긴다.
+        Assert.Equal(DbGateEnvironment.Verdict.FailCi, DbGateEnvironment.Decide("1", null));
+        Assert.Equal(DbGateEnvironment.Verdict.FailCi, DbGateEnvironment.Decide("1", "1"));
+
+        // ⓑ 🔴 이번 교정의 과녁 — 로컬 + 선언 없음 = 실패.
+        //    종전에는 이 자리가 조용한 PASS 였다(PM 실측: Failed 0 / Passed 10 / Skipped 0 / 0.97초,
+        //    DB 를 물리면 같은 글자에 50초 — 판별 수단이 소요시간 하나뿐이었다).
+        Assert.Equal(DbGateEnvironment.Verdict.FailUndeclared, DbGateEnvironment.Decide(null, null));
+        Assert.Equal(DbGateEnvironment.Verdict.FailUndeclared, DbGateEnvironment.Decide(null, ""));
+        Assert.Equal(DbGateEnvironment.Verdict.FailUndeclared, DbGateEnvironment.Decide(null, "false"));
+        Assert.Equal(DbGateEnvironment.Verdict.FailUndeclared, DbGateEnvironment.Decide(null, "0"));
+
+        // ⓒ 로컬 + 명시 선언 — 건너뛴다. 로컬 개발을 깨뜨리지 않는 것이 이 봉합의 조건이다.
+        Assert.Equal(DbGateEnvironment.Verdict.Skip, DbGateEnvironment.Decide(null, "1"));
+        Assert.Equal(DbGateEnvironment.Verdict.Skip, DbGateEnvironment.Decide("false", "true"));
+
+        // ⓓ 사유 글이 복구 방법을 담는가 — 다음 사람은 실패 메시지만 읽는다.
+        var msg = DbGateEnvironment.UndeclaredMessage("G-10 사유 점검");
+        Assert.Contains("HITPAN_BO_GATE_DB", msg);
+        Assert.Contains(DbGateEnvironment.SkipDeclareVar, msg);
+        Assert.Contains("검증이 아니다", msg);
+
+        // ⓔ 🔴 음성 대조군 — 종전 경로(SkipOrFail)는 **여전히 조용히 true** 를 준다.
+        //    호출 101곳을 이번에 안 바꿨다는 사실을 게이트가 들고 있어야 다음 사람이 범위를 오해하지 않는다(2차수 과녁).
+        Assert.True(DbGateEnvironment.SkipOrFail("G-10 음성대조군(종전 경로 · 일부러 조용하다)"));
+
+        Console.WriteLine("[G-10] 선언없음=실패 · 선언=건너뛰기 · CI=실패 · 종전경로=조용한 true(대조군) 확인");
+    }
+
     private static string Trim(string s) =>
         s.Length <= 300 ? s : s[..300] + "…";
 }

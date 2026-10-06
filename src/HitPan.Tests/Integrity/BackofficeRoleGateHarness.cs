@@ -153,7 +153,7 @@ internal sealed class BackofficeRoleGateHarness : IDisposable
         catch (MySqlException ex)
         {
             Console.Error.WriteLine($"[{gateName}] DB 준비 실패({ex.Number}): {ex.Message}");
-            return DbGateEnvironment.SkipOrFail(gateName) && false;
+            return DbGateEnvironment.SkipOrFailStrict(gateName) && false;
         }
 
         // 실물 적용 경로 — SQL 복사본 판정 금지(작14 F-2 재발 방지).
