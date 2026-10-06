@@ -12,6 +12,16 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
+/// 이 게이트는 일부러 행 잠금을 쥐고 최대 20초씩 기다리는 경쟁 시험(G-E4b·E4c·E16·E21)을 품는다 — 다른 DB 게이트와 동시에 돌면
+/// CI DB 를 붙잡아 무관 시험이 접속 시간초과로 깜빡였다(작5 §8-13 · ⚠️가설 — CI 로 확인). 백업 게이트(<c>BackupCredentialGateCollection</c>)와 같은 방식.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class EmployeeAccountLinkGateDbCollection
+{
+    public const string Name = "EmployeeAccountLinkGateDb";
+}
+
+/// <summary>
 /// 🔴 2026-10-05 작5 — 사원 ↔ 계정 양방향 연결 게이트의 <b>DB 몫</b>
 /// (설계 <c>docs/설계/erp/20261005_설계_사원계정연결_아이디표기.md</c> §8 G-E1~E8 · G-E12).
 /// </summary>
@@ -30,7 +40,7 @@ namespace HitPan.Tests.Integrity;
 /// 보여 주지 못하면 그 시험의 초록은 아무것도 증명하지 않는다 ⇒ 대조군 단언이 함께 실패한다.</para>
 /// <para>연결 문자열은 <see cref="MySqlConnectionStringBuilder"/> 로 만든다(비밀 스캔) · 격리 DB 연결은 풀을 끈다.</para>
 /// </remarks>
-[Collection("EmployeeAccountLinkGateDb")]
+[Collection(EmployeeAccountLinkGateDbCollection.Name)]
 public sealed partial class EmployeeAccountLinkGateDbTests : IDisposable
 {
     private readonly string _dbName = "hitpan_eal_" + Guid.NewGuid().ToString("N")[..8];
