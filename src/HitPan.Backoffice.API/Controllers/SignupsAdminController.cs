@@ -147,6 +147,24 @@ public class SignupsAdminController : ControllerBase
                     new { Tid = signupTenantId });
             }
 
+            // 🔴 [3-V] I-1 · [4] 발견② 교정 2026-10-07 — **키가 있으면 폴백 금지(fail-closed)**.
+            //   종전엔 키가 있어도 그 tenant 가 pending 이 아니면 아래 글자 폴백으로 내려갔다 ⇒
+            //   동명의 **다른** 고객사를 승인하고 가입서의 기존 키를 그 키로 덮어썼다(오귀속 · 게이트 G-1f).
+            //   키가 있는데 조건에 안 맞으면 사람에게 돌린다 — 추측으로 잇지 않는다(반자동 원칙).
+            //   폴백 자체는 살린다(#20) — 키가 **없는** 옛 행만 아래 글자 경로를 탄다(대조군 G-1e).
+            if (!string.IsNullOrEmpty(signupTenantId) && string.IsNullOrEmpty(tenantId))
+            {
+                _logger.LogWarning(
+                    "[SignupsAdmin] approve 거부 — 가입서에 연결된 고객사가 승인대기(pending)가 아니다. "
+                    + "글자 폴백 금지(오귀속 차단) signupId={Id} signupTenantId={Tid}",
+                    signupId, signupTenantId);
+                return Conflict(new
+                {
+                    success = false,
+                    message = "이 신청에 연결된 고객사가 승인 대기 상태가 아닙니다. 고객사 상태를 확인해 주세요."
+                });
+            }
+
             // 키가 없는 옛 행(NULL)만 읽기 폴백(#20) —
             // 사고 #5 봉합 (2026-06-10): signup ↔ tenant 1:1 매칭 — submitted_at에 가장 가까운 pending tenant 1건만
             // 이전 버그: WHERE company_name AND status='pending' → 같은 회사명 여러 pending이면 모두 같은 키 저장

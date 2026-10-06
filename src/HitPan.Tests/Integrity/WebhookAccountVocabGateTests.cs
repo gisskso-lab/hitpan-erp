@@ -29,6 +29,11 @@ namespace HitPan.Tests.Integrity;
 /// CI <c>db-gate</c>(<c>HITPAN_REQUIRE_DB</c>)가 계측 경로. 운영 무접촉(#39) — 임시 DB 만 만들고 지운다.</para>
 /// <para>⚠️ G-Z5b 는 수신부 <c>BuildConnectionString()</c> 이 읽는 <c>DB_*</c> 환경변수를 잠시 격리 ERP DB 로
 /// 돌린다(BackupCredentialGate 선례) — 끝나면 원복. 같은 이유로 전용 컬렉션(직렬)이다.</para>
+/// <para>🔴 <b>G-Z5b 전제 ([3-V] I-6 · [4] 발견④ 교정 2026-10-07)</b> — ① 이 프로세스에 <b>실물</b> 서명키
+/// (<c>db.conf</c>·환경변수 <c>HITPAN_BOOTSTRAP_TOKEN_KEY</c>)가 <b>없어야</b> 하고(있으면 시험이 실물
+/// 비밀값으로 서명하게 된다 — 건너뛴다), ② DB 서버에 <b>비밀번호가 있어야</b> 한다(빈 비번이면 수신부
+/// <c>GetRequired("DB_PASSWORD")</c> 가 던져 봉합과 무관한 가짜 500 FAIL 이 난다 — 건너뛴다).
+/// 두 전제가 다 서는 곳이 CI <c>db-gate</c>(<c>dbgate_ci</c> 비번 · db.conf 없음) = 정규 계측 경로다.</para>
 /// </remarks>
 [Collection("WebhookAccountVocabGate")]
 public sealed class WebhookAccountVocabGateTests : IDisposable
@@ -259,10 +264,27 @@ public sealed class WebhookAccountVocabGateTests : IDisposable
         return (result as IStatusCodeActionResult)?.StatusCode ?? 0;
     }
 
-    /// <summary>수신부(VerifySignature)와 같은 순서로 키를 골라 같은 모양(base64url)으로 서명한다 — 대조군 재서명용.</summary>
+    /// <summary>
+    /// 이 프로세스에 **실물** 서명키(db.conf / 환경변수 HITPAN_BOOTSTRAP_TOKEN_KEY)가 잡혀 있나.
+    /// <para>🔴 [3-V] I-6 교정 2026-10-07 — 수신부 <c>ResolveSigningKey</c> 는 db.conf 를 설정값보다
+    /// **먼저** 보므로, 실물 설치 PC 에선 시험이 실물 비밀값으로 서명하게 된다(유출은 없으나 시험↔실물
+    /// 격리가 흐려지고 머신에 따라 판정 경로가 갈린다). TenantConfigReader 는 덮어쓰기 창구가 없어
+    /// (db.conf 가 환경변수보다 우선) 시험이 이 값을 지울 수 없다 ⇒ 그런 환경에서는 **건너뛴다**.
+    /// 정규 계측 경로인 CI db-gate 에는 db.conf 가 없어 아래 TestKey 로 돈다.</para>
+    /// </summary>
+    private static bool HasRealSigningKey() =>
+        !string.IsNullOrWhiteSpace(TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY"));
+
+    /// <summary>
+    /// 수신부(VerifySignature)와 같은 순서로 키를 골라 같은 모양(base64url)으로 서명한다 — 대조군 재서명용.
+    /// <para>🔧 I-6 교정 — 실물 키 폴백을 없애고 **시험 전용 값**만 쓴다. 키 고르는 순서는 실물
+    /// <see cref="WebhookInboundController.ResolveSigningKey"/> 를 그대로 불러 베끼지 않는다(동어반복·드리프트 방지).
+    /// 호출 전에 <see cref="HasRealSigningKey"/> 로 전제를 세운다.</para>
+    /// </summary>
     private static string Sign(string body)
     {
-        var key = TenantConfigReader.Get("HITPAN_BOOTSTRAP_TOKEN_KEY") ?? TestKey;
+        var key = WebhookInboundController.ResolveSigningKey(null, TestKey)
+                  ?? throw new Xunit.Sdk.XunitException("서명 키 해석 실패 — 시험 전용 키가 비었다.");
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(body));
         return Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -280,6 +302,19 @@ public sealed class WebhookAccountVocabGateTests : IDisposable
     public async Task Z5b_Inbound_Reads_Captured_Payload_And_Rejects_Wrong_Key()
     {
         if (!Probe("G-Z5b")) return;
+
+        // 🔴 전제 1 ([3-V] I-6) — 실물 서명키가 잡힌 PC 에선 시험 격리가 안 된다(위 HasRealSigningKey 주석).
+        if (HasRealSigningKey() && DbGateEnvironment.SkipOrFail("G-Z5b (실물 db.conf 서명키 — 시험 격리 불가)"))
+            return;
+
+        // 🔴 전제 2 ([4] 발견④) — 수신부 BuildConnectionString() 의
+        //   TenantConfigReader.GetRequired("DB_PASSWORD") 는 **빈 값에서 던진다**(WebhookInboundController:266).
+        //   비밀번호 없는 DB 서버에선 그 예외가 catch 로 500 이 되어 **가짜 FAIL** 이 난다(봉합과 무관).
+        //   ⇒ 비번 없는 서버는 건너뛴다. CI db-gate 는 비번이 있어 실제로 돈다(정규 계측 경로).
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HITPAN_DB_PASS"))
+            && DbGateEnvironment.SkipOrFail("G-Z5b (DB_PASSWORD 빈 값 — 수신부가 던져 가짜 500)"))
+            return;
+
         await SetUpBackofficeDbAsync();
         SetUpErpDb();
         await SeedBoTenantAsync(extraAccounts: 2, extraDeviceSlots: 1);

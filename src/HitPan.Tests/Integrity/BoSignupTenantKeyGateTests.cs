@@ -4,6 +4,7 @@ using HitPan.Backoffice.API.Controllers;
 using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;   // [4] 교정 2026-10-07 — G-1f 가 응답 상태코드를 직접 센다
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using MySqlConnector;
@@ -369,6 +370,56 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
             "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
     }
 
+    /// <summary>
+    /// 🔴 G-1f ([3-V] I-1 · [4] 발견② 교정 2026-10-07) — <b>키가 있으면 폴백 금지(fail-closed)</b>.
+    /// <para>사고 경로: 가입서에 tenant_id 키가 <b>있는데</b> 그 tenant 가 pending 이 아니면(재승인·이미 활성)
+    /// 종전 코드는 키 유무를 보지 않고 회사명 글자 폴백으로 내려갔다 ⇒ 동명의 <b>다른</b> 고객사(T2)를
+    /// 승인하고, 가입서의 기존 키(T1)를 T2 로 <b>덮어썼다</b>.</para>
+    /// <para>이 시험은 그 길을 실물 컨트롤러로 태운다. 가드가 없으면 Approve 가 200 을 내며
+    /// 남의 tenant 를 활성화하므로 아래 단언이 <b>전부 깨진다</b>(봉합 전 FAIL 재현 — 2026-10-07 실측).</para>
+    /// <para>대조군은 G-1e — 키가 <b>없는</b> 옛 행은 글자 폴백으로 계속 승인돼야 한다(#20 · 폴백 자체는 살린다).</para>
+    /// </summary>
+    [Fact]
+    public async Task G1f_키가있고_그tenant가_pending아니면_글자폴백으로_남의tenant를_승인하지_않는다()
+    {
+        if (!TrySetUpDb(nameof(G1f_키가있고_그tenant가_pending아니면_글자폴백으로_남의tenant를_승인하지_않는다))) return;
+        await RunRealMigratorAsync();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+
+        // 동명 2개사 — T1 = 이 가입서의 자기 tenant(이미 active · pending 아님) · T2 = 동명 타사(pending)
+        var at = new DateTime(2026, 10, 7, 9, 0, 0, DateTimeKind.Utc);
+        await db.ExecuteAsync(@"
+            INSERT INTO tenants (tenant_id, tenant_code, company_name, tel, status, db_host, db_name,
+                                 license_key_hash, reseller_tier, created_at, updated_at)
+            VALUES (@T1, 'T-921', @C, '010-0000-0021', 'active',  '', '', 'hash-t1', 0, @At, @At),
+                   (@T2, 'T-922', @C, '010-0000-0022', 'pending', '', '', '',        0, @At, @At);
+            INSERT INTO landing_signups (signup_token, biz_no_hash, company_name, email, phone, plan_type,
+                                         agree_terms, agree_privacy, status, submitted_at, tenant_id)
+            VALUES ('sgn-g1f', 'bizhash-f', @C, 'f@gate.test', '010-0000-0021', 'basic', 1, 1,
+                    'submitted', @At, @T1);",
+            new { C = Company, T1, T2, At = at });
+        var sId = await db.QueryFirstAsync<long>(
+            "SELECT signup_id FROM landing_signups WHERE signup_token = 'sgn-g1f'");
+
+        // 키가 있는데 그 tenant 가 조건에 안 맞는다 ⇒ 글자 폴백 금지 · 명확한 실패로 끝낸다
+        var result = await NewSignupsAdmin().Approve(sId, CancellationToken.None);
+        var code = Assert.IsAssignableFrom<IStatusCodeActionResult>(result).StatusCode;
+        Assert.InRange(code ?? 0, 400, 499);                 // 4xx — 성공(200)으로 끝나면 남의 tenant 가 승인됐다
+
+        // ① 가입서의 기존 키가 덮이지 않았다 (T2 로 바뀌면 오귀속)
+        Assert.Equal(T1, await db.QueryFirstAsync<string>(
+            "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
+        // ② 가입서 상태도 그대로 — 승인 처리되지 않았다
+        Assert.Equal("submitted", await db.QueryFirstAsync<string>(
+            "SELECT status FROM landing_signups WHERE signup_id = @Id", new { Id = sId }));
+        // ③ 동명 타사(T2) 무접촉 — 활성화도, 시리얼 발급도 없었다
+        var t2 = await db.QueryFirstAsync<(string Status, string Hash)>(
+            "SELECT status, license_key_hash FROM tenants WHERE tenant_id = @T", new { T = T2 });
+        Assert.Equal("pending", t2.Status);
+        Assert.Equal("", t2.Hash);
+    }
+
     // ══════════════════════════════════════════════════════════════
     // G-4 backfill 행 수 검산 — 실제 마이그 경로(SchemaMigrator)로 적용
     // ══════════════════════════════════════════════════════════════
@@ -394,12 +445,16 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
             VALUES ('sgn-g4-a',  'h-a',  '유일상사',  'a@gate.test',  '010', 'basic', 1, 1, 'approved',  @At),
                    ('sgn-g4-b1', 'h-b1', '동명상사', 'b1@gate.test', '010', 'basic', 1, 1, 'approved',  @At),
                    ('sgn-g4-b2', 'h-b2', '동명상사', 'b2@gate.test', '010', 'basic', 1, 1, 'approved',  @At),
-                   ('sgn-g4-c',  'h-c',  '고아상사',  'c@gate.test',  '010', 'basic', 1, 1, 'submitted', @At);
+                   ('sgn-g4-c',  'h-c',  '고아상사',  'c@gate.test',  '010', 'basic', 1, 1, 'submitted', @At),
+                   -- 🔧 [3-V] I-2 교정 2026-10-07 — 후보 tenants 는 **정확히 1건**인데 가입서가 반려분.
+                   --   종전 backfill 은 이 행도 키로 굳혔다(반려된 타사 가입서가 진짜 고객 tenant 에 붙는 길).
+                   ('sgn-g4-d',  'h-d',  '반려상사',  'd@gate.test',  '010', 'basic', 1, 1, 'rejected',  @At);
             INSERT INTO tenants (tenant_id, tenant_code, company_name, tel, status, db_host, db_name,
                                  license_key_hash, reseller_tier, created_at, updated_at)
             VALUES ('aaaaaaaa-0000-4000-8000-00000000000a', 'T-911', '유일상사',  '010', 'active', '', '', 'h', 0, @At, @At),
                    ('bbbbbbbb-0000-4000-8000-00000000000b', 'T-912', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At),
-                   ('cccccccc-0000-4000-8000-00000000000c', 'T-913', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At);",
+                   ('cccccccc-0000-4000-8000-00000000000c', 'T-913', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At),
+                   ('dddddddd-0000-4000-8000-00000000000d', 'T-914', '반려상사', '010', 'active', '', '', 'h', 0, @At, @At);",
             new { At = at });
         var totalBefore = await db.QueryFirstAsync<int>("SELECT COUNT(*) FROM landing_signups");
 
@@ -413,8 +468,8 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
         var nulls = await db.QueryFirstAsync<int>(
             "SELECT COUNT(*) FROM landing_signups WHERE tenant_id IS NULL");
         Assert.Equal(totalAfter, linked + nulls);
-        Assert.Equal(1, linked);   // 유일상사만
-        Assert.Equal(3, nulls);    // 모호 2(동명) + 고아 1
+        Assert.Equal(1, linked);   // 유일상사만 (승인분 · 후보 1건)
+        Assert.Equal(4, nulls);    // 모호 2(동명) + 고아 1 + 🔧 status 제외 1(반려상사)
 
         // 유일 1건은 자기 tenant 로 — 모호 2건은 NULL 그대로(자동 추정 금지 · 음성 대조군)
         Assert.Equal("aaaaaaaa-0000-4000-8000-00000000000a", await db.QueryFirstAsync<string>(
@@ -422,16 +477,29 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
         Assert.Equal(2, await db.QueryFirstAsync<int>(
             "SELECT COUNT(*) FROM landing_signups WHERE company_name = '동명상사' AND tenant_id IS NULL"));
 
+        // 🔧 [3-V] I-2 교정 — 반려 가입서는 후보 tenants 가 1건이어도 키로 굳지 않는다.
+        //   봉합 전엔 여기가 'dddddddd-…' 로 **연결**됐다(반려된 타사 가입서 ↔ 진짜 고객 tenant).
+        Assert.Null(await db.QueryFirstAsync<string?>(
+            "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_token = 'sgn-g4-d'"));
+
         // 건수 기록 — bo_audit_log 한 줄에 total/linked/ambiguous/orphan
         var detail = await db.QueryFirstAsync<string>(@"
             SELECT detail_json FROM bo_audit_log
             WHERE action = 'z2.signup_tenant_backfill' ORDER BY log_id DESC LIMIT 1");
         using (var doc = System.Text.Json.JsonDocument.Parse(detail))
         {
-            Assert.Equal(4, doc.RootElement.GetProperty("total").GetInt32());
+            Assert.Equal(5, doc.RootElement.GetProperty("total").GetInt32());
             Assert.Equal(1, doc.RootElement.GetProperty("linked").GetInt32());
             Assert.Equal(2, doc.RootElement.GetProperty("ambiguous_null_kept").GetInt32());
             Assert.Equal(1, doc.RootElement.GetProperty("orphan_null").GetInt32());
+            // 🔧 I-2 교정 — 제외된 건수도 센다(반려상사 1건). 봉합 전엔 이 키 자체가 없었다.
+            Assert.Equal(1, doc.RootElement.GetProperty("excluded_by_status").GetInt32());
+            // 검산식 — 네 분류가 겹치지 않고 total 을 채운다
+            Assert.Equal(5,
+                doc.RootElement.GetProperty("linked").GetInt32()
+                + doc.RootElement.GetProperty("ambiguous_null_kept").GetInt32()
+                + doc.RootElement.GetProperty("orphan_null").GetInt32()
+                + doc.RootElement.GetProperty("excluded_by_status").GetInt32());
         }
 
         // FK 실물 — varchar(36) 컬럼 + 제약이 실제로 걸려 있다 (#13 DESCRIBE 축)
@@ -464,6 +532,9 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
     {
         public Task EmitSubscriptionChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
         public Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
+        // [4]·[3-V] 교정 2026-10-07 — 같은 사이클 갈래 다(Z5)가 인터페이스에 더한 구현체(#12 전수).
+        //   이 대역이 없어 4갈래 합류 빌드가 CS0535 로 끊겼다. 이 게이트는 웹훅을 재지 않으므로 빈 대역.
+        public Task EmitAccountChangedAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class FakeEmail : IEmailSender
