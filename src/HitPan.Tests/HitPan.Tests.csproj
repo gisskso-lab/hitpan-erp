@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <!-- 🔴 20261007작11 게이트 3 — 익명 노출 본사관리 API 를 **실제 요청·상태코드**로 문다.
+         라우트·속성을 글자로만 검사하면 「[AllowAnonymous] 를 다시 붙였다」를 못 잡는다(실측 전례: 메인PC ②가
+         TenantMiddleware 에서 401 로 잘린 사고 — 게이트 18건이 전부 못 잡았다. 미들웨어를 지나가 보지 않았기 때문).
+         그래서 WebApplicationFactory<Program> 로 **백오피스 API 의 실제 인증·인가 파이프라인**을 띄우고
+         토큰없음/대리점/본사관리자 세 경우를 보낸다. DB 불필요(401·403 은 컨트롤러 앞에서 갈린다). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.3" />

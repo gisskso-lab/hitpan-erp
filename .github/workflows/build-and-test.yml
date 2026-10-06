@@ -503,6 +503,28 @@ jobs:
           #    대조군: pending 결제·다른 달 confirmed 결제가 섞이면 G-2③ 빨간불.
           #    근거: docs/개발/백오피스/20261006작8_갈래나_Z3_개발명세서.md §4
           GATES="$GATES|BackofficeSettlementStatusGate"
+          # 🔴 20261007작11 P0 (BackofficeAnonymousAdminApiGate · 사장님 「모두 결재!!」 2026-10-07)
+          #    적발: api/admin/devices · api/admin/serial-locks 두 본사 관리 컨트롤러가 클래스에 [AllowAnonymous].
+          #      토큰 0으로 임의 고객사 기기 지문·OS 조회 + 임의 기기 차단 + 시리얼 잠금 해제가 됐다.
+          #      serial-locks 는 주석이 「super_admin 권한」인데 바로 다음 줄이 [AllowAnonymous] 였다(주석은 코드가 아니다).
+          #      기존 「권한 메뉴 정합」 게이트는 ERP 전용이라 백오피스를 안 봤다(선행검증 §2-5).
+          #    글자 검사가 아니라 WebApplicationFactory<Program> 로 **실제 인증·인가 파이프라인에 요청을 보내** 상태코드를 본다.
+          #    DB 불필요(401·403 은 컨트롤러 앞에서 갈린다) ⇒ 이 잡에서 돌려도 DB 의존이 없다.
+          #    등록 근거 = **전후 대조**(2026-10-07 로컬 격리 실측 · 개발명세서 §4):
+          #      · 봉합 전([AllowAnonymous] 로 되돌림) → 9 FAIL / 8 PASS
+          #          실물 실측: 토큰없음 GET devices 200(기기 지문 응답) · POST revoke **200 「기기 차단 완료」**
+          #                    · 토큰없음 POST unlock **200 「잠금 해제 완료」** (익명 쓰기가 실제로 반영됐다)
+          #      · 봉합 후([Authorize(Policy="PlatformAdmin")])     → 17/17 PASS
+          #          실물 실측: 토큰없음 401 · 대리점 토큰 403 · platform_admin/platform_owner 200
+          #    음성 대조군(G_W11_6~9)은 되돌림 여부와 무관하게 PASS — 로그인·랜딩가입·설치 부트스트랩·/healthz 는 계속 익명.
+          #    🔴 2026-10-07 [3-V] 머지 전 교정 — 클래스 필터라 신설 3건도 자동으로 물린다(20건):
+          #      · M-1 G_W11_10 — 이 게이트는 실제 호스트를 띄우므로 WebhookDispatcher 도 깨어나고 첫 틱을
+          #        지연 없이 돈다. 연결문자열을 안 덮으면 시험이 pending 행을 읽어 **외부 웹훅을 실제 발송**할 수
+          #        있었다(작9 「외부 실호출 0」 위반). 없는 DB·Port=1 로 덮었고 G_W11_10 이 그 덮개를 검산한다.
+          #      · M-2 G_W11_5 확장 — 판정식을 리플렉션 전수로(감시 10 → 21개) · [Authorize] 단독은 불합격.
+          #        G_W11_11(전수 분류 미분류 0건) · G_W11_12(예외표 썩음 방지) 신설.
+          #        FAIL 확인: 예외표 OwnerMfaController 한 줄을 어긋나게 하면 G_W11_5·G_W11_12 2건 FAIL.
+          GATES="$GATES|BackofficeAnonymousAdminApiGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
