@@ -541,9 +541,11 @@ public sealed class UserService : IUserService
         // 🔴 10/5 봉합1 P2-05 — 첫 문장은 잠금 손잡이(행 없으면 이름 잠금).
         await using var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false);
         // ⬛ [작5 §8-12 V5-22 전] 좌석 잠금 → users X(UPDATE) → employees S(하위질의) — 퇴사(employees → users)와 역순 ⇒ 1213.
-        //   🔴 좌석 잠금 바로 뒤 · users 보다 먼저 연결 사원 행을 잠근다(좌석 → employees → users · CreateForEmployeeAsync P3-10 과 같은 순서).
-        await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
+        //   🔴 좌석 판정 바로 뒤 · users 보다 먼저 연결 사원 행을 잠근다(좌석 → employees → users · CreateForEmployeeAsync P3-10 과 같은 순서).
+        // ⬛ [10/6 이어받기 전] 좌석 잠금과 EnsureSeatAsync 사이에 두었다 — 사원 행 찾기(일반 SELECT)가 read view 를 먼저 만들어
+        //   좌석 COUNT 가 「첫 일반 읽기」가 아니게 됐다(AccountSeatGuard G-A6 문구). 좌석을 쥔 뒤라 F-6 은 아니지만 규칙 문구 그대로 지키려 뒤로 옮겼다.
         await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
+        await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
 
         // ⬛ [작5 §8-7 P2-13 전] users 만 봤다 — 옛 퇴사자 계정(is_active=0 · is_deleted=0)을 대표 손으로도 되살렸다.
         // ⬛ UPDATE users SET is_active = 1, updated_at = NOW(6)
@@ -926,9 +928,10 @@ public sealed class UserService : IUserService
             await using (var seatLock = await AccountSeatGuard.AcquireAsync(_db, tx, tenantId, _logger, ct).ConfigureAwait(false))
             {
                 // ⬛ [작5 §8-12 V5-22 전] 좌석 → users X → employees S(하위질의 ×2) — 퇴사와 역순 ⇒ 1213.
-                //   🔴 좌석 잠금 바로 뒤 · users 보다 먼저 연결 사원 행(좌석 → employees → users).
-                await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
+                //   🔴 좌석 판정 바로 뒤 · users 보다 먼저 연결 사원 행(좌석 → employees → users).
+                // ⬛ [10/6 이어받기 전] LockLinkedEmployeeRowsAsync 가 EnsureSeatAsync 앞 — 좌석 COUNT 가 첫 일반 읽기가 아니게 됐다(G-A6 문구 · ResumeAsync 와 같은 이유로 뒤로).
                 await AccountSeatGuard.EnsureSeatAsync(_db, tx, tenantId, 1, _logger, ct).ConfigureAwait(false);
+                await LockLinkedEmployeeRowsAsync(userId, tenantId, tx, ct).ConfigureAwait(false);
 
                 var affected = await _db.ExecuteAsync(new CommandDefinition(
                     // ⬛ [P2-12·P2-13 전] ... AND {StaffTouchablePredicate}  (직무·퇴사 조건 없음)
