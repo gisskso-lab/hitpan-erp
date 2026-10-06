@@ -445,12 +445,16 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
             VALUES ('sgn-g4-a',  'h-a',  '유일상사',  'a@gate.test',  '010', 'basic', 1, 1, 'approved',  @At),
                    ('sgn-g4-b1', 'h-b1', '동명상사', 'b1@gate.test', '010', 'basic', 1, 1, 'approved',  @At),
                    ('sgn-g4-b2', 'h-b2', '동명상사', 'b2@gate.test', '010', 'basic', 1, 1, 'approved',  @At),
-                   ('sgn-g4-c',  'h-c',  '고아상사',  'c@gate.test',  '010', 'basic', 1, 1, 'submitted', @At);
+                   ('sgn-g4-c',  'h-c',  '고아상사',  'c@gate.test',  '010', 'basic', 1, 1, 'submitted', @At),
+                   -- 🔧 [3-V] I-2 교정 2026-10-07 — 후보 tenants 는 **정확히 1건**인데 가입서가 반려분.
+                   --   종전 backfill 은 이 행도 키로 굳혔다(반려된 타사 가입서가 진짜 고객 tenant 에 붙는 길).
+                   ('sgn-g4-d',  'h-d',  '반려상사',  'd@gate.test',  '010', 'basic', 1, 1, 'rejected',  @At);
             INSERT INTO tenants (tenant_id, tenant_code, company_name, tel, status, db_host, db_name,
                                  license_key_hash, reseller_tier, created_at, updated_at)
             VALUES ('aaaaaaaa-0000-4000-8000-00000000000a', 'T-911', '유일상사',  '010', 'active', '', '', 'h', 0, @At, @At),
                    ('bbbbbbbb-0000-4000-8000-00000000000b', 'T-912', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At),
-                   ('cccccccc-0000-4000-8000-00000000000c', 'T-913', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At);",
+                   ('cccccccc-0000-4000-8000-00000000000c', 'T-913', '동명상사', '010', 'active', '', '', 'h', 0, @At, @At),
+                   ('dddddddd-0000-4000-8000-00000000000d', 'T-914', '반려상사', '010', 'active', '', '', 'h', 0, @At, @At);",
             new { At = at });
         var totalBefore = await db.QueryFirstAsync<int>("SELECT COUNT(*) FROM landing_signups");
 
@@ -464,8 +468,8 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
         var nulls = await db.QueryFirstAsync<int>(
             "SELECT COUNT(*) FROM landing_signups WHERE tenant_id IS NULL");
         Assert.Equal(totalAfter, linked + nulls);
-        Assert.Equal(1, linked);   // 유일상사만
-        Assert.Equal(3, nulls);    // 모호 2(동명) + 고아 1
+        Assert.Equal(1, linked);   // 유일상사만 (승인분 · 후보 1건)
+        Assert.Equal(4, nulls);    // 모호 2(동명) + 고아 1 + 🔧 status 제외 1(반려상사)
 
         // 유일 1건은 자기 tenant 로 — 모호 2건은 NULL 그대로(자동 추정 금지 · 음성 대조군)
         Assert.Equal("aaaaaaaa-0000-4000-8000-00000000000a", await db.QueryFirstAsync<string>(
@@ -473,16 +477,29 @@ public sealed class BoSignupTenantKeyGateTests : IDisposable
         Assert.Equal(2, await db.QueryFirstAsync<int>(
             "SELECT COUNT(*) FROM landing_signups WHERE company_name = '동명상사' AND tenant_id IS NULL"));
 
+        // 🔧 [3-V] I-2 교정 — 반려 가입서는 후보 tenants 가 1건이어도 키로 굳지 않는다.
+        //   봉합 전엔 여기가 'dddddddd-…' 로 **연결**됐다(반려된 타사 가입서 ↔ 진짜 고객 tenant).
+        Assert.Null(await db.QueryFirstAsync<string?>(
+            "SELECT CAST(tenant_id AS CHAR) FROM landing_signups WHERE signup_token = 'sgn-g4-d'"));
+
         // 건수 기록 — bo_audit_log 한 줄에 total/linked/ambiguous/orphan
         var detail = await db.QueryFirstAsync<string>(@"
             SELECT detail_json FROM bo_audit_log
             WHERE action = 'z2.signup_tenant_backfill' ORDER BY log_id DESC LIMIT 1");
         using (var doc = System.Text.Json.JsonDocument.Parse(detail))
         {
-            Assert.Equal(4, doc.RootElement.GetProperty("total").GetInt32());
+            Assert.Equal(5, doc.RootElement.GetProperty("total").GetInt32());
             Assert.Equal(1, doc.RootElement.GetProperty("linked").GetInt32());
             Assert.Equal(2, doc.RootElement.GetProperty("ambiguous_null_kept").GetInt32());
             Assert.Equal(1, doc.RootElement.GetProperty("orphan_null").GetInt32());
+            // 🔧 I-2 교정 — 제외된 건수도 센다(반려상사 1건). 봉합 전엔 이 키 자체가 없었다.
+            Assert.Equal(1, doc.RootElement.GetProperty("excluded_by_status").GetInt32());
+            // 검산식 — 네 분류가 겹치지 않고 total 을 채운다
+            Assert.Equal(5,
+                doc.RootElement.GetProperty("linked").GetInt32()
+                + doc.RootElement.GetProperty("ambiguous_null_kept").GetInt32()
+                + doc.RootElement.GetProperty("orphan_null").GetInt32()
+                + doc.RootElement.GetProperty("excluded_by_status").GetInt32());
         }
 
         // FK 실물 — varchar(36) 컬럼 + 제약이 실제로 걸려 있다 (#13 DESCRIBE 축)
