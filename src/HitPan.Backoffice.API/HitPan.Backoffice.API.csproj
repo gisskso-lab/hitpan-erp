@@ -7,6 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 🔴 20261007작10 ①사이클 갈래 ㄱ — 게이트가 표 모양 판별 기억(BoLiveAccountReader.ForgetSchemaProbe)을
+         비울 수 있어야 격리 DB 를 다시 깔아도 판독이 낡은 모양을 쓰지 않는다.
+         선례: src/HitPan.Infrastructure/HitPan.Infrastructure.csproj:13 (같은 이유·같은 방식).
+         ⚠️ 운영 코드는 그 함수를 부르지 않는다 — 시험만 부른다. -->
+    <InternalsVisibleTo Include="HitPan.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.13" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.13" />
     <PackageReference Include="Dapper" Version="2.1.72" />

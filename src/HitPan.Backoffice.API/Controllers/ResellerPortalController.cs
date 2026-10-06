@@ -1,4 +1,6 @@
 using Dapper;
+using HitPan.Backoffice.API.Attributes;
+using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -21,24 +23,36 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #18·#22 평문 0 (사업자번호·CEO명 0건)
 //   #20 워크플로우 끊김 0
 //   #35 객체 분리 + 행 수준 격리
+//
+// 🔴 20261007작10 ①사이클 갈래 ㄱ (설계 §1-2·§1-3):
+//   · [ResellerScoped] — 대리점 토큰에게 **열려 있는 유일한 라우트**. 나머지 전부 403(거부 기본값).
+//     최소 등급은 기본값(reseller_user) = 대리점 소속이면 누구나. ⚠️ 이 3개 중 어느 것을
+//     대리점 **관리자 전용**으로 둘지는 업무 판단이라 이 차수에서 정하지 않았다(개발명세서 §5 보고).
+//   · 범위값 출처를 IResellerScope **하나**로 모았다(동작 동일 — 예전에도 클레임만 읽었다).
+//     직접 클레임을 읽던 GetResellerId() 는 지우지 않고 ⬛ 로 남긴다(헌법 #1).
 [ApiController]
 [Route("api/reseller-portal")]
 [Authorize]
+[ResellerScoped]
 public class ResellerPortalController : ControllerBase
 {
     private readonly IConfiguration _config;
     private readonly ILogger<ResellerPortalController> _logger;
+    private readonly IResellerScope _scope;
 
-    public ResellerPortalController(IConfiguration config, ILogger<ResellerPortalController> logger)
+    public ResellerPortalController(IConfiguration config, ILogger<ResellerPortalController> logger,
+                                    IResellerScope scope)
     {
         _config = config;
         _logger = logger;
+        _scope = scope;
     }
 
     [HttpGet("summary")]
     public async Task<IActionResult> Summary(CancellationToken ct)
     {
-        var resellerId = GetResellerId();
+        // 설계 §1-2 ③ — 범위값은 이 서비스에서만 온다(쿼리·바디·헤더 경로 0 · 헌법 #2).
+        var resellerId = _scope.CurrentOrNull();
         if (string.IsNullOrWhiteSpace(resellerId))
             return Forbid();
 
@@ -68,7 +82,8 @@ public class ResellerPortalController : ControllerBase
     [HttpGet("settlements")]
     public async Task<IActionResult> Settlements([FromQuery] string? status, CancellationToken ct)
     {
-        var resellerId = GetResellerId();
+        // 설계 §1-2 ③ — 범위값은 이 서비스에서만 온다(쿼리·바디·헤더 경로 0 · 헌법 #2).
+        var resellerId = _scope.CurrentOrNull();
         if (string.IsNullOrWhiteSpace(resellerId))
             return Forbid();
 
@@ -113,7 +128,8 @@ public class ResellerPortalController : ControllerBase
     [HttpGet("customers")]
     public async Task<IActionResult> Customers([FromQuery] string? status, CancellationToken ct)
     {
-        var resellerId = GetResellerId();
+        // 설계 §1-2 ③ — 범위값은 이 서비스에서만 온다(쿼리·바디·헤더 경로 0 · 헌법 #2).
+        var resellerId = _scope.CurrentOrNull();
         if (string.IsNullOrWhiteSpace(resellerId))
             return Forbid();
 
@@ -153,6 +169,9 @@ public class ResellerPortalController : ControllerBase
         }
     }
 
+    // ⬛ 20261007작10 갈래 ㄱ — 범위값 창구를 IResellerScope 하나로 모음(이 함수 사용처 0).
+    //    지우지 않는 이유 = 헌법 #1(덮어쓰기 금지) · 역호환 판단 기록 보존.
+    //    🔴 다시 쓰지 마라 — account_type=="reseller" 를 축으로 읽는 낡은 경로다(설계 C-4 · 판정축은 role).
     private string? GetResellerId()
     {
         // 클레임 우선순위: reseller_id > sub (대리점 토큰)
