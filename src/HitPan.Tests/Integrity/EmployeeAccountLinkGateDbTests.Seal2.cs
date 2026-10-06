@@ -252,7 +252,7 @@ public sealed partial class EmployeeAccountLinkGateDbTests
 
     // ══ G-E19 — P3-16 아이디 trim 저장 ══
 
-    [Fact(DisplayName = "G-E19 🔴 P3-16 — 대표 경로 계정 추가(CreateAsync)에 \" hong19\" → users.email·사원 사본 모두 \"hong19\" · 다시 \"hong19 \" 는 「이미 사용 중인 아이디」 · 대조군(옛 원문 중복 검사는 앞 공백 아이디를 다른 아이디로 본다)")]
+    [Fact(DisplayName = "G-E19 🔴 P3-16 — 대표 경로 계정 추가(CreateAsync)에 \" hong19\" → users.email·사원 사본 모두 \"hong19\"(글자 수 6) · 다시 \"hong19 \"·\" hong19\" 는 「이미 사용 중인 아이디」(판별은 앞 공백 칸 · 끝 공백 칸은 PAD SPACE 라 판별력 없음 V5-24) · 대조군(옛 원문 중복 검사는 앞 공백 아이디를 다른 아이디로 본다)")]
     public async Task E19_Create_Stores_Trimmed_LoginId()
     {
         if (!Ready("G-E19")) return;
@@ -264,14 +264,30 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         Assert.Equal("hong19", await db.ExecuteScalarAsync<string>("SELECT email FROM users WHERE user_id=@U", new { U = id }));
         Assert.Equal("hong19", await db.ExecuteScalarAsync<string>("SELECT login_id FROM employees WHERE user_id=@U", new { U = id }));
 
+        // 🔴 작5 §8-12 V5-24 — 저장값을 글자 수로도 본다(DB 비교 규칙과 무관 · 끝 공백까지 센다).
+        Assert.Equal(6L, await db.ExecuteScalarAsync<long>("SELECT CHAR_LENGTH(email) FROM users WHERE user_id=@U", new { U = id }));
+        Assert.Equal(6L, await db.ExecuteScalarAsync<long>("SELECT CHAR_LENGTH(login_id) FROM employees WHERE user_id=@U", new { U = id }));
+
         var users0 = await CountAsync(db, "users");
+        // ⬛ [V5-24 전] 둘째 단언은 「hong19 」(끝 공백) 하나 — utf8mb4_unicode_ci 는 끝 공백을 무시(PAD SPACE)해서
+        //   중복 검사가 원문이어도 409 가 났다 ⇒ 판별 못 함. 그 칸은 남기고(한계 기록) 판별 칸 「 hong19」(앞 공백)를 더한다.
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.CreateAsync(new CreateUserDto { Email = "hong19 ", UserName = "홍길동2", Password = Pw, Role = "User" }, _tenantA));
         Assert.Equal(UserService.LoginIdTakenMessage, ex.Message);
         Assert.Equal(users0, await CountAsync(db, "users"));
 
-        // 🔴 대조군 — 옛 중복 검사(원문 그대로)는 「 hong19」 를 저장된 hong19 와 다른 아이디로 본다 ⇒ 통과 ⇒ 앞 공백째 두 번째 계정
-        Assert.Equal(0L, await db.ExecuteScalarAsync<long>(
-            "SELECT COUNT(*) FROM users WHERE tenant_id = @T AND email = @E AND is_deleted = 0", new { T = _tenantA, E = " hong19" }));
+        // 🔴 V5-24 판별 칸 — 앞 공백은 비교 규칙이 무시하지 않는다. 중복 검사가 원문(" hong19")이면 0건으로 통과해
+        //   ⓐ 저장도 원문이면 두 번째 계정이 생기고(예외 없음) ⓑ 저장만 trim 이면 INSERT 가 UNIQUE(1062)로 터진다(MySqlException) — 둘 다 여기서 FAIL.
+        var ex2 = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            svc.CreateAsync(new CreateUserDto { Email = " hong19", UserName = "홍길동3", Password = Pw, Role = "User" }, _tenantA));
+        Assert.Equal(UserService.LoginIdTakenMessage, ex2.Message);
+        Assert.Equal(users0, await CountAsync(db, "users"));
+
+        // 🔴 대조군 — 옛 중복 검사(원문 그대로)는 「 hong19」 를 저장된 hong19 와 다른 아이디로 본다(0건 ⇒ 통과) · trim 값이면 1건
+        const string oldDup = "SELECT COUNT(*) FROM users WHERE tenant_id = @T AND email = @E AND is_deleted = 0";
+        Assert.Equal(0L, await db.ExecuteScalarAsync<long>(oldDup, new { T = _tenantA, E = " hong19" }));
+        Assert.Equal(1L, await db.ExecuteScalarAsync<long>(oldDup, new { T = _tenantA, E = " hong19".Trim() }));
+        // 한계 증명 — 끝 공백 칸은 원문 그대로 비교해도 1건(PAD SPACE) ⇒ 「hong19 」 단언은 판별력이 없다(위 ⬛ 줄)
+        Assert.Equal(1L, await db.ExecuteScalarAsync<long>(oldDup, new { T = _tenantA, E = "hong19 " }));
     }
 }
