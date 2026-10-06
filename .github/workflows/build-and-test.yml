@@ -465,6 +465,44 @@ jobs:
           #    1건이 api.anthropic.com 으로 떠남 → 봉합 후 0건. 봉합 빼고 FAIL 재확인 포함 —
           #    표 전문: docs/개발/erp/20261006작9_외부AI반출봉합_개발명세서.md §4
           GATES="$GATES|ExternalAiExportGate"
+          # 🔴 20261006작8 갈래 라 — DB-39·DB-60 「본사 전용 — ERP no-op」 봉합 ⓖ1~ⓖ6 (Db3960BackofficeNoOpGateTests).
+          #    옛 고객 DB(시드 두 행 없음)에서 DB-39 가 본사 표 5+FK+고정비번 계정을 만들고 DB-60 이 errno 150 으로
+          #    실패해 마이그 체인(DB-70~137)이 영구 중단되던 사고(선행검증 20261006_선행검증서_DB39_60).
+          #    등록 근거는 "초록불이라서" 가 아니라 **봉합 전 FAIL 실측**이다(시험 DB hitpan_e2e · 2026-10-06):
+          #      · 봉합 전(원본 두 파일) → 러너 Success=False Failed=DB-60 errno 150 · 본사 표 5 · admin 행 1 (ⓖ1 FAIL)
+          #      · 봉합 후(no-op 교체)  → Success=True Applied=[DB-39,DB-60] · 체인 완주 · 본사 표 0 (ⓖ1 PASS)
+          #    ⓖ5 손상상태 재개(success=0 재실행 전제) · ⓖ6 음성대조군(success=1 파일은 본문이 바뀌어도 skip —
+          #    훗날 러너에 checksum 비교가 생기면 ⓖ6 이 FAIL 로 알린다 · §7-6 1회성 예외의 전제 고정).
+          #    🔴 이 잡이 유일한 계측 경로다 — 개발 PC 는 CREATE DATABASE 거부로 [SKIP].
+          #    근거: docs/개발/erp/20261006작8_갈래라_DB3960_개발명세서.md
+          GATES="$GATES|Db3960BackofficeNoOpGate"
+          # 🔴 20261006작8 갈래 가 (Z2) BoSignupTenantKeyGate — 백오피스 landing_signups.tenant_id FK ·
+          #    글자 조인 5곳 → 키 조인 · backfill 검산. 실물 SchemaMigrator 가 installer/backoffice/*.sql 을
+          #    번호순으로 적용하고, 실물 컨트롤러(Approve/List/Bootstrap/ResendLicense)를 부른다.
+          #    등록 근거는 초록불이 아니라 **봉합 전 FAIL 재현**이다 — 조인 5곳을 봉합 전 코드로 되돌리면
+          #    G1b(목록 엇갈림)·G1c(부트스트랩 남의 가입서)·G1d(남의 시리얼 갈아끼움)가 빨간불
+          #    (개발명세서 §4 — docs/개발/백오피스/20261006작8_갈래가_Z2_개발명세서.md).
+          #    대조군: G1e(키 없는 옛 행 글자 폴백 생존 · #20) · G4 모호 2건 NULL 유지(자동 추정 금지).
+          #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측.
+          GATES="$GATES|BoSignupTenantKeyGate"
+          # 🔴 20261006작8 갈래 다(Z5) G-3 — 계정 과금 어휘 전환(보내는 쪽만 · WebhookAccountVocabGateTests).
+          #    G-Z5a 송신 payload 캡처(실물 WebhookOutboundService + 실물 SchemaMigrator 로 installer/backoffice 00·30 적용):
+          #      ExtraAccounts 실림 + ExtraDeviceSlots·device-slot 라우트 병행(#37) + account_changed → subscription 라우트.
+          #    G-Z5b 수신부 일치(실물 WebhookInboundController — ERP 수신 코드 무접촉 · 불러서 본다):
+          #      송신 payload 그대로 → local_subscription.extra_accounts 반영 · **대조군** = 키 이름 틀린 payload(값 9)는
+          #      200 인데 값 무변(받지만 안 읽는다). 대조군이 시험 안에 있다 — 송신이 키를 바꾸면 Z5b 양성이 빨간불.
+          #    🔴 개발 PC 는 CREATE DATABASE 거부라 로컬 무력화 실측은 격리 인스턴스(33306 선례)로만 가능 —
+          #       실측 기록: docs/개발/백오피스/20261006작8_갈래다_Z5_개발명세서.md §4
+          GATES="$GATES|WebhookAccountVocabGate"
+          # 🔴 20261006작8 갈래 나(Z3) G-2 (BackofficeSettlementStatusGateTests · 격리 DB ·
+          #    실물 SchemaMigrator + ResellerSettlementCalculator). 토스는 'confirmed' 기록,
+          #    정산은 'approved' 판독 → 정산 0원(선행검증 A-②). 사장님 Q-2 결재 통일값 = 'confirmed'.
+          #    등록 근거는 "초록불이라서" 가 아니라 **전후 대조**다(20261006 로컬 빌린 시험 DB 실측):
+          #      · 봉합 전(Calculator 'approved' 판독) → G-2② FAIL "정산 0원 재현 — gross 실측: 0"
+          #      · 봉합 후('confirmed' 판독)           → gross 110,000 일치 PASS
+          #    대조군: pending 결제·다른 달 confirmed 결제가 섞이면 G-2③ 빨간불.
+          #    근거: docs/개발/백오피스/20261006작8_갈래나_Z3_개발명세서.md §4
+          GATES="$GATES|BackofficeSettlementStatusGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

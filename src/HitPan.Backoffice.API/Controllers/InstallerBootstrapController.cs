@@ -72,7 +72,19 @@ public class InstallerBootstrapController : ControllerBase
                        ls.email AS Email,
                        ls.plan_type AS PlanType
                 FROM tenants t
-                LEFT JOIN landing_signups ls ON ls.company_name = t.company_name
+                -- Z2 (20261006작8 갈래 가): 회사명 글자 조인 → tenant_id 키 조인.
+                --   키로 묶인 가입서를 먼저 집고, 키가 없는 옛 행(tenant_id NULL)만
+                --   기존 글자 조인으로 읽기 폴백한다(#20 — 끊김 금지). 같은 회사명 2건이어도
+                --   키 행이 있으면 글자 행은 쳐다보지 않는다(동명 회사 엇갈림 차단 · C-1).
+                LEFT JOIN landing_signups ls ON ls.signup_id = (
+                    SELECT ls2.signup_id FROM landing_signups ls2
+                    WHERE ls2.tenant_id = t.tenant_id
+                       OR (ls2.tenant_id IS NULL
+                           AND ls2.company_name = t.company_name
+                           AND NOT EXISTS (SELECT 1 FROM landing_signups k WHERE k.tenant_id = t.tenant_id))
+                    ORDER BY (ls2.tenant_id = t.tenant_id) DESC, ls2.submitted_at DESC
+                    LIMIT 1
+                )
                 WHERE t.license_key_hash = @Hash AND t.status = 'active'
                 LIMIT 1",
                 new { Hash = licHash });
