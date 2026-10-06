@@ -458,6 +458,13 @@ jobs:
           # 🔴 20261005작5 사원↔계정 연결 G-E1~E14 (EmployeeAccountLinkGateTests · …DbTests · …DbTests.Pipeline). 작5 전용 한 줄.
           #    갈래1·2·3 합류 전에는 FAIL 이 정상(「갈래N 합류 전」 문구) · 대조군·연결 목록: docs/개발/erp/20261005작5_사원계정연결_개발명세서_게이트.md
           GATES="$GATES|EmployeeAccountLinkGate"
+          # 🔴 20261006작9 외부 AI 반출 봉합 — ExternalAiExportGateDbTests(G-2~G-7 · 실물 ChatbotService/
+          #    AiAgentService/ExternalAiGate · TEMPORARY 표로 공용 DB 무접촉 · 가짜 HTTP 핸들러 — 외부 실호출 0)
+          #    + ExternalAiExportGateTests(G-8 문구·#36 동시반영·Tool 등록부 무접촉 — DB 불필요).
+          #    등록 근거는 초록불이 아니라 **봉합 전 FAIL 실측**(#32): 동의 0건·키 valid 에서 외부 호출
+          #    1건이 api.anthropic.com 으로 떠남 → 봉합 후 0건. 봉합 빼고 FAIL 재확인 포함 —
+          #    표 전문: docs/개발/erp/20261006작9_외부AI반출봉합_개발명세서.md §4
+          GATES="$GATES|ExternalAiExportGate"
           # 🔴 20261006작8 갈래 라 — DB-39·DB-60 「본사 전용 — ERP no-op」 봉합 ⓖ1~ⓖ6 (Db3960BackofficeNoOpGateTests).
           #    옛 고객 DB(시드 두 행 없음)에서 DB-39 가 본사 표 5+FK+고정비번 계정을 만들고 DB-60 이 errno 150 으로
           #    실패해 마이그 체인(DB-70~137)이 영구 중단되던 사고(선행검증 20261006_선행검증서_DB39_60).
