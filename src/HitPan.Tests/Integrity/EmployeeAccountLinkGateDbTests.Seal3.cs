@@ -120,18 +120,29 @@ public sealed partial class EmployeeAccountLinkGateDbTests
             ("직원 SuspendAsStaffAsync", eSStaff, sStaff, c => new UserService(c, new NoOpAudit()).SuspendAsStaffAsync(sStaff, actor, _tenantA)),
         };
         await using var db = await OpenAsync();
+        // ⬛ [10/6 이어받기 전] 경우마다 바로 Assert — 첫 경우가 FAIL 하면 나머지 둘은 안 돌아 「봉합 빼면 셋 다 FAIL」을 한 번에 못 봤다.
+        //   경우별 첫 실패 한 줄을 모아 끝에 한 번 단언한다(경우끼리 다른 사원·계정 — 서로 안 오염).
+        var failures = new List<string>();
         foreach (var (what, emp, user, op) in cases)
         {
             var (resignErr, blocked, opErr) = await RaceWithResignAsync(emp, op, what);
-            Assert.False(IsDeadlock(resignErr) || IsDeadlock(opErr),
-                $"V5-22 — {what} ↔ 퇴사 1213 교착 · 퇴사={resignErr?.GetBaseException().Message ?? "성공"} · 조작={opErr?.GetBaseException().Message ?? "성공"}");
-            Assert.True(resignErr is null, $"{what} — 퇴사가 실패했다: {resignErr}");
-            Assert.True(blocked, $"{what} — 퇴사가 계정을 지우지 않았다(연결 계정 없음?)");
+            string? fail = null;
+            if (IsDeadlock(resignErr) || IsDeadlock(opErr))
+                fail = $"V5-22 — {what} ↔ 퇴사 1213 교착 · 퇴사={resignErr?.GetBaseException().Message ?? "성공"} · 조작={opErr?.GetBaseException().Message ?? "성공"}";
+            else if (resignErr is not null)
+                fail = $"{what} — 퇴사가 실패했다: {resignErr}";
+            else if (!blocked)
+                fail = $"{what} — 퇴사가 계정을 지우지 않았다(연결 계정 없음?)";
             // 퇴사가 먼저 끝나 계정을 지웠다 ⇒ 기다리던 조작은 「찾을 수 없음」으로 정상 거절(서버 오류 아님)
-            Assert.True(opErr is InvalidOperationException, $"{what} — 기다린 뒤 정상 거절이 아니다: {opErr?.GetType().Name} {opErr?.Message}");
-            Assert.True(await db.ExecuteScalarAsync<bool>("SELECT is_deleted FROM users WHERE user_id=@U", new { U = user }), $"{what} — 퇴사가 계정을 지우지 않았다");
-            Assert.Equal((null, null), await EmpLinkAsync(db, emp));
+            else if (opErr is not InvalidOperationException)
+                fail = $"{what} — 기다린 뒤 정상 거절이 아니다: {opErr?.GetType().Name} {opErr?.Message}";
+            else if (!await db.ExecuteScalarAsync<bool>("SELECT is_deleted FROM users WHERE user_id=@U", new { U = user }))
+                fail = $"{what} — 퇴사가 계정을 지우지 않았다";
+            else if (await EmpLinkAsync(db, emp) != (null, null))
+                fail = $"{what} — 퇴사 뒤 사원 연결이 남았다";
+            if (fail is not null) failures.Add(fail);
         }
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
 
         // 대표 경로 [사용 안 함](SuspendAsync)은 사원 행을 안 잡는다 — 퇴사가 기다리는 동안 기다림 없이 끝나고 퇴사도 그 뒤 정상
         await using (var holder = await OpenAsync())
