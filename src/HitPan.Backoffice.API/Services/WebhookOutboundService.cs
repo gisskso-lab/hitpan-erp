@@ -22,6 +22,10 @@ public interface IWebhookOutboundService
 {
     Task EmitSubscriptionChangedAsync(string tenantId, CancellationToken ct = default);
     Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default);
+    // 20261006작8 Z5 — 계정 과금 어휘 전환(보내는 쪽만). ERP 가 ExtraAccounts 를 실제로 읽는
+    // 수신 라우트(subscription — WebhookInboundController:45-46·211-213 실측)로 쏜다.
+    // 구현체 전수(#12): WebhookOutboundService 하나 — 2026-10-06 grep 확인.
+    Task EmitAccountChangedAsync(string tenantId, CancellationToken ct = default);
 }
 
 public class WebhookOutboundService : IWebhookOutboundService
@@ -38,8 +42,19 @@ public class WebhookOutboundService : IWebhookOutboundService
     public Task EmitSubscriptionChangedAsync(string tenantId, CancellationToken ct = default) =>
         EmitAsync(tenantId, "subscription_changed", ct);
 
-    public Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default) =>
-        EmitAsync(tenantId, "device_slot_changed", ct);
+    // ⬛ public Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default) =>
+    // ⬛     EmitAsync(tenantId, "device_slot_changed", ct);
+    // 20261006작8 Z5 — #37(옛 판 호환): 구 이벤트·구 라우트(device-slot)는 제거하지 않고 병행 송신.
+    //   옛 판 ERP 는 device-slot 수신까지만 안다. 새 판 ERP 는 subscription 라우트에서만
+    //   ExtraAccounts 를 읽는다(수신 코드 무접촉 — 실측 대조만 했다).
+    public async Task EmitDeviceSlotChangedAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EmitAsync(tenantId, "device_slot_changed", ct);   // 구 라우트 병행(#37)
+        await EmitAsync(tenantId, "account_changed", ct);       // 계정 과금 라우트
+    }
+
+    public Task EmitAccountChangedAsync(string tenantId, CancellationToken ct = default) =>
+        EmitAsync(tenantId, "account_changed", ct);
 
     private async Task EmitAsync(string tenantId, string eventType, CancellationToken ct)
     {
@@ -60,6 +75,7 @@ public class WebhookOutboundService : IWebhookOutboundService
                     ai_token_extra AS AiTokenExtra,
                     max_users AS MaxUsers,
                     extra_device_slots AS ExtraDeviceSlots,
+                    extra_accounts AS ExtraAccounts,
                     CAST(reseller_id AS CHAR) AS ResellerId,
                     reseller_tier AS ResellerTier
                 FROM tenants WHERE tenant_id = @TenantId",
@@ -76,7 +92,17 @@ public class WebhookOutboundService : IWebhookOutboundService
             // (베타 영역 저장할 영역 = 단일 시연 영역, 고객사별 도메인 저장할 영역 = 정식 영역 저장)
             var webhookHost = Environment.GetEnvironmentVariable("WEBHOOK_TARGET_HOST")
                               ?? $"{tenant.TenantCode}.hitpan.kr";
-            var targetUrl = $"https://{webhookHost}/api/internal/webhook/{(eventType == "subscription_changed" ? "subscription" : "device-slot")}";
+            // ⬛ var targetUrl = $"https://{webhookHost}/api/internal/webhook/{(eventType == "subscription_changed" ? "subscription" : "device-slot")}";
+            // 20261006작8 Z5 — ERP 수신 라우트 실측 대조(WebhookInboundController):
+            //   [HttpPost("subscription")] → HandleAsync(isSubscription:true) 만 extra_accounts COALESCE UPDATE(:211-213)
+            //   [HttpPost("device-slot")]  → ExtraAccounts 를 읽지 않는다(:107-108)
+            //   ⇒ 계정 과금(account_changed)은 subscription 라우트로. device-slot 라우트는 제거하지 않는다(#37).
+            var route = eventType switch
+            {
+                "device_slot_changed" => "device-slot",
+                _ => "subscription" // subscription_changed · account_changed
+            };
+            var targetUrl = $"https://{webhookHost}/api/internal/webhook/{route}";
 
             var nonce = Guid.NewGuid().ToString();
             var payload = new
@@ -91,7 +117,8 @@ public class WebhookOutboundService : IWebhookOutboundService
                 tenant.AiTokenMonthlyLimit,
                 tenant.AiTokenExtra,
                 tenant.MaxUsers,
-                tenant.ExtraDeviceSlots,
+                tenant.ExtraDeviceSlots,     // #37 — 구 키 병행 송신(옛 판 ERP 가 읽는다)
+                tenant.ExtraAccounts,        // 20261006작8 Z5 — ERP WebhookPayload.ExtraAccounts(int?) 와 키 이름·형 대조
                 tenant.ResellerId,
                 tenant.ResellerTier,
                 nonce,
@@ -159,6 +186,8 @@ public class WebhookOutboundService : IWebhookOutboundService
         public int AiTokenExtra { get; set; }
         public int MaxUsers { get; set; }
         public int ExtraDeviceSlots { get; set; }
+        // 20261006작8 Z5 — 추가 구매 계정 수(tenants.extra_accounts · 30_backoffice_tenants_extra_accounts.sql)
+        public int ExtraAccounts { get; set; }
         public string? ResellerId { get; set; }
         public int ResellerTier { get; set; }
     }
