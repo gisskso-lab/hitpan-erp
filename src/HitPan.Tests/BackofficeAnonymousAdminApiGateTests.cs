@@ -43,10 +43,12 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
 
     private readonly HttpClient _http;
     private readonly Factory _factory;
+    private readonly Xunit.Abstractions.ITestOutputHelper _out;
 
-    public BackofficeAnonymousAdminApiGate(Factory factory)
+    public BackofficeAnonymousAdminApiGate(Factory factory, Xunit.Abstractions.ITestOutputHelper output)
     {
         _factory = factory;
+        _out = output;
         _http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -177,27 +179,49 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
     //   위 4개 라우트만 재면 「내일 추가되는 api/admin/xxx」는 또 못 잡는다.
     //   글자 검사가 아니라 어셈블리 메타데이터(실제 컴파일된 속성)를 읽는다.
     [Fact]
-    public void G_W11_5_관리컨트롤러는_익명이_될_수_없다()
+    public void G_W11_5_관리표면은_익명도_인증만도_될_수_없다()
     {
         var offenders = new List<string>();
-        foreach (var t in AdminControllerTypes())
-        {
-            var classAnon = t.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
-            var classAuth = t.GetCustomAttributes().Any(a => a is IAuthorizeData);
-            if (classAnon)
-                offenders.Add($"{t.Name}: 클래스에 [AllowAnonymous] — 토큰 0으로 열린다");
-            else if (!classAuth)
-                offenders.Add($"{t.Name}: 클래스에 [Authorize] 가 없다 — 백오피스 API 에는 FallbackPolicy 가 없어 사실상 익명이다");
+        var watched = 0;
 
-            foreach (var m in PublicActions(t))
+        foreach (var t in AdminSurfaceTypes())
+        {
+            watched++;
+            var classAnon = t.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
+            var anonActions = PublicActions(t)
+                .Where(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null)
+                .Select(m => m.Name).ToList();
+
+            // (가) 익명 — 작11 P0 가 바로 이 모양이었다.
+            if (classAnon && !AnonymousOnAdminSurfaceBaseline.ContainsKey(t.Name))
+                offenders.Add($"{t.Name}: 클래스에 [AllowAnonymous] — 토큰 0으로 열린다");
+            foreach (var a in anonActions)
             {
-                if (m.GetCustomAttribute<AllowAnonymousAttribute>() is not null)
-                    offenders.Add($"{t.Name}.{m.Name}: 액션에 [AllowAnonymous] — 관리 API 에서 예외를 뚫었다");
+                if (!AnonymousOnAdminSurfaceBaseline.ContainsKey($"{t.Name}.{a}")
+                    && !AnonymousOnAdminSurfaceBaseline.ContainsKey(t.Name))
+                    offenders.Add($"{t.Name}.{a}: 액션에 [AllowAnonymous] — 관리 표면에 예외를 뚫었다");
+            }
+            if (classAnon || AnonymousOnAdminSurfaceBaseline.ContainsKey(t.Name)) continue;
+
+            // (나) 인증만 요구 — [Authorize] 단독은 **합격이 아니다.**
+            //     백오피스 JWT 는 대리점에게도 발급된다(BackofficeAuthController.cs:115) ⇒ 역할까지 물어야 갈린다.
+            if (!RequiresRole(t) && !BareAuthorizeBaseline.ContainsKey(t.Name))
+            {
+                var hasAuth = t.GetCustomAttributes().Any(a => a is IAuthorizeData);
+                offenders.Add(hasAuth
+                    ? $"{t.Name}: [Authorize] 단독 — 인증만 묻는다. 유효한 대리점 JWT 면 통과한다 " +
+                      "(Policy/Roles 또는 액션마다 [BoPermission(\"…\")] 필요)"
+                    : $"{t.Name}: 인가 표시가 없다 — 백오피스 API 에는 FallbackPolicy 가 없어 사실상 익명이다");
             }
         }
 
+        // 감시 범위를 눈으로 본다 — 다음 사람이 「몇 개를 보고 있나」를 출력에서 바로 읽는다.
+        var scope = $"[작11 게이트 범위] 백오피스 컨트롤러 전수 {AllControllerTypes().Count()}개 중 " +
+                    $"관리 표면 {watched}개 감시 · 문서화 익명 예외 {AnonymousOnAdminSurfaceBaseline.Count}건 · " +
+                    $"역할미요구 기지 예외 {BareAuthorizeBaseline.Count}건";
         Assert.True(offenders.Count == 0,
-            "익명으로 열린 관리 API 가 있다 (작11 P0 와 같은 모양):\n  - " + string.Join("\n  - ", offenders));
+            scope + "\n익명·인증만으로 열린 관리 표면이 있다 (작11 P0 와 같은 모양):\n  - "
+            + string.Join("\n  - ", offenders));
     }
 
     // ── 음성 대조군 — 정당한 익명 경로는 계속 열려 있어야 한다 ───────────────────────────
@@ -248,19 +272,105 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
         }
     }
 
-    // 「관리 API」 판정: 라우트에 admin 조각이 있거나, 컨트롤러 이름에 Admin 이 들어간 것.
-    //   후자가 필요한 이유: api/backoffice/tenants(TenantsAdminController) 처럼 라우트에 admin 이 없는 관리 API 가 있다.
-    private static IEnumerable<Type> AdminControllerTypes()
+    // ════════════════════════════════════════════════════════════════════════════════
+    //  M-2 (2026-10-07 [3-V] 보안상무 병렬검증 교정 2/3) — 판정식을 **리플렉션 전수**로 넓혔다.
+    //
+    //  종전 판정식의 두 구멍 (검증자가 「게이트는 초록인데 봉합이 뚫리는 조합」으로 찾아냈다):
+    //   (1) 글자 의존 — 클래스명에 Admin / 라우트에 admin 인 것만 봤다 ⇒ 백오피스 컨트롤러 32개 중
+    //       10개만 감시했다. 클래스에 인가 표시가 아예 없는 4건(PromotionController ·
+    //       TossPaymentsController · LandingSignupController · BackofficeAuthController) 은
+    //       **집합에 들어오지도 않았다.**
+    //   (2) [Authorize] 단독을 합격으로 셌다 ⇒ 앞으로 누가 api/admin 컨트롤러를 만들며 [Authorize] 만
+    //       달면 게이트는 초록인데 **대리점 JWT 에 열린다.** 백오피스 JWT 는 대리점에게도 발급되므로
+    //       (BackofficeAuthController.cs:115) 인증만으로는 대리점을 못 가른다.
+    //
+    //  새 판정식:
+    //   · 집합 = 어셈블리의 ControllerBase 파생 **전수**(추상 제외) — 이름·라우트 글자에 의존하지 않는다.
+    //   · 「관리 표면」 = 라우트에 admin 조각 | 라우트가 api/backoffice/* | 클래스명에 Admin.
+    //     api/backoffice/* 를 넣는 이유: TenantsAdminController 처럼 라우트에 admin 이 없는 관리 API 와,
+    //     PromotionController 처럼 **이름에도 Admin 이 없는** 관리 API 가 둘 다 있다.
+    //   · 관리 표면은 **역할까지 요구**해야 합격 — [Authorize(Policy/Roles=…)] 또는 액션의 [BoPermission("…")].
+    //     [Authorize] 단독은 합격으로 세지 않는다.
+    //
+    //  🔴 넓히면서 드러난 한계 — 아래 예외표 2개가 그 전부다(침묵하지 않고 이름·사유를 적는다).
+    //     G_W11_12 가 예외표의 썩음을 막는다: 고쳐지면 표를 줄여야 초록이 된다.
+    //     ⚠️ 예외표에 있다 = 「안전하다」가 아니라 「별도 트랙에서 처리 중 / 설계상 역할 불요」.
+    //
+    //  🔴 남은 한계 (리플렉션으로 못 넓히는 부분 · 명세서 §9 와 같은 문장):
+    //   (a) **본문 역할검사는 안 읽는다.** BoPermissions·CredentialsStatus 는 액션 본문에서 IsOwner() 로
+    //       403 을 낸다. 속성이 아니므로 리플렉션으로는 보이지 않는다 ⇒ 예외표로만 다룬다.
+    //   (b) **런타임 정책 내용은 안 읽는다.** [Authorize(Policy="X")] 가 붙어 있으면 합격으로 센다.
+    //       그 X 가 Program.cs 에서 실제로 역할을 요구하는지까지는 속성 메타데이터에 없다.
+    //       그 축은 G_W11_1~4 의 **실제 요청**(토큰없음 401 / 대리점 403 / 본사 통과)이 맡는다.
+    //   (c) **라우트 접두어 규칙은 여전히 규약 의존.** api/backoffice·api/admin 밖에 새 관리 접두어
+    //       (예: api/platform)를 만들면 관리 표면으로 안 잡힌다. 그때는 IsAdminSurface 를 함께 늘려야 한다.
+    //       그 누락은 G_W11_11 의 전수 분류(미분류 0건)가 드러낸다.
+    // ════════════════════════════════════════════════════════════════════════════════
+
+    // 관리 표면인데 익명이 정당한 것 — 전건 열거 + 사유. (가입·로그인 경로는 토큰을 받기 전이다.)
+    private static readonly Dictionary<string, string> AnonymousOnAdminSurfaceBaseline = new()
+    {
+        ["BackofficeAuthController"] =
+            "로그인 — 토큰을 받기 전 경로. 토큰을 요구하면 아무도 못 들어온다 (G_W11_7·8 이 열림을 지킨다)",
+        ["ResellerApplicationController"] =
+            "대리점 가입 신청 공개 접수(api/backoffice/reseller-applications POST) — 신청자는 아직 계정이 없다. " +
+            "심사·승인은 별 컨트롤러 ResellerApplicationsAdminController 가 맡고 그쪽은 [BoPermission] 2중이다",
+        ["PromotionController.Redeem"] =
+            "고객이 프로모션 코드를 입력하는 경로(PromotionController.cs:212-213) — 익명 봉합 후보 B 목록 · " +
+            "사장님 결재 대기. 결재로 막히면 이 줄을 지운다"
+    };
+
+    // 관리 표면인데 역할을 안 묻는 것 — 전건 열거 + 사유. PM 판정으로 이번 차수 무접촉.
+    private static readonly Dictionary<string, string> BareAuthorizeBaseline = new()
+    {
+        ["BoPermissionsController"] =
+            "액션 본문 IsOwner() 로 403 (BoPermissionsController.cs:30·40). 단 F-1·F-2 — PlatformAdmin 이 role 을 " +
+            "안 보고 IsOwner() 가 영원히 false ⇒ 작10 2차수 역할 4값 전환에서 정리",
+        ["CredentialsStatusController"] =
+            "액션 본문 IsOwner() 로 403 (CredentialsStatusController.cs:39·104·160). F-2 동일 ⇒ 작10 2차수",
+        ["OwnerMfaController"] =
+            "자기 계정 MFA 만 다룬다(sub 클레임 범위 · OwnerMfaController.cs:167) ⇒ 역할 요구가 설계상 불필요"
+    };
+
+    private static IEnumerable<Type> AllControllerTypes()
     {
         var asm = typeof(HitPan.Backoffice.API.Program).Assembly;
-        foreach (var t in asm.GetTypes())
-        {
-            if (t.IsAbstract || !typeof(ControllerBase).IsAssignableFrom(t)) continue;
-            var route = t.GetCustomAttribute<RouteAttribute>()?.Template ?? "";
-            var isAdminRoute = route.Split('/').Any(s => s.Equals("admin", StringComparison.OrdinalIgnoreCase));
-            var isAdminName = t.Name.Contains("Admin", StringComparison.Ordinal);
-            if (isAdminRoute || isAdminName) yield return t;
-        }
+        return asm.GetTypes()
+                  .Where(t => !t.IsAbstract && typeof(ControllerBase).IsAssignableFrom(t))
+                  .OrderBy(t => t.Name, StringComparer.Ordinal);
+    }
+
+    private static string RouteOf(Type t) => t.GetCustomAttribute<RouteAttribute>()?.Template ?? "";
+
+    private static bool IsAdminSurface(Type t)
+    {
+        var route = RouteOf(t);
+        var segs = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segs.Any(s => s.Equals("admin", StringComparison.OrdinalIgnoreCase))) return true;
+        if (segs.Length >= 2 && segs[0].Equals("api", StringComparison.OrdinalIgnoreCase)
+            && segs[1].Equals("backoffice", StringComparison.OrdinalIgnoreCase)) return true;
+        return t.Name.Contains("Admin", StringComparison.Ordinal);
+    }
+
+    private static IEnumerable<Type> AdminSurfaceTypes() => AllControllerTypes().Where(IsAdminSurface);
+
+    // 역할까지 요구하나 — 속성 메타데이터만으로 판정한다(위 한계 (a)(b) 참조).
+    private static bool RequiresRole(Type t)
+    {
+        static bool HasRoleData(IEnumerable<object> attrs) =>
+            attrs.OfType<IAuthorizeData>().Any(a =>
+                !string.IsNullOrWhiteSpace(a.Policy) || !string.IsNullOrWhiteSpace(a.Roles));
+
+        if (HasRoleData(t.GetCustomAttributes())) return true;
+        if (t.GetCustomAttributes().OfType<HitPan.Backoffice.API.Filters.BoPermissionAttribute>().Any()) return true;
+
+        var actions = PublicActions(t).ToList();
+        if (actions.Count == 0) return false;
+        // 액션마다 역할·권한을 묻는 경우도 합격 — 다만 **한 액션이라도 빠지면** 불합격이다.
+        return actions.All(m =>
+            HasRoleData(m.GetCustomAttributes())
+            || m.GetCustomAttributes().OfType<HitPan.Backoffice.API.Filters.BoPermissionAttribute>().Any()
+            || m.GetCustomAttribute<AllowAnonymousAttribute>() is not null);
     }
 
     private static IEnumerable<MethodInfo> PublicActions(Type t) =>
@@ -268,18 +378,112 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
          .Where(m => !m.IsSpecialName);
 
     [Fact]
-    public void G_W11_9_관리컨트롤러_판정이_실제로_무엇인가를_물었다()
+    public void G_W11_9_판정식이_실제로_무엇을_보는지_검산()
     {
         // 판정식 검산(「게이트는 글자가 아니라 동작」 · 판정식도 대조로 검산).
-        // 빈 집합을 상대로 반사 점검이 돌면 영원히 초록이다. 적발 대상이 실제로 잡혀 있는지 센다.
-        var names = AdminControllerTypes().Select(t => t.Name).ToList();
-        Assert.Contains("DevicesAdminController", names);
-        Assert.Contains("SerialLocksAdminController", names);
-        Assert.True(names.Count >= 10, $"관리 컨트롤러 판정이 너무 적게 잡았다: {names.Count}건 ({string.Join(", ", names)})");
-        // 음성 대조군: 공개 조회·로그인은 관리 API 로 잡히면 안 된다(잡히면 G_W11_5 가 정당한 익명을 빨간불로 만든다).
-        Assert.DoesNotContain("PricingPublicController", names);
-        Assert.DoesNotContain("BackofficeAuthController", names);
-        Assert.DoesNotContain("LandingSignupController", names);
+        // 빈 집합을 상대로 반사 점검이 돌면 영원히 초록이다.
+        var all = AllControllerTypes().Select(t => t.Name).ToList();
+        var admin = AdminSurfaceTypes().Select(t => t.Name).ToList();
+
+        // 🔴 감시 범위를 **통과할 때도** 출력에 찍는다 — 다음 사람이 「몇 개를 보고 있나」를 눈으로 본다.
+        //   실패 메시지에만 있으면 초록일 때 범위가 보이지 않아, 범위가 쪼그라든 걸 아무도 모른다.
+        _out.WriteLine($"[작11 게이트 범위] 백오피스 컨트롤러 전수 {all.Count}개 · 관리 표면 {admin.Count}개 감시 " +
+                       $"(종전 글자 판정식 10개) · 문서화 익명 예외 {AnonymousOnAdminSurfaceBaseline.Count}건 · " +
+                       $"역할미요구 기지 예외 {BareAuthorizeBaseline.Count}건");
+        _out.WriteLine("  관리 표면: " + string.Join(", ", admin));
+        _out.WriteLine("  비관리(익명·자기범위): " + string.Join(", ", all.Except(admin)));
+
+        // 전수 집합이 실제로 전수인가 — 32개(2026-10-07 실측)에서 줄어들면 리플렉션이 빠진 것이다.
+        Assert.True(all.Count >= 32,
+            $"백오피스 컨트롤러 전수가 {all.Count}건 — 2026-10-07 실측 32건보다 적다 ({string.Join(", ", all)})");
+
+        // 작11 §1 이 적발한 둘.
+        Assert.Contains("DevicesAdminController", admin);
+        Assert.Contains("SerialLocksAdminController", admin);
+
+        // M-2 (1) — 종전 글자 판정식이 **아예 못 봤던** 4건이 이제 전수 집합에 들어온다.
+        foreach (var n in new[] { "PromotionController", "TossPaymentsController",
+                                  "LandingSignupController", "BackofficeAuthController" })
+            Assert.Contains(n, all);
+
+        // 그중 관리 표면인 둘은 감시 대상이 됐다(종전 0건).
+        Assert.Contains("PromotionController", admin);
+        Assert.Contains("BackofficeAuthController", admin);
+
+        // 감시 범위가 종전(10)보다 실제로 늘었는가.
+        Assert.True(admin.Count >= 20,
+            $"관리 표면 판정이 {admin.Count}건 — 종전 10건에서 늘지 않았다 ({string.Join(", ", admin)})");
+
+        // 음성 대조군: 공개 조회·랜딩 경로는 관리 표면으로 잡히면 안 된다.
+        Assert.DoesNotContain("PricingPublicController", admin);
+        Assert.DoesNotContain("LandingSignupController", admin);
+        Assert.DoesNotContain("LandingPublicController", admin);
+        Assert.DoesNotContain("InstallerBootstrapController", admin);
+
+        // RequiresRole 자체의 대조 — 봉합한 둘은 양성, 예외표의 셋은 음성이어야 한다.
+        var byName = AllControllerTypes().ToDictionary(t => t.Name, t => t);
+        Assert.True(RequiresRole(byName["DevicesAdminController"]));
+        Assert.True(RequiresRole(byName["TenantsAdminController"]));
+        Assert.False(RequiresRole(byName["OwnerMfaController"]));
+    }
+
+    [Fact]
+    public void G_W11_11_컨트롤러_전수가_분류에서_새지_않는다()
+    {
+        // 한계 (c) 를 드러내는 장치. 전수 = 관리표면 + 익명 + 인증필요 로 **빠짐없이** 나뉘어야 한다.
+        // 새 접두어(api/platform 등)를 쓴 컨트롤러가 들어오면 「인가 표시도 없고 익명도 아닌」
+        // 미분류로 떨어져 여기서 빨간불이 된다.
+        var unclassified = new List<string>();
+        int adminCnt = 0, anonCnt = 0, authCnt = 0;
+
+        foreach (var t in AllControllerTypes())
+        {
+            if (IsAdminSurface(t)) { adminCnt++; continue; }
+
+            var anon = t.GetCustomAttribute<AllowAnonymousAttribute>() is not null
+                       || PublicActions(t).Any(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null);
+            var auth = t.GetCustomAttributes().Any(a => a is IAuthorizeData)
+                       || PublicActions(t).Any(m => m.GetCustomAttributes().Any(a => a is IAuthorizeData));
+
+            if (anon) anonCnt++;
+            else if (auth) authCnt++;
+            else unclassified.Add($"{t.Name} (라우트 \"{RouteOf(t)}\") — 관리 표면도 아니고 인가 표시도 익명 표시도 없다");
+        }
+
+        Assert.True(unclassified.Count == 0,
+            $"[작11 게이트 범위] 전수 {AllControllerTypes().Count()} = 관리표면 {adminCnt} + 익명 {anonCnt} + 인증필요 {authCnt}" +
+            "\n분류에서 샌 컨트롤러가 있다 — IsAdminSurface 의 접두어 규칙을 늘려야 한다:\n  - "
+            + string.Join("\n  - ", unclassified));
+    }
+
+    [Fact]
+    public void G_W11_12_예외표가_썩지_않는다()
+    {
+        // 예외표는 적어 두면 영원히 남는다 ⇒ 「고쳐졌는데 아직 예외」와 「이름이 바뀌었는데 그대로」를 막는다.
+        var stale = new List<string>();
+        var byName = AllControllerTypes().ToDictionary(t => t.Name, t => t);
+
+        foreach (var (key, reason) in BareAuthorizeBaseline)
+        {
+            if (!byName.TryGetValue(key, out var t))
+            { stale.Add($"{key}: 그런 컨트롤러가 없다 — 예외표에서 지워라 (사유: {reason})"); continue; }
+            if (RequiresRole(t))
+                stale.Add($"{key}: 이제 역할을 요구한다 — 예외표에서 지워라 (사유였던 것: {reason})");
+        }
+
+        foreach (var (key, reason) in AnonymousOnAdminSurfaceBaseline)
+        {
+            var typeName = key.Split('.')[0];
+            if (!byName.TryGetValue(typeName, out var t))
+            { stale.Add($"{key}: 그런 컨트롤러가 없다 — 예외표에서 지워라 (사유: {reason})"); continue; }
+            var anon = t.GetCustomAttribute<AllowAnonymousAttribute>() is not null
+                       || PublicActions(t).Any(m => m.GetCustomAttribute<AllowAnonymousAttribute>() is not null);
+            if (!anon)
+                stale.Add($"{key}: 이제 익명이 아니다 — 예외표에서 지워라 (사유였던 것: {reason})");
+        }
+
+        Assert.True(stale.Count == 0,
+            "작11 게이트 예외표가 실제 코드와 갈라졌다:\n  - " + string.Join("\n  - ", stale));
     }
 
     // ── M-1 음성 대조군 — 「시험이 외부로 실제 송신할 수 없다」를 돌아가는 앱에서 검산한다 ──────────
