@@ -16,9 +16,80 @@ namespace HitPan.Tests.Integrity;
 /// CI DB 를 붙잡아 무관 시험이 접속 시간초과로 깜빡였다(작5 §8-13 · ⚠️가설 — CI 로 확인). 백업 게이트(<c>BackupCredentialGateCollection</c>)와 같은 방식.
 /// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class EmployeeAccountLinkGateDbCollection
+public sealed class EmployeeAccountLinkGateDbCollection : ICollectionFixture<EmployeeAccountLinkGatePoolFixture>
 {
     public const string Name = "EmployeeAccountLinkGateDb";
+}
+
+/// <summary>
+/// 🔴 2026-10-06 작6 봉합 시도 — 작5 머지 SHA <c>161a21ec</c> db-gate 488/492 · 실패 4건 전부 MySqlException 1040
+/// <c>Too many connections</c>(접속 단계 · 값 단언 실패 0 · 결8 §5-1).
+/// </summary>
+/// <remarks>
+/// <para>⚠️가설: 앞서 돈 DB 게이트들이 격리 DB 마다 풀을 켠 채 연결해 <b>쉬는 풀 연결</b>이 이 프로세스에 남고,
+/// 병렬을 끈 이 컬렉션이 맨 끝에 혼자 돌 때 그 연결이 서버 한도를 채운다.</para>
+/// <para>그래서 이 컬렉션이 시작할 때 <b>한 번</b> <see cref="MySqlConnection.ClearAllPoolsAsync"/> 로 쉬는 풀 연결을 닫는다.
+/// 재시도·기대값 변경은 하지 않는다(작6 §3 — 값 단언을 숨기지 않는다).</para>
+/// <para>계측(작6 §2-2): 비우기 직전·직후 <c>Threads_connected</c> · <c>Max_used_connections</c> · <c>max_connections</c> 를
+/// 표준오류로 찍는다 — CI <c>dbgate.log</c> 에서 <c>[EAL-POOL]</c> 로 찾는다. 가설이 맞으면 직후 값이 직전보다 줄어든다.</para>
+/// <para>DB 가 없는 자리(로컬 · <c>build</c> 잡)는 계측을 건너뛰고 풀 비우기만 한다 — 이 프로세스 안의 일이라 무해하다.</para>
+/// </remarks>
+public sealed class EmployeeAccountLinkGatePoolFixture : IAsyncLifetime
+{
+    private const string Tag = "[EAL-POOL]";
+
+    public async Task InitializeAsync()
+    {
+        var measure = DbGateEnvironment.IsCi || File.Exists(MysqlExe());
+        if (measure) await LogServerCountersAsync("직전");
+
+        await MySqlConnection.ClearAllPoolsAsync();
+        Console.Error.WriteLine($"{Tag} ClearAllPoolsAsync 완료 — 이 프로세스의 쉬는 풀 연결을 닫았다.");
+
+        if (measure) await LogServerCountersAsync("직후");
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    private static string MysqlExe() =>
+        Environment.GetEnvironmentVariable("HITPAN_MYSQL") ?? @"C:\Program Files\MariaDB 11.4\bin\mysql.exe";
+
+    /// <summary>계측 연결 자신도 1개로 센다(풀 끔 · 쓰고 바로 닫는다).</summary>
+    private static async Task LogServerCountersAsync(string when)
+    {
+        var b = new MySqlConnectionStringBuilder
+        {
+            Server = Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "localhost",
+            Port = uint.TryParse(Environment.GetEnvironmentVariable("HITPAN_DB_PORT"), out var p) ? p : 3306,
+            UserID = Environment.GetEnvironmentVariable("HITPAN_DB_USER") ?? "root",
+            Password = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "",
+            Pooling = false,
+            ConnectionTimeout = 10,
+        };
+        try
+        {
+            await using var c = new MySqlConnection(b.ConnectionString);
+            await c.OpenAsync();
+            var vals = new List<string>();
+            await using (var cmd = new MySqlCommand(
+                "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Max_used_connections')", c))
+            await using (var r = await cmd.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync()) vals.Add($"{r.GetString(0)}={r.GetString(1)}");
+            }
+            await using (var cmd = new MySqlCommand("SHOW GLOBAL VARIABLES LIKE 'max_connections'", c))
+            await using (var r = await cmd.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync()) vals.Add($"{r.GetString(0)}={r.GetString(1)}");
+            }
+            Console.Error.WriteLine($"{Tag} {when} · {string.Join(" · ", vals)}");
+        }
+        catch (MySqlException ex)
+        {
+            // 계측 실패는 그 자체가 자료다(1040 이면 비우기 직전에 이미 한도) — 삼키지 않고 번호와 함께 찍는다.
+            Console.Error.WriteLine($"{Tag} {when} · 계측 연결 실패 ErrorCode={(int)ex.ErrorCode} Number={ex.Number} · {ex.Message}");
+        }
+    }
 }
 
 /// <summary>
