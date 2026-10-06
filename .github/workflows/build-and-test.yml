@@ -469,6 +469,15 @@ jobs:
           #    🔴 이 잡이 유일한 계측 경로다 — 개발 PC 는 CREATE DATABASE 거부로 [SKIP].
           #    근거: docs/개발/erp/20261006작8_갈래라_DB3960_개발명세서.md
           GATES="$GATES|Db3960BackofficeNoOpGate"
+          # 🔴 20261006작8 갈래 가 (Z2) BoSignupTenantKeyGate — 백오피스 landing_signups.tenant_id FK ·
+          #    글자 조인 5곳 → 키 조인 · backfill 검산. 실물 SchemaMigrator 가 installer/backoffice/*.sql 을
+          #    번호순으로 적용하고, 실물 컨트롤러(Approve/List/Bootstrap/ResendLicense)를 부른다.
+          #    등록 근거는 초록불이 아니라 **봉합 전 FAIL 재현**이다 — 조인 5곳을 봉합 전 코드로 되돌리면
+          #    G1b(목록 엇갈림)·G1c(부트스트랩 남의 가입서)·G1d(남의 시리얼 갈아끼움)가 빨간불
+          #    (개발명세서 §4 — docs/개발/백오피스/20261006작8_갈래가_Z2_개발명세서.md).
+          #    대조군: G1e(키 없는 옛 행 글자 폴백 생존 · #20) · G4 모호 2건 NULL 유지(자동 추정 금지).
+          #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측.
+          GATES="$GATES|BoSignupTenantKeyGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
