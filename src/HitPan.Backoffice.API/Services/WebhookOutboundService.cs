@@ -97,11 +97,26 @@ public class WebhookOutboundService : IWebhookOutboundService
             //   [HttpPost("subscription")] → HandleAsync(isSubscription:true) 만 extra_accounts COALESCE UPDATE(:211-213)
             //   [HttpPost("device-slot")]  → ExtraAccounts 를 읽지 않는다(:107-108)
             //   ⇒ 계정 과금(account_changed)은 subscription 라우트로. device-slot 라우트는 제거하지 않는다(#37).
+            // ⬛ var route = eventType switch { "device_slot_changed" => "device-slot", _ => "subscription" };
+            // 🔴 [3-V] I-5 교정 2026-10-07 — 포괄 기본값(`_ => "subscription"`)을 **화이트리스트**로.
+            //   종전엔 모르는 event_type 이 전부 조용히 구독 수신부(구독 필드 COALESCE UPDATE)로 흘러들었다.
+            //   훗날 새 이벤트를 더하는 사람이 라우트 검토를 건너뛰어도 사고가 안 나게, 아는 것만 보낸다.
+            //   병행 송신(#37) 보존: device_slot_changed → 구 라우트 · account_changed → subscription 라우트.
             var route = eventType switch
             {
-                "device_slot_changed" => "device-slot",
-                _ => "subscription" // subscription_changed · account_changed
+                "subscription_changed" => "subscription",
+                "account_changed"      => "subscription",   // ERP 는 subscription 라우트에서만 ExtraAccounts 를 읽는다
+                "device_slot_changed"  => "device-slot",     // #37 — 옛 판 ERP 가 아는 구 라우트
+                _ => null
             };
+            if (route is null)
+            {
+                _logger.LogWarning(
+                    "[Webhook] 미등록 event_type — 발행 거부 tenant={Tid} event={Ev}. "
+                    + "라우트 화이트리스트: subscription_changed · account_changed · device_slot_changed",
+                    tenantId, eventType);
+                return;
+            }
             var targetUrl = $"https://{webhookHost}/api/internal/webhook/{route}";
 
             var nonce = Guid.NewGuid().ToString();
