@@ -265,9 +265,17 @@ public class SerialVerifyController : ControllerBase
 }
 
 // 본사 잠금 해제 API (super_admin 권한)
+// 🔴 P0 봉합 (2026-10-07 작11 · 사장님 결재 「모두 결재!!」):
+//   위 주석은 2026-06 부터 「super_admin 권한」이라 적혀 있었으나 **다음 줄이 `[AllowAnonymous]`** 였다.
+//   주석은 코드가 아니다. 토큰 0으로
+//     GET  api/admin/serial-locks            → 잠긴 지문·실패횟수 목록(공격자가 자기 잠금 상태를 조회)
+//     POST api/admin/serial-locks/{id}/unlock → 익명 잠금 해제
+//   이 둘이 열려 있었다 ⇒ 시리얼 무차별 대입 방어선(serial_verify_locks)이 사실상 무력했다.
+//   봉합 기준 = 현행 축(account_type = platform_admin / platform_owner) — 작11 §2-1 결재.
+//   역할 enum 4값 전환(작10 ①사이클) 때 함께 옮긴다(2단 방식).
 [ApiController]
 [Route("api/admin/serial-locks")]
-[AllowAnonymous]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-10-07 작11 P0 봉합 — 익명·대리점 JWT 차단)
 public class SerialLocksAdminController : ControllerBase
 {
     private readonly IConfiguration _config;

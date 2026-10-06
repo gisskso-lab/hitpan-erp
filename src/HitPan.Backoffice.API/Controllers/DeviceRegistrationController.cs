@@ -316,9 +316,18 @@ public class DeviceRegistrationController : ControllerBase
 }
 
 // 본사 기기 관리 API
+// 🔴 P0 봉합 (2026-10-07 작11 · 사장님 결재 「모두 결재!!」):
+//   종전엔 클래스에 `[AllowAnonymous]` 가 붙어 있었다. 토큰 0으로
+//     GET  api/admin/devices/tenant/{tenantId}  → 임의 고객사 기기 지문·OS·last_seen 전량 응답
+//     POST api/admin/devices/{deviceId}/revoke  → 임의 기기 차단(업무 중단)
+//   이 둘이 열려 있었다. 「본사 기기 관리 API」라는 주석만 보고 막혀 있다고 믿은 사례다.
+//   봉합 기준 = 현행 축(account_type = platform_admin / platform_owner) — 작11 §2-1 결재.
+//   역할 enum 4값 전환(작10 ①사이클) 때 이 속성을 함께 옮긴다(2단 방식). 지금 4값을 앞당기지 않는다.
+//   Policy 를 쓰는 이유는 SignupsAdminController.cs:31-37 과 같다
+//   (`devices.*` 권한 키가 시드에 0건이라 [BoPermission] 이면 사장님 본인도 403).
 [ApiController]
 [Route("api/admin/devices")]
-[AllowAnonymous]
+[Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-10-07 작11 P0 봉합 — 익명·대리점 JWT 차단)
 public class DevicesAdminController : ControllerBase
 {
     private readonly IConfiguration _config;
