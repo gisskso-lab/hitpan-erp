@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS bo_cs_tickets (
     tenant_id         varchar(36)  NOT NULL,
     reseller_id       varchar(36)  NULL DEFAULT NULL COMMENT 'NULL = 직판 → 본사 1차(F-14 결재 조건ⓐ)',
     client_ticket_uid varchar(36)  NOT NULL COMMENT 'ERP 발급 cs_request_id — 멱등의 유일한 근거(설계 §3-2)',
-    received_channel  varchar(10)  NOT NULL DEFAULT 'phone' COMMENT 'phone/erp_message — 쪽지가 전화를 줄였나를 세는 재료',
+    -- varchar(20): 설계 초안(§3-2)은 10 이었으나 'erp_message'(11자)가 STRICT 에서 잘린다 —
+    -- CI 양성 게이트 G-B5-0 이 실측으로 잡음(2026-10-08 · Data too long). 값은 그대로, 칸만 넓힘.
+    received_channel  varchar(20)  NOT NULL DEFAULT 'phone' COMMENT 'phone/erp_message — 쪽지가 전화를 줄였나를 세는 재료',
     category          varchar(20)  NOT NULL COMMENT '8종 정본(use/set/net/dat/upd/bug/ins/etc — 결-9) · 사람이 재분류 가능',
     sub_tag           varchar(30)  NOT NULL COMMENT '사전정의 목록만 — 자유입력 불가(쟁점-3)',
     shape_tag         varchar(20)  NULL COMMENT '7모양 보조 태그(결-9 보조축) — ERP 가 보낸 고객 언어',
