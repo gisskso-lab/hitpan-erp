@@ -12,7 +12,7 @@
     데이터: 본사 백오피스 DB resellers + tenants(영업 고객사 메타) 만
 *@
 
-<PageTitle>@(_item?.ResellerName ?? "협력업체 상세") — 히트판 백오피스</PageTitle>
+<PageTitle>@(_item?.ResellerName ?? "대리점 상세") — 히트판 백오피스</PageTitle>
 
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
     <div style="display:flex;align-items:center;gap:12px;">
@@ -34,7 +34,7 @@
 else if (_item is null)
 {
     <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
-        <MudText Color="Color.Secondary">협력업체를 찾을 수 없습니다.</MudText>
+        <MudText Color="Color.Secondary">대리점을 찾을 수 없습니다.</MudText>
     </MudPaper>
 }
 else
@@ -43,7 +43,7 @@ else
         <MudItem xs="12" md="6">
             <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
                 <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">사업자 정보</MudText>
-                @RowText("협력업체 코드", _item.ResellerCode)
+                @RowText("대리점 코드", _item.ResellerCode)
                 @RowText("회사명", _item.ResellerName)
                 @RowText("사업자등록번호", _item.BizNo ?? "-")
                 @RowText("대표자명", _item.CeoName ?? "-")

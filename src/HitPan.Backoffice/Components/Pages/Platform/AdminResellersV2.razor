@@ -11,13 +11,13 @@
     신청 검토는 /admin/reseller-applications (별도)
 *@
 
-<PageTitle>협력업체 관리 — 히트판 백오피스</PageTitle>
+<PageTitle>대리점 관리 — 히트판 백오피스</PageTitle>
 
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">협력업체 관리</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">대리점 관리</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-            활성·정지된 협력업체 목록 (신청 검토는 [협력업체 신청] 메뉴)
+            활성·정지된 대리점 목록 (신청 검토는 [대리점 신청] 메뉴)
         </MudText>
     </div>
     <div style="display:flex;gap:8px;">
@@ -43,7 +43,7 @@
 else if (_items.Count == 0)
 {
     <MudPaper Elevation="0" Class="pa-8" Style="border-radius:12px;background:#F9FAFB;text-align:center;">
-        <MudText Color="Color.Secondary">조건에 맞는 협력업체가 없습니다. 신청 검토는 [협력업체 신청] 메뉴에서 진행합니다.</MudText>
+        <MudText Color="Color.Secondary">조건에 맞는 대리점이 없습니다. 신청 검토는 [대리점 신청] 메뉴에서 진행합니다.</MudText>
     </MudPaper>
 }
 else
@@ -112,7 +112,7 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"협력업체 목록 조회 실패: {ex.Message}", Severity.Error);
+            Snackbar.Add($"대리점 목록 조회 실패: {ex.Message}", Severity.Error);
             _items = new();
         }
         finally

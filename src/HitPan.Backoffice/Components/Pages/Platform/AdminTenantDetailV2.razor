@@ -98,13 +98,13 @@ else
 
         <MudItem xs="12" md="6">
             <MudPaper Elevation="1" Class="pa-4" Style="border-radius:12px;height:100%;">
-                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">구독 · 협력업체</MudText>
+                <MudText Typo="Typo.h6" Class="mb-3" Style="color:#0F6E56;">구독 · 대리점</MudText>
                 @RowText("구독 등급", _item.SubscriptionTier ?? "basic")
                 @RowText("AI 모드", _item.AiMode ?? "hitpan_pool")
                 @RowText("AI 토큰 한도", $"{_item.AiTokenMonthlyLimit:N0} / 월")
                 @RowText("기기 슬롯", $"{_item.MaxUsers} 사용자")
                 <div class="bo-row">
-                    <div class="bo-row-label">협력업체</div>
+                    <div class="bo-row-label">대리점</div>
                     <div class="bo-row-value">
                         @if (!string.IsNullOrEmpty(_item.ResellerId))
                         {
