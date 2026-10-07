@@ -91,7 +91,15 @@ public sealed class TunnelTokenRecovery : ITunnelTokenRecovery
                 licenseKey,
                 machineFingerprint = $"{Environment.MachineName}-{Environment.UserName}",
                 hostname = Environment.MachineName,
-                installerVersion = VersionInfo.Current
+                installerVersion = VersionInfo.Current,
+                // 🆕 20261007작12 1차수 B3-1 ⓒ — 「나는 단계 2(터널 자가복구)다」를 서버에 알린다.
+                //   서버는 이 값일 때만 응답에서 tenant 묶음과 bootstrap.token·tokenKey 를 **뺀다**
+                //   (설계 §5 — 이 셋은 워치독이 참조 0건이다). 🔴 이 파일이 **실제로 읽는 것은
+                //   domain.tunnelToken(:131) 과 domain.tunnelId(:136) 둘뿐**이고 둘 다 그대로 온다
+                //   ⇒ 아래 파싱·재시도 로직 무접촉. (tunnelTokenIssued 는 :128 **주석**에만 있고
+                //   TryGetProperty 호출이 0건이다 — 설계 §5-1 이 주석을 코드로 읽었다. 주석은 코드가 아니다.)
+                //   🔴 옛 워치독은 이 필드를 안 보내므로 전체 응답을 받는다(서버 기본값 = 전체 · 하위호환).
+                purpose = "tunnel-recovery"
             };
 
             using var res = await _http.PostAsJsonAsync(url, payload, ct);

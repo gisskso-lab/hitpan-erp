@@ -42,6 +42,11 @@ jobs:
         # 헌법 #19: errors 0 + warnings 0이 정합성·무결성
         run: dotnet build src/HitPan.sln --configuration Release --no-restore --nologo /p:TreatWarningsAsErrors=true /warnaserror
 
+      # 🔴 20261007작12 2차수 T-6 봉합차수([4] N5) — G-T6-5(실물 Inno Pascal)는 이 전체 시험에서
+      #   **스스로 빠진다**(HITPAN_REQUIRE_ISCC 가 1 이 아니면 iscc-optout.log 만 남기고 지나간다).
+      #   왜: 러너에 Inno 가 기본 탑재돼 있어 전체 시험이 그걸 집어 컴파일했고, 그 게이트 하나가 깨지자
+      #       required `build` 가 빨강이 되어 **모든 PR 의 머지가 막혔다**(run 37613228947 · Failed 1).
+      #   계측은 아래 전용 단계에서만 하고, 그 단계는 ISCC 없으면 스킵이 아니라 FAIL 이다.
       - name: Test (Unit + Integration)
         run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
         continue-on-error: false
@@ -66,6 +71,10 @@ jobs:
           GATES="$GATES|LocalSwapLeftoverGateTests|LocalSwapLeftoverLauncherGateTests"
           # 20260930작1 확대 1.3.50(작업지시서 §18 · 설계 §19-2) — 남기기(G-NK) · 세 번째 길(G-NP) · 일꾼 rollback+manual_zip(G-NW) · 완료 팝업 판정(G-ND)
           GATES="$GATES|LocalSwapManifestKeepGateTests|LocalSwapPrevFetchGateTests|LocalSwapPrevFetchWorkerGateTests|LocalSwapDonePopupGateTests|RollbackWatchGateTests"
+          # 🔴 20261007작12 2차수 T-6 — 설치 실패 문구 도달(G-T6-1·2·3). windows-latest 전용이라 이 잡에 합류한다.
+          #    .iss 에서 PS 블록을 복원해 powershell.exe 로 **실제 실행** + 로컬 HttpListener 가 423/401/500 한글 JSON 반환.
+          #    대조군·FAIL 실측: docs/개발/백오피스/20261007작12_2차수_T6_설치실패문구_도달_개발명세서.md §4
+          GATES="$GATES|InstallerBootstrapMessageGateTests"
           echo "▶ 이 단계가 무는 게이트: $GATES"
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
@@ -82,6 +91,65 @@ jobs:
           done
           if [ -n "$MISSING" ]; then echo "::error::목록에 있는데 한 건도 안 돈 게이트:$MISSING"; exit 1; fi
           echo "작1 게이트 전부 실제로 돌았다."
+
+      # 🔴 20261007작12 2차수 T-6 — **실물 Inno Pascal** 게이트(G-T6-5 · 갈래 ⓑ1).
+      #   왜 별 단계인가: Inno 의 LoadStringsFromFile 이 **UTF-8 BOM 파일을 어떤 인코딩으로 읽는지**
+      #   아무도 모른다(U1). 틀리면 42자 한글이 고객 설치 화면에서 깨지고 「문구가 닿았다」가 통째로 무너진다.
+      #   복제본으로는 못 잰다 — ISCC 말고는 잴 길이 없다.
+      #   ISCC 설치는 build-installer.yml:179 · deploy-update.yml:572 가 쓰는 방식을 그대로 베꼈다.
+      #   🔴 HITPAN_REQUIRE_ISCC=1 이라 ISCC 가 없으면 **스킵이 아니라 FAIL** 이다.
+      #   ⚠️ 개발 PC 에는 ISCC 를 깔지 않는다(#29 사전승인) ⇒ **이 단계가 유일한 계측 경로**다
+      #      (로컬에서는 iscc-skips.log 표식만 남는다).
+      #   🔴 봉합차수([4] N4) — 앞선 차수는 이 설치 단계가 **전체 시험 뒤**에 있어 전체 시험이 먼저 터지며
+      #      아예 안 돌았고, 게이트는 **러너 기본 탑재 Inno** 로 컴파일됐다(시험본·출하본 판 갈림).
+      #      ⇒ 설치를 전용 단계 **바로 앞**에 두고, HITPAN_ISCC_EXPECT_VERSION 으로 게이트가 **판을 직접 단언**한다.
+      - name: ISCC 설치 (실물 Inno Pascal 게이트용 · 출하와 같은 6.7.1)
+        run: choco install innosetup --version=6.7.1 -y --no-progress
+
+      - name: 작12 T-6 게이트 — 실물 Inno Pascal (G-T6-5 · 전용 단계)
+        env:
+          HITPAN_REQUIRE_ISCC: "1"
+          # 🔴 출하가 굽는 판(build-installer.yml:179 · deploy-update.yml:583)과 같아야 한다.
+          #    다르면 게이트가 FAIL 한다 — 재는 것이 출하물이 아니게 되는 걸 막는다.
+          HITPAN_ISCC_EXPECT_VERSION: "6.7.1"
+        shell: bash
+        run: |
+          set -o pipefail
+          # 🔴 앞선 단계(전체 시험·작1 게이트)가 남긴 표식을 먼저 지운다 — 안 지우면 아래 조용한초록 판별이
+          #    남의 표식을 보고 늘 터진다. 이 단계가 **자기 실행**만 보도록 만든다.
+          find . -name 'iscc-optout.log' -delete || true
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~InstallerBootstrapMessageGateTests.G_T6_5" \
+            --logger "trx;LogFileName=t6-iscc-results.trx" 2>&1 | tee "$RUNNER_TEMP/t6iscc.log"
+          TRX=$(find . -name 't6-iscc-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::t6-iscc-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          # 🔴 [4] N6 — 앞선 식 `grep -o 'G_T6_5[^"]*'` 은 **시험 수가 아니다**(한 시험이 여러 번 매친다).
+          #    trx 의 결과 레코드(testName 속성)만 세서 사람이 읽는 「N 건」을 진짜 건수로 만든다.
+          N=$(grep -o 'testName="[^"]*G_T6_5[^"]*"' "$TRX" | wc -l)
+          echo "  G-T6-5* : $N 건 (결과 레코드 수)"
+          if [ "$N" -eq 0 ]; then echo "::error::G-T6-5 가 한 건도 안 돌았다"; exit 1; fi
+          # 🔴 ISCC 가 있는데도 전용 단계가 아니라며 빠져나갔으면(= env 가 안 먹었으면) 조용한 초록이다.
+          if find . -name 'iscc-optout.log' -print -quit | grep -q .; then
+            echo "::error::전용 단계인데 iscc-optout.log 가 생겼다 — HITPAN_REQUIRE_ISCC 가 시험에 안 닿았다"
+            find . -name 'iscc-optout.log' -exec cat {} \;
+            exit 1
+          fi
+
+      - name: 안 잰 축 표식 (ISCC 없는 러너)
+        if: always()
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem -Path . -Filter 'iscc-skips.log' -Recurse -File -ErrorAction SilentlyContinue
+          if ($f) {
+            Write-Host "::warning::ISCC 없는 러너 — 실물 Inno Pascal 축은 이 판에서 재지 않았다"
+            $f | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName }
+          } else {
+            Write-Host "[ISCC축] iscc-skips.log 없음 — 실물 Inno Pascal 로 실측한 판이다"
+          }
+          # 🔴 전체 시험에서 G-T6-5 가 의도대로 빠졌다는 표식(N5). 없어도 실패는 아니지만 로그에 남긴다.
+          $o = Get-ChildItem -Path . -Filter 'iscc-optout.log' -Recurse -File -ErrorAction SilentlyContinue
+          if ($o) { $o | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName } }
 
       # 🔴 20260928작2 개정3 W-3 — storage.js 의 「비교 후 지움」·「옮겨 오기 표식」을 node 로 **실제로** 돌려 잰다
       #   (글자 검사 아님 · 파일을 vm 에서 올려 window.hitpanStorage_* 를 부른다). 러너(windows-latest)에 node 가 있다.
@@ -561,6 +629,34 @@ jobs:
           #      (G-14음 이 없음→OFF · 가드만 빠짐→OFF · 둘 다→ON 전환을 문다 · G-14ㄷ 는 Filters.Add<T> 가
           #       TypeFilterAttribute 로 들어가는 함정을 들고 있다).
           GATES="$GATES|BackofficeGuardStartupGate"
+          # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
+          #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
+          #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)
+          #    담지 않는 것(숨기지 않고 적는다): **G-1·G-2·G-2b 는 ⓐ 선검증 게이트 ⇒ [3]-2(C-1 운영 읽기 뒤)**.
+          #    🔴 **G-7(워치독 실파서 투입)은 이 잡이 아니라 `build` 잡에서 돈다** (PM 결재 ① 2026-10-07):
+          #      HitPan.Watchdog 는 net8.0-windows, HitPan.Tests 는 net8.0 ⇒ NU1201 로 참조 불가.
+          #      그래서 `src/HitPan.Watchdog.Tests/InstallerBootstrapReducedResponseGateTests.cs`(신설 5건)에 뒀다.
+          #      그 프로젝트는 이미 솔루션에 있고 `build` 잡은 windows-latest 에서 `dotnet test src/HitPan.sln` 을
+          #      돌린다(:20·:46) ⇒ 자동으로 집힌다. **추측이 아니라 쟀다** — 같은 필터로 `dotnet test src/HitPan.sln`
+          #      을 돌려 `HitPan.Watchdog.Tests.dll` 5 Passed 를 확인했다(개발명세서 §5-1).
+          #      이 잡(ubuntu)은 HitPan.Tests.csproj 만 지목하므로 영향 0.
+          #    등록 근거는 초록불이 아니라 **봉합 빼기 전후 대조 9건 실측**이다(2026-10-07 · hitpan_trgtest):
+          #      A 가산 제거            → 5 FAIL (G-3·G-4a·G-4b·G-5·G-10)
+          #      B 잠금 거절(423) 제거  → 1 FAIL (G-3)
+          #      C 60분 창 조건 제거    → 1 FAIL (G-4b · 영구 잠금 복귀)
+          #      D 🔴 P0-1 되돌림(잠금 판독을 키 조회 앞으로) → 3 FAIL (G-3·G-4a·G-10)
+          #      E UPSERT 대입 순서 되돌림(= 설계가 「기존 식 그대로」라 한 순서) → G-3 FAIL
+          #        실측: **4회째에 failed_count=4·is_locked=1** — 결재 수치는 5회다
+          #      F 성공 리셋 제거        → 2 FAIL (G-5·G-10)
+          #      G ⓒ 기본값을 축소로 뒤집기 → 3 FAIL (G-8·G-8b·C-1 · 구 설치본·구 워치독 방어)
+          #      H [Authorize] 부착      → 1 FAIL (G-9 · 작11 식 봉합 유입 차단)
+          #      I1 가산을 바깥 catch 에  → 1 FAIL (G-6b) · I2 가산을 CF 장애 catch 에 → 1 FAIL (G-6a)
+          #      원복 뒤 전건 11/11 PASS · 빌드 0/0
+          #    🔴 I2 는 처음에 **G-6a 를 뚫었다**(성공 리셋이 가산을 0 으로 덮었다) ⇒ 판정을 「행이 아예 없다」로
+          #      고친 뒤 FAIL 을 확인했다. 게이트를 실측으로 고친 자리다.
+          #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측(19초 · DB 없이면 1초).
+          #    근거: docs/개발/백오피스/20261007작12_1차수_B3-1_시도제한_응답최소화_개발명세서.md
+          GATES="$GATES|InstallerBootstrapPreverifyGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
