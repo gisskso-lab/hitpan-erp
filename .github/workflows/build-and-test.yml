@@ -549,6 +549,29 @@ jobs:
           #        G_W11_11(전수 분류 미분류 0건) · G_W11_12(예외표 썩음 방지) 신설.
           #        FAIL 확인: 예외표 OwnerMfaController 한 줄을 어긋나게 하면 G_W11_5·G_W11_12 2건 FAIL.
           GATES="$GATES|BackofficeAnonymousAdminApiGate"
+          # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
+          #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
+          #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)
+          #    담지 않는 것(숨기지 않고 적는다): **G-1·G-2·G-2b 는 ⓐ 선검증 게이트 ⇒ [3]-2(C-1 운영 읽기 뒤)**.
+          #      **G-7(워치독 실파서 투입)은 아예 없다** — HitPan.Watchdog 는 net8.0-windows, HitPan.Tests 는 net8.0
+          #      ⇒ TFM 이 좁은 쪽을 넓은 쪽이 참조할 수 없다(NU1201). PM 결재 사항(개발명세서 §5).
+          #    등록 근거는 초록불이 아니라 **봉합 빼기 전후 대조 9건 실측**이다(2026-10-07 · hitpan_trgtest):
+          #      A 가산 제거            → 5 FAIL (G-3·G-4a·G-4b·G-5·G-10)
+          #      B 잠금 거절(423) 제거  → 1 FAIL (G-3)
+          #      C 60분 창 조건 제거    → 1 FAIL (G-4b · 영구 잠금 복귀)
+          #      D 🔴 P0-1 되돌림(잠금 판독을 키 조회 앞으로) → 3 FAIL (G-3·G-4a·G-10)
+          #      E UPSERT 대입 순서 되돌림(= 설계가 「기존 식 그대로」라 한 순서) → G-3 FAIL
+          #        실측: **4회째에 failed_count=4·is_locked=1** — 결재 수치는 5회다
+          #      F 성공 리셋 제거        → 2 FAIL (G-5·G-10)
+          #      G ⓒ 기본값을 축소로 뒤집기 → 3 FAIL (G-8·G-8b·C-1 · 구 설치본·구 워치독 방어)
+          #      H [Authorize] 부착      → 1 FAIL (G-9 · 작11 식 봉합 유입 차단)
+          #      I1 가산을 바깥 catch 에  → 1 FAIL (G-6b) · I2 가산을 CF 장애 catch 에 → 1 FAIL (G-6a)
+          #      원복 뒤 전건 11/11 PASS · 빌드 0/0
+          #    🔴 I2 는 처음에 **G-6a 를 뚫었다**(성공 리셋이 가산을 0 으로 덮었다) ⇒ 판정을 「행이 아예 없다」로
+          #      고친 뒤 FAIL 을 확인했다. 게이트를 실측으로 고친 자리다.
+          #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측(19초 · DB 없이면 1초).
+          #    근거: docs/개발/백오피스/20261007작12_1차수_B3-1_시도제한_응답최소화_개발명세서.md
+          GATES="$GATES|InstallerBootstrapPreverifyGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

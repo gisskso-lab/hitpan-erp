@@ -82,41 +82,12 @@ public class InstallerBootstrapController : ControllerBase
             var normalizedKey = req.LicenseKey.Trim().ToUpperInvariant().Replace(" ", "");
             var licHash = ComputeHmacSha256(normalizedKey, pepper);
 
-            // ──────────────────────────────────────────────────────────────────
-            // ②-b 🆕 작12 B3-1 ⓑ — Ⓛ 잠금 판독 (설계 §1 바꾼 흐름 ②-b · §4-1)
-            //   종전: ⑤ 가 LogWarning 한 줄만 남기고 401 ⇒ 틀린 키를 **횟수 제한 없이** 던질 수 있었다.
-            //   잠금 키 단위는 client_fingerprint 해시 **하나뿐**이다 — serial_verify_locks 의
-            //   UNIQUE KEY uk_fingerprint 가 그것이고, submitted_hash·client_ip 에는 인덱스가 없다
-            //   (출하 DDL :471-473) ⇒ 키·IP 단위 가산은 DDL 추가를 부르므로 2차수(사장님 결재 ②).
-            //
-            //   🔴 60분 창 밖이면 is_locked=1 이어도 **통과시킨다**(사장님 결재 ③ — 자동 해제).
-            //      기존 기계(SerialVerifyController :66-76)는 영구 잠금 + 본사 수동 해제다.
-            //      그걸 그대로 연결하면 오타 5번으로 **재설치가 영구 차단**된다(P0). G-4 가 이 자리를 문다.
+            // 🆕 작12 B3-1 ⓑ 재료 — 지문 해시·접속 IP. 잠금 **판독은 키 조회 뒤**에 한다(아래 ⑤).
+            //   🔴 잠금 키 단위는 client_fingerprint 해시 **하나뿐**이다 — serial_verify_locks 의
+            //      UNIQUE KEY uk_fingerprint 가 그것이고, submitted_hash·client_ip 에는 인덱스가 없다
+            //      (출하 DDL :471-473) ⇒ 키·IP 단위 가산은 DDL 추가를 부르므로 2차수(사장님 결재 ②).
             var fpHash = ComputeHmacSha256(req.MachineFingerprint, pepper);
             var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-            var lockState = await db.QueryFirstOrDefaultAsync<BootstrapLockRow>(@"
-                SELECT failed_count AS FailedCount,
-                       is_locked AS IsLocked,
-                       CASE WHEN last_failed_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE)
-                            THEN 1 ELSE 0 END AS WithinWindow
-                FROM serial_verify_locks
-                WHERE client_fingerprint = @Fp",
-                new { Fp = fpHash, Window = FailWindowMinutes });
-
-            if (lockState is not null && lockState.IsLocked == 1 && lockState.WithinWindow == 1)
-            {
-                await LogBootstrapAttempt(db, null, licHash, fpHash, clientIp, ResultLocked);
-                _logger.LogWarning(
-                    "[InstallerBootstrap] 지문 단위 잠금으로 거절 count={Cnt} (60분 뒤 자동 해제)",
-                    lockState.FailedCount);
-                return StatusCode(423, new
-                {
-                    success = false,
-                    locked = true,
-                    message = "시리얼 입력 5회 실패로 잠시 중지되었습니다. 1시간 뒤 다시 시도해주세요."
-                });
-            }
 
             // 시리얼 = 포링키. tenants에서 평문 비교 가능하지만 HMAC 비교가 보안 정합.
             // 데이터 흐름도 정정 (사장님 결재 2026-06-18 "길 B"): 백오피스는 사업자번호·대표자명 평문을
@@ -151,7 +122,49 @@ public class InstallerBootstrapController : ControllerBase
 
             if (tenant is null)
             {
-                // ⑤ 🆕 작12 B3-1 ⓑ — 실패 카운터 +1 · 시도 기록 (설계 §1 ⑤)
+                // ══════════════════════════════════════════════════════════════
+                // ⑤ 🆕 작12 B3-1 ⓑ — 잠금은 **키를 못 찾은 뒤에만** 본다
+                //
+                // 🔴🔴 P0-1 처방 (사장님 결재 2026-10-07 · [4] 검증팀장 반증):
+                //   「유효한 키는 잠금과 무관하게 통과시킨다.」
+                //   1차 구현은 잠금 판독을 키 조회 **앞**에 뒀다. 그러면 지문이 한 번 잠긴 PC 는
+                //   **유효 키로도 423** 이 되어 터널 자가복구·재설치가 60분 멈춘다(#27·#28·#30).
+                //   반증 사실: 워치독은 60분에 **최대 10회** 부트스트랩을 부를 수 있다 —
+                //     WS28F_CoolDown.AllowRecovery 가 **키별 독립 큐**(한도 5)이고
+                //     Worker.cs:448(ServiceReinstall) · Worker.cs:1051(PostReboot:ServiceReinstall)
+                //     두 키가 각각 깨운다. 큐는 in-memory 라 서비스 재시작마다 리셋 ⇒ 10 은 **하한**.
+                //   게다가 조회 조건이 t.status='active'(:88) 라 **구독 정지·미승인 고객은 유효 키로도 401**
+                //     ⇒ 설계 §4-3⑤「워치독은 실패 경로에 안 들어간다」는 **반증됐다.**
+                //   보너스: 「남의 지문을 보내 그 PC 설치를 60분 막는」 공격면(검증 S-2)도 함께 사라진다 —
+                //     그 공격으로는 **틀린 키 시도만** 막힌다.
+                //   무차별 대입은 항상 **틀린 키**를 내므로 막는 힘은 그대로다.
+                // ══════════════════════════════════════════════════════════════
+                var lockState = await db.QueryFirstOrDefaultAsync<BootstrapLockRow>(@"
+                    SELECT failed_count AS FailedCount,
+                           is_locked AS IsLocked,
+                           CASE WHEN last_failed_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE)
+                                THEN 1 ELSE 0 END AS WithinWindow
+                    FROM serial_verify_locks
+                    WHERE client_fingerprint = @Fp",
+                    new { Fp = fpHash, Window = FailWindowMinutes });
+
+                // 🔴 60분 창 밖이면 is_locked=1 이어도 통과시킨다(사장님 결재 ③ — 자동 해제).
+                //   기존 기계(SerialVerifyController :66-76)는 영구 잠금 + 본사 수동 해제다.
+                //   그걸 그대로 연결하면 오타 5번으로 재설치가 영구 차단된다. G-4b 가 이 자리를 문다.
+                if (lockState is not null && lockState.IsLocked == 1 && lockState.WithinWindow == 1)
+                {
+                    await LogBootstrapAttempt(db, null, licHash, fpHash, clientIp, ResultLocked);
+                    _logger.LogWarning(
+                        "[InstallerBootstrap] 틀린 키 + 지문 단위 잠금으로 거절 count={Cnt} (60분 뒤 자동 해제)",
+                        lockState.FailedCount);
+                    return StatusCode(423, new
+                    {
+                        success = false,
+                        locked = true,
+                        message = "시리얼 입력 5회 실패로 잠시 중지되었습니다. 1시간 뒤 다시 시도해주세요."
+                    });
+                }
+
                 //   🔴 가산은 **키 불일치에서만** 돈다. 본사 장애·DB 오류·CF 실패는 바깥 catch → 500 이라
                 //      이 자리에 닿지 않는다 ⇒ 본사가 아파도 고객이 잠기지 않는다(설계 §4-3 1번 · G-6).
                 await IncrementBootstrapFailedCount(db, fpHash);
@@ -265,6 +278,8 @@ public class InstallerBootstrapController : ControllerBase
                                         "HITPAN_BOOTSTRAP_TOKEN_KEY 미설정 — 부트스트랩 서명키 없이 설치 응답 불가(DEV 폴백 금지, 보안상무 결재 조건1)");
 
             // ⑧-b 🆕 작12 B3-1 ⓑ — 성공이 실패 카운터를 0 으로 리셋한다 (설계 §1 ⑧-b · §4-3 3번)
+            //   🔴 P0-1 처방의 2단이기도 하다 — 잠긴 지문도 **유효 키면 여기까지 와서** 잠금이 풀린다.
+            //      is_locked 도 함께 0 으로 내린다(아래 UPDATE). G-10 이 그 자리를 동작으로 문다.
             //   기존 serial/verify 성공 경로(SerialVerifyController.cs:133-137)와 같은 식이다.
             //   ⇒ 이전 오타가 다음 설치로 넘어가지 않는다. G-5 가 이 자리를 문다.
             await db.ExecuteAsync(@"
@@ -304,6 +319,10 @@ public class InstallerBootstrapController : ControllerBase
             //   무엇을 못 빼나 (정직하게 적는다):
             //     · domain.tunnelToken · domain.tunnelId 는 **두 단계 모두** 필요하다
             //       (설치 iss:615·618 / 워치독 :131·:136) ⇒ 비밀값성 4항목 중 2개만 줄어든다.
+            //   🔴 교정 2026-10-07 ([4] 검증 지적): 워치독이 **실제로 읽는 것은 이 둘뿐**이다.
+            //      설계 §5-1 은 domain.tunnelTokenIssued 도 「필요」로 적었는데 그건 **주석 한 줄**이고
+            //      TryGetProperty 호출이 0건이다(TunnelTokenRecovery.cs:128 주석). 주석은 코드가 아니다.
+            //      그래서 그 항목은 「빼도 안 깨지지만 변경 최소로 그대로 둔다」가 정확한 서술이다.
             //
             //   ⚠️ 단계적 발효 — 고객 PC 의 **구 워치독**은 이 필드를 안 보내므로 전체 응답을 받는다(안 깨진다).
             //      자동 업데이트로 새 워치독이 깔린 PC 부터 축소가 발효된다. 「게시 직후 전 고객 축소」가 아니다.
@@ -376,14 +395,42 @@ public class InstallerBootstrapController : ControllerBase
     // ══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 실패 카운터 UPSERT — <b>기존 식과 같다</b>(SerialVerifyController.cs:178-202).
-    /// <para>창(60분) 밖이면 1 로 되돌리고 잠금도 푼다 ⇒ 오래된 실패가 쌓여서 잠그지 않는다.</para>
+    /// 실패 카운터 UPSERT — 창(60분) 밖이면 1 로 되돌리고 잠금도 푼다 ⇒ 오래된 실패가 쌓여서 잠그지 않는다.
+    ///
+    /// <para>🔴🔴 <b>대입 순서가 판정이다 — 손대지 마라.</b> (2026-10-07 작12 B3-1 실측으로 발견)
+    /// MariaDB 의 <c>ON DUPLICATE KEY UPDATE</c> 는 대입을 <b>위에서 아래로</b> 평가하고,
+    /// 뒤 줄이 앞 줄에서 <b>이미 바뀐 값</b>을 본다. 그래서 <c>failed_count</c> 를 먼저 올려 두고
+    /// 아래에서 <c>failed_count + 1 &gt;= @Max</c> 를 보면 <b>한 번 일찍</b> 잠긴다.</para>
+    ///
+    /// <para><b>실측(hitpan_trgtest · 2026-10-07)</b>: 설계가 「기존 식 그대로」라 한
+    /// <c>SerialVerifyController.cs:178-202</c> 의 순서를 그대로 복사했더니
+    /// <b>4회째에 <c>failed_count=4, is_locked=1</c></b> 이 됐다 — 결재된 수치는 <b>5회</b>다
+    /// (사장님 헌법 「5회 실패 시 잠금」 · <c>MaxFailedAttempts=5</c>).
+    /// 같은 이유로 <c>locked_at</c> 이 <c>is_locked</c> 뒤에 있으면 <c>is_locked = 0</c> 조건이
+    /// 영원히 거짓이 되어 <b>잠긴 시각이 NULL 로 남는다</b>.</para>
+    ///
+    /// <para>⇒ 옛 값을 보는 줄을 <b>전부 위로</b> 올렸다: locked_at → is_locked → failed_count →
+    /// first_failed_at → last_failed_at. 숫자(5·60)는 하나도 바꾸지 않았다.</para>
+    ///
+    /// <para>⚠️ <b>같은 결함이 <c>SerialVerifyController</c> 에 그대로 있다</b>(브라우저 시리얼 검증).
+    /// 이번 차수 범위가 아니라 <b>안 고쳤다</b> — 개발명세서 §6 에 올려 뒀다.
+    /// 그 문은 레포 전수 호출자 0건이라 오늘 아무도 안 쓴다 ⇒ 「기존에 검증된 기계」가 아니다.</para>
     /// </summary>
     private static Task IncrementBootstrapFailedCount(MySqlConnection db, string fingerprint) =>
         db.ExecuteAsync(@"
             INSERT INTO serial_verify_locks (client_fingerprint, failed_count, first_failed_at, last_failed_at)
             VALUES (@Fp, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
             ON DUPLICATE KEY UPDATE
+                locked_at = CASE
+                    WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN NULL
+                    WHEN failed_count + 1 >= @Max AND is_locked = 0 THEN UTC_TIMESTAMP()
+                    ELSE locked_at
+                END,
+                is_locked = CASE
+                    WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN 0
+                    WHEN failed_count + 1 >= @Max THEN 1
+                    ELSE is_locked
+                END,
                 failed_count = CASE
                     WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN 1
                     ELSE failed_count + 1
@@ -392,17 +439,7 @@ public class InstallerBootstrapController : ControllerBase
                     WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN UTC_TIMESTAMP(6)
                     ELSE first_failed_at
                 END,
-                last_failed_at = UTC_TIMESTAMP(6),
-                is_locked = CASE
-                    WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN 0
-                    WHEN failed_count + 1 >= @Max THEN 1
-                    ELSE is_locked
-                END,
-                locked_at = CASE
-                    WHEN last_failed_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Window MINUTE) THEN NULL
-                    WHEN failed_count + 1 >= @Max AND is_locked = 0 THEN UTC_TIMESTAMP()
-                    ELSE locked_at
-                END",
+                last_failed_at = UTC_TIMESTAMP(6)",
             new { Fp = fingerprint, Window = FailWindowMinutes, Max = MaxFailedAttempts });
 
     /// <summary>

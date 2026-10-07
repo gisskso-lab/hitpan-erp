@@ -312,8 +312,9 @@ public sealed class InstallerBootstrapPreverifyGateTests
         Assert.Equal(5, after!.Value.FailedCount);
         Assert.Equal(1, after.Value.IsLocked);
 
-        // 잠긴 뒤 또 보내면 키가 맞든 틀리든 423 (판독이 앞에 선다)
-        Assert.Equal(423, StatusOf(await controller.Bootstrap(Req(ValidKey), CancellationToken.None)));
+        // 잠긴 뒤 **틀린 키**를 또 보내면 423 (무차별 대입은 항상 틀린 키를 낸다)
+        Assert.Equal(423, StatusOf(await controller.Bootstrap(Req(WrongKeyPrefix + 6), CancellationToken.None)));
+        // 🔴 유효 키는 423 이 아니다 — 그 축은 G-4a·G-10 이 따로 문다(P0-1 처방)
 
         // 시도 기록이 **구분되어** 남는다 — 같은 표를 브라우저 시리얼 검증이 공유한다
         Assert.Equal(5, await db.QueryFirstAsync<int>(
@@ -331,14 +332,14 @@ public sealed class InstallerBootstrapPreverifyGateTests
     // ══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// G-4. 잠긴 지문의 <c>last_failed_at</c> 을 <b>61분 전</b>으로 밀고 유효 키 → <b>200</b>.
-    /// <para>🔴 읽기 쪽 60분 창 조건(<c>WithinWindow</c>)이 없으면 423 으로 남는다 ⇒ 오타 5번으로
-    /// 재설치가 영구 차단된다(기존 기계는 영구 잠금 + 본사 수동 해제다).</para>
+    /// 🔴 G-4a (P0-1 방어선 · 사장님 결재 2026-10-07) — 잠긴 지문 + <b>유효 키</b> → <b>즉시 200</b>.
+    /// <para>61분을 기다리지 않는다. 잠금 판독이 키 조회 <b>앞</b>으로 가면 423 이 되어 FAIL ⇒
+    /// 워치독 터널 자가복구와 고객 재설치가 60분 멈춘다(#27·#28·#30).</para>
     /// </summary>
     [Fact]
-    public async Task G4_잠긴지문도_60분_지나면_유효키로_열린다()
+    public async Task G4a_잠긴지문도_유효키면_즉시_200_이다()
     {
-        if (!TrySetUpDb(nameof(G4_잠긴지문도_60분_지나면_유효키로_열린다))) return;
+        if (!TrySetUpDb(nameof(G4a_잠긴지문도_유효키면_즉시_200_이다))) return;
         await RunRealMigratorAsync();
         await using var db = new MySqlConnection(DbConnString());
         await db.OpenAsync();
@@ -347,8 +348,32 @@ public sealed class InstallerBootstrapPreverifyGateTests
         var controller = NewBootstrap();
         for (var i = 1; i <= 5; i++)
             await controller.Bootstrap(Req(WrongKeyPrefix + i), CancellationToken.None);
-        Assert.Equal(1, (await ReadLockAsync(db))!.Value.IsLocked);                 // 잠겼다
-        Assert.Equal(423, StatusOf(await controller.Bootstrap(Req(ValidKey), CancellationToken.None)));
+        Assert.Equal(1, (await ReadLockAsync(db))!.Value.IsLocked);       // 잠겼다(틀린 키 5회)
+
+        // 🔴 시각을 밀지 않는다 — 잠긴 **그 순간** 유효 키로 들어온다
+        Assert.Equal(200, StatusOf(await controller.Bootstrap(Req(ValidKey), CancellationToken.None)));
+    }
+
+    /// <summary>
+    /// G-4b 자동 해제 — 잠긴 지문 + <b>틀린 키</b> + <c>last_failed_at</c> 을 61분 전으로 밀면 <b>401</b>.
+    /// <para>읽기 쪽 60분 창 조건(<c>WithinWindow</c>)이 없으면 <b>423</b> 으로 남는다 ⇒ FAIL.
+    /// 기존 기계는 영구 잠금 + 본사 수동 해제다 — 이 조건이 그걸 되돌려 푼다.</para>
+    /// </summary>
+    [Fact]
+    public async Task G4b_잠금은_60분_지나면_틀린키에도_423이_아니다()
+    {
+        if (!TrySetUpDb(nameof(G4b_잠금은_60분_지나면_틀린키에도_423이_아니다))) return;
+        await RunRealMigratorAsync();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+        await SeedTenantAsync(db);
+
+        var controller = NewBootstrap();
+        for (var i = 1; i <= 5; i++)
+            await controller.Bootstrap(Req(WrongKeyPrefix + i), CancellationToken.None);
+        Assert.Equal(1, (await ReadLockAsync(db))!.Value.IsLocked);
+        // 잠긴 창 안에서는 틀린 키가 423
+        Assert.Equal(423, StatusOf(await controller.Bootstrap(Req(WrongKeyPrefix + 6), CancellationToken.None)));
 
         // 시계를 못 돌리므로 표의 시각을 뒤로 민다 — 「60분 지난 상태」를 실제로 만든다
         await db.ExecuteAsync(@"
@@ -356,10 +381,46 @@ public sealed class InstallerBootstrapPreverifyGateTests
             SET last_failed_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 61 MINUTE)
             WHERE client_fingerprint = @Fp", new { Fp = FpHash });
 
-        var ok = await controller.Bootstrap(Req(ValidKey), CancellationToken.None);
-        Assert.Equal(200, StatusOf(ok));                                            // 스스로 열렸다
-        Assert.Equal(0, (await ReadLockAsync(db))!.Value.FailedCount);               // 성공이 0 으로 리셋
-        Assert.Equal(0, (await ReadLockAsync(db))!.Value.IsLocked);
+        // 423 이 아니다 — 창이 지나 스스로 열렸고, 틀린 키라서 401 + 카운터는 1 에서 다시 시작
+        Assert.Equal(401, StatusOf(await controller.Bootstrap(Req(WrongKeyPrefix + 7), CancellationToken.None)));
+        var row = await ReadLockAsync(db);
+        Assert.Equal(1, row!.Value.FailedCount);
+        Assert.Equal(0, row.Value.IsLocked);
+    }
+
+    /// <summary>
+    /// 🔴🔴 G-10 (P0-1 · 사장님 결재 2026-10-07) — <b>워치독 자가복구가 잠기지 않는다</b>를 동작으로 재는 유일한 게이트.
+    /// <para>잠긴 지문이 유효 키로 <b>200</b> 을 받고 <b>그 뒤 <c>failed_count=0</c>·<c>is_locked=0</c></b>.
+    /// 그래서 바로 다음 요청도 정상이다(잠금이 실제로 풀렸다).</para>
+    /// <para><b>봉합을 빼면</b>(= 잠금 검사를 키 조회보다 앞으로 옮기면) <b>423</b> 이 나와 FAIL 한다.</para>
+    /// <para>반증 근거: 워치독은 60분에 최대 10회 부트스트랩을 부를 수 있고(키별 독립 큐 ·
+    /// <c>Worker.cs:448</c>·<c>:1051</c> 두 키), <c>t.status='active'</c> 조건 때문에 구독 정지·미승인
+    /// 고객은 <b>유효 키로도 401</b> 이다 ⇒ 지문이 잠길 길이 실재한다.</para>
+    /// </summary>
+    [Fact]
+    public async Task G10_잠긴지문이_유효키로_200을_받고_잠금이_실제로_풀린다()
+    {
+        if (!TrySetUpDb(nameof(G10_잠긴지문이_유효키로_200을_받고_잠금이_실제로_풀린다))) return;
+        await RunRealMigratorAsync();
+        await using var db = new MySqlConnection(DbConnString());
+        await db.OpenAsync();
+        await SeedTenantAsync(db);
+
+        var controller = NewBootstrap();
+        for (var i = 1; i <= 5; i++)
+            await controller.Bootstrap(Req(WrongKeyPrefix + i), CancellationToken.None);
+        var locked = await ReadLockAsync(db);
+        Assert.Equal(5, locked!.Value.FailedCount);
+        Assert.Equal(1, locked.Value.IsLocked);                 // 전제: 정말 잠겼다
+
+        // 워치독·고객 재설치가 쓰는 길 — 유효 키
+        Assert.Equal(200, StatusOf(await controller.Bootstrap(Req(ValidKey), CancellationToken.None)));
+
+        var after = await ReadLockAsync(db);
+        Assert.Equal(0, after!.Value.FailedCount);              // 리셋됐다
+        Assert.Equal(0, after.Value.IsLocked);                  // 잠금이 실제로 풀렸다
+        // 풀렸으니 다음 요청도 정상이다(「한 번은 통과하지만 표는 잠긴 채」가 아니다)
+        Assert.Equal(200, StatusOf(await controller.Bootstrap(Req(ValidKey), CancellationToken.None)));
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -414,9 +475,15 @@ public sealed class InstallerBootstrapPreverifyGateTests
         Assert.Equal(200, StatusOf(await NewBootstrap(cf).Bootstrap(Req(ValidKey), CancellationToken.None)));
 
         Assert.True(cf.IssueCalls >= 1, "CF 대역이 한 번도 안 불렸다 — 이 시험이 장애를 재현하지 못했다.");
-        var row = await ReadLockAsync(db);
-        Assert.True(row is null || row.Value.FailedCount == 0,
-            $"CF 장애가 실패 카운터를 올렸다(failed_count={row?.FailedCount}). 본사 장애가 고객을 잠근다.");
+
+        // 🔴 교정 2026-10-07 (FAIL 재현 I2 가 이 게이트를 뚫었다 — 실측으로 알았다):
+        //   종전 판정은 「failed_count == 0 이면 통과」였다. 그런데 이 요청은 **성공(200)** 이라
+        //   ⑧-b 리셋이 뒤에서 돌아 **0 으로 덮어 준다** ⇒ CF 장애 catch 에 가산을 심어도 초록이었다.
+        //   ⇒ 판정을 「행이 아예 없다」로 바꾼다. 가산은 UPSERT 로 **행을 만들고**, 리셋 UPDATE 는
+        //      행을 지우지 않으므로 심은 가산이 흔적으로 남는다. (I2 재측정에서 FAIL 확인)
+        Assert.Null(await ReadLockAsync(db));
+        Assert.Equal(0, await db.QueryFirstAsync<int>(
+            "SELECT COUNT(*) FROM serial_verify_attempts WHERE result IN ('installer-mismatch','installer-locked')"));
     }
 
     /// <summary>
@@ -459,10 +526,14 @@ public sealed class InstallerBootstrapPreverifyGateTests
         await SeedTenantAsync(db);
 
         var value = OkValue(await NewBootstrap().Bootstrap(Req(ValidKey), CancellationToken.None));
-        Assert.Equal(FullNames.OrderBy(x => x, StringComparer.Ordinal), NamePaths(value));
+        var names = NamePaths(value);
 
-        // 모르는 값(빈 문자열·null)이어도 **이름**은 있어야 한다 — 구 설치본이 평면 이름으로 집는다
-        Assert.Equal(19, NamePaths(value).Count);
+        // 🔴 숫자를 세지 않는다 — **이름 집합 전수 대조**다([4] 교정 2026-10-07).
+        //   설계 §6 G-8 의 「18개」는 어느 셈법으로도 안 나온다(실측 = 이름 19 · 말단 16).
+        //   숫자를 기대값으로 쓰면 「개수는 같은데 이름이 바뀐」 하위호환 파괴를 못 잡는다.
+        Assert.Equal(FullNames.OrderBy(x => x, StringComparer.Ordinal), names);
+        Assert.Empty(names.Except(FullNames));       // 더해진 이름 0개
+        Assert.Empty(FullNames.Except(names));       // 빠진 이름 0개
     }
 
     /// <summary>
@@ -511,8 +582,13 @@ public sealed class InstallerBootstrapPreverifyGateTests
         Assert.Equal(ReducedNames.OrderBy(x => x, StringComparer.Ordinal), names);
         Assert.Empty(names.Except(FullNames));                        // 더한 이름 0개
         Assert.Equal(8, FullNames.Except(names).Count());             // 뺀 이름 8개
-        foreach (var kept in new[] { "domain.tunnelToken", "domain.tunnelId", "domain.tunnelTokenIssued" })
-            Assert.Contains(kept, names);                             // 워치독이 읽는 셋은 못 뺀다
+        // 🔴 [4] 교정 2026-10-07 — 워치독이 **실제로 읽는 것은 이 둘뿐**이다.
+        //   설계 §5-1 은 domain.tunnelTokenIssued 도 「필요」로 적었지만 그건 TunnelTokenRecovery.cs:128
+        //   **주석**이고 TryGetProperty 호출이 0건이다. 그래서 기준은 두 개로 세운다(주석은 코드가 아니다).
+        foreach (var kept in new[] { "domain.tunnelToken", "domain.tunnelId" })
+            Assert.Contains(kept, names);                             // 워치독이 읽는 둘은 못 뺀다
+        // tunnelTokenIssued 는 **빼도 워치독이 안 깨지지만** 변경 최소로 그대로 둔다(그 사실을 고정한다)
+        Assert.Contains("domain.tunnelTokenIssued", names);
         foreach (var gone in new[] { "bootstrap.token", "bootstrap.tokenKey", "tenant", "tenant.email" })
             Assert.DoesNotContain(gone, names);
 
