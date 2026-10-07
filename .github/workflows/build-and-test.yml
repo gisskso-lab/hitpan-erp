@@ -253,7 +253,16 @@ jobs:
 
       - name: Install MariaDB client
         # 게이트가 MysqlExe() 로 클라이언트 실행파일 존재를 확인한다 — 없으면 못 붙은 것으로 본다.
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+        # 🔴 2026-10-08 작14: apt 미러 멈춤으로 이 단계가 30분 잡 타임아웃까지 매달린 사고 3회
+        #    (run 37667422201 DDL Smoke · 37670016572 db-gate 2회 — 전부 시험 시작 전 취소).
+        #    시도당 4분 제한 + 3회 재시도 — 전부 실패하면 30분 허비 대신 12분 안에 정직하게 FAIL.
+        run: |
+          for i in 1 2 3; do
+            timeout 240 sudo apt-get update && timeout 240 sudo apt-get install -y mariadb-client && exit 0
+            echo "::warning::apt 시도 $i 실패 — 재시도"
+            sleep 10
+          done
+          echo "::error::mariadb-client 설치 3회 실패 (apt 미러)"; exit 1
 
       - name: Wait for MariaDB
         run: |
@@ -737,7 +746,14 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install MariaDB client
-        run: sudo apt-get update && sudo apt-get install -y mariadb-client
+        # 🔴 apt 미러 멈춤 3회(2026-10-08) — db-gate 쪽과 같은 시간제한+재시도.
+        run: |
+          for i in 1 2 3; do
+            timeout 240 sudo apt-get update && timeout 240 sudo apt-get install -y mariadb-client && exit 0
+            echo "::warning::apt 시도 $i 실패 — 재시도"
+            sleep 10
+          done
+          echo "::error::mariadb-client 설치 3회 실패 (apt 미러)"; exit 1
 
       - name: Wait for MariaDB
         run: |
