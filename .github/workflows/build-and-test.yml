@@ -87,6 +87,45 @@ jobs:
           if [ -n "$MISSING" ]; then echo "::error::목록에 있는데 한 건도 안 돈 게이트:$MISSING"; exit 1; fi
           echo "작1 게이트 전부 실제로 돌았다."
 
+      # 🔴 20261007작12 2차수 T-6 — **실물 Inno Pascal** 게이트(G-T6-5 · 갈래 ⓑ1).
+      #   왜 별 단계인가: Inno 의 LoadStringsFromFile 이 **UTF-8 BOM 파일을 어떤 인코딩으로 읽는지**
+      #   아무도 모른다(U1). 틀리면 42자 한글이 고객 설치 화면에서 깨지고 「문구가 닿았다」가 통째로 무너진다.
+      #   복제본으로는 못 잰다 — ISCC 말고는 잴 길이 없다.
+      #   ISCC 설치는 build-installer.yml:179 · deploy-update.yml:572 가 쓰는 방식을 그대로 베꼈다.
+      #   🔴 HITPAN_REQUIRE_ISCC=1 이라 ISCC 가 없으면 **스킵이 아니라 FAIL** 이다.
+      #   ⚠️ 개발 PC 에는 ISCC 를 깔지 않는다(#29 사전승인) ⇒ **이 단계가 유일한 계측 경로**이고
+      #      이 PR 의 CI 첫 실행이 1차 계측이다(로컬에서는 iscc-skips.log 표식만 남는다).
+      - name: ISCC 설치 (실물 Inno Pascal 게이트용)
+        run: choco install innosetup --version=6.7.1 -y --no-progress
+
+      - name: 작12 T-6 게이트 — 실물 Inno Pascal (G-T6-5)
+        env:
+          HITPAN_REQUIRE_ISCC: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~InstallerBootstrapMessageGateTests.G_T6_5" \
+            --logger "trx;LogFileName=t6-iscc-results.trx" 2>&1 | tee "$RUNNER_TEMP/t6iscc.log"
+          TRX=$(find . -name 't6-iscc-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::t6-iscc-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          N=$(grep -o 'G_T6_5[^"]*' "$TRX" | wc -l)
+          echo "  G-T6-5 : $N 건"
+          if [ "$N" -eq 0 ]; then echo "::error::G-T6-5 가 한 건도 안 돌았다"; exit 1; fi
+
+      - name: 안 잰 축 표식 (ISCC 없는 러너)
+        if: always()
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem -Path . -Filter 'iscc-skips.log' -Recurse -File -ErrorAction SilentlyContinue
+          if ($f) {
+            Write-Host "::warning::ISCC 없는 러너 — 실물 Inno Pascal 축은 이 판에서 재지 않았다"
+            $f | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName }
+          } else {
+            Write-Host "[ISCC축] iscc-skips.log 없음 — 실물 Inno Pascal 로 실측한 판이다"
+          }
+
       # 🔴 20260928작2 개정3 W-3 — storage.js 의 「비교 후 지움」·「옮겨 오기 표식」을 node 로 **실제로** 돌려 잰다
       #   (글자 검사 아님 · 파일을 vm 에서 올려 window.hitpanStorage_* 를 부른다). 러너(windows-latest)에 node 가 있다.
       #   ⚠️ 디렉터리가 아니라 파일을 준다 — node 22 는 `--test <디렉터리>` 를 파일로 읽어 실패한다(로컬 실측).

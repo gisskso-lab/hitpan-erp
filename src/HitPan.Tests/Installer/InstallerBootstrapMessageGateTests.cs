@@ -733,6 +733,171 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     }
 
     // ============================================================
+    // G-T6-5 — 🔴 **실물 Inno Pascal** 로 뽑는다 (갈래 ⓑ1 · ISCC)
+    //   왜 필수인가: Inno 의 LoadStringsFromFile 이 **UTF-8 BOM 파일을 어떤 인코딩으로 읽는지**
+    //   아무도 모른다(U1). 틀리면 42자 한글이 고객 화면에서 깨지고 「닿았다」가 통째로 무너진다.
+    //   복제본으로는 못 잰다 — ISCC 말고는 잴 길이 없다.
+    //   🚫 이 PC 에 ISCC 를 깔지 않는다(#29) ⇒ 로컬은 표식 남기고 지나가고, CI 잡이 재는 유일한 경로다.
+    // ============================================================
+
+    private static string? FindIscc()
+    {
+        string? env = Environment.GetEnvironmentVariable("ISCC_PATH");
+        if (!string.IsNullOrWhiteSpace(env) && File.Exists(env)) return env;
+        foreach (string p in new[]
+        {
+            @"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            @"C:\Program Files\Inno Setup 6\ISCC.exe",
+        })
+            if (File.Exists(p)) return p;
+        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (string d in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string p = Path.Combine(d.Trim(), "ISCC.exe");
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5</b> — <c>.iss</c> 에서 Pascal 함수 텍스트를 <b>한 글자도 안 바꾸고 들어내</b> 전용 harness
+    /// <c>.iss</c> 를 만들고, <b>진짜 ISCC</b> 로 컴파일해 <b>진짜 Inno Pascal</b> 로 돌린다. 복제본이 아니다.
+    /// 입력은 <b>G-T6-1 이 만든 실물 응답 파일</b>이고, 출하본과 같은 <c>LoadStringsFromFile</c> 로 읽는다.
+    /// <c>[Files]</c> 0건 · <c>InitializeSetup</c> 이 <c>Result := False</c> 로 끝내 **아무것도 설치하지 않는다**.
+    /// ⚠️ <b>이 PC 에서는 한 번도 안 돌았다</b>(ISCC 없음 · 설치 금지) — CI 첫 실행이 1차 계측이다.
+    /// </summary>
+    [Fact]
+    public void G_T6_5_실물_Inno_Pascal_이_같은_글자를_낸다()
+    {
+        string? iscc = FindIscc();
+        bool required = Environment.GetEnvironmentVariable("HITPAN_REQUIRE_ISCC") == "1";
+        if (iscc is null)
+        {
+            if (required)
+                throw new XunitException("HITPAN_REQUIRE_ISCC=1 인데 ISCC.exe 를 못 찾았다 — 이 게이트는 스킵하지 않는다.");
+            string mark = Path.Combine(AppContext.BaseDirectory, "iscc-skips.log");
+            File.AppendAllText(mark,
+                $"{DateTime.Now:s} G-T6-5 미계측 — ISCC 없음(이 PC 에 깔지 않는다 · #29). " +
+                "실물 Inno Pascal · LoadStringsFromFile 인코딩(U1) 은 CI 잡에서만 재진다.\n");
+            Console.Error.WriteLine("[G-T6-5 미계측] ISCC 없음 — 복제본 결과는 실물 증명이 아니다.");
+            return;
+        }
+
+        var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
+        var ok = RoundTrip("g5_ok", 200, SuccessBody);
+        string failFile = Path.Combine(_root, "g5_423", "bootstrap-response.json");
+        string okFile = Path.Combine(_root, "g5_ok", "bootstrap-response.json");
+        Assert.True(File.Exists(failFile) && File.Exists(okFile), "G-T6-1 이 만든 실물 응답 파일이 없다.");
+
+        string iss = IssText();
+        string lifted = PascalFunction(iss, "function JsonHexDigit(") + "\r\n" +
+                        PascalFunction(iss, "function ExtractJsonString(") + "\r\n" +
+                        PascalFunction(iss, "function JsonEscape(");
+        AssertPascalBodyUnchanged();
+
+        string dir = Path.Combine(_root, "iscc");
+        Directory.CreateDirectory(dir);
+        string harness = Path.Combine(dir, "BootstrapJsonSelfTest.iss");
+        File.WriteAllText(harness, HarnessTemplate
+            .Replace("OUTDIR_PLACEHOLDER", dir, StringComparison.Ordinal)
+            .Replace("LIFTED_PLACEHOLDER", lifted, StringComparison.Ordinal),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+        var (cExit, cOut) = RunExe(iscc, $"/Q \"{harness}\"", dir);
+        if (cExit != 0) throw new XunitException($"ISCC 컴파일 실패(exit {cExit}):\n{cOut}");
+        string exe = Path.Combine(dir, "t6selftest.exe");
+        Assert.True(File.Exists(exe), "ISCC 가 harness EXE 를 안 만들었다.");
+
+        foreach (var (name, input, expectedMessage, expectedCompany) in new[]
+        {
+            ("423", failFile, Msg423, ""),
+            ("success", okFile, "", NastyCompany),
+        })
+        {
+            string outFile = Path.Combine(dir, $"out-{name}.txt");
+            var (rExit, rOut) = RunExe(exe, $"/SILENT /IN=\"{input}\" /OUT=\"{outFile}\"", dir);
+            Assert.True(File.Exists(outFile), $"[{name}] harness 가 결과를 안 남겼다(exit {rExit}): {rOut}");
+            string[] got = File.ReadAllLines(outFile, Encoding.ASCII);
+            Assert.True(got.Length >= 2, $"[{name}] 결과 줄이 2개가 아니다: {string.Join(" / ", got)}");
+            string gotMessage = UnescapeAsciiJson(got[0]);
+            string gotCompany = UnescapeAsciiJson(got[1]);
+            Console.WriteLine($"[G-T6-5 {name}] 실물 Pascal message='{gotMessage}' company='{gotCompany}'");
+            // 🔴 U1 — Inno 가 BOM 파일을 제대로 읽었나. 틀리면 여기서 한글이 깨져 FAIL 한다.
+            Assert.Equal(expectedMessage, gotMessage);
+            Assert.Equal(expectedCompany, gotCompany);
+        }
+        Console.WriteLine($"[G-T6-5] 실물 ISCC={iscc} · 실패 {fail.ElapsedMs}ms · 성공 {ok.ElapsedMs}ms");
+    }
+
+    private const string HarnessTemplate = @"[Setup]
+AppName=HitPan T6 SelfTest
+AppVersion=0.0
+DefaultDirName={tmp}\hp-t6-selftest
+CreateAppDir=no
+Uninstallable=no
+DisableProgramGroupPage=yes
+OutputDir=OUTDIR_PLACEHOLDER
+OutputBaseFilename=t6selftest
+
+[Code]
+LIFTED_PLACEHOLDER
+
+function InitializeSetup(): Boolean;
+var
+  Lines: TArrayOfString;
+  Raw, Written: String;
+  I: Integer;
+begin
+  Raw := '';
+  if LoadStringsFromFile(ExpandConstant('{param:IN}'), Lines) then
+    for I := 0 to GetArrayLength(Lines) - 1 do Raw := Raw + Lines[I];
+  Written := JsonEscape(ExtractJsonString(Raw, 'message')) + #13#10 +
+             JsonEscape(ExtractJsonString(Raw, 'companyName'));
+  SaveStringToFile(ExpandConstant('{param:OUT}'), Written, False);
+  Result := False;
+end;
+";
+
+    private static (int Exit, string Output) RunExe(string exe, string args, string cwd)
+    {
+        var psi = new ProcessStartInfo(exe)
+        {
+            Arguments = args,
+            WorkingDirectory = cwd,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var p = Process.Start(psi) ?? throw new XunitException($"{exe} 를 못 띄웠다.");
+        string so = p.StandardOutput.ReadToEnd();
+        string se = p.StandardError.ReadToEnd();
+        if (!p.WaitForExit(180_000)) throw new XunitException($"{exe} 가 180초 안에 안 끝났다.");
+        return (p.ExitCode, (so + se).Trim());
+    }
+
+    /// <summary>출하본 <c>JsonEscape</c> 가 낸 순수 ASCII 를 되돌린다 — 파일 인코딩 변수를 없앤 뒤 비교한다.</summary>
+    private static string UnescapeAsciiJson(string s)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '\\' && i + 1 < s.Length)
+            {
+                char n = s[i + 1];
+                if (n == 'u' && i + 5 < s.Length)
+                {
+                    sb.Append((char)Convert.ToInt32(s.Substring(i + 2, 4), 16));
+                    i += 5; continue;
+                }
+                if (n is '"' or '\\') { sb.Append(n); i++; continue; }
+            }
+            sb.Append(s[i]);
+        }
+        return sb.ToString();
+    }
+
+    // ============================================================
     // 🔴 복제본 고정 — .iss 가 바뀌면 FAIL (설계 §3-4-1 차선 조건)
     // ============================================================
 
