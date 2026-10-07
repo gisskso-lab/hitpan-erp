@@ -635,6 +635,11 @@ jobs:
           #            · G-B0-3 음성(미상 라이선스 401) · G-B0-4 음성(#40 자격증명 모양 거부) · G-B0-5 변경 보고 최신승
           #    DB 필요(격리 DB + 실물 SchemaMigrator). 로컬 무DB = SkipOrFailStrict 가 FAIL 로 드러낸다(조용한 초록 0).
           GATES="$GATES|BackofficeS2OwnerReportGate"
+          # 🔴 20261008작14 묶음 B (CsMessagePipelineGateTests) — CS 쪽지 왕복 (ERP 측 · 출하 DDL 실물 import)
+          #    G-CS-1 유실0·자동재송신(UTC 폴링 포함) · G-CS-2 400 종결 · G-CS-3 5xx 재시도(삭제 0)
+          #    · G-CS-4 문① 입력거부+양성 대조군 · G-CS-5 문② 송신직전 거부(우회 차단)
+          #    · G-CS-6 큐 멱등(UNIQUE 1062) · G-CS-7 답 멱등 · ⑥17시나리오 #1·#2·#4 재측정은 실물 — [4] 몫
+          GATES="$GATES|CsMessagePipelineGate"
           # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)

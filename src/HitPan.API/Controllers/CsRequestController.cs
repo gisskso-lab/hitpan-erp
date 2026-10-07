@@ -133,9 +133,12 @@ public class CsRequestController : ControllerBase
                     ErpVersion = erpVersion,
                 }, tx);
 
+            // 🔴 next_attempt_at 을 명시적으로 UTC 로 넣는다 — 표 기본값은 서버 로컬시각이고
+            //    워커 폴링은 UTC_TIMESTAMP(6) 비교라, KST 고객 PC 에서 기본값에 맡기면
+            //    새 쪽지가 9시간 뒤에야 집힌다(게이트 G-CS-1 이 이 자리를 잰다).
             await _db.ExecuteAsync(@"
-                INSERT INTO cs_outbox (tenant_id, cs_request_id, payload_json)
-                VALUES (@TenantId, @Id, @Payload)",
+                INSERT INTO cs_outbox (tenant_id, cs_request_id, payload_json, next_attempt_at)
+                VALUES (@TenantId, @Id, @Payload, UTC_TIMESTAMP(6))",
                 new { TenantId = tenantId, Id = requestId, Payload = payload }, tx);
 
             tx.Commit();

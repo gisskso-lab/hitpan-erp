@@ -66,11 +66,11 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                 }
                 else
                 {
-                    await SendPendingAsync(db, hq, ownerAccountId, st);
+                    await SendPendingAsync(db, hq, ownerAccountId, _logger, st);
 
                     if (DateTime.UtcNow - _lastPullUtc >= PullInterval)
                     {
-                        await PullRepliesAsync(db, hq, ownerAccountId, st);
+                        await PullRepliesAsync(db, hq, ownerAccountId, _logger, st);
                         _lastPullUtc = DateTime.UtcNow;
                     }
                 }
@@ -87,7 +87,9 @@ public sealed class CsOutboxSenderWorker : BackgroundService
     }
 
     // ── 송신 — 한 건씩 순서대로 (#16 단일 연결 · WhenAll 금지) ──────────────
-    private async Task SendPendingAsync(MySqlConnection db, IHeadquartersClient hq, string ownerAccountId, CancellationToken st)
+    //   public static 인 이유: 게이트(CsMessagePipelineGateTests)가 격리 DB + 가짜 본사로
+    //   이 사이클을 **직접** 돌려 동작을 잰다 — 글자가 아니라 동작(누적 26회 지적 자리).
+    public static async Task SendPendingAsync(MySqlConnection db, IHeadquartersClient hq, string ownerAccountId, ILogger logger, CancellationToken st)
     {
         var rows = (await db.QueryAsync<OutboxRow>(@"
             SELECT outbox_id AS OutboxId, tenant_id AS TenantId, cs_request_id AS CsRequestId,
@@ -140,7 +142,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                      WHERE outbox_id = @OutboxId",
                     new { Attempt = attempt, Code = code, Err = Trim(body), Backoff = (int)backoffSec, Reason = reason, row.OutboxId });
                 if (reason == "failed")
-                    _logger.LogError("[CS송신] 상한 도달 — failed 로 멈춤(삭제 아님 · 사람이 본다) outbox={Id}", row.OutboxId);
+                    logger.LogError("[CS송신] 상한 도달 — failed 로 멈춤(삭제 아님 · 사람이 본다) outbox={Id}", row.OutboxId);
             }
         }
     }
@@ -152,13 +154,14 @@ public sealed class CsOutboxSenderWorker : BackgroundService
             new { Reason = reason, Code = code, Err = err, row.OutboxId, row.CsRequestId });
 
     // ── 답 Pull (B-9) — reply_id 멱등 · 수신 즉시 「답변도착」 ─────────────────
-    private async Task PullRepliesAsync(MySqlConnection db, IHeadquartersClient hq, string ownerAccountId, CancellationToken st)
+    /// <summary>답 Pull — public static 인 이유는 SendPendingAsync 와 같다(게이트가 직접 돌린다).</summary>
+    public static async Task PullRepliesAsync(MySqlConnection db, IHeadquartersClient hq, string ownerAccountId, ILogger logger, CancellationToken st)
     {
         var (code, body) = await hq.PullAsync("/api/backoffice/cs/replies/pull", ownerAccountId, st);
         if (code is < 200 or >= 300)
         {
             // B-5 수신부가 서기 전에는 404 가 정상이다 — 경고 한 줄만, 기능 영향 0.
-            _logger.LogDebug("[CS수신] Pull 미응답 code={Code} — 다음 주기에 재시도", code);
+            logger.LogDebug("[CS수신] Pull 미응답 code={Code} — 다음 주기에 재시도", code);
             return;
         }
 
@@ -171,7 +174,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "[CS수신] Pull 응답 해석 실패 — 버리지 않고 다음 주기 재시도");
+            logger.LogWarning(ex, "[CS수신] Pull 응답 해석 실패 — 버리지 않고 다음 주기 재시도");
             return;
         }
         if (replies is null || replies.Count == 0) return;
@@ -194,7 +197,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                     RepliedAt = r.RepliedAt == default ? DateTime.UtcNow : r.RepliedAt,
                 });
         }
-        _logger.LogInformation("[CS수신] 답 {N}건 수신", replies.Count);
+        logger.LogInformation("[CS수신] 답 {N}건 수신", replies.Count);
     }
 
     // payload_json 안의 body 글만 다시 검사한다(문②) — 키 이름이 아니라 내용.
