@@ -52,7 +52,16 @@
                 <NavLinkItem Href="/admin/promotions" Icon="campaign" Label="프로모션 관리" />
             </div>
 
-            @* 8 설정 — Owner 전용 (노출 조건 platform_owner 유지 · System Config 는 안내 껍데기라 미노출) *@
+            @* 8 설정 — 노출 조건은 platform_owner 다. System Config 는 안내 껍데기라 미노출.
+               🔴 그 값은 토큰에 영영 들어가지 않는다 — BoRoles.DeriveAccountType 이 본사 2역할을
+                  모두 platform_admin 으로 접는 것이 설계값이다(BoRoles.cs 머리말 PM 결재 2026-10-07).
+                  ⇒ 이 묶음은 현재 아무에게도 렌더되지 않는다. 선재 구멍이고 작14 가 만든 것이 아니다.
+                  판정·갈래 = docs/검증/선행/20261008_선행검증서_작14_설정OWNER_노출구멍.md
+               🔴 「Owner 전용」이라 적지 않는다 — 6줄의 접근 조건이 같지 않다 (PM 검산 2026-10-08):
+                  · OwnerOnly 2줄 = /owner/permissions · /owner/credentials-status
+                    (단 OwnerOnly 자체도 role="owner" 를 요구해 현행 DB 역할로는 통과 불가)
+                  · 인증만([Authorize]) 4줄 = /admin/bo-users · /admin/approvals · /admin/mfa-setup · /admin/tenant-domains
+               노출 조건과 접근 조건은 다른 것이다. 잠금 추가는 권한 범위라 사장님 결재 사항(#11). *@
             @if (_isPlatformOwner)
             {
                 <div class="bo2-nav-section bo2-nav-section-owner">
