@@ -814,14 +814,33 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
 
         // 🔴 [4] N4 — 시험본과 출하본의 Inno 판이 갈리면 이 게이트가 재는 것이 출하물이 아니다.
         //    출하는 6.7.1(build-installer.yml · deploy-update.yml). 전용 단계가 그 값을 env 로 준다.
+        // 🔴 봉합(10/7 · main CI run 37621671829 — 이 단언 하나로 main 과 모든 가지가 빨강이었다):
+        //    앞선 식은 판을 **ISCC 가 뱉는 글자**에서 찾았다. 그게 틀렸다 —
+        //      · ISCC 를 인수 없이 부르면 배너는 'Inno Setup 6 Command-Line Compiler' 로 끝나고
+        //        **stdout+stderr 합본 어디에도 패치 판 번호(6.7.1)가 없다**(위 식이 합본 전체를 봤는데 FAIL — 실측).
+        //      · 그래서 "배너 다음 줄을 읽자" 류의 봉합은 또 빨강이다. 글자에는 애초에 그 숫자가 없다.
+        //      · 러너 ISCC 는 **실제로 6.7.1 이다** — 같은 run 의 choco 단계가
+        //        'InnoSetup v6.7.1 already installed.' 라 찍었다. 즉 N4 는 사실로는 이미 충족이었고
+        //        깨진 것은 **재는 방법**뿐이었다.
+        //    ⇒ 판은 글자가 아니라 **바이너리 판 자원**(FileVersion·ProductVersion)에서 잰다.
+        //       배너는 사람이 읽는 참고로만 로그에 남기고, 글자 대조는 보조 경로로 둔다.
+        //       대조군은 G-T6-5e 가 잰다(이 PC 에 ISCC 가 없어도 FAIL 경로가 증명된다).
         string expectVer = Environment.GetEnvironmentVariable("HITPAN_ISCC_EXPECT_VERSION") ?? "";
         var (vExit, vOut) = RunExe(iscc, "", Path.GetTempPath());
         string banner = vOut.Split('\n').FirstOrDefault(l => l.Contains("Inno Setup", StringComparison.Ordinal))?.Trim()
                         ?? vOut.Split('\n').FirstOrDefault()?.Trim() ?? "(배너 없음)";
-        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 배너='{banner}' (exit {vExit})");
-        if (expectVer.Length > 0 && !vOut.Contains(expectVer, StringComparison.Ordinal))
+        var vInfo = FileVersionInfo.GetVersionInfo(iscc);
+        string fileVer = (vInfo.FileVersion ?? "").Trim();
+        string prodVer = (vInfo.ProductVersion ?? "").Trim();
+        Console.WriteLine($"[G-T6-5] ISCC={iscc} · FileVersion='{fileVer}' · ProductVersion='{prodVer}' " +
+                          $"· 판 배너='{banner}' (exit {vExit})");
+        if (expectVer.Length > 0
+            && !IsSameInnoVersion(fileVer, expectVer)
+            && !IsSameInnoVersion(prodVer, expectVer)
+            && !vOut.Contains(expectVer, StringComparison.Ordinal))
             throw new XunitException(
-                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\nISCC={iscc}\n배너={banner}");
+                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\n" +
+                $"ISCC={iscc}\nFileVersion={fileVer}\nProductVersion={prodVer}\n배너={banner}");
 
         var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
         var ok = RoundTrip("g5_ok", 200, SuccessBody);
@@ -1068,6 +1087,39 @@ begin
   Result := False;
 end;
 ";
+
+    /// <summary>
+    /// 🔴 Inno 판 대조 — 기대값 <c>6.7.1</c> 이 바이너리 판 자원의 4자리 표기 <c>6.7.1.0</c> 과
+    /// 맞물리게 <b>접두 일치</b>로 본다. 단 접두 뒤가 <c>.</c> 일 때만 같다고 본다 —
+    /// 그래야 <c>6.7.10</c> 을 <c>6.7.1</c> 로 잘못 보지 않는다(음성 대조군 = G-T6-5e).
+    /// </summary>
+    private static bool IsSameInnoVersion(string actual, string expect)
+    {
+        if (actual.Length == 0 || expect.Length == 0) return false;
+        if (string.Equals(actual, expect, StringComparison.Ordinal)) return true;
+        return actual.StartsWith(expect + ".", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5e</b> — G-T6-5 의 <b>판 대조 식 자체</b>를 잰다. 봉합(10/7 main CI run 37621671829)이
+    /// 바꾼 유일한 판정 지점이고, <b>이 PC 에는 ISCC 가 없어</b>(#29 · 설치 금지) G-T6-5 본체는 못 돈다.
+    /// ⇒ 대조군을 여기서 세운다: 4자리 판이 통과하고, <b>틀린 판은 실제로 FAIL 한다</b>.
+    /// 양성만 세면 「늘 참」인 식도 초록이다 — 음성 3건이 그걸 막는다.
+    /// </summary>
+    [Fact]
+    public void G_T6_5e_판_대조식이_네자리는_받고_틀린판은_막는다()
+    {
+        // 양성 — 러너·출하가 실제로 쓰는 모양
+        Assert.True(IsSameInnoVersion("6.7.1", "6.7.1"), "같은 판을 다르다고 본다.");
+        Assert.True(IsSameInnoVersion("6.7.1.0", "6.7.1"), "판 자원 4자리 표기를 다르다고 본다 — 이게 10/7 빨간불의 반대쪽이다.");
+
+        // 🔴 음성 대조군 — 하나라도 true 면 이 게이트는 「늘 참」이라 아무것도 안 지킨다
+        Assert.False(IsSameInnoVersion("6.7.10", "6.7.1"), "6.7.10 을 6.7.1 로 봤다 — 접두만 보면 생기는 사고다.");
+        Assert.False(IsSameInnoVersion("6.6.2.0", "6.7.1"), "다른 판을 같다고 본다.");
+        Assert.False(IsSameInnoVersion("", "6.7.1"), "판을 못 읽었는데 통과시킨다 — 조용한 초록이다.");
+
+        Console.WriteLine("[G-T6-5e] 판 대조식 양성 2 · 음성 3 — FAIL 경로 증명됨.");
+    }
 
     private static (int Exit, string Output) RunExe(string exe, string args, string cwd)
     {
