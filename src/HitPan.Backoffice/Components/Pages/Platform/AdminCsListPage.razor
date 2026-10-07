@@ -1,24 +1,24 @@
 @*
-    WS-20260601-18 본사 백오피스 — CS 티켓 전체 목록 (8명제 #7 본사 전권)
-    작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 백엔드 매니저
-    절대 원칙:
-      - PlatformOnlyV2 (owner/manager/staff 전원 열람)
-      - 평문 사업자번호·상호·대표자 노출 금지 → 마스킹·시리얼만
-      - Razor에 C# raw string 금지 (헌법 #14)
-      - 빈 catch 금지 (헌법 #15)
+    작14 B-8 — CS 티켓 결선 (사장님 결재 2026-10-08) · 원형 = WS-20260601-18 껍데기
+    - 본사 전권(F-14 2차·전체 조회) · PlatformOnlyV2
+    - 한 화면 완결: 목록 + 선택 티켓의 본문·답·상태를 같은 화면에서 (히트판 정신)
+    - 답 작성 = 반자동 ②겹의 문: 쓴 사람이 승인자(approved_by NOT NULL) · 발송은 ERP 5분 Pull
+    - 상태 전이는 서버 1곳(api/admin/cs/{id}/status) — 화면은 부르기만 한다
+    - Razor 에 C# raw string 금지(#14) · 빈 catch 금지(#15)
 *@
 
 @page "/admin/cs"
 @layout PlatformLayout
 @attribute [Authorize(Policy = "PlatformOnlyV2")]
-@inject HttpClient Http
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
 @inject ISnackbar Snackbar
 @using HitPan.Backoffice.Components.Pages.Platform.Components
 
 <PageTitle>CS 티켓 — 히트판 백오피스</PageTitle>
 
-<BoPageHeader Title="CS 티켓 전체"
-              Subtitle="본사 전권 · 시리얼 단위 추적 (평문 사업자정보 0건)">
+<BoPageHeader Title="CS 티켓"
+              Subtitle="고객사 ERP 쪽지·전화 접수 — 답은 고객 ERP 화면으로 전달됩니다">
     <Actions>
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Refresh"
@@ -27,19 +27,15 @@
 </BoPageHeader>
 
 <BoFilterBar>
-    <MudTextField @bind-Value="_keyword" Label="검색 (시리얼·티켓번호)" Variant="Variant.Outlined"
+    <MudTextField @bind-Value="_keyword" Label="검색 (회사명·고객사코드)" Variant="Variant.Outlined"
                   Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
     <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
         <MudSelectItem Value="@("all")">전체</MudSelectItem>
-        <MudSelectItem Value="@("open")">처리중</MudSelectItem>
-        <MudSelectItem Value="@("pending")">대기</MudSelectItem>
-        <MudSelectItem Value="@("closed")">완료</MudSelectItem>
-    </MudSelect>
-    <MudSelect T="string" @bind-Value="_priorityFilter" Label="우선순위" Variant="Variant.Outlined" Margin="Margin.Dense">
-        <MudSelectItem Value="@("all")">전체</MudSelectItem>
-        <MudSelectItem Value="@("p0")">P0</MudSelectItem>
-        <MudSelectItem Value="@("p1")">P1</MudSelectItem>
-        <MudSelectItem Value="@("p2")">P2</MudSelectItem>
+        <MudSelectItem Value="@("접수")">접수</MudSelectItem>
+        <MudSelectItem Value="@("처리중")">처리중</MudSelectItem>
+        <MudSelectItem Value="@("보류")">보류</MudSelectItem>
+        <MudSelectItem Value="@("고객답대기")">고객 답 대기</MudSelectItem>
+        <MudSelectItem Value="@("완료")">완료</MudSelectItem>
     </MudSelect>
     <div class="bo-filter-bar__action">
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
@@ -57,30 +53,35 @@
     {
         <div style="padding:32px 24px;">
             <BoEmptyStateCard Title="접수된 CS 티켓이 없습니다"
-                              Description="고객사 ERP 또는 챗봇에서 CS가 접수되면 시리얼 단위로 이곳에 표시됩니다. 평문 사업자정보는 노출되지 않습니다 (헌법 #18·#22)."
+                              Description="고객사 ERP 의 「CS 요청」 쪽지나 전화 접수가 이곳에 표시됩니다."
                               IllustrationKind="doc" />
         </div>
     }
     else
     {
         <MudDataGrid T="CsTicketRow" Items="_rows" Loading="_loading"
-                     Hover="true" Dense="true" SortMode="SortMode.Single">
+                     Hover="true" Dense="true" SortMode="SortMode.Single"
+                     RowClick="@(e => SelectAsync(e.Item))">
             <Columns>
-                <PropertyColumn Property="x => x.TicketNo" Title="티켓번호" />
-                <PropertyColumn Property="x => x.SerialMasked" Title="시리얼 (마스킹)" />
-                <TemplateColumn Title="우선순위">
+                <PropertyColumn Property="x => x.CompanyName" Title="고객사" />
+                <TemplateColumn Title="분류">
                     <CellTemplate>
-                        <span class="bo-status-chip @PriChipClass(context.Item.Priority)">@context.Item.Priority.ToUpper()</span>
+                        <span>@CategoryLabel(context.Item.Category)</span>
+                        <MudText Typo="Typo.caption" Style="color:#6B7280">@ShapeLabel(context.Item.ShapeTag)</MudText>
                     </CellTemplate>
                 </TemplateColumn>
-                <PropertyColumn Property="x => x.Subject" Title="제목" />
+                <TemplateColumn Title="접수 경로">
+                    <CellTemplate>
+                        <span>@(context.Item.Channel == "erp_message" ? "쪽지" : "전화")</span>
+                    </CellTemplate>
+                </TemplateColumn>
                 <TemplateColumn Title="상태">
                     <CellTemplate>
-                        <span class="bo-status-chip @CsStatusChipClass(context.Item.Status)">@context.Item.Status</span>
+                        <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.Status</span>
                     </CellTemplate>
                 </TemplateColumn>
-                <PropertyColumn Property="x => x.OpenedAt" Title="접수" Format="yyyy-MM-dd HH:mm" />
-                <PropertyColumn Property="x => x.Assignee" Title="담당자" />
+                <PropertyColumn Property="x => x.ReceivedAt" Title="접수" Format="MM-dd HH:mm" />
+                <PropertyColumn Property="x => x.ReplyCount" Title="답" />
             </Columns>
             <PagerContent>
                 <MudDataGridPager T="CsTicketRow" />
@@ -89,12 +90,65 @@
     }
 </div>
 
+@if (_detail is not null)
+{
+    <MudPaper Elevation="0" Class="pa-4 mt-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.h6">@_detail.CompanyName — @CategoryLabel(_detail.Category)</MudText>
+            <div class="d-flex align-center gap-2">
+                <MudSelect T="string" @bind-Value="_newStatus" Label="상태" Dense="true" Variant="Variant.Outlined"
+                           Style="min-width:140px">
+                    <MudSelectItem Value="@("접수")">접수</MudSelectItem>
+                    <MudSelectItem Value="@("처리중")">처리중</MudSelectItem>
+                    <MudSelectItem Value="@("보류")">보류</MudSelectItem>
+                    <MudSelectItem Value="@("고객답대기")">고객 답 대기</MudSelectItem>
+                    <MudSelectItem Value="@("완료")">완료</MudSelectItem>
+                </MudSelect>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ChangeStatusAsync">상태 변경</MudButton>
+            </div>
+        </div>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+            @(_detail.Channel == "erp_message" ? "쪽지" : "전화") · @ShapeLabel(_detail.ShapeTag) · 화면 @(_detail.ScreenCode ?? "-") · 판 @(_detail.ErpVersion ?? "-") · @_detail.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        </MudText>
+        <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:var(--mud-palette-background-gray);border-radius:8px">
+            <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@(string.IsNullOrEmpty(_detail.Body) ? "(본문 없음 — 태그만 접수)" : _detail.Body)</MudText>
+        </MudPaper>
+
+        @foreach (var r in _replies)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border:1px solid var(--mud-palette-lines-default);border-radius:8px">
+                <div class="d-flex align-center justify-space-between mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">본사 답</MudChip>
+                    <MudText Typo="Typo.caption" Style="color:#6B7280">
+                        @r.ApprovedAt.ToLocalTime().ToString("MM-dd HH:mm") · @(r.DeliveredAt is null ? "전달 대기(5분 주기)" : "전달됨")
+                    </MudText>
+                </div>
+                <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@r.Body</MudText>
+            </MudPaper>
+        }
+
+        <MudTextField T="string" @bind-Value="_replyBody" Label="답 쓰기" Variant="Variant.Outlined"
+                      Lines="4" MaxLength="4000" Counter="4000" Class="mt-2"
+                      HelperText="저장하는 사람이 승인자입니다 — 저장 즉시 고객 ERP 가 5분 주기로 가져갑니다" />
+        <div class="d-flex justify-end mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_sendingReply" OnClick="SendReplyAsync">
+                @(_sendingReply ? "저장 중…" : "답 저장 (승인)")
+            </MudButton>
+        </div>
+    </MudPaper>
+}
+
 @code {
     private List<CsTicketRow> _rows = new();
     private bool _loading = true;
     private string _keyword = "";
     private string _statusFilter = "all";
-    private string _priorityFilter = "all";
+
+    private CsTicketDetail? _detail;
+    private List<ReplyRow> _replies = new();
+    private string? _replyBody;
+    private string _newStatus = "접수";
+    private bool _sendingReply;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -108,9 +162,10 @@
         _loading = true;
         try
         {
-            // WS-13 CS API 결합 가도. 현 시점 빈 목록 저장 (평문 0 원칙).
-            await Task.Yield();
-            _rows = new List<CsTicketRow>();
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ListResponse>(
+                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}");
+            _rows = res?.Data ?? new();
         }
         catch (Exception ex)
         {
@@ -122,30 +177,132 @@
         }
     }
 
-    private static string CsStatusChipClass(string s) => s switch
+    private async Task SelectAsync(CsTicketRow row)
     {
-        "open" => "bo-status-chip--suspended",
-        "pending" => "bo-status-chip--trial",
-        "closed" => "bo-status-chip--active",
-        _ => "bo-status-chip--neutral"
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<DetailResponse>($"api/admin/cs/{row.Id}");
+            _detail = res?.Ticket;
+            _replies = res?.Replies ?? new();
+            _newStatus = _detail?.Status ?? "접수";
+            _replyBody = null;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"티켓을 열지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SendReplyAsync()
+    {
+        if (_detail is null || string.IsNullOrWhiteSpace(_replyBody)) return;
+        _sendingReply = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/admin/cs/{_detail.Id}/reply", new { body = _replyBody });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("답을 저장했습니다. 고객 ERP 가 5분 주기로 가져갑니다.", Severity.Success);
+                await SelectAsync(new CsTicketRow { Id = _detail.Id });
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "답을 저장하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"답을 저장하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _sendingReply = false;
+        }
+    }
+
+    private async Task ChangeStatusAsync()
+    {
+        if (_detail is null) return;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/admin/cs/{_detail.Id}/status", new { to = _newStatus });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("상태를 바꿨습니다.", Severity.Success);
+                await LoadAsync();
+                await SelectAsync(new CsTicketRow { Id = _detail.Id });
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "상태를 바꾸지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"상태를 바꾸지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // 8종 정본(결-9) — 누리집 8폴더와 같은 어휘
+    private static string CategoryLabel(string? c) => c switch
+    {
+        "use" => "사용", "set" => "설정", "net" => "통신", "dat" => "데이터",
+        "upd" => "업데이트", "bug" => "기능오류", "ins" => "설치", "etc" => "기타",
+        _ => c ?? "-",
     };
 
-    private static string PriChipClass(string p) => p switch
+    // 7모양 보조 태그(고객 언어)
+    private static string ShapeLabel(string? s) => s switch
     {
-        "p0" => "bo-status-chip--expired",
-        "p1" => "bo-status-chip--suspended",
-        "p2" => "bo-status-chip--trial",
+        "open_fail" => "안 열려요", "number_mismatch" => "숫자 안 맞아요", "how_to" => "어떻게 해요",
+        "print_fail" => "안 찍혀요", "change_request" => "바꿔주세요", "billing" => "요금·결제",
+        "feature_request" => "되게 해주세요", _ => s ?? "",
+    };
+
+    private static string StatusChipClass(string s) => s switch
+    {
+        "접수" => "bo-status-chip--suspended",
+        "처리중" => "bo-status-chip--trial",
+        "보류" or "고객답대기" => "bo-status-chip--neutral",
+        "완료" => "bo-status-chip--active",
         _ => "bo-status-chip--neutral"
     };
 
     public class CsTicketRow
     {
-        public string TicketNo { get; set; } = "";
-        public string SerialMasked { get; set; } = "";
-        public string Priority { get; set; } = "p2";
-        public string Subject { get; set; } = "";
-        public string Status { get; set; } = "open";
-        public DateTime OpenedAt { get; set; }
-        public string Assignee { get; set; } = "";
+        public long Id { get; set; }
+        public string CompanyName { get; set; } = "";
+        public string TenantCode { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string? ShapeTag { get; set; }
+        public string? SubTag { get; set; }
+        public string Channel { get; set; } = "";
+        public string Status { get; set; } = "";
+        public DateTime ReceivedAt { get; set; }
+        public int ReplyCount { get; set; }
     }
+
+    public class CsTicketDetail : CsTicketRow
+    {
+        public string? Body { get; set; }
+        public string? ScreenCode { get; set; }
+        public string? ErpVersion { get; set; }
+    }
+
+    public class ReplyRow
+    {
+        public string ReplyId { get; set; } = "";
+        public string Body { get; set; } = "";
+        public DateTime ApprovedAt { get; set; }
+        public DateTime? DeliveredAt { get; set; }
+    }
+
+    private sealed class ListResponse { public bool Success { get; set; } public List<CsTicketRow> Data { get; set; } = new(); }
+    private sealed class DetailResponse { public bool Success { get; set; } public CsTicketDetail? Ticket { get; set; } public List<ReplyRow> Replies { get; set; } = new(); }
+    private sealed class ApiMessage { public string? Message { get; set; } }
 }

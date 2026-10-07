@@ -646,6 +646,9 @@ jobs:
           #    · G-B5-4 시간당 상한 · G-B5-5·6 문③(본문 모양·필드 화이트리스트) · G-B5-7 승인 없인 몸통 불생성(1048)
           #    · G-B5-8 답 Pull. 격리 DB + 실물 SchemaMigrator(40_backoffice_cs.sql 적용이 과녁에 포함).
           GATES="$GATES|CsInboundGate"
+          # 🔴 20261008작14 B-8 (CsAdminGateTests) — /admin/cs 결선 서버 몫: 상태 전이 서버 1곳
+          #    (목록 밖 400 · INSERT ONLY 로그 실존 · 완료 시각) + 답 작성 = 쓴 사람이 승인자(반자동 ②겹)
+          GATES="$GATES|CsAdminGate"
           # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)
