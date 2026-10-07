@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -191,6 +192,112 @@ public class TelemetryController : ControllerBase
             _logger.LogError(ex, "[Telemetry] 업데이트 기록 수신 실패");
             return StatusCode(500, new { success = false, message = "기록 실패" });
         }
+    }
+
+    /// <summary>
+    /// S-2 대표 아이디 수신 — 개통 후 첫 보고 (작14 B-0 · F-10 · 10/5 사장님 「명심」).
+    ///
+    /// ■ 왜 JsonElement 인가 — 필드 화이트리스트 서버 강제 (F-10 완료 기준)
+    ///   DTO 바인딩은 모르는 필드를 조용히 버린다. 「버림」은 「거부」가 아니다 —
+    ///   금지 필드를 실은 payload 는 통째로 400 이어야 하고 거부 로그가 남아야 한다.
+    ///   그래서 원문 JSON 의 키를 직접 센다. 허용 키 = licenseKey · ownerAccountId 둘뿐.
+    ///
+    /// ■ #40 — 부모계정은 아이디 방식 · 본사 비번 0건: 비번·해시·토큰 모양 값은 값 단위로도 거부.
+    /// ■ 라이선스 키는 대조에만 쓰고 저장·로깅하지 않는다(update-history 와 같은 규칙).
+    /// ■ ERP 송신측은 작14 묶음 B-3(한 송신 모듈)이 만든다 — 이 수신이 B-0 의 「칸과 수집 경로」다.
+    /// </summary>
+    [HttpPost("owner-report")]
+    public async Task<IActionResult> ReportOwnerAccount([FromBody] JsonElement body, CancellationToken ct)
+    {
+        if (body.ValueKind != JsonValueKind.Object)
+            return BadRequest(new { success = false, message = "요청 비어있음" });
+
+        // ── 필드 화이트리스트: 허용 키 밖이 하나라도 있으면 통째로 거부 ──
+        string? licenseKey = null, ownerAccountId = null;
+        foreach (var prop in body.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, "licenseKey", StringComparison.OrdinalIgnoreCase))
+                licenseKey = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : null;
+            else if (string.Equals(prop.Name, "ownerAccountId", StringComparison.OrdinalIgnoreCase))
+                ownerAccountId = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : null;
+            else
+            {
+                // 거부 로그 — 키 이름만 적는다(값은 민감할 수 있어 로그 금지 · #22).
+                _logger.LogWarning("[Telemetry] S-2 금지 필드 거부 — key={Key}", Safe(prop.Name));
+                return BadRequest(new { success = false, message = "허용되지 않은 항목 포함" });
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(licenseKey))
+            return Unauthorized(new { success = false, message = "인증 실패" });
+
+        ownerAccountId = ownerAccountId?.Trim();
+        if (string.IsNullOrWhiteSpace(ownerAccountId) || ownerAccountId.Length > 100)
+            return BadRequest(new { success = false, message = "대표 아이디 형식 오류" });
+
+        // #40 — 비번·해시·토큰 모양 값은 아이디 자리라도 거부(잘못 실어 보내는 사고 차단).
+        if (LooksLikeCredential(ownerAccountId))
+        {
+            _logger.LogWarning("[Telemetry] S-2 자격증명 모양 값 거부 (#40)");
+            return BadRequest(new { success = false, message = "허용되지 않은 항목 포함" });
+        }
+
+        try
+        {
+            await using var db = await OpenAsync(ct);
+
+            // 인증: update-history 와 같은 선례 — HMAC 대조, 원문은 저장·로깅 0.
+            var pepper = _config["License:Pepper"] ?? throw new InvalidOperationException("License:Pepper 미설정");
+            var licHash = ComputeHmacSha256(licenseKey.Trim().ToUpperInvariant().Replace(" ", ""), pepper);
+
+            var row = await db.QueryFirstOrDefaultAsync<S2OwnerRow>(
+                @"SELECT CAST(tenant_id AS CHAR) AS TenantId, owner_account_id AS CurrentOwner
+                    FROM tenants WHERE license_key_hash = @Hash LIMIT 1",
+                new { Hash = licHash });
+
+            if (row is null)
+            {
+                // 라이선스가 우리 것이 아니다 — 적재 0 (위조 행 방지).
+                _logger.LogWarning("[Telemetry] S-2 미상 라이선스 — 수신 거부");
+                return Unauthorized(new { success = false, message = "인증 실패" });
+            }
+
+            // 변경 감지는 로그로 남긴다(B-10 재인증 동선의 재료 — 값은 최신 보고가 이긴다).
+            if (!string.IsNullOrEmpty(row.CurrentOwner) && row.CurrentOwner != ownerAccountId)
+                _logger.LogInformation("[Telemetry] S-2 대표 아이디 변경 감지 — tenant={TenantId}", row.TenantId);
+
+            await db.ExecuteAsync(@"
+                UPDATE tenants
+                   SET owner_account_id   = @OwnerAccountId,
+                       owner_collected_at = UTC_TIMESTAMP(),
+                       owner_collect_path = 'erp_first_report'
+                 WHERE tenant_id = @TenantId",
+                new { OwnerAccountId = ownerAccountId, row.TenantId });
+
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Telemetry] S-2 대표 아이디 수신 실패");
+            return StatusCode(500, new { success = false, message = "기록 실패" });
+        }
+    }
+
+    /// <summary>S-2 대조행 — Dapper 가 이름으로 맵는다(튜플 매핑은 런타임 지뢰라 쓰지 않는다).</summary>
+    private sealed class S2OwnerRow
+    {
+        public string TenantId { get; set; } = "";
+        public string? CurrentOwner { get; set; }
+    }
+
+    /// <summary>#40 방어 — 비번·해시·토큰 모양. 대표 아이디 자리에 올 이유가 없는 모양이다.</summary>
+    private static bool LooksLikeCredential(string v)
+    {
+        if (v.StartsWith("$2a$") || v.StartsWith("$2b$") || v.StartsWith("$2y$")) return true;   // BCrypt 모양
+        if (v.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) return true;
+        if (v.StartsWith("eyJ", StringComparison.Ordinal) && v.Count(c => c == '.') >= 2) return true; // JWT 모양
+        if (v.Length >= 40 && v.All(Uri.IsHexDigit)) return true;                                 // 긴 hex = 해시 모양
+        return false;
     }
 
     /// <summary>

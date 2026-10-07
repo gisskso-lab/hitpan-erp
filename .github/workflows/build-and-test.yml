@@ -629,6 +629,12 @@ jobs:
           #      (G-14음 이 없음→OFF · 가드만 빠짐→OFF · 둘 다→ON 전환을 문다 · G-14ㄷ 는 Filters.Add<T> 가
           #       TypeFilterAttribute 로 들어가는 함정을 들고 있다).
           GATES="$GATES|BackofficeGuardStartupGate"
+          # 🔴 20261008작14 B-0 (BackofficeS2OwnerReportGateTests) — S-2 대표 아이디 수집 (F-10 · 10/5 「명심」)
+          #    담는 것: G-B0-1 양성(정상 보고가 4칸을 채움 · 32_backoffice_s2_owner.sql 실물 적용 포함)
+          #            · G-B0-2 음성(허용 키 밖 필드 = 통째 400 + 적재 0 · 양성 대조군 = G-B0-1 과 같은 payload)
+          #            · G-B0-3 음성(미상 라이선스 401) · G-B0-4 음성(#40 자격증명 모양 거부) · G-B0-5 변경 보고 최신승
+          #    DB 필요(격리 DB + 실물 SchemaMigrator). 로컬 무DB = SkipOrFailStrict 가 FAIL 로 드러낸다(조용한 초록 0).
+          GATES="$GATES|BackofficeS2OwnerReportGate"
           # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)

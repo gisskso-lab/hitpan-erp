@@ -13,7 +13,7 @@ namespace HitPan.Backoffice.Controllers;
 //   POST /backoffice/auth/signin (email, password, returnUrl)
 //      → BackofficeService.AdminLoginAsync / ResellerLoginAsync (ERP API 호출)
 //      → 성공 시 Cookie SignInAsync (백오피스 쿠키)
-//      → returnUrl 또는 /admin/dashboard 리다이렉트
+//      → returnUrl 또는 기본 화면 리다이렉트 (본사 = /admin/tenants · 대리점 = /reseller/customers — 작14 M-1·M-2)
 //
 // 헌법 정합:
 //   #15 빈 catch 금지, ILogger 저장
@@ -71,7 +71,8 @@ public class BackofficeAuthController : Controller
             }, admin.Data.ExpiresAt);
 
             _logger.LogInformation("[BackofficeAuth] admin signed in email={Email}", email);
-            return LocalRedirect(SafeReturn(returnUrl, "/admin/dashboard"));
+            // 작14 M-1 (사장님 결재 2026-10-08): 본사 첫 화면 = 고객 목록 (대시보드는 실물 시각화 전까지 미노출)
+            return LocalRedirect(SafeReturn(returnUrl, "/admin/tenants"));
         }
 
         var reseller = await _bo.ResellerLoginAsync(email, password, ct);
@@ -90,7 +91,8 @@ public class BackofficeAuthController : Controller
             }, reseller.ResellerData.ExpiresAt);
 
             _logger.LogInformation("[BackofficeAuth] reseller signed in email={Email}", email);
-            return LocalRedirect(SafeReturn(returnUrl, "/admin/dashboard"));
+            // 작14 M-2 (사장님 결재 2026-10-08): 대리점 첫 화면 = 내 고객사
+            return LocalRedirect(SafeReturn(returnUrl, "/reseller/customers"));
         }
 
         var msg = admin.Message ?? reseller.Message ?? "이메일 또는 비밀번호가 올바르지 않습니다";

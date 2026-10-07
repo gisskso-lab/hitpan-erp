@@ -323,6 +323,23 @@ public class LandingSignupController : ControllerBase
                     req.Phone
                 });
 
+            // S-2 대표 이메일 수집 (작14 B-0 · F-10 — 「가입 시 이메일」 칸 · 10/5 사장님 「명심」).
+            //   🔴 INSERT 에 합치지 않고 별도 UPDATE + catch 인 이유: 칸(32_backoffice_s2_owner.sql)이
+            //   운영에 아직 적용 전일 수 있다(HITPAN_BO_AUTO_MIGRATE 는 사장님이 켜는 값 — 켜짐 여부를
+            //   이 코드가 보증 못 한다). 칸이 없다고 가입이 끊기면 안 된다(#20) — 그 경우 경고 로그만
+            //   남기고 가입은 그대로 진행한다(#15 빈 catch 금지 — 한 줄 이상 기록).
+            try
+            {
+                await db.ExecuteAsync(
+                    "UPDATE tenants SET owner_email = @Email WHERE tenant_id = @TenantId",
+                    new { req.Email, TenantId = tenantId });
+            }
+            catch (MySqlException ex)
+            {
+                _logger.LogWarning(ex,
+                    "[LandingSignup] S-2 owner_email 기록 실패 — 가입은 계속 (칸 미적용 가능성 · 32_backoffice_s2_owner.sql 적용 여부 확인)");
+            }
+
             _logger.LogInformation("[LandingSignup] submitted token={Token} tenant={TenantCode} email={Email} plan={Plan}",
                 signupToken, tenantCode, req.Email, req.PlanType);
 
