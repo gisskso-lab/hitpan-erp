@@ -66,6 +66,10 @@ jobs:
           GATES="$GATES|LocalSwapLeftoverGateTests|LocalSwapLeftoverLauncherGateTests"
           # 20260930작1 확대 1.3.50(작업지시서 §18 · 설계 §19-2) — 남기기(G-NK) · 세 번째 길(G-NP) · 일꾼 rollback+manual_zip(G-NW) · 완료 팝업 판정(G-ND)
           GATES="$GATES|LocalSwapManifestKeepGateTests|LocalSwapPrevFetchGateTests|LocalSwapPrevFetchWorkerGateTests|LocalSwapDonePopupGateTests|RollbackWatchGateTests"
+          # 🔴 20261007작12 2차수 T-6 — 설치 실패 문구 도달(G-T6-1·2·3). windows-latest 전용이라 이 잡에 합류한다.
+          #    .iss 에서 PS 블록을 복원해 powershell.exe 로 **실제 실행** + 로컬 HttpListener 가 423/401/500 한글 JSON 반환.
+          #    대조군·FAIL 실측: docs/개발/백오피스/20261007작12_2차수_T6_설치실패문구_도달_개발명세서.md §4
+          GATES="$GATES|InstallerBootstrapMessageGateTests"
           echo "▶ 이 단계가 무는 게이트: $GATES"
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
