@@ -359,5 +359,8 @@ public sealed class CsMessagePipelineGateTests : IDisposable
 
         public Task<(int StatusCode, string Body)> PullAsync(string path, string ownerAccountId, CancellationToken ct)
             => Task.FromResult(PullResult);
+
+        public Task<(int StatusCode, string Body)> PostOwnerReportAsync(string ownerAccountId, CancellationToken ct)
+            => Task.FromResult((200, "{\"success\":true}")); // 이 게이트의 과녁 아님 — 워커 사이클이 직접 호출하지 않는다
     }
 }

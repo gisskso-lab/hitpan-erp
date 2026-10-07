@@ -640,6 +640,12 @@ jobs:
           #    · G-CS-4 문① 입력거부+양성 대조군 · G-CS-5 문② 송신직전 거부(우회 차단)
           #    · G-CS-6 큐 멱등(UNIQUE 1062) · G-CS-7 답 멱등 · ⑥17시나리오 #1·#2·#4 재측정은 실물 — [4] 몫
           GATES="$GATES|CsMessagePipelineGate"
+          # 🔴 20261008작14 B-5·B-6 (CsInboundGateTests) — CS 수신 게이트 ⓪ 3중 일치 + 자물쇠
+          #    G-B5-0 양성 대조군(멱등 포함) · G-B5-1 한 축 틀림 3종 각각 401(폐기 시리얼 = 해시 축)
+          #    · G-B5-2 부모 미등록→첫 보고 후 자가 해소 · G-B5-3 연속 실패 잠금(맞는 재료도 429)
+          #    · G-B5-4 시간당 상한 · G-B5-5·6 문③(본문 모양·필드 화이트리스트) · G-B5-7 승인 없인 몸통 불생성(1048)
+          #    · G-B5-8 답 Pull. 격리 DB + 실물 SchemaMigrator(40_backoffice_cs.sql 적용이 과녁에 포함).
+          GATES="$GATES|CsInboundGate"
           # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)

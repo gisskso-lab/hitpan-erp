@@ -36,6 +36,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
     private static readonly TimeSpan PullInterval = TimeSpan.FromMinutes(5);
     private const int MaxAttempts = 50;              // 상한 — 그 뒤 failed 로 멈춤(삭제 아님)
     private DateTime _lastPullUtc = DateTime.MinValue;
+    private bool _ownerReported;
 
     public CsOutboxSenderWorker(IServiceScopeFactory scopeFactory, ILogger<CsOutboxSenderWorker> logger)
     {
@@ -66,6 +67,17 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                 }
                 else
                 {
+                    // S-2 첫 보고(B-0 송신측) — 기동 후 성공할 때까지 사이클마다 1회 시도.
+                    //   백오피스 tenants.owner_account_id 가 채워져야 3중 일치(부모계정 축)가 열린다.
+                    //   실패해도 쪽지는 큐에 보존(수신이 owner_not_registered 401 → 재시도)이라 유실 0.
+                    if (!_ownerReported)
+                    {
+                        var (code, _) = await hq.PostOwnerReportAsync(ownerAccountId, st);
+                        _ownerReported = code is >= 200 and < 300;
+                        if (_ownerReported)
+                            _logger.LogInformation("[CS송신] S-2 대표 아이디 첫 보고 완료");
+                    }
+
                     await SendPendingAsync(db, hq, ownerAccountId, _logger, st);
 
                     if (DateTime.UtcNow - _lastPullUtc >= PullInterval)

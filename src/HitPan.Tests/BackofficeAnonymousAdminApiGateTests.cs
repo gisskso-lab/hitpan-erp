@@ -358,7 +358,12 @@ public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymous
             "심사·승인은 별 컨트롤러 ResellerApplicationsAdminController 가 맡고 그쪽은 [BoPermission] 2중이다",
         ["PromotionController.Redeem"] =
             "고객이 프로모션 코드를 입력하는 경로(PromotionController.cs:212-213) — 익명 봉합 후보 B 목록 · " +
-            "사장님 결재 대기. 결재로 막히면 이 줄을 지운다"
+            "사장님 결재 대기. 결재로 막히면 이 줄을 지운다",
+        ["CsInboundController"] =
+            "작14 B-5 — ERP 쪽지 수신·답 Pull(api/backoffice/cs). 고객 PC 기계 경로라 백오피스 토큰이 없다. " +
+            "자물쇠 = 3중 일치(테넌트+시리얼+부모계정 · 하나만 틀려도 거부+거부로그) + 연속 실패 잠금 + " +
+            "시간당 상한 + 본문 상한(B-6 — 문과 자물쇠 같은 커밋). Telemetry 선례와 같은 축이며 " +
+            "동작은 CsInboundGateTests 가 잰다(3종 각각 거부·폐기 시리얼·양성 대조군)"
     };
 
     // 관리 표면인데 역할을 안 묻는 것 — 전건 열거 + 사유. PM 판정으로 이번 차수 무접촉.
