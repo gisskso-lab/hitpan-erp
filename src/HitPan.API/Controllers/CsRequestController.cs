@@ -46,10 +46,17 @@ public class CsRequestController : ControllerBase
     };
 
     // 세부태그 고정 목록 — 업무 영역 축. 1차 최소 목록이며 조정은 CS팀장 몫(반자동 — 거부 집계를 보고).
-    private static readonly HashSet<string> SubTags = new(StringComparer.Ordinal)
+    //   화면 콤보도 이 목록을 그대로 받아 그린다(GET 응답에 동봉) — 목록의 주인은 이 파일 하나다.
+    private static readonly Dictionary<string, string> SubTags = new()
     {
-        "estimate_sales", "purchase_order", "stock", "invoice",
-        "accounting", "hr_payroll", "settings_perm", "etc",
+        ["estimate_sales"] = "견적·수주·판매",
+        ["purchase_order"] = "발주·매입",
+        ["stock"] = "재고",
+        ["invoice"] = "거래명세서·세금계산서",
+        ["accounting"] = "회계·경비",
+        ["hr_payroll"] = "사원·급여",
+        ["settings_perm"] = "설정·권한",
+        ["etc"] = "기타",
     };
 
     public CsRequestController(IDbConnection db, ILogger<CsRequestController> logger)
@@ -72,7 +79,7 @@ public class CsRequestController : ControllerBase
             return BadRequest(new { success = false, message = "유형을 선택해 주세요" });
 
         // 고정 목록 화이트리스트 — 밖의 값은 거부 + DB-142 기록(rule_code = tag_not_allowed)
-        if (!Categories.ContainsKey(req.Category) || !SubTags.Contains(req.SubTag ?? ""))
+        if (!Categories.ContainsKey(req.Category) || !SubTags.ContainsKey(req.SubTag ?? ""))
         {
             await RecordRejectAsync(tenantId, "tag_not_allowed", ct);
             return BadRequest(new { success = false, message = "목록에 있는 유형·태그만 보낼 수 있습니다" });
@@ -170,7 +177,7 @@ public class CsRequestController : ControllerBase
              LIMIT 200",
             new { TenantId = tenantId });
 
-        return Ok(new { success = true, data = rows, categories = Categories });
+        return Ok(new { success = true, data = rows, categories = Categories, subTags = SubTags });
     }
 
     // ─────────────────────────────────────────────────────────────

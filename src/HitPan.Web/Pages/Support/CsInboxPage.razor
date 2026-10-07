@@ -1,0 +1,86 @@
+@page "/support/cs/{RequestId}"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+@* 작14 B-1 — 받은 답 전용 화면 (결-6: 사내 메신저와 분리 · 본사 직원은 이 테넌트 사원이 아니라서 메신저에 못 꽂는다)
+   · 답을 열면 읽음 처리 — N-8 「안 읽은 답 N」 숫자가 여기서 줄어든다
+   · replied_by_kind 는 본사/대리점 글자만 — 사람 이름은 애초에 안 받는다(설계 §5-3) *@
+
+<PageTitle>CS 답변</PageTitle>
+<PageHeader Title="CS 답변" Subtitle="보낸 문의에 대한 담당 상담원의 답입니다" />
+
+<MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+           OnClick="@(() => Nav.NavigateTo("/support/cs"))" Class="mb-2">문의 목록으로</MudButton>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_replies.Count == 0)
+{
+    <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
+        <MudText Typo="Typo.body2" Style="color:#6B7280">아직 답이 없습니다. 답이 오면 화면 위에 알려 드립니다.</MudText>
+    </MudPaper>
+}
+else
+{
+    <div style="max-width:860px">
+        @foreach (var r in _replies)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@r.RepliedByKind 답변</MudChip>
+                    <MudText Typo="Typo.caption" Style="color:#6B7280">@r.RepliedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
+                </div>
+                <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@r.Body</MudText>
+            </MudPaper>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string RequestId { get; set; } = "";
+
+    private bool _loading = true;
+    private List<Reply> _replies = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<RepliesResponse>($"api/cs/requests/{RequestId}/replies");
+            _replies = res?.Data ?? new();
+
+            // 읽음 처리 — 열었다 = 읽었다. N-8 숫자가 줄어든다(read_at 메타 갱신).
+            foreach (var r in _replies.Where(x => x.ReadAt is null))
+            {
+                await Http.PostAsync($"api/cs/replies/{r.ReplyId}/read", null);
+            }
+        }
+        catch (Exception)
+        {
+            // 목록 화면이 안내한다 — 여기서는 빈 화면 + 콘솔 한 줄(#15)
+            Console.Error.WriteLine("[CS] 답 목록 조회 실패");
+        }
+        _loading = false;
+    }
+
+    private sealed class RepliesResponse
+    {
+        public bool Success { get; set; }
+        public List<Reply> Data { get; set; } = new();
+    }
+
+    private sealed class Reply
+    {
+        public string ReplyId { get; set; } = "";
+        public string CsRequestId { get; set; } = "";
+        public string Body { get; set; } = "";
+        public string RepliedByKind { get; set; } = "";
+        public DateTime RepliedAt { get; set; }
+        public DateTime? ReadAt { get; set; }
+    }
+}
