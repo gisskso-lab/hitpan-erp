@@ -617,6 +617,18 @@ jobs:
           #        G_W11_11(전수 분류 미분류 0건) · G_W11_12(예외표 썩음 방지) 신설.
           #        FAIL 확인: 예외표 OwnerMfaController 한 줄을 어긋나게 하면 G_W11_5·G_W11_12 2건 FAIL.
           GATES="$GATES|BackofficeAnonymousAdminApiGate"
+          # 🔴 20261007작10 게시 전 조건 P-2 (BackofficeGuardStartupGate · 사장님 「7건 모두 결재!!」 2026-10-07)
+          #    재는 것: **기동 한 줄이 실제로 나오는가.** 가드(BoAccessGuard)는 통과할 때 로그가 0줄이라
+          #      운영에서 「붙어 있나」를 볼 신호가 없었다([4] 리뷰서 §5 — 가드가 한 인스턴스에서 미실행으로
+          #      보인 1회 관측 · 재현 실패. 신호가 없으면 다음에도 못 가린다).
+          #    DB 불필요(실물 호스트를 띄우되 연결문자열을 Port=1 로 덮는다 · 외부 실호출 0).
+          #    등록 근거 = **전후 대조**(2026-10-07 로컬 실측 · 개발명세서):
+          #      · 봉합 후            → 3/3 PASS (기동 줄 「서버 강제 ON」 실제 수신 · 전역 필터 개수 확인)
+          #      · Program.cs 의 o.Filters.Add<BoAccessGuard>() **제거** → **1 FAIL**(ON 줄이 안 나온다) · 즉시 원복
+          #    🔴 글자 판정 금지: 「등록했다」를 로그에 박지 않았다. 실제 MvcOptions.Filters 를 읽어 만든 보고다
+          #      (G-14음 이 없음→OFF · 가드만 빠짐→OFF · 둘 다→ON 전환을 문다 · G-14ㄷ 는 Filters.Add<T> 가
+          #       TypeFilterAttribute 로 들어가는 함정을 들고 있다).
+          GATES="$GATES|BackofficeGuardStartupGate"
           # 🔴 20261007작12 1차수 B3-1 (InstallerBootstrapPreverifyGateTests) — 설치 부트스트랩
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)

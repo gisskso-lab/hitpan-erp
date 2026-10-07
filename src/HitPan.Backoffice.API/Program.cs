@@ -114,6 +114,27 @@ public class Program
 
         var app = builder.Build();
 
+        // 🔴 20261007작10 게시 전 조건 P-2 (사장님 결재 2026-10-07 · [5] CTO §2 P-2)
+        //   가드는 **통과할 때 로그를 0줄** 남긴다 ⇒ 운영에서 「붙어 있나」를 볼 신호가 없었다.
+        //   [4] 검증에서 「가드가 한 인스턴스에서 미실행으로 보인 1회 관측 · 재현 실패」가 있었고,
+        //   신호가 없으면 다음에도 못 가린다. 그래서 기동 때 한 줄 남긴다.
+        //   🔴 글자를 박지 않는다 — **실제 MvcOptions.Filters 목록을 읽어** 만든 보고다
+        //      (등록 줄을 지우면 이 로그가 OFF 로 바뀐다. 게이트 G-14 가 그 전환을 문다).
+        var boGuardReport = HitPan.Backoffice.API.Filters.BoGuardStartupReport.Inspect(
+            app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<
+                Microsoft.AspNetCore.Mvc.MvcOptions>>().Value.Filters);
+        var boStartupLogger = app.Services
+            .GetRequiredService<ILoggerFactory>().CreateLogger("HitPan.Backoffice.Startup");
+        if (boGuardReport.AllRegistered)
+        {
+            boStartupLogger.LogInformation("{Message}", boGuardReport.Message);
+        }
+        else
+        {
+            // 기동은 막지 않는다(막으면 고객 백오피스가 안 뜬다) — 대신 가장 큰 소리로 남긴다.
+            boStartupLogger.LogCritical("{Message}", boGuardReport.Message);
+        }
+
         // P0 보안 봉합 (2026-06-11): HTTPS 강제 + HSTS
         if (!app.Environment.IsDevelopment())
         {
