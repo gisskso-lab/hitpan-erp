@@ -553,8 +553,13 @@ jobs:
           #    ⓑ 시도 제한(지문 단위 · 60분 자동 해제) · ⓒ 응답 최소화(단계 구분).
           #    담는 것: G-3 · G-4a · G-4b · G-5 · G-6a · G-6b · G-8 · G-8b · G-10 · C-1 · G-9  (11건)
           #    담지 않는 것(숨기지 않고 적는다): **G-1·G-2·G-2b 는 ⓐ 선검증 게이트 ⇒ [3]-2(C-1 운영 읽기 뒤)**.
-          #      **G-7(워치독 실파서 투입)은 아예 없다** — HitPan.Watchdog 는 net8.0-windows, HitPan.Tests 는 net8.0
-          #      ⇒ TFM 이 좁은 쪽을 넓은 쪽이 참조할 수 없다(NU1201). PM 결재 사항(개발명세서 §5).
+          #    🔴 **G-7(워치독 실파서 투입)은 이 잡이 아니라 `build` 잡에서 돈다** (PM 결재 ① 2026-10-07):
+          #      HitPan.Watchdog 는 net8.0-windows, HitPan.Tests 는 net8.0 ⇒ NU1201 로 참조 불가.
+          #      그래서 `src/HitPan.Watchdog.Tests/InstallerBootstrapReducedResponseGateTests.cs`(신설 5건)에 뒀다.
+          #      그 프로젝트는 이미 솔루션에 있고 `build` 잡은 windows-latest 에서 `dotnet test src/HitPan.sln` 을
+          #      돌린다(:20·:46) ⇒ 자동으로 집힌다. **추측이 아니라 쟀다** — 같은 필터로 `dotnet test src/HitPan.sln`
+          #      을 돌려 `HitPan.Watchdog.Tests.dll` 5 Passed 를 확인했다(개발명세서 §5-1).
+          #      이 잡(ubuntu)은 HitPan.Tests.csproj 만 지목하므로 영향 0.
           #    등록 근거는 초록불이 아니라 **봉합 빼기 전후 대조 9건 실측**이다(2026-10-07 · hitpan_trgtest):
           #      A 가산 제거            → 5 FAIL (G-3·G-4a·G-4b·G-5·G-10)
           #      B 잠금 거절(423) 제거  → 1 FAIL (G-3)
