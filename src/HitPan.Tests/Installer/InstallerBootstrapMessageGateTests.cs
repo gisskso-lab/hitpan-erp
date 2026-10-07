@@ -104,12 +104,40 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     /// </summary>
     private static string RestorePsBlock(string iss, IDictionary<string, string> vars, string apiBase)
     {
+        // 🔴 ⓒ 블록 선택을 **단언**한다 — `.iss` 에 `PsScript :=` 블록이 여럿이고(측정: 4개),
+        //    그중 하나는 `'}';` 로 끝나지도 않고 `ExpandConstant` 가 들어 있어 **순진한 뽑기는 두 블록을 삼킨다**.
+        var blockStarts = new List<int>();
+        for (int k = iss.IndexOf("PsScript :=", StringComparison.Ordinal); k >= 0;
+                 k = iss.IndexOf("PsScript :=", k + 1, StringComparison.Ordinal))
+            blockStarts.Add(k);
+        if (blockStarts.Count < 2)
+            throw new XunitException($"`PsScript :=` 블록이 {blockStarts.Count}개다 — .iss 모양이 바뀌었다. 게이트를 갱신하라.");
+
         int anchor = iss.IndexOf("/api/installer/bootstrap", StringComparison.Ordinal);
         if (anchor < 0) throw new XunitException(".iss 에 /api/installer/bootstrap 이 없다 — 게이트 과녁이 사라졌다.");
         int start = iss.LastIndexOf("PsScript :=", anchor, StringComparison.Ordinal);
         if (start < 0) throw new XunitException("부트스트랩 PsScript := 블록을 못 찾았다.");
+        // 고른 블록이 **부트스트랩 블록**인지: 다음 블록 시작 전에 앵커가 있어야 한다.
+        int next = blockStarts.FirstOrDefault(p => p > start, -1);
+        if (next >= 0 && anchor > next)
+            throw new XunitException("블록 선택이 틀렸다 — 앵커가 다음 PsScript 블록 뒤에 있다.");
+        Console.WriteLine($"[복원기] PsScript 블록 {blockStarts.Count}개 중 위치 {start} 선택 (앵커 {anchor})");
 
-        int i = start + "PsScript :=".Length;
+        string ps = EvalPascalExpr(iss, start + "PsScript :=".Length, vars);
+        if (!ps.Contains("{#BackofficeApi}", StringComparison.Ordinal))
+            throw new XunitException("복원한 PS 에 {#BackofficeApi} 가 없다 — 블록을 잘못 집었다.");
+        if (!ps.Contains("Invoke-RestMethod", StringComparison.Ordinal))
+            throw new XunitException("복원한 PS 에 Invoke-RestMethod 가 없다 — 블록을 잘못 집었다.");
+        return ps.Replace("{#BackofficeApi}", apiBase, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pascal 문자열 식(리터럴 · <c>#NN</c> 글자상수 · 식별자 · <c>+</c> · <c>//</c> 주석)을 평가한다.
+    /// <c>;</c> <c>,</c> <c>)</c> 에서 끝난다. 모르는 글자·식별자는 FAIL(모양 변경을 조용히 넘기지 않는다).
+    /// </summary>
+    private static string EvalPascalExpr(string iss, int from, IDictionary<string, string> vars)
+    {
+        int i = from;
         var sb = new StringBuilder();
         while (i < iss.Length)
         {
@@ -121,7 +149,8 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
                 continue;
             }
             if (c == '+') { i++; continue; }
-            if (c == ';') break;
+            // 식의 끝 — PsScript 는 ';' 로, MsgBox 첫 인자는 ',' 로 끝난다(리터럴 밖에만 나온다).
+            if (c is ';' or ',' or ')') break;
             if (c == '\'')
             {
                 i++;
@@ -158,12 +187,68 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
             throw new XunitException($"복원기가 모르는 글자 '{c}' (위치 {i}) — .iss PS 블록 모양이 바뀌었다.");
         }
 
-        string ps = sb.ToString();
-        if (!ps.Contains("{#BackofficeApi}", StringComparison.Ordinal))
-            throw new XunitException("복원한 PS 에 {#BackofficeApi} 가 없다 — 블록을 잘못 집었다.");
-        if (!ps.Contains("Invoke-RestMethod", StringComparison.Ordinal))
-            throw new XunitException("복원한 PS 에 Invoke-RestMethod 가 없다 — 블록을 잘못 집었다.");
-        return ps.Replace("{#BackofficeApi}", apiBase, StringComparison.Ordinal);
+        return sb.ToString();
+    }
+
+    // ============================================================
+    // 🔴 .iss 의 **실패 분기 세 줄**을 읽어 고객 대화상자 글자를 만든다
+    //    (W-3 호출 자리 · W-4 머리글 · Pascal 고정 한글 문장까지 묶는다.
+    //     2026-10-07 실측: 이게 없으면 W-3 을 되돌려도 게이트가 **0건 FAIL** 이었다.)
+    // ============================================================
+
+    private static string FailureBranch(string iss)
+    {
+        int s = iss.IndexOf("if Pos('\"success\":true', RawResponse) = 0 then begin", StringComparison.Ordinal);
+        if (s < 0) throw new XunitException(".iss 에서 실패 분기를 못 찾았다 — 게이트 과녁이 사라졌다.");
+        int e = iss.IndexOf("\n  end;", s, StringComparison.Ordinal);
+        if (e < 0) throw new XunitException("실패 분기의 end; 를 못 찾았다.");
+        return iss.Substring(s, e - s);
+    }
+
+    /// <summary>실패 분기가 <b>실제로 부르는</b> 파서로 message 를 뽑는다(복제본 dispatch).</summary>
+    private static string ShownMessage(string iss, string responseJson)
+    {
+        string block = FailureBranch(iss);
+        var m = Regex.Match(block, @"G_CompanyName := (Extract\w+)\(RawResponse, 'message'\);");
+        if (!m.Success) throw new XunitException("실패 분기의 message 추출 줄을 못 찾았다 — 게이트를 갱신하라.");
+        return m.Groups[1].Value switch
+        {
+            "ExtractJsonString" => ExtractJsonStringReplica(responseJson, "message"),
+            "ExtractJsonValue" => ExtractJsonValueReplica(responseJson, "message"),
+            var other => throw new XunitException($"모르는 파서 '{other}' — 복제본을 더하고 게이트를 갱신하라."),
+        };
+    }
+
+    /// <summary>
+    /// 응답이 왔지만 알아볼 수 있는 <c>message</c> 가 없을 때 <c>.iss</c> 가 쓰는 <b>고정 한글 문장</b>을 평가한다.
+    /// 🔴 보안 결재(폴백 ⓑ 삭제)의 지지대다 — 없어지면 FAIL.
+    /// </summary>
+    private static string FixedFallbackSentence(string iss)
+    {
+        string block = FailureBranch(iss);
+        const string anchor = "if G_CompanyName = '' then";
+        int a = block.IndexOf(anchor, StringComparison.Ordinal);
+        if (a < 0) throw new XunitException("실패 분기의 고정 한글 폴백 줄을 못 찾았다 — 보안 결재(ⓑ 삭제)의 지지대다.");
+        int assign = block.IndexOf("G_CompanyName :=", a + anchor.Length, StringComparison.Ordinal);
+        if (assign < 0) throw new XunitException("고정 한글 폴백의 대입식을 못 찾았다.");
+        string s = EvalPascalExpr(block, assign + "G_CompanyName :=".Length,
+            new Dictionary<string, string>(StringComparer.Ordinal));
+        if (s.Length == 0) throw new XunitException("고정 한글 폴백이 빈 문자열이다 — 고객이 아무 글자도 못 본다.");
+        return s;
+    }
+
+    /// <summary>고객이 실제로 읽는 대화상자 글자 = <c>.iss</c> 의 MsgBox 식 + 고정 한글 폴백까지 평가한 결과.</summary>
+    private static string CustomerDialogText(string iss, string responseJson)
+    {
+        string block = FailureBranch(iss);
+        string shown = ShownMessage(iss, responseJson);
+
+        if (shown.Length == 0) shown = FixedFallbackSentence(iss);
+
+        int mb = block.IndexOf("MsgBox(", StringComparison.Ordinal);
+        if (mb < 0) throw new XunitException("실패 분기의 MsgBox 를 못 찾았다.");
+        return EvalPascalExpr(block, mb + "MsgBox(".Length,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["G_CompanyName"] = shown });
     }
 
     /// <summary>
@@ -429,11 +514,17 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         AssertPascalBodyUnchanged();
 
         var trip = RoundTrip($"g2_{status}", status, ErrorBody(serverMessage));
-        string shown = ExtractJsonStringReplica(trip.ResponseJson, "message");
+        string iss = IssText();
+        string shown = ShownMessage(iss, trip.ResponseJson);
+        string dialog = CustomerDialogText(iss, trip.ResponseJson);
 
         Assert.Equal(serverMessage, shown);
         Assert.NotEqual(2, shown.Length);
-        if (status == 423) Assert.Contains("1시간 뒤", shown, StringComparison.Ordinal);
+        // 고객이 읽는 글자 전체 — 머리글(W-4)까지 .iss 에서 평가한 결과다
+        Assert.Contains("설치를 계속할 수 없습니다", dialog, StringComparison.Ordinal);
+        Assert.Contains(serverMessage, dialog, StringComparison.Ordinal);
+        Assert.DoesNotContain("시리얼 인증 실패", dialog, StringComparison.Ordinal);
+        if (status == 423) Assert.Contains("1시간 뒤", dialog, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -447,10 +538,12 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
 
         var trip = RoundTrip("g2_comma", 400, ErrorBody(MsgComma));
 
-        string withNew = ExtractJsonStringReplica(trip.ResponseJson, "message");
+        // 🔴 .iss 가 실제로 부르는 파서로 뽑는다 — 호출 자리를 옛 함수로 되돌리면 여기서 FAIL 한다.
+        string withNew = ShownMessage(IssText(), trip.ResponseJson);
         string withOld = ExtractJsonValueReplica(trip.ResponseJson, "message");
 
         Assert.Equal(MsgComma, withNew);
+        Assert.Contains(MsgComma, CustomerDialogText(IssText(), trip.ResponseJson), StringComparison.Ordinal);
         // 음성 대조군 — 옛 파서로는 잘린다(이 케이스가 S-2 의 유일한 검출기다)
         Assert.NotEqual(MsgComma, withOld);
         Assert.True(withOld.Length < MsgComma.Length, $"옛 파서가 자르지 않았다 — 이 케이스는 검출기가 아니다: '{withOld}'");
@@ -483,12 +576,25 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         var trip = RoundTrip("g4_html", 502, HtmlBody, contentType: "text/html; charset=utf-8");
 
         Assert.Equal(1, trip.ExitCode);
-        string shown = ExtractJsonStringReplica(trip.ResponseJson, "message");
-        Assert.Equal("", shown);
-        foreach (string token in HtmlLeakTokens)
-            Assert.DoesNotContain(token, trip.ResponseJson, StringComparison.OrdinalIgnoreCase);
-        // 고객 화면 = .iss 의 고정 한글 문장(Pascal `if G_CompanyName = '' then …`) — 서버 글자 0
+        string iss = IssText();
+        Assert.Equal("", ShownMessage(iss, trip.ResponseJson));
         Assert.Contains("\"message\":\"\"", trip.ResponseJson, StringComparison.Ordinal);
+
+        // 🔴 응답 파일에도, 고객이 읽는 글자에도 본문이 한 조각도 없어야 한다
+        string dialog = CustomerDialogText(iss, trip.ResponseJson);
+        foreach (string token in HtmlLeakTokens)
+        {
+            Assert.DoesNotContain(token, trip.ResponseJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(token, dialog, StringComparison.OrdinalIgnoreCase);
+        }
+        // 🔴 「안 샌다」만으로는 모자라다 — **고정 한글 문장이 실제로 떴는지**를 같이 단언한다(PM 결재 2026-10-07).
+        string fixedSentence = FixedFallbackSentence(iss);
+        Assert.NotEqual(0, fixedSentence.Length);
+        Assert.NotEqual("알 수 없는 오류", fixedSentence);
+        Assert.Contains("설치를 계속할 수 없습니다", dialog, StringComparison.Ordinal);
+        Assert.Contains(fixedSentence, dialog, StringComparison.Ordinal);
+        // ⓒ(.NET 예외 글자)도 이 길로는 안 온다 — 본문이 있으면 ⓒ 를 쓰지 않는다
+        Assert.DoesNotContain("502", dialog, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -500,7 +606,7 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     {
         var trip = RoundTrip("g4_neg_html", 502, HtmlBody, (ps, _) => MakeFallbackB(ps), "text/html; charset=utf-8");
 
-        string shown = ExtractJsonStringReplica(trip.ResponseJson, "message");
+        string shown = ShownMessage(IssText(), trip.ResponseJson);
         Assert.NotEqual("", shown);
         Assert.Contains("back-internal-07", shown, StringComparison.Ordinal);
         Assert.Contains("8f3c9a21b7de4411", shown, StringComparison.Ordinal);

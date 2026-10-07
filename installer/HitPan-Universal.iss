@@ -644,11 +644,16 @@ begin
     //   🔴 [3-V] 보안 병렬검증 P1 (PM 결재 2026-10-07) — 폴백 ⓑ(`$_.ErrorDetails.Message` 원문)를 **삭제했다**.
     //   message 키가 없는 본문(프록시·Cloudflare 오류 HTML · ASP.NET 자동 400 ProblemDetails)이 ⓑ 로 떨어지면
     //   호스트명·제품명·추적 ID 가 **고객 대화상자 전문**으로 증폭된다(이스케이프가 가려 주지 않는다).
-    //   ⇒ ⓐ(JSON 의 message 가 문자열일 때)만 쓰고, 안 되면 **빈 문자열**로 둔다.
-    //     아래 Pascal 이 고정 한글 문장('알 수 없는 오류')을 넣고, 원문은 **ErrorFile 로만** 남는다.
+    //   ⇒ 응답 본문이 **있을 때**는 ⓐ(JSON 의 message 가 문자열)만 쓰고, 안 되면 **빈 문자열**로 둔다.
+    //     아래 Pascal 이 고정 한글 문장을 넣고, 본문 원문은 **ErrorFile 로만** 남는다.
+    //   🟢 **ⓒ 는 살려 둔다**(PM 정정 2026-10-07) — 응답 본문이 **아예 없을 때**(연결 실패·시간 초과)의
+    //     $_.Exception.Message 는 **.NET 이 스스로 만드는 한글 문장**이라 서버·프록시 본문이 아니다.
+    //     ⓒ 까지 덮으면 통신 사고에서 고객이 받는 정보가 오늘보다 줄어든다.
     //   🟢 봉합 목적은 안 깎인다 — 423·401·500 은 전부 message 키를 가져 ⓐ 로 닿는다.
     '  $human = '''';' + #13#10 +
-    '  try { $parsed = $msg | ConvertFrom-Json -ErrorAction Stop; if ($parsed -and ($parsed.message -is [string]) -and ($parsed.message.Length -gt 0)) { $human = $parsed.message; } } catch { $human = ''''; }' + #13#10 +
+    '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) {' + #13#10 +
+    '    try { $parsed = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop; if ($parsed -and ($parsed.message -is [string]) -and ($parsed.message.Length -gt 0)) { $human = $parsed.message; } } catch { $human = ''''; }' + #13#10 +
+    '  } else { $human = $_.Exception.Message; }' + #13#10 +
     '  try {' + #13#10 +
     '    $out = [pscustomobject][ordered]@{ success = $false; message = $human } | ConvertTo-Json -Compress;' + #13#10 +
     '    [System.IO.File]::WriteAllText("' + ResponseFile + '", $out, [System.Text.Encoding]::UTF8);' + #13#10 +
@@ -691,7 +696,11 @@ begin
     //   머리글: 423 은 시리얼이 틀린 게 아니라 **잠긴 것**이다. 「시리얼 인증 실패」는 고객의 다음 행동을 틀리게 한다.
     //   🚫 설치본은 문구를 **지어내지 않는다** — 서버 message 가 유일한 원본이다(423 에 「1시간 뒤」가 이미 있다).
     G_CompanyName := ExtractJsonString(RawResponse, 'message');
-    if G_CompanyName = '' then G_CompanyName := '알 수 없는 오류';
+    //   응답이 왔지만 알아볼 수 있는 message 가 없을 때 쓰는 **고정 한글 문장**.
+    //   🔴 [3-V] 보안 결재의 지지대다 — 서버·프록시 본문을 고객 화면에 올리지 않기 위해 여기서 끊는다.
+    //   🚫 「인터넷·방화벽 확인」을 붙이지 않는다 — **응답은 왔다**. 틀린 안내가 된다(설계 §2-3).
+    if G_CompanyName = '' then
+      G_CompanyName := '백오피스 응답을 알아볼 수 없습니다.' + #13#10 + '잠시 뒤 다시 시도해주세요.';
     MsgBox('설치를 계속할 수 없습니다' + #13#10 + #13#10 + G_CompanyName, mbError, MB_OK);
     Exit;
   end;
