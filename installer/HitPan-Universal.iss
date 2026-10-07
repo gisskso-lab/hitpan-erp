@@ -706,18 +706,21 @@ begin
   end;
 
   // 응답에서 필드 추출
+  //   T-6 (20261007작12 2차수 · 사장님 범위 확대 2026-10-07): **9개 이름 전부** ExtractJsonString 으로.
+  //   옛 ExtractJsonValue 는 ` \uXXXX ` 를 못 풀어 PS 5.1 이 `& < > '` 를 바꿔 보낸 값에서 글자가 깨졌다
+  //   (상호에 `&` 가 든 고객은 지금까지 `\u0026` 으로 설치됐다). 🚫 옛 함수는 **지우지 않는다** — 다른 블록이 쓴다(#1).
   //   길 B (사장님 결재 2026-06-18): bizNo·ceoName 추출 제거 — 백오피스 응답에 없음(평문 미보유).
-  G_TenantCode := ExtractJsonValue(RawResponse, 'tenantCode');
-  G_CompanyName := ExtractJsonValue(RawResponse, 'companyName');
-  G_PrimaryDomain := ExtractJsonValue(RawResponse, 'primary');
-  G_ApiDomain := ExtractJsonValue(RawResponse, 'api');
-  G_TunnelToken := ExtractJsonValue(RawResponse, 'tunnelToken');
+  G_TenantCode := ExtractJsonString(RawResponse, 'tenantCode');
+  G_CompanyName := ExtractJsonString(RawResponse, 'companyName');
+  G_PrimaryDomain := ExtractJsonString(RawResponse, 'primary');
+  G_ApiDomain := ExtractJsonString(RawResponse, 'api');
+  G_TunnelToken := ExtractJsonString(RawResponse, 'tunnelToken');
   // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01): 워치독 WS-28-C 자가복구용 터널 UUID. 응답 domain.tunnelId.
   //   LOCAL 모드·터널 미발급이면 빈 문자열(db.conf 에 빈 값 → 워치독이 보수적으로 자가복구 스킵).
-  G_TunnelId := ExtractJsonValue(RawResponse, 'tunnelId');
-  G_BootstrapToken := ExtractJsonValue(RawResponse, 'token');
+  G_TunnelId := ExtractJsonString(RawResponse, 'tunnelId');
+  G_BootstrapToken := ExtractJsonString(RawResponse, 'token');
   // 재설치 P0 2차 벽 봉합 (2026-07-06): 부모계정 서명검증 키 추출 (응답 bootstrap.tokenKey).
-  G_BootstrapTokenKey := ExtractJsonValue(RawResponse, 'tokenKey');
+  G_BootstrapTokenKey := ExtractJsonString(RawResponse, 'tokenKey');
 
   // 정리
   DeleteFile(ResponseFile);

@@ -205,19 +205,34 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         return iss.Substring(s, e - s);
     }
 
-    /// <summary>실패 분기가 <b>실제로 부르는</b> 파서로 message 를 뽑는다(복제본 dispatch).</summary>
-    private static string ShownMessage(string iss, string responseJson)
+    /// <summary>부트스트랩 함수 영역 — 쌍둥이 <c>CallLicenseClaimApi</c>(손대지 않는다)를 안 삼키게 잘라 둔다.</summary>
+    private static string BootstrapRegion(string iss)
     {
-        string block = FailureBranch(iss);
-        var m = Regex.Match(block, @"G_CompanyName := (Extract\w+)\(RawResponse, 'message'\);");
-        if (!m.Success) throw new XunitException("실패 분기의 message 추출 줄을 못 찾았다 — 게이트를 갱신하라.");
+        int s = iss.IndexOf("if Pos('\"success\":true', RawResponse) = 0 then begin", StringComparison.Ordinal);
+        if (s < 0) throw new XunitException(".iss 에서 부트스트랩 실패 분기를 못 찾았다.");
+        int e = iss.IndexOf("\nfunction CallLicenseClaimApi", s, StringComparison.Ordinal);
+        if (e < 0) throw new XunitException("쌍둥이 CallLicenseClaimApi 경계를 못 찾았다 — 영역을 잘못 자르면 쌍둥이를 재게 된다.");
+        return iss.Substring(s, e - s);
+    }
+
+    /// <summary>
+    /// 🔴 <c>.iss</c> 가 그 이름에 <b>실제로 부르는</b> 파서로 값을 뽑는다(복제본 dispatch).
+    /// 호출 자리를 옛 함수로 되돌리면 게이트가 갈린다 — 2026-10-07 에 이게 없어서 0건 FAIL 이었다.
+    /// </summary>
+    private static string ShownValue(string iss, string responseJson, string name)
+    {
+        string region = BootstrapRegion(iss);
+        var m = Regex.Match(region, @"(Extract\w+)\(RawResponse, '" + Regex.Escape(name) + @"'\)");
+        if (!m.Success) throw new XunitException($"부트스트랩에서 '{name}' 추출 줄을 못 찾았다 — 게이트를 갱신하라.");
         return m.Groups[1].Value switch
         {
-            "ExtractJsonString" => ExtractJsonStringReplica(responseJson, "message"),
-            "ExtractJsonValue" => ExtractJsonValueReplica(responseJson, "message"),
+            "ExtractJsonString" => ExtractJsonStringReplica(responseJson, name),
+            "ExtractJsonValue" => ExtractJsonValueReplica(responseJson, name),
             var other => throw new XunitException($"모르는 파서 '{other}' — 복제본을 더하고 게이트를 갱신하라."),
         };
     }
+
+    private static string ShownMessage(string iss, string responseJson) => ShownValue(iss, responseJson, "message");
 
     /// <summary>
     /// 응답이 왔지만 알아볼 수 있는 <c>message</c> 가 없을 때 <c>.iss</c> 가 쓰는 <b>고정 한글 문장</b>을 평가한다.
@@ -616,8 +631,13 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     // G-T6-3 — 성공 경로 9개 이름 무회귀 + 민감도 대조군
     // ============================================================
 
+    // 🔴 상호에 `&` `<` `>` `'` `"` `\` 와 한글·공백을 전부 넣는다 — PS 5.1 ConvertTo-Json 이
+    //    `& < > '` 를 \uXXXX 로, `"` `\` 를 \" \\ 로 바꿔 보낸다. 옛 파서는 그걸 못 풀어 글자가 깨졌다.
+    private const string NastyCompany = "히트판 & 공영정보 <주> 'ERP' \"큰\" \\역슬래시\\";
+
     private const string SuccessBody =
-        "{\"success\":true,\"tenantCode\":\"T0042\",\"companyName\":\"테스트상사\"," +
+        "{\"success\":true,\"tenantCode\":\"T0042\"," +
+        "\"companyName\":\"히트판 & 공영정보 <주> 'ERP' \\\"큰\\\" \\\\역슬래시\\\\\"," +
         "\"domain\":{\"primary\":\"test1234.hitpan.kr\",\"api\":\"api-test1234.hitpan.kr\"," +
         "\"tunnelToken\":\"TTOKEN-abc123\",\"tunnelId\":\"11111111-2222-3333-4444-555555555555\"}," +
         "\"bootstrap\":{\"token\":\"BTOKEN-xyz789\",\"tokenKey\":\"BKEY-456def\"}}";
@@ -625,7 +645,7 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     private static readonly Dictionary<string, string> SuccessExpected = new(StringComparer.Ordinal)
     {
         ["tenantCode"] = "T0042",
-        ["companyName"] = "테스트상사",
+        ["companyName"] = NastyCompany,
         ["primary"] = "test1234.hitpan.kr",
         ["api"] = "api-test1234.hitpan.kr",
         ["tunnelToken"] = "TTOKEN-abc123",
@@ -644,12 +664,53 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         Assert.Contains("\"success\":true", trip.ResponseJson, StringComparison.Ordinal);
 
         // 🔴 이름 집합으로 대조한다 — 숫자가 맞는다고 같은 집합이 아니다.
-        var got = NineNames.ToDictionary(n => n, n => ExtractJsonValueReplica(trip.ResponseJson, n), StringComparer.Ordinal);
+        //    그리고 값은 **.iss 가 그 이름에 실제로 부르는 파서**로 뽑는다(되돌리면 갈린다).
+        string iss = IssText();
+        var got = NineNames.ToDictionary(n => n, n => ShownValue(iss, trip.ResponseJson, n), StringComparer.Ordinal);
         Assert.Equal(NineNames.OrderBy(x => x, StringComparer.Ordinal),
                      got.Keys.OrderBy(x => x, StringComparer.Ordinal));
         foreach (var kv in SuccessExpected) Assert.Equal(kv.Value, got[kv.Key]);
         // 성공 응답에는 message 가 없다 ⇒ 빈 문자열
         Assert.Equal("", got["message"]);
+
+        // 🔴 음성 대조군 — 옛 파서로는 `&` `<` `>` `'` 가 \uXXXX 로 남아 **깨진다**.
+        //    이게 안 갈리면 「9개 전부 바르게 뽑힌다」는 아무것도 재지 않는 말이다.
+        string withOld = ExtractJsonValueReplica(trip.ResponseJson, "companyName");
+        Assert.NotEqual(NastyCompany, withOld);
+        Console.WriteLine($"[G-T6-3] 옛 파서가 내는 상호: '{withOld}' / 새 파서: '{got["companyName"]}'");
+    }
+
+    /// <summary>
+    /// 🔴 <b>대리쌍(이모지)</b> — 조용히 지나가지 않는다. 실제로 재서 **되는지 안 되는지를 고정**한다.
+    /// 새 함수의 <c>\uXXXX</c> 해제는 <b>1..255 만</b> 글자로 바꾼다(Unicode Inno 의 <c>Chr()</c> 를 못 쟀다 ⇒ ISCC 없음).
+    /// 그 밖은 원문 글자를 남긴다. 이모지가 <c>\u</c> 로 escape 되어 오면 **복원되지 않는다**는 뜻이다.
+    /// </summary>
+    [Fact]
+    public void G_T6_3_대리쌍_이모지_처리를_고정한다()
+    {
+        const string emojiCompany = "히트판😀상사";
+        string body =
+            "{\"success\":true,\"tenantCode\":\"T0042\",\"companyName\":\"" + emojiCompany + "\"," +
+            "\"domain\":{\"primary\":\"a.b\",\"api\":\"c.d\",\"tunnelToken\":\"t\",\"tunnelId\":\"u\"}," +
+            "\"bootstrap\":{\"token\":\"v\",\"tokenKey\":\"w\"}}";
+
+        var trip = RoundTrip("g3_emoji", 200, body);
+        string got = ShownValue(IssText(), trip.ResponseJson, "companyName");
+        bool escaped = trip.ResponseJson.Contains("\\ud83d", StringComparison.OrdinalIgnoreCase);
+        Console.WriteLine($"[G-T6-3 대리쌍] 응답에 \\u escape {(escaped ? "있음" : "없음")} · 뽑힌 값 '{got}'");
+
+        if (escaped)
+        {
+            // 🔴 고정: escape 되어 오면 **복원하지 않는다**(1..255 밖). 원문 글자가 남는다 — 조용히 사라지지 않는다.
+            Assert.NotEqual(emojiCompany, got);
+            Assert.Contains("\\ud83d", got, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("히트판", got, StringComparison.Ordinal);
+        }
+        else
+        {
+            // 🟢 고정: PS 5.1 ConvertTo-Json 이 대리쌍을 escape 하지 않으면 그대로 왕복한다.
+            Assert.Equal(emojiCompany, got);
+        }
     }
 
     /// <summary>
