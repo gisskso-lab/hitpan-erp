@@ -839,8 +839,8 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         //    판정식(DecideInnoVersion)은 **G-T6-5e 가 양성·음성으로 직접 잰다** — 헬퍼가 아니라 **합성식**을.
         string expectVer = Environment.GetEnvironmentVariable("HITPAN_ISCC_EXPECT_VERSION") ?? "";
         var probes = ProbeInnoVersions(iscc);
-        foreach (var (src, val) in probes)
-            Console.WriteLine($"[G-T6-5 판출처] {src} = '{val}'");
+        foreach (var (src, val, auth) in probes)
+            Console.WriteLine($"[G-T6-5 판출처] [{(auth ? "기록" : "참고")}] {src} = '{val}'");
 
         var (vOk, vWhy) = DecideInnoVersion(probes, expectVer);
         Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 판정: {vWhy}");
@@ -1134,30 +1134,36 @@ end;
     /// <b>숨기면 다음 사람이 또 추정한다.</b> 이 PC 에는 ISCC 가 없어(#29) 어느 출처가 판을 아는지
     /// 여기서는 알 수 없다 ⇒ CI 한 바퀴가 유일한 계측 경로다.
     /// </summary>
-    private static List<(string Source, string Value)> ProbeInnoVersions(string iscc)
+    private static List<(string Source, string Value, bool Authoritative)> ProbeInnoVersions(string iscc)
     {
-        var list = new List<(string Source, string Value)>();
-        void Add(string src, Func<string> read)
+        var list = new List<(string Source, string Value, bool Authoritative)>();
+        void Add(string src, bool authoritative, Func<string> read)
         {
             string v;
             try { v = (read() ?? "").Trim(); }
             catch (Exception ex) { v = $"(못 읽음: {ex.GetType().Name})"; }
-            list.Add((src, v.Length == 0 ? "(빈값)" : v));
+            list.Add((src, v.Length == 0 ? "(빈값)" : v, authoritative));
         }
 
         string dir = Path.GetDirectoryName(iscc) ?? "";
         string compil = Path.Combine(dir, "Compil32.exe");
-        Add("ISCC.exe FileVersion", () => FileVersionInfo.GetVersionInfo(iscc).FileVersion ?? "");
-        Add("ISCC.exe ProductVersion", () => FileVersionInfo.GetVersionInfo(iscc).ProductVersion ?? "");
-        Add("Compil32.exe FileVersion", () => File.Exists(compil)
+
+        // 🔴 판정 대상 = **기록** 출처. 설치기·패키지 관리자·판 자원이 "이 판이다"라고 적어 둔 것만 판정에 쓴다.
+        Add("ISCC.exe FileVersion", true, () => FileVersionInfo.GetVersionInfo(iscc).FileVersion ?? "");
+        Add("ISCC.exe ProductVersion", true, () => FileVersionInfo.GetVersionInfo(iscc).ProductVersion ?? "");
+        Add("Compil32.exe FileVersion", true, () => File.Exists(compil)
             ? FileVersionInfo.GetVersionInfo(compil).FileVersion ?? "" : "(파일 없음)");
-        Add("Compil32.exe ProductVersion", () => File.Exists(compil)
+        Add("Compil32.exe ProductVersion", true, () => File.Exists(compil)
             ? FileVersionInfo.GetVersionInfo(compil).ProductVersion ?? "" : "(파일 없음)");
-        Add("ISCC 인수없음 출력", () => FirstVersionToken(RunExe(iscc, "", Path.GetTempPath()).Output));
-        Add("ISCC /? 출력", () => FirstVersionToken(RunExe(iscc, "/?", Path.GetTempPath()).Output));
-        Add("choco 패키지 nuspec", ChocoInnoVersion);
-        Add("설치제거 레지스트리 DisplayVersion", RegistryInnoVersion);
-        Add("whatsnew.htm 첫 판 토큰", () =>
+        Add("choco 패키지 nuspec", true, ChocoInnoVersion);
+        Add("설치제거 레지스트리 DisplayVersion", true, RegistryInnoVersion);
+
+        // 🔴 참고 = **글자**에서 정규식으로 뽑은 토큰. 판정에 쓰지 않는다 —
+        //    도움말·안내문에 섞인 아무 숫자(연도·예시·옛 판)를 "이 판"으로 읽어 **헛 FAIL** 을 낼 수 있다.
+        //    사람이 읽을 단서로만 로그에 남긴다. 이 축을 판정에 끼우는 건 추정을 단언으로 올리는 짓이다.
+        Add("ISCC 인수없음 출력(글자)", false, () => FirstVersionToken(RunExe(iscc, "", Path.GetTempPath()).Output));
+        Add("ISCC /? 출력(글자)", false, () => FirstVersionToken(RunExe(iscc, "/?", Path.GetTempPath()).Output));
+        Add("whatsnew.htm 첫 토큰(글자)", false, () =>
         {
             string p = Path.Combine(dir, "whatsnew.htm");
             if (!File.Exists(p)) return "(파일 없음)";
@@ -1203,8 +1209,8 @@ end;
     }
 
     /// <summary>사람이 읽을 수 있게 출처 전부를 줄로 편다 — 실패 메시지에 그대로 붙는다.</summary>
-    private static string ProbeReport(IEnumerable<(string Source, string Value)> probes) =>
-        string.Join("\n", probes.Select(p => $"  {p.Source} = '{p.Value}'"));
+    private static string ProbeReport(IEnumerable<(string Source, string Value, bool Authoritative)> probes) =>
+        string.Join("\n", probes.Select(p => $"  [{(p.Authoritative ? "기록" : "참고")}] {p.Source} = '{p.Value}'"));
 
     /// <summary>
     /// 🔴 <b>판 판정식</b> — G-T6-5 가 실제로 쓰는 합성 판단. 1차 봉합은 헬퍼만 시험했고
@@ -1214,22 +1220,29 @@ end;
     /// ⑤ 아무 출처도 판을 모르면 <b>미계측으로 통과</b>하되 표식을 남긴다(과녁 본체를 막지 않는다).
     /// </summary>
     private static (bool Ok, string Why) DecideInnoVersion(
-        IReadOnlyList<(string Source, string Value)> probes, string expect)
+        IReadOnlyList<(string Source, string Value, bool Authoritative)> probes, string expect)
     {
         if (expect.Length == 0)
             return (false, "HITPAN_ISCC_EXPECT_VERSION 이 비었다 — 전용 단계가 기대 판을 안 줬다(설정이 시험에 안 닿았다). 스킵하지 않는다(P1-1).");
         if (!Regex.IsMatch(expect, @"^\d+\.\d+\.\d+"))
             return (false, $"기대 판 모양이 아니다('{expect}') — 최소 `주.부.패치` 세 자리여야 한다. 잘린 기대값은 접두 일치로 아무 판이나 받는다(V-3).");
 
-        var read = probes.Where(p => LooksLikeVersion(p.Value)).ToList();
+        // 🔴 판정은 **기록 출처만** 본다. 글자에서 뽑은 토큰은 단서일 뿐 판이 아니다(헛 FAIL 방지).
+        var read = probes.Where(p => p.Authoritative && LooksLikeVersion(p.Value)).ToList();
+        string textHint = string.Join(" · ", probes
+            .Where(p => !p.Authoritative && LooksLikeVersion(p.Value))
+            .Select(p => $"{p.Source}='{p.Value}'"));
         if (read.Count == 0)
-            return (true, $"{UnmeasuredMark} — 판을 아는 출처가 하나도 없다(후보 {probes.Count}곳 전부 확인). N4 는 이 바퀴에서 안 재졌다.");
+            return (true, $"{UnmeasuredMark} — 판을 **기록**으로 아는 출처가 하나도 없다(후보 {probes.Count}곳 전부 확인). " +
+                          $"N4 는 이 바퀴에서 안 재졌다." +
+                          (textHint.Length > 0 ? $" 글자 단서(판정 제외): {textHint}" : ""));
 
         var hit = read.FirstOrDefault(p => IsSameInnoVersion(p.Value, expect));
         if (hit.Source is not null)
-            return (true, $"기대({expect}) 일치 — 출처 '{hit.Source}' = '{hit.Value}' (읽힌 출처 {read.Count}곳)");
+            return (true, $"기대({expect}) 일치 — 기록 출처 '{hit.Source}' = '{hit.Value}' (판을 읽은 기록 출처 {read.Count}곳)");
 
-        return (false, $"ISCC 판이 기대({expect})와 다르다 — 시험본·출하본 Inno 판 갈림(N4). 판을 읽은 출처 {read.Count}곳이 전부 기대와 다르다.");
+        return (false, $"ISCC 판이 기대({expect})와 다르다 — 시험본·출하본 Inno 판 갈림(N4). " +
+                       $"판을 읽은 기록 출처 {read.Count}곳이 전부 기대와 다르다.");
     }
 
     /// <summary>
@@ -1240,33 +1253,45 @@ end;
     [Fact]
     public void G_T6_5e_판_판정식이_양성음성을_가른다()
     {
-        static List<(string Source, string Value)> P(params (string, string)[] xs) =>
-            xs.Select(x => (x.Item1, x.Item2)).ToList();
+        // (출처, 값, 기록여부) — 기록=true 만 판정에 쓰인다
+        static List<(string Source, string Value, bool Authoritative)> P(params (string, string, bool)[] xs) =>
+            xs.Select(x => (x.Item1, x.Item2, x.Item3)).ToList();
 
-        // 양성 — 출처 하나만 판을 알아도 통과한다(ISCC.exe 가 0.0.0.0 이어도)
-        Assert.True(DecideInnoVersion(P(("ISCC.exe FileVersion", "0.0.0.0"), ("choco", "6.7.1")), "6.7.1").Ok,
-            "다른 출처가 판을 아는데도 막는다.");
-        Assert.True(DecideInnoVersion(P(("레지스트리", "6.7.1.0")), "6.7.1").Ok,
+        // 양성 — 기록 출처 하나만 판을 알아도 통과한다(ISCC.exe 가 0.0.0.0 이어도)
+        Assert.True(DecideInnoVersion(P(("ISCC.exe FileVersion", "0.0.0.0", true), ("choco", "6.7.1", true)), "6.7.1").Ok,
+            "다른 기록 출처가 판을 아는데도 막는다.");
+        Assert.True(DecideInnoVersion(P(("레지스트리", "6.7.1.0", true)), "6.7.1").Ok,
             "4자리 표기를 다르다고 본다.");
 
         // 🔴 음성 1 — 읽힌 판이 다르면 막는다 (N4 유지)
-        Assert.False(DecideInnoVersion(P(("choco", "6.6.2")), "6.7.1").Ok, "다른 판을 통과시킨다 — N4 가 죽는다.");
+        Assert.False(DecideInnoVersion(P(("choco", "6.6.2", true)), "6.7.1").Ok, "다른 판을 통과시킨다 — N4 가 죽는다.");
         // 🔴 음성 2 — 6.7.10 을 6.7.1 로 보지 않는다 (1차 봉합의 글자 보조항 면죄부 제거 · P1-2)
-        Assert.False(DecideInnoVersion(P(("choco", "6.7.10")), "6.7.1").Ok, "6.7.10 을 6.7.1 로 봤다.");
+        Assert.False(DecideInnoVersion(P(("choco", "6.7.10", true)), "6.7.1").Ok, "6.7.10 을 6.7.1 로 봤다.");
+        // 🔴 음성 6 — **글자 출처는 판정에 끼지 못한다.** 도움말에 섞인 숫자로 통과시키면 헛 통과,
+        //    옛 판 숫자로 막으면 헛 FAIL 이다. 둘 다 안 되게 「미계측」으로 떨어져야 한다.
+        var textOnly = DecideInnoVersion(
+            P(("ISCC.exe FileVersion", "0.0.0.0", true), ("whatsnew.htm 첫 토큰(글자)", "6.7.1", false)), "6.7.1");
+        Assert.True(textOnly.Ok, "판정에서 뺀 글자 출처 때문에 과녁 본체를 막는다.");
+        Assert.StartsWith(UnmeasuredMark, textOnly.Why);
+        // 🔴 음성 7 — 기록이 다르면 글자가 맞아도 FAIL (글자가 면죄부가 되면 안 된다)
+        Assert.False(DecideInnoVersion(
+            P(("choco", "6.6.2", true), ("ISCC /? 출력(글자)", "6.7.1", false)), "6.7.1").Ok,
+            "기록이 다른데 글자가 맞다고 통과시킨다 — 면죄부가 되살아났다.");
         // 🔴 음성 3 — 기대값이 비면 스킵이 아니라 FAIL (조용한 초록 · P1-1)
         // 🔴 대조실험 B 가 알려준 것(10/7 밤): `.Ok` 만 보면 이 음성은 **아무것도 안 지킨다** —
         //    P1-1 봉합을 빼도 아래 V-3 모양 검사가 빈 기대값을 대신 막아 시험이 그냥 통과했다.
         //    두 보호장치를 가르려면 **사유까지** 단언해야 한다. 이게 「게이트는 글자가 아니라 동작」이다.
-        var empty = DecideInnoVersion(P(("choco", "6.7.1")), "");
+        var empty = DecideInnoVersion(P(("choco", "6.7.1", true)), "");
         Assert.False(empty.Ok, "기대값이 없는데 통과시킨다 — 단언이 사라진다.");
         Assert.Contains("HITPAN_ISCC_EXPECT_VERSION", empty.Why, StringComparison.Ordinal);
         // 🔴 음성 4·5 — 잘린 기대값은 아무 판이나 받는다 (V-3)
-        Assert.False(DecideInnoVersion(P(("choco", "6.9.9.9")), "6").Ok, "기대값 '6' 으로 6.9.9.9 를 받는다.");
-        Assert.False(DecideInnoVersion(P(("choco", "6.7.9")), "6.7").Ok, "기대값 '6.7' 로 6.7.9 를 받는다.");
+        Assert.False(DecideInnoVersion(P(("choco", "6.9.9.9", true)), "6").Ok, "기대값 '6' 으로 6.9.9.9 를 받는다.");
+        Assert.False(DecideInnoVersion(P(("choco", "6.7.9", true)), "6.7").Ok, "기대값 '6.7' 로 6.7.9 를 받는다.");
 
         // 🔴 미계측 — 아무 출처도 판을 모르면 통과하되 **반드시 표식 문구**가 붙는다(조용한 초록 방지)
         var un = DecideInnoVersion(
-            P(("ISCC.exe FileVersion", "0.0.0.0"), ("Compil32.exe FileVersion", "(파일 없음)"), ("ISCC 출력", "(빈값)")),
+            P(("ISCC.exe FileVersion", "0.0.0.0", true), ("Compil32.exe FileVersion", "(파일 없음)", true),
+              ("ISCC 출력(글자)", "(빈값)", false)),
             "6.7.1");
         Assert.True(un.Ok, "판을 못 읽었다고 과녁 본체까지 막는다 — 곁가지가 본 계측을 막은 것이 10/7 사고다.");
         Assert.StartsWith(UnmeasuredMark, un.Why);
