@@ -3,9 +3,10 @@
 @inject AuthenticationStateProvider AuthState
 
 @*
-    백오피스 v2 사이드바 (사장님 결재 2026-06-01)
-    - 헌법 #1 정합: 기존 메뉴 구조 보존, 섹션 그루핑·시각 갱신만
-    - 6 섹션: 대시보드 / 고객사 / 대리점 / 결제 / 운영 / 시스템(Owner)
+    백오피스 v2 사이드바 (사장님 결재 2026-06-01 · 작14 메뉴 재구성 2026-10-08)
+    - 본사 8대메뉴 틀(작14 §10 M-6): 1 대시보드 · 2 대리점관리 · 3 고객 · 4 CS · 5 결제·구독 · 6 운영현황 · 7 마케팅 · 8 설정
+      이 중 화면 실물이 있는 2·3·5·7·8 만 노출 (빈 껍데기 금지)
+    - 대리점 로그인: 내 고객사 · 내 정산 2줄
 *@
 
 <div class="bo-sidebar bo2-sidebar-inner">
@@ -18,44 +19,44 @@
     </div>
 
     <nav class="bo2-nav">
-        @* 헌법 #35 W1+W2+W5 (사장님 결재 2026-06-04): 활성 메뉴만 노출.
-            W9 대기 메뉴(시리얼 발급·결제·환불·정산·CS·워치독·통계)는 백오피스 API 신설 후 복원. *@
+        @* 작14 묶음 A (사장님 결재 2026-10-08): 본사 8대메뉴 틀 재배치.
+            화면이 없거나 껍데기인 대메뉴(1 대시보드 · 4 CS · 6 운영현황)는 미노출 — 빈 껍데기 금지.
+            각 소메뉴는 후속 사이클에서 화면이 실물로 붙을 때 노출한다. *@
         @if (_isPlatformAdmin || _isPlatformOwner)
         {
+            @* 2 대리점 관리 — 본사 전용 *@
             <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">대시보드</div>
-                <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
-            </div>
-
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">고객사</div>
-                <NavLinkItem Href="/admin/tenants" Icon="business" Label="고객사 목록" Count="@_countTenants" />
-            </div>
-
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">협력업체</div>
-                <NavLinkItem Href="/admin/resellers" Icon="store" Label="협력업체 목록" Count="@_countResellers" />
-                <NavLinkItem Href="/admin/reseller-applications" Icon="how_to_reg" Label="협력업체 신청" />
-            </div>
-
-            @* W9 대리점 영역 (사장님 결재 2026-06-05) *@
-            <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">대리점 (W9)</div>
-                <NavLinkItem Href="/admin/reseller-settlements" Icon="monetization_on" Label="대리점 정산" />
+                <div class="bo2-nav-section-label">대리점 관리</div>
+                <NavLinkItem Href="/admin/resellers" Icon="store" Label="대리점 목록" Count="@_countResellers" />
+                <NavLinkItem Href="/admin/reseller-applications" Icon="how_to_reg" Label="대리점 신청" />
                 <NavLinkItem Href="/admin/reseller-serials" Icon="qr_code" Label="대리점 시리얼" />
+                <NavLinkItem Href="/admin/reseller-settlements" Icon="monetization_on" Label="대리점 정산" />
             </div>
 
-            @* W17 마케팅 (사장님 결재 2026-06-05) *@
+            @* 3 고객 관리 *@
             <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">마케팅 (W17)</div>
+                <div class="bo2-nav-section-label">고객 관리</div>
+                <NavLinkItem Href="/admin/tenants" Icon="business" Label="고객 목록" Count="@_countTenants" />
+                <NavLinkItem Href="/admin/signups" Icon="person_add" Label="고객 신청" />
+            </div>
+
+            @* 5 결제·구독 — 본사 전용 *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">결제·구독</div>
+                <NavLinkItem Href="/admin/pricing" Icon="payments" Label="요금제" />
+            </div>
+
+            @* 7 마케팅 *@
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">마케팅</div>
                 <NavLinkItem Href="/admin/promotions" Icon="campaign" Label="프로모션 관리" />
             </div>
 
+            @* 8 설정 — Owner 전용 (노출 조건 platform_owner 유지 · System Config 는 안내 껍데기라 미노출) *@
             @if (_isPlatformOwner)
             {
                 <div class="bo2-nav-section bo2-nav-section-owner">
-                    <div class="bo2-nav-section-label">시스템 <span class="bo2-owner-tag">OWNER</span></div>
-                    <NavLinkItem Href="/owner/system-config" Icon="settings" Label="System Config" />
+                    <div class="bo2-nav-section-label">설정 <span class="bo2-owner-tag">OWNER</span></div>
                     <NavLinkItem Href="/admin/bo-users" Icon="admin_panel_settings" Label="Owner 사용자 관리" />
                     <NavLinkItem Href="/admin/approvals" Icon="how_to_reg" Label="4-eyes 결재함" />
                     <NavLinkItem Href="/admin/mfa-setup" Icon="security" Label="MFA 등록" />
@@ -67,10 +68,14 @@
         }
         else
         {
-            @* 대리점 메뉴 — W9 대기 *@
+            @* 대리점 로그인 — 실물 2줄 (작14 A-3 · 사장님 결재 2026-10-08) *@
             <div class="bo2-nav-section">
-                <div class="bo2-nav-section-label">대시보드</div>
-                <NavLinkItem Href="/admin/dashboard" Icon="dashboard" Label="대시보드" Match="@NavLinkMatch.All" />
+                <div class="bo2-nav-section-label">고객 관리</div>
+                <NavLinkItem Href="/reseller/customers" Icon="business" Label="내 고객사" />
+            </div>
+            <div class="bo2-nav-section">
+                <div class="bo2-nav-section-label">내 정산</div>
+                <NavLinkItem Href="/reseller/settlement" Icon="monetization_on" Label="내 정산" />
             </div>
         }
     </nav>

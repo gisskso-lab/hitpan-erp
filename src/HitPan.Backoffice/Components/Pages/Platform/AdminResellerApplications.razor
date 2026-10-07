@@ -1,6 +1,6 @@
 @page "/admin/reseller-applications"
 @layout PlatformLayout
-@attribute [Authorize]
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
 @rendermode InteractiveServer
 @inject IHttpClientFactory HttpFactory
 @inject ISnackbar Snackbar
