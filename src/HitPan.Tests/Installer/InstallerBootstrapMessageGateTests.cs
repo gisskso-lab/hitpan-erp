@@ -1254,7 +1254,12 @@ end;
         // 🔴 음성 2 — 6.7.10 을 6.7.1 로 보지 않는다 (1차 봉합의 글자 보조항 면죄부 제거 · P1-2)
         Assert.False(DecideInnoVersion(P(("choco", "6.7.10")), "6.7.1").Ok, "6.7.10 을 6.7.1 로 봤다.");
         // 🔴 음성 3 — 기대값이 비면 스킵이 아니라 FAIL (조용한 초록 · P1-1)
-        Assert.False(DecideInnoVersion(P(("choco", "6.7.1")), "").Ok, "기대값이 없는데 통과시킨다 — 단언이 사라진다.");
+        // 🔴 대조실험 B 가 알려준 것(10/7 밤): `.Ok` 만 보면 이 음성은 **아무것도 안 지킨다** —
+        //    P1-1 봉합을 빼도 아래 V-3 모양 검사가 빈 기대값을 대신 막아 시험이 그냥 통과했다.
+        //    두 보호장치를 가르려면 **사유까지** 단언해야 한다. 이게 「게이트는 글자가 아니라 동작」이다.
+        var empty = DecideInnoVersion(P(("choco", "6.7.1")), "");
+        Assert.False(empty.Ok, "기대값이 없는데 통과시킨다 — 단언이 사라진다.");
+        Assert.Contains("HITPAN_ISCC_EXPECT_VERSION", empty.Why, StringComparison.Ordinal);
         // 🔴 음성 4·5 — 잘린 기대값은 아무 판이나 받는다 (V-3)
         Assert.False(DecideInnoVersion(P(("choco", "6.9.9.9")), "6").Ok, "기대값 '6' 으로 6.9.9.9 를 받는다.");
         Assert.False(DecideInnoVersion(P(("choco", "6.7.9")), "6.7").Ok, "기대값 '6.7' 로 6.7.9 를 받는다.");
