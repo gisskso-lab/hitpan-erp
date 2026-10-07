@@ -1,6 +1,6 @@
 @page "/admin/reseller-applications"
 @layout PlatformLayout
-@attribute [Authorize]
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
 @rendermode InteractiveServer
 @inject IHttpClientFactory HttpFactory
 @inject ISnackbar Snackbar
@@ -13,11 +13,11 @@
     권한: bo_permissions DB 저장 (사장님이 /owner/permissions에서 저장한 role만)
 *@
 
-<PageTitle>협력업체 신청 — 히트판 백오피스</PageTitle>
+<PageTitle>대리점 신청 — 히트판 백오피스</PageTitle>
 
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">협력업체 가입 신청</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">대리점 가입 신청</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             가입 신청 검토 · 승인 · 반려 (사장님 권한 저장: /owner/permissions)
         </MudText>
@@ -105,7 +105,7 @@ else
     private async Task ShowDetailAsync(ApplicationRow row)
     {
         var parameters = new DialogParameters { ["ApplicationId"] = row.ApplicationId };
-        await Dialog.ShowAsync<ResellerApplicationDetailDialog>("협력업체 신청 상세", parameters);
+        await Dialog.ShowAsync<ResellerApplicationDetailDialog>("대리점 신청 상세", parameters);
     }
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -142,8 +142,8 @@ else
     private async Task ApproveAsync(ApplicationRow row)
     {
         var ok = await ConfirmDialog.ShowAsync(Dialog,
-            "협력업체 승인",
-            $"{row.CompanyName} 협력업체 가입을 승인하시겠습니까? 대리점 코드(R-XXXX)·임시 비밀번호가 발급되어 신청자 이메일로 자동 발송됩니다.",
+            "대리점 승인",
+            $"{row.CompanyName} 대리점 가입을 승인하시겠습니까? 대리점 코드(R-XXXX)·임시 비밀번호가 발급되어 신청자 이메일로 자동 발송됩니다.",
             confirmText: "승인", cancelText: "취소", severity: Severity.Success);
         if (!ok) return;
 
