@@ -345,6 +345,13 @@ builder.Services.AddHostedService<HitPan.API.Services.CsAutoDispatchService>();
 builder.Services.AddScoped<HitPan.API.Services.Messaging.IOutboxPublisher,
                           HitPan.API.Services.Messaging.OutboxPublisherService>();
 builder.Services.AddHostedService<HitPan.API.BackgroundServices.OutboxPollerWorker>();
+// 작14 B-3 — ERP → 본사 「한 송신 모듈」(아키텍처명세서 §5 · CS 쪽지가 첫 사용자) + CS 송출·답Pull 워커
+//   - HTTPS API 만(본사 DB 직결 금지 · 설계 §2-3) · 인증 재료 = 테넌트+시리얼+부모계정 3중(사장님 10/8)
+//   - 큐 비면 무동작 — 본사가 죽어도 ERP 는 돈다(#30) · 글 삭제 없음(유실 0)
+builder.Services.AddHttpClient("headquarters");
+builder.Services.AddScoped<HitPan.API.Services.Headquarters.IHeadquartersClient,
+                          HitPan.API.Services.Headquarters.HeadquartersClient>();
+builder.Services.AddHostedService<HitPan.API.BackgroundServices.CsOutboxSenderWorker>();
 // 전자서명 (간편인증 Mock 4종 + 수동 3종) + 전자근로계약서
 builder.Services.AddScoped<IESignatureService, ESignatureService>();
 builder.Services.AddScoped<ILaborContractService, LaborContractService>();

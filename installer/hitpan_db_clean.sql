@@ -3644,7 +3644,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4909,6 +4909,93 @@ CREATE TABLE `chat_file_settings` (
   `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
   PRIMARY KEY (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='메신저 파일 한도 — 파일이 ERP를 넘어뜨리지 못하게. 업무 데이터는 무관';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `cs_requests` — 작14 B-2 (DB-139) · CS 쪽지 로컬 원본
+--
+
+DROP TABLE IF EXISTS `cs_requests`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `cs_requests` (
+  `cs_request_id` varchar(36) NOT NULL COMMENT 'ERP 가 발급(UUID) — 멱등키의 몸통',
+  `tenant_id` varchar(36) NOT NULL COMMENT 'JWT 유래만 (#2)',
+  `created_by` varchar(36) NOT NULL COMMENT '쓴 사원(자식계정) — 로컬 전용 · 송신 payload 밖(#22)',
+  `category` varchar(20) NOT NULL COMMENT '유형(7모양 콤보 고정 목록 — 화이트리스트 밖 거부)',
+  `sub_tag` varchar(30) NOT NULL COMMENT '세부태그 — 사전정의 목록만',
+  `body` varchar(2000) DEFAULT NULL COMMENT '자유 본문(결-5 ㉯) — 저장 전 금지필드 검사(문①)',
+  `screen_code` varchar(40) DEFAULT NULL COMMENT '어느 화면에서 났나(자동)',
+  `erp_version` varchar(20) NOT NULL COMMENT '어느 판인가(자동)',
+  `status` varchar(10) NOT NULL DEFAULT '접수' COMMENT '접수/전송중/전송완료/거부/답변도착/종결',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`cs_request_id`),
+  KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
+  KEY `idx_cs_req_status` (`tenant_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 로컬 원본 — 자식계정 작성 · 부모계정 파이프로 송신(작14 B-2)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `cs_outbox` — 작14 B-2 (DB-140) · 송신 큐 (유실 0 · 삭제 금지)
+--
+
+DROP TABLE IF EXISTS `cs_outbox`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `cs_outbox` (
+  `outbox_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) NOT NULL,
+  `cs_request_id` varchar(36) NOT NULL COMMENT '무엇을 보내나(cs_requests PK)',
+  `payload_json` varchar(4000) NOT NULL COMMENT '화이트리스트 필드만 담긴 완성 몸통(자식계정 제외 · 교정③)',
+  `attempt_count` int(11) NOT NULL DEFAULT 0,
+  `next_attempt_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) COMMENT '지수백오프 시각',
+  `sent_at` datetime(6) DEFAULT NULL COMMENT 'NULL = 아직 안 갔다 — 워커는 이 칸만 보고 집는다',
+  `last_status_code` int(11) DEFAULT NULL COMMENT '4xx/5xx 구분',
+  `last_error` varchar(500) DEFAULT NULL,
+  `terminal_reason` varchar(30) DEFAULT NULL COMMENT 'rejected/failed — 비면 아직 살아 있다 · 행 삭제 금지',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`outbox_id`),
+  UNIQUE KEY `uq_cs_outbox_req` (`cs_request_id`),
+  KEY `idx_cs_outbox_pending` (`sent_at`,`next_attempt_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 송신 큐 — 유실 0 · 삭제 금지 · 멱등키 = cs_request_id(작14 B-2)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `cs_replies` — 작14 B-2 (DB-141) · 받은 답 (Pull 수신 · reply_id 멱등)
+--
+
+DROP TABLE IF EXISTS `cs_replies`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `cs_replies` (
+  `reply_id` varchar(36) NOT NULL COMMENT '본사 발급 ID 그대로 — 멱등',
+  `tenant_id` varchar(36) NOT NULL,
+  `cs_request_id` varchar(36) NOT NULL,
+  `body` varchar(4000) NOT NULL COMMENT '본사가 쓴 답(고객에게 보일 글)',
+  `replied_by_kind` varchar(10) NOT NULL COMMENT '본사/대리점 — 사람 이름은 안 받는다',
+  `replied_at` datetime(6) NOT NULL,
+  `received_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `read_at` datetime(6) DEFAULT NULL COMMENT 'N-8 「안 읽은 답 N」 의 재료',
+  PRIMARY KEY (`reply_id`),
+  KEY `idx_cs_reply_req` (`tenant_id`,`cs_request_id`,`replied_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 답 — Pull 수신 · reply_id 멱등 · 전용 화면 결-6(작14 B-2)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `cs_forbidden_rejects` — 작14 B-4 (DB-142) · 금지필드 거부 기록 (INSERT ONLY)
+--
+
+DROP TABLE IF EXISTS `cs_forbidden_rejects`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `cs_forbidden_rejects` (
+  `reject_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) NOT NULL,
+  `rule_code` varchar(30) NOT NULL COMMENT 'resident_no/card_no/account_no/biz_no/tag_not_allowed — 값은 저장 안 함',
+  `occurred_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`reject_id`),
+  KEY `idx_cs_reject_tenant` (`tenant_id`,`occurred_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='금지필드 거부 기록 — 규칙코드·시각만 · INSERT ONLY(작14 B-4)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;

@@ -1,0 +1,199 @@
+@page "/support/cs"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@* 작14 B-1 — CS 요청 보내기 + 내 문의 목록 (사장님 결재 2026-10-08 · 결-10 메뉴 = 사이드바 하단 단독)
+   · 유형(7모양)·세부태그 콤보 목록의 주인은 서버(CsRequestController) 하나 — 화면은 받아 그린다
+   · 한 줄 고지(R-8): 「이 내용은 담당 대리점과 본사 상담원이 봅니다」 · 「본사만 보기」 칸은 결-2(법무 묶음) 후
+   · 「접수됐습니다」는 서버 INSERT 성공 응답 뒤에만 띄운다(게이트③ — 유실 0 의 화면 짝)
+   · 「아직 본사에 안 갔음」 상태가 보여야 한다 — 안 보이면 고객은 기다리고 우리는 못 받은 걸 모른다 *@
+
+<PageTitle>CS 요청</PageTitle>
+<PageHeader Title="CS 요청" Subtitle="궁금한 것·안 되는 것을 쪽지로 보내면 담당 상담원이 답을 보냅니다" />
+
+<MudPaper Elevation="0" Class="pa-6 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" @bind-Value="_category" Label="어떤 일인가요?" Variant="Variant.Outlined" Dense="true">
+                @foreach (var c in _categories)
+                {
+                    <MudSelectItem T="string" Value="@c.Key">@c.Value</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" @bind-Value="_subTag" Label="어느 업무에서요?" Variant="Variant.Outlined" Dense="true">
+                @foreach (var t in _subTags)
+                {
+                    <MudSelectItem T="string" Value="@t.Key">@t.Value</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12">
+            <MudTextField T="string" @bind-Value="_body" Label="내용 (선택)" Variant="Variant.Outlined"
+                          Lines="5" MaxLength="2000" Counter="2000"
+                          HelperText="주민번호·카드번호·계좌번호·사업자번호는 넣지 마세요 — 담겨 있으면 보낼 수 없습니다" />
+        </MudItem>
+        <MudItem xs="12" Class="d-flex align-center justify-space-between flex-wrap gap-2">
+            <MudText Typo="Typo.caption" Style="color:#6B7280">이 내용은 담당 대리점과 본사 상담원이 봅니다</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_sending" OnClick="SendAsync">
+                @(_sending ? "보내는 중…" : "보내기")
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudText Typo="Typo.h6" Class="mb-2">내 문의</MudText>
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.body2" Style="color:#6B7280">보낸 문의가 없습니다.</MudText>
+}
+else
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
+        <MudList T="string" Dense="true">
+            @foreach (var it in _items)
+            {
+                <MudListItem T="string" OnClick="@(() => Nav.NavigateTo($"/support/cs/{it.CsRequestId}"))">
+                    <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="width:100%">
+                        <div>
+                            <MudText Typo="Typo.body2"><b>@CategoryLabel(it.Category)</b> · @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))</MudText>
+                            <MudText Typo="Typo.caption" Style="color:#6B7280">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
+                        </div>
+                        <div class="d-flex align-center gap-2">
+                            @if (it.ReplyCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">답 @it.ReplyCount</MudChip>
+                            }
+                            <MudChip T="string" Size="Size.Small" Color="@StatusColor(it)" Variant="Variant.Outlined">@StatusLabel(it)</MudChip>
+                        </div>
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+}
+
+@code {
+    private Dictionary<string, string> _categories = new();
+    private Dictionary<string, string> _subTags = new();
+    private string _category = "";
+    private string _subTag = "";
+    private string? _body;
+    private bool _sending;
+    private bool _loading = true;
+    private List<CsItem> _items = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<ListResponse>("api/cs/requests");
+            _items = res?.Data ?? new();
+            _categories = res?.Categories ?? new();
+            _subTags = res?.SubTags ?? new();
+            if (string.IsNullOrEmpty(_category) && _categories.Count > 0) _category = _categories.Keys.First();
+            if (string.IsNullOrEmpty(_subTag) && _subTags.Count > 0) _subTag = _subTags.Keys.Last(); // 기본 = 기타
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("문의 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
+        }
+        _loading = false;
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrEmpty(_category) || string.IsNullOrEmpty(_subTag))
+        {
+            Snackbar.Add("유형과 업무를 선택해 주세요.", Severity.Warning);
+            return;
+        }
+        _sending = true;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/cs/requests", new
+            {
+                category = _category,
+                subTag = _subTag,
+                body = _body,
+                screenCode = "cs-request",
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                // 게이트③ — 「접수됐습니다」는 서버 INSERT 성공 뒤에만.
+                Snackbar.Add("접수됐습니다. 답이 오면 화면 위에 알려 드립니다.", Severity.Success);
+                _body = null;
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                // 금지필드 안내(문①) — 거부가 아니라 고칠 기회: 그 부분을 지우면 보낼 수 있다.
+                Snackbar.Add(err?.Message ?? "보내지 못했습니다. 내용을 확인해 주세요.", Severity.Warning);
+            }
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("보내지 못했습니다. 연결 상태를 확인해 주세요.", Severity.Warning);
+        }
+        _sending = false;
+    }
+
+    private string CategoryLabel(string code) => _categories.TryGetValue(code, out var v) ? v : code;
+    private static string Preview(string body) => body.Length <= 40 ? body : body[..40] + "…";
+
+    // 상태 — 「아직 본사에 안 갔음」이 핵심이다(설계 §2-5 · 고쳤다 ≠ 갔다).
+    private static string StatusLabel(CsItem it) => it switch
+    {
+        { TerminalReason: "rejected" } => "보낼 수 없음 — 내용 확인",
+        { TerminalReason: "failed" } => "전송 지연 — 본사 확인 중",
+        { Status: "답변도착" } => "답변 도착",
+        { Status: "종결" } => "종결",
+        { SentAt: null } => "아직 본사에 안 갔음",
+        _ => "접수됨",
+    };
+
+    private static Color StatusColor(CsItem it) => it switch
+    {
+        { TerminalReason: "rejected" } or { TerminalReason: "failed" } => Color.Error,
+        { Status: "답변도착" } => Color.Success,
+        { SentAt: null } => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private sealed class ListResponse
+    {
+        public bool Success { get; set; }
+        public List<CsItem> Data { get; set; } = new();
+        public Dictionary<string, string> Categories { get; set; } = new();
+        public Dictionary<string, string> SubTags { get; set; } = new();
+    }
+
+    private sealed class CsItem
+    {
+        public string CsRequestId { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string? SubTag { get; set; }
+        public string? Body { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public DateTime? SentAt { get; set; }
+        public string? TerminalReason { get; set; }
+        public int AttemptCount { get; set; }
+        public int ReplyCount { get; set; }
+    }
+
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}
