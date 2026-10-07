@@ -53,8 +53,11 @@ public static class ForbiddenFieldScanner
             if (digits.Length is >= 13 and <= 19 && PassesLuhn(digits)) return "card_no";
         }
 
-        if (AccountShapePattern.IsMatch(body)) return "account_no";
+        // 🔴 순서: 사업자(3-2-5 — 더 특정적) 먼저, 계좌(하이픈 묶음 일반형)는 마지막.
+        //    거꾸로 두면 000-00-00000 모양이 account_no 로 집계돼 CS팀장의 규칙 조정 숫자가 틀어진다
+        //    — CI db-gate G-CS-5 가 실측으로 잡은 흠(2026-10-08 · 6/7 PASS 중 1 FAIL).
         if (BizNoPattern.IsMatch(body)) return "biz_no";
+        if (AccountShapePattern.IsMatch(body)) return "account_no";
 
         return null;
     }

@@ -223,8 +223,10 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         var name = TenantConfigReader.GetRequired("DB_NAME");
         var user = TenantConfigReader.GetRequired("DB_USER");
         var pass = TenantConfigReader.GetRequired("DB_PASSWORD");
+        // GuidFormat=None — char(36) 이 Guid 로 와서 string DTO 매핑이 500 으로 터진다
+        // (2026-08-12 양식템플릿 사고 · ConnectionStringGuidGuardTests 가 전수 강제).
         return new MySqlConnection(
-            $"Server={host};Port={port};Database={name};Uid={user};Pwd={pass};CharSet=utf8mb4;AllowUserVariables=true");
+            $"Server={host};Port={port};Database={name};Uid={user};Pwd={pass};CharSet=utf8mb4;AllowUserVariables=true;GuidFormat=None");
     }
 
     private static string? Trim(string? s) => string.IsNullOrEmpty(s) ? s : (s.Length <= 500 ? s : s[..500]);
