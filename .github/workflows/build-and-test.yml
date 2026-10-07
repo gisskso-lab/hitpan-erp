@@ -42,6 +42,11 @@ jobs:
         # 헌법 #19: errors 0 + warnings 0이 정합성·무결성
         run: dotnet build src/HitPan.sln --configuration Release --no-restore --nologo /p:TreatWarningsAsErrors=true /warnaserror
 
+      # 🔴 20261007작12 2차수 T-6 봉합차수([4] N5) — G-T6-5(실물 Inno Pascal)는 이 전체 시험에서
+      #   **스스로 빠진다**(HITPAN_REQUIRE_ISCC 가 1 이 아니면 iscc-optout.log 만 남기고 지나간다).
+      #   왜: 러너에 Inno 가 기본 탑재돼 있어 전체 시험이 그걸 집어 컴파일했고, 그 게이트 하나가 깨지자
+      #       required `build` 가 빨강이 되어 **모든 PR 의 머지가 막혔다**(run 37613228947 · Failed 1).
+      #   계측은 아래 전용 단계에서만 하고, 그 단계는 ISCC 없으면 스킵이 아니라 FAIL 이다.
       - name: Test (Unit + Integration)
         run: dotnet test src/HitPan.sln --configuration Release --no-build --nologo --verbosity normal --logger "trx;LogFileName=test-results.trx"
         continue-on-error: false
@@ -93,26 +98,43 @@ jobs:
       #   복제본으로는 못 잰다 — ISCC 말고는 잴 길이 없다.
       #   ISCC 설치는 build-installer.yml:179 · deploy-update.yml:572 가 쓰는 방식을 그대로 베꼈다.
       #   🔴 HITPAN_REQUIRE_ISCC=1 이라 ISCC 가 없으면 **스킵이 아니라 FAIL** 이다.
-      #   ⚠️ 개발 PC 에는 ISCC 를 깔지 않는다(#29 사전승인) ⇒ **이 단계가 유일한 계측 경로**이고
-      #      이 PR 의 CI 첫 실행이 1차 계측이다(로컬에서는 iscc-skips.log 표식만 남는다).
-      - name: ISCC 설치 (실물 Inno Pascal 게이트용)
+      #   ⚠️ 개발 PC 에는 ISCC 를 깔지 않는다(#29 사전승인) ⇒ **이 단계가 유일한 계측 경로**다
+      #      (로컬에서는 iscc-skips.log 표식만 남는다).
+      #   🔴 봉합차수([4] N4) — 앞선 차수는 이 설치 단계가 **전체 시험 뒤**에 있어 전체 시험이 먼저 터지며
+      #      아예 안 돌았고, 게이트는 **러너 기본 탑재 Inno** 로 컴파일됐다(시험본·출하본 판 갈림).
+      #      ⇒ 설치를 전용 단계 **바로 앞**에 두고, HITPAN_ISCC_EXPECT_VERSION 으로 게이트가 **판을 직접 단언**한다.
+      - name: ISCC 설치 (실물 Inno Pascal 게이트용 · 출하와 같은 6.7.1)
         run: choco install innosetup --version=6.7.1 -y --no-progress
 
-      - name: 작12 T-6 게이트 — 실물 Inno Pascal (G-T6-5)
+      - name: 작12 T-6 게이트 — 실물 Inno Pascal (G-T6-5 · 전용 단계)
         env:
           HITPAN_REQUIRE_ISCC: "1"
+          # 🔴 출하가 굽는 판(build-installer.yml:179 · deploy-update.yml:583)과 같아야 한다.
+          #    다르면 게이트가 FAIL 한다 — 재는 것이 출하물이 아니게 되는 걸 막는다.
+          HITPAN_ISCC_EXPECT_VERSION: "6.7.1"
         shell: bash
         run: |
           set -o pipefail
+          # 🔴 앞선 단계(전체 시험·작1 게이트)가 남긴 표식을 먼저 지운다 — 안 지우면 아래 조용한초록 판별이
+          #    남의 표식을 보고 늘 터진다. 이 단계가 **자기 실행**만 보도록 만든다.
+          find . -name 'iscc-optout.log' -delete || true
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
             --configuration Release --no-build --nologo --verbosity normal \
             --filter "FullyQualifiedName~InstallerBootstrapMessageGateTests.G_T6_5" \
             --logger "trx;LogFileName=t6-iscc-results.trx" 2>&1 | tee "$RUNNER_TEMP/t6iscc.log"
           TRX=$(find . -name 't6-iscc-results.trx' -print | head -n 1)
           if [ -z "$TRX" ]; then echo "::error::t6-iscc-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
-          N=$(grep -o 'G_T6_5[^"]*' "$TRX" | wc -l)
-          echo "  G-T6-5 : $N 건"
+          # 🔴 [4] N6 — 앞선 식 `grep -o 'G_T6_5[^"]*'` 은 **시험 수가 아니다**(한 시험이 여러 번 매친다).
+          #    trx 의 결과 레코드(testName 속성)만 세서 사람이 읽는 「N 건」을 진짜 건수로 만든다.
+          N=$(grep -o 'testName="[^"]*G_T6_5[^"]*"' "$TRX" | wc -l)
+          echo "  G-T6-5* : $N 건 (결과 레코드 수)"
           if [ "$N" -eq 0 ]; then echo "::error::G-T6-5 가 한 건도 안 돌았다"; exit 1; fi
+          # 🔴 ISCC 가 있는데도 전용 단계가 아니라며 빠져나갔으면(= env 가 안 먹었으면) 조용한 초록이다.
+          if find . -name 'iscc-optout.log' -print -quit | grep -q .; then
+            echo "::error::전용 단계인데 iscc-optout.log 가 생겼다 — HITPAN_REQUIRE_ISCC 가 시험에 안 닿았다"
+            find . -name 'iscc-optout.log' -exec cat {} \;
+            exit 1
+          fi
 
       - name: 안 잰 축 표식 (ISCC 없는 러너)
         if: always()
@@ -125,6 +147,9 @@ jobs:
           } else {
             Write-Host "[ISCC축] iscc-skips.log 없음 — 실물 Inno Pascal 로 실측한 판이다"
           }
+          # 🔴 전체 시험에서 G-T6-5 가 의도대로 빠졌다는 표식(N5). 없어도 실패는 아니지만 로그에 남긴다.
+          $o = Get-ChildItem -Path . -Filter 'iscc-optout.log' -Recurse -File -ErrorAction SilentlyContinue
+          if ($o) { $o | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName } }
 
       # 🔴 20260928작2 개정3 W-3 — storage.js 의 「비교 후 지움」·「옮겨 오기 표식」을 node 로 **실제로** 돌려 잰다
       #   (글자 검사 아님 · 파일을 vm 에서 올려 window.hitpanStorage_* 를 부른다). 러너(windows-latest)에 node 가 있다.

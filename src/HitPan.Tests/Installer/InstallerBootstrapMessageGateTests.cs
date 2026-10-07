@@ -221,15 +221,24 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     /// </summary>
     private static string ShownValue(string iss, string responseJson, string name)
     {
-        string region = BootstrapRegion(iss);
-        var m = Regex.Match(region, @"(Extract\w+)\(RawResponse, '" + Regex.Escape(name) + @"'\)");
-        if (!m.Success) throw new XunitException($"부트스트랩에서 '{name}' 추출 줄을 못 찾았다 — 게이트를 갱신하라.");
-        return m.Groups[1].Value switch
+        return ParserFor(iss, name) switch
         {
             "ExtractJsonString" => ExtractJsonStringReplica(responseJson, name),
             "ExtractJsonValue" => ExtractJsonValueReplica(responseJson, name),
             var other => throw new XunitException($"모르는 파서 '{other}' — 복제본을 더하고 게이트를 갱신하라."),
         };
+    }
+
+    /// <summary>
+    /// 🔴 <c>.iss</c> 가 그 이름에 <b>실제로 부르는 파서 이름</b>. 호출 자리를 옛 함수로 되돌리면 값이 갈린다.
+    /// G-T6-5 의 실물 harness 도 이 판정을 먼저 보고 과녁을 고정한다(harness 는 한 파서만 싣는다).
+    /// </summary>
+    private static string ParserFor(string iss, string name)
+    {
+        string region = BootstrapRegion(iss);
+        var m = Regex.Match(region, @"(Extract\w+)\(RawResponse, '" + Regex.Escape(name) + @"'\)");
+        if (!m.Success) throw new XunitException($"부트스트랩에서 '{name}' 추출 줄을 못 찾았다 — 게이트를 갱신하라.");
+        return m.Groups[1].Value;
     }
 
     private static string ShownMessage(string iss, string responseJson) => ShownValue(iss, responseJson, "message");
@@ -633,11 +642,13 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
 
     // 🔴 상호에 `&` `<` `>` `'` `"` `\` 와 한글·공백을 전부 넣는다 — PS 5.1 ConvertTo-Json 이
     //    `& < > '` 를 \uXXXX 로, `"` `\` 를 \" \\ 로 바꿔 보낸다. 옛 파서는 그걸 못 풀어 글자가 깨졌다.
-    private const string NastyCompany = "히트판 & 공영정보 <주> 'ERP' \"큰\" \\역슬래시\\";
+    // 🔴 2026-10-07 봉합차수 — [4] §7-3 이 독립 측정에 쓴 **쉼표 포함 38자**로 맞춘다(머지조건 2).
+    //    옛 파서는 값 끝을 `"` `,` `}` 로 봤으므로 **쉼표 축이 빠지면 음성 대조군이 약해진다**.
+    private const string NastyCompany = "히트판 & 공영정보 <주>, 'ERP' \"큰\" \\역슬래시\\ 테스트상사";
 
     private const string SuccessBody =
         "{\"success\":true,\"tenantCode\":\"T0042\"," +
-        "\"companyName\":\"히트판 & 공영정보 <주> 'ERP' \\\"큰\\\" \\\\역슬래시\\\\\"," +
+        "\"companyName\":\"히트판 & 공영정보 <주>, 'ERP' \\\"큰\\\" \\\\역슬래시\\\\ 테스트상사\"," +
         "\"domain\":{\"primary\":\"test1234.hitpan.kr\",\"api\":\"api-test1234.hitpan.kr\"," +
         "\"tunnelToken\":\"TTOKEN-abc123\",\"tunnelId\":\"11111111-2222-3333-4444-555555555555\"}," +
         "\"bootstrap\":{\"token\":\"BTOKEN-xyz789\",\"tokenKey\":\"BKEY-456def\"}}";
@@ -764,7 +775,12 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
     /// <c>.iss</c> 를 만들고, <b>진짜 ISCC</b> 로 컴파일해 <b>진짜 Inno Pascal</b> 로 돌린다. 복제본이 아니다.
     /// 입력은 <b>G-T6-1 이 만든 실물 응답 파일</b>이고, 출하본과 같은 <c>LoadStringsFromFile</c> 로 읽는다.
     /// <c>[Files]</c> 0건 · <c>InitializeSetup</c> 이 <c>Result := False</c> 로 끝내 **아무것도 설치하지 않는다**.
-    /// ⚠️ <b>이 PC 에서는 한 번도 안 돌았다</b>(ISCC 없음 · 설치 금지) — CI 첫 실행이 1차 계측이다.
+    /// ⚠️ <b>이 PC 에서는 한 번도 안 돌았다</b>(ISCC 없음 · 설치 금지) — CI 가 유일한 계측 경로다.
+    /// <para>
+    /// 🟢🟢 <b>1차 계측(CI run 37613228947) 결과 U1 이 열렸다</b> — 실물 Inno Pascal 이 BOM 붙은 UTF-8
+    /// 응답 파일을 <c>LoadStringsFromFile</c> 로 읽어 <b>42자 한글을 정확히</b> 냈다. 그 증거는 아이러니하게도
+    /// <b>이 시험의 실패 메시지</b>였다(<c>got.Length &gt;= 2</c> 단언 버그 — 아래 주석).
+    /// </para>
     /// </summary>
     [Fact]
     public void G_T6_5_실물_Inno_Pascal_이_같은_글자를_낸다()
@@ -782,6 +798,30 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
             Console.Error.WriteLine("[G-T6-5 미계측] ISCC 없음 — 복제본 결과는 실물 증명이 아니다.");
             return;
         }
+        if (!required)
+        {
+            // 🔴 [4] N5 — ISCC 가 있어도 **전용 단계가 아니면 재지 않는다**.
+            //    전체 시험(`dotnet test src/HitPan.sln`)에 섞여 있으면 이 게이트 하나가 깨질 때
+            //    모든 PR 의 required `build` 가 빨강이 된다. 계측은 HITPAN_REQUIRE_ISCC=1 을 주는
+            //    전용 단계에서만 하고, 그 단계는 ISCC 가 없으면 스킵이 아니라 FAIL 한다.
+            string optout = Path.Combine(AppContext.BaseDirectory, "iscc-optout.log");
+            File.AppendAllText(optout,
+                $"{DateTime.Now:s} G-T6-5 미계측(의도) — ISCC 는 있으나 HITPAN_REQUIRE_ISCC≠1. " +
+                $"전용 단계가 잰다(ISCC={iscc}).\n");
+            Console.Error.WriteLine("[G-T6-5 미계측(의도)] 전용 단계(HITPAN_REQUIRE_ISCC=1)에서만 잰다 — N5.");
+            return;
+        }
+
+        // 🔴 [4] N4 — 시험본과 출하본의 Inno 판이 갈리면 이 게이트가 재는 것이 출하물이 아니다.
+        //    출하는 6.7.1(build-installer.yml · deploy-update.yml). 전용 단계가 그 값을 env 로 준다.
+        string expectVer = Environment.GetEnvironmentVariable("HITPAN_ISCC_EXPECT_VERSION") ?? "";
+        var (vExit, vOut) = RunExe(iscc, "", Path.GetTempPath());
+        string banner = vOut.Split('\n').FirstOrDefault(l => l.Contains("Inno Setup", StringComparison.Ordinal))?.Trim()
+                        ?? vOut.Split('\n').FirstOrDefault()?.Trim() ?? "(배너 없음)";
+        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 배너='{banner}' (exit {vExit})");
+        if (expectVer.Length > 0 && !vOut.Contains(expectVer, StringComparison.Ordinal))
+            throw new XunitException(
+                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\nISCC={iscc}\n배너={banner}");
 
         var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
         var ok = RoundTrip("g5_ok", 200, SuccessBody);
@@ -795,12 +835,18 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
                         PascalFunction(iss, "function JsonEscape(");
         AssertPascalBodyUnchanged();
 
+        // 🔴 harness 는 ExtractJsonString 하나만 싣는다 ⇒ `.iss` 가 9개 이름 전부 그 함수를 부르는지
+        //    먼저 단언한다. 한 자리라도 옛 함수로 돌아가면 **harness 가 재는 것이 출하 경로가 아니다**.
+        var wrongParser = NineNames.Where(n => ParserFor(iss, n) != "ExtractJsonString").ToList();
+        if (wrongParser.Count > 0)
+            throw new XunitException(
+                "`.iss` 가 이 이름들에 ExtractJsonString 을 안 부른다 ⇒ harness 과녁이 출하 경로와 다르다: " +
+                string.Join(", ", wrongParser.Select(n => $"{n}→{ParserFor(iss, n)}")));
+
         string dir = Path.Combine(_root, "iscc");
         Directory.CreateDirectory(dir);
         string harness = Path.Combine(dir, "BootstrapJsonSelfTest.iss");
-        File.WriteAllText(harness, HarnessTemplate
-            .Replace("OUTDIR_PLACEHOLDER", dir, StringComparison.Ordinal)
-            .Replace("LIFTED_PLACEHOLDER", lifted, StringComparison.Ordinal),
+        File.WriteAllText(harness, BuildHarnessIss(lifted, dir),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
         var (cExit, cOut) = RunExe(iscc, $"/Q \"{harness}\"", dir);
@@ -808,25 +854,187 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         string exe = Path.Combine(dir, "t6selftest.exe");
         Assert.True(File.Exists(exe), "ISCC 가 harness EXE 를 안 만들었다.");
 
-        foreach (var (name, input, expectedMessage, expectedCompany) in new[]
+        // 🔴 423 = message 만 있고 companyName 은 **없다**(빈 문자열이 정답) · success = 9개 중 8개 값 + 빈 message.
+        var expected423 = NineNames.ToDictionary(n => n, n => n == "message" ? Msg423 : "", StringComparer.Ordinal);
+        var expectedOk = NineNames.ToDictionary(n => n, n => n == "message" ? "" : SuccessExpected[n], StringComparer.Ordinal);
+
+        // 🔴 [4] 머지조건 1·2 — 한 경우가 터져도 **나머지가 돈다**. 앞선 차수는 423 에서 터져
+        //    success(성공 경로 9개 값)에 아예 도달하지 못했고, 그래서 N3 이 미측정으로 남았다.
+        var failures = new List<string>();
+        foreach (var (name, input, exp) in new[]
         {
-            ("423", failFile, Msg423, ""),
-            ("success", okFile, "", NastyCompany),
+            ("423", failFile, expected423),
+            ("success", okFile, expectedOk),
         })
         {
-            string outFile = Path.Combine(dir, $"out-{name}.txt");
-            var (rExit, rOut) = RunExe(exe, $"/SILENT /IN=\"{input}\" /OUT=\"{outFile}\"", dir);
-            Assert.True(File.Exists(outFile), $"[{name}] harness 가 결과를 안 남겼다(exit {rExit}): {rOut}");
-            string[] got = File.ReadAllLines(outFile, Encoding.ASCII);
-            Assert.True(got.Length >= 2, $"[{name}] 결과 줄이 2개가 아니다: {string.Join(" / ", got)}");
-            string gotMessage = UnescapeAsciiJson(got[0]);
-            string gotCompany = UnescapeAsciiJson(got[1]);
-            Console.WriteLine($"[G-T6-5 {name}] 실물 Pascal message='{gotMessage}' company='{gotCompany}'");
-            // 🔴 U1 — Inno 가 BOM 파일을 제대로 읽었나. 틀리면 여기서 한글이 깨져 FAIL 한다.
-            Assert.Equal(expectedMessage, gotMessage);
-            Assert.Equal(expectedCompany, gotCompany);
+            try
+            {
+                MeasureOneWithRealPascal(exe, dir, name, input, exp);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"[{name}] {ex.Message}");
+                Console.Error.WriteLine($"[G-T6-5 {name}] 터졌다 — 다음 경우는 계속 잰다: {ex.Message}");
+            }
         }
-        Console.WriteLine($"[G-T6-5] 실물 ISCC={iscc} · 실패 {fail.ElapsedMs}ms · 성공 {ok.ElapsedMs}ms");
+        Console.WriteLine($"[G-T6-5] 실물 ISCC={iscc} · 판='{banner}' · 실패 {fail.ElapsedMs}ms · 성공 {ok.ElapsedMs}ms");
+        if (failures.Count > 0)
+            throw new XunitException($"실물 Inno Pascal 경우 {failures.Count}/2 가 틀렸다:\n" + string.Join("\n---\n", failures));
+    }
+
+    /// <summary>
+    /// 한 경우를 <b>실물 Inno Pascal</b> 로 재고 <b>9개 이름의 값</b>을 대조한다.
+    /// 🔴 줄 수를 세지 않는다 — harness 가 <c>name=value</c> 로 쓰고 <c>File.ReadAllText</c> 로 받는다.
+    /// (앞선 차수는 <c>ReadAllLines</c> + <c>Length &gt;= 2</c> 였는데 <c>ReadAllLines</c> 가 <b>끝의 빈 줄을 안 센다</b>.
+    ///  423 입력엔 <c>companyName</c> 이 없어 둘째 줄이 빈 줄 ⇒ <b>제품이 맞는데 FAIL</b> = 민감도 역전.)
+    /// </summary>
+    private static void MeasureOneWithRealPascal(
+        string exe, string dir, string name, string input, Dictionary<string, string> expected)
+    {
+        string outFile = Path.Combine(dir, $"out-{name}.txt");
+        var (rExit, rOut) = RunExe(exe, $"/SILENT /IN=\"{input}\" /OUT=\"{outFile}\"", dir);
+        if (!File.Exists(outFile))
+            throw new XunitException($"harness 가 결과를 안 남겼다(exit {rExit}): {rOut}");
+
+        var got = ParseHarnessOutput(File.ReadAllText(outFile, Encoding.ASCII));
+
+        // 이름 집합 전수 대조 — 개수로 세지 않는다(값이 빈 이름도 줄이 남는다).
+        Assert.Equal(NineNames.OrderBy(x => x, StringComparer.Ordinal),
+                     got.Keys.OrderBy(x => x, StringComparer.Ordinal));
+
+        var diff = new List<string>();
+        foreach (string n in NineNames)
+        {
+            Console.WriteLine($"[G-T6-5 {name}] {n} = '{got[n]}' (기대 '{expected[n]}')");
+            if (!string.Equals(got[n], expected[n], StringComparison.Ordinal))
+                diff.Add($"{n}: 실물='{got[n]}'({got[n].Length}자) ≠ 기대='{expected[n]}'({expected[n].Length}자)");
+        }
+        // 🔴 U1 — Inno 가 BOM 붙은 UTF-8 응답 파일을 제대로 읽었나. 틀리면 한글이 깨져 여기서 갈린다.
+        if (diff.Count > 0)
+            throw new XunitException($"실물 Pascal 값 {NineNames.Length - diff.Count}/{NineNames.Length} 일치 · 어긋난 것:\n  " +
+                                     string.Join("\n  ", diff));
+        Console.WriteLine($"[G-T6-5 {name}] 🟢 실물 Inno Pascal {NineNames.Length}/{NineNames.Length} 값 일치");
+    }
+
+    /// <summary>
+    /// harness 출력(<c>name=value</c> 줄들)을 이름→값 으로 받는다.
+    /// 🔴 <b>줄 수를 세지 않는다.</b> 모든 줄이 <c>name=</c> 로 시작하므로 <b>빈 값도 줄이 남는다</b> ⇒
+    /// 값이 없는 이름(423 의 <c>companyName</c>)이 조용히 사라지지 않는다.
+    /// </summary>
+    private static Dictionary<string, string> ParseHarnessOutput(string raw)
+    {
+        var got = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string line in raw.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = line.IndexOf('=', StringComparison.Ordinal);
+            if (eq <= 0) throw new XunitException($"harness 출력 줄이 'name=value' 모양이 아니다: '{line}'");
+            got[line[..eq]] = UnescapeAsciiJson(line[(eq + 1)..]);
+        }
+        return got;
+    }
+
+    /// <summary>
+    /// harness <c>.iss</c> 텍스트를 만든다. <b>ISCC 없이도</b> 모양을 잴 수 있게 따로 빼 뒀다(G-T6-5c).
+    /// 🔴 CI 가 유일한 계측 경로라, 템플릿 오타 하나가 CI 한 바퀴를 태운다.
+    /// </summary>
+    private static string BuildHarnessIss(string lifted, string outDir)
+    {
+        // 🔴 9개 이름을 Pascal 배열로 박아 넣는다(Inno Pascal 은 배열 리터럴이 없다).
+        var names = new StringBuilder();
+        names.Append($"SetArrayLength(Names, {NineNames.Length});\r\n");
+        for (int i = 0; i < NineNames.Length; i++)
+            names.Append($"  Names[{i}] := '{NineNames[i]}';\r\n");
+        return HarnessTemplate
+            .Replace("OUTDIR_PLACEHOLDER", outDir, StringComparison.Ordinal)
+            .Replace("LIFTED_PLACEHOLDER", lifted, StringComparison.Ordinal)
+            .Replace("NAMES_PLACEHOLDER", names.ToString().TrimEnd(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5c</b> — harness <c>.iss</c> 텍스트의 모양을 ISCC 없이 고정한다.
+    /// 치환 안 된 PLACEHOLDER · 빠진 이름 · <c>[Files]</c> 생김 · <c>Result := False</c> 사라짐을 잡는다.
+    /// 🚫 컴파일 증명이 아니다 — 실물 Pascal 은 CI 전용 단계만 잴 수 있다.
+    /// </summary>
+    [Fact]
+    public void G_T6_5c_harness_iss_텍스트가_모양을_갖춘다()
+    {
+        string iss = IssText();
+        string lifted = PascalFunction(iss, "function JsonHexDigit(") + "\r\n" +
+                        PascalFunction(iss, "function ExtractJsonString(") + "\r\n" +
+                        PascalFunction(iss, "function JsonEscape(");
+        string text = BuildHarnessIss(lifted, @"C:\tmp\hp-t6");
+
+        Assert.DoesNotContain("PLACEHOLDER", text, StringComparison.Ordinal);
+        Assert.Contains($"SetArrayLength(Names, {NineNames.Length});", text, StringComparison.Ordinal);
+        for (int i = 0; i < NineNames.Length; i++)
+            Assert.Contains($"Names[{i}] := '{NineNames[i]}';", text, StringComparison.Ordinal);
+        Assert.Contains("JsonEscape(ExtractJsonString(Raw, Names[I]))", text, StringComparison.Ordinal);
+        Assert.Contains("function JsonHexDigit(", text, StringComparison.Ordinal);
+        Assert.Contains("function ExtractJsonString(", text, StringComparison.Ordinal);
+        Assert.Contains("function JsonEscape(", text, StringComparison.Ordinal);
+        // 🔴 아무것도 설치하지 않는다 — [Files] 0건 + InitializeSetup 이 False 로 끝낸다.
+        Assert.DoesNotContain("[Files]", text, StringComparison.Ordinal);
+        Assert.Contains("Result := False;", text, StringComparison.Ordinal);
+
+        // 🔴 harness 는 ExtractJsonString 하나만 싣는다 ⇒ `.iss` 가 9개 이름 전부 그 함수를 불러야
+        //    harness 가 재는 것이 출하 경로다. 한 자리라도 옛 함수로 되돌아가면 여기서 갈린다.
+        //    (ISCC 없는 PC 에서도 도는 자리에 둔다 — G-T6-5 안에만 두면 이 축이 CI 에서만 깨어난다.)
+        var wrong = NineNames.Where(n => ParserFor(iss, n) != "ExtractJsonString").ToList();
+        Assert.True(wrong.Count == 0,
+            "`.iss` 가 이 이름들에 ExtractJsonString 을 안 부른다 ⇒ harness 과녁이 출하 경로와 다르다: " +
+            string.Join(", ", wrong.Select(n => $"{n}→{ParserFor(iss, n)}")));
+        Console.WriteLine($"[G-T6-5c] harness 길이 {text.Length}자 · 이름 {NineNames.Length}개 · dispatch 9/9 ExtractJsonString");
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5d</b> — 봉합 자체의 과녁. harness 출력에서 <b>빈 값이 살아 돌아오나</b>.
+    /// 앞선 차수는 <c>File.ReadAllLines</c> + <c>Length &gt;= 2</c> 였고, 423 입력의 <c>companyName</c> 이
+    /// 빈 값이라 <b>끝의 빈 줄이 세어지지 않아</b> 1줄 ⇒ <b>제품이 맞는데 FAIL</b> 했다
+    /// (CI run 37613228947 · <c>Total 2261 / Failed 1</c>). 민감도가 거꾸로였다.
+    /// 아래 음성 대조군이 그 옛 방식을 같은 글자로 재현한다.
+    /// </summary>
+    [Fact]
+    public void G_T6_5d_빈값도_이름줄로_살아온다_옛방식은_삼켰다()
+    {
+        // 423 모양 — message 만 값이 있고 나머지 8개는 빈 값이다.
+        string raw = string.Concat(NineNames.Select(n => n + "=" + (n == "message" ? "x" : "") + "\r\n"));
+        var got = ParseHarnessOutput(raw);
+
+        Assert.Equal(NineNames.OrderBy(x => x, StringComparer.Ordinal),
+                     got.Keys.OrderBy(x => x, StringComparer.Ordinal));
+        Assert.Equal("x", got["message"]);
+        Assert.Equal("", got["companyName"]);
+
+        // 🔴 음성 대조군 — 옛 방식(값만 줄바꿈으로 이어 쓰고 ReadAllLines 로 센다)은 끝의 빈 줄을 삼킨다.
+        //    이게 안 갈리면 「단언을 고쳤다」가 아무것도 재지 않는 말이다.
+        string old = Path.Combine(Path.GetTempPath(), "hp_t6_oldstyle_" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+        try
+        {
+            File.WriteAllText(old, "x\r\n", Encoding.ASCII);   // message + CRLF + 빈 companyName
+            string[] oldLines = File.ReadAllLines(old, Encoding.ASCII);
+            Assert.Single(oldLines);                            // 2줄이 아니다 ⇒ 옛 단언 `>= 2` 는 FAIL 했다
+            Console.WriteLine($"[G-T6-5d] 옛 방식 ReadAllLines = {oldLines.Length}줄 / 새 방식 이름 = {got.Count}개");
+        }
+        finally
+        {
+            try { File.Delete(old); }
+            catch (IOException ex) { Console.Error.WriteLine($"[G-T6-5d] 임시파일 삭제 실패(무해): {ex.Message}"); }
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5b</b> — G-T6-5 의 <b>과녁 문자열 모양</b>을 고정한다(ISCC 없는 PC 에서도 돈다).
+    /// 423 문장은 <b>42자</b>, 성공 상호는 <b>38자</b>이고 <c>&amp; &lt; &gt; ' " \</c> 쉼표·공백·한글 <b>9축</b>을 전부 품는다.
+    /// 과녁이 물러지면(축이 빠지면) 실물 Pascal 측정이 쉬운 글자만 재게 된다.
+    /// </summary>
+    [Fact]
+    public void G_T6_5b_과녁문자열이_42자_38자_9축을_품는다()
+    {
+        Assert.Equal(42, Msg423.Length);
+        Assert.Equal(38, NastyCompany.Length);
+        foreach (string axis in new[] { "&", "<", ">", "'", "\"", "\\", ",", " ", "히트판" })
+            Assert.Contains(axis, NastyCompany, StringComparison.Ordinal);
+        Console.WriteLine($"[G-T6-5b] 423={Msg423.Length}자 · 상호={NastyCompany.Length}자 '{NastyCompany}'");
     }
 
     private const string HarnessTemplate = @"[Setup]
@@ -845,14 +1053,17 @@ LIFTED_PLACEHOLDER
 function InitializeSetup(): Boolean;
 var
   Lines: TArrayOfString;
+  Names: TArrayOfString;
   Raw, Written: String;
   I: Integer;
 begin
   Raw := '';
   if LoadStringsFromFile(ExpandConstant('{param:IN}'), Lines) then
     for I := 0 to GetArrayLength(Lines) - 1 do Raw := Raw + Lines[I];
-  Written := JsonEscape(ExtractJsonString(Raw, 'message')) + #13#10 +
-             JsonEscape(ExtractJsonString(Raw, 'companyName'));
+  NAMES_PLACEHOLDER
+  Written := '';
+  for I := 0 to GetArrayLength(Names) - 1 do
+    Written := Written + Names[I] + '=' + JsonEscape(ExtractJsonString(Raw, Names[I])) + #13#10;
   SaveStringToFile(ExpandConstant('{param:OUT}'), Written, False);
   Result := False;
 end;
