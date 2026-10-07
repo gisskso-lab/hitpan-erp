@@ -9,7 +9,13 @@ namespace HitPan.Watchdog.Tests;
 ///
 /// DbConfReader 는 AppContext.BaseDirectory 기준 ..\db.conf 또는 .\db.conf 를 찾는다(ResolveDbConfPath).
 /// 테스트는 실행 폴더(BaseDirectory)에 임시 db.conf 를 만들어 ApplyToOptions 결과를 검증하고, 끝나면 지운다.
+///
+/// 🔴 추가 2026-10-07 (작12 B3-1) — 같은 <c>db.conf</c> 한 파일을 쓰는 시험이 하나 더 생겼다
+/// (<c>InstallerBootstrapReducedResponseGateTests</c> · G-7). xUnit 은 **다른 클래스를 병렬로** 돌리므로
+/// 한쪽 Dispose 가 지운 파일을 다른 쪽이 읽어 **깜빡인다.** 같은 collection 으로 직렬화한다.
+/// 이 줄 하나만 더했고 본문은 한 글자도 안 바꿨다(#1).
 /// </summary>
+[Collection(WatchdogDbConfCollection.Name)]
 public class DbConfReaderTests : IDisposable
 {
     private readonly string _confPath = Path.Combine(AppContext.BaseDirectory, "db.conf");

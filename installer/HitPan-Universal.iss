@@ -362,6 +362,79 @@ begin
     Delete(Result, Length(Result), 1);
 end;
 
+// ============================================================
+// T-6 (20261007작12 2차수 · 설계 §2-2) — JSON 문자열 값을 제대로 뽑는다
+//   추가형이다. 위 ExtractJsonValue 는 **한 글자도 고치지 않는다**(#1) — 9개 이름이 그 함수에 매여 있다.
+//   왜 새로 만드나: ExtractJsonValue 는 값의 끝을 `"` · `,` · `}` **아무거나**로 보기 때문에
+//   값 안에 쉼표가 하나라도 들어가는 날 고객 문구가 조용히 잘린다.
+//   규약: (1) 여는 `"` 를 반드시 요구한다(없으면 빈 문자열)
+//        (2) 이스케이프하지 않은 `"` 에서만 끝낸다 ⇒ 값 안의 `,` `}` 에서 안 잘린다
+//        (3) \" \\ \/ \n \r \t \b \f 를 푼다
+//        (4) \uXXXX 는 1..255 만 글자로 바꾸고, 그 밖은 원문 글자를 그대로 남긴다.
+//            🔴 Unicode Inno 의 Chr() 가 255 를 넘는 값에서 어떻게 되는지 **못 쟀다** — 이 PC 에 ISCC 가 없다.
+//            PS 5.1 의 ConvertTo-Json 은 한글을 \u 로 바꾸지 않으므로 오늘 경로에는 안 걸린다(설계 §1-3 실측).
+//   🔴 평면 검색(Pos)은 그대로다 — 바깥 message 하나만 찾으면 된다(설계 §2-2).
+// ============================================================
+function JsonHexDigit(C: Char): Integer;
+begin
+  if (C >= '0') and (C <= '9') then Result := Ord(C) - Ord('0')
+  else if (C >= 'a') and (C <= 'f') then Result := Ord(C) - Ord('a') + 10
+  else if (C >= 'A') and (C <= 'F') then Result := Ord(C) - Ord('A') + 10
+  else Result := -1;
+end;
+
+function ExtractJsonString(Json: String; Key: String): String;
+var
+  SearchKey: String;
+  P, I, Code, D: Integer;
+  C: Char;
+  Bad: Boolean;
+begin
+  Result := '';
+  SearchKey := '"' + Key + '":';
+  P := Pos(SearchKey, Json);
+  if P = 0 then Exit;
+
+  P := P + Length(SearchKey);
+  while (P <= Length(Json)) and (Json[P] = ' ') do P := P + 1;
+  if P > Length(Json) then Exit;
+  if Json[P] <> '"' then Exit;
+  P := P + 1;
+
+  while P <= Length(Json) do begin
+    C := Json[P];
+    if C = '"' then Exit;
+    if C = '\' then begin
+      if P + 1 > Length(Json) then Exit;
+      P := P + 1;
+      C := Json[P];
+      if C = 'n' then Result := Result + #10
+      else if C = 'r' then Result := Result + #13
+      else if C = 't' then Result := Result + #9
+      else if C = 'b' then Result := Result + #8
+      else if C = 'f' then Result := Result + #12
+      else if C = 'u' then begin
+        Code := 0;
+        Bad := False;
+        for I := 1 to 4 do begin
+          if P + I > Length(Json) then Bad := True
+          else begin
+            D := JsonHexDigit(Json[P + I]);
+            if D < 0 then Bad := True else Code := Code * 16 + D;
+          end;
+        end;
+        if Bad then Exit;
+        if (Code >= 1) and (Code <= 255) then Result := Result + Chr(Code)
+        else Result := Result + '\u' + Copy(Json, P + 1, 4);
+        P := P + 4;
+      end
+      else Result := Result + C;
+    end else
+      Result := Result + C;
+    P := P + 1;
+  end;
+end;
+
 // W-3 (작업지시서 20260716작2): Pascal Boolean 을 PowerShell 리터럴($true/$false)로 변환.
 function BoolToPsLiteral(B: Boolean): String;
 begin
@@ -563,8 +636,27 @@ begin
     '} catch {' + #13#10 +
     '  $msg = $_.Exception.Message;' + #13#10 +
     '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = $_.ErrorDetails.Message; }' + #13#10 +
+    // T-6 봉합 (20261007작12 2차수 · 설계 §2-1). 옛 줄이 한 일: $msg 는 서버 응답 **본문 전체**(이미 JSON)인데
+    //   그걸 또 JSON message 문자열 **안에** 싸서 썼다 ⇒ 평면 파서가 바깥 message 를 잡고 첫 `"` 에서 멈춰
+    //   고객 화면에 **`{\` 두 글자**만 남았다(401·423·500·400 전부). 1차수 전부터 그랬다.
+    //   ⇒ 서버 message 를 **한 겹만** 꺼내고, 조립은 ConvertTo-Json 에 맡긴다(손으로 JSON 문자열 안 만든다).
+    //   [ordered] 로 success 를 앞에 고정한다 — 아래 Pos('"success":true') 판정과 사람이 읽는 순서를 맞춘다.
+    //   🔴 [3-V] 보안 병렬검증 P1 (PM 결재 2026-10-07) — 폴백 ⓑ(`$_.ErrorDetails.Message` 원문)를 **삭제했다**.
+    //   message 키가 없는 본문(프록시·Cloudflare 오류 HTML · ASP.NET 자동 400 ProblemDetails)이 ⓑ 로 떨어지면
+    //   호스트명·제품명·추적 ID 가 **고객 대화상자 전문**으로 증폭된다(이스케이프가 가려 주지 않는다).
+    //   ⇒ 응답 본문이 **있을 때**는 ⓐ(JSON 의 message 가 문자열)만 쓰고, 안 되면 **빈 문자열**로 둔다.
+    //     아래 Pascal 이 고정 한글 문장을 넣고, 본문 원문은 **ErrorFile 로만** 남는다.
+    //   🟢 **ⓒ 는 살려 둔다**(PM 정정 2026-10-07) — 응답 본문이 **아예 없을 때**(연결 실패·시간 초과)의
+    //     $_.Exception.Message 는 **.NET 이 스스로 만드는 한글 문장**이라 서버·프록시 본문이 아니다.
+    //     ⓒ 까지 덮으면 통신 사고에서 고객이 받는 정보가 오늘보다 줄어든다.
+    //   🟢 봉합 목적은 안 깎인다 — 423·401·500 은 전부 message 키를 가져 ⓐ 로 닿는다.
+    '  $human = '''';' + #13#10 +
+    '  if ($_.ErrorDetails -and $_.ErrorDetails.Message) {' + #13#10 +
+    '    try { $parsed = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop; if ($parsed -and ($parsed.message -is [string]) -and ($parsed.message.Length -gt 0)) { $human = $parsed.message; } } catch { $human = ''''; }' + #13#10 +
+    '  } else { $human = $_.Exception.Message; }' + #13#10 +
     '  try {' + #13#10 +
-    '    [System.IO.File]::WriteAllText("' + ResponseFile + '", ''{"success":false,"message":"'' + ($msg -replace ''"'', ''\"'') + ''"}'', [System.Text.Encoding]::UTF8);' + #13#10 +
+    '    $out = [pscustomobject][ordered]@{ success = $false; message = $human } | ConvertTo-Json -Compress;' + #13#10 +
+    '    [System.IO.File]::WriteAllText("' + ResponseFile + '", $out, [System.Text.Encoding]::UTF8);' + #13#10 +
     '  } catch { }' + #13#10 +
     '  try { [System.IO.File]::WriteAllText("' + ErrorFile + '", $msg, [System.Text.Encoding]::UTF8); } catch { }' + #13#10 +
     '  exit 1;' + #13#10 +
@@ -599,26 +691,36 @@ begin
 
   // 매우 단순 JSON 파싱 (정식 영역은 워치독에서 박을 영역)
   if Pos('"success":true', RawResponse) = 0 then begin
-    // 에러 메시지 추출 (단순)
-    G_CompanyName := ExtractJsonValue(RawResponse, 'message');
-    if G_CompanyName = '' then G_CompanyName := '알 수 없는 오류';
-    MsgBox('시리얼 인증 실패:' + #13#10 + G_CompanyName, mbError, MB_OK);
+    // 에러 메시지 추출
+    //   T-6 (20261007작12 2차수 · 설계 §2-2·§2-3) — 이 한 곳만 새 함수로. 아래 9개 이름은 옛 함수 그대로.
+    //   머리글: 423 은 시리얼이 틀린 게 아니라 **잠긴 것**이다. 「시리얼 인증 실패」는 고객의 다음 행동을 틀리게 한다.
+    //   🚫 설치본은 문구를 **지어내지 않는다** — 서버 message 가 유일한 원본이다(423 에 「1시간 뒤」가 이미 있다).
+    G_CompanyName := ExtractJsonString(RawResponse, 'message');
+    //   응답이 왔지만 알아볼 수 있는 message 가 없을 때 쓰는 **고정 한글 문장**.
+    //   🔴 [3-V] 보안 결재의 지지대다 — 서버·프록시 본문을 고객 화면에 올리지 않기 위해 여기서 끊는다.
+    //   🚫 「인터넷·방화벽 확인」을 붙이지 않는다 — **응답은 왔다**. 틀린 안내가 된다(설계 §2-3).
+    if G_CompanyName = '' then
+      G_CompanyName := '백오피스 응답을 알아볼 수 없습니다.' + #13#10 + '잠시 뒤 다시 시도해주세요.';
+    MsgBox('설치를 계속할 수 없습니다' + #13#10 + #13#10 + G_CompanyName, mbError, MB_OK);
     Exit;
   end;
 
   // 응답에서 필드 추출
+  //   T-6 (20261007작12 2차수 · 사장님 범위 확대 2026-10-07): **9개 이름 전부** ExtractJsonString 으로.
+  //   옛 ExtractJsonValue 는 ` \uXXXX ` 를 못 풀어 PS 5.1 이 `& < > '` 를 바꿔 보낸 값에서 글자가 깨졌다
+  //   (상호에 `&` 가 든 고객은 지금까지 `\u0026` 으로 설치됐다). 🚫 옛 함수는 **지우지 않는다** — 다른 블록이 쓴다(#1).
   //   길 B (사장님 결재 2026-06-18): bizNo·ceoName 추출 제거 — 백오피스 응답에 없음(평문 미보유).
-  G_TenantCode := ExtractJsonValue(RawResponse, 'tenantCode');
-  G_CompanyName := ExtractJsonValue(RawResponse, 'companyName');
-  G_PrimaryDomain := ExtractJsonValue(RawResponse, 'primary');
-  G_ApiDomain := ExtractJsonValue(RawResponse, 'api');
-  G_TunnelToken := ExtractJsonValue(RawResponse, 'tunnelToken');
+  G_TenantCode := ExtractJsonString(RawResponse, 'tenantCode');
+  G_CompanyName := ExtractJsonString(RawResponse, 'companyName');
+  G_PrimaryDomain := ExtractJsonString(RawResponse, 'primary');
+  G_ApiDomain := ExtractJsonString(RawResponse, 'api');
+  G_TunnelToken := ExtractJsonString(RawResponse, 'tunnelToken');
   // 봉합 (2026-06-21, 7차 전수조사 D6-P0-01): 워치독 WS-28-C 자가복구용 터널 UUID. 응답 domain.tunnelId.
   //   LOCAL 모드·터널 미발급이면 빈 문자열(db.conf 에 빈 값 → 워치독이 보수적으로 자가복구 스킵).
-  G_TunnelId := ExtractJsonValue(RawResponse, 'tunnelId');
-  G_BootstrapToken := ExtractJsonValue(RawResponse, 'token');
+  G_TunnelId := ExtractJsonString(RawResponse, 'tunnelId');
+  G_BootstrapToken := ExtractJsonString(RawResponse, 'token');
   // 재설치 P0 2차 벽 봉합 (2026-07-06): 부모계정 서명검증 키 추출 (응답 bootstrap.tokenKey).
-  G_BootstrapTokenKey := ExtractJsonValue(RawResponse, 'tokenKey');
+  G_BootstrapTokenKey := ExtractJsonString(RawResponse, 'tokenKey');
 
   // 정리
   DeleteFile(ResponseFile);
