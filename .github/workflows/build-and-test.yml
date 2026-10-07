@@ -118,9 +118,13 @@ jobs:
           # 🔴 앞선 단계(전체 시험·작1 게이트)가 남긴 표식을 먼저 지운다 — 안 지우면 아래 조용한초록 판별이
           #    남의 표식을 보고 늘 터진다. 이 단계가 **자기 실행**만 보도록 만든다.
           find . -name 'iscc-optout.log' -delete || true
+          find . -name 'iscc-version-unmeasured.log' -delete || true
+          # 🔴 [4] V-6 봉합(10/7 밤) — 앞선 필터 `~…G_T6_5` 는 **`G_T6_5e`(판정식 단위시험)까지 삼켰다**.
+          #    그래서 「실물 계측 건수」가 4→5 로 늘어 비실물 1건이 실물 숫자에 섞였다.
+          #    끝에 `_` 를 붙여 실물 본체(`G_T6_5_실물_…`)만 집는다. b·c·d·e 는 전체 시험이 이미 돌린다.
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
             --configuration Release --no-build --nologo --verbosity normal \
-            --filter "FullyQualifiedName~InstallerBootstrapMessageGateTests.G_T6_5" \
+            --filter "FullyQualifiedName~InstallerBootstrapMessageGateTests.G_T6_5_" \
             --logger "trx;LogFileName=t6-iscc-results.trx" 2>&1 | tee "$RUNNER_TEMP/t6iscc.log"
           TRX=$(find . -name 't6-iscc-results.trx' -print | head -n 1)
           if [ -z "$TRX" ]; then echo "::error::t6-iscc-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
@@ -134,6 +138,13 @@ jobs:
             echo "::error::전용 단계인데 iscc-optout.log 가 생겼다 — HITPAN_REQUIRE_ISCC 가 시험에 안 닿았다"
             find . -name 'iscc-optout.log' -exec cat {} \;
             exit 1
+          fi
+          # 🔴 2차 봉합(10/7 밤) — 판을 **아무 출처도 모를 때**는 과녁 본체를 막지 않고 통과시키되
+          #    조용한 초록이 되지 않게 표식을 띄운다. 실측값은 위 `[G-T6-5 판출처]` 줄에 전부 찍혀 있다.
+          #    ⚠️ 이 경고가 떠 있는 동안 N4(시험본==출하본)는 **안 재지고 있다** — 별건 트랙에서 닫는다.
+          if find . -name 'iscc-version-unmeasured.log' -print -quit | grep -q .; then
+            echo "::warning::N4 미계측 — Inno 판을 아는 출처가 하나도 없다. 아래 판출처 실측값으로 다음 단언식을 고른다."
+            find . -name 'iscc-version-unmeasured.log' -exec cat {} \;
           fi
 
       - name: 안 잰 축 표식 (ISCC 없는 러너)

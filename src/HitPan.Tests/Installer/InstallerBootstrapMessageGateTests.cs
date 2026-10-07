@@ -822,25 +822,36 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         //      · 러너 ISCC 는 **실제로 6.7.1 이다** — 같은 run 의 choco 단계가
         //        'InnoSetup v6.7.1 already installed.' 라 찍었다. 즉 N4 는 사실로는 이미 충족이었고
         //        깨진 것은 **재는 방법**뿐이었다.
-        //    ⇒ 판은 글자가 아니라 **바이너리 판 자원**(FileVersion·ProductVersion)에서 잰다.
-        //       배너는 사람이 읽는 참고로만 로그에 남기고, 글자 대조는 보조 경로로 둔다.
-        //       대조군은 G-T6-5e 가 잰다(이 PC 에 ISCC 가 없어도 FAIL 경로가 증명된다).
+        //    ⇒ 1차 봉합은 판을 **바이너리 판 자원**(FileVersion·ProductVersion)에서 쟀다.
+        // 🔴🔴 2차 봉합 (10/7 밤 · PR #485 run 37627205264 · [4] 반려 · 사장님 결재 「한 바퀴에 합친다」):
+        //    그 1차 봉합도 빨갰다. 실측값이 답을 줬다 —
+        //      FileVersion='0.0.0.0' · ProductVersion='0.0.0.0' · 배너='Inno Setup 6 Command-Line Compiler'
+        //    ⇒ **ISCC.exe 는 판 자원을 아예 갖고 있지 않다.** 세 OR 가 전부 false 라
+        //      러너가 진짜 6.7.1 이어도 **영구 빨강**이었다(= 늘 실패하는 체크 = 아무도 안 보는 체크).
+        //    🔴 다음 수정이 **세 번째 추정**이 되면 안 된다. 그래서 이렇게 짰다:
+        //      ① 판을 알 만한 **후보 출처를 전부 재서 값을 로그에 찍는다**(이 PC 엔 ISCC 가 없어
+        //         어느 출처가 판을 아는지 여기서는 못 안다 — #29 설치 금지 ⇒ CI 가 유일한 계측 경로).
+        //      ② 판을 **읽은 출처가 있는데 기대와 다르면 FAIL** — N4(시험본==출하본)는 그대로 지킨다.
+        //      ③ 어느 출처도 못 읽으면 **미계측 표식 + 경고**를 남기고 **과녁 본체로 진행**한다.
+        //         왜: 곁가지 보호장치 하나가 **본 과녁(실물 Inno Pascal · U1 인코딩)의 계측을
+        //         main·가지·PR 세 run 내내 통째로 막고 있었다**(소요 325ms·200ms 가 증거).
+        //         조용한 초록이 되지 않게 표식 파일을 남기고 CI 단계가 그걸 읽어 경고로 띄운다.
+        //    판정식(DecideInnoVersion)은 **G-T6-5e 가 양성·음성으로 직접 잰다** — 헬퍼가 아니라 **합성식**을.
         string expectVer = Environment.GetEnvironmentVariable("HITPAN_ISCC_EXPECT_VERSION") ?? "";
-        var (vExit, vOut) = RunExe(iscc, "", Path.GetTempPath());
-        string banner = vOut.Split('\n').FirstOrDefault(l => l.Contains("Inno Setup", StringComparison.Ordinal))?.Trim()
-                        ?? vOut.Split('\n').FirstOrDefault()?.Trim() ?? "(배너 없음)";
-        var vInfo = FileVersionInfo.GetVersionInfo(iscc);
-        string fileVer = (vInfo.FileVersion ?? "").Trim();
-        string prodVer = (vInfo.ProductVersion ?? "").Trim();
-        Console.WriteLine($"[G-T6-5] ISCC={iscc} · FileVersion='{fileVer}' · ProductVersion='{prodVer}' " +
-                          $"· 판 배너='{banner}' (exit {vExit})");
-        if (expectVer.Length > 0
-            && !IsSameInnoVersion(fileVer, expectVer)
-            && !IsSameInnoVersion(prodVer, expectVer)
-            && !vOut.Contains(expectVer, StringComparison.Ordinal))
-            throw new XunitException(
-                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\n" +
-                $"ISCC={iscc}\nFileVersion={fileVer}\nProductVersion={prodVer}\n배너={banner}");
+        var probes = ProbeInnoVersions(iscc);
+        foreach (var (src, val) in probes)
+            Console.WriteLine($"[G-T6-5 판출처] {src} = '{val}'");
+
+        var (vOk, vWhy) = DecideInnoVersion(probes, expectVer);
+        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 판정: {vWhy}");
+        if (!vOk) throw new XunitException($"{vWhy}\nISCC={iscc}\n" + ProbeReport(probes));
+        if (vWhy.StartsWith(UnmeasuredMark, StringComparison.Ordinal))
+        {
+            // 🔴 조용한 초록 방지 — 통과시키되 **흔적을 남긴다.** CI 전용 단계가 이 파일을 읽어 경고로 띄운다.
+            File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "iscc-version-unmeasured.log"),
+                $"{DateTime.Now:s} {vWhy}\n{ProbeReport(probes)}\n");
+            Console.Error.WriteLine($"[G-T6-5 판 미계측] {vWhy} — N4 는 이 바퀴에서 **안 재졌다**.");
+        }
 
         var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
         var ok = RoundTrip("g5_ok", 200, SuccessBody);
@@ -896,7 +907,7 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
                 Console.Error.WriteLine($"[G-T6-5 {name}] 터졌다 — 다음 경우는 계속 잰다: {ex.Message}");
             }
         }
-        Console.WriteLine($"[G-T6-5] 실물 ISCC={iscc} · 판='{banner}' · 실패 {fail.ElapsedMs}ms · 성공 {ok.ElapsedMs}ms");
+        Console.WriteLine($"[G-T6-5] 실물 ISCC={iscc} · 판 판정='{vWhy}' · 실패 {fail.ElapsedMs}ms · 성공 {ok.ElapsedMs}ms");
         if (failures.Count > 0)
             throw new XunitException($"실물 Inno Pascal 경우 {failures.Count}/2 가 틀렸다:\n" + string.Join("\n---\n", failures));
     }
@@ -1088,10 +1099,14 @@ begin
 end;
 ";
 
+    /// <summary>판 미계측 표식 — 이 글자로 시작하는 판정은 "통과시켰지만 안 쟀다"는 뜻이다.</summary>
+    private const string UnmeasuredMark = "판 미계측";
+
     /// <summary>
-    /// 🔴 Inno 판 대조 — 기대값 <c>6.7.1</c> 이 바이너리 판 자원의 4자리 표기 <c>6.7.1.0</c> 과
-    /// 맞물리게 <b>접두 일치</b>로 본다. 단 접두 뒤가 <c>.</c> 일 때만 같다고 본다 —
-    /// 그래야 <c>6.7.10</c> 을 <c>6.7.1</c> 로 잘못 보지 않는다(음성 대조군 = G-T6-5e).
+    /// 🔴 Inno 판 대조 — 기대값 <c>6.7.1</c> 이 4자리 표기 <c>6.7.1.0</c> 과 맞물리게 <b>접두 일치</b>로 본다.
+    /// 단 접두 뒤가 <c>.</c> 일 때만 같다고 본다 — 그래야 <c>6.7.10</c> 을 <c>6.7.1</c> 로 보지 않는다.
+    /// ⚠️ 이 헬퍼만으로는 <b>잘린 기대값</b>(<c>"6"</c>·<c>"6.7"</c>)을 못 막는다(V-3) —
+    /// 그 축은 <see cref="DecideInnoVersion"/> 이 기대값 <b>모양</b>으로 막는다.
     /// </summary>
     private static bool IsSameInnoVersion(string actual, string expect)
     {
@@ -1100,25 +1115,163 @@ end;
         return actual.StartsWith(expect + ".", StringComparison.Ordinal);
     }
 
+    /// <summary>판 모양인가 — <c>0.0.0.0</c> 처럼 전부 0 인 값은 "판 자원 없음"이지 판이 아니다.</summary>
+    private static bool LooksLikeVersion(string v)
+    {
+        if (!Regex.IsMatch(v, @"^\d+(\.\d+)+$")) return false;
+        return v.Split('.').Any(p => p.TrimStart('0').Length > 0);
+    }
+
+    /// <summary>글자 더미에서 첫 판 토큰을 뽑는다(없으면 빈 문자열).</summary>
+    private static string FirstVersionToken(string text)
+    {
+        var m = Regex.Match(text ?? "", @"\d+\.\d+(?:\.\d+)*");
+        return m.Success ? m.Value : "";
+    }
+
     /// <summary>
-    /// 🔴 <b>G-T6-5e</b> — G-T6-5 의 <b>판 대조 식 자체</b>를 잰다. 봉합(10/7 main CI run 37621671829)이
-    /// 바꾼 유일한 판정 지점이고, <b>이 PC 에는 ISCC 가 없어</b>(#29 · 설치 금지) G-T6-5 본체는 못 돈다.
-    /// ⇒ 대조군을 여기서 세운다: 4자리 판이 통과하고, <b>틀린 판은 실제로 FAIL 한다</b>.
-    /// 양성만 세면 「늘 참」인 식도 초록이다 — 음성 3건이 그걸 막는다.
+    /// 🔴 판을 알 만한 <b>후보 출처를 전부</b> 재서 (출처, 값) 으로 돌려준다. 못 읽은 것도 사유와 함께 남긴다 —
+    /// <b>숨기면 다음 사람이 또 추정한다.</b> 이 PC 에는 ISCC 가 없어(#29) 어느 출처가 판을 아는지
+    /// 여기서는 알 수 없다 ⇒ CI 한 바퀴가 유일한 계측 경로다.
+    /// </summary>
+    private static List<(string Source, string Value)> ProbeInnoVersions(string iscc)
+    {
+        var list = new List<(string Source, string Value)>();
+        void Add(string src, Func<string> read)
+        {
+            string v;
+            try { v = (read() ?? "").Trim(); }
+            catch (Exception ex) { v = $"(못 읽음: {ex.GetType().Name})"; }
+            list.Add((src, v.Length == 0 ? "(빈값)" : v));
+        }
+
+        string dir = Path.GetDirectoryName(iscc) ?? "";
+        string compil = Path.Combine(dir, "Compil32.exe");
+        Add("ISCC.exe FileVersion", () => FileVersionInfo.GetVersionInfo(iscc).FileVersion ?? "");
+        Add("ISCC.exe ProductVersion", () => FileVersionInfo.GetVersionInfo(iscc).ProductVersion ?? "");
+        Add("Compil32.exe FileVersion", () => File.Exists(compil)
+            ? FileVersionInfo.GetVersionInfo(compil).FileVersion ?? "" : "(파일 없음)");
+        Add("Compil32.exe ProductVersion", () => File.Exists(compil)
+            ? FileVersionInfo.GetVersionInfo(compil).ProductVersion ?? "" : "(파일 없음)");
+        Add("ISCC 인수없음 출력", () => FirstVersionToken(RunExe(iscc, "", Path.GetTempPath()).Output));
+        Add("ISCC /? 출력", () => FirstVersionToken(RunExe(iscc, "/?", Path.GetTempPath()).Output));
+        Add("choco 패키지 nuspec", ChocoInnoVersion);
+        Add("설치제거 레지스트리 DisplayVersion", RegistryInnoVersion);
+        Add("whatsnew.htm 첫 판 토큰", () =>
+        {
+            string p = Path.Combine(dir, "whatsnew.htm");
+            if (!File.Exists(p)) return "(파일 없음)";
+            using var sr = new StreamReader(p);
+            var buf = new char[8192];
+            int n = sr.Read(buf, 0, buf.Length);
+            return FirstVersionToken(new string(buf, 0, n));
+        });
+        return list;
+    }
+
+    /// <summary>choco 가 기록한 innosetup 패키지 판 — 워크플로 3곳이 거는 핀이 실제로 무엇이 됐는지.</summary>
+    private static string ChocoInnoVersion()
+    {
+        string root = Environment.GetEnvironmentVariable("ChocolateyInstall") ?? @"C:\ProgramData\chocolatey";
+        string lib = Path.Combine(root, "lib");
+        if (!Directory.Exists(lib)) return "(choco lib 없음)";
+        foreach (string d in Directory.GetDirectories(lib, "innosetup*"))
+            foreach (string f in Directory.GetFiles(d, "*.nuspec"))
+            {
+                var m = Regex.Match(File.ReadAllText(f), @"<version>\s*([^<\s]+)\s*</version>",
+                                    RegexOptions.IgnoreCase);
+                if (m.Success) return m.Groups[1].Value;
+            }
+        return "(nuspec 없음)";
+    }
+
+    /// <summary>설치 제거 항목의 DisplayVersion — 설치기가 적어 둔 판.</summary>
+    private static string RegistryInnoVersion()
+    {
+        foreach (string key in new[]
+        {
+            @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+            @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+        })
+        {
+            var (exit, outp) = RunExe("reg", $"query \"{key}\" /v DisplayVersion", Path.GetTempPath());
+            if (exit != 0) continue;
+            var m = Regex.Match(outp, @"DisplayVersion\s+REG_SZ\s+(\S+)");
+            if (m.Success) return m.Groups[1].Value;
+        }
+        return "(레지스트리 없음)";
+    }
+
+    /// <summary>사람이 읽을 수 있게 출처 전부를 줄로 편다 — 실패 메시지에 그대로 붙는다.</summary>
+    private static string ProbeReport(IEnumerable<(string Source, string Value)> probes) =>
+        string.Join("\n", probes.Select(p => $"  {p.Source} = '{p.Value}'"));
+
+    /// <summary>
+    /// 🔴 <b>판 판정식</b> — G-T6-5 가 실제로 쓰는 합성 판단. 1차 봉합은 헬퍼만 시험했고
+    /// <b>합성식에는 대조군이 0건</b>이었다(P1-2). 이제 G-T6-5e 가 이 함수를 직접 잰다.
+    /// 규칙: ① 기대값 없음 = <b>FAIL</b>(스킵 아님 · P1-1) ② 기대값이 잘렸으면 <b>FAIL</b>(V-3)
+    /// ③ 읽힌 판이 하나라도 기대와 같으면 통과 ④ 읽혔는데 전부 다르면 <b>FAIL</b>(N4 유지)
+    /// ⑤ 아무 출처도 판을 모르면 <b>미계측으로 통과</b>하되 표식을 남긴다(과녁 본체를 막지 않는다).
+    /// </summary>
+    private static (bool Ok, string Why) DecideInnoVersion(
+        IReadOnlyList<(string Source, string Value)> probes, string expect)
+    {
+        if (expect.Length == 0)
+            return (false, "HITPAN_ISCC_EXPECT_VERSION 이 비었다 — 전용 단계가 기대 판을 안 줬다(설정이 시험에 안 닿았다). 스킵하지 않는다(P1-1).");
+        if (!Regex.IsMatch(expect, @"^\d+\.\d+\.\d+"))
+            return (false, $"기대 판 모양이 아니다('{expect}') — 최소 `주.부.패치` 세 자리여야 한다. 잘린 기대값은 접두 일치로 아무 판이나 받는다(V-3).");
+
+        var read = probes.Where(p => LooksLikeVersion(p.Value)).ToList();
+        if (read.Count == 0)
+            return (true, $"{UnmeasuredMark} — 판을 아는 출처가 하나도 없다(후보 {probes.Count}곳 전부 확인). N4 는 이 바퀴에서 안 재졌다.");
+
+        var hit = read.FirstOrDefault(p => IsSameInnoVersion(p.Value, expect));
+        if (hit.Source is not null)
+            return (true, $"기대({expect}) 일치 — 출처 '{hit.Source}' = '{hit.Value}' (읽힌 출처 {read.Count}곳)");
+
+        return (false, $"ISCC 판이 기대({expect})와 다르다 — 시험본·출하본 Inno 판 갈림(N4). 판을 읽은 출처 {read.Count}곳이 전부 기대와 다르다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-T6-5e</b> — G-T6-5 가 실제로 쓰는 <b>합성 판정식</b>(<see cref="DecideInnoVersion"/>)을 잰다.
+    /// <b>이 PC 에는 ISCC 가 없어</b>(#29 · 설치 금지) 본체는 못 돈다 ⇒ 판정식의 FAIL 경로를 여기서 증명한다.
+    /// 1차 봉합의 이 시험은 <b>헬퍼만</b> 쟀고 합성식엔 대조군이 0건이었다([3-V] P1-2 · [4] V-3).
     /// </summary>
     [Fact]
-    public void G_T6_5e_판_대조식이_네자리는_받고_틀린판은_막는다()
+    public void G_T6_5e_판_판정식이_양성음성을_가른다()
     {
-        // 양성 — 러너·출하가 실제로 쓰는 모양
-        Assert.True(IsSameInnoVersion("6.7.1", "6.7.1"), "같은 판을 다르다고 본다.");
-        Assert.True(IsSameInnoVersion("6.7.1.0", "6.7.1"), "판 자원 4자리 표기를 다르다고 본다 — 이게 10/7 빨간불의 반대쪽이다.");
+        static List<(string Source, string Value)> P(params (string, string)[] xs) =>
+            xs.Select(x => (x.Item1, x.Item2)).ToList();
 
-        // 🔴 음성 대조군 — 하나라도 true 면 이 게이트는 「늘 참」이라 아무것도 안 지킨다
-        Assert.False(IsSameInnoVersion("6.7.10", "6.7.1"), "6.7.10 을 6.7.1 로 봤다 — 접두만 보면 생기는 사고다.");
-        Assert.False(IsSameInnoVersion("6.6.2.0", "6.7.1"), "다른 판을 같다고 본다.");
-        Assert.False(IsSameInnoVersion("", "6.7.1"), "판을 못 읽었는데 통과시킨다 — 조용한 초록이다.");
+        // 양성 — 출처 하나만 판을 알아도 통과한다(ISCC.exe 가 0.0.0.0 이어도)
+        Assert.True(DecideInnoVersion(P(("ISCC.exe FileVersion", "0.0.0.0"), ("choco", "6.7.1")), "6.7.1").Ok,
+            "다른 출처가 판을 아는데도 막는다.");
+        Assert.True(DecideInnoVersion(P(("레지스트리", "6.7.1.0")), "6.7.1").Ok,
+            "4자리 표기를 다르다고 본다.");
 
-        Console.WriteLine("[G-T6-5e] 판 대조식 양성 2 · 음성 3 — FAIL 경로 증명됨.");
+        // 🔴 음성 1 — 읽힌 판이 다르면 막는다 (N4 유지)
+        Assert.False(DecideInnoVersion(P(("choco", "6.6.2")), "6.7.1").Ok, "다른 판을 통과시킨다 — N4 가 죽는다.");
+        // 🔴 음성 2 — 6.7.10 을 6.7.1 로 보지 않는다 (1차 봉합의 글자 보조항 면죄부 제거 · P1-2)
+        Assert.False(DecideInnoVersion(P(("choco", "6.7.10")), "6.7.1").Ok, "6.7.10 을 6.7.1 로 봤다.");
+        // 🔴 음성 3 — 기대값이 비면 스킵이 아니라 FAIL (조용한 초록 · P1-1)
+        Assert.False(DecideInnoVersion(P(("choco", "6.7.1")), "").Ok, "기대값이 없는데 통과시킨다 — 단언이 사라진다.");
+        // 🔴 음성 4·5 — 잘린 기대값은 아무 판이나 받는다 (V-3)
+        Assert.False(DecideInnoVersion(P(("choco", "6.9.9.9")), "6").Ok, "기대값 '6' 으로 6.9.9.9 를 받는다.");
+        Assert.False(DecideInnoVersion(P(("choco", "6.7.9")), "6.7").Ok, "기대값 '6.7' 로 6.7.9 를 받는다.");
+
+        // 🔴 미계측 — 아무 출처도 판을 모르면 통과하되 **반드시 표식 문구**가 붙는다(조용한 초록 방지)
+        var un = DecideInnoVersion(
+            P(("ISCC.exe FileVersion", "0.0.0.0"), ("Compil32.exe FileVersion", "(파일 없음)"), ("ISCC 출력", "(빈값)")),
+            "6.7.1");
+        Assert.True(un.Ok, "판을 못 읽었다고 과녁 본체까지 막는다 — 곁가지가 본 계측을 막은 것이 10/7 사고다.");
+        Assert.StartsWith(UnmeasuredMark, un.Why);
+
+        // 헬퍼 축(1차 봉합에서 세운 것 — 유지)
+        Assert.True(IsSameInnoVersion("6.7.1.0", "6.7.1"));
+        Assert.False(IsSameInnoVersion("6.7.10", "6.7.1"));
+        Assert.False(IsSameInnoVersion("", "6.7.1"));
+
+        Console.WriteLine("[G-T6-5e] 합성 판정식 양성 2 · 음성 5 · 미계측 표식 1 — FAIL 경로 증명됨.");
     }
 
     private static (int Exit, string Output) RunExe(string exe, string args, string cwd)
