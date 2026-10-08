@@ -59,8 +59,11 @@ else
 
                     <MudText Typo="Typo.body2" Style="margin-top:12px;font-weight:600;">한도</MudText>
                     <MudNumericField @bind-Value="plan.MaxUsers" Label="자식계정 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
-                    <MudNumericField @bind-Value="plan.MaxPcDevices" Label="PC 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
-                    <MudNumericField @bind-Value="plan.MaxMobileDevices" Label="모바일 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+                    @* 🔴 20261008작16 §B — 두 칸은 int? 다. 미설정(NULL)이면 빈 칸으로 보인다.
+                       라벨·레이아웃은 한 글자도 안 바꿨다. 빈 칸으로 저장하면 서버가 기존 값을 그대로 둔다
+                       (UPDATE 가 COALESCE). 0 을 넣으면 그 요금제의 기기 등록이 전부 막히니 비워 두면 된다. *@
+                    <MudNumericField T="int?" @bind-Value="plan.MaxPcDevices" Label="PC 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Placeholder="미설정 (기본 5대)" />
+                    <MudNumericField T="int?" @bind-Value="plan.MaxMobileDevices" Label="모바일 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" Placeholder="미설정 (기본 3대)" />
                     <MudNumericField @bind-Value="plan.AiTokenMonthly" Label="월 AI 토큰" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
 
                     <MudTextField @bind-Value="plan.Reason" Label="변경 사유 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Placeholder="예: 2026년 하반기 가격 조정" />
@@ -198,8 +201,13 @@ else
         public string PriceDisplay { get; set; } = "number";
         public int MaxUsers { get; set; }
         public int MaxDevices { get; set; }
-        public int MaxPcDevices { get; set; }
-        public int MaxMobileDevices { get; set; }
+
+        // 🔴 20261008작16 §B (설계 §4-2 · PM 결재 D-2) — int? 다.
+        //   pricing_plans 의 두 칸이 NULL DEFAULT NULL 이라 응답에 null 이 온다.
+        //   int 로 받으면 역직렬화에서 터지고, 0 으로 저장하면 그 요금제의 기기 등록이 전부 막힌다
+        //   (서버 폴백 COALESCE(…,5)/(…,3) 는 NULL 만 막는다).
+        public int? MaxPcDevices { get; set; }
+        public int? MaxMobileDevices { get; set; }
         public int AiTokenMonthly { get; set; }
         public string? FeaturesJson { get; set; }
         public int IsActive { get; set; }

@@ -6,6 +6,15 @@ using MySqlConnector;
 namespace HitPan.Backoffice.API.Controllers;
 
 // 프로모션·할인·이벤트 관리 (브라운킴 PM 2026-06-08)
+//
+// 🔴 20261008작16 §A (설계 §2-2 · PM 직접 재확인) — **부르는 화면이 0건인 경로다.**
+//   api/admin/promotions-v2 를 가리키는 .razor/.cs 가 레포 전체 grep 0건이다(2026-10-08 실측).
+//   살아 있는 프로모션 줄기는 PromotionController(api/backoffice/promotions · promotions_legacy) 하나뿐이고,
+//   결재된 IA 도 그 경로를 정본으로 적었다(20261007 설계서 백오피스 메뉴재구성 :43·:91).
+//   이 컨트롤러는 promotions(admin 모양 · varchar PK) 를 읽는다 — 그 표는 **그대로 둔다**(#1·#37).
+//   두 표·두 컨트롤러 통합은 **2차 별건**(사장님 결재 2026-06-18 todo). 이번 차수는 코드·표 무접촉.
+//   ⚠️ 아래 GetPublicPlans 는 pricing_plans 의 세 칸을 읽는다 ⇒ 44_backoffice_pricing_plan_columns.sql
+//      이 적재되지 않으면 이 경로도 같은 뿌리로 500 이다(설계 §2-5).
 [ApiController]
 [Route("api/admin/promotions-v2")]
 [Authorize(Policy = "PlatformAdmin")]  // 본사 마스터 계정만 (2026-06-11 P0 봉합)

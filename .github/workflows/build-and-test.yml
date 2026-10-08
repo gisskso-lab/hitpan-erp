@@ -718,6 +718,25 @@ jobs:
           #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측(19초 · DB 없이면 1초).
           #    근거: docs/개발/백오피스/20261007작12_1차수_B3-1_시도제한_응답최소화_개발명세서.md
           GATES="$GATES|InstallerBootstrapPreverifyGate"
+          # 🔴 20261008작16 §D (BackofficePromotionPricingDbGateTests) — 운영 백오피스 500 4건 봉합.
+          #    담는 것: G-PROMO-1(실물 PromotionController 가 목록·등록·redeem SQL 을 DB 에 보낸다 +
+          #              promotion_usages 1건 + use_count 1 + 중복 promo_code 400 음성)
+          #            · G-PRICE-1(요금제 SELECT 200 + 두 칸 NULL 매핑 + price_display 기본값 'number'
+          #              + 🔴 실물 DeviceRegistration 등록 응답의 deviceLimit 가 **5/3** + 값 9 를 넣으면 9 양성
+          #              + 두 칸 안 보낸 저장 뒤 기존 9 보존 = UPDATE COALESCE)
+          #            · G-MIG-1(31·43·44 2회 적재 2회 성공 + 두 기기 칸 기본값이 NULL 인지 information_schema 로 확인)
+          #            · G-MIG-2(고아 tenant_id 를 **심고** 31 적재 → 성공 + 그 행만 NULL 복원 + 멀쩡한 키 보존 양성 + FK 성립)
+          #    🔴 한글 글자 단언 0건 — 판정은 상태코드·불리언·DB 값으로만 한다(10/8 \uXXXX 사고).
+          #    봉합 빼기 전후 대조 실측(2026-10-08 · hitpan_trgtest · 개발명세서 §4):
+          #      A PromotionController 의 INSERT 표 이름을 promotions 로 되돌림 → G-PROMO-1 만 FAIL
+          #      B PlanRow 두 칸을 int 로 되돌림 → G-PRICE-1 만 FAIL (NULL 이 **조용히 0** 으로 매핑됐다)
+          #      C 31 의 ADD KEY 에서 IF NOT EXISTS 제거 → G-MIG-1 만 FAIL (errno 1061)
+          #      D 31 의 고아 복원 UPDATE 제거 → G-MIG-2 만 FAIL (errno 1452 — 기동 거부 경로)
+          #      원복 뒤 4/4 PASS · 6~8초(DB 없이면 1초대 — 소요시간이 판별 수단이다)
+          #    🔴 로컬은 hitpan 계정이 CREATE DATABASE 거부 ⇒ HITPAN_BO_GATE_DB=hitpan_trgtest 로만 실측.
+          #    🔴 글자검사 짝인 G-COL-1·G-COL-1n(BackofficeColumnContractGateTests)은 DB 가 필요 없어
+          #      `build` 잡의 전체 시험에서 돈다 — 여기 넣지 않았다(안 넣었다는 사실을 남긴다).
+          GATES="$GATES|BackofficePromotionPricingDbGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

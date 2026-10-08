@@ -108,6 +108,11 @@ public class PricingAdminController : ControllerBase
                 new { PlanId = planId });
             if (before is null) return NotFound(new { success = false, message = "요금제 없음" });
 
+            // 🔴 20261008작16 §B (설계 §4-2 ② · PM 결재 D-2) — 기기 두 칸만 COALESCE 로 감쌌다.
+            //   화면이 두 칸을 안 보내면 NULL 이 오는데, 그대로 대입하면 **기존 설정이 지워진다**.
+            //   NULL 이면 기존 값을 그대로 둔다(#1 추가만의 정신). 0 으로 덮지도 않는다 —
+            //   0 은 DeviceRegistration 의 COALESCE(…,5)/(…,3) 폴백을 무력화해 상한 0 을 만든다.
+            //   나머지 칸의 대입식은 한 글자도 안 바꿨다.
             await db.ExecuteAsync(@"
                 UPDATE pricing_plans
                 SET plan_name = @PlanName,
@@ -117,8 +122,8 @@ public class PricingAdminController : ControllerBase
                     price_display = @PriceDisplay,
                     max_users = @MaxUsers,
                     max_devices = @MaxDevices,
-                    max_pc_devices = @MaxPcDevices,
-                    max_mobile_devices = @MaxMobileDevices,
+                    max_pc_devices = COALESCE(@MaxPcDevices, max_pc_devices),
+                    max_mobile_devices = COALESCE(@MaxMobileDevices, max_mobile_devices),
                     ai_token_monthly = @AiTokenMonthly,
                     features_json = @FeaturesJson,
                     is_visible = @IsVisible,
@@ -254,8 +259,14 @@ public class PricingAdminController : ControllerBase
         public string PriceDisplay { get; set; } = "number";  // 'number' or 'contact'
         public int MaxUsers { get; set; }
         public int MaxDevices { get; set; }
-        public int MaxPcDevices { get; set; }
-        public int MaxMobileDevices { get; set; }
+
+        // 🔴 20261008작16 §B (설계 §4-2 ② · PM 결재 D-2) — int 가 아니라 int? 다.
+        //   두 칸은 pricing_plans 에 NULL DEFAULT NULL 로 더해진다(미설정 = NULL).
+        //   int 로 받으면 Dapper 가 NULL 을 int 에 못 담아 **다시 500** 이다.
+        //   NULL = 「미설정」이고, 기기 상한 폴백은 DeviceRegistrationController 의
+        //   COALESCE(…, 5) / COALESCE(…, 3) 이 맡는다. 🔴 0 으로 바꾸면 상한이 0 이 된다.
+        public int? MaxPcDevices { get; set; }
+        public int? MaxMobileDevices { get; set; }
         public int AiTokenMonthly { get; set; }
         public string? FeaturesJson { get; set; }
         public int IsActive { get; set; }
@@ -274,8 +285,11 @@ public class PricingAdminController : ControllerBase
         public string PriceDisplay { get; set; } = "number";
         public int MaxUsers { get; set; }
         public int MaxDevices { get; set; }
-        public int MaxPcDevices { get; set; }
-        public int MaxMobileDevices { get; set; }
+
+        // 🔴 20261008작16 §B — int? 다. 화면이 두 칸을 안 보내면(= 미설정) NULL 로 오고,
+        //   UPDATE 는 COALESCE(@MaxPcDevices, max_pc_devices) 로 **기존 값을 0 으로 덮지 않는다**(#1 정신).
+        public int? MaxPcDevices { get; set; }
+        public int? MaxMobileDevices { get; set; }
         public int AiTokenMonthly { get; set; }
         public string? FeaturesJson { get; set; }
         public bool IsVisible { get; set; } = true;

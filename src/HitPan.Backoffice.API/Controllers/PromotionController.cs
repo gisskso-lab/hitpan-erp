@@ -23,6 +23,19 @@ namespace HitPan.Backoffice.API.Controllers;
 //   #18·#22 본사 메타만, 평문 0
 //   #20 워크플로우 끊김 0
 //   #25 안전하게 (UNIQUE 차단 + use_count 검증)
+//
+// 🔴 20261008작16 §A (설계 §3 ⓒ · PM 결재 D-1) — 표 이름을 promotions_legacy 로 돌렸다.
+//   왜: 이 컨트롤러가 쓰는 칸 이름(promo_code·title·use_count·target_plan·status)은
+//       promotions_legacy 의 칸이다. 그런데 SQL 은 **promotions**(admin 모양 · varchar PK ·
+//       promotion_code/promotion_name/used_count/is_active)를 가리키고 있었다 ⇒ 운영에서
+//       목록·등록·토글·redeem 전부 Unknown column 500 (2026-10-08 실사고).
+//   왜 legacy 가 정본인가: 이 줄기만 화면이 있고(AdminPromotions.razor · PromotionCreateDialog.razor),
+//       promotion_usages 의 외래키도 promotions_legacy(promotion_id) 에 묶여 있다(00_core:540-541).
+//       admin 모양으로 옮기면 사용이력 PK 형변경 + FK 재작성 + 랜딩 redeem 까지 끌려온다.
+//   바꾼 것은 **표 이름 6곳뿐**이다 — 칸 이름·화면 필드·검증 로직은 한 글자도 안 바꿨다(#1).
+//   되돌림은 표 이름 한 단어. 표 보장 = installer/backoffice/43_backoffice_promotion_legacy_align.sql.
+//   ⚠️ 운영 promotions 에 살아 있는 행이 있으면 목록에 안 보인다(설계 §3-4 · 사장님 결재 ⑴) —
+//      데이터는 지우지 않는다. 두 표 통합은 별건 todo(사장님 결재 2026-06-18).
 [ApiController]
 [Route("api/backoffice/promotions")]
 public class PromotionController : ControllerBase
@@ -67,7 +80,7 @@ public class PromotionController : ControllerBase
                     target_plan AS TargetPlan,
                     status AS Status,
                     created_at AS CreatedAt
-                FROM promotions
+                FROM promotions_legacy
                 {where}
                 ORDER BY promotion_id DESC
                 LIMIT 500", param);
@@ -104,13 +117,13 @@ public class PromotionController : ControllerBase
         {
             await using var db = await OpenAsync(ct);
             var dup = await db.QueryFirstOrDefaultAsync<int>(
-                "SELECT COUNT(*) FROM promotions WHERE promo_code = @Code",
+                "SELECT COUNT(*) FROM promotions_legacy WHERE promo_code = @Code",
                 new { Code = req.PromoCode });
             if (dup > 0)
                 return BadRequest(new { success = false, message = "이미 사용 중인 프로모션 코드입니다." });
 
             var promotionId = await db.ExecuteScalarAsync<long>(@"
-                INSERT INTO promotions
+                INSERT INTO promotions_legacy
                     (promo_code, title, discount_type, discount_value,
                      starts_at, ends_at, max_uses, target_plan, status, created_by)
                 VALUES
@@ -158,7 +171,7 @@ public class PromotionController : ControllerBase
         {
             await using var db = await OpenAsync(ct);
             var affected = await db.ExecuteAsync(
-                "UPDATE promotions SET status = @Status WHERE promotion_id = @Id",
+                "UPDATE promotions_legacy SET status = @Status WHERE promotion_id = @Id",
                 new { Status = req.Status, Id = id });
             if (affected == 0)
                 return NotFound(new { success = false, message = "프로모션을 찾을 수 없습니다." });
@@ -231,7 +244,7 @@ public class PromotionController : ControllerBase
                     use_count AS UseCount,
                     target_plan AS TargetPlan,
                     status AS Status
-                FROM promotions
+                FROM promotions_legacy
                 WHERE promo_code = @Code",
                 new { Code = req.PromoCode });
 
@@ -255,7 +268,7 @@ public class PromotionController : ControllerBase
                     (promotion_id, promo_code, signup_token, applied_amount, source)
                 VALUES
                     (@PromotionId, @PromoCode, @SignupToken, @AppliedAmount, 'landing_signup');
-                UPDATE promotions SET use_count = use_count + 1 WHERE promotion_id = @PromotionId;",
+                UPDATE promotions_legacy SET use_count = use_count + 1 WHERE promotion_id = @PromotionId;",
                 new
                 {
                     promo.PromotionId,
