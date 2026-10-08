@@ -262,7 +262,9 @@ public class PricingAdminController : ControllerBase
 
         // 🔴 20261008작16 §B (설계 §4-2 ② · PM 결재 D-2) — int 가 아니라 int? 다.
         //   두 칸은 pricing_plans 에 NULL DEFAULT NULL 로 더해진다(미설정 = NULL).
-        //   int 로 받으면 Dapper 가 NULL 을 int 에 못 담아 **다시 500** 이다.
+        //   🔴 2026-10-08 실측 정정: int 로 받아도 **500 이 안 난다** — Dapper 가 NULL 을 조용히 0 으로 둔다.
+        //   그래서 화면에 0 이 뜨고 그 0 이 저장돼 **기기 등록이 전부 막힌다**(COALESCE 가 NULL 만 막는다).
+        //   500 보다 덜 시끄럽고 더 위험하다. int? 가 그 길을 닫는다.
         //   NULL = 「미설정」이고, 기기 상한 폴백은 DeviceRegistrationController 의
         //   COALESCE(…, 5) / COALESCE(…, 3) 이 맡는다. 🔴 0 으로 바꾸면 상한이 0 이 된다.
         public int? MaxPcDevices { get; set; }
