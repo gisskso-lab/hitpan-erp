@@ -340,7 +340,9 @@ public sealed class BackofficePromotionPricingDbGateTests
                 new { Tid = tenantId, Hash = Hmac(licenseKey, Pepper) });
         }
 
-        // ── 1) 요금제 목록 — PlanRow 가 두 칸을 int? 로 받는다(int 면 여기서 500)
+        // ── 1) 요금제 목록 — PlanRow 가 두 칸을 int? 로 받는다.
+        //    🔴 int 였다면 500 이 아니라 **조용한 0** 이 된다(Dapper 가 NULL 을 그냥 안 담는다 · 실측 2026-10-08).
+        //    아래 Assert.Null 이 그 조용한 0 을 잡는 자리다 — 500 축만 두면 못 잡는다.
         var pricing = new PricingAdminController(env.Config(), NullLogger<PricingAdminController>.Instance)
         { ControllerContext = OwnerContext() };
         var listed = await pricing.ListPlans(default);
