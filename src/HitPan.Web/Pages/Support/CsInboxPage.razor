@@ -37,6 +37,65 @@ else
                 <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@r.Body</MudText>
             </MudPaper>
         }
+
+        @* 작15 E-1 — 만족도 카드. 답 목록과 같은 화면에 있고, 보낸 뒤에도 화면 이동 0(한 화면 완결).
+           🔴 열림 판정의 주인은 서버다 — 화면은 서버가 준 canRate 를 그대로 따른다(사장님 결재 Q-1).
+           🚫 고객에게 보이는 글자에 개발 용어 0건(#23) *@
+        @if (_rating is not null && _rating.CanRate && !_thanks)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">답변이 도움이 됐나요?</MudText>
+                <div class="d-flex flex-wrap mb-3" style="gap:8px">
+                    @foreach (var c in Choices)
+                    {
+                        <MudButton Color="Color.Primary" Disabled="@_sending"
+                                   Variant="@(_pick == c.Score ? Variant.Filled : Variant.Outlined)"
+                                   OnClick="@(() => _pick = c.Score)">@c.Label</MudButton>
+                    }
+                </div>
+                <MudTextField @bind-Value="_comment" Label="한 줄 남기기 (선택)" Variant="Variant.Outlined"
+                              MaxLength="500" Disabled="@_sending"
+                              HelperText="주민번호·카드번호·계좌번호·사업자번호는 넣지 마세요" />
+                @if (!string.IsNullOrEmpty(_notice))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:#B42318">@_notice</MudText>
+                }
+                <div class="mt-3">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               Disabled="@(_pick == 0 || _sending)" OnClick="SendRatingAsync">평가 보내기</MudButton>
+                </div>
+            </MudPaper>
+        }
+        else if (_rating is not null && (_thanks || _rating.Reason == ReasonAlreadyRated))
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                @if (_thanks)
+                {
+                    <MudText Typo="Typo.subtitle1">평가 고맙습니다. 더 나은 답으로 보답하겠습니다.</MudText>
+                }
+                @if (_rating.MyRating is not null)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-1" Style="color:#6B7280">
+                        이 답변을 「@LabelOf(_rating.MyRating)」로 평가하셨습니다.
+                    </MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(_rating.MyComment))
+                {
+                    <MudText Typo="Typo.body2" Class="mt-1" Style="white-space:pre-wrap">@_rating.MyComment</MudText>
+                }
+                @* 「고쳤다 ≠ 갔다」 자리 — 아직 본사에 닿지 않은 것을 닿은 것처럼 보이게 하지 않는다 *@
+                @if (DeliveryNotice(_rating.DeliveryState) is { Length: > 0 } dn)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color:#6B7280">@dn</MudText>
+                }
+            </MudPaper>
+        }
+        else if (_rating is not null && ClosedNotice(_rating.Reason) is { Length: > 0 } cn)
+        {
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.body2" Style="color:#6B7280">@cn</MudText>
+            </MudPaper>
+        }
     </div>
 }
 
@@ -46,13 +105,34 @@ else
     private bool _loading = true;
     private List<Reply> _replies = new();
 
+    // 작15 E-1 — 3단 글자와 점수 (사장님 결재 Q-3: 좋아요/보통/아쉬워요 = 3/2/1)
+    private const string ReasonAlreadyRated = "already_rated";
+    private static readonly Choice[] Choices =
+    {
+        new(3, "좋아요"),
+        new(2, "보통"),
+        new(1, "아쉬워요"),
+    };
+
+    private RatingBlock? _rating;
+    private int _pick;
+    private string? _comment;
+    private bool _sending;
+    private bool _thanks;
+    private string? _notice;
+
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
+        _thanks = false;
+        _pick = 0;
+        _comment = null;
+        _notice = null;
         try
         {
             var res = await Http.GetFromJsonAsync<RepliesResponse>($"api/cs/requests/{RequestId}/replies");
             _replies = res?.Data ?? new();
+            _rating = res?.Rating;
 
             // 읽음 처리 — 열었다 = 읽었다. N-8 숫자가 줄어든다(read_at 메타 갱신).
             foreach (var r in _replies.Where(x => x.ReadAt is null))
@@ -68,10 +148,108 @@ else
         _loading = false;
     }
 
+    // 작15 E-1 — 평가 보내기. 서버가 열림을 다시 판정하므로 화면이 우회로가 되지 않는다.
+    private async Task SendRatingAsync()
+    {
+        if (_pick == 0 || _sending) return;
+        _sending = true;
+        _notice = null;
+        try
+        {
+            var res = await Http.PostAsJsonAsync($"api/cs/requests/{RequestId}/rating",
+                new { rating = _pick, comment = _comment });
+
+            if (res.IsSuccessStatusCode)
+            {
+                _thanks = true;
+            }
+            else
+            {
+                _notice = await ReadMessageAsync(res) ?? "지금은 평가할 수 없습니다.";
+            }
+            await RefreshRatingAsync();
+        }
+        catch (Exception)
+        {
+            // #15 — 조용히 삼키지 않는다. 고객에게 한 줄, 콘솔에 한 줄.
+            _notice = "평가를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.";
+            Console.Error.WriteLine("[CS] 평가 전송 실패");
+        }
+        _sending = false;
+    }
+
+    private async Task RefreshRatingAsync()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<RepliesResponse>($"api/cs/requests/{RequestId}/replies");
+            if (res?.Rating is not null) _rating = res.Rating;
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("[CS] 평가 상태 재조회 실패");
+        }
+    }
+
+    private static async Task<string?> ReadMessageAsync(HttpResponseMessage res)
+    {
+        try
+        {
+            var err = await res.Content.ReadFromJsonAsync<RateError>();
+            return string.IsNullOrWhiteSpace(err?.Message) ? null : err!.Message;
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("[CS] 평가 응답 해석 실패");
+            return null;
+        }
+    }
+
+    private static string LabelOf(int? score)
+        => Choices.FirstOrDefault(c => c.Score == score)?.Label ?? "";
+
+    // 내 평가가 본사까지 갔나 — 안 간 것을 간 것처럼 보이게 하지 않는다(PM 결재 D-3).
+    private static string DeliveryNotice(string? state) => state switch
+    {
+        "pending" => "평가를 전달하는 중입니다.",
+        "rejected" => "평가를 전달하지 못했습니다 — 내용을 확인해 주세요.",
+        "failed" => "평가 전달이 지연되고 있습니다. 본사가 확인 중입니다.",
+        _ => "",
+    };
+
+    // 평가가 닫혀 있는 사유 — 설계 §4 표의 화면 글자 그대로
+    private static string ClosedNotice(string? reason) => reason switch
+    {
+        "not_sent" => "아직 본사에 전달되지 않았습니다. 전달된 뒤에 평가할 수 있습니다.",
+        "rejected" => "보낼 수 없는 문의입니다 — 내용을 확인해 주세요.",
+        "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
+        "no_reply" => "답이 오면 평가할 수 있습니다.",
+        _ => "",
+    };
+
+    private sealed record Choice(int Score, string Label);
+
+    private sealed class RateError
+    {
+        public bool Success { get; set; }
+        public string? Reason { get; set; }
+        public string? Message { get; set; }
+    }
+
+    private sealed class RatingBlock
+    {
+        public bool CanRate { get; set; }
+        public string? Reason { get; set; }
+        public int? MyRating { get; set; }
+        public string? MyComment { get; set; }
+        public string? DeliveryState { get; set; }
+    }
+
     private sealed class RepliesResponse
     {
         public bool Success { get; set; }
         public List<Reply> Data { get; set; } = new();
+        public RatingBlock? Rating { get; set; }
     }
 
     private sealed class Reply
