@@ -4,6 +4,7 @@ using Dapper;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MySqlConnector;
 
 namespace HitPan.API.Controllers;
 
@@ -200,8 +201,149 @@ public class CsRequestController : ControllerBase
              ORDER BY replied_at",
             new { TenantId = tenantId, Id = id });
 
-        return Ok(new { success = true, data = rows });
+        // 작15 E-1 — 평가 블록 **동봉**(추가만 · #1). 기존 키 success·data 는 한 글자도 안 바꿨다.
+        //   판정은 서버가 한다 — 화면이 제 마음대로 열지 못한다(사장님 결재 Q-1).
+        var rating = RatingBlock(await LoadRatingStateAsync(tenantId, id));
+
+        return Ok(new { success = true, data = rows, rating });
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 작15 E-1 — 만족도 평가 받기 (신설 · 사장님 결재 2026-10-08 Q-1·Q-2·Q-3)
+    //
+    // ■ Q-1 — 평가는 **답이 1건 이상** 올 때만 열린다.
+    //   열림 = sent_at IS NOT NULL AND terminal_reason IS NULL AND 답 1건 이상 AND 평가 행 없음.
+    //   🔴 화면만 숨기지 않는다 — 같은 판정을 이 POST 가 **서버에서 다시** 한다.
+    //   왜 이 판정이 전부인가: 본사 수신구는 티켓이 없어도 200 {duplicated:true} 를 준다
+    //   (CsInboundController.cs:231). 전송 전·거부된 쪽지를 평가하면 점수가 **조용히 사라진다**.
+    //
+    // ■ Q-2 — **수정 불가 · 첫 평가만.** 평가 행이 있으면 열지도 않고 POST 도 받지 않는다(수정·철회 0건).
+    // ■ Q-3 — 좋아요 / 보통 / 아쉬워요 = 3 / 2 / 1 (본사 점수 범위 1~3 과 같은 축).
+    // ■ #2 — tenant_id 는 HttpContext.Items 에서만. 파라미터 수신 0.
+    // ─────────────────────────────────────────────────────────────
+    [HttpPost("requests/{id}/rating")]
+    public async Task<IActionResult> Rate(string id, [FromBody] RateCsRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        var userId = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
+
+        if (req is null)
+            return BadRequest(new { success = false, reason = "bad_request", message = "평가를 선택해 주세요" });
+
+        // ① 열림 판정 — 서버가 다시 한다(화면 우회로 들어온 평가가 사라지는 길을 닫는 자리)
+        var reason = RatingReason(await LoadRatingStateAsync(tenantId, id));
+        if (reason == ReasonAlreadyRated)
+            return Ok(new { success = true, alreadyRated = true, reason });   // Q-2 — 첫 평가가 정본
+        if (reason != ReasonOpen)
+            return BadRequest(new { success = false, reason, message = ClosedMessage(reason) });
+
+        // ② 점수 범위 — 본사 계약과 같은 1~3. 여기서 걸러 본사 400 을 만들지 않는다.
+        if (req.Rating is < 1 or > 3)
+            return BadRequest(new { success = false, reason = "bad_rating", message = "평가를 선택해 주세요" });
+
+        // ③ 한 줄 평 — 상한 500(본사 저장 상한과 같은 값 ⇒ 보낸 글이 잘려 들어가지 않는다)
+        var comment = req.Comment?.Trim();
+        if (comment is { Length: > 500 })
+            return BadRequest(new { success = false, reason = "comment_too_long", message = "한 줄로 적어 주세요" });
+        if (comment?.Length == 0) comment = null;
+
+        // ④ 문① — 보내기 전 금지필드 검사. 본사는 금지필드 글을 조용히 버리고 점수만 저장하므로
+        //    ERP 가 먼저 **고칠 기회**를 줘야 고객이 쓴 글이 사라지지 않는다.
+        var rule = ForbiddenFieldScanner.Scan(comment);
+        if (rule is not null)
+        {
+            await RecordRejectAsync(tenantId, rule, ct);
+            return BadRequest(new { success = false, reason = "forbidden_field", message = ForbiddenFieldScanner.GuideMessage(rule) });
+        }
+
+        // ⑤ 로컬에 먼저 적는다 — 터널·본사가 내려가 있어도 평가가 사라지지 않는다(유실 0).
+        //    🔴 next_attempt_at 을 UTC 로 명시한다 — 표 기본값은 서버 로컬시각이고 워커 폴링은
+        //    UTC_TIMESTAMP(6) 비교라, KST 고객 PC 에서 기본값에 맡기면 9시간 뒤에야 집힌다
+        //    (Create 의 cs_outbox INSERT 와 같은 함정 · 게이트 G-E1-2 가 이 자리를 잰다).
+        try
+        {
+            await _db.ExecuteAsync(@"
+                INSERT INTO cs_rating_outbox (tenant_id, cs_request_id, `rating`, `comment`, next_attempt_at)
+                VALUES (@TenantId, @Id, @Rating, @Comment, UTC_TIMESTAMP(6))",
+                new { TenantId = tenantId, Id = id, req.Rating, Comment = comment });
+        }
+        catch (MySqlException ex) when (ex.Number == 1062)
+        {
+            // uq_cs_rating_req — 두 번 눌러도 사고가 아니다(멱등). 첫 평가가 그대로 정본이다.
+            _logger.LogInformation(ex, "[CS평가] 같은 쪽지 재평가 시도 — 첫 평가 유지(멱등)");
+            return Ok(new { success = true, alreadyRated = true, reason = ReasonAlreadyRated });
+        }
+
+        return Ok(new { success = true });
+    }
+
+    // 작15 E-1 — 열림 판정의 재료를 **한 번의 조회**로 모은다(#16 — 한 요청 = 한 연결 · Task.WhenAll 금지).
+    //   🔴 TINYINT/불리언을 dynamic 으로 받으면 캐스팅 500 이 난다(선례) ⇒ 형을 적은 DTO 로 받는다.
+    private async Task<RatingStateRow?> LoadRatingStateAsync(string tenantId, string csRequestId)
+        => await _db.QueryFirstOrDefaultAsync<RatingStateRow>(@"
+            SELECT o.sent_at         AS SentAt,
+                   o.terminal_reason AS TerminalReason,
+                   (SELECT COUNT(*) FROM cs_replies p
+                     WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS ReplyCount,
+                   g.`rating`        AS MyRating,
+                   g.`comment`       AS MyComment,
+                   g.sent_at         AS RatingSentAt,
+                   g.terminal_reason AS RatingTerminalReason
+              FROM cs_requests r
+              LEFT JOIN cs_outbox o        ON o.cs_request_id = r.cs_request_id
+              LEFT JOIN cs_rating_outbox g ON g.cs_request_id = r.cs_request_id AND g.tenant_id = r.tenant_id
+             WHERE r.tenant_id = @TenantId AND r.cs_request_id = @Id",
+            new { TenantId = tenantId, Id = csRequestId });
+
+    private const string ReasonOpen = "open";
+    private const string ReasonAlreadyRated = "already_rated";
+
+    // §4 표 그대로 — 이 함수 하나가 「조용히 사라지는 평가」를 막는 전부다.
+    //   순서가 뜻이다: 이미 평가한 건이 가장 먼저(Q-2 첫 평가만) → 종결 → 미전송 → 답 0건 → 열림.
+    private static string RatingReason(RatingStateRow? s)
+    {
+        if (s is null) return "not_sent";                       // 내 테넌트에 그 쪽지가 없다
+        if (s.MyRating is not null) return ReasonAlreadyRated;  // Q-2 — 수정 불가
+        if (s.TerminalReason == "rejected") return "rejected";
+        if (s.TerminalReason == "failed") return "failed";
+        if (s.SentAt is null) return "not_sent";                // 본사에 티켓이 아직 없다
+        if (s.ReplyCount < 1) return "no_reply";                // Q-1 — 답이 와야 열린다
+        return ReasonOpen;
+    }
+
+    // 고객에게 보이는 닫힘 사유 — 🚫 개발 용어 0건(#23)
+    private static string ClosedMessage(string reason) => reason switch
+    {
+        "not_sent" => "아직 본사에 전달되지 않았습니다. 전달된 뒤에 평가할 수 있습니다.",
+        "rejected" => "보낼 수 없는 문의입니다 — 내용을 확인해 주세요.",
+        "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
+        "no_reply" => "답이 오면 평가할 수 있습니다.",
+        _ => "지금은 평가할 수 없습니다.",
+    };
+
+    // 화면이 그대로 그릴 수 있는 블록 — 판정의 주인은 서버 하나다.
+    private static object RatingBlock(RatingStateRow? s)
+    {
+        var reason = RatingReason(s);
+        return new
+        {
+            canRate = reason == ReasonOpen,
+            reason,
+            myRating = s?.MyRating,
+            myComment = s?.MyComment,
+            deliveryState = s?.MyRating is null ? null : DeliveryState(s!),
+        };
+    }
+
+    // 내 평가가 본사까지 갔나 — 「고쳤다 ≠ 갔다」 자리라 고객에게 그대로 보인다(PM 결재 D-3).
+    private static string DeliveryState(RatingStateRow s)
+        => s.RatingTerminalReason switch
+        {
+            "rejected" => "rejected",
+            "failed" => "failed",
+            _ => s.RatingSentAt is null ? "pending" : "sent",
+        };
 
     // N-8 — 「안 읽은 답 N」 전역 표시의 숫자
     [HttpGet("replies/unread-count")]
@@ -255,5 +397,24 @@ public class CsRequestController : ControllerBase
         public string? SubTag { get; set; }
         public string? Body { get; set; }
         public string? ScreenCode { get; set; }
+    }
+
+    // 작15 E-1 — 평가 요청 몸통. 점수는 금액이 아니라 정수다(#4 와 무관 · 1~3).
+    public class RateCsRequest
+    {
+        public int Rating { get; set; }
+        public string? Comment { get; set; }
+    }
+
+    // 작15 E-1 — 열림 판정 재료. dynamic 금지(TINYINT ↔ bool/int 캐스팅 500 선례).
+    private sealed class RatingStateRow
+    {
+        public DateTime? SentAt { get; set; }
+        public string? TerminalReason { get; set; }
+        public int ReplyCount { get; set; }
+        public int? MyRating { get; set; }
+        public string? MyComment { get; set; }
+        public DateTime? RatingSentAt { get; set; }
+        public string? RatingTerminalReason { get; set; }
     }
 }

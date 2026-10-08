@@ -80,6 +80,10 @@ public sealed class CsOutboxSenderWorker : BackgroundService
 
                     await SendPendingAsync(db, hq, ownerAccountId, _logger, st);
 
+                    // 작15 E-1 — 만족도 평가 갈래. 같은 사이클·같은 연결(#16) · 30초 주기.
+                    //   위 함수 본문은 한 글자도 안 바꿨다(#1) — 호출 한 줄만 더했다.
+                    await SendPendingRatingsAsync(db, hq, ownerAccountId, _logger, st);
+
                     if (DateTime.UtcNow - _lastPullUtc >= PullInterval)
                     {
                         await PullRepliesAsync(db, hq, ownerAccountId, _logger, st);
@@ -156,6 +160,122 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                 if (reason == "failed")
                     logger.LogError("[CS송신] 상한 도달 — failed 로 멈춤(삭제 아님 · 사람이 본다) outbox={Id}", row.OutboxId);
             }
+        }
+    }
+
+    // ── 작15 E-1 — 만족도 평가 송신 (cs_rating_outbox · 기존 두 함수와 **같은 모양**) ────
+    //   public static 인 이유는 SendPendingAsync 와 같다 — 게이트가 격리 DB + 가짜 본사로
+    //   이 사이클을 직접 돌려 **동작**을 잰다(글자가 아니라 동작 · 누적 26회 지적 자리).
+    //
+    //   🔴 cs_requests.status 는 건드리지 않는다 — 평가는 쪽지 상태축이 아니다.
+    //      섞으면 「답변 도착」 글자가 평가에 덮인다(설계 §6 · R-5).
+    //   🔴 행 삭제 0 — 상한(50회) 뒤 failed 로 멈추고 사람이 본다. 평가는 고객이 쓴 글이다.
+    public static async Task SendPendingRatingsAsync(MySqlConnection db, IHeadquartersClient hq, string ownerAccountId, ILogger logger, CancellationToken st)
+    {
+        var rows = (await db.QueryAsync<RatingRow>(@"
+            SELECT outbox_id AS OutboxId, tenant_id AS TenantId, cs_request_id AS CsRequestId,
+                   `rating` AS Rating, `comment` AS Comment, attempt_count AS AttemptCount
+              FROM cs_rating_outbox
+             WHERE sent_at IS NULL AND terminal_reason IS NULL AND next_attempt_at <= UTC_TIMESTAMP(6)
+             ORDER BY outbox_id
+             LIMIT 20")).ToList();
+
+        foreach (var row in rows)
+        {
+            if (st.IsCancellationRequested) return;
+
+            // 문② — 송신 직전 한 줄 평 재검. 기존 ScanPayloadBody 는 payload.body 만 보므로
+            //   평가는 그 그물에 안 걸린다 ⇒ 같은 스캐너를 쓰는 검사를 하나 더 둔다.
+            //   (ScanPayloadBody 본문은 한 글자도 바꾸지 않았다 — messages 쪽 불변 · #1)
+            var rule = ScanRatingComment(row.Comment);
+            if (rule is not null)
+            {
+                await db.ExecuteAsync(
+                    "INSERT INTO cs_forbidden_rejects (tenant_id, rule_code) VALUES (@TenantId, @Rule)",
+                    new { row.TenantId, Rule = rule });
+                await MarkRatingTerminalAsync(db, row.OutboxId, "rejected", 400, "forbidden-field(door2)");
+                continue;
+            }
+
+            // 몸통은 **정확히 3키** — 4번째 키가 있으면 본사가 통째 400 으로 거부한다
+            //   (CsInboundController.cs:200-205 화이트리스트). 봉투(3중 재료)는 HeadquartersClient 가 싼다.
+            var payload = JsonSerializer.Serialize(new
+            {
+                csRequestId = row.CsRequestId,
+                rating = row.Rating,
+                comment = row.Comment,
+            });
+
+            var (code, body) = await hq.PostAsync("/api/backoffice/cs/ratings", payload, ownerAccountId, st);
+
+            if (code is >= 200 and < 300)
+            {
+                // 🔴 2xx 라도 본사에 티켓이 없었으면 duplicated 가 온다(CsInboundController.cs:231).
+                //    그때 평가는 본사 어디에도 안 남는다 ⇒ 그 사실의 **유일한 흔적**을 last_error 에 적는다.
+                //    고객 화면은 「보냈다」로 둔다 — 실패로 되돌리면 또 누르고 또 사라진다(설계 §8).
+                var dup = LooksDuplicated(body);
+                await db.ExecuteAsync(@"
+                    UPDATE cs_rating_outbox
+                       SET sent_at = UTC_TIMESTAMP(6), last_status_code = @Code, last_error = @Err
+                     WHERE outbox_id = @OutboxId",
+                    new { Code = code, Err = dup ? "duplicated" : null, row.OutboxId });
+                if (dup)
+                    logger.LogWarning("[CS평가] 본사에 해당 티켓이 없었다(duplicated) — 흔적만 남긴다 outbox={Id}", row.OutboxId);
+            }
+            else if (code is 400 or 422)
+            {
+                // 내용으로 거부 — 재시도해도 같은 답이다. 종결 + 화면에 사유. 행 삭제 0.
+                await MarkRatingTerminalAsync(db, row.OutboxId, "rejected", code, Trim(body));
+            }
+            else
+            {
+                // 0(타임아웃·연결) · 5xx · 401/403 · 🔴 **429(60분 잠금)** = 재시도.
+                //   429 를 rejected 로 종결하면 그 창에 눌린 평가가 **영구 소실**된다(G-E1-4 가 이 자리를 문다).
+                var attempt = row.AttemptCount + 1;
+                var reason = attempt >= MaxAttempts ? "failed" : null;
+                var backoffSec = Math.Min(30 * Math.Pow(2, Math.Min(attempt, 10)), 600); // 상한 10분
+                await db.ExecuteAsync(@"
+                    UPDATE cs_rating_outbox
+                       SET attempt_count = @Attempt, last_status_code = @Code, last_error = @Err,
+                           next_attempt_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL @Backoff SECOND),
+                           terminal_reason = @Reason
+                     WHERE outbox_id = @OutboxId",
+                    new { Attempt = attempt, Code = code, Err = Trim(body), Backoff = (int)backoffSec, Reason = reason, row.OutboxId });
+                if (reason == "failed")
+                    logger.LogError("[CS평가] 상한 도달 — failed 로 멈춤(삭제 아님 · 사람이 본다) outbox={Id}", row.OutboxId);
+            }
+        }
+    }
+
+    // 평가 종결 — cs_requests 는 건드리지 않는다(쪽지 상태축과 분리 · R-5).
+    private static async Task MarkRatingTerminalAsync(MySqlConnection db, long outboxId, string reason, int code, string? err)
+        => await db.ExecuteAsync(@"
+            UPDATE cs_rating_outbox
+               SET terminal_reason = @Reason, last_status_code = @Code, last_error = @Err
+             WHERE outbox_id = @OutboxId",
+            new { Reason = reason, Code = code, Err = err, OutboxId = outboxId });
+
+    /// <summary>문② 평가판 — 한 줄 평 글만 본다(기존 <c>ScanPayloadBody</c> 는 payload.body 전용이라 평가를 못 본다).</summary>
+    internal static string? ScanRatingComment(string? comment) => ForbiddenFieldScanner.Scan(comment);
+
+    /// <summary>
+    /// 본사가 2xx 와 함께 <c>duplicated:true</c> 를 줬나 — 티켓이 없어서 아무것도 저장되지 않았다는 뜻이다.
+    /// <para>🔴 ASCII 키·불리언만 본다. 한글 글자 비교는 쓰지 않는다(JSON 직렬화가 한글을 <c>\uXXXX</c> 로 쓴다).</para>
+    /// </summary>
+    internal static bool LooksDuplicated(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("duplicated", out var d)
+                && d.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            // 해석 못 하는 2xx 본문은 「평범한 성공」으로 본다 — 흔적을 거짓으로 남기지 않는다.
+            return false;
         }
     }
 
@@ -249,6 +369,17 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         public string TenantId { get; set; } = "";
         public string CsRequestId { get; set; } = "";
         public string PayloadJson { get; set; } = "";
+        public int AttemptCount { get; set; }
+    }
+
+    // 작15 E-1 — 평가 큐 한 행. 점수는 금액이 아니라 정수다(1~3).
+    private sealed class RatingRow
+    {
+        public long OutboxId { get; set; }
+        public string TenantId { get; set; } = "";
+        public string CsRequestId { get; set; } = "";
+        public int Rating { get; set; }
+        public string? Comment { get; set; }
         public int AttemptCount { get; set; }
     }
 

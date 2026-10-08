@@ -3644,7 +3644,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4996,6 +4996,34 @@ CREATE TABLE `cs_forbidden_rejects` (
   PRIMARY KEY (`reject_id`),
   KEY `idx_cs_reject_tenant` (`tenant_id`,`occurred_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='금지필드 거부 기록 — 규칙코드·시각만 · INSERT ONLY(작14 B-4)';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `cs_rating_outbox` — 작15 E-1 (DB-143) · 만족도 평가 송신 큐 (유실 0 · 삭제 금지)
+--   🔴 #36 — 이 블록이 빠지면 신규 설치 고객만 평가가 500 으로 터진다(DB-126 선례).
+--      게이트 G-E1-0 이 바로 이 자리를 문다(출하 DDL 실물 import 후 INSERT).
+--
+
+DROP TABLE IF EXISTS `cs_rating_outbox`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `cs_rating_outbox` (
+  `outbox_id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) NOT NULL COMMENT 'JWT 유래만(#2) — 파라미터 수신 0',
+  `cs_request_id` varchar(36) NOT NULL COMMENT '어느 쪽지의 평가인가(cs_requests PK) · 멱등의 자리',
+  `rating` tinyint(4) NOT NULL COMMENT '1 아쉬워요 / 2 보통 / 3 좋아요 — 본사 계약(정수 1~3)과 같은 축',
+  `comment` varchar(500) DEFAULT NULL COMMENT '한 줄 평 · 상한은 본사 저장 상한과 같은 500 ⇒ 잘림 0',
+  `attempt_count` int(11) NOT NULL DEFAULT 0,
+  `next_attempt_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) COMMENT '지수백오프 시각 · INSERT 는 UTC 명시로 넣는다',
+  `sent_at` datetime(6) DEFAULT NULL COMMENT 'NULL = 아직 안 갔다 — 워커는 이 칸만 보고 집는다',
+  `last_status_code` int(11) DEFAULT NULL COMMENT '4xx/5xx 구분',
+  `last_error` varchar(500) DEFAULT NULL COMMENT '2xx 인데 본사에 티켓이 없었으면 duplicated 로 남는다 — 조용히 사라진 평가의 유일한 흔적',
+  `terminal_reason` varchar(30) DEFAULT NULL COMMENT 'rejected/failed — 비면 아직 살아 있다 · 행 삭제 금지',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  PRIMARY KEY (`outbox_id`),
+  UNIQUE KEY `uq_cs_rating_req` (`cs_request_id`),
+  KEY `idx_cs_rating_pending` (`sent_at`,`next_attempt_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 만족도 평가 송신 큐 — 유실 0 · 삭제 금지 · 멱등키 = cs_request_id(작15 E-1)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
