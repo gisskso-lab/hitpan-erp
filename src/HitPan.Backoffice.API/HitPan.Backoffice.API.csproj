@@ -25,4 +25,20 @@
   </ItemGroup>
 
 
+  <ItemGroup>
+    <!-- 🔴 20261008 R-1 (사장님 결재 「PM 권고대로 진행」) — 백오피스 스키마 SQL 을 산출물에 **동봉**한다.
+         왜: 적재기는 HITPAN_BO_SCHEMA_DIR 또는 AppContext.BaseDirectory/installer/backoffice 를 보는데
+             (Program.cs:166-167), 그 폴더가 없으면 예외 없이 「적용할 게 없음」으로 조용히 통과한다
+             (SchemaMigrator.cs:43). 그런데 여기에 복사 항목이 0개여서 publish 산출물에 SQL 이 안 실렸고,
+             배포는 publish 폴더만 rsync 한다 ⇒ 2026-10-08 NCP 배포 로그 전문에 .sql 이 0줄.
+             그래서 「HITPAN_BO_AUTO_MIGRATE=1 로 재기동」이 운영에서 헛돌았고 CS 화면이 500 이었다.
+         🔴 installer/ 안의 파일은 한 글자도 고치지 않는다 — 있는 파일을 산출물에 실어 보내기만 한다.
+         와일드카드라 새 번호(43·44…)를 더하면 자동으로 따라온다 — 사람이 이 줄을 다시 고칠 일이 없다.
+         감시: BackofficeSchemaShipGateTests (G-BO-SHIP-1·2·3) — 이 줄을 지우면 FAIL 한다(봉합 전 3/3 FAIL 확인). -->
+    <Content Include="..\..\installer\backoffice\*.sql"
+             Link="installer\backoffice\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
