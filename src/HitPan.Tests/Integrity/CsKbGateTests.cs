@@ -86,7 +86,24 @@ public sealed class CsKbGateTests : IDisposable
         return (id, tenantId, code);
     }
 
-    private static string Json(IActionResult r) => JsonSerializer.Serialize(((ObjectResult)r).Value);
+    // 🔴 한글을 \uXXXX 로 바꾸지 않는 직렬화 — 이 한 줄이 게이트의 생명이다.
+    //    기본 설정은 비 ASCII 를 escape 한다. 그러면 「회사명이 응답에 있나」를 한글로 묻는
+    //    음성 단언이 **늘 통과해 버린다**(글자가 게… 로 바뀌어 있으니 못 찾는다) —
+    //    새는 걸 못 잡는 게이트가 된다. CI 가 양성 축(「문제점」이 있나)으로 이걸 잡았다(2026-10-08).
+    private static readonly JsonSerializerOptions RawKorean = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    private static string Json(IActionResult r)
+    {
+        // 자기 검사(미끼 글자) — 한글이 escape 되면 아래 음성 단언들이 전부 거짓 통과한다.
+        //   🔴 「\u 가 하나도 없어야 한다」로 적으면 안 된다: 이모지는 서러게이트 쌍이라
+        //   UnsafeRelaxed 에서도 \uD83D… 로 남는 것이 정상이다(CI 실측 2026-10-08).
+        //   재야 할 것은 **한글이 비교 가능한 상태인가** 하나뿐이다.
+        Assert.Equal("\"문제점\"", JsonSerializer.Serialize("문제점", RawKorean));
+        return JsonSerializer.Serialize(((ObjectResult)r).Value, RawKorean);
+    }
 
     // ── G-C-1 ────────────────────────────────────────────────────────
     [Fact(DisplayName = "G-C-1 🔴 승격 초안 — 티켓엔 회사명·식별자가 있는데도 초안엔 0건(가져오지 않은 값은 잊을 수도 없다)")]
@@ -102,6 +119,9 @@ public sealed class CsKbGateTests : IDisposable
         Assert.Contains("문제점", json);
         Assert.Contains("해결점", json);
         Assert.Contains("sales_order", json);   // 화면 코드는 가져온다(식별정보가 아니다)
+        // 🔴 음성 단언의 효력 증명 — 티켓 본문(한글)은 그대로 실려 온다.
+        //    즉 한글이 비교 가능한 상태인데도 회사명·식별자만 없는 것이다(거짓 통과 아님).
+        Assert.Contains(TicketBody, json);
 
         // 🔴 음성 — 식별정보는 한 글자도 없다
         Assert.DoesNotContain(CompanyName, json);
