@@ -13,7 +13,7 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🔴 작14 묶음 C 게이트 — CS 책상 + 누리집의 **안전핀을 동작으로** 잰다
+/// 🔴 작14 묶음 C 게이트 — CS 책상 + 백과사전의 **안전핀을 동작으로** 잰다
 /// (작업지시서 §4 C-게이트 · 설계서 §2-ⓓ).
 ///
 /// <list type="bullet">
@@ -279,8 +279,8 @@ public sealed class CsKbGateTests : IDisposable
     public void G_C_7_8폴더_이슈코드_PRD틀()
     {
         var root = RepoRoot();
-        var baseDir = Path.Combine(root, "docs", "CS", "누리집");
-        Assert.True(Directory.Exists(baseDir), $"누리집 폴더가 없다: {baseDir}");
+        var baseDir = Path.Combine(root, "docs", "CS", "백과사전");
+        Assert.True(Directory.Exists(baseDir), $"백과사전 폴더가 없다: {baseDir}");
 
         // 8폴더 — 이름·개수 그대로(백오피스 CategoryFolder 와 글자까지 같아야 한다)
         var folders = new[] { "1.사용", "2.설정", "3.통신", "4.데이터", "5.업데이트", "6.기능오류", "7.설치", "8.기타" };
@@ -388,6 +388,6 @@ public sealed class CsKbGateTests : IDisposable
             if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
             dir = dir.Parent;
         }
-        throw new Xunit.Sdk.XunitException("HitPan.sln 을 못 찾았다 — 누리집 폴더를 읽을 수 없다.");
+        throw new Xunit.Sdk.XunitException("HitPan.sln 을 못 찾았다 — 백과사전 폴더를 읽을 수 없다.");
     }
 }

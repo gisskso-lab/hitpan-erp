@@ -174,6 +174,66 @@ public class CsInboundController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────
+    // 만족도 평가 수신 — 사장님 워크플로우 7단계(2026-10-08)
+    //
+    // ■ 왜 받나: CS 실적(8단계)의 **유일한 고객 쪽 숫자**다. 처리 건수로 재면 거짓말을 낳는다
+    //   (숫자 올리려 애매한 것도 완료로 넘긴다). 고객이 「됐다」고 한 것만 진짜 완료다.
+    // ■ 받는 것은 **점수 1~3 + 한 줄**뿐이다. 업무 데이터 0 (#18·#22).
+    // ■ 쪽지·답과 **같은 문**을 쓴다 — 3중 일치 인증 · 봉투 화이트리스트 · 금지필드 문③.
+    //   한 줄 평에 식별정보가 실리면 **점수만 저장하고 글은 버린다**(거부로 되돌리면 평가가 사라진다).
+    // ■ 멱등: 이미 평가된 건은 덮지 않는다(고객이 두 번 눌러도 첫 평가가 정본 · UPDATE … IS NULL).
+    //
+    // ⚠️ ERP 쪽 「평가 보내기」 화면·전송은 **다음 세션 몫**이다(사장님 지시 2026-10-08:
+    //    백오피스 먼저 · ERP 수정은 헷갈리지 않게 다음 세션). 이 문은 그때 바로 받을 수 있게 먼저 세운다.
+    [HttpPost("ratings")]
+    public async Task<IActionResult> ReceiveRating([FromBody] JsonElement envelope, CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+
+        var auth = await AuthenticateAsync(db, envelope, ct);
+        if (auth.Fail is not null) return auth.Fail;
+
+        if (!envelope.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+            return await RejectAsync(db, auth.TenantCode, "bad_payload", BadRequest(Msg("요청 형식 오류")));
+
+        // 화이트리스트 — 이 셋 밖의 키가 하나라도 있으면 통째 거부(구버전·악의 공통 차단)
+        foreach (var p in data.EnumerateObject())
+        {
+            if (p.Name is not ("csRequestId" or "rating" or "comment"))
+                return await RejectAsync(db, auth.TenantCode, "forbidden_field", BadRequest(Msg("허용되지 않은 항목 포함")));
+        }
+
+        var uid = Str(data, "csRequestId");
+        if (string.IsNullOrWhiteSpace(uid) || uid.Length > 36)
+            return await RejectAsync(db, auth.TenantCode, "bad_payload", BadRequest(Msg("쪽지 식별자 오류")));
+
+        if (!data.TryGetProperty("rating", out var rv) || rv.ValueKind != JsonValueKind.Number
+            || !rv.TryGetInt32(out var rating) || rating is < 1 or > 3)
+            return await RejectAsync(db, auth.TenantCode, "bad_payload", BadRequest(Msg("평가는 1~3 입니다")));
+
+        // 한 줄 평 — 길이 상한 + 문③ 검사. 걸리면 **글만 버리고 점수는 살린다**.
+        var comment = Str(data, "comment");
+        if (comment is { Length: > 500 }) comment = comment[..500];
+        if (BoForbiddenFieldScanner.Scan(comment) is not null)
+        {
+            await RejectAsync(db, auth.TenantCode, "forbidden_field", Ok(Msg("")));
+            comment = null;
+        }
+
+        var n = await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets
+               SET rating = @Rating, rated_at = UTC_TIMESTAMP(6), rating_comment = @Comment
+             WHERE tenant_id = @TenantId AND client_ticket_uid = @Uid AND rated_at IS NULL",
+            new { auth.TenantId, Uid = uid, Rating = rating, Comment = comment });
+
+        // 행이 없거나 이미 평가된 건 — ERP 가 재시도로 쌓지 않게 **200** 으로 닫는다(멱등).
+        if (n == 0) return Ok(new { success = true, duplicated = true });
+
+        _logger.LogInformation("[CS수신] 만족도 수신 tenant={Tenant}", Safe(auth.TenantCode));
+        return Ok(new { success = true });
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // 3중 일치 인증 — 봉투 화이트리스트 + 잠금(B-6 ①)
     // ─────────────────────────────────────────────────────────────
     private sealed record AuthResult(string TenantId, string TenantCode, IActionResult? Fail)
@@ -267,7 +327,7 @@ public class CsInboundController : ControllerBase
     }
 
     // ── 문③ 본문 모양 검사 — 규칙 한 벌은 BoForbiddenFieldScanner 하나다 ──
-    //    🔴 왜 한 벌인가(작14 C-4 와 같은 커밋): 누리집 승인 재스캔이 두 번째 호출자다.
+    //    🔴 왜 한 벌인가(작14 C-4 와 같은 커밋): 백과사전 승인 재스캔이 두 번째 호출자다.
     //    같은 규칙을 백오피스 안에서 두 벌 쓰면 검사 **순서**가 갈라진다
     //    (2026-10-08 CI G-CS-5 실측: 사업자번호가 계좌로 잡혔다). 복제는 ERP↔백오피스 경계 한 번만.
     private static string? ScanBody(string? body) => BoForbiddenFieldScanner.Scan(body);
@@ -300,6 +360,10 @@ public class CsInboundController : ControllerBase
 
     private static object Msg(string m) => new { success = false, message = m };
     private static string? Str(JsonElement e) => e.ValueKind == JsonValueKind.String ? e.GetString() : null;
+
+    /// <summary>객체 안의 문자열 칸 한 개 — 없으면 null(있는 것만 읽는다).</summary>
+    private static string? Str(JsonElement obj, string name)
+        => obj.TryGetProperty(name, out var v) ? Str(v) : null;
     private static string Safe(string? s) => string.IsNullOrEmpty(s) ? "(없음)" : (s.Length <= 24 ? s : s[..24] + "…");
     private static string? Truncate(string? s, int max) => string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s[..max]);
 

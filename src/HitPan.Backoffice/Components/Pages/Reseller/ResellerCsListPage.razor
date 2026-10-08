@@ -1,5 +1,5 @@
 @*
-    WS-20260601-17 대리점 RLS CS 티켓 목록 + 신규 등록 (8명제 #6·#7)
+    WS-20260601-17 대리점 RLS CS 창구 목록 + 신규 등록 (8명제 #6·#7)
     작성일: 2026-06-01 / 작성팀: 프론트 매니저 + 백엔드 매니저
     절대 원칙:
       - ResellerSelfOnly (JWT role=reseller + reseller_serial 필수)
@@ -16,11 +16,11 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 
-<PageTitle>내 영업 CS 티켓 — 히트판</PageTitle>
+<PageTitle>내 영업 CS 창구 — 히트판</PageTitle>
 
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
     <div>
-        <MudText Typo="Typo.h5" Style="font-weight:600;">내 영업 CS 티켓</MudText>
+        <MudText Typo="Typo.h5" Style="font-weight:600;">내 영업 CS 창구</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
             자기 영업 고객사 한정 (다른 대리점 0)
         </MudText>
@@ -74,7 +74,7 @@
         </PagerContent>
         <NoRecordsContent>
             <MudText Align="Align.Center" Class="pa-6" Color="Color.Secondary">
-                CS 티켓이 없습니다.
+                CS 창구이 없습니다.
             </MudText>
         </NoRecordsContent>
     </MudDataGrid>
@@ -82,7 +82,7 @@
 
 <MudDialog @bind-Visible="_dlgOpen" Options="@(new DialogOptions{ MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent>
-        <MudText Typo="Typo.h6">새 CS 티켓</MudText>
+        <MudText Typo="Typo.h6">새 CS 창구</MudText>
     </TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="_form.TargetSerial" Label="대상 시리얼 (HP-...)"
@@ -136,7 +136,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"CS 티켓 조회 실패: {ex.Message}", Severity.Error);
+            Snackbar.Add($"CS 창구 조회 실패: {ex.Message}", Severity.Error);
             _rows = new List<TicketRow>();
         }
         finally
@@ -157,7 +157,7 @@
             var http = await Http.PostAsJsonAsync("api/reseller/v2/cs/tickets", _form);
             if (http.IsSuccessStatusCode)
             {
-                Snackbar.Add("CS 티켓이 등록되었습니다", Severity.Success);
+                Snackbar.Add("CS 창구이 등록되었습니다", Severity.Success);
                 _dlgOpen = false;
                 await LoadAsync();
             }

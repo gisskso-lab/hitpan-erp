@@ -53,6 +53,41 @@ public class CsAdminController : ControllerBase
     //   지금은 서버 제안값 하나뿐이고, 사람이 화면에서 고칠 수 있다(반자동 — 자동 확정 0건).
     private const int DefaultPromiseHours = 24;
 
+    // ── 사장님 지시 2026-10-08 — 응대 유형 3종 ────────────────────────
+    //   🔴 `received_channel`(들어온 길)과 **다른 축**이다. 전화로 들어와 원격지원으로 끝날 수 있다.
+    private static readonly HashSet<string> AllowedHandledVia = new(StringComparer.Ordinal)
+    {
+        "message",   // 쪽지로 응대
+        "phone",     // 전화로 응대
+        "remote",    // 원격지원
+    };
+
+    // ── 진행 4단계 — 파생값이다(칸을 새로 만들지 않는다) ──────────────
+    //   ① 안 읽음      read_at IS NULL
+    //   ② 처리 안 됨   읽었고 status <> '완료'
+    //   ③ 처리 완료    status = '완료' 이고 평가 전
+    //   ④ 평가 완료    rated_at IS NOT NULL
+    //   🔴 네 단계는 **서로 겹치지 않고 합이 전체**다(G-C-10 이 그걸 문다).
+    //      겹치면 화면 아래 숫자가 서로 안 맞아 「어느 게 맞나」를 사람이 판단하게 된다.
+    //      그래서 조건을 네 번 따로 쓰지 않고 **단계를 한 번 정해서** 센다(겹칠 길이 없다).
+    private const string StageExpr = @"
+        CASE WHEN rated_at IS NOT NULL THEN 4
+             WHEN status = '완료'      THEN 3
+             WHEN read_at IS NULL      THEN 1
+             ELSE 2 END";
+
+    private const string StageCountSql = @"
+        SELECT SUM(stage = 1) AS unread,
+               SUM(stage = 2) AS open,
+               SUM(stage = 3) AS done,
+               SUM(stage = 4) AS rated,
+               COUNT(*)       AS total
+          FROM (SELECT CASE WHEN rated_at IS NOT NULL THEN 4
+                            WHEN status = '완료'      THEN 3
+                            WHEN read_at IS NULL      THEN 1
+                            ELSE 2 END AS stage
+                  FROM bo_cs_tickets) s";
+
     public CsAdminController(IConfiguration config, ILogger<CsAdminController> logger)
     {
         _config = config;
@@ -62,7 +97,8 @@ public class CsAdminController : ControllerBase
     // ── 목록 — 상태·유형 필터 + 회사명 검색 + 「내 응대함」(C-2 · mine=1) ──
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? q,
-                                          [FromQuery] bool mine, CancellationToken ct)
+                                          [FromQuery] bool mine, [FromQuery] string? stage,
+                                          CancellationToken ct)
     {
         var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         await using var db = await OpenAsync(ct);
@@ -77,13 +113,23 @@ public class CsAdminController : ControllerBase
                    k.status          AS status,
                    k.handler_type    AS handlerType,
                    k.handler_id      AS handlerId,
+                   k.handled_via     AS handledVia,
                    k.promised_at     AS promisedAt,
+                   k.read_at         AS readAt,
+                   k.rating          AS rating,
+                   k.rated_at        AS ratedAt,
                    k.received_at     AS receivedAt,
                    (SELECT COUNT(*) FROM bo_cs_replies r WHERE r.ticket_id = k.id) AS replyCount
               FROM bo_cs_tickets k
               JOIN tenants t ON t.tenant_id = k.tenant_id
              WHERE (@Status IS NULL OR k.status = @Status)
                AND (@Mine = 0 OR k.handler_id = @AdminId)
+               -- 4단계 필터 — 화면 아래 띠의 숫자를 누르면 그 단계만 보인다(세는 식과 **같은 식**)
+               AND (@Stage IS NULL OR @Stage = 'all' OR
+                    (CASE WHEN k.rated_at IS NOT NULL THEN 'rated'
+                          WHEN k.status = '완료'      THEN 'done'
+                          WHEN k.read_at IS NULL      THEN 'unread'
+                          ELSE 'open' END) = @Stage)
                AND (@Q IS NULL OR t.company_name LIKE CONCAT('%', @Q, '%') OR t.tenant_code LIKE CONCAT('%', @Q, '%'))
              ORDER BY k.received_at DESC
              LIMIT 300",
@@ -93,6 +139,7 @@ public class CsAdminController : ControllerBase
                 Q = string.IsNullOrWhiteSpace(q) ? null : q.Trim(),
                 Mine = mine ? 1 : 0,
                 AdminId = adminId,
+                Stage = string.IsNullOrWhiteSpace(stage) || stage == "all" ? null : stage.Trim(),
             });
         return Ok(new { success = true, data = rows });
     }
@@ -116,6 +163,15 @@ public class CsAdminController : ControllerBase
             SELECT reply_id AS replyId, body, replied_by_kind AS repliedByKind,
                    approved_by AS approvedBy, approved_at AS approvedAt, delivered_at AS deliveredAt
               FROM bo_cs_replies WHERE ticket_id = @Id ORDER BY approved_at", new { Id = id });
+
+        // 🔴 여는 순간이 「읽음」이다 — 단 **최초 1회만** 기록한다(WHERE read_at IS NULL).
+        //    덮어쓰면 「아무도 안 본 채 며칠 지났다」는 사실이 사라진다. 그 사실이 CS 의 핵심 자료다.
+        var reader = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets
+               SET read_at = UTC_TIMESTAMP(6), read_by = @Reader
+             WHERE id = @Id AND read_at IS NULL",
+            new { Id = id, Reader = reader });
 
         return Ok(new { success = true, ticket, replies });
     }
@@ -167,16 +223,69 @@ public class CsAdminController : ControllerBase
         if (from is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
         if (from == to) return Ok(new { success = true, unchanged = true });
 
+        // 🔴 완료로 넘길 때는 **응대 유형**이 있어야 한다(쪽지·전화·원격지원 중 하나).
+        //    나중에 CS 실적을 만들 때 이 칸이 비어 있으면 **소급이 안 된다** — 그래서 지금 막는다.
+        if (to == "완료")
+        {
+            var via = await db.ExecuteScalarAsync<string?>(
+                "SELECT handled_via FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+            if (string.IsNullOrEmpty(via))
+                return BadRequest(new { success = false, message = "어떻게 응대했는지(쪽지·전화·원격지원) 먼저 골라 주세요" });
+        }
+
         await db.ExecuteAsync(@"
             UPDATE bo_cs_tickets
                SET status = @To,
-                   completed_at = CASE WHEN @To = '완료' THEN UTC_TIMESTAMP(6) ELSE completed_at END
+                   completed_at = CASE WHEN @To = '완료' THEN UTC_TIMESTAMP(6) ELSE completed_at END,
+                   read_at = COALESCE(read_at, UTC_TIMESTAMP(6)),
+                   read_by = COALESCE(read_by, @AdminId)
              WHERE id = @Id;
             INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
             VALUES (@Id, @From, @To, @AdminId);",
             new { Id = id, From = from, To = to, AdminId = adminId });
 
         return Ok(new { success = true });
+    }
+
+    // ── 진행 4단계 숫자 — 사이드바 빨간 숫자와 화면 아래 띠가 같은 값을 읽는다 ──
+    //    (두 곳이 각자 세면 숫자가 어긋나고, 그 순간 사람이 화면을 못 믿는다)
+    [HttpGet("counts")]
+    public async Task<IActionResult> Counts(CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+        var row = await db.QueryFirstAsync(StageCountSql);
+        return Ok(new
+        {
+            success = true,
+            unread = (long?)row.unread ?? 0,   // ① 읽지 않음
+            open = (long?)row.open ?? 0,       // ② 처리되지 않음
+            done = (long?)row.done ?? 0,       // ③ 처리 완료
+            rated = (long?)row.rated ?? 0,     // ④ CS평가 완료
+            total = (long)row.total,
+        });
+    }
+
+    // ── 응대 유형 — 쪽지/전화/원격지원 (들어온 길과 다른 축) ──────────
+    [HttpPost("{id:long}/handled-via")]
+    public async Task<IActionResult> SetHandledVia(long id, [FromBody] HandledViaRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var via = req?.Via?.Trim() ?? "";
+        if (!AllowedHandledVia.Contains(via))
+            return BadRequest(new { success = false, message = "응대 유형은 쪽지·전화·원격지원 중 하나입니다" });
+
+        await using var db = await OpenAsync(ct);
+        var n = await db.ExecuteAsync(
+            "UPDATE bo_cs_tickets SET handled_via = @Via WHERE id = @Id", new { Id = id, Via = via });
+        if (n == 0) return NotFound(new { success = false, message = "티켓이 없습니다" });
+
+        await db.ExecuteAsync(@"
+            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+            VALUES (@Id, '응대', @Via, @AdminId)",
+            new { Id = id, Via = via, AdminId = adminId });
+        return Ok(new { success = true, handledVia = via });
     }
 
     // ── C-1 분류 다시 고르기 — 8종 정본 밖은 거부 · 전이 기록은 상태 로그와 같은 표 ──
@@ -308,6 +417,7 @@ public class CsAdminController : ControllerBase
     public class ReplyRequest { public string? Body { get; set; } }
     public class StatusRequest { public string? To { get; set; } }
     public class CategoryRequest { public string? To { get; set; } }
+    public class HandledViaRequest { public string? Via { get; set; } }
     public class AssignRequest { public string? HandlerType { get; set; } }
     public class PromiseRequest { public DateTime? At { get; set; } }
 

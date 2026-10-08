@@ -7,10 +7,15 @@ using MySqlConnector;
 
 namespace HitPan.Backoffice.API.Controllers;
 
-// 작14 C-3·C-4 — CS 누리집 (사장님 결재 2026-10-08)
+// 작14 C-3·C-4 — CS 백과사전 (사장님 결재 2026-10-08)
+//
+// 🔴 사장님 지시 2026-10-08 — 원문 그대로 보존(지우지 말 것)
+//누리집을 만들고 AI를 통한 CS자동화 즉시 실행하지 않고, 준비중인 이유는 추후 쪽지 형태에서 챗봇 형태로 백오피스가 히트판에 1:1로 CS를 자동화 처리 할 수 있도록 하는 준비단계이다. //
+//
+// ⇒ 이 화면이 모으는 「문제점/해결점」이 그 챗봇의 재료다. 지금은 사람이 쓰고 사람이 승인한다.
 //
 // ■ 왜: 해결한 일이 사람 머릿속에서 끝나면 같은 일을 100번 다시 푼다.
-//   누리집은 「이 증상엔 이렇게」가 쌓이는 창고이고, 다음 답을 빨리 만드는 재료다.
+//   백과사전은 「이 증상엔 이렇게」가 쌓이는 창고이고, 다음 답을 빨리 만드는 재료다.
 //
 // ■ 안 바꾼 뼈대(설계 §2-ⓑ 결재본)
 //   · 저장 형식은 md — 쓰는 사람에겐 파일과 똑같다. 단 **정본은 DB**(파일은 내보내기용 · §2-ⓔ).
@@ -35,7 +40,7 @@ public class KbController : ControllerBase
         ["upd"] = "UPD", ["bug"] = "BUG", ["ins"] = "INS", ["etc"] = "ETC",
     };
 
-    // 8폴더 .MD 미러 경로(C-3) — 레포 docs/CS/누리집/ 아래 폴더 이름과 **글자까지 같아야** 한다.
+    // 8폴더 .MD 미러 경로(C-3) — 레포 docs/CS/백과사전/ 아래 폴더 이름과 **글자까지 같아야** 한다.
     private static readonly Dictionary<string, string> CategoryFolder = new(StringComparer.Ordinal)
     {
         ["use"] = "1.사용", ["set"] = "2.설정", ["net"] = "3.통신", ["dat"] = "4.데이터",
@@ -206,7 +211,7 @@ public class KbController : ControllerBase
             });
 
         await LogAsync(db, docId, issueCode, approved ? "approve" : "save_draft", actor, null);
-        _logger.LogInformation("[누리집] 등재 code={Code} status={Status}", issueCode, status);
+        _logger.LogInformation("[백과사전] 등재 code={Code} status={Status}", issueCode, status);
         return Ok(new { success = true, docId, issueCode, version = 1, status });
     }
 
@@ -280,7 +285,7 @@ public class KbController : ControllerBase
 
         var files = rows.Select(r => new
         {
-            path = $"docs/CS/누리집/{Folder(r.Category)}/{r.IssueCode}.md",
+            path = $"docs/CS/백과사전/{Folder(r.Category)}/{r.IssueCode}.md",
             markdown = $"# {r.IssueCode} {r.Title}\n\n> 판 v{r.Version} · 정본은 백오피스 DB(이 파일은 미러)\n\n{r.BodyMd}\n",
         }).ToList();
 
@@ -335,7 +340,7 @@ public class KbController : ControllerBase
         }
         catch (MySqlException ex)
         {
-            _logger.LogWarning(ex, "[누리집] 기록 실패 action={Action}", action); // #15 — 본 작업은 막지 않는다
+            _logger.LogWarning(ex, "[백과사전] 기록 실패 action={Action}", action); // #15 — 본 작업은 막지 않는다
         }
     }
 

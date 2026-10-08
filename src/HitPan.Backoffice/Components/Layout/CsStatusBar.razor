@@ -1,0 +1,64 @@
+@*
+    CS 진행 4단계 띠 — 화면 아래쪽 (사장님 지시 2026-10-08)
+      "읽지 않은 CS 00건, 처리되지 않은 CS 00건" 이런 식으로 · 읽지 않은 건은 빨간색
+
+    - 4단계: ① 읽지 않음 ② 처리되지 않음 ③ 처리 완료 ④ CS평가 완료
+    - 세는 곳은 서버 한 곳(api/admin/cs/counts) · 사이드바 빨간 숫자와 같은 값을 쓴다
+    - 60초마다 다시 센다. 조회가 한 번 실패해도 숫자를 0으로 지우지 않는다
+    - 누르면 CS 창구의 그 단계로 바로 간다(보고 끝나는 숫자가 아니라 일로 이어지는 숫자)
+    - Razor 에 C# raw string 금지(#14) · 빈 catch 금지(#15)
+*@
+
+@implements IDisposable
+@inject HitPan.Backoffice.Services.CsCountsService Counts
+@inject NavigationManager Nav
+
+@if (Counts.Loaded)
+{
+    <div class="bo2-cs-bar">
+        <span class="bo2-cs-bar__label">CS</span>
+
+        <button type="button" class="bo2-cs-bar__item @(Counts.Unread > 0 ? "danger" : "")"
+                @onclick="@(() => Go("unread"))">
+            읽지 않은 CS <strong>@Counts.Unread.ToString("N0")</strong>건
+        </button>
+
+        <button type="button" class="bo2-cs-bar__item @(Counts.Open > 0 ? "warn" : "")"
+                @onclick="@(() => Go("open"))">
+            처리되지 않은 CS <strong>@Counts.Open.ToString("N0")</strong>건
+        </button>
+
+        <button type="button" class="bo2-cs-bar__item" @onclick="@(() => Go("done"))">
+            처리 완료 <strong>@Counts.Done.ToString("N0")</strong>건
+        </button>
+
+        <button type="button" class="bo2-cs-bar__item" @onclick="@(() => Go("rated"))">
+            CS평가 완료 <strong>@Counts.Rated.ToString("N0")</strong>건
+        </button>
+
+        <span class="bo2-cs-bar__total">전체 @Counts.Total.ToString("N0")건</span>
+    </div>
+}
+
+@code {
+    private Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Counts.Changed += OnChanged;
+        await Counts.RefreshAsync();
+        // 60초 주기 — CS 는 사람이 보는 속도라 분 단위면 충분하다(1초 폴링은 서버만 깎는다).
+        _timer = new Timer(async _ => await Counts.RefreshAsync(), null,
+                           TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private void Go(string stage) => Nav.NavigateTo($"/admin/cs?stage={stage}");
+
+    public void Dispose()
+    {
+        Counts.Changed -= OnChanged;
+        _timer?.Dispose();
+    }
+}

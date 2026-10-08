@@ -79,6 +79,10 @@ public class Program
         builder.Services.AddHttpClient("backoffice-authed", c => c.BaseAddress = new Uri(backofficeApi))
             .AddHttpMessageHandler<JwtFromCookieHandler>();
 
+        // CS 4단계 숫자 — 사이드바 빨간 숫자와 화면 아래 띠가 **같은 값**을 쓰도록 한 벌로 모은다
+        //   (각자 세면 두 숫자가 어긋나고, 그러면 사람이 화면을 안 믿는다 · 사장님 지시 2026-10-08)
+        builder.Services.AddScoped<HitPan.Backoffice.Services.CsCountsService>();
+
         var app = builder.Build();
 
         if (!app.Environment.IsDevelopment())

@@ -1,5 +1,5 @@
 @*
-    작14 B-8 — CS 티켓 결선 (사장님 결재 2026-10-08) · 원형 = WS-20260601-18 껍데기
+    작14 B-8 — CS 창구 결선 (사장님 결재 2026-10-08) · 원형 = WS-20260601-18 껍데기
     - 본사 전권(F-14 2차·전체 조회) · PlatformOnlyV2
     - 한 화면 완결: 목록 + 선택 티켓의 본문·답·상태를 같은 화면에서 (히트판 정신)
     - 답 작성 = 반자동 ②겹의 문: 쓴 사람이 승인자(approved_by NOT NULL) · 발송은 ERP 5분 Pull
@@ -13,11 +13,12 @@
 @using System.Net.Http.Json
 @inject IHttpClientFactory HttpFactory
 @inject ISnackbar Snackbar
+@inject HitPan.Backoffice.Services.CsCountsService Counts
 @using HitPan.Backoffice.Components.Pages.Platform.Components
 
-<PageTitle>CS 티켓 — 히트판 백오피스</PageTitle>
+<PageTitle>CS 창구 — 히트판 백오피스</PageTitle>
 
-<BoPageHeader Title="CS 티켓"
+<BoPageHeader Title="CS 창구"
               Subtitle="고객사 ERP 쪽지·전화 접수 — 답은 고객 ERP 화면으로 전달됩니다">
     <Actions>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
@@ -82,6 +83,14 @@
         <MudSelectItem Value="@("고객답대기")">고객 답 대기</MudSelectItem>
         <MudSelectItem Value="@("완료")">완료</MudSelectItem>
     </MudSelect>
+    @* 사장님 지시 2026-10-08 — 진행 4단계 *@
+    <MudSelect T="string" @bind-Value="_stageFilter" Label="진행 단계" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("unread")">① 읽지 않음</MudSelectItem>
+        <MudSelectItem Value="@("open")">② 처리되지 않음</MudSelectItem>
+        <MudSelectItem Value="@("done")">③ 처리 완료</MudSelectItem>
+        <MudSelectItem Value="@("rated")">④ CS평가 완료</MudSelectItem>
+    </MudSelect>
     <MudSwitch T="bool" @bind-Value="_mineOnly" Label="내 응대함만" Color="Color.Primary" />
     <div class="bo-filter-bar__action">
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
@@ -91,14 +100,14 @@
 
 <div class="bo-list-section">
     <div class="bo-list-section__head">
-        <span class="bo-list-section__title">CS 티켓 목록</span>
+        <span class="bo-list-section__title">CS 창구 목록</span>
         <span class="bo-list-section__count">총 <strong>@_rows.Count.ToString("N0")</strong>건</span>
     </div>
 
     @if (!_loading && _rows.Count == 0)
     {
         <div style="padding:32px 24px;">
-            <BoEmptyStateCard Title="접수된 CS 티켓이 없습니다"
+            <BoEmptyStateCard Title="접수된 CS 창구이 없습니다"
                               Description="고객사 ERP 의 「CS 요청」 쪽지나 전화 접수가 이곳에 표시됩니다."
                               IllustrationKind="doc" />
         </div>
@@ -124,6 +133,20 @@
                 <TemplateColumn Title="상태">
                     <CellTemplate>
                         <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.Status</span>
+                        @if (context.Item.ReadAt is null)
+                        {
+                            <span class="bo-status-chip bo-status-chip--suspended" style="margin-left:4px">안 읽음</span>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="응대">
+                    <CellTemplate>
+                        <span>@HandledViaLabel(context.Item.HandledVia)</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="평가">
+                    <CellTemplate>
+                        <span>@RatingLabel(context.Item.Rating)</span>
                     </CellTemplate>
                 </TemplateColumn>
                 <PropertyColumn Property="x => x.ReceivedAt" Title="접수" Format="MM-dd HH:mm" />
@@ -177,11 +200,21 @@
                        OnClick="SetPromiseAsync">답 약속 (@(PromiseHours)시간)</MudButton>
             <MudText Typo="Typo.caption" Style="color:#6B7280">@PromiseText(_detail.PromisedAt)</MudText>
 
+            @* 사장님 지시 2026-10-08 — 응대 유형 3종. 완료로 넘기려면 이 칸이 채워져 있어야 한다 *@
+            <MudSelect T="string" @bind-Value="_newHandledVia" Label="응대 유형" Dense="true"
+                       Variant="Variant.Outlined" Style="min-width:150px">
+                @foreach (var v in HandledVias)
+                {
+                    <MudSelectItem Value="@v.Key">@v.Value</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="SetHandledViaAsync">응대 저장</MudButton>
+
             @if (_detail.Status == "완료")
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
                            StartIcon="@Icons.Material.Filled.MenuBook"
-                           OnClick="PromoteDraftAsync">누리집 초안</MudButton>
+                           OnClick="PromoteDraftAsync">백과사전 초안</MudButton>
             }
         </div>
         <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
@@ -213,11 +246,11 @@
             </MudButton>
         </div>
 
-        @* ── C-3·C-4 누리집 승격 — 초안은 회사·담당자 칸을 애초에 가져오지 않는다 ── *@
+        @* ── C-3·C-4 백과사전 승격 — 초안은 회사·담당자 칸을 애초에 가져오지 않는다 ── *@
         @if (_draft is not null)
         {
             <MudDivider Class="my-4" />
-            <MudText Typo="Typo.h6" Class="mb-1">누리집 초안</MudText>
+            <MudText Typo="Typo.h6" Class="mb-1">백과사전 초안</MudText>
             <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
                 회사 이름·담당자·연락처는 이 초안에 <b>들어오지 않습니다</b>(가져오지 않은 값은 잊을 수도 없습니다).
                 제목과 해결 순서를 적고 승인하면 그때 등재됩니다 — 승인 없이는 행이 생기지 않습니다.
@@ -271,6 +304,25 @@
     private bool _mineOnly;
     private string _newCategory = "etc";
 
+    // ── 사장님 지시 2026-10-08 — 진행 4단계 · 응대 유형 3종 ──
+    private string _stageFilter = "all";
+    private string _newHandledVia = "message";
+
+    private static readonly List<KeyValuePair<string, string>> HandledVias = new()
+    {
+        new("message", "쪽지로 응대"), new("phone", "전화로 응대"), new("remote", "원격지원"),
+    };
+
+    private static string HandledViaLabel(string? v) => v switch
+    {
+        "message" => "쪽지", "phone" => "전화", "remote" => "원격지원", _ => "-",
+    };
+
+    private static string RatingLabel(int? r) => r switch
+    {
+        3 => "좋아요", 2 => "보통", 1 => "아쉬워요", _ => "-",
+    };
+
     private bool _phoneOpen;
     private bool _phoneSaving;
     private string _phoneTenantCode = "";
@@ -278,7 +330,7 @@
     private string _phoneSubTag = "etc";
     private string? _phoneBody;
 
-    private string? _draft;                 // 누리집 초안 본문(md) — null = 초안 칸 닫힘
+    private string? _draft;                 // 백과사전 초안 본문(md) — null = 초안 칸 닫힘
     private string _draftTitle = "";
     private string _draftCategory = "etc";
     private bool _draftQuoteOmitted;
@@ -317,12 +369,12 @@
         {
             var http = HttpFactory.CreateClient("backoffice-authed");
             var res = await http.GetFromJsonAsync<ListResponse>(
-                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}&mine={(_mineOnly ? "true" : "false")}");
+                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}&mine={(_mineOnly ? "true" : "false")}&stage={Uri.EscapeDataString(_stageFilter)}");
             _rows = res?.Data ?? new();
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"CS 티켓 조회 실패: {ex.Message}", Severity.Error);
+            Snackbar.Add($"CS 창구 조회 실패: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -340,8 +392,11 @@
             _replies = res?.Replies ?? new();
             _newStatus = _detail?.Status ?? "접수";
             _newCategory = string.IsNullOrEmpty(_detail?.Category) ? "etc" : _detail!.Category;
+            _newHandledVia = string.IsNullOrEmpty(_detail?.HandledVia) ? "message" : _detail!.HandledVia!;
             _replyBody = null;
             _draft = null;                  // 다른 티켓을 열면 초안 칸은 닫는다(섞이면 사고다)
+            // 상세를 여는 순간 서버가 「읽음」을 박는다 ⇒ 아래 띠·사이드바 숫자를 바로 다시 센다
+            await Counts.RefreshAsync();
         }
         catch (Exception ex)
         {
@@ -410,6 +465,13 @@
         await PostAsync($"api/admin/cs/{_detail.Id}/category", new { to = _newCategory }, "분류를 바꿨습니다.");
     }
 
+    // ── 응대 유형 저장 ──
+    private async Task SetHandledViaAsync()
+    {
+        if (_detail is null) return;
+        await PostAsync($"api/admin/cs/{_detail.Id}/handled-via", new { via = _newHandledVia }, "응대 유형을 저장했습니다.");
+    }
+
     // ── C-2 배정(내 응대함) ──
     private async Task AssignToMeAsync()
     {
@@ -436,6 +498,7 @@
                 var id = _detail!.Id;
                 await LoadAsync();
                 await SelectAsync(new CsTicketRow { Id = id });
+                await Counts.RefreshAsync();   // 단계가 바뀌었으면 아래 띠 숫자도 같이 움직인다
             }
             else
             {
@@ -491,7 +554,7 @@
         }
     }
 
-    // ── C-3·C-4 누리집 승격 초안 ──
+    // ── C-3·C-4 백과사전 승격 초안 ──
     private async Task PromoteDraftAsync()
     {
         if (_detail is null) return;
@@ -542,7 +605,7 @@
             if (res.IsSuccessStatusCode)
             {
                 var ok = await res.Content.ReadFromJsonAsync<DocSaveResponse>();
-                Snackbar.Add($"누리집에 {status}으로 등재했습니다 — {ok?.IssueCode}", Severity.Success);
+                Snackbar.Add($"백과사전에 {status}으로 등재했습니다 — {ok?.IssueCode}", Severity.Success);
                 _draft = null;
             }
             else
@@ -570,7 +633,7 @@
         return $"{local:MM-dd HH:mm} · {(int)left.TotalHours}시간 남음";
     }
 
-    // 8종 정본(결-9) — 누리집 8폴더와 같은 어휘
+    // 8종 정본(결-9) — 백과사전 8폴더와 같은 어휘
     private static string CategoryLabel(string? c) => c switch
     {
         "use" => "사용", "set" => "설정", "net" => "통신", "dat" => "데이터",
@@ -608,6 +671,10 @@
         public string? HandlerType { get; set; }
         public string? HandlerId { get; set; }
         public DateTime? PromisedAt { get; set; }
+        public string? HandledVia { get; set; }
+        public DateTime? ReadAt { get; set; }
+        public int? Rating { get; set; }
+        public DateTime? RatedAt { get; set; }
         public DateTime ReceivedAt { get; set; }
         public int ReplyCount { get; set; }
     }
