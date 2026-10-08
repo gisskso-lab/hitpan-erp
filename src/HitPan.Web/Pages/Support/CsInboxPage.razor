@@ -161,7 +161,12 @@ else
 
             if (res.IsSuccessStatusCode)
             {
-                _thanks = true;
+                // 🔴 S-2 — 200 이라고 다 「고맙습니다」가 아니다. 이미 평가된 건은 내 점수가 안 들어간다.
+                var body = await ReadRateBodyAsync(res);
+                if (body?.AlreadyRated == true)
+                    _notice = "이미 평가하셨습니다 — 처음 누른 평가가 그대로 반영됩니다.";
+                else
+                    _thanks = true;
             }
             else
             {
@@ -188,6 +193,20 @@ else
         catch (Exception)
         {
             Console.Error.WriteLine("[CS] 평가 상태 재조회 실패");
+        }
+    }
+
+    // 작15 S-2 봉합 — 성공 응답의 몸통도 읽는다(alreadyRated 를 가려내는 자리).
+    private static async Task<RateError?> ReadRateBodyAsync(HttpResponseMessage res)
+    {
+        try
+        {
+            return await res.Content.ReadFromJsonAsync<RateError>();
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("[CS] 평가 응답 해석 실패");
+            return null;
         }
     }
 
@@ -224,6 +243,8 @@ else
         "rejected" => "보낼 수 없는 문의입니다 — 내용을 확인해 주세요.",
         "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
         "no_reply" => "답이 오면 평가할 수 있습니다.",
+        // 작15 S-1 봉합 — 회사 목록에서 남의 쪽지를 열었을 때.
+        "not_mine" => "문의를 쓴 분만 평가할 수 있습니다.",
         _ => "",
     };
 
@@ -232,6 +253,9 @@ else
     private sealed class RateError
     {
         public bool Success { get; set; }
+        // 작15 S-2 봉합 — 서버는 「이미 평가됨」을 200 으로 준다(ERP 가 재시도로 쌓지 않게 · 멱등).
+        //   그래서 성공 코드만 보고 「고맙습니다」를 띄우면 고객에게 거짓말이 된다.
+        public bool AlreadyRated { get; set; }
         public string? Reason { get; set; }
         public string? Message { get; set; }
     }

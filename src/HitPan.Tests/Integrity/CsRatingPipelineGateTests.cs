@@ -189,6 +189,18 @@ public sealed class CsRatingPipelineGateTests : IDisposable
         return c;
     }
 
+    // 작15 S-1 게이트 — 「누가 눌렀나」를 바꿔 끼울 수 있어야 남의 쪽지 평가를 실제로 재볼 수 있다.
+    private static CsRequestController Controller(MySqlConnection db, string userId)
+    {
+        var ctrl = new CsRequestController(db, NullLogger<CsRequestController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+        ctrl.HttpContext.Items["TenantId"] = Tenant;
+        ctrl.HttpContext.Items["UserId"] = userId;
+        return ctrl;
+    }
+
     private static CsRequestController Controller(MySqlConnection db)
     {
         var ctrl = new CsRequestController(db, NullLogger<CsRequestController>.Instance)
@@ -560,6 +572,69 @@ public sealed class CsRatingPipelineGateTests : IDisposable
 
         foreach (var (id, score) in cases)
             Assert.Equal(score, sent[id]);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 작15 S-1·S-2 봉합 게이트 (사장님 결재 2026-10-08 · [3-V]·[4] 적발)
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "G-E1-10 🔴 S-1 — 남의 쪽지는 평가할 수 없다(같은 회사라도) · 양성 = 쓴 사람은 된다")]
+    public async Task G_E1_10_남의쪽지_평가거부()
+    {
+        if (!Ready("G-E1-10")) return;
+        await using var db = await OpenAsync();
+        await SeedOpenAsync(db, "q-10");            // created_by = child-user-1 · 전송됨 + 답 1건 = 열림
+
+        // 🔴 음성 — 같은 테넌트의 **다른 자식계정**이 누른다.
+        //   막지 않으면 UNIQUE(cs_request_id) 때문에 쓴 사람이 영구히 못 하고,
+        //   rated_by 칸이 없어 누가 눌렀는지도 모르며, 행 삭제 금지라 되돌릴 수단이 0 이다.
+        var other = await Controller(db, "child-user-2")
+            .Rate("q-10", new CsRequestController.RateCsRequest { Rating = 1, Comment = "not mine" }, default);
+        Assert.IsType<BadRequestObjectResult>(other);
+        Assert.Equal("not_mine", Reason(other));
+        Assert.Equal(0, await RowsAsync(db, "q-10"));          // 행이 아예 안 생겨야 한다
+
+        // 🔴 음성 ② — 남의 화면에는 그 사람의 점수·글이 실려 나가지 않는다.
+        var peek = await Controller(db, "child-user-2").Replies("q-10", default);
+        var block = Body(peek).GetProperty("rating");
+        Assert.False(block.GetProperty("canRate").GetBoolean());
+        Assert.Equal("not_mine", block.GetProperty("reason").GetString());
+        Assert.Equal(JsonValueKind.Null, block.GetProperty("myRating").ValueKind);
+
+        // 🟢 양성 대조군 — 똑같은 쪽지인데 **쓴 사람**이 누르면 된다.
+        //   「원래 안 되는 것」을 막은 게 아님을 증명한다.
+        var owner = await RateAsync(db, "q-10", 3, "mine");
+        Assert.IsType<OkObjectResult>(owner);
+        Assert.Equal(1, await RowsAsync(db, "q-10"));
+        Assert.Equal(3, await db.ExecuteScalarAsync<int>(
+            "SELECT `rating` FROM cs_rating_outbox WHERE cs_request_id = 'q-10'"));
+    }
+
+    [Fact(DisplayName = "G-E1-11 🔴 S-2 — 두 번째 평가의 200 에는 alreadyRated 가 실린다(화면이 「고맙습니다」와 가려낼 재료)")]
+    public async Task G_E1_11_재평가응답에_표식이_실린다()
+    {
+        if (!Ready("G-E1-11")) return;
+        await using var db = await OpenAsync();
+        await SeedOpenAsync(db, "q-11");
+
+        var first = await RateAsync(db, "q-11", 3, "first");
+        Assert.IsType<OkObjectResult>(first);
+        // 🟢 양성 대조군 — 첫 평가의 200 에는 그 표식이 **없다**(있으면 늘 「이미 평가」로 읽힌다).
+        Assert.False(AlreadyRated(first));
+
+        // 🔴 두 번째 — 서버는 멱등하게 200 을 주지만, 내 점수는 안 들어갔다.
+        //   화면이 성공 코드만 보면 「평가 고맙습니다」가 떠서 고객에게 거짓말이 된다.
+        var second = await RateAsync(db, "q-11", 1, "second");
+        Assert.IsType<OkObjectResult>(second);
+        Assert.True(AlreadyRated(second));
+        Assert.Equal("already_rated", Reason(second));
+
+        // 첫 점수가 정본이다(결재 Q-2) — 두 번째 점수·글이 덮지 않는다.
+        Assert.Equal(1, await RowsAsync(db, "q-11"));
+        Assert.Equal(3, await db.ExecuteScalarAsync<int>(
+            "SELECT `rating` FROM cs_rating_outbox WHERE cs_request_id = 'q-11'"));
+        Assert.Equal("first", await db.ExecuteScalarAsync<string>(
+            "SELECT `comment` FROM cs_rating_outbox WHERE cs_request_id = 'q-11'"));
     }
 
     // ── 가짜 본사 — 응답을 각본대로 주고 **주소·몸통·오너**를 적는다 ─────
