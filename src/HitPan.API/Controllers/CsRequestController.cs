@@ -191,6 +191,8 @@ public class CsRequestController : ControllerBase
     public async Task<IActionResult> Replies(string id, CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        // 작15 S-1 봉합 — 평가 블록 판정에 「쓴 사람」이 필요하다(추가만 · 기존 응답 키 무변).
+        var userId = HttpContext.Items["UserId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         var rows = await _db.QueryAsync(@"
@@ -203,7 +205,7 @@ public class CsRequestController : ControllerBase
 
         // 작15 E-1 — 평가 블록 **동봉**(추가만 · #1). 기존 키 success·data 는 한 글자도 안 바꿨다.
         //   판정은 서버가 한다 — 화면이 제 마음대로 열지 못한다(사장님 결재 Q-1).
-        var rating = RatingBlock(await LoadRatingStateAsync(tenantId, id));
+        var rating = RatingBlock(await LoadRatingStateAsync(tenantId, id), userId);
 
         return Ok(new { success = true, data = rows, rating });
     }
@@ -232,7 +234,7 @@ public class CsRequestController : ControllerBase
             return BadRequest(new { success = false, reason = "bad_request", message = "평가를 선택해 주세요" });
 
         // ① 열림 판정 — 서버가 다시 한다(화면 우회로 들어온 평가가 사라지는 길을 닫는 자리)
-        var reason = RatingReason(await LoadRatingStateAsync(tenantId, id));
+        var reason = RatingReason(await LoadRatingStateAsync(tenantId, id), userId);
         if (reason == ReasonAlreadyRated)
             return Ok(new { success = true, alreadyRated = true, reason });   // Q-2 — 첫 평가가 정본
         if (reason != ReasonOpen)
@@ -282,7 +284,8 @@ public class CsRequestController : ControllerBase
     //   🔴 TINYINT/불리언을 dynamic 으로 받으면 캐스팅 500 이 난다(선례) ⇒ 형을 적은 DTO 로 받는다.
     private async Task<RatingStateRow?> LoadRatingStateAsync(string tenantId, string csRequestId)
         => await _db.QueryFirstOrDefaultAsync<RatingStateRow>(@"
-            SELECT o.sent_at         AS SentAt,
+            SELECT r.created_by      AS CreatedBy,
+                   o.sent_at         AS SentAt,
                    o.terminal_reason AS TerminalReason,
                    (SELECT COUNT(*) FROM cs_replies p
                      WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS ReplyCount,
@@ -291,19 +294,25 @@ public class CsRequestController : ControllerBase
                    g.sent_at         AS RatingSentAt,
                    g.terminal_reason AS RatingTerminalReason
               FROM cs_requests r
-              LEFT JOIN cs_outbox o        ON o.cs_request_id = r.cs_request_id
+              LEFT JOIN cs_outbox o        ON o.cs_request_id = r.cs_request_id AND o.tenant_id = r.tenant_id
               LEFT JOIN cs_rating_outbox g ON g.cs_request_id = r.cs_request_id AND g.tenant_id = r.tenant_id
              WHERE r.tenant_id = @TenantId AND r.cs_request_id = @Id",
             new { TenantId = tenantId, Id = csRequestId });
 
     private const string ReasonOpen = "open";
     private const string ReasonAlreadyRated = "already_rated";
+    // 작15 S-1 봉합 — 「내 테넌트의 쪽지」와 「내가 쓴 쪽지」는 다르다. 목록은 회사 전체를 보여준다.
+    private const string ReasonNotMine = "not_mine";
 
     // §4 표 그대로 — 이 함수 하나가 「조용히 사라지는 평가」를 막는 전부다.
     //   순서가 뜻이다: 이미 평가한 건이 가장 먼저(Q-2 첫 평가만) → 종결 → 미전송 → 답 0건 → 열림.
-    private static string RatingReason(RatingStateRow? s)
+    private static string RatingReason(RatingStateRow? s, string? userId)
     {
         if (s is null) return "not_sent";                       // 내 테넌트에 그 쪽지가 없다
+        // 🔴 S-1 — 이 검사가 가장 먼저다. 남이 먼저 누르면 UNIQUE 때문에 쓴 사람이 영구히 못 하고,
+        //    rated_by 칸이 없어 누가 눌렀는지도 모르며, 행 삭제 금지라 되돌릴 수단이 0 이다.
+        if (string.IsNullOrEmpty(userId) || !string.Equals(s.CreatedBy, userId, StringComparison.Ordinal))
+            return ReasonNotMine;
         if (s.MyRating is not null) return ReasonAlreadyRated;  // Q-2 — 수정 불가
         if (s.TerminalReason == "rejected") return "rejected";
         if (s.TerminalReason == "failed") return "failed";
@@ -319,20 +328,23 @@ public class CsRequestController : ControllerBase
         "rejected" => "보낼 수 없는 문의입니다 — 내용을 확인해 주세요.",
         "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
         "no_reply" => "답이 오면 평가할 수 있습니다.",
+        "not_mine" => "문의를 쓴 분만 평가할 수 있습니다.",
         _ => "지금은 평가할 수 없습니다.",
     };
 
     // 화면이 그대로 그릴 수 있는 블록 — 판정의 주인은 서버 하나다.
-    private static object RatingBlock(RatingStateRow? s)
+    private static object RatingBlock(RatingStateRow? s, string? userId)
     {
-        var reason = RatingReason(s);
+        var reason = RatingReason(s, userId);
+        // 🔴 S-1 — 남의 쪽지면 그 사람의 점수·글을 내보내지 않는다(본 적 없는 사람에게 보일 길을 막는다).
+        var mine = reason != ReasonNotMine;
         return new
         {
             canRate = reason == ReasonOpen,
             reason,
-            myRating = s?.MyRating,
-            myComment = s?.MyComment,
-            deliveryState = s?.MyRating is null ? null : DeliveryState(s!),
+            myRating = mine ? s?.MyRating : null,
+            myComment = mine ? s?.MyComment : null,
+            deliveryState = !mine || s?.MyRating is null ? null : DeliveryState(s!),
         };
     }
 
@@ -409,6 +421,8 @@ public class CsRequestController : ControllerBase
     // 작15 E-1 — 열림 판정 재료. dynamic 금지(TINYINT ↔ bool/int 캐스팅 500 선례).
     private sealed class RatingStateRow
     {
+        // 작15 S-1 봉합(사장님 결재 2026-10-08) — 쓴 사람만 평가한다. 판정 재료가 없으면 판정을 못 한다.
+        public string? CreatedBy { get; set; }
         public DateTime? SentAt { get; set; }
         public string? TerminalReason { get; set; }
         public int ReplyCount { get; set; }
