@@ -36,7 +36,7 @@ public sealed class CsStageGateTests : IDisposable
         .AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:BackofficeDb"] = _h.DbConnString(),
-            ["Telemetry:LicensePepper"] = Pepper,
+            ["License:Pepper"] = Pepper,
         }).Build();
 
     private CsAdminController Cs(string actor) => new(Config(), NullLogger<CsAdminController>.Instance)
@@ -59,7 +59,8 @@ public sealed class CsStageGateTests : IDisposable
     {
         using var h = new System.Security.Cryptography.HMACSHA256(
             System.Text.Encoding.UTF8.GetBytes(Pepper));
-        return Convert.ToHexString(h.ComputeHash(System.Text.Encoding.UTF8.GetBytes(license))).ToLowerInvariant();
+        var normalized = license.Trim().ToUpperInvariant().Replace(" ", "");   // 컨트롤러와 같은 정규화
+        return Convert.ToHexString(h.ComputeHash(System.Text.Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
     }
 
     /// <summary>테넌트 1개 + 티켓 n개. 티켓은 전부 「안 읽음 · 접수」 상태로 시작한다.</summary>
