@@ -37,6 +37,22 @@ ALTER TABLE landing_signups
 ALTER TABLE landing_signups
     ADD KEY IF NOT EXISTS ix_landing_signups_tenant (tenant_id);
 
+-- ── 🔴 추가 2026-10-08 (20261008작16 §C · 설계 §5-1 · PM 결재 D-3) — 고아 복원 1문장 ──
+--   왜 FK 문장 「앞」인가: 칸이 이 파일에서 처음 생기는 DB 라면 FK 시점에 전 행이 NULL 이라
+--   errno 1452 는 불가하다. 위험은 **칸이 이미 있고 값이 들어 있는 경우**뿐이다 — 그 값 중 하나라도
+--   tenants 에 없는 키(고아)면 FK 생성이 1452 로 거부되고, 적재기가 멈춰 **백오피스 기동이 거부된다**.
+--   그러면 뒤 번호(40·41·42·43·44)도 전부 안 들어가 CS·프로모션·요금제 500 이 그대로 남는다.
+--   🔴 새 파일로는 못 한다 — 칸이 없는 DB 에서 이 UPDATE 를 먼저 돌리면 Unknown column 으로
+--   그 파일이 기동을 거부한다. 그래서 같은 파일 안, ADD COLUMN **뒤** · ADD CONSTRAINT **앞**이다.
+--   무엇을 건드리나: tenant_id IS NOT NULL 이면서 tenants 에 없는 키인 행만 NULL 로 되돌린다
+--   (NULL = 「옛 행 또는 모호·고아」 = 이 파일이 정한 그 뜻 그대로 · 회사명 글자 조인 폴백이 살아 있다 #20).
+--   가입서 행은 지우지 않는다(정산 추적용 보존). 재실행 안전 — 두 번째엔 고칠 행이 0건이다.
+--   기존 줄은 한 줄도 지우거나 바꾸지 않았다(#1).
+UPDATE landing_signups
+SET tenant_id = NULL
+WHERE tenant_id IS NOT NULL
+  AND tenant_id NOT IN (SELECT tenant_id FROM tenants);
+
 -- MariaDB 문법 실측(11.4.10): IF NOT EXISTS 는 FOREIGN KEY 뒤 —
 --   ADD CONSTRAINT symbol FOREIGN KEY IF NOT EXISTS (col) REFERENCES …
 ALTER TABLE landing_signups

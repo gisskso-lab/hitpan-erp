@@ -403,6 +403,16 @@ CREATE TABLE IF NOT EXISTS pricing_plans (
     description      text          NULL DEFAULT NULL,
     monthly_price    decimal(10,0) NOT NULL DEFAULT 0,
     yearly_price     decimal(10,0) NOT NULL DEFAULT 0,
+    -- ── 20261008작16 §B (설계 §4 · PM 결재 D-2·D-4) — 세 칸 추가형 복원 ──
+    --   컨트롤러 4개(PricingAdmin·LandingPublic·PromotionsAdmin·DeviceRegistration)가 읽는 칸인데
+    --   6/11 커밋 82091fb7 에서 정의만 사라져 운영 화면이 500 이었다(선행검증 확정 2).
+    --   같은 세 칸을 44_backoffice_pricing_plan_columns.sql 이 기존 DB 에 ADD COLUMN 으로 더한다.
+    --   여기(출하 DDL)에도 두는 이유 = 신규 설치가 44 없이도 맞게 서야 한다(#36 단일 진실원).
+    --   🔴 price_display 는 **표시 모드**다('number'/'contact') — 금액 글자를 넣는 칸이 아니다.
+    --   🔴 기기 두 칸은 NULL 기본 — 0 을 주면 COALESCE(…,5)/(…,3) 폴백이 안 돌아 상한 0 이 된다.
+    price_display    varchar(50)   NOT NULL DEFAULT 'number',
+    max_pc_devices   int(11)       NULL DEFAULT NULL,
+    max_mobile_devices int(11)     NULL DEFAULT NULL,
     max_users        int(11)       NOT NULL DEFAULT 3,
     max_devices      int(11)       NOT NULL DEFAULT 3,
     ai_token_monthly int(11)       NOT NULL DEFAULT 0,
