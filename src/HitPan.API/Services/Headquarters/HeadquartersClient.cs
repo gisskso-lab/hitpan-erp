@@ -27,6 +27,13 @@ public interface IHeadquartersClient
 
     /// <summary>3중 인증 재료를 질의문자열 없이 봉투 POST 로 보내는 Pull(답 수신 · B-9). 본문은 수신 목록 JSON.</summary>
     Task<(int StatusCode, string Body)> PullAsync(string path, string ownerAccountId, CancellationToken ct);
+
+    /// <summary>
+    /// S-2 대표 아이디 첫 보고(작14 B-0 의 ERP 송신측) — 봉투가 아니라 **그 수신구의 화이트리스트
+    /// 평면 몸통**({licenseKey, ownerAccountId})으로 보낸다. 봉투로 싸면 화이트리스트 밖 키라 400 이다.
+    /// 백오피스가 이 값을 채워야 3중 일치의 부모계정 축이 열린다 — CS 쪽지의 선행 고리.
+    /// </summary>
+    Task<(int StatusCode, string Body)> PostOwnerReportAsync(string ownerAccountId, CancellationToken ct);
 }
 
 public sealed class HeadquartersClient : IHeadquartersClient
@@ -59,6 +66,14 @@ public sealed class HeadquartersClient : IHeadquartersClient
 
     public async Task<(int, string)> PullAsync(string path, string ownerAccountId, CancellationToken ct)
         => await SendAsync(path, Envelope("{}", ownerAccountId), ct);
+
+    public async Task<(int, string)> PostOwnerReportAsync(string ownerAccountId, CancellationToken ct)
+    {
+        var licenseKey = TenantConfigReader.Get("LICENSE_KEY") ?? "";
+        var flat = "{\"licenseKey\":" + System.Text.Json.JsonSerializer.Serialize(licenseKey)
+                 + ",\"ownerAccountId\":" + System.Text.Json.JsonSerializer.Serialize(ownerAccountId) + "}";
+        return await SendAsync("/api/telemetry/owner-report", flat, ct);
+    }
 
     private async Task<(int, string)> SendAsync(string path, string envelopeJson, CancellationToken ct)
     {

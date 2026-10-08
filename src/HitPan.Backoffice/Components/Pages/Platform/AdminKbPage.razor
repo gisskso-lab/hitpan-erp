@@ -1,0 +1,323 @@
+@*
+    작14 C-3·C-4 — CS 누리집 (사장님 결재 2026-10-08)
+    - 정본은 DB(bo_kb_docs) · 이 화면이 쓰고·보여주고·내보낸다(설계 §2-ⓐ)
+    - 🔴 고침은 UPDATE 가 아니라 version+1 새 판 — 옛 판이 그대로 남는다(이력 칸에서 보인다)
+    - 🔴 승인은 사람만 — 승인 없이는 승인 판 행 자체가 안 생긴다(DB CHECK)
+    - 승인 전 본문 재스캔은 서버가 한다 — 화면은 거부 사유를 보여 주기만 한다
+    - Razor 에 C# raw string 금지(#14) · 빈 catch 금지(#15)
+*@
+
+@page "/admin/kb"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@using HitPan.Backoffice.Components.Pages.Platform.Components
+
+<PageTitle>CS 누리집 — 히트판 백오피스</PageTitle>
+
+<BoPageHeader Title="CS 누리집"
+              Subtitle="해결한 일이 쌓이는 창고 — 승인된 문서만 다음 답의 재료가 됩니다">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="ExportAsync">.MD 미러 내보내기</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
+
+<BoFilterBar>
+    <MudTextField @bind-Value="_keyword" Label="검색 (제목·이슈코드)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" OnKeyUp="OnSearchKey" />
+    <MudSelect T="string" @bind-Value="_categoryFilter" Label="분류(8종)" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        @foreach (var c in Categories)
+        {
+            <MudSelectItem Value="@c.Key">@c.Value</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="string" @bind-Value="_statusFilter" Label="상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("초안")">초안</MudSelectItem>
+        <MudSelectItem Value="@("승인")">승인</MudSelectItem>
+        <MudSelectItem Value="@("폐기")">폐기</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
+    </div>
+</BoFilterBar>
+
+<div class="bo-list-section">
+    <div class="bo-list-section__head">
+        <span class="bo-list-section__title">문서 목록 (이슈코드별 최신 판)</span>
+        <span class="bo-list-section__count">총 <strong>@_rows.Count.ToString("N0")</strong>건</span>
+    </div>
+
+    @if (!_loading && _rows.Count == 0)
+    {
+        <div style="padding:32px 24px;">
+            <BoEmptyStateCard Title="아직 등재된 문서가 없습니다"
+                              Description="CS 티켓을 완료로 바꾸고 「누리집 초안」 을 누르면 이곳에 쌓입니다."
+                              IllustrationKind="doc" />
+        </div>
+    }
+    else
+    {
+        <MudDataGrid T="KbDocRow" Items="_rows" Loading="_loading"
+                     Hover="true" Dense="true" SortMode="SortMode.Single"
+                     RowClick="@(e => OpenAsync(e.Item.IssueCode))">
+            <Columns>
+                <PropertyColumn Property="x => x.IssueCode" Title="이슈코드" />
+                <TemplateColumn Title="분류">
+                    <CellTemplate>
+                        <span>@CategoryLabel(context.Item.Category)</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Title" Title="제목" />
+                <TemplateColumn Title="상태">
+                    <CellTemplate>
+                        <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.Status</span>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.Version" Title="판" />
+                <PropertyColumn Property="x => x.CreatedAt" Title="만든 날" Format="MM-dd HH:mm" />
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="KbDocRow" />
+            </PagerContent>
+        </MudDataGrid>
+    }
+</div>
+
+@if (_history.Count > 0)
+{
+    var head = _history[0];
+    <MudPaper Elevation="0" Class="pa-4 mt-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.h6">@head.IssueCode — @head.Title</MudText>
+            <span class="bo-status-chip @StatusChipClass(head.Status)">@(head.Status) v@(head.Version)</span>
+        </div>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
+            @CategoryLabel(head.Category)
+            @if (!string.IsNullOrEmpty(head.ApprovedBy))
+            {
+                <span> · 승인 @(head.ApprovedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))</span>
+            }
+            else
+            {
+                <span> · 아직 승인 안 된 판입니다 — 다음 답의 재료로 나가지 않습니다</span>
+            }
+        </MudText>
+
+        <MudTextField T="string" @bind-Value="_editTitle" Label="제목" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" MaxLength="200" Class="mb-2" />
+        <MudTextField T="string" @bind-Value="_editBody" Label="문제점 / 해결점" Variant="Variant.Outlined"
+                      Lines="16" MaxLength="8000" Counter="8000"
+                      HelperText="저장하면 옛 판은 그대로 남고 새 판(v+1)이 생깁니다 — 덮어쓰지 않습니다" />
+        <div class="d-flex justify-end gap-2 mt-2">
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => ReviseAsync("폐기"))">폐기</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => ReviseAsync("초안"))">새 판 저장(초안)</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       Disabled="_saving" OnClick="@(() => ReviseAsync("승인"))">
+                @(_saving ? "저장 중…" : "새 판 승인")
+            </MudButton>
+        </div>
+
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">판 이력 (@(_history.Count)판)</MudText>
+        @foreach (var h in _history)
+        {
+            <div class="d-flex align-center gap-2" style="padding:4px 0;">
+                <span class="bo-status-chip @StatusChipClass(h.Status)">v@(h.Version) @h.Status</span>
+                <MudText Typo="Typo.caption" Style="color:#6B7280">
+                    @h.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") · @h.Title
+                </MudText>
+            </div>
+        }
+    </MudPaper>
+}
+
+@if (_exportFiles.Count > 0)
+{
+    <MudPaper Elevation="0" Class="pa-4 mt-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.h6" Class="mb-1">.MD 미러 — @(_exportFiles.Count)개</MudText>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+            승인된 판만 나옵니다. 아래 경로가 레포 8폴더 구조와 같습니다(파일은 사본 · 정본은 여기 DB).
+        </MudText>
+        @foreach (var f in _exportFiles)
+        {
+            <MudText Typo="Typo.body2" Style="font-family:monospace">@f.Path</MudText>
+        }
+    </MudPaper>
+}
+
+@code {
+    private List<KbDocRow> _rows = new();
+    private List<KbDocVersion> _history = new();
+    private List<ExportFile> _exportFiles = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string _keyword = "";
+    private string _categoryFilter = "all";
+    private string _statusFilter = "all";
+    private string _editTitle = "";
+    private string _editBody = "";
+    private string _openCode = "";
+
+    // 8종 정본(결-9) — CS 티켓 화면과 같은 어휘·같은 순서
+    private static readonly List<KeyValuePair<string, string>> Categories = new()
+    {
+        new("use", "사용"), new("set", "설정"), new("net", "통신"), new("dat", "데이터"),
+        new("upd", "업데이트"), new("bug", "기능오류"), new("ins", "설치"), new("etc", "기타"),
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ListResponse>(
+                $"api/admin/kb/docs?category={Uri.EscapeDataString(_categoryFilter)}&status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}");
+            _rows = res?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"누리집 조회 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenAsync(string issueCode)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<HistoryResponse>($"api/admin/kb/docs/{Uri.EscapeDataString(issueCode)}");
+            _history = res?.Data ?? new();
+            _openCode = issueCode;
+            if (_history.Count > 0)
+            {
+                _editTitle = _history[0].Title;
+                _editBody = _history[0].BodyMd;
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"문서를 열지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ReviseAsync(string status)
+    {
+        if (string.IsNullOrEmpty(_openCode)) return;
+        if (string.IsNullOrWhiteSpace(_editTitle) || string.IsNullOrWhiteSpace(_editBody))
+        {
+            Snackbar.Add("제목과 본문을 채워 주세요.", Severity.Info);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync(
+                $"api/admin/kb/docs/{Uri.EscapeDataString(_openCode)}/revise",
+                new { title = _editTitle.Trim(), bodyMd = _editBody, status });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"새 판을 {status}으로 저장했습니다 — 옛 판은 그대로 남습니다.", Severity.Success);
+                await LoadAsync();
+                await OpenAsync(_openCode);
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "저장하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<ExportResponse>("api/admin/kb/export");
+            _exportFiles = res?.Files ?? new();
+            if (_exportFiles.Count == 0)
+                Snackbar.Add("승인된 문서가 아직 없습니다 — 미러로 나갈 것이 없습니다.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"내보내지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string CategoryLabel(string? c) => c switch
+    {
+        "use" => "사용", "set" => "설정", "net" => "통신", "dat" => "데이터",
+        "upd" => "업데이트", "bug" => "기능오류", "ins" => "설치", "etc" => "기타",
+        _ => c ?? "-",
+    };
+
+    private static string StatusChipClass(string? s) => s switch
+    {
+        "승인" => "bo-status-chip--active",
+        "초안" => "bo-status-chip--trial",
+        "폐기" => "bo-status-chip--suspended",
+        _ => "bo-status-chip--neutral",
+    };
+
+    public class KbDocRow
+    {
+        public long DocId { get; set; }
+        public string IssueCode { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string Status { get; set; } = "";
+        public int Version { get; set; }
+        public string? ApprovedBy { get; set; }
+        public DateTime? ApprovedAt { get; set; }
+        public long? SourceTicketId { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class KbDocVersion : KbDocRow
+    {
+        public string BodyMd { get; set; } = "";
+        public string? CreatedBy { get; set; }
+    }
+
+    public class ExportFile
+    {
+        public string Path { get; set; } = "";
+        public string Markdown { get; set; } = "";
+    }
+
+    private sealed class ListResponse { public bool Success { get; set; } public List<KbDocRow> Data { get; set; } = new(); }
+    private sealed class HistoryResponse { public bool Success { get; set; } public List<KbDocVersion> Data { get; set; } = new(); }
+    private sealed class ExportResponse { public bool Success { get; set; } public int Count { get; set; } public List<ExportFile> Files { get; set; } = new(); }
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}
