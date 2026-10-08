@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Dapper;
+using HitPan.Backoffice.API.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -28,16 +29,42 @@ public class CsAdminController : ControllerBase
         "접수", "처리중", "보류", "고객답대기", "완료",
     };
 
+    // ── 작14 C-1·C-2 추가분 ───────────────────────────────────────────
+    // 분류 8종 정본(결-9) — 1차는 **사람이 고른다**(AI 분류는 묶음 D). 이 목록 밖은 거부.
+    private static readonly HashSet<string> AllowedCategory = new(StringComparer.Ordinal)
+    {
+        "use", "set", "net", "dat", "upd", "bug", "ins", "etc",
+    };
+
+    // 업무 영역 보조태그 — 자유입력 불가(쟁점-3). 수신측(CsInboundController)과 같은 목록이다.
+    private static readonly HashSet<string> AllowedSubTags = new(StringComparer.Ordinal)
+    {
+        "estimate_sales", "purchase_order", "stock", "invoice",
+        "accounting", "hr_payroll", "settings_perm", "etc",
+    };
+
+    // 응대 주체 — ERP 계정 계층(#38)과 무관한 본사/대리점 축이다.
+    private static readonly HashSet<string> AllowedHandlerType = new(StringComparer.Ordinal)
+    {
+        "본사2차", "대리점1차",
+    };
+
+    // 답 약속 시계 기준값(C-2). 🔴 **정본은 9.설정 몫**이다 — 설정 화면이 생기면 거기서 읽는다.
+    //   지금은 서버 제안값 하나뿐이고, 사람이 화면에서 고칠 수 있다(반자동 — 자동 확정 0건).
+    private const int DefaultPromiseHours = 24;
+
     public CsAdminController(IConfiguration config, ILogger<CsAdminController> logger)
     {
         _config = config;
         _logger = logger;
     }
 
-    // ── 목록 — 상태·유형 필터 + 회사명 검색 ─────────────────────────
+    // ── 목록 — 상태·유형 필터 + 회사명 검색 + 「내 응대함」(C-2 · mine=1) ──
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? q, CancellationToken ct)
+    public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? q,
+                                          [FromQuery] bool mine, CancellationToken ct)
     {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         await using var db = await OpenAsync(ct);
         var rows = await db.QueryAsync(@"
             SELECT k.id              AS id,
@@ -48,11 +75,15 @@ public class CsAdminController : ControllerBase
                    k.sub_tag         AS subTag,
                    k.received_channel AS channel,
                    k.status          AS status,
+                   k.handler_type    AS handlerType,
+                   k.handler_id      AS handlerId,
+                   k.promised_at     AS promisedAt,
                    k.received_at     AS receivedAt,
                    (SELECT COUNT(*) FROM bo_cs_replies r WHERE r.ticket_id = k.id) AS replyCount
               FROM bo_cs_tickets k
               JOIN tenants t ON t.tenant_id = k.tenant_id
              WHERE (@Status IS NULL OR k.status = @Status)
+               AND (@Mine = 0 OR k.handler_id = @AdminId)
                AND (@Q IS NULL OR t.company_name LIKE CONCAT('%', @Q, '%') OR t.tenant_code LIKE CONCAT('%', @Q, '%'))
              ORDER BY k.received_at DESC
              LIMIT 300",
@@ -60,6 +91,8 @@ public class CsAdminController : ControllerBase
             {
                 Status = string.IsNullOrWhiteSpace(status) || status == "all" ? null : status,
                 Q = string.IsNullOrWhiteSpace(q) ? null : q.Trim(),
+                Mine = mine ? 1 : 0,
+                AdminId = adminId,
             });
         return Ok(new { success = true, data = rows });
     }
@@ -73,6 +106,7 @@ public class CsAdminController : ControllerBase
             SELECT k.id, t.company_name AS companyName, t.tenant_code AS tenantCode,
                    k.category, k.shape_tag AS shapeTag, k.sub_tag AS subTag, k.body,
                    k.status, k.screen_code AS screenCode, k.erp_version AS erpVersion,
+                   k.handler_type AS handlerType, k.handler_id AS handlerId, k.promised_at AS promisedAt,
                    k.received_channel AS channel, k.received_at AS receivedAt, k.completed_at AS completedAt
               FROM bo_cs_tickets k JOIN tenants t ON t.tenant_id = k.tenant_id
              WHERE k.id = @Id", new { Id = id });
@@ -145,9 +179,145 @@ public class CsAdminController : ControllerBase
         return Ok(new { success = true });
     }
 
+    // ── C-1 분류 다시 고르기 — 8종 정본 밖은 거부 · 전이 기록은 상태 로그와 같은 표 ──
+    //    사람이 고치는 것이 1차 설계값이다(규칙 1차 분류는 수신측이 넣고, 최종은 사람).
+    [HttpPost("{id:long}/category")]
+    public async Task<IActionResult> Recategorize(long id, [FromBody] CategoryRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var to = req?.To?.Trim() ?? "";
+        if (!AllowedCategory.Contains(to))
+            return BadRequest(new { success = false, message = "분류를 8종 중에서 골라 주세요" });
+
+        await using var db = await OpenAsync(ct);
+        var from = await db.ExecuteScalarAsync<string?>(
+            "SELECT category FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        if (from is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
+        if (from == to) return Ok(new { success = true, unchanged = true });
+
+        await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets SET category = @To WHERE id = @Id;
+            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+            VALUES (@Id, CONCAT('분류:', @From), CONCAT('분류:', @To), @AdminId);",
+            new { Id = id, From = from, To = to, AdminId = adminId });
+
+        return Ok(new { success = true });
+    }
+
+    // ── C-2 내 응대함 — 배정. 누가 잡았는지가 남아야 「아무도 안 본 글」이 안 생긴다 ──
+    [HttpPost("{id:long}/assign")]
+    public async Task<IActionResult> Assign(long id, [FromBody] AssignRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var kind = string.IsNullOrWhiteSpace(req?.HandlerType) ? "본사2차" : req!.HandlerType!.Trim();
+        if (!AllowedHandlerType.Contains(kind))
+            return BadRequest(new { success = false, message = "응대 주체가 목록 밖입니다" });
+
+        await using var db = await OpenAsync(ct);
+        var exists = await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        if (exists == 0) return NotFound(new { success = false, message = "티켓이 없습니다" });
+
+        await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets SET handler_id = @AdminId, handler_type = @Kind WHERE id = @Id;
+            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+            VALUES (@Id, '배정', @Kind, @AdminId);",
+            new { Id = id, AdminId = adminId, Kind = kind });
+
+        return Ok(new { success = true, handlerId = adminId, handlerType = kind });
+    }
+
+    // ── C-2 답 약속 시계 — 서버가 제안하고 사람이 고친다(기준값 정본은 9.설정) ──
+    [HttpPost("{id:long}/promise")]
+    public async Task<IActionResult> SetPromise(long id, [FromBody] PromiseRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        await using var db = await OpenAsync(ct);
+        var exists = await db.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        if (exists == 0) return NotFound(new { success = false, message = "티켓이 없습니다" });
+
+        // 제안값 = 지금 + 기준 시간. 사람이 보낸 값이 있으면 그것을 쓴다(반자동).
+        var at = req?.At ?? DateTime.UtcNow.AddHours(DefaultPromiseHours);
+        await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets SET promised_at = @At WHERE id = @Id;
+            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+            VALUES (@Id, '약속', '약속설정', @AdminId);",
+            new { Id = id, At = at, AdminId = adminId });
+
+        return Ok(new { success = true, promisedAt = at });
+    }
+
+    // ── C-2 전화 접수 30초 틀 — 전화로 들어온 것도 같은 표에 쌓인다 ──
+    //    🔴 금지필드 검사는 쪽지와 **같은 규칙 한 벌**(BoForbiddenFieldScanner)을 쓴다 —
+    //       전화 받아 적다가 식별정보가 들어가는 길이 열려 있으면 문③이 반쪽이다.
+    [HttpPost("phone")]
+    public async Task<IActionResult> PhoneIntake([FromBody] PhoneRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var code = req?.TenantCode?.Trim() ?? "";
+        var category = req?.Category?.Trim() ?? "";
+        var subTag = string.IsNullOrWhiteSpace(req?.SubTag) ? "etc" : req!.SubTag!.Trim();
+        var body = req?.Body?.Trim() ?? "";
+
+        if (string.IsNullOrEmpty(code))
+            return BadRequest(new { success = false, message = "고객사(테넌트넘버)를 골라 주세요" });
+        if (!AllowedCategory.Contains(category))
+            return BadRequest(new { success = false, message = "분류를 8종 중에서 골라 주세요" });
+        if (!AllowedSubTags.Contains(subTag))
+            return BadRequest(new { success = false, message = "업무 영역이 목록 밖입니다" });
+        if (body.Length is 0 or > 2000)
+            return BadRequest(new { success = false, message = "통화 내용은 1~2000자입니다" });
+
+        var rule = BoForbiddenFieldScanner.Scan(body);
+        if (rule is not null)
+            return BadRequest(new { success = false, message = "적으신 내용에 식별정보 모양이 있습니다 — 그 줄을 지워 주세요" });
+
+        await using var db = await OpenAsync(ct);
+        var tenantId = await db.ExecuteScalarAsync<string?>(
+            "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE tenant_code = @Code", new { Code = code });
+        if (tenantId is null) return NotFound(new { success = false, message = "그 테넌트넘버의 고객사가 없습니다" });
+
+        var uid = Guid.NewGuid().ToString();
+        var id = await db.ExecuteScalarAsync<long>(@"
+            INSERT INTO bo_cs_tickets
+                (tenant_id, client_ticket_uid, received_channel, category, sub_tag, body,
+                 status, handler_type, handler_id, promised_at)
+            VALUES (@TenantId, @Uid, 'phone', @Category, @SubTag, @Body,
+                    '접수', '본사2차', @AdminId, @Promise);
+            SELECT LAST_INSERT_ID();",
+            new
+            {
+                TenantId = tenantId, Uid = uid, Category = category, SubTag = subTag, Body = body,
+                AdminId = adminId, Promise = DateTime.UtcNow.AddHours(DefaultPromiseHours),
+            });
+
+        _logger.LogInformation("[CS어드민] 전화 접수 — ticket={Id}", id);
+        return Ok(new { success = true, id });
+    }
+
     private sealed class TicketKey { public string TenantId { get; set; } = ""; public string Uid { get; set; } = ""; }
     public class ReplyRequest { public string? Body { get; set; } }
     public class StatusRequest { public string? To { get; set; } }
+    public class CategoryRequest { public string? To { get; set; } }
+    public class AssignRequest { public string? HandlerType { get; set; } }
+    public class PromiseRequest { public DateTime? At { get; set; } }
+
+    public class PhoneRequest
+    {
+        public string? TenantCode { get; set; }
+        public string? Category { get; set; }
+        public string? SubTag { get; set; }
+        public string? Body { get; set; }
+    }
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {

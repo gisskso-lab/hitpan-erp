@@ -20,11 +20,56 @@
 <BoPageHeader Title="CS 티켓"
               Subtitle="고객사 ERP 쪽지·전화 접수 — 답은 고객 ERP 화면으로 전달됩니다">
     <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Call"
+                   OnClick="@(() => _phoneOpen = !_phoneOpen)">전화 접수</MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Refresh"
                    OnClick="LoadAsync">새로고침</MudButton>
     </Actions>
 </BoPageHeader>
+
+@* ── C-2 전화 접수 30초 틀 — 통화하면서 채울 수 있게 칸이 4개뿐이다 ── *@
+@if (_phoneOpen)
+{
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.h6" Class="mb-1">전화 접수</MudText>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
+            통화 중에 채우는 틀입니다 — 고객사·분류·업무 영역·들은 말 네 칸이면 접수됩니다.
+            주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다).
+        </MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="3">
+                <MudTextField @bind-Value="_phoneTenantCode" Label="고객사 코드" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="string" @bind-Value="_phoneCategory" Label="분류(8종)" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var c in Categories)
+                    {
+                        <MudSelectItem Value="@c.Key">@c.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="string" @bind-Value="_phoneSubTag" Label="업무 영역" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var s in SubTags)
+                    {
+                        <MudSelectItem Value="@s.Key">@s.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3" Class="d-flex align-center">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_phoneSaving"
+                           OnClick="SavePhoneAsync">@(_phoneSaving ? "접수 중…" : "접수")</MudButton>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_phoneBody" Label="들은 말 그대로" Variant="Variant.Outlined"
+                              Lines="3" MaxLength="2000" Counter="2000" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
 
 <BoFilterBar>
     <MudTextField @bind-Value="_keyword" Label="검색 (회사명·고객사코드)" Variant="Variant.Outlined"
@@ -37,6 +82,7 @@
         <MudSelectItem Value="@("고객답대기")">고객 답 대기</MudSelectItem>
         <MudSelectItem Value="@("완료")">완료</MudSelectItem>
     </MudSelect>
+    <MudSwitch T="bool" @bind-Value="_mineOnly" Label="내 응대함만" Color="Color.Primary" />
     <div class="bo-filter-bar__action">
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
@@ -107,6 +153,37 @@
                 <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ChangeStatusAsync">상태 변경</MudButton>
             </div>
         </div>
+
+        @* ── C-1 분류 다시 고르기 · C-2 배정·약속 시계 — 한 줄에 모아 둔다 ── *@
+        <div class="d-flex align-center flex-wrap gap-2 mb-3">
+            <MudSelect T="string" @bind-Value="_newCategory" Label="분류(8종)" Dense="true"
+                       Variant="Variant.Outlined" Style="min-width:150px">
+                @foreach (var c in Categories)
+                {
+                    <MudSelectItem Value="@c.Key">@c.Value</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ChangeCategoryAsync">분류 저장</MudButton>
+
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.AssignmentInd"
+                       OnClick="AssignToMeAsync">내가 맡기</MudButton>
+            <MudText Typo="Typo.caption" Style="color:#6B7280">
+                담당 @(string.IsNullOrEmpty(_detail.HandlerType) ? "미배정" : _detail.HandlerType)
+            </MudText>
+
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Schedule"
+                       OnClick="SetPromiseAsync">답 약속 (@(PromiseHours)시간)</MudButton>
+            <MudText Typo="Typo.caption" Style="color:#6B7280">@PromiseText(_detail.PromisedAt)</MudText>
+
+            @if (_detail.Status == "완료")
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.MenuBook"
+                           OnClick="PromoteDraftAsync">누리집 초안</MudButton>
+            }
+        </div>
         <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
             @(_detail.Channel == "erp_message" ? "쪽지" : "전화") · @ShapeLabel(_detail.ShapeTag) · 화면 @(_detail.ScreenCode ?? "-") · 판 @(_detail.ErpVersion ?? "-") · @_detail.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
         </MudText>
@@ -135,6 +212,46 @@
                 @(_sendingReply ? "저장 중…" : "답 저장 (승인)")
             </MudButton>
         </div>
+
+        @* ── C-3·C-4 누리집 승격 — 초안은 회사·담당자 칸을 애초에 가져오지 않는다 ── *@
+        @if (_draft is not null)
+        {
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.h6" Class="mb-1">누리집 초안</MudText>
+            <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
+                회사 이름·담당자·연락처는 이 초안에 <b>들어오지 않습니다</b>(가져오지 않은 값은 잊을 수도 없습니다).
+                제목과 해결 순서를 적고 승인하면 그때 등재됩니다 — 승인 없이는 행이 생기지 않습니다.
+                @if (_draftQuoteOmitted)
+                {
+                    <span style="color:#B45309"> · 본문에 식별정보 모양이 있어 인용을 생략했습니다.</span>
+                }
+            </MudText>
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <MudSelect T="string" @bind-Value="_draftCategory" Label="분류(8종)" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var c in Categories)
+                        {
+                            <MudSelectItem Value="@c.Key">@c.Value</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField @bind-Value="_draftTitle" Label="제목 (증상 한 줄)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" MaxLength="200" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_draft" Label="문제점 / 해결점" Variant="Variant.Outlined"
+                                  Lines="14" MaxLength="8000" Counter="8000" />
+                </MudItem>
+            </MudGrid>
+            <div class="d-flex justify-end gap-2 mt-2">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => SaveDocAsync("초안"))">초안 저장</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           Disabled="_savingDoc" OnClick="@(() => SaveDocAsync("승인"))">
+                    @(_savingDoc ? "등재 중…" : "승인 등재")
+                </MudButton>
+            </div>
+        }
     </MudPaper>
 }
 
@@ -150,6 +267,42 @@
     private string _newStatus = "접수";
     private bool _sendingReply;
 
+    // ── C-1·C-2·C-3 추가분 ──
+    private bool _mineOnly;
+    private string _newCategory = "etc";
+
+    private bool _phoneOpen;
+    private bool _phoneSaving;
+    private string _phoneTenantCode = "";
+    private string _phoneCategory = "use";
+    private string _phoneSubTag = "etc";
+    private string? _phoneBody;
+
+    private string? _draft;                 // 누리집 초안 본문(md) — null = 초안 칸 닫힘
+    private string _draftTitle = "";
+    private string _draftCategory = "etc";
+    private bool _draftQuoteOmitted;
+    private bool _savingDoc;
+
+    // 답 약속 기준값 — 🔴 정본은 9.설정 몫. 화면은 같은 숫자를 보여 주기만 한다(서버가 계산한다).
+    private const int PromiseHours = 24;
+
+    // 8종 정본(결-9) — 콤보의 단일 출처
+    private static readonly List<KeyValuePair<string, string>> Categories = new()
+    {
+        new("use", "사용"), new("set", "설정"), new("net", "통신"), new("dat", "데이터"),
+        new("upd", "업데이트"), new("bug", "기능오류"), new("ins", "설치"), new("etc", "기타"),
+    };
+
+    // 업무 영역 — 자유입력 불가(쟁점-3) · 서버 화이트리스트와 같은 목록
+    private static readonly List<KeyValuePair<string, string>> SubTags = new()
+    {
+        new("estimate_sales", "견적·수주·판매"), new("purchase_order", "발주·매입"),
+        new("stock", "재고·창고"), new("invoice", "계산서·명세서"),
+        new("accounting", "회계·경비"), new("hr_payroll", "사원·급여"),
+        new("settings_perm", "설정·권한"), new("etc", "기타"),
+    };
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task OnSearchKey(KeyboardEventArgs e)
@@ -164,7 +317,7 @@
         {
             var http = HttpFactory.CreateClient("backoffice-authed");
             var res = await http.GetFromJsonAsync<ListResponse>(
-                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}");
+                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}&mine={(_mineOnly ? "true" : "false")}");
             _rows = res?.Data ?? new();
         }
         catch (Exception ex)
@@ -186,7 +339,9 @@
             _detail = res?.Ticket;
             _replies = res?.Replies ?? new();
             _newStatus = _detail?.Status ?? "접수";
+            _newCategory = string.IsNullOrEmpty(_detail?.Category) ? "etc" : _detail!.Category;
             _replyBody = null;
+            _draft = null;                  // 다른 티켓을 열면 초안 칸은 닫는다(섞이면 사고다)
         }
         catch (Exception ex)
         {
@@ -248,6 +403,173 @@
         }
     }
 
+    // ── C-1 분류 다시 고르기 ──
+    private async Task ChangeCategoryAsync()
+    {
+        if (_detail is null) return;
+        await PostAsync($"api/admin/cs/{_detail.Id}/category", new { to = _newCategory }, "분류를 바꿨습니다.");
+    }
+
+    // ── C-2 배정(내 응대함) ──
+    private async Task AssignToMeAsync()
+    {
+        if (_detail is null) return;
+        await PostAsync($"api/admin/cs/{_detail.Id}/assign", new { handlerType = "본사2차" }, "제 응대함으로 가져왔습니다.");
+    }
+
+    // ── C-2 답 약속 시계 — 서버가 기준 시간으로 제안값을 넣는다(사람이 다시 눌러 갱신 가능) ──
+    private async Task SetPromiseAsync()
+    {
+        if (_detail is null) return;
+        await PostAsync($"api/admin/cs/{_detail.Id}/promise", new { }, "답 약속 시각을 넣었습니다.");
+    }
+
+    private async Task PostAsync(string url, object payload, string okMessage)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync(url, payload);
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add(okMessage, Severity.Success);
+                var id = _detail!.Id;
+                await LoadAsync();
+                await SelectAsync(new CsTicketRow { Id = id });
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "바꾸지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"바꾸지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    // ── C-2 전화 접수 ──
+    private async Task SavePhoneAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_phoneTenantCode) || string.IsNullOrWhiteSpace(_phoneBody))
+        {
+            Snackbar.Add("고객사 코드와 들은 말을 채워 주세요.", Severity.Info);
+            return;
+        }
+        _phoneSaving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/cs/phone", new
+            {
+                tenantCode = _phoneTenantCode.Trim(),
+                category = _phoneCategory,
+                subTag = _phoneSubTag,
+                body = _phoneBody,
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("전화 접수를 저장했습니다.", Severity.Success);
+                _phoneBody = null;
+                _phoneOpen = false;
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "접수하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"접수하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _phoneSaving = false;
+        }
+    }
+
+    // ── C-3·C-4 누리집 승격 초안 ──
+    private async Task PromoteDraftAsync()
+    {
+        if (_detail is null) return;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/admin/kb/promote/{_detail.Id}", new { });
+            if (res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadFromJsonAsync<PromoteResponse>();
+                _draft = body?.Draft?.BodyMd ?? "";
+                _draftCategory = string.IsNullOrEmpty(body?.Draft?.Category) ? "etc" : body!.Draft!.Category;
+                _draftQuoteOmitted = body?.Draft?.QuoteOmitted ?? false;
+                _draftTitle = "";
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "초안을 만들지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"초안을 만들지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveDocAsync(string status)
+    {
+        if (_draft is null || _detail is null) return;
+        if (string.IsNullOrWhiteSpace(_draftTitle))
+        {
+            Snackbar.Add("제목을 적어 주세요 — 증상 한 줄이면 됩니다.", Severity.Info);
+            return;
+        }
+        _savingDoc = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/kb/docs", new
+            {
+                category = _draftCategory,
+                title = _draftTitle.Trim(),
+                bodyMd = _draft,
+                status,
+                sourceTicketId = _detail.Id,
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                var ok = await res.Content.ReadFromJsonAsync<DocSaveResponse>();
+                Snackbar.Add($"누리집에 {status}으로 등재했습니다 — {ok?.IssueCode}", Severity.Success);
+                _draft = null;
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "등재하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"등재하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _savingDoc = false;
+        }
+    }
+
+    private static string PromiseText(DateTime? at)
+    {
+        if (at is null) return "약속 없음";
+        var local = at.Value.ToLocalTime();
+        var left = local - DateTime.Now;
+        if (left.TotalMinutes < 0) return $"{local:MM-dd HH:mm} · 지났습니다";
+        return $"{local:MM-dd HH:mm} · {(int)left.TotalHours}시간 남음";
+    }
+
     // 8종 정본(결-9) — 누리집 8폴더와 같은 어휘
     private static string CategoryLabel(string? c) => c switch
     {
@@ -283,6 +605,9 @@
         public string? SubTag { get; set; }
         public string Channel { get; set; } = "";
         public string Status { get; set; } = "";
+        public string? HandlerType { get; set; }
+        public string? HandlerId { get; set; }
+        public DateTime? PromisedAt { get; set; }
         public DateTime ReceivedAt { get; set; }
         public int ReplyCount { get; set; }
     }
@@ -300,6 +625,26 @@
         public string Body { get; set; } = "";
         public DateTime ApprovedAt { get; set; }
         public DateTime? DeliveredAt { get; set; }
+    }
+
+    private sealed class PromoteResponse { public bool Success { get; set; } public DraftBody? Draft { get; set; } }
+
+    private sealed class DraftBody
+    {
+        public string Category { get; set; } = "";
+        public string? Title { get; set; }
+        public string BodyMd { get; set; } = "";
+        public long SourceTicketId { get; set; }
+        public bool QuoteOmitted { get; set; }
+    }
+
+    private sealed class DocSaveResponse
+    {
+        public bool Success { get; set; }
+        public long DocId { get; set; }
+        public string? IssueCode { get; set; }
+        public int Version { get; set; }
+        public string? Status { get; set; }
     }
 
     private sealed class ListResponse { public bool Success { get; set; } public List<CsTicketRow> Data { get; set; } = new(); }

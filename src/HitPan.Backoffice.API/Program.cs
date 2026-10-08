@@ -62,6 +62,11 @@ public class Program
         //   - 개인키 = HITPAN_SERIAL_SIGN_PRIVATE_KEY 환경변수(베타 서버격리). Singleton(개인키 PEM import 1회 재사용).
         builder.Services.AddSingleton<HitPan.Backoffice.API.Services.ISerialSignatureService,
                                       HitPan.Backoffice.API.Services.SerialSignatureService>();
+        // 🔴 작14 C-5 — 외부 AI 반출 잠금장치(fail-closed · 사장님 결재 2026-10-08).
+        //   동의 행이 있을 때만 열린다. 지금은 동의 절차 자체가 없으므로 사실상 전면 차단이 결재된 상태다.
+        //   묶음 D(AI 3사)는 반드시 이 게이트를 통과한 뒤에만 외부로 나간다 — 판정은 이 한 곳.
+        builder.Services.AddScoped<HitPan.Backoffice.API.Security.IBoExternalAiGate,
+                                   HitPan.Backoffice.API.Security.BoExternalAiGate>();
 
         // JWT 인증 (백오피스 전용 — ERP와 분리)
         var jwt = builder.Configuration.GetSection("Jwt");

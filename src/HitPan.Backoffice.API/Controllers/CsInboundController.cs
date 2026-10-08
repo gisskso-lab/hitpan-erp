@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dapper;
+using HitPan.Backoffice.API.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -265,37 +266,11 @@ public class CsInboundController : ControllerBase
         return result;
     }
 
-    // ── 문③ 본문 모양 검사 — ERP ForbiddenFieldScanner 와 같은 규칙·어휘(독립 복제 · 경계 분리) ──
-    private static readonly Regex BizNo = new(@"\b\d{3}-?\d{2}-?\d{5}\b", RegexOptions.Compiled);
-    private static readonly Regex ResidentNo = new(@"\b\d{6}-\d{7}\b|\b\d{13}\b", RegexOptions.Compiled);
-    private static readonly Regex CardShape = new(@"\b\d{4}([ -]?\d{4}){2,3}([ -]?\d{1,3})?\b", RegexOptions.Compiled);
-    private static readonly Regex AccountShape = new(@"\b\d{2,6}-\d{2,6}-\d{2,8}\b", RegexOptions.Compiled);
-
-    private static string? ScanBody(string? body)
-    {
-        if (string.IsNullOrWhiteSpace(body)) return null;
-        if (ResidentNo.IsMatch(body)) return "resident_no";
-        foreach (Match m in CardShape.Matches(body))
-        {
-            var digits = new string(m.Value.Where(char.IsDigit).ToArray());
-            if (digits.Length is >= 13 and <= 19 && Luhn(digits)) return "card_no";
-        }
-        if (BizNo.IsMatch(body)) return "biz_no";          // 3-2-5 가 더 특정적 — 계좌보다 먼저(G-CS-5 교훈)
-        if (AccountShape.IsMatch(body)) return "account_no";
-        return null;
-    }
-
-    private static bool Luhn(string digits)
-    {
-        int sum = 0; bool alt = false;
-        for (int i = digits.Length - 1; i >= 0; i--)
-        {
-            int d = digits[i] - '0';
-            if (alt) { d *= 2; if (d > 9) d -= 9; }
-            sum += d; alt = !alt;
-        }
-        return sum % 10 == 0;
-    }
+    // ── 문③ 본문 모양 검사 — 규칙 한 벌은 BoForbiddenFieldScanner 하나다 ──
+    //    🔴 왜 한 벌인가(작14 C-4 와 같은 커밋): 누리집 승인 재스캔이 두 번째 호출자다.
+    //    같은 규칙을 백오피스 안에서 두 벌 쓰면 검사 **순서**가 갈라진다
+    //    (2026-10-08 CI G-CS-5 실측: 사업자번호가 계좌로 잡혔다). 복제는 ERP↔백오피스 경계 한 번만.
+    private static string? ScanBody(string? body) => BoForbiddenFieldScanner.Scan(body);
 
     // ── 분류 — 7모양(고객 언어 · ERP) → 8종 정본(결-9) 규칙 1차 · 사람이 재분류 가능 ──
     private static readonly Dictionary<string, string> ShapeToCategory = new()
