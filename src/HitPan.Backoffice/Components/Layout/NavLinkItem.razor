@@ -9,7 +9,8 @@
     <span class="bo2-nav-label">@Label</span>
     @if (Count.HasValue && Count.Value > 0)
     {
-        <span class="bo2-nav-count">@(Count.Value > 999 ? "999+" : Count.Value.ToString())</span>
+        @* CountAccent="danger" = 빨간 숫자(안 읽은 CS 처럼 「지금 봐야 하는 것」 · 사장님 지시 2026-10-08) *@
+        <span class="bo2-nav-count @(CountAccent == "danger" ? "bo2-nav-count--danger" : "")">@(Count.Value > 999 ? "999+" : Count.Value.ToString())</span>
     }
 </NavLink>
 
@@ -18,5 +19,7 @@
     [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
     [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
     [Parameter] public int? Count { get; set; }
+    /// <summary>"danger" 면 빨간 숫자. 비우면 기존 모양 그대로(#1 — 기존 호출부 무영향).</summary>
+    [Parameter] public string? CountAccent { get; set; }
     [Parameter] public NavLinkMatch Match { get; set; } = NavLinkMatch.Prefix;
 }

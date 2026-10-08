@@ -1,5 +1,5 @@
 @*
-    작14 C-3·C-4 — CS 누리집 (사장님 결재 2026-10-08)
+    작14 C-3·C-4 — CS 백과사전 (사장님 결재 2026-10-08)
     - 정본은 DB(bo_kb_docs) · 이 화면이 쓰고·보여주고·내보낸다(설계 §2-ⓐ)
     - 🔴 고침은 UPDATE 가 아니라 version+1 새 판 — 옛 판이 그대로 남는다(이력 칸에서 보인다)
     - 🔴 승인은 사람만 — 승인 없이는 승인 판 행 자체가 안 생긴다(DB CHECK)
@@ -15,9 +15,9 @@
 @inject ISnackbar Snackbar
 @using HitPan.Backoffice.Components.Pages.Platform.Components
 
-<PageTitle>CS 누리집 — 히트판 백오피스</PageTitle>
+<PageTitle>CS 백과사전 — 히트판 백오피스</PageTitle>
 
-<BoPageHeader Title="CS 누리집"
+<BoPageHeader Title="CS 백과사전"
               Subtitle="해결한 일이 쌓이는 창고 — 승인된 문서만 다음 답의 재료가 됩니다">
     <Actions>
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
@@ -61,7 +61,7 @@
     {
         <div style="padding:32px 24px;">
             <BoEmptyStateCard Title="아직 등재된 문서가 없습니다"
-                              Description="CS 티켓을 완료로 바꾸고 「누리집 초안」 을 누르면 이곳에 쌓입니다."
+                              Description="CS 창구을 완료로 바꾸고 「백과사전 초안」 을 누르면 이곳에 쌓입니다."
                               IllustrationKind="doc" />
         </div>
     }
@@ -168,7 +168,7 @@
     private string _editBody = "";
     private string _openCode = "";
 
-    // 8종 정본(결-9) — CS 티켓 화면과 같은 어휘·같은 순서
+    // 8종 정본(결-9) — CS 창구 화면과 같은 어휘·같은 순서
     private static readonly List<KeyValuePair<string, string>> Categories = new()
     {
         new("use", "사용"), new("set", "설정"), new("net", "통신"), new("dat", "데이터"),
@@ -194,7 +194,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"누리집 조회 실패: {ex.Message}", Severity.Error);
+            Snackbar.Add($"백과사전 조회 실패: {ex.Message}", Severity.Error);
         }
         finally
         {

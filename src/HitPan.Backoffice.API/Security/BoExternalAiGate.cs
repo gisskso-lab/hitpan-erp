@@ -19,6 +19,12 @@ namespace HitPan.Backoffice.API.Security;
 /// </summary>
 public interface IBoExternalAiGate
 {
+    // 🔴 사장님 지시 2026-10-08 — 원문 그대로 보존(지우지 말 것)
+    //누리집을 만들고 AI를 통한 CS자동화 즉시 실행하지 않고, 준비중인 이유는 추후 쪽지 형태에서 챗봇 형태로 백오피스가 히트판에 1:1로 CS를 자동화 처리 할 수 있도록 하는 준비단계이다. //
+    //
+    // ⇒ 그래서 이 게이트는 「기능을 안 만든 것」이 아니라 **열쇠를 아직 안 돌린 것**이다.
+    //   지금 쌓는 CS 기록·분류·해결 문서가 그때 챗봇이 읽을 재료가 된다.
+
     /// <summary>이 테넌트의 외부 AI 반출이 열려 있는가. 판정 실패는 던지지 않고 닫힘을 돌려준다.</summary>
     Task<bool> IsOpenAsync(string tenantId, CancellationToken ct = default);
 }

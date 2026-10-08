@@ -89,6 +89,15 @@ public sealed class CsAdminGateTests : IDisposable
 
         await using var db = await _h.OpenAsync();
         Assert.Null(await db.ExecuteScalarAsync<DateTime?>("SELECT completed_at FROM bo_cs_tickets WHERE id = @Id", new { Id = id }));
+
+        // 🔴 2026-10-08 사장님 지시로 **규칙이 하나 늘었다**: 완료로 넘기려면 응대 유형이 있어야 한다
+        //   (쪽지·전화·원격지원 — CS 실적 자료는 소급이 안 되므로 그 자리에서 받는다).
+        //   그래서 이 게이트의 준비 단계에 응대 유형 한 줄이 생겼다. 재는 대상은 그대로
+        //   **completed_at 이 「완료일 때만」 박히는가** 이고, 그 축은 바뀌지 않았다.
+        //   (응대 유형 자체를 무는 것은 G-C-12 다 — 음성·양성 양쪽을 거기서 본다.)
+        Assert.IsType<OkObjectResult>(
+            await c.SetHandledVia(id, new CsAdminController.HandledViaRequest { Via = "message" }, default));
+
         Assert.IsType<OkObjectResult>(
             await c.ChangeStatus(id, new CsAdminController.StatusRequest { To = "완료" }, default));
         Assert.NotNull(await db.ExecuteScalarAsync<DateTime?>("SELECT completed_at FROM bo_cs_tickets WHERE id = @Id", new { Id = id }));

@@ -545,3 +545,66 @@
     .bo2-search-kbd { display: none; }
     .bo2-topbar-title { display: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   CS 4단계 띠 + 빨간 숫자 (사장님 지시 2026-10-08)
+     "읽지 않은 CS 00건, 처리되지 않은 CS 00건" — 화면 아래쪽 · 안 읽은 건은 빨간색
+   ───────────────────────────────────────────────────────────── */
+.bo2-nav-count--danger {
+    background: #DC2626;
+    color: #fff;
+}
+
+.bo2-cs-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 20px;
+    border-top: 1px solid #E5E7EB;
+    background: #FAFAFA;
+    font-size: 13px;
+    color: #374151;
+}
+
+.bo2-cs-bar__label {
+    font-weight: 700;
+    color: #0F6E56;
+    letter-spacing: .02em;
+}
+
+.bo2-cs-bar__item {
+    appearance: none;
+    border: 1px solid #E5E7EB;
+    background: #fff;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: #374151;
+    cursor: pointer;
+}
+
+.bo2-cs-bar__item:hover { border-color: #0F6E56; }
+.bo2-cs-bar__item strong { font-weight: 700; margin: 0 2px; }
+
+/* 안 읽은 것 = 지금 봐야 하는 것 */
+.bo2-cs-bar__item.danger {
+    border-color: #DC2626;
+    color: #B91C1C;
+    background: #FEF2F2;
+}
+.bo2-cs-bar__item.danger strong { color: #DC2626; }
+
+/* 처리 안 된 것 = 손이 가야 하는 것 */
+.bo2-cs-bar__item.warn {
+    border-color: #D97706;
+    color: #92400E;
+    background: #FFFBEB;
+}
+
+.bo2-cs-bar__total { margin-left: auto; color: #6B7280; }
+
+@media (max-width: 720px) {
+    .bo2-cs-bar { font-size: 12px; padding: 6px 12px; }
+    .bo2-cs-bar__total { margin-left: 0; }
+}
