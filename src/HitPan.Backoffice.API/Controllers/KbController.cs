@@ -101,8 +101,10 @@ public class KbController : ControllerBase
         var rows = await db.QueryAsync(@"
             SELECT d.issue_code AS issueCode, d.category, d.title, d.body_md AS bodyMd, d.version
               FROM bo_kb_docs d
-              JOIN (SELECT issue_code, MAX(version) AS v FROM bo_kb_docs
-                     WHERE status = '승인' GROUP BY issue_code) m
+              -- 🔴 최신 판은 **상태와 무관하게** 고르고, 그 최신 판이 '승인' 일 때만 내보낸다.
+              --    안쪽에서 status='승인' 으로 먼저 걸면 폐기된 문서의 **옛 승인 판**이 되살아난다
+              --    (G-C-5 가 실측으로 잡음 — 2026-10-08 CI).
+              JOIN (SELECT issue_code, MAX(version) AS v FROM bo_kb_docs GROUP BY issue_code) m
                 ON m.issue_code = d.issue_code AND m.v = d.version
              WHERE d.status = '승인'
                AND (@Category IS NULL OR d.category = @Category)
@@ -270,8 +272,8 @@ public class KbController : ControllerBase
             SELECT d.issue_code AS IssueCode, d.category AS Category, d.title AS Title,
                    d.body_md AS BodyMd, d.version AS Version
               FROM bo_kb_docs d
-              JOIN (SELECT issue_code, MAX(version) AS v FROM bo_kb_docs
-                     WHERE status = '승인' GROUP BY issue_code) m
+              -- 🔴 재사용 재료와 **같은 규칙**이어야 한다(미러에 폐기된 옛 판이 남으면 안 된다).
+              JOIN (SELECT issue_code, MAX(version) AS v FROM bo_kb_docs GROUP BY issue_code) m
                 ON m.issue_code = d.issue_code AND m.v = d.version
              WHERE d.status = '승인'
              ORDER BY d.issue_code");
