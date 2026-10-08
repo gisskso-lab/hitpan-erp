@@ -97,10 +97,12 @@ public sealed class CsKbGateTests : IDisposable
 
     private static string Json(IActionResult r)
     {
-        var json = JsonSerializer.Serialize(((ObjectResult)r).Value, RawKorean);
-        // 자기 검사 — 한글이 escape 된 채면 아래 음성 단언들이 전부 거짓 통과한다.
-        Assert.DoesNotContain("\\u", json);
-        return json;
+        // 자기 검사(미끼 글자) — 한글이 escape 되면 아래 음성 단언들이 전부 거짓 통과한다.
+        //   🔴 「\u 가 하나도 없어야 한다」로 적으면 안 된다: 이모지는 서러게이트 쌍이라
+        //   UnsafeRelaxed 에서도 \uD83D… 로 남는 것이 정상이다(CI 실측 2026-10-08).
+        //   재야 할 것은 **한글이 비교 가능한 상태인가** 하나뿐이다.
+        Assert.Equal("\"문제점\"", JsonSerializer.Serialize("문제점", RawKorean));
+        return JsonSerializer.Serialize(((ObjectResult)r).Value, RawKorean);
     }
 
     // ── G-C-1 ────────────────────────────────────────────────────────
