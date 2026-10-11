@@ -13,7 +13,9 @@ namespace HitPan.Tests.Integrity;
 /// <c>ALTER … ADD COLUMN IF NOT EXISTS</c> 를 쓴다. MySQL 8 은 그걸 1064 로 거부하고,
 /// 적용기는 첫 실패에서 기동을 중단한다 ⇒ <c>11</c> 번 이후 <b>표 9개·칸 17개가 운영에 한 번도 안 들어갔다</b>
 /// (2026-10-11 사장님 손으로 서버 로그·<c>_schema_migrations</c>·<c>SHOW TABLES</c> 실측 —
-/// docs/검증/선행/20261011_1V_백오피스_MySQL8_문법거부_선행검증서.md).</para>
+/// docs/검증/선행/20261011_1V_백오피스_MySQL8_문법거부_선행검증서.md).
+/// <br/>🔴 이 「9개·17개」는 <b>그날 운영에 빠져 있던 수</b>다 — 아래 요구 목록의 크기가 아니다.
+/// 목록은 SQL 이 늘면 함께 늘어난다(45번이 표 2개·칸 3개를 더했다). <b>숫자는 목록이 말한다.</b></para>
 ///
 /// <para>🔴 <b>왜 게이트 수십 개가 못 잡았나</b>: 백오피스 스키마를 적재하는 게이트가 전부
 /// <c>mariadb:11.4</c> 에서만 돌았다. <b>판이 하나였다.</b> 그래서 이 파일은 <b>판을 확인하는 것</b>부터 한다 —
@@ -39,6 +41,8 @@ public sealed class BackofficeSchemaMysql8GateTests
         "tenant_update_history", "tenant_update_state",                             // 20
         "bo_cs_tickets", "bo_cs_ticket_logs", "bo_cs_replies", "bo_cs_reject_logs", // 40
         "bo_kb_docs", "bo_kb_doc_logs", "bo_ai_export_consents",                    // 41
+        // 🔴 20261011작2 — 45번 신설분. G-M8-1 이 전 파일을 적용하므로 여기 더하면 MySQL 8 에서 검산된다.
+        "bo_cs_outbound", "bo_cs_retention_policy",                                 // 45
     ];
 
     /// <summary>적용기가 <c>ALTER … ADD COLUMN</c> 으로 붙여야 하는 칸 (11·30·31·32·41·42·44번 소관).</summary>
@@ -55,6 +59,12 @@ public sealed class BackofficeSchemaMysql8GateTests
         ("bo_cs_tickets", "rated_at"), ("bo_cs_tickets", "rating_comment"),          // 42
         ("pricing_plans", "price_display"),                                          // 44
         ("pricing_plans", "max_pc_devices"), ("pricing_plans", "max_mobile_devices"),// 44
+        // 🔴 20261011작2 [4] 검증 V-1 봉합 — 45번은 표 2개 **말고 칸 3개도** 더한다.
+        //   표만 `RequiredTables` 에 넣고 칸을 안 넣어서, 작1 사고의 모양(「표는 생겼는데
+        //   칸이 조용히 안 생김」)이 바로 그 자리에 다시 열려 있었다. `ALTER` 는 1060 관용
+        //   경로를 타므로 **실패해도 적용됨으로 기록된다** ⇒ 보증인이 없으면 영영 모른다.
+        ("bo_cs_tickets", "purged_at"), ("bo_cs_tickets", "purged_by"),              // 45
+        ("bo_cs_tickets", "purge_reason"),                                           // 45
     ];
 
     /// <summary>
@@ -78,6 +88,10 @@ public sealed class BackofficeSchemaMysql8GateTests
         ("pricing_plans", "price_display", "varchar(50)"),                 // 44
         ("pricing_plans", "max_pc_devices", "int"),                        // 44
         ("pricing_plans", "max_mobile_devices", "int"),                    // 44
+        // 🔴 20261011작2 [4] V-1 — 형까지 센다(1060 관용은 「있다」만 보장한다).
+        ("bo_cs_tickets", "purged_at", "datetime(6)"),                     // 45
+        ("bo_cs_tickets", "purged_by", "varchar(36)"),                     // 45
+        ("bo_cs_tickets", "purge_reason", "varchar(200)"),                 // 45
     ];
 
     /// <summary>적용기가 <c>ALTER … ADD KEY</c> 로 붙여야 하는 인덱스 — ADD KEY 벗기기 경로의 과녁.</summary>
@@ -123,7 +137,10 @@ public sealed class BackofficeSchemaMysql8GateTests
     // G-M8-2 — 표·칸·인덱스가 실제로 생겼다
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-M8-2 적용 후 표 9개·칸 17개·인덱스 2개가 MySQL 8 에 실재한다")]
+    // 🔴 이름에 숫자를 쓰지 않는다 — 2026-10-11 실측: 표가 9→11, 칸이 17→20 으로 늘었는데
+    //   이름은 「표 9개·칸 17개」로 남아 CI 로그가 **거짓을 찍고 있었다**(단언은 목록 전수라 정상).
+    //   이름이 사실과 어긋나면 다음 사람이 「새 칸은 안 센다」고 읽는다. 숫자는 목록이 말하게 둔다.
+    [Fact(DisplayName = "G-M8-2 적용 후 요구 표·칸(이름+형)·인덱스가 MySQL 8 에 실재한다 (목록 전수)")]
     public async Task G_M8_2_표와_칸이_실재한다()
     {
         const string gate = "G-M8-2 MySQL8 표·칸 실재";

@@ -24,6 +24,10 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Call"
                    OnClick="@(() => _phoneOpen = !_phoneOpen)">전화 접수</MudButton>
+        @* 🔴 20261011작2 C-4 — 본사가 먼저 보내는 쪽지(프로모션·이벤트·과금) *@
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Send"
+                   OnClick="ToggleOutboundAsync">쪽지 보내기</MudButton>
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.Refresh"
                    OnClick="LoadAsync">새로고침</MudButton>
@@ -40,9 +44,16 @@
             주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다).
         </MudText>
         <MudGrid Spacing="2">
+            @* 🔴 20261011작2 A-2 (사장님 오더 2026-10-11) — 코드를 외워 치지 않는다.
+               **회사명을 치면 찾아서 코드를 자동으로 채운다.** 통화 중에 쓰는 칸이라
+               "고객사 코드가 뭐였지" 로 통화가 멈추면 안 된다. *@
             <MudItem xs="12" sm="3">
-                <MudTextField @bind-Value="_phoneTenantCode" Label="고객사 코드" Variant="Variant.Outlined"
-                              Margin="Margin.Dense" />
+                <MudAutocomplete T="TenantPick" Label="고객사명" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Value="_phonePick" ValueChanged="OnPhoneTenantPicked"
+                                 SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
+                                 ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
+                                 HelperText="@(string.IsNullOrEmpty(_phoneTenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_phoneTenantCode}")"
+                                 HelperTextOnFocus="false" />
             </MudItem>
             <MudItem xs="12" sm="3">
                 <MudSelect T="string" @bind-Value="_phoneCategory" Label="분류(8종)" Variant="Variant.Outlined" Margin="Margin.Dense">
@@ -69,6 +80,118 @@
                               Lines="3" MaxLength="2000" Counter="2000" />
             </MudItem>
         </MudGrid>
+    </MudPaper>
+}
+
+@* ── 🔴 20261011작2 C-4 — 본사 → 고객사 쪽지 보내기 (사장님 오더 2026-10-11) ──
+   프로모션·이벤트·구독요금 미결제 안내를 본사가 **먼저** 보낸다.
+   🔴 지금은 고객사 ERP 가 받을 자리가 아직 없다(다음 작업 = ERP CS 파이프라인).
+      그래서 화면이 「보냄」이라고 말하지 않는다 — **전달 대기함**에 쌓이고, 통로가 열리면 자동으로 나간다. *@
+@if (_outboundOpen)
+{
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+        <MudText Typo="Typo.h6" Class="mb-1">고객사에 쪽지 보내기</MudText>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            쓰신 쪽지는 <b>전달 대기함</b>에 저장됩니다. 고객사 ERP 수신 통로가 열리면 쌓인 쪽지가 자동으로 나갑니다
+            — 지금은 아직 고객사 화면에 뜨지 않습니다.
+        </MudAlert>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudAutocomplete T="TenantPick" Label="받는 고객사" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Value="_outPick" ValueChanged="OnOutboundTenantPicked"
+                                 SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
+                                 ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
+                                 HelperText="@(string.IsNullOrEmpty(_outTenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_outTenantCode}")"
+                                 HelperTextOnFocus="false" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="string" @bind-Value="_outPurpose" Label="용도" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var p in OutboundPurposes)
+                    {
+                        <MudSelectItem Value="@p.Key">@p.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="5">
+                <MudTextField @bind-Value="_outTitle" Label="제목 (선택)" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" MaxLength="100" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_outBody" Label="보낼 내용" Variant="Variant.Outlined"
+                              Lines="4" MaxLength="2000" Counter="2000"
+                              HelperText="주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다)" />
+            </MudItem>
+            <MudItem xs="12" Class="d-flex align-center gap-2">
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Disabled="_outSaving"
+                           StartIcon="@Icons.Material.Filled.Send"
+                           OnClick="SendOutboundAsync">@(_outSaving ? "넣는 중…" : "전달 대기함에 넣기")</MudButton>
+                <MudText Typo="Typo.caption" Style="color:#6B7280">
+                    대기 @_outboundPending 건
+                </MudText>
+            </MudItem>
+        </MudGrid>
+
+        @if (_outbound.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">보낸 쪽지</MudText>
+            <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                <thead>
+                    <tr><th>고객사</th><th>용도</th><th>내용</th><th>쓴 때</th><th>상태</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in _outbound)
+                    {
+                        <tr>
+                            <td>@o.CompanyName</td>
+                            <td>@OutboundPurposeLabel(o.Purpose)</td>
+                            <td style="max-width:360px;white-space:pre-wrap">@(string.IsNullOrEmpty(o.Title) ? o.Body : $"{o.Title} — {o.Body}")</td>
+                            <td>@o.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm")</td>
+                            <td>
+                                @if (o.CanceledAt is not null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">취소됨</MudChip>
+                                }
+                                else if (o.DeliveredAt is not null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">전달됨</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning">전달 대기</MudChip>
+                                }
+                            </td>
+                            <td>
+                                @if (o.CanceledAt is null && o.DeliveredAt is null)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                               OnClick="@(() => CancelOutboundAsync(o.OutboundId))">취소</MudButton>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+
+        @* ── C-6~C-9 보관기한 — 🔴 설정해도 스스로 지우지 않는다 ── *@
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-1">쪽지 보관기한</MudText>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+            기한이 지난 쪽지는 <b>폐기 후보</b>로만 보입니다. 사람이 확정해야 지워집니다 — 저절로 지워지는 일은 없습니다.
+        </MudText>
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudNumericField T="int?" @bind-Value="_retainDays" Label="보관 일수 (비우면 무기한)" Variant="Variant.Outlined"
+                             Margin="Margin.Dense" Min="1" Max="3650" Style="max-width:220px" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="SaveRetentionAsync">기한 저장</MudButton>
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="LoadPurgeCandidatesAsync">폐기 후보 보기</MudButton>
+            @if (_purgeCandidates is not null)
+            {
+                <MudText Typo="Typo.caption" Style="color:#6B7280">
+                    기한 지난 쪽지 @_purgeCandidates.Count 건 — 목록에서 하나씩 폐기하십시오
+                </MudText>
+            }
+        </div>
     </MudPaper>
 }
 
@@ -216,7 +339,38 @@
                            StartIcon="@Icons.Material.Filled.MenuBook"
                            OnClick="PromoteDraftAsync">백과사전 초안</MudButton>
             }
+
+            @* 🔴 20261011작2 C-13 — 임의 폐기(사장님 오더). 사유를 적어야 눌린다.
+               내용은 지워지고 「언제 누가 왜 지웠나」는 감사기록에 남는다. *@
+            @if (_detail.PurgedAt is null)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.DeleteOutline"
+                           OnClick="@(() => { _purgeTargetId = _detail!.Id; _purgeReason = ""; })">폐기</MudButton>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default">폐기됨</MudChip>
+            }
         </div>
+
+        @if (_purgeTargetId == _detail.Id)
+        {
+            <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--mud-palette-error);border-radius:8px">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">이 쪽지를 폐기합니다</MudText>
+                <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+                    본문이 지워집니다. 되돌릴 수 없습니다. 접수 기록과 「누가 언제 왜 지웠는지」는 남습니다.
+                </MudText>
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <MudTextField @bind-Value="_purgeReason" Label="폐기 사유 (필수)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" MaxLength="200" Style="min-width:320px" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small"
+                               OnClick="PurgeTicketAsync">폐기 확정</MudButton>
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               OnClick="@(() => _purgeTargetId = null)">그만두기</MudButton>
+                </div>
+            </MudPaper>
+        }
         <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
             @(_detail.Channel == "erp_message" ? "쪽지" : "전화") · @ShapeLabel(_detail.ShapeTag) · 화면 @(_detail.ScreenCode ?? "-") · 판 @(_detail.ErpVersion ?? "-") · @_detail.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
         </MudText>
@@ -329,6 +483,288 @@
     private string _phoneCategory = "use";
     private string _phoneSubTag = "etc";
     private string? _phoneBody;
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261011작2 — 사장님 오더 2026-10-11
+    //   A-2 고객사명 자동조회 · C-4 본사 선발신 쪽지 · C-6~C-13 보관기한·폐기
+    // ══════════════════════════════════════════════════════════════════════
+
+    public sealed class TenantPick
+    {
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+    }
+
+    private TenantPick? _phonePick;
+    private TenantPick? _outPick;
+
+    private bool _outboundOpen;
+    private bool _outSaving;
+    private string _outTenantCode = "";
+    private string _outPurpose = "promo";
+    private string? _outTitle;
+    private string? _outBody;
+    private List<OutboundRow> _outbound = new();
+    private int _outboundPending;
+
+    private int? _retainDays;
+    private List<PurgeCandidateRow>? _purgeCandidates;
+
+    private long? _purgeTargetId;
+    private string _purgeReason = "";
+
+    // 용도 — 사장님 오더의 세 가지 + 기타. 서버(AllowedOutboundPurpose)와 **같은 목록**이다.
+    private static readonly List<KeyValuePair<string, string>> OutboundPurposes = new()
+    {
+        new("promo", "프로모션"), new("event", "이벤트"), new("billing", "구독요금 안내"), new("etc", "기타"),
+    };
+
+    private static string OutboundPurposeLabel(string? p) => p switch
+    {
+        "promo" => "프로모션", "event" => "이벤트", "billing" => "구독요금", _ => "기타",
+    };
+
+    /// <summary>고객사명(또는 코드 일부)으로 찾는다 — 전화접수·쪽지보내기가 **같은 입구**를 쓴다.</summary>
+    private async Task<IEnumerable<TenantPick>> SearchTenantsAsync(string? query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Array.Empty<TenantPick>();
+        }
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<TenantLookupResponse>(
+                $"api/admin/cs/tenant-lookup?q={Uri.EscapeDataString(query)}", ct);
+            return res?.Items ?? (IEnumerable<TenantPick>)Array.Empty<TenantPick>();
+        }
+        catch (Exception ex)
+        {
+            // #15 — 빈 catch 금지. 조회가 막히면 사람이 알아야 한다(코드 직접 입력으로 돌아갈 수 있게).
+            Snackbar.Add($"고객사 조회 실패: {ex.Message}", Severity.Warning);
+            return Array.Empty<TenantPick>();
+        }
+    }
+
+    private void OnPhoneTenantPicked(TenantPick? pick)
+    {
+        _phonePick = pick;
+        _phoneTenantCode = pick?.TenantCode ?? "";
+    }
+
+    private void OnOutboundTenantPicked(TenantPick? pick)
+    {
+        _outPick = pick;
+        _outTenantCode = pick?.TenantCode ?? "";
+    }
+
+    private async Task ToggleOutboundAsync()
+    {
+        _outboundOpen = !_outboundOpen;
+        if (_outboundOpen)
+        {
+            await LoadOutboundAsync();
+            await LoadRetentionAsync();
+        }
+    }
+
+    private async Task LoadOutboundAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<OutboundListResponse>("api/admin/cs/outbound");
+            _outbound = res?.Items ?? new();
+            _outboundPending = _outbound.Count(o => o.DeliveredAt is null && o.CanceledAt is null);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"보낸 쪽지 조회 실패: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private async Task SendOutboundAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_outTenantCode) || string.IsNullOrWhiteSpace(_outBody))
+        {
+            Snackbar.Add("받는 고객사와 보낼 내용을 채워 주세요.", Severity.Info);
+            return;
+        }
+        _outSaving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/cs/outbound", new
+            {
+                tenantCode = _outTenantCode,
+                purpose = _outPurpose,
+                title = _outTitle,
+                body = _outBody,
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                // 🔴 「보냈습니다」라고 말하지 않는다 — 아직 고객사에 안 닿았다.
+                Snackbar.Add("전달 대기함에 넣었습니다 — 수신 통로가 열리면 자동으로 나갑니다.", Severity.Success);
+                _outBody = null;
+                _outTitle = null;
+                await LoadOutboundAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "넣지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"넣지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _outSaving = false;
+        }
+    }
+
+    private async Task CancelOutboundAsync(string outboundId)
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/admin/cs/outbound/{outboundId}/cancel", null);
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("취소했습니다.", Severity.Success);
+                await LoadOutboundAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "취소하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"취소하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadRetentionAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<RetentionResponse>("api/admin/cs/retention");
+            _retainDays = res?.Policy?.RetainDays;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"보관기한 조회 실패: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private async Task SaveRetentionAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/cs/retention", new { retainDays = _retainDays });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add(_retainDays is null
+                    ? "무기한으로 저장했습니다 — 저절로 지워지지 않습니다."
+                    : $"{_retainDays}일로 저장했습니다 — 기한이 지나도 저절로 지워지지 않고 「폐기 후보」로만 보입니다.",
+                    Severity.Success);
+                _purgeCandidates = null;
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "저장하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadPurgeCandidatesAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<PurgeCandidatesResponse>("api/admin/cs/purge-candidates");
+            _purgeCandidates = res?.Items ?? new();
+            if (res?.RetainDays is null)
+            {
+                Snackbar.Add("보관기한이 무기한입니다 — 폐기 후보가 없습니다.", Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"폐기 후보 조회 실패: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private async Task PurgeTicketAsync()
+    {
+        if (_purgeTargetId is null) return;
+        if (string.IsNullOrWhiteSpace(_purgeReason))
+        {
+            Snackbar.Add("폐기 사유를 적어 주세요 — 기록으로 남습니다.", Severity.Info);
+            return;
+        }
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync($"api/admin/cs/{_purgeTargetId}/purge", new { reason = _purgeReason });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("폐기했습니다 — 내용은 지워졌고, 지웠다는 기록은 남습니다.", Severity.Success);
+                _purgeTargetId = null;
+                _purgeReason = "";
+                _detail = null;
+                _purgeCandidates = null;
+                await LoadAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "폐기하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"폐기하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private sealed class TenantLookupResponse { public List<TenantPick>? Items { get; set; } }
+    private sealed class OutboundListResponse { public List<OutboundRow>? Items { get; set; } }
+    private sealed class RetentionResponse { public RetentionPolicy? Policy { get; set; } }
+    private sealed class RetentionPolicy { public int? RetainDays { get; set; } }
+    private sealed class PurgeCandidatesResponse { public int? RetainDays { get; set; } public List<PurgeCandidateRow>? Items { get; set; } }
+
+    private sealed class OutboundRow
+    {
+        public string OutboundId { get; set; } = "";
+        public string? CompanyName { get; set; }
+        public string? TenantCode { get; set; }
+        public string? Purpose { get; set; }
+        public string? Title { get; set; }
+        public string? Body { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? DeliveredAt { get; set; }
+        public DateTime? CanceledAt { get; set; }
+    }
+
+    private sealed class PurgeCandidateRow
+    {
+        public long Id { get; set; }
+        public string? Category { get; set; }
+        public string? Status { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
 
     private string? _draft;                 // 백과사전 초안 본문(md) — null = 초안 칸 닫힘
     private string _draftTitle = "";
@@ -684,6 +1120,10 @@
         public string? Body { get; set; }
         public string? ScreenCode { get; set; }
         public string? ErpVersion { get; set; }
+
+        // 🔴 20261011작2 C-13 — 폐기 표식(값이 있으면 본문은 비어 있다).
+        public DateTime? PurgedAt { get; set; }
+        public string? PurgeReason { get; set; }
     }
 
     public class ReplyRow

@@ -738,6 +738,57 @@ jobs:
           #      `build` 잡의 전체 시험에서 돈다 — 여기 넣지 않았다(안 넣었다는 사실을 남긴다).
           GATES="$GATES|BackofficePromotionPricingDbGate"
 
+          # 🔴 20261011작2 절 A·C — 고객사명 자동조회 · 본사 선발신 쪽지 · 보관기한 · 임의 폐기
+          #    (G-W2-1·2·3·6·7 · BackofficeCsOutboundGateTests)
+          #    실물 CsAdminController 를 호출해 **그가 자기 SQL 을 DB 에 보내게** 한다 — 신설 45번 SQL 이
+          #    그 흐름에 실제로 끼는지도 여기서 드러난다(표 2개 + bo_cs_tickets 3칸).
+          #    🔴 이 게이트가 지키는 약속 셋(사장님 오더에서 바로 나온다):
+          #      ① 본사가 쓴 쪽지는 사라지지 않는다(큐에 남는다)
+          #      ② 화면이 「보냄」이라고 거짓말하지 않는다(delivered_at NULL ⇒ 대기로 보고 · 응답 delivered=false)
+          #      ③ 보관기한이 지나도 저절로 지워지지 않는다(G-W2-7 이 「행·본문·purged_at」 셋을 직접 센다)
+          #    봉합 빼기 전후 대조 실측(2026-10-11 2차수 · hitpan_trgtest · MariaDB 11.4.10):
+          #      S1 응답 delivered 를 false→true (「보냈다」고 거짓말) → G-W2-2 만 FAIL
+          #      S2 폐기를 UPDATE→DELETE FROM bo_cs_tickets → G-W2-6 만 FAIL
+          #      S3 purge-candidates 에 DELETE 한 줄 추가(자동삭제) → G-W2-7 만 FAIL
+          #    🔴 3차수 ([4] 검증 봉합 · G-W2-9·10·11 신설) 대조 실측:
+          #      T1 폐기에서 `bo_cs_replies` 비우기 제거 → G-W2-9 만 FAIL
+          #         (「폐기됨」 티켓에 본사 답장 전문이 남는 사고 — 대화의 절반만 비우면 폐기가 아니다)
+          #      T2 purge-candidates 가 선발신 후보를 안 세게 → G-W2-10 만 FAIL
+          #         (전달·취소된 선발신은 지울 길이 0 이었다 — 오더는 「주고받은」 쪽지다)
+          #      T3 PurgeOutbound 에 [AllowAnonymous] → G-W2-11 만 FAIL
+          #         🔴 게이트가 컨트롤러를 **직접 부르므로** [Authorize] 를 안 지나간다 ⇒
+          #            이 게이트는 파이프라인이 읽는 **메타데이터**를 본다(음성 대조군 포함)
+          #      원복 뒤 8/8 PASS · 11초(DB 없이면 1초 미만 — 소요시간이 판별 수단이다)
+          #    🔴 로컬에서 재려면 **게이트 클래스를 하나씩** 돌려라. `HITPAN_BO_GATE_DB` 는 DB 가
+          #      하나인데 xUnit 은 클래스를 **병렬로** 돌린다 ⇒ 서로의 표를 DROP 해서 애먼 게이트가
+          #      빨간불이 된다(2026-10-11 실측: 3클래스 동시 = G-PRICE-1 FAIL / 하나씩 = 전부 PASS).
+          #      CI 에는 override 가 없어 **클래스마다 자기 DB** 를 만든다 — 이 함정은 로컬 전용이다.
+          #    🔴 1차수 때 여기 「로컬 실측 불가」라고 적어 두고 안 쟀다. 그게 틀렸다 —
+          #      바로 위 10/8 주석이 HITPAN_BO_GATE_DB 로 재는 길을 이미 적어 뒀고
+          #      게이트 파일 자신도 그 변수를 읽는다. 실제로 재 보니 입구 2개가 500 이었다
+          #      (콜레이션 혼용 · bo_cs_tickets 에 없는 created_at). **못 쟀다고 쓰기 전에 재라.**
+          GATES="$GATES|BackofficeCsOutboundGate"
+
+          # 🔴 20261011작2 절 B — 요금제 화면 직접 등록 + 「제외」 버튼
+          #    (G-W2-4·5·8 · BackofficePricingCreateGateTests · 🔴 8 = [4] V-7 봉합 — 6 은 쪽지 폐기 몫)
+          #    운영 pricing_plans 는 0행이고 등록 입구가 없었다(PUT·toggle-active 만 있었다) ⇒ 첫 등록 자체가 불가.
+          #    🔴 이 게이트가 지키는 약속:
+          #      ④ 같은 plan_id 재등록은 409 이고 **기존 행을 한 글자도 안 바꾼다**(updated_at 까지 불변)
+          #        — 가장 그럴듯한 사고 모양인 `INSERT … ON DUPLICATE KEY UPDATE` 를 넣는 순간 빨간불이 된다
+          #      ⑤ 「제외」는 행을 지우지 않는다(COUNT=1 · 가격 불변 · 이력 1줄 · 포함으로 되돌리기 왕복)
+          #      ⑥ 안 보낸 기기 두 칸이 **0 이 아니라 NULL** 로 들어간다(0 이면 기기등록 COALESCE 폴백이 죽는다)
+          #    봉합 빼기 전후 대조 실측(2026-10-11 · hitpan_trgtest · 절B 개발명세서 §4-3):
+          #      S1 중복 선조회 무력화 + ON DUPLICATE KEY UPDATE → G-W2-5 만 FAIL
+          #      S2 이력 action 'create' → 'update' → G-W2-4 만 FAIL
+          #      S3 ToggleActive 의 UPDATE → DELETE FROM pricing_plans → G-W2-8 만 FAIL
+          #    🔴 3차수 ([4] 검증 V-5 봉합 · G-W2-12 신설) 대조 실측:
+          #      T4 이력 INSERT 실패를 try/catch 로 삼키고 그대로 커밋 → G-W2-12 만 FAIL
+          #         (요금제는 생겼는데 이력 0줄 + 응답 500, 다시 누르면 409 — 사람이 손쓸 수 없는 반쪽 상태)
+          #      ⚠️ 이력 INSERT 를 거래 **밖으로** 빼는 조작은 대조가 안 된다 — 같은 연결에 거래가
+          #         열려 있어 4건이 전부 깨진다(격리 실패). 삼키고 커밋하는 쪽이 올바른 대조다.
+          #      원복 뒤 4/4 PASS · 6초(DB 없이면 1초대 — 소요시간이 판별 수단이다)
+          GATES="$GATES|BackofficePricingCreateGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).

@@ -21,7 +21,14 @@
             가격 변경 시 <strong>다음 청구 주기부터 자동 반영</strong>됩니다. 모든 변경은 이력에 기록됩니다.
         </MudText>
     </div>
-    <MudButton Variant="Variant.Outlined" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+    @* 🔴 20261011작2 §B-2 — 「새 요금제」 입구. 종전 새로고침 버튼은 한 글자도 안 바꿨고 옆에 더했다(#1). *@
+    <div style="display:flex;gap:8px;">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => _showNew = !_showNew)"
+                   StartIcon="@(_showNew ? Icons.Material.Filled.Close : Icons.Material.Filled.Add)">
+            @(_showNew ? "등록 취소" : "새 요금제")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" OnClick="LoadAsync" StartIcon="@Icons.Material.Filled.Refresh">새로고침</MudButton>
+    </div>
 </div>
 
 @if (_loading)
@@ -30,6 +37,107 @@
 }
 else
 {
+    @* ══════════════════════════════════════════════════════════════════
+       🔴 20261011작2 §B-2 — 새 요금제 등록 폼.
+       목록 **위**에 둔 이유: pricing_plans 가 0행이면 아래 목록은 아무것도 안 그린다.
+       그 상태에서도 첫 등록이 되어야 한다(운영 실측 = 0행 · 화면에서 첫 등록 불가였다).
+       칸 순서는 필수부터다 — 처음 앉은 사람이 위에서 아래로만 채우면 끝난다.
+       ══════════════════════════════════════════════════════════════════ *@
+    @if (_showNew)
+    {
+        <MudPaper Elevation="3" Class="pa-6 mb-6" Style="border-radius:16px;border:2px solid var(--mud-palette-primary);">
+            <MudText Typo="Typo.h6" Style="font-weight:600;margin-bottom:4px;">새 요금제 등록</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                아래 5칸만 채우면 등록됩니다. 나머지는 비워 두면 기본값으로 들어갑니다.
+            </MudText>
+
+            <MudGrid Class="mt-3">
+                <MudItem xs="12" md="4">
+                    <MudTextField @bind-Value="_new.PlanId" Label="요금제 코드 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="basic" HelperText="영문·숫자 20자 이내. 등록 후에는 바꿀 수 없습니다." />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField @bind-Value="_new.PlanName" Label="요금제 이름 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="베이직 5" HelperText="고객에게 보이는 이름입니다." />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudSelect T="string" @bind-Value="_new.PriceDisplay" Label="가격 표시 방식" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("number")">숫자 (예: 35,000원)</MudSelectItem>
+                        <MudSelectItem Value="@("contact")">상담 (랜딩에 "상담" 표시)</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <MudNumericField @bind-Value="_new.MonthlyPrice" Label="월 요금 (원) (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Min="0" Disabled="@(_new.PriceDisplay == "contact")" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudNumericField @bind-Value="_new.YearlyPrice" Label="연 요금 (원) (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Min="0" Disabled="@(_new.PriceDisplay == "contact")" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudTextField @bind-Value="_new.Reason" Label="등록 사유 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="예: 베타 테스트용 요금제 신설" HelperText="이력에 남습니다." />
+                </MudItem>
+            </MudGrid>
+
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Style="font-weight:600;margin-bottom:8px;">
+                선택 항목 — 비워 두면 기본값으로 들어갑니다
+            </MudText>
+
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="_new.Description" Label="설명" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2"
+                                  Placeholder="랜딩페이지에 함께 보일 한 줄 설명" />
+                </MudItem>
+                <MudItem xs="12" md="2">
+                    <MudNumericField @bind-Value="_new.MaxUsers" Label="자식계정 수" Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" />
+                </MudItem>
+                @* 🔴 작16 §B 와 같은 이유로 T="int?" 다. 비워 두면 미설정(NULL)으로 저장되고
+                   기기 상한은 서버 폴백(5대/3대)이 맡는다. 0 을 넣으면 그 요금제의 기기 등록이 전부 막힌다. *@
+                <MudItem xs="12" md="2">
+                    <MudNumericField T="int?" @bind-Value="_new.MaxPcDevices" Label="PC 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Placeholder="미설정 (기본 5대)" />
+                </MudItem>
+                <MudItem xs="12" md="2">
+                    <MudNumericField T="int?" @bind-Value="_new.MaxMobileDevices" Label="모바일 기기 수" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Placeholder="미설정 (기본 3대)" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudNumericField @bind-Value="_new.AiTokenMonthly" Label="월 AI 토큰" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudNumericField @bind-Value="_new.DisplayOrder" Label="표시 순서" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0"
+                                     HelperText="작은 수가 앞에 보입니다." />
+                </MudItem>
+                <MudItem xs="12" md="6" Class="d-flex align-center">
+                    <MudSwitch T="bool" @bind-Value="_new.IsVisible" Color="Color.Primary" Label="랜딩페이지에 보이기" />
+                </MudItem>
+            </MudGrid>
+
+            <div style="display:flex;gap:8px;margin-top:16px;">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync" Disabled="@_creating"
+                           StartIcon="@Icons.Material.Filled.Save">
+                    @(_creating ? "등록 중…" : "등록")
+                </MudButton>
+                <MudButton Variant="Variant.Text" OnClick="@(() => _showNew = false)">취소</MudButton>
+            </div>
+        </MudPaper>
+    }
+    else if (_plans.Count == 0)
+    {
+        @* 0행 빈 화면 — 「아무것도 못 하는 화면」이 되지 않게 할 일을 한 줄로 말해준다. *@
+        <MudPaper Elevation="0" Class="pa-8 mb-6" Style="border-radius:16px;background:#F9FAFB;text-align:center;">
+            <MudText Typo="Typo.h6" Style="font-weight:600;">등록된 요금제가 없습니다</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+                첫 요금제를 등록하면 랜딩페이지와 구독 청구에 쓰입니다.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => _showNew = true)"
+                       StartIcon="@Icons.Material.Filled.Add">첫 요금제 등록</MudButton>
+        </MudPaper>
+    }
+
     <MudGrid>
         @foreach (var plan in _plans)
         {
@@ -40,9 +148,13 @@ else
                             <MudText Typo="Typo.h6" Style="font-weight:600;">@plan.PlanName</MudText>
                             <MudText Typo="Typo.caption" Color="Color.Secondary">@plan.PlanId</MudText>
                         </div>
-                        <MudChip T="string" Size="Size.Small"
-                                 Color="@(plan.IsActive == 1 ? Color.Success : Color.Default)">
-                            @(plan.IsActive == 1 ? "활성" : "비활성")
+                        @* 🔴 20261011작2 §B-3 — 지금 상태가 한눈에 보여야 한다.
+                           「활성/비활성」은 개발 용어였다. 사람이 쓰는 말로 바꿨다(#25 · 고객 노출 용어).
+                           제외 = 과금·노출에서 빼는 것이고, 행은 남는다. *@
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                 Icon="@(plan.IsActive == 1 ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Block)"
+                                 Color="@(plan.IsActive == 1 ? Color.Success : Color.Warning)">
+                            @(plan.IsActive == 1 ? "판매중" : "제외됨")
                         </MudChip>
                     </div>
 
@@ -70,10 +182,26 @@ else
 
                     <div style="display:flex;gap:8px;">
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" OnClick="@(() => SaveAsync(plan))">저장</MudButton>
-                        <MudButton Variant="Variant.Outlined" Color="@(plan.IsActive == 1 ? Color.Warning : Color.Success)" OnClick="@(() => ToggleAsync(plan))">
-                            @(plan.IsActive == 1 ? "비활성화" : "활성화")
+                        @* 🔴 20261011작2 §B-3 — 사장님 오더의 「제외」 버튼.
+                           한 버튼이 양방향이다 — 제외했으면 같은 자리에서 다시 포함할 수 있다.
+                           🔴 행을 지우지 않는다. 호출하는 입구도 종전 toggle-active 그대로다(신설 0). *@
+                        <MudButton Variant="Variant.Outlined" Color="@(plan.IsActive == 1 ? Color.Warning : Color.Success)"
+                                   StartIcon="@(plan.IsActive == 1 ? Icons.Material.Filled.Block : Icons.Material.Filled.CheckCircle)"
+                                   OnClick="@(() => ToggleAsync(plan))">
+                            @(plan.IsActive == 1 ? "제외" : "포함")
                         </MudButton>
                     </div>
+                    @* 🔴 [4] V-10 봉합 — 코드가 보증하지 않는 것을 말하지 않는다.
+                       종전 문구: 「제외하면 **신규 가입**·랜딩 노출에서 빠집니다」.
+                       실측(소비처 7곳 전수): `is_active=0` 이 막는 곳은 **공개 요금표 2곳뿐**이고
+                       가입 입구는 요금제를 검사하지 않는다 — 그 코드로 가입 요청은 그대로 들어간다.
+                       이미 쓰고 있는 고객의 과금·기기 상한도 그대로 간다.
+                       ⇒ 지금 보증되는 것만 적는다. 「과금까지 멈춘다」는 별건 트랙이다. *@
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="display:block;margin-top:6px;">
+                        @(plan.IsActive == 1
+                            ? "제외하면 요금제 안내(랜딩·공개 요금표)에서 빠집니다. 요금제는 삭제되지 않고 언제든 다시 포함할 수 있습니다. 이미 이 요금제를 쓰고 있는 고객사의 과금은 그대로입니다."
+                            : "지금 제외 상태입니다 — 요금제 안내에 안 보입니다. [포함] 을 누르면 다시 보입니다.")
+                    </MudText>
                 </MudPaper>
             </MudItem>
         }
@@ -96,6 +224,11 @@ else
     private List<PlanEdit> _plans = new();
     private bool _loading;
 
+    // 🔴 20261011작2 §B-2 — 새 요금제 등록 상태. 종전 필드·메서드는 한 글자도 안 바꿨다(#1).
+    private bool _showNew;
+    private bool _creating;
+    private NewPlan _new = new();
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -115,6 +248,87 @@ else
         finally
         {
             _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 🔴 20261011작2 §B-2 — 등록. POST api/admin/pricing/plans (신설 입구)
+    //   409(중복)는 사람 말로 되돌려준다 — 「코드가 겹쳤다」는 사용자가 고칠 수 있는 일이다.
+    //   🔴 실패했으면 입력칸을 비우지 않는다. 다시 쓰게 만들면 안 된다.
+    // ══════════════════════════════════════════════════════════════════
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_new.PlanId))
+        {
+            Snackbar.Add("요금제 코드를 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_new.PlanName))
+        {
+            Snackbar.Add("요금제 이름을 입력해주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_new.Reason))
+        {
+            Snackbar.Add("등록 사유를 입력해주세요. (감사 추적)", Severity.Warning);
+            return;
+        }
+        if (_new.MonthlyPrice < 0 || _new.YearlyPrice < 0)
+        {
+            Snackbar.Add("가격은 0 이상이어야 합니다.", Severity.Warning);
+            return;
+        }
+
+        _creating = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var body = new
+            {
+                planId = _new.PlanId.Trim(),
+                planName = _new.PlanName.Trim(),
+                description = _new.Description,
+                monthlyPrice = _new.MonthlyPrice,
+                yearlyPrice = _new.YearlyPrice,
+                priceDisplay = string.IsNullOrWhiteSpace(_new.PriceDisplay) ? "number" : _new.PriceDisplay,
+                maxUsers = _new.MaxUsers,
+                // 🔴 maxDevices 는 **안 보낸다** — 집행에 안 쓰이는 표시용 레거시 칸이고,
+                //   안 보내면 서버가 출하 DDL 과 같은 기본값을 넣는다(0 이 조용히 들어가지 않는다).
+                maxPcDevices = _new.MaxPcDevices,
+                maxMobileDevices = _new.MaxMobileDevices,
+                aiTokenMonthly = _new.AiTokenMonthly,
+                isVisible = _new.IsVisible,
+                displayOrder = _new.DisplayOrder,
+                reason = _new.Reason,
+                changedBy = "platform_admin",
+                changedByName = "본사 마스터"
+            };
+
+            var resp = await http.PostAsJsonAsync("api/admin/pricing/plans", body);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"{body.planName} 등록 완료", Severity.Success);
+                _new = new NewPlan();
+                _showNew = false;
+                await LoadAsync();
+            }
+            else if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                Snackbar.Add($"요금제 코드 '{body.planId}' 는 이미 있습니다. 다른 코드를 써주세요.", Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add($"등록 실패: {resp.StatusCode}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"등록 실패: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _creating = false;
             StateHasChanged();
         }
     }
@@ -212,6 +426,27 @@ else
         public string? FeaturesJson { get; set; }
         public int IsActive { get; set; }
         public int IsVisible { get; set; }
+        public int DisplayOrder { get; set; }
+        public string Reason { get; set; } = "";
+    }
+
+    // 🔴 20261011작2 §B-2 — 등록 폼 상태. PlanEdit 와 따로 두는 이유:
+    //   PlanEdit 는 서버가 준 **기존 행**을 담는 그릇이고(IsActive 등 읽기값 포함),
+    //   이것은 아직 DB 에 없는 입력값이다. 섞으면 「목록 행을 고쳤는지 새로 만든 건지」가 흐려진다.
+    //   기본값은 출하 DDL 과 같게 둔다(max_users 3 · is_visible 1).
+    public class NewPlan
+    {
+        public string PlanId { get; set; } = "";
+        public string PlanName { get; set; } = "";
+        public string? Description { get; set; }
+        public decimal MonthlyPrice { get; set; }
+        public decimal YearlyPrice { get; set; }
+        public string PriceDisplay { get; set; } = "number";
+        public int MaxUsers { get; set; } = 3;
+        public int? MaxPcDevices { get; set; }
+        public int? MaxMobileDevices { get; set; }
+        public int AiTokenMonthly { get; set; }
+        public bool IsVisible { get; set; } = true;
         public int DisplayOrder { get; set; }
         public string Reason { get; set; } = "";
     }
