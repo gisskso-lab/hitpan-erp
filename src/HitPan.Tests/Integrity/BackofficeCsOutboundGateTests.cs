@@ -247,7 +247,10 @@ public sealed class BackofficeCsOutboundGateTests
 
         await using var db = await env.OpenAsync();
         await db.ExecuteAsync(
-            "UPDATE bo_cs_tickets SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 40 DAY) WHERE id = @Id",
+            // 🔴 칸 이름은 `received_at` 이다(40번 DDL `:37`) — `created_at` 은 없다.
+            //   이 한 줄이 틀려서 게이트가 빨간불이 됐고, 그 빨간불이 **컨트롤러의 같은 오타**를
+            //   드러냈다(`purge-candidates` 가 호출만 하면 500). 글자검사로는 못 잡는 자리다.
+            "UPDATE bo_cs_tickets SET received_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 40 DAY) WHERE id = @Id",
             new { Id = ticketId });
 
         // ③ 기한 30일 설정

@@ -532,7 +532,13 @@ public class CsAdminController : ControllerBase
                    o.delivered_at  AS deliveredAt,
                    o.canceled_at   AS canceledAt
               FROM bo_cs_outbound o
-              LEFT JOIN tenants t ON CAST(t.tenant_id AS CHAR) = o.tenant_id
+              -- 🔴 CAST 를 쓰지 않는다(2026-10-11 게이트 G-W2-2 실측).
+              --   `CAST(t.tenant_id AS CHAR)` 는 결과를 연결 기본 콜레이션(utf8mb4_general_ci)으로
+              --   내놓고, `o.tenant_id` 는 표 콜레이션(utf8mb4_unicode_ci)이다 ⇒ `=` 가
+              --   Illegal mix of collations 로 **1267 을 던져 목록 조회가 500** 이 됐다.
+              --   두 칸 모두 varchar(36) 같은 모양이라 CAST 자체가 애초에 필요 없었다.
+              --   같은 파일 :124·:160 이 쓰는 모양이 정본이다.
+              LEFT JOIN tenants t ON t.tenant_id = o.tenant_id
              WHERE 1 = 1 {where}
              ORDER BY o.created_at DESC
              LIMIT 200");
@@ -615,11 +621,15 @@ public class CsAdminController : ControllerBase
         }
 
         var rows = await db.QueryAsync(@"
-            SELECT id, tenant_id AS tenantId, category, status, created_at AS createdAt
+            -- 🔴 `bo_cs_tickets` 의 접수시각 칸 이름은 `received_at` 이다 — `created_at` 은 없다
+            --   (40번 DDL `:37`). 게이트 G-W2-7 이 실측으로 잡았다: 이 입구는 호출하는 순간
+            --   Unknown column 'created_at' 로 **500** 이었다(#13 DESCRIBE 의무를 내가 건너뛴 자리).
+            --   화면(`PurgeCandidateRow.CreatedAt`)이 쓰는 이름을 지키려고 **별칭만 createdAt** 으로 둔다.
+            SELECT id, tenant_id AS tenantId, category, status, received_at AS createdAt
               FROM bo_cs_tickets
              WHERE purged_at IS NULL
-               AND created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Days DAY)
-             ORDER BY created_at
+               AND received_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Days DAY)
+             ORDER BY received_at
              LIMIT 200",
             new { Days = days });
 
