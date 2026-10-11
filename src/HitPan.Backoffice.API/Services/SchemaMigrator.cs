@@ -56,14 +56,23 @@ public sealed class SchemaMigrator
         //       `ALTER … ADD COLUMN IF NOT EXISTS` 를 쓴다. MySQL 8 은 그 문법을 거부하고(1064),
         //       적용기는 첫 실패에서 기동을 중단하므로 11번 이후 전부가 운영에 못 들어갔다
         //       (선행검증서 20261011_1V §3 — 서버 로그 실측).
-        //   판정 못 하면(빈 문자열) 보정 경로로 간다 — 보정 경로는 MariaDB 에서도 정답이기 때문이다
-        //   (문장 쪼개기 + 토큰 벗기기 + 「이미 있다」 관용은 양쪽 다 유효).
+        //   🔴 20261011작1 2차수 — [4] 검증 V-3 교정. 종전 주석은 「판정 못 하면 보정 경로로 간다,
+        //      보정은 MariaDB 에서도 정답이니까」였다. **그 전제가 측정으로 틀렸다**:
+        //      MariaDB 11.4.10 에서 같은 이름 FK 재추가는 **1005(errno 121)** 를 낸다 — 1826 이 아니다.
+        //      즉 관용 목록 밖이라, MariaDB 를 MySQL 로 오인하면 `31` 번 ADD CONSTRAINT 에서
+        //      **기동이 영구 거부**될 수 있다(우리가 MySQL 쪽에서 막은 그 덫이 반대 판에 열린다).
+        //   ⇒ 판독 실패(빈 문자열)는 **종전 경로**로 떨어뜨린다. 그게 「아무것도 안 바뀐 상태」이고,
+        //      새 덫을 만들지 않는 쪽이다. (MySQL 인데 판독이 실패하면 종전처럼 1064 로 멈춘다 —
+        //      오늘과 같은 상태일 뿐, 더 나빠지지 않는다.)
         var serverVersion = await QueryServerVersionAsync(db, ct);
-        var isMariaDb = serverVersion.Contains("mariadb", StringComparison.OrdinalIgnoreCase);
+        var isMariaDb = serverVersion.Length == 0
+                     || serverVersion.Contains("mariadb", StringComparison.OrdinalIgnoreCase);
         _logger.LogInformation(
             "[SchemaMigrator] 서버 판 = {Version} → {Path}",
             string.IsNullOrEmpty(serverVersion) ? "(판독 실패)" : serverVersion,
-            isMariaDb ? "종전 경로(무변경)" : "MySQL 호환 보정 경로");
+            isMariaDb
+                ? (serverVersion.Length == 0 ? "종전 경로(판독 실패 — 안전쪽)" : "종전 경로(무변경)")
+                : "MySQL 호환 보정 경로");
 
         // 적용 이력 테이블 보장
         await ExecuteAsync(db, @"
@@ -173,7 +182,13 @@ public sealed class SchemaMigrator
     /// <para>🔴 왜 「<c>ADD COLUMN</c> 뒤」 같은 모양으로 좁히지 않았나: 실물 31번이
     /// <c>ADD CONSTRAINT fk_… FOREIGN KEY IF NOT EXISTS (…)</c> 처럼 <b>이름이 중간에 끼는</b> 모양을 쓴다.
     /// 모양을 열거하면 그런 변형을 놓친다(G-M8-5c 가 설계 중에 실제로 잡아냈다).
-    /// MySQL 8 의 <c>ALTER</c> 에는 이 토큰이 설 자리가 아예 없으므로 — 인용·주석 밖이라면 — 전부 벗긴다.</para>
+    /// 그래서 <c>ALTER</c> 문 안에서는 — 인용·주석 밖이라면 — 전부 벗긴다.</para>
+    /// <para>🔴 20261011작1 2차수 — [4] 검증 교정: 종전 주석은 「MySQL 8 의 <c>ALTER</c> 에는 이 토큰이
+    /// 설 자리가 <b>아예 없으므로</b>」라고 적었으나 근거가 어긋난다(MySQL 8 은 <c>CREATE INDEX IF NOT EXISTS</c>
+    /// 등도 모른다 — <c>ALTER</c> 만의 성질이 아니다). <c>ALTER</c> 로 한정하는 진짜 근거는
+    /// <b>오늘 `installer/backoffice/*.sql` 14개의 사정</b>이다 — 이 토큰이 쓰인 곳이 <c>ALTER</c> 와
+    /// <c>CREATE/DROP TABLE</c> 뿐이고, 후자는 MySQL 도 아는 문법이라 건드리면 안 된다.
+    /// <c>CREATE INDEX IF NOT EXISTS</c> 는 오늘 0건이다 — 생기면 G-M8-5c 가 아니라 **적용 실패**로 드러난다.</para>
     /// </summary>
     private static readonly Regex ExistsTokenRegex = new(
         @"\GIF\s+(?:NOT\s+)?EXISTS\b\s*",
@@ -214,11 +229,20 @@ public sealed class SchemaMigrator
             }
             catch (MySqlException ex) when (IsAlreadyThere(ex))
             {
-                // 「이미 있다」 = IF NOT EXISTS 를 벗긴 대가. 건마다 남긴다 — 덮어서 초록이 이 설계의 실패 모양이다.
+                // 🔴 20261011작1 2차수 — [4] 검증이 찾은 구멍(V-1) 봉합.
+                //   사고 모양: `32` 번은 **한 문장에 ADD COLUMN 4절**(`42` 번 첫 문장은 6절)이다.
+                //   그 중 **한 칸만 이미 있어도** MySQL 은 문장 **전체를 롤백**하고 1060 을 낸다.
+                //   그걸 그냥 「이미 적용됨」으로 넘기면 나머지 3칸(42면 5칸)이 **안 생긴 채**
+                //   `_schema_migrations` 에 기록되고, 해시 멱등이 그 파일을 **영영 skip** 한다.
+                //   ⇒ 적용기는 성공을 보고하는데 운영에는 칸이 없다 = 10/11 사고와 같은 500 이 조용히 돌아온다.
+                //   (검증 실측: MariaDB 11.4.10 임시표에서 4절 중 가운데 1절만 중복이어도 나머지 3칸 미생성)
+                //   봉합: 절 단위로 쪼개 다시 시도한다. 진짜 「이미 있는」 절만 넘어가고 나머지는 적용된다.
+                var byClause = await TryApplyAlterClauseByClauseAsync(db, statements[n], fileName, n + 1, ct);
                 tolerated++;
                 _logger.LogInformation(
-                    "[SchemaMigrator] {File} 문장 {No}/{Total} — 이미 적용됨으로 넘어감 (오류 {Code})",
-                    fileName, n + 1, statements.Count, (int)ex.ErrorCode);
+                    "[SchemaMigrator] {File} 문장 {No}/{Total} — 이미 적용됨으로 넘어감 (오류 {Code}{Retry})",
+                    fileName, n + 1, statements.Count, (int)ex.ErrorCode,
+                    byClause ? " · 절 단위 재시도 완료" : string.Empty);
             }
         }
 
@@ -237,6 +261,92 @@ public sealed class SchemaMigrator
     /// </summary>
     private static bool IsAlreadyThere(MySqlException ex)
         => (int)ex.ErrorCode is 1060 or 1061 or 1091 or 1826;
+
+    /// <summary><c>ALTER TABLE &lt;표&gt;</c> 머리. 앞에 붙은 주석·공백을 함께 먹는다.</summary>
+    private static readonly Regex AlterPrefixRegex = new(
+        @"^(?:\s|--[^\n]*|\#[^\n]*|/\*.*?\*/)*ALTER\s+(?:ONLINE\s+)?(?:IGNORE\s+)?TABLE\s+(?:IF\s+EXISTS\s+)?(?:`[^`]+`|[A-Za-z0-9_$]+)(?:\s*\.\s*(?:`[^`]+`|[A-Za-z0-9_$]+))?",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 🔴 20261011작1 2차수 (V-1 봉합) — 여러 절 <c>ALTER</c> 를 <b>절 단위로 쪼개 다시 시도</b>한다.
+    /// <para>한 절의 「이미 있다」로 문장 전체가 롤백되면 나머지 절이 적용되지 않는데, 그걸 적용됨으로
+    /// 기록하면 해시 멱등이 영영 건너뛴다. 절로 쪼개면 <b>진짜 있는 절만</b> 넘어가고 나머지는 적용된다.</para>
+    /// <para>그 밖의 오류는 <b>던진다</b> — 종전과 같다(#19).</para>
+    /// </summary>
+    /// <returns>쪼개 돌렸으면 <c>true</c> · 쪼갤 게 없으면(절 1개 또는 <c>ALTER</c> 가 아니면) <c>false</c>.</returns>
+    private async Task<bool> TryApplyAlterClauseByClauseAsync(
+        MySqlConnection db, string statement, string fileName, int no, CancellationToken ct)
+    {
+        var clauses = SplitAlterClauses(statement, out var prefix);
+        if (clauses.Count < 2)
+        {
+            return false;
+        }
+
+        var applied = 0;
+        var already = 0;
+        foreach (var clause in clauses)
+        {
+            try
+            {
+                await using var cmd = new MySqlCommand(
+                    StripAlterExistsTokens($"{prefix} {clause}"), db) { CommandTimeout = 120 };
+                await cmd.ExecuteNonQueryAsync(ct);
+                applied++;
+            }
+            catch (MySqlException ex) when (IsAlreadyThere(ex))
+            {
+                already++;
+            }
+        }
+
+        _logger.LogInformation(
+            "[SchemaMigrator] {File} 문장 {No} — 절 단위 재시도: 절 {Total}개 중 적용 {Applied} · 이미 있음 {Already}",
+            fileName, no, clauses.Count, applied, already);
+        return true;
+    }
+
+    /// <summary>
+    /// <c>ALTER TABLE t ADD …, ADD …</c> 를 머리(<paramref name="prefix"/>)와 절 목록으로 가른다.
+    /// 괄호 안·인용 안·주석 안의 쉼표는 경계가 아니다. <c>ALTER</c> 가 아니면 빈 목록.
+    /// </summary>
+    internal static List<string> SplitAlterClauses(string statement, out string prefix)
+    {
+        prefix = string.Empty;
+        var clauses = new List<string>();
+
+        var stripped = StripAlterExistsTokens(statement);
+        var head = AlterPrefixRegex.Match(stripped);
+        if (!head.Success)
+        {
+            return clauses;
+        }
+
+        prefix = head.Value.TrimEnd();
+        var rest = stripped[head.Length..];
+
+        var sb = new StringBuilder();
+        var depth = 0;
+        for (var i = 0; i < rest.Length; i++)
+        {
+            if (TryCopyVerbatim(rest, ref i, sb)) { continue; }
+
+            var c = rest[i];
+            if (c == '(') { depth++; }
+            else if (c == ')') { depth--; }
+            else if (c == ',' && depth == 0)
+            {
+                AddIfExecutable(clauses, sb.ToString());
+                sb.Clear();
+                continue;
+            }
+
+            sb.Append(c);
+        }
+
+        AddIfExecutable(clauses, sb.ToString());
+        return clauses;
+    }
 
     /// <summary>
     /// SQL 본문을 문장 단위로 쪼갠다. 인용 구간(<c>'</c> <c>"</c> <c>`</c>)과 주석 안의 <c>;</c> 는 경계가 아니다.

@@ -57,6 +57,29 @@ public sealed class BackofficeSchemaMysql8GateTests
         ("pricing_plans", "max_pc_devices"), ("pricing_plans", "max_mobile_devices"),// 44
     ];
 
+    /// <summary>
+    /// 🔴 20261011작1 2차수 ([4] 검증 V-2) — **형까지** 센다. 1060 관용은 「있다」만 보장하고 형은 안 본다.
+    /// <para>MySQL 8 은 `int` 표시폭을 떼므로 `int(11)` 이 아니라 `int` 로 보고한다 — 실측 기준 그대로 적는다.</para>
+    /// </summary>
+    private static readonly (string Table, string Column, string Type)[] RequiredColumnTypes =
+    [
+        ("tenant_payments", "approved_at_dt", "datetime"),                 // 11
+        ("tenants", "extra_accounts", "int"),                              // 30
+        ("landing_signups", "tenant_id", "varchar(36)"),                   // 31
+        ("tenants", "owner_account_id", "varchar(100)"),                   // 32
+        ("tenants", "owner_email", "varchar(255)"),                        // 32
+        ("tenants", "owner_collected_at", "datetime"),                     // 32
+        ("tenants", "owner_collect_path", "varchar(30)"),                  // 32
+        ("bo_cs_tickets", "promised_at", "datetime(6)"),                   // 41
+        ("bo_cs_tickets", "read_by", "varchar(36)"),                       // 42
+        ("bo_cs_tickets", "handled_via", "varchar(20)"),                   // 42
+        ("bo_cs_tickets", "rating", "tinyint"),                            // 42
+        ("bo_cs_tickets", "rating_comment", "varchar(500)"),               // 42
+        ("pricing_plans", "price_display", "varchar(50)"),                 // 44
+        ("pricing_plans", "max_pc_devices", "int"),                        // 44
+        ("pricing_plans", "max_mobile_devices", "int"),                    // 44
+    ];
+
     /// <summary>적용기가 <c>ALTER … ADD KEY</c> 로 붙여야 하는 인덱스 — ADD KEY 벗기기 경로의 과녁.</summary>
     private static readonly (string Table, string Index)[] RequiredIndexes =
     [
@@ -132,6 +155,66 @@ public sealed class BackofficeSchemaMysql8GateTests
         Assert.True(missingIndexes.Count == 0,
             $"[{gate}] 없는 인덱스 {missingIndexes.Count}개: {string.Join(", ", missingIndexes)}\n"
           + "  (ALTER … ADD KEY 경로가 MySQL 8 에서 안 돌았다)");
+
+        // 🔴 20261011작1 2차수 — [4] 검증 V-2 교정: 종전 단언은 **존재만** 봤다.
+        //   1060 관용은 「칸이 있다」만 보장하고 **형은 안 본다** — `varchar(10)` 자리에 `VARCHAR(100)` 을
+        //   요청해도 1060 으로 넘어가며 짧은 칸이 그대로 남는다(검증자 MariaDB 실측).
+        //   그러면 요금제 500·S-2 수집 1406 같은 사고가 **칸이 있는데도** 난다. 형까지 센다.
+        var types = (await db.QueryAsync<string>(
+            "SELECT LOWER(CONCAT(table_name, '.', column_name, '=', column_type)) "
+          + "FROM information_schema.columns WHERE table_schema = DATABASE()")).ToHashSet();
+        var wrongTypes = RequiredColumnTypes
+            .Where(x => !types.Contains($"{x.Table}.{x.Column}={x.Type}".ToLowerInvariant()))
+            .Select(x => $"{x.Table}.{x.Column} 기대 {x.Type}").ToList();
+        Assert.True(wrongTypes.Count == 0,
+            $"[{gate}] 형이 다른(또는 없는) 칸 {wrongTypes.Count}개: {string.Join(" · ", wrongTypes)}\n"
+          + "  실제 형: "
+          + string.Join(" · ", types.Where(t => RequiredColumnTypes.Any(
+                r => t.StartsWith($"{r.Table}.{r.Column}=".ToLowerInvariant(), StringComparison.Ordinal)))));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-M8-6 — 🔴 [4] 검증 V-1: 「한 문장 여러 절」 ALTER 의 부분 상태
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-M8-6 부분 상태 — 여러 절 ALTER 에서 한 칸만 미리 있어도 나머지 절이 전부 적용된다")]
+    public async Task G_M8_6_부분상태에서도_나머지_절이_적용된다()
+    {
+        const string gate = "G-M8-6 MySQL8 부분상태";
+        await using var db = await Mysql8GateDb.TryCreateAsync(gate, "hitpan_bo_mysql8_gate_6", applyAll: false);
+        if (db is null) return;
+
+        // ① `tenants` 표만 세운다(적용기 경로 밖 — 사고 상태를 만드는 재료).
+        await db.ApplyOneFileAsync("00_backoffice_core.sql");
+
+        // ② 🔴 32번이 더할 **4칸 중 하나만** 미리 만든다 = 실제로 일어날 수 있는 모양
+        //    (`00_backoffice_core.sql:101` 이 「운영 수동 ALTER만」 전례를 스스로 적어 둔다).
+        await db.ExecuteAsync(
+            "ALTER TABLE tenants ADD COLUMN owner_account_id VARCHAR(100) NULL DEFAULT NULL");
+
+        // ③ 실물 적용기를 돌린다.
+        await db.ApplyWithRealMigratorAsync();
+
+        // ④ 봉합 전이면: 32번이 1060 으로 통째 롤백되고 「적용됨」으로 기록돼 **나머지 3칸이 영영 안 생긴다.**
+        var owner = await db.CountAsync(
+            "SELECT COUNT(*) FROM information_schema.columns "
+          + "WHERE table_schema = DATABASE() AND table_name = 'tenants' "
+          + "AND column_name IN ('owner_account_id','owner_email','owner_collected_at','owner_collect_path')");
+        Assert.True(owner == 4,
+            $"[{gate}] `tenants` owner 칸이 {owner}/4 — 여러 절 ALTER 가 부분 적용으로 끝났다(V-1 재발).");
+
+        // ⑤ 두 번째 축 — 이미 다 적용된 DB 에서 **42번(6절 한 문장)** 의 칸 하나만 지우고 이력을 비운다.
+        //    6절 문장이 1060 을 내고, 절 단위 재시도가 그 한 칸을 되살려야 한다.
+        await db.ExecuteAsync("ALTER TABLE bo_cs_tickets DROP COLUMN rating_comment");
+        await db.ExecuteAsync("DELETE FROM _schema_migrations");
+        await db.ApplyWithRealMigratorAsync();
+
+        var restored = await db.CountAsync(
+            "SELECT COUNT(*) FROM information_schema.columns "
+          + "WHERE table_schema = DATABASE() AND table_name = 'bo_cs_tickets' "
+          + "AND column_name = 'rating_comment'");
+        Assert.True(restored == 1,
+            $"[{gate}] `bo_cs_tickets.rating_comment` 이 {restored}/1 — 6절 문장의 부분 상태가 안 복구됐다.");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -288,6 +371,37 @@ public sealed class BackofficeSchemaMysql8GateTests
         }
     }
 
+    [Fact(DisplayName = "G-M8-5d 절 쪼개기 — 여러 절 ALTER 를 머리+절로 가른다 (괄호·인용 안 쉼표는 경계 아님)")]
+    public void G_M8_5d_여러절_ALTER를_가른다()
+    {
+        // ① 실물 32번 — 세미콜론 1개 = 한 문장 · 그 안에 ADD COLUMN 4절 (V-1 의 현장)
+        var raw = File.ReadAllText(Path.Combine(Mysql8GateDb.BoSqlDir(), "32_backoffice_s2_owner.sql"));
+        var statements = SchemaMigrator.SplitStatements(raw);
+        Assert.Single(statements);
+
+        var clauses = SchemaMigrator.SplitAlterClauses(statements[0], out var prefix);
+        Assert.Equal(4, clauses.Count);
+        Assert.Contains("ALTER TABLE tenants", prefix);
+        Assert.All(clauses, c =>
+            Assert.StartsWith("ADD COLUMN", StripComments(c).Trim(), StringComparison.OrdinalIgnoreCase));
+
+        // ② 실물 42번 첫 문장 — 6절
+        var raw42 = File.ReadAllText(Path.Combine(Mysql8GateDb.BoSqlDir(), "42_backoffice_cs_stages.sql"));
+        var first42 = SchemaMigrator.SplitStatements(raw42)[0];
+        Assert.Equal(6, SchemaMigrator.SplitAlterClauses(first42, out _).Count);
+
+        // ③ 괄호 안 쉼표는 경계가 아니다
+        Assert.Equal(2, SchemaMigrator.SplitAlterClauses(
+            "ALTER TABLE t ADD KEY ix (a, b, c), ADD COLUMN d int NULL", out _).Count);
+
+        // ④ 인용 안 쉼표도 경계가 아니다
+        Assert.Equal(2, SchemaMigrator.SplitAlterClauses(
+            "ALTER TABLE t ADD COLUMN a int NULL COMMENT 'ㄱ, ㄴ, ㄷ', ADD COLUMN b int NULL", out _).Count);
+
+        // ⑤ 음성 대조 — ALTER 가 아니면 빈 목록(절 쪼개기를 엉뚱한 문장에 적용하지 않는다)
+        Assert.Empty(SchemaMigrator.SplitAlterClauses("CREATE TABLE t (a int, b int)", out _));
+    }
+
     /// <summary>주석만 지운다 — 시험이 「실행되는 부분」만 보고 판정하기 위한 보조.</summary>
     private static string StripComments(string sql) => System.Text.RegularExpressions.Regex.Replace(
         sql,
@@ -385,6 +499,17 @@ public sealed class BackofficeSchemaMysql8GateTests
         /// <summary>실물 적용기 그 자체를 돌린다 — 시험이 적재 방식을 흉내내지 않는다.</summary>
         public Task ApplyWithRealMigratorAsync() =>
             new SchemaMigrator(ConnString, BoSqlDir(), NullLogger<SchemaMigrator>.Instance).ApplyAsync();
+
+        /// <summary>
+        /// 파일 하나를 내용 그대로 실행한다(적용기 경로 **밖** — 사고 상태를 만드는 재료로만 쓴다).
+        /// <para>쓰는 곳은 G-M8-6 뿐이고, 거기 쓰는 `00` 번은 `CREATE TABLE IF NOT EXISTS` 뿐이라 통째 실행이 된다.</para>
+        /// </summary>
+        public async Task ApplyOneFileAsync(string fileName)
+        {
+            var path = Path.Combine(BoSqlDir(), fileName);
+            Assert.True(File.Exists(path), $"재료 파일이 없다: {path}");
+            await ExecuteAsync(await File.ReadAllTextAsync(path));
+        }
 
         public async Task<IEnumerable<T>> QueryAsync<T>(string sql)
         {
