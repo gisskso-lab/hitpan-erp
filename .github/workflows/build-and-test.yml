@@ -746,8 +746,15 @@ jobs:
           #      ① 본사가 쓴 쪽지는 사라지지 않는다(큐에 남는다)
           #      ② 화면이 「보냄」이라고 거짓말하지 않는다(delivered_at NULL ⇒ 대기로 보고 · 응답 delivered=false)
           #      ③ 보관기한이 지나도 저절로 지워지지 않는다(G-W2-7 이 「행·본문·purged_at」 셋을 직접 센다)
-          #    🔴 로컬 실측 불가(이 PC 는 hitpan 계정이 CREATE DATABASE 거부 · 쓸 수 있는 시험 DB 없음)
-          #      ⇒ **이 잡의 첫 실행이 계측 경로다.** 로컬 초록을 증거로 올리지 않았다.
+          #    봉합 빼기 전후 대조 실측(2026-10-11 2차수 · hitpan_trgtest · MariaDB 11.4.10):
+          #      S1 응답 delivered 를 false→true (「보냈다」고 거짓말) → G-W2-2 만 FAIL
+          #      S2 폐기를 UPDATE→DELETE FROM bo_cs_tickets → G-W2-6 만 FAIL
+          #      S3 purge-candidates 에 DELETE 한 줄 추가(자동삭제) → G-W2-7 만 FAIL
+          #      원복 뒤 5/5 PASS · 7~12초(DB 없이면 0.7초 — 소요시간이 판별 수단이다)
+          #    🔴 1차수 때 여기 「로컬 실측 불가」라고 적어 두고 안 쟀다. 그게 틀렸다 —
+          #      바로 위 10/8 주석이 HITPAN_BO_GATE_DB 로 재는 길을 이미 적어 뒀고
+          #      게이트 파일 자신도 그 변수를 읽는다. 실제로 재 보니 입구 2개가 500 이었다
+          #      (콜레이션 혼용 · bo_cs_tickets 에 없는 created_at). **못 쟀다고 쓰기 전에 재라.**
           GATES="$GATES|BackofficeCsOutboundGate"
 
           # 🔴 20261011작2 절 B — 요금제 화면 직접 등록 + 「제외」 버튼
