@@ -438,7 +438,23 @@ public class CsRequestController : ControllerBase
         var n = await _db.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM cs_replies WHERE tenant_id = @TenantId AND read_at IS NULL",
             new { TenantId = tenantId });
-        return Ok(new { success = true, count = n });
+
+        // 🔴 20261012 사장님 실측 반려 — 「백오피스에서 보낸 메시지를 어디서 보는지, 메뉴가 없음」
+        //   숫자는 종전부터 있었는데 **그 숫자를 쓰는 배너가 전부 「CS 답변」이라고 말했다.**
+        //   본사 안내는 **답변이 아니다** — 고객이 「내가 뭘 물었지?」 하며 답을 찾다가 못 찾는다
+        //   ([4] V-4 와 같은 종류가 전역 배너에 남아 있었다).
+        //   ⇒ 출처별로 나눠 내려준다. `count`(합계)는 **그대로** 둬서 옛 화면이 안 깨진다(추가만 · #1).
+        //   칸이 없는 DB 에서도 살아야 하므로 `origin` 은 가드를 지난다.
+        int hq = 0;
+        if (await HasOriginColumnAsync())
+        {
+            hq = await _db.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM cs_replies p
+                  JOIN cs_requests r ON r.cs_request_id = p.cs_request_id
+                 WHERE p.tenant_id = @TenantId AND p.read_at IS NULL AND r.origin = 'hq'",
+                new { TenantId = tenantId });
+        }
+        return Ok(new { success = true, count = n, hqCount = hq, replyCount = n - hq });
     }
 
     // 읽음 표시 — read_at 은 메타 갱신(#3 과 무충돌 · sent_at 선례와 같은 성격)
