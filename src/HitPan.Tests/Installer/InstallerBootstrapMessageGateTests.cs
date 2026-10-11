@@ -863,23 +863,39 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
                 && int.TryParse(parts[1], out int eMin)
                 && int.TryParse(parts[2], out int eRev))
             {
-                string probe = Path.Combine(_root, "iscc_version_probe.iss");
-                File.WriteAllText(probe,
-                    $"#if VER < EncodeVer({eMaj},{eMin},{eRev})\r\n"
-                  + "  #error HPVER_TOO_OLD\r\n"
-                  + "#endif\r\n"
-                  + $"#if VER >= EncodeVer({eMaj},{eMin},{eRev + 1})\r\n"
-                  + "  #error HPVER_TOO_NEW\r\n"
-                  + "#endif\r\n"
-                  + "#error HPVER_MATCH\r\n");
+                // 🔴 `_root` 는 이 시점에 **아직 없다** — 뒤의 `RoundTrip` 이 만든다.
+                //   먼저 쓰려다 `DirectoryNotFoundException` 으로 터졌다(CI 실측 2026-10-12).
+                //   멱등이라 이미 있어도 무해하다.
+                // 🔴 프로브가 터지면 **읽을 수 없는 예외**가 아니라 **판정으로 말한다.**
+                //   (CI 실측 2026-10-12: `_root` 가 아직 없어 `DirectoryNotFoundException` 이 그대로
+                //    올라와, 정작 알고 싶던 판 정보가 한 줄도 안 남았다 — 진단이 진단을 가렸다)
+                //   🔴 삼키는 게 아니다. `verOk` 는 「맞다」가 아니면 **그대로 거짓**이고 게이트는 FAIL 한다.
+                try
+                {
+                    Directory.CreateDirectory(_root);          // 멱등 — 뒤의 RoundTrip 이 또 만들어도 무해
+                    string probe = Path.Combine(_root, "iscc_version_probe.iss");
+                    File.WriteAllText(probe,
+                        $"#if VER < EncodeVer({eMaj},{eMin},{eRev})\r\n"
+                      + "  #error HPVER_TOO_OLD\r\n"
+                      + "#endif\r\n"
+                      + $"#if VER >= EncodeVer({eMaj},{eMin},{eRev + 1})\r\n"
+                      + "  #error HPVER_TOO_NEW\r\n"
+                      + "#endif\r\n"
+                      + "#error HPVER_MATCH\r\n");
 
-                var (_, pOut) = RunExe(iscc, $"\"{probe}\"", _root);
-                isppOut = pOut;
-                isppVerdict =
-                    pOut.Contains("HPVER_MATCH", StringComparison.Ordinal) ? "맞다"
-                  : pOut.Contains("HPVER_TOO_OLD", StringComparison.Ordinal) ? "기대보다 낮다"
-                  : pOut.Contains("HPVER_TOO_NEW", StringComparison.Ordinal) ? "기대보다 높다"
-                  : "표식 없음(ISPP 가 안 돌았다)";
+                    var (_, pOut) = RunExe(iscc, $"\"{probe}\"", _root);
+                    isppOut = pOut;
+                    isppVerdict =
+                        pOut.Contains("HPVER_MATCH", StringComparison.Ordinal) ? "맞다"
+                      : pOut.Contains("HPVER_TOO_OLD", StringComparison.Ordinal) ? "기대보다 낮다"
+                      : pOut.Contains("HPVER_TOO_NEW", StringComparison.Ordinal) ? "기대보다 높다"
+                      : "표식 없음(ISPP 가 안 돌았다)";
+                }
+                catch (Exception ex)
+                {
+                    isppVerdict = $"프로브 실행 실패({ex.GetType().Name}: {ex.Message})";
+                    Console.Error.WriteLine($"[G-T6-5] ISPP 프로브 실패: {ex}");   // #15
+                }
                 Console.WriteLine($"[G-T6-5] ISPP 판 판정='{isppVerdict}'");
             }
 
