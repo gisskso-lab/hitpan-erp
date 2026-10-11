@@ -166,7 +166,15 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         Assert.True(list.Count == 1, $"{gate} 쪽지함이 본사 안내를 {list.Count}건 보여준다(기대 1건).");
 
         // ⑥ 🔴 평가 대상이 아니다(질문이 아니다) — B-5
-        Assert.False(Field<bool>(Field<object>(ValueOf(replies), "rating"), "canRate"));
+        //   🔴 [4] V-8ⓒ 봉합: `canRate == false` **만** 보면 봉합을 빼도 초록이다
+        //   (`not_mine` 도 false 를 준다) ⇒ **사유까지** 단언한다. 그래야 이 게이트가 B-5 를 문다.
+        var ratingBlock = Field<object>(ValueOf(replies), "rating");
+        Assert.False(Field<bool>(ratingBlock, "canRate"));
+        Assert.Equal("hq_notice", Field<string>(ratingBlock, "reason"));
+
+        // ⑦ 🔴 [4] V-4 봉합 — 화면이 「무엇을 보고 있는지」 알 수 있어야 한다.
+        //   이 값이 없으면 쪽지함이 「보낸 문의에 대한 담당 상담원의 답입니다」라고 **사실과 다른 말**을 한다.
+        Assert.Equal("hq", Field<string>(ValueOf(replies), "origin"));
 
         // ⑦ 🔴 ack 가 도착해 창구가 「전달됨」으로 바뀌었나 — 이것이 D-4 의 과녁이다
         await using (var bodb = await OpenBoAsync())
@@ -297,6 +305,75 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         // ④ 거부가 기록됐나 — 「누가 왜 거부됐나」가 없으면 운영에서 원인을 못 찾는다
         await using var bodb = await OpenBoAsync();
         Assert.True(await bodb.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM bo_cs_reject_logs") >= 2);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W3-6 — 🔴 [4] V-1 봉합 · **폐기는 고객 사본까지 간다**
+    //
+    // 사고: 본사가 전달된 선발신을 폐기하면 본사 화면은 「폐기됨」인데 **고객 쪽지함에는
+    //   본문이 영구히 남았다**(회수 입구 0건). 작2 V-3(「대화의 절반만 비우면 폐기가 아니다」)가
+    //   **시스템 경계를 넘어** 재발한 자리이고, 선발신을 실제로 내려보내는 이 PR 이 그 구멍을 만든다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-6 🔴 본사가 폐기하면 고객 ERP 사본의 본문도 비워진다 · 행은 남는다 (+음성 대조)")]
+    public async Task G_W3_6_폐기는_고객사본까지_간다()
+    {
+        const string gate = "G-W3-6 폐기 회수";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+        var admin = NewCsAdminController();
+
+        var id = Field<string>(ValueOf(await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        { TenantCode = TenantCode, Purpose = "promo", Title = "거둬갈 안내", Body = "지워질 본사 글" }, default)), "outboundId");
+
+        // 내려보내 고객이 보게 한다
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        // 🔴 음성 대조군 — 폐기 **전**에는 고객에게 본문이 보인다(안 보이면 이 게이트가 늘 통과한다)
+        Assert.Contains("지워질 본사 글", await erp.ExecuteScalarAsync<string>(
+            "SELECT body FROM cs_requests WHERE cs_request_id = @Id", new { Id = id }) ?? "");
+        Assert.Contains("지워질 본사 글", await erp.ExecuteScalarAsync<string>(
+            "SELECT body FROM cs_replies WHERE cs_request_id = @Id", new { Id = id }) ?? "");
+
+        // 본사가 거둬간다(전달 뒤에도 폐기는 듣는다 — 설계대로)
+        Assert.True(StatusOf(await admin.PurgeOutbound(id,
+            new CsAdminController.PurgeRequest { Reason = "오발송 회수" }, default)) == 200);
+
+        // 다음 Pull 이 「거둬감」을 고객에게 전달한다
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        // ① 🔴 고객 사본의 본문이 비었다 — 이것이 과녁이다
+        Assert.Null(await erp.ExecuteScalarAsync<string?>(
+            "SELECT body FROM cs_requests WHERE cs_request_id = @Id", new { Id = id }));
+        Assert.True(string.IsNullOrEmpty(await erp.ExecuteScalarAsync<string?>(
+            "SELECT body FROM cs_replies WHERE cs_request_id = @Id", new { Id = id })),
+            $"{gate} 고객 사본의 답 본문이 남아 있다 — 본사 화면은 「폐기됨」인데 고객은 계속 본다.");
+
+        // ② 🔴 행은 남는다 — 「본사가 거둬간 안내입니다」를 화면이 말할 수 있어야 한다
+        Assert.Equal(1, await erp.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM cs_requests WHERE cs_request_id = @Id", new { Id = id }));
+        Assert.Equal(1, await erp.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM cs_replies WHERE cs_request_id = @Id", new { Id = id }));
+
+        // ③ 🔴 음성 축 — **고객이 쓴 문의는 본사가 못 지운다.** 같은 회수 경로에 남의 열쇠를 먹여도 안 비워진다.
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest { Category = "use", SubTag = "etc", Body = "내가 쓴 문의" }, default));
+        var mine = await erp.ExecuteScalarAsync<string?>(
+            "SELECT cs_request_id FROM cs_requests WHERE origin = 'local' LIMIT 1");
+        Assert.False(string.IsNullOrEmpty(mine), $"{gate} 음성 대조용 고객 문의가 안 만들어졌다.");
+
+        await CsOutboxSenderWorker.PurgeOutboundCopiesAsync(erp, new List<string> { mine! },
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        Assert.Equal("내가 쓴 문의", await erp.ExecuteScalarAsync<string>(
+            "SELECT body FROM cs_requests WHERE cs_request_id = @Id", new { Id = mine }));
     }
 
     // ══════════════════════════════════════════════════════════════

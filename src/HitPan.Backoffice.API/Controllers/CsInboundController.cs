@@ -205,7 +205,32 @@ public class CsInboundController : ControllerBase
             _logger.LogInformation("[CS수신] 선발신 {N}건 내려보냄(ack 대기) — code={Code}",
                 outbound.Count, Safe(auth.TenantCode));
 
-        return Ok(new { success = true, replies = rows, outbound });
+        // ══════════════════════════════════════════════════════════
+        // 🔴 [4] V-1 봉합(작3 4차수) — **폐기는 고객 사본까지 간다.**
+        //
+        // 사고: `PurgeOutbound` 는 전달 뒤에도 듣는다(취소와 달리 `delivered_at` 을 안 본다 —
+        //   그게 설계다. 「관리 후 임의 폐기」는 이미 나간 것도 지울 수 있어야 한다).
+        //   그런데 **고객 ERP 에 내려간 사본을 회수할 입구가 0건**이었다 ⇒ 본사 화면에는
+        //   「폐기됨」인데 고객 쪽지함에는 **본문이 영구히 남는다.** 작2 V-3(「대화의 절반만
+        //   비우면 폐기가 아니다」)가 **시스템 경계를 넘어 재발**한 모양이고, 이 PR 이 선발신을
+        //   실제로 내려보내면서 **그 구멍을 새로 만든다.**
+        //
+        // ⇒ 폐기된 선발신의 **열쇠만** 내려보낸다(본문은 안 보낸다 — 지우라는 지시다).
+        //   ERP 는 자기 사본의 본문을 비운다. 열쇠뿐이라 #18·#22 에 걸릴 칸이 없다.
+        // 🔴 14일 창 안에서만 보낸다 — 영원히 들고 다니면 Pull 응답이 끝없이 커진다.
+        //   ERP 쪽은 멱등(이미 비운 것을 또 비워도 같다)이라 창을 넘겨 놓친 건은 피해가 없다.
+        var purged = (await db.QueryAsync<string>(@"
+            SELECT outbound_id
+              FROM bo_cs_outbound
+             WHERE tenant_id = @TenantId
+               AND purged_at IS NOT NULL
+               AND delivered_at IS NOT NULL
+               AND purged_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 14 DAY)
+             ORDER BY purged_at
+             LIMIT 50",
+            new { auth.TenantId })).ToList();
+
+        return Ok(new { success = true, replies = rows, outbound, purgedOutbound = purged });
     }
 
     // ─────────────────────────────────────────────────────────────

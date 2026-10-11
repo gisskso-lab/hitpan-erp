@@ -8,11 +8,15 @@
    · 답을 열면 읽음 처리 — N-8 「안 읽은 답 N」 숫자가 여기서 줄어든다
    · replied_by_kind 는 본사/대리점 글자만 — 사람 이름은 애초에 안 받는다(설계 §5-3) *@
 
-<PageTitle>CS 답변</PageTitle>
-<PageHeader Title="CS 답변" Subtitle="보낸 문의에 대한 담당 상담원의 답입니다" />
+@* 🔴 20261012작3 [4] V-4 봉합 — **본사가 먼저 보낸 안내**는 「내가 보낸 문의에 대한 답」이 아니다.
+   그대로 두면 화면이 사실과 다른 말을 한다(「보낸 문의에 대한 담당 상담원의 답입니다」·「문의 목록으로」).
+   고객이 「내가 언제 이런 걸 물었지?」 하고 헷갈린다 — 「처음 보는 사람이 혼자 쓸 수 있냐」 기준. *@
+<PageTitle>@(_isHq ? "본사 안내" : "CS 답변")</PageTitle>
+<PageHeader Title="@(_isHq ? "본사 안내" : "CS 답변")"
+            Subtitle="@(_isHq ? "히트판 본사에서 보낸 안내입니다" : "보낸 문의에 대한 담당 상담원의 답입니다")" />
 
 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
-           OnClick="@(() => Nav.NavigateTo("/support/cs"))" Class="mb-2">문의 목록으로</MudButton>
+           OnClick="@(() => Nav.NavigateTo("/support/cs"))" Class="mb-2">@(_isHq ? "목록으로" : "문의 목록으로")</MudButton>
 
 @if (_loading)
 {
@@ -21,7 +25,12 @@
 else if (_replies.Count == 0)
 {
     <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
-        <MudText Typo="Typo.body2" Style="color:#6B7280">아직 답이 없습니다. 답이 오면 화면 위에 알려 드립니다.</MudText>
+        @* 🔴 본사가 **거둬간** 안내도 이 자리로 온다(본문이 비워졌다 — [4] V-1 봉합).
+           「답이 없습니다」라고 하면 사실과 다르다. *@
+        <MudText Typo="Typo.body2" Style="color:#6B7280">
+            @(_isHq ? "본사가 거둬간 안내입니다. 내용은 더 이상 보이지 않습니다."
+                    : "아직 답이 없습니다. 답이 오면 화면 위에 알려 드립니다.")
+        </MudText>
     </MudPaper>
 }
 else
@@ -31,10 +40,24 @@ else
         {
             <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
                 <div class="d-flex align-center justify-space-between mb-2">
-                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@r.RepliedByKind 답변</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="@(_isHq ? Color.Info : Color.Primary)"
+                             Variant="@(_isHq ? Variant.Filled : Variant.Outlined)"
+                             Icon="@(_isHq ? Icons.Material.Filled.Campaign : null)">
+                        @(_isHq ? "본사 안내" : $"{r.RepliedByKind} 답변")
+                    </MudChip>
                     <MudText Typo="Typo.caption" Style="color:#6B7280">@r.RepliedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
                 </div>
-                <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@r.Body</MudText>
+                @* 🔴 [4] V-1 봉합 — 본사가 거둬간 안내는 본문이 비워져 내려온다(빈 칸이 아니라 사실을 말한다). *@
+                @if (string.IsNullOrWhiteSpace(r.Body))
+                {
+                    <MudText Typo="Typo.body2" Style="color:#6B7280">
+                        @(_isHq ? "본사가 거둬간 안내입니다. 내용은 더 이상 보이지 않습니다." : "내용이 없습니다.")
+                    </MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@r.Body</MudText>
+                }
             </MudPaper>
         }
 
@@ -103,6 +126,8 @@ else
     [Parameter] public string RequestId { get; set; } = "";
 
     private bool _loading = true;
+    /// <summary>🔴 작3 [4] V-4 — 본사가 먼저 보낸 안내인가. 서버가 알려준다(화면이 추측하지 않는다).</summary>
+    private bool _isHq;
     private List<Reply> _replies = new();
 
     // 작15 E-1 — 3단 글자와 점수 (사장님 결재 Q-3: 좋아요/보통/아쉬워요 = 3/2/1)
@@ -133,6 +158,7 @@ else
             var res = await Http.GetFromJsonAsync<RepliesResponse>($"api/cs/requests/{RequestId}/replies");
             _replies = res?.Data ?? new();
             _rating = res?.Rating;
+            _isHq = string.Equals(res?.Origin, "hq", StringComparison.Ordinal);
 
             // 읽음 처리 — 열었다 = 읽었다. N-8 숫자가 줄어든다(read_at 메타 갱신).
             foreach (var r in _replies.Where(x => x.ReadAt is null))
@@ -274,6 +300,8 @@ else
         public bool Success { get; set; }
         public List<Reply> Data { get; set; } = new();
         public RatingBlock? Rating { get; set; }
+        /// <summary>local = 내가 보낸 문의 · hq = 본사가 먼저 보낸 안내(작3 [4] V-4)</summary>
+        public string? Origin { get; set; }
     }
 
     private sealed class Reply

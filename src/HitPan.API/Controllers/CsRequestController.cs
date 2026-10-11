@@ -158,9 +158,14 @@ public class CsRequestController : ControllerBase
         try
         {
             await _db.ExecuteAsync(@"
+                -- 🔴 [4] V-3 봉합(작3 4차수) — `created_at` 을 **명시**한다(UTC).
+                --   DDL 의 `DEFAULT current_timestamp(6)`(DB-139:33)은 **세션 시간대**(이 서버는 KST)이고,
+                --   본사가 보낸 안내는 본사가 찍은 **UTC** 로 들어온다(`CsAdminController:525` → 워커가 그대로 삽입).
+                --   한 목록(`ORDER BY created_at DESC`)에 기준이 둘이면 **갓 온 본사 안내가 9시간 과거로 묻힌다**
+                --   — 고객은 새 안내를 못 본다. 검증팀 실측 **540분**. 작2 V-6 과 같은 모양이다.
                 INSERT INTO cs_requests
-                    (cs_request_id, tenant_id, created_by, category, sub_tag, body, screen_code, erp_version, status)
-                VALUES (@Id, @TenantId, @UserId, @Category, @SubTag, @Body, @ScreenCode, @ErpVersion, '접수')",
+                    (cs_request_id, tenant_id, created_by, category, sub_tag, body, screen_code, erp_version, status, created_at)
+                VALUES (@Id, @TenantId, @UserId, @Category, @SubTag, @Body, @ScreenCode, @ErpVersion, '접수', UTC_TIMESTAMP(6))",
                 new
                 {
                     Id = requestId,
@@ -251,7 +256,15 @@ public class CsRequestController : ControllerBase
         //   판정은 서버가 한다 — 화면이 제 마음대로 열지 못한다(사장님 결재 Q-1).
         var rating = RatingBlock(await LoadRatingStateAsync(tenantId, id), userId);
 
-        return Ok(new { success = true, data = rows, rating });
+        // 🔴 [4] V-4 봉합(4차수) — 화면이 **무엇을 보고 있는지** 알아야 한다.
+        //   본사가 먼저 보낸 안내는 「내가 보낸 문의에 대한 답」이 아니다. 그 사실을 안 주면
+        //   화면이 「보낸 문의에 대한 담당 상담원의 답입니다」라고 **사실과 다른 말**을 한다(#23).
+        var origin = await _db.ExecuteScalarAsync<string?>(
+            $@"SELECT {(await HasOriginColumnAsync() ? "origin" : "'local'")}
+                 FROM cs_requests WHERE tenant_id = @TenantId AND cs_request_id = @Id",
+            new { TenantId = tenantId, Id = id }) ?? "local";
+
+        return Ok(new { success = true, data = rows, rating, origin });
     }
 
     // ─────────────────────────────────────────────────────────────
