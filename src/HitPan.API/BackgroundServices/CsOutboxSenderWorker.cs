@@ -298,17 +298,26 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         }
 
         List<ReplyDto>? replies;
+        List<OutboundDto>? outbound;
         try
         {
             var doc = JsonSerializer.Deserialize<PullResponse>(body,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             replies = doc?.Replies;
+            outbound = doc?.Outbound;
         }
         catch (JsonException ex)
         {
             logger.LogWarning(ex, "[CS수신] Pull 응답 해석 실패 — 버리지 않고 다음 주기 재시도");
             return;
         }
+
+        // 🔴 20261012작3 B-2·B-3 — **본사가 먼저 보낸 쪽지**를 앉힌다.
+        //   답(replies)보다 먼저 처리한다: 선발신은 원본 문의가 없어서 아래 답 저장문
+        //   (`FROM cs_requests r`)에 걸리면 **조용히 사라진다**. 그 자리가 10/11 에 발견된 구멍이다.
+        if (outbound is { Count: > 0 })
+            await ReceiveOutboundAsync(db, hq, ownerAccountId, outbound, logger, st);
+
         if (replies is null || replies.Count == 0) return;
 
         foreach (var r in replies)
@@ -383,7 +392,13 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         public int AttemptCount { get; set; }
     }
 
-    private sealed class PullResponse { public List<ReplyDto>? Replies { get; set; } }
+    private sealed class PullResponse
+    {
+        public List<ReplyDto>? Replies { get; set; }
+
+        /// <summary>🔴 20261012작3 — 본사 선발신. 옛 판 응답에는 없다 ⇒ null 이면 그냥 건너뛴다.</summary>
+        public List<OutboundDto>? Outbound { get; set; }
+    }
 
     private sealed class ReplyDto
     {
@@ -393,4 +408,121 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         public string? RepliedByKind { get; set; }
         public DateTime RepliedAt { get; set; }
     }
+
+    /// <summary>본사가 먼저 보낸 쪽지 — 받는 칸은 다섯뿐이다(본사 내부 식별자는 안 내려온다).
+    /// <para>게이트가 이 모양으로 수신 사이클을 직접 돌린다 ⇒ public.</para></summary>
+    public sealed class OutboundDto
+    {
+        public string OutboundId { get; set; } = "";
+        public string? Purpose { get; set; }
+        public string? Title { get; set; }
+        public string? Body { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작3 B-2·B-3 — 본사 선발신 수신
+    //
+    // 왜 `cs_requests` 에 앉히나 (설계 D-1)
+    //   ERP 의 목록(`CsRequestController.cs:178`)과 쪽지함(`CsInboxPage.razor:133`)이
+    //   **둘 다 `cs_requests` 기준**이다. 새 표를 만들면 화면 둘을 새로 짜야 하고
+    //   흐름이 끊긴다(#20). 기존 자리에 앉히면 **화면 변경 없이** 그대로 보인다.
+    //
+    // 🔴 `origin='hq'` 로 **반드시 표시**한다(DB-144). 고객이 「내가 쓰지 않은 쪽지」를
+    //   자기 문의와 구별해야 한다.
+    // 🔴 멱등 = `outbound_id` 를 `cs_request_id` 로 **그대로** 쓴다(양쪽 varchar(36) · 실측).
+    //   두 번 내려와도 `INSERT IGNORE` 로 1건이다.
+    // 🔴 에코 없음 — `cs_outbox` 에 **넣지 않는다**(`cs_outbox` INSERT 는 `CsRequestController:141`
+    //   한 곳뿐이다 · 실측). 본사발신이 본사로 되돌아가는 고리가 구조적으로 안 생긴다.
+    // 🔴 ack 는 **저장에 성공한 것만** 보낸다. 못 보내면 `delivered_at` 이 안 채워져
+    //   다음 주기에 또 내려오고, 멱등이 중복을 막는다 ⇒ **유실 0 · 중복 0**.
+    // ══════════════════════════════════════════════════════════════
+    public static async Task ReceiveOutboundAsync(MySqlConnection db, IHeadquartersClient hq,
+        string ownerAccountId, List<OutboundDto> items, ILogger logger, CancellationToken st)
+    {
+        // 🔴 테넌트는 **부모계정 행에서** 꺼낸다 — 송신 경로가 이미 그 행으로 3중 재료를 모은다
+        //   (같은 파일 위쪽 `is_parent = 1 AND is_active = 1`). 다른 데서 추측하면 축이 둘이 된다.
+        var tenantId = await db.ExecuteScalarAsync<string?>(
+            "SELECT tenant_id FROM users WHERE is_parent = 1 AND is_active = 1 LIMIT 1");
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            // 테넌트를 모르면 앉힐 수 없다 — 버리지 않고 다음 주기에 다시 받는다(ack 를 안 보낸다).
+            logger.LogWarning("[CS수신] 선발신 보류 — 로컬 부모계정에서 tenant_id 확정 불가");
+            return;
+        }
+
+        var saved = new List<string>();
+
+        foreach (var o in items)
+        {
+            if (string.IsNullOrWhiteSpace(o.OutboundId) || string.IsNullOrWhiteSpace(o.Body)) continue;
+
+            var title = (o.Title ?? "").Trim();
+            // 🔴 용도·제목을 **본문 머리 한 줄**로 얹는다 — 칸을 새로 만들지 않는다.
+            //   용도는 사람 말로 적는다(「프로모션」·「이벤트」·「요금안내」) — 화면에 개발 용어 금지(#23).
+            var head = title.Length > 0 ? $"[{PurposeLabel(o.Purpose)}] {title}" : $"[{PurposeLabel(o.Purpose)}]";
+            var shown = head + "\n" + o.Body;
+            if (shown.Length > 2000) shown = shown[..2000];
+
+            await using var tx = await db.BeginTransactionAsync(st);
+            try
+            {
+                // ① 본사발신 원본 1줄 — 고객이 쓴 것이 아니므로 created_by 는 'headquarters' 표식이다.
+                await db.ExecuteAsync(@"
+                    INSERT IGNORE INTO cs_requests
+                        (cs_request_id, tenant_id, created_by, category, sub_tag, body,
+                         screen_code, erp_version, status, origin, created_at)
+                    VALUES
+                        (@Id, @TenantId, 'headquarters', 'etc', 'etc', @Body,
+                         NULL, @Ver, '답변도착', 'hq', @CreatedAt)",
+                    new
+                    {
+                        Id = o.OutboundId, TenantId = tenantId, Body = shown,
+                        Ver = "hq",   // erp_version 은 NOT NULL — 본사발신은 ERP 판이 없다는 표식
+                        CreatedAt = o.CreatedAt == default ? DateTime.UtcNow : o.CreatedAt,
+                    }, tx);
+
+                // ② 같은 글을 답 한 줄로도 둔다 — 쪽지함이 답을 읽어 그리기 때문이다(화면 변경 0).
+                await db.ExecuteAsync(@"
+                    INSERT IGNORE INTO cs_replies (reply_id, tenant_id, cs_request_id, body, replied_by_kind, replied_at)
+                    VALUES (@ReplyId, @TenantId, @Id, @Body, '본사', @At)",
+                    new
+                    {
+                        ReplyId = o.OutboundId, TenantId = tenantId, Id = o.OutboundId, Body = shown,
+                        At = o.CreatedAt == default ? DateTime.UtcNow : o.CreatedAt,
+                    }, tx);
+
+                await tx.CommitAsync(st);
+                saved.Add(o.OutboundId);
+            }
+            catch (MySqlException ex)
+            {
+                // #15 — 삼키지 않는다. ack 를 안 보내므로 다음 주기에 다시 내려온다(유실 0).
+                await tx.RollbackAsync(st);
+                logger.LogWarning(ex, "[CS수신] 선발신 저장 실패 outbound={Id} — 다음 주기 재시도", o.OutboundId);
+            }
+        }
+
+        if (saved.Count == 0) return;
+
+        // 🔴 **저장이 끝난 뒤에만** 도착을 알린다 — 이 ack 가 본사 화면의 「전달됨」 근거다.
+        var payload = "{\"outboundIds\":["
+            + string.Join(",", saved.Select(id => JsonSerializer.Serialize(id))) + "]}";
+        var (code, _) = await hq.PostAsync("/api/backoffice/cs/outbound/ack", payload, ownerAccountId, st);
+        if (code is >= 200 and < 300)
+            logger.LogInformation("[CS수신] 본사 안내 {N}건 수신·도착확인 완료", saved.Count);
+        else
+            logger.LogWarning("[CS수신] 본사 안내 {N}건 저장됐으나 도착확인 실패 code={Code} — 다음 주기에 재시도", saved.Count, code);
+    }
+
+    /// <summary>용도를 사람 말로 — 화면에 개발 용어를 내지 않는다(#23).</summary>
+    private static string PurposeLabel(string? purpose) => purpose switch
+    {
+        "promo" => "프로모션",
+        "event" => "이벤트",
+        "billing" => "요금안내",
+        _ => "본사안내",
+    };
+
 }

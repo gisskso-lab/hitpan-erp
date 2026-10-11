@@ -65,11 +65,28 @@ else
                 <MudListItem T="string" OnClick="@(() => Nav.NavigateTo($"/support/cs/{it.CsRequestId}"))">
                     <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="width:100%">
                         <div>
-                            <MudText Typo="Typo.body2"><b>@CategoryLabel(it.Category)</b> · @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))</MudText>
+                            @* 🔴 20261012작3 B-4 — 본사가 먼저 보낸 안내는 **내가 쓴 문의가 아니다.**
+                               구별 표시가 없으면 「내가 언제 이런 걸 물었지?」가 된다. *@
+                            <MudText Typo="Typo.body2">
+                                @if (it.Origin == "hq")
+                                {
+                                    <b style="color:var(--mud-palette-info)">본사 안내</b><span> · </span>
+                                }
+                                else
+                                {
+                                    <b>@CategoryLabel(it.Category)</b><span> · </span>
+                                }
+                                @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))
+                            </MudText>
                             <MudText Typo="Typo.caption" Style="color:#6B7280">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
                         </div>
                         <div class="d-flex align-center gap-2">
-                            @if (it.ReplyCount > 0)
+                            @if (it.Origin == "hq")
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
+                                         Icon="@Icons.Material.Filled.Campaign">본사에서 보냄</MudChip>
+                            }
+                            else if (it.ReplyCount > 0)
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">답 @it.ReplyCount</MudChip>
                             }
@@ -188,6 +205,8 @@ else
         public string? SubTag { get; set; }
         public string? Body { get; set; }
         public string Status { get; set; } = "";
+        /// <summary>local = 내가 쓴 문의 · hq = 본사가 먼저 보낸 안내(작3 B-4)</summary>
+        public string? Origin { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? SentAt { get; set; }
         public string? TerminalReason { get; set; }

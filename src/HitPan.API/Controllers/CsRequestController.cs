@@ -169,6 +169,9 @@ public class CsRequestController : ControllerBase
                    r.body            AS body,
                    r.status          AS status,
                    r.created_at      AS createdAt,
+                   -- 🔴 20261012작3 B-4 — 출처(DB-144). 'hq' = 본사가 먼저 보낸 안내다.
+                   --   고객이 **자기가 쓰지 않은 쪽지**를 자기 문의와 구별해야 한다.
+                   r.origin          AS origin,
                    o.sent_at         AS sentAt,
                    o.terminal_reason AS terminalReason,
                    o.attempt_count   AS attemptCount,
@@ -285,6 +288,7 @@ public class CsRequestController : ControllerBase
     private async Task<RatingStateRow?> LoadRatingStateAsync(string tenantId, string csRequestId)
         => await _db.QueryFirstOrDefaultAsync<RatingStateRow>(@"
             SELECT r.created_by      AS CreatedBy,
+                   r.origin          AS Origin,
                    o.sent_at         AS SentAt,
                    o.terminal_reason AS TerminalReason,
                    (SELECT COUNT(*) FROM cs_replies p
@@ -303,12 +307,18 @@ public class CsRequestController : ControllerBase
     private const string ReasonAlreadyRated = "already_rated";
     // 작15 S-1 봉합 — 「내 테넌트의 쪽지」와 「내가 쓴 쪽지」는 다르다. 목록은 회사 전체를 보여준다.
     private const string ReasonNotMine = "not_mine";
+    // 🔴 작3 B-5 — 본사가 먼저 보낸 안내는 **질문이 아니다** ⇒ 평가 대상이 아니다.
+    //   이 갈래가 없으면 `not_mine` 으로 떨어져 「문의를 쓴 분만 평가할 수 있습니다」가 뜬다 —
+    //   고객이 쓴 문의가 아예 아닌데 그 문장은 사실과 다르다(#23 고객 노출 문구는 사실만).
+    private const string ReasonHqNotice = "hq_notice";
 
     // §4 표 그대로 — 이 함수 하나가 「조용히 사라지는 평가」를 막는 전부다.
     //   순서가 뜻이다: 이미 평가한 건이 가장 먼저(Q-2 첫 평가만) → 종결 → 미전송 → 답 0건 → 열림.
     private static string RatingReason(RatingStateRow? s, string? userId)
     {
         if (s is null) return "not_sent";                       // 내 테넌트에 그 쪽지가 없다
+        // 🔴 작3 B-5 — 가장 먼저 가른다. 본사 안내는 평가·재전송 축에 아예 들어오지 않는다.
+        if (string.Equals(s.Origin, "hq", StringComparison.Ordinal)) return ReasonHqNotice;
         // 🔴 S-1 — 이 검사가 가장 먼저다. 남이 먼저 누르면 UNIQUE 때문에 쓴 사람이 영구히 못 하고,
         //    rated_by 칸이 없어 누가 눌렀는지도 모르며, 행 삭제 금지라 되돌릴 수단이 0 이다.
         if (string.IsNullOrEmpty(userId) || !string.Equals(s.CreatedBy, userId, StringComparison.Ordinal))
@@ -329,6 +339,7 @@ public class CsRequestController : ControllerBase
         "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
         "no_reply" => "답이 오면 평가할 수 있습니다.",
         "not_mine" => "문의를 쓴 분만 평가할 수 있습니다.",
+        "hq_notice" => "본사에서 보낸 안내입니다. 평가 대상이 아닙니다.",
         _ => "지금은 평가할 수 없습니다.",
     };
 
@@ -423,6 +434,8 @@ public class CsRequestController : ControllerBase
     {
         // 작15 S-1 봉합(사장님 결재 2026-10-08) — 쓴 사람만 평가한다. 판정 재료가 없으면 판정을 못 한다.
         public string? CreatedBy { get; set; }
+        /// <summary>작3 B-5 — 'hq' 면 본사가 먼저 보낸 안내다(질문이 아니라 평가 대상이 아니다).</summary>
+        public string? Origin { get; set; }
         public DateTime? SentAt { get; set; }
         public string? TerminalReason { get; set; }
         public int ReplyCount { get; set; }

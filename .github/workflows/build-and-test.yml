@@ -789,6 +789,29 @@ jobs:
           #      원복 뒤 4/4 PASS · 6초(DB 없이면 1초대 — 소요시간이 판별 수단이다)
           GATES="$GATES|BackofficePricingCreateGate"
 
+          # 🔴🔴 20261012작3 — **CS 쪽지 파이프라인 왕복** (G-W3-1·2·3·4 · CsPipelineRoundTripGateTests)
+          #    사장님 오더: 「파이프라인 설계·연결·구축 → **최종 도는지**」
+          #
+          #    🔴 이 게이트가 메우는 구멍: 종전엔 **두 반쪽이 맞물리는지 재는 게이트가 0개**였다 —
+          #      `CsMessagePipelineGate` 는 **가짜 본사**로 ERP 쪽만, `CsInboundGate` 는 **가짜 봉투**로
+          #      본사 쪽만 쟀다. 양쪽 다 초록인데 **왕복은 한 번도 안 돌아본** 상태였다
+          #      (「만드는 쪽만 재면 9건 전부 통과하고도 반려난다」 — 8/27 작7 교훈과 같은 모양).
+          #
+          #    ⇒ 이 게이트는 **DB 를 두 개** 쓴다: ERP(출하 DDL `hitpan_db_clean.sql` 실물 import)와
+          #      백오피스(실물 `SchemaMigrator`). 그 사이를 `BridgeHq` 가 잇는데 가짜 응답을 만들지 않고
+          #      **실물 `CsInboundController` 를 호출**한다. 두 제품이 실제로 맞물린다.
+          #
+          #    🔴 무는 약속:
+          #      ① ERP 쪽지가 **실물 수신부까지 올라가** CS 창구에 1건으로 선다(멱등 — 두 번 돌려도 1건)
+          #      ② 본사 선발신이 **ERP 쪽지함에 앉고 화면이 보여준다** · ack 뒤 창구가 「전달됨」이 된다
+          #        (🔴 ack 전에는 `delivered_at` NULL — 내려보낸 것과 도착한 것은 다른 사실이다)
+          #      ③ **취소·폐기분은 안 내려간다** · ack 를 못 보내면 **다음 Pull 에 또 내려온다**(유실 0)
+          #      ④ 3중 일치 음성 대조군 — 시리얼·부모계정 축이 틀리면 401 이고 **쪽지는 큐에 남는다**
+          #
+          #    🔴 **로컬에서는 못 돈다** — ERP DB 가 `CREATE DATABASE` 를 요구하고 개발 PC 의 `hitpan`
+          #      계정은 거부한다 ⇒ **이 잡이 유일한 계측 경로다.** 로컬 초록을 증거로 올리지 않았다.
+          GATES="$GATES|CsPipelineRoundTripGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).

@@ -4929,9 +4929,11 @@ CREATE TABLE `cs_requests` (
   `erp_version` varchar(20) NOT NULL COMMENT '어느 판인가(자동)',
   `status` varchar(10) NOT NULL DEFAULT '접수' COMMENT '접수/전송중/전송완료/거부/답변도착/종결',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `origin` varchar(10) NOT NULL DEFAULT 'local' COMMENT 'local = 고객(자식계정) 문의 · hq = 본사가 먼저 보낸 안내(DB-144 · 작3 B-1)',
   PRIMARY KEY (`cs_request_id`),
   KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
-  KEY `idx_cs_req_status` (`tenant_id`,`status`)
+  KEY `idx_cs_req_status` (`tenant_id`,`status`),
+  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 로컬 원본 — 자식계정 작성 · 부모계정 파이프로 송신(작14 B-2)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
