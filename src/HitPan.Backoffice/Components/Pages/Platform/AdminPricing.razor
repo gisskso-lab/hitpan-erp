@@ -53,8 +53,12 @@ else
 
             <MudGrid Class="mt-3">
                 <MudItem xs="12" md="4">
+                    @* 🔴 20261012작3 오더 1 ⓒ — 안내 문구가 서버 규칙과 **글자 그대로** 같아야 한다.
+                       종전 「영문·숫자 20자 이내」는 서버가 길이만 재서 지켜지지 않던 약속이었다.
+                       MaxLength 로 **넘겨 적을 수조차 없게** 둔다 — 보내고 나서 빨간 글씨를 보는 건 늦다. *@
                     <MudTextField @bind-Value="_new.PlanId" Label="요금제 코드 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
-                                  Placeholder="basic" HelperText="영문·숫자 20자 이내. 등록 후에는 바꿀 수 없습니다." />
+                                  MaxLength="20" Placeholder="basic"
+                                  HelperText="영문·숫자와 -, _ 만. 20자 이내. 등록 후에는 바꿀 수 없습니다." />
                 </MudItem>
                 <MudItem xs="12" md="4">
                     <MudTextField @bind-Value="_new.PlanName" Label="요금제 이름 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
