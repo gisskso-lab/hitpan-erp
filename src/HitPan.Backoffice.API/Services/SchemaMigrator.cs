@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using MySqlConnector;
 
 namespace HitPan.Backoffice.API.Services;
@@ -50,6 +51,20 @@ public sealed class SchemaMigrator
         await using var db = new MySqlConnection(_connectionString);
         await db.OpenAsync(ct);
 
+        // 🔴 20261011작1 — 서버 판을 1회 판정한다 (설계 §2-1).
+        //   왜: 운영 백오피스(NCP)는 MySQL 8.0.45 인데 우리 SQL 은 MariaDB 전용
+        //       `ALTER … ADD COLUMN IF NOT EXISTS` 를 쓴다. MySQL 8 은 그 문법을 거부하고(1064),
+        //       적용기는 첫 실패에서 기동을 중단하므로 11번 이후 전부가 운영에 못 들어갔다
+        //       (선행검증서 20261011_1V §3 — 서버 로그 실측).
+        //   판정 못 하면(빈 문자열) 보정 경로로 간다 — 보정 경로는 MariaDB 에서도 정답이기 때문이다
+        //   (문장 쪼개기 + 토큰 벗기기 + 「이미 있다」 관용은 양쪽 다 유효).
+        var serverVersion = await QueryServerVersionAsync(db, ct);
+        var isMariaDb = serverVersion.Contains("mariadb", StringComparison.OrdinalIgnoreCase);
+        _logger.LogInformation(
+            "[SchemaMigrator] 서버 판 = {Version} → {Path}",
+            string.IsNullOrEmpty(serverVersion) ? "(판독 실패)" : serverVersion,
+            isMariaDb ? "종전 경로(무변경)" : "MySQL 호환 보정 경로");
+
         // 적용 이력 테이블 보장
         await ExecuteAsync(db, @"
             CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -95,12 +110,21 @@ public sealed class SchemaMigrator
 
             try
             {
-                // 한 파일을 통째로 실행(여러 CREATE TABLE 포함). MySqlConnector는
-                // AllowUserVariables + 다중 statement를 ExecuteNonQuery로 처리.
-                await using (var cmd = new MySqlCommand(sql, db))
+                if (isMariaDb)
                 {
-                    cmd.CommandTimeout = 120;
-                    await cmd.ExecuteNonQueryAsync(ct);
+                    // 종전 경로 — 한 파일을 통째로 실행(여러 CREATE TABLE 포함). MySqlConnector는
+                    // AllowUserVariables + 다중 statement를 ExecuteNonQuery로 처리.
+                    // 🔴 20261011작1 — 이 경로는 한 글자도 안 바꿨다(#1). MariaDB 판 회귀 0 의 근거.
+                    await using (var cmd = new MySqlCommand(sql, db))
+                    {
+                        cmd.CommandTimeout = 120;
+                        await cmd.ExecuteNonQueryAsync(ct);
+                    }
+                }
+                else
+                {
+                    // 🔴 20261011작1 — MySQL 호환 보정 경로(설계 §2-2~§2-4).
+                    await ApplyForMySqlAsync(db, sql, fileName, ct);
                 }
 
                 // 이력 기록(파일명 PK — 내용 바뀌면 UPDATE)
@@ -123,6 +147,225 @@ public sealed class SchemaMigrator
                 throw;
             }
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261011작1 — MySQL 8 호환 보정 (사장님 결재 2026-10-11 「안1대로 진행해」)
+    //
+    //   근거: docs/검증/선행/20261011_1V_백오피스_MySQL8_문법거부_선행검증서.md
+    //         docs/설계/백오피스/20261011_스키마적용기_MySQL8호환_설계문서.md
+    //
+    //   🔴 installer/backoffice/*.sql 은 한 글자도 안 고친다 — 백오피스 DDL 진실원(#36·#37·#41)이고
+    //      그 파일을 파싱해 표→칸 색인을 만드는 게이트(BackofficeColumnContractGateTests)가 산다.
+    //      그래서 보정은 여기(적용기) 한 곳에서만 한다.
+    //   감시: BackofficeSchemaMysql8GateTests (G-M8-1~5) — 이 보정을 되돌리면 FAIL 한다.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>주석(<c>-- …</c> · <c>#…</c> · <c>/* … */</c>)을 지우는 패턴. 실행문이 있는지 판정할 때만 쓴다.</summary>
+    private static readonly Regex CommentRegex = new(
+        @"/\*.*?\*/|--(?=[ \t\r\n])[^\n]*|--$|#[^\n]*",
+        RegexOptions.Singleline | RegexOptions.Multiline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>IF NOT EXISTS</c> / <c>IF EXISTS</c> 토큰 하나. <c>\G</c> 로 <b>검사 위치에서만</b> 맞춘다.
+    /// <para>🔴 <c>ALTER</c> 문에서만 쓴다 — <c>CREATE TABLE IF NOT EXISTS</c> 는 MySQL 도 아는 문법이고
+    /// 벗기면 멱등성이 깨진다(설계 §2-3).</para>
+    /// <para>🔴 왜 「<c>ADD COLUMN</c> 뒤」 같은 모양으로 좁히지 않았나: 실물 31번이
+    /// <c>ADD CONSTRAINT fk_… FOREIGN KEY IF NOT EXISTS (…)</c> 처럼 <b>이름이 중간에 끼는</b> 모양을 쓴다.
+    /// 모양을 열거하면 그런 변형을 놓친다(G-M8-5c 가 설계 중에 실제로 잡아냈다).
+    /// MySQL 8 의 <c>ALTER</c> 에는 이 토큰이 설 자리가 아예 없으므로 — 인용·주석 밖이라면 — 전부 벗긴다.</para>
+    /// </summary>
+    private static readonly Regex ExistsTokenRegex = new(
+        @"\GIF\s+(?:NOT\s+)?EXISTS\b\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>서버 판 문자열(<c>SELECT VERSION()</c>). 판독 실패 시 빈 문자열.</summary>
+    private static async Task<string> QueryServerVersionAsync(MySqlConnection db, CancellationToken ct)
+    {
+        await using var cmd = new MySqlCommand("SELECT VERSION()", db) { CommandTimeout = 30 };
+        var raw = await cmd.ExecuteScalarAsync(ct);
+        return raw as string ?? string.Empty;
+    }
+
+    /// <summary>
+    /// MySQL 경로 — 파일을 문장으로 쪼개 하나씩 실행한다. <c>IF NOT EXISTS</c> 토큰은 벗기고,
+    /// 그 대가로 생기는 「이미 있다」(1060·1061·1091)만 적용됨으로 보고 넘어간다.
+    /// <para>그 밖의 오류는 <b>종전과 같이</b> 던져서 기동을 중단시킨다(#15·#19) —
+    /// 스키마 불일치를 안고 돌면 런타임 500 이 숨는다.</para>
+    /// </summary>
+    private async Task ApplyForMySqlAsync(MySqlConnection db, string sql, string fileName, CancellationToken ct)
+    {
+        var statements = SplitStatements(sql);
+        if (statements.Count == 0)
+        {
+            // 주석만 있는 파일 — 사고가 아니다. 다만 조용히 넘기지 않는다.
+            _logger.LogWarning("[SchemaMigrator] {File} — 실행할 문장 0개(주석뿐)", fileName);
+            return;
+        }
+
+        var tolerated = 0;
+        for (var n = 0; n < statements.Count; n++)
+        {
+            var statement = StripAlterExistsTokens(statements[n]);
+            try
+            {
+                await using var cmd = new MySqlCommand(statement, db) { CommandTimeout = 120 };
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+            catch (MySqlException ex) when (IsAlreadyThere(ex))
+            {
+                // 「이미 있다」 = IF NOT EXISTS 를 벗긴 대가. 건마다 남긴다 — 덮어서 초록이 이 설계의 실패 모양이다.
+                tolerated++;
+                _logger.LogInformation(
+                    "[SchemaMigrator] {File} 문장 {No}/{Total} — 이미 적용됨으로 넘어감 (오류 {Code})",
+                    fileName, n + 1, statements.Count, (int)ex.ErrorCode);
+            }
+        }
+
+        _logger.LogInformation(
+            "[SchemaMigrator] {File} — MySQL 보정 경로: 문장 {Total}개 실행 · 「이미 있다」 {Tolerated}건",
+            fileName, statements.Count, tolerated);
+    }
+
+    /// <summary>
+    /// 「이미 있다」로 볼 오류만 넷 — 1060 중복 칸 · 1061 중복 인덱스 · 1091 없는 것 지우기 · 1826 중복 FK 이름.
+    /// <para>🔴 1826 을 넣은 이유(게이트 G-M8-3 이 설계 중에 잡아낸 자리): <c>31</c> 번은
+    /// <c>ADD CONSTRAINT fk_landing_signups_tenant</c> 를 <b>IF NOT EXISTS 없이</b> 쓴다.
+    /// 파일이 중간에 실패하면 이력에 안 남아 다음 기동이 그 파일을 처음부터 다시 돌리는데,
+    /// 그때 FK 이름 중복(1826)에서 또 멈춰 <b>영영 안 열린다</b>. 그 덫을 막는다.</para>
+    /// <para>그 밖의 오류는 전부 던진다 — 스키마 불일치를 안고 도는 것이 더 위험하다(#19).</para>
+    /// </summary>
+    private static bool IsAlreadyThere(MySqlException ex)
+        => (int)ex.ErrorCode is 1060 or 1061 or 1091 or 1826;
+
+    /// <summary>
+    /// SQL 본문을 문장 단위로 쪼갠다. 인용 구간(<c>'</c> <c>"</c> <c>`</c>)과 주석 안의 <c>;</c> 는 경계가 아니다.
+    /// <para>실측(2026-10-11 · installer/backoffice 14파일 전수): 문자열 안 <c>;</c> 0건 · 주석 안 <c>;</c> 0건.
+    /// 그래도 6가지(<c>'</c> <c>"</c> <c>`</c> <c>--</c> <c>#</c> <c>/* */</c>)를 인식한다 — 다음에 누가 넣어도 안 깨지게.</para>
+    /// </summary>
+    internal static List<string> SplitStatements(string sql)
+    {
+        var list = new List<string>();
+        var sb = new StringBuilder();
+
+        for (var i = 0; i < sql.Length; i++)
+        {
+            // 주석·인용 구간은 통째로 옮긴다 — 그 안의 ; 는 문장 경계가 아니다.
+            if (TryCopyVerbatim(sql, ref i, sb)) { continue; }
+
+            if (sql[i] == ';')
+            {
+                AddIfExecutable(list, sb.ToString());
+                sb.Clear();
+                continue;
+            }
+
+            sb.Append(sql[i]);
+        }
+
+        AddIfExecutable(list, sb.ToString());
+        return list;
+    }
+
+    /// <summary>
+    /// 지금 위치가 주석(<c>-- </c> · <c>#</c> · <c>/* */</c>)이나 인용 구간(<c>'</c> <c>"</c> <c>`</c>)의
+    /// 시작이면 그 구간을 <paramref name="sb"/> 에 그대로 옮기고 <paramref name="i"/> 를 마지막 글자로 옮긴다.
+    /// <para>쪼개기와 토큰 벗기기가 <b>같은 눈</b>으로 본문을 읽게 하려고 한 곳에 뒀다 —
+    /// 두 쪽이 다르게 읽으면 한쪽이 가린 것을 다른 쪽이 고쳐버린다.</para>
+    /// </summary>
+    private static bool TryCopyVerbatim(string s, ref int i, StringBuilder sb)
+    {
+        var c = s[i];
+
+        // 줄주석 `-- `(MySQL 은 -- 뒤에 공백/줄끝이어야 주석) · `#`
+        var isDashComment = c == '-' && i + 1 < s.Length && s[i + 1] == '-'
+                            && (i + 2 >= s.Length || s[i + 2] is ' ' or '\t' or '\r' or '\n');
+        if (isDashComment || c == '#')
+        {
+            var nl = s.IndexOf('\n', i);
+            var end = nl < 0 ? s.Length - 1 : nl;
+            sb.Append(s, i, end - i + 1);
+            i = end;
+            return true;
+        }
+
+        // 블록주석 /* … */
+        if (c == '/' && i + 1 < s.Length && s[i + 1] == '*')
+        {
+            var close = s.IndexOf("*/", i + 2, StringComparison.Ordinal);
+            var end = close < 0 ? s.Length - 1 : close + 1;
+            sb.Append(s, i, end - i + 1);
+            i = end;
+            return true;
+        }
+
+        // 인용 구간
+        if (c is '\'' or '"' or '`')
+        {
+            var j = i + 1;
+            while (j < s.Length)
+            {
+                if (s[j] == '\\' && c != '`' && j + 1 < s.Length) { j += 2; continue; }
+                if (s[j] == c)
+                {
+                    // 같은 인용부호 2개 = 이스케이프된 리터럴 — 구간이 안 끝난다
+                    if (j + 1 < s.Length && s[j + 1] == c) { j += 2; continue; }
+                    break;
+                }
+                j++;
+            }
+            var end = j < s.Length ? j : s.Length - 1;
+            sb.Append(s, i, end - i + 1);
+            i = end;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void AddIfExecutable(List<string> list, string statement)
+    {
+        // 주석을 지우고도 글자가 남으면 실행문이다. (빈 문장을 보내면 MySQL 이 1065 로 거부한다)
+        if (!string.IsNullOrWhiteSpace(CommentRegex.Replace(statement, " ")))
+        {
+            list.Add(statement.Trim());
+        }
+    }
+
+    /// <summary>
+    /// <c>ALTER</c> 문에서만 <c>IF NOT EXISTS</c> / <c>IF EXISTS</c> 토큰을 벗긴다.
+    /// <c>CREATE</c>·<c>DROP TABLE</c> 등 다른 문장은 원문 그대로 돌려준다.
+    /// </summary>
+    internal static string StripAlterExistsTokens(string statement)
+    {
+        var bare = CommentRegex.Replace(statement, " ").TrimStart();
+        if (!bare.StartsWith("ALTER", StringComparison.OrdinalIgnoreCase))
+        {
+            return statement;
+        }
+
+        var sb = new StringBuilder(statement.Length);
+        for (var i = 0; i < statement.Length; i++)
+        {
+            // 주석·인용 안의 글자는 고치지 않는다 — COMMENT '…' 안의 설명을 바꾸면 그게 DB 에 들어간다.
+            if (TryCopyVerbatim(statement, ref i, sb)) { continue; }
+
+            var c = statement[i];
+            var wordStart = i == 0 || !(char.IsLetterOrDigit(statement[i - 1]) || statement[i - 1] == '_');
+            if ((c is 'I' or 'i') && wordStart)
+            {
+                var m = ExistsTokenRegex.Match(statement, i);
+                if (m.Success)
+                {
+                    i += m.Length - 1; // 토큰(+뒤 공백)을 버린다
+                    continue;
+                }
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     private static async Task ExecuteAsync(MySqlConnection db, string sql, CancellationToken ct)
