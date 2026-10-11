@@ -546,6 +546,23 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         var after = ListFirst(await NewErpController(erp).List(default), gate);
         Assert.Equal("failed", (string?)after["terminalReason"]);
         Assert.Null(after["sentAt"]);
+
+        // ④ 🔴 서버가 고객에게 **거짓말을 안 하나.** 멈춘 문의의 평가 입구를 두드리면
+        //   사유는 `failed` 여야 하고, 문구가 「본사가 확인 중」이라고 말하면 안 된다 —
+        //   그 문의는 **본사에 도착한 적이 없어** 확인할 사람이 없고, 재전송 입구도 0건이라
+        //   「기다리면 된다」로 읽히면 고객은 **영원히 기다린다.**
+        //   (글자를 세는 게 아니라 **고객에게 실제로 나가는 문장**을 재는 것이다 —
+        //    이 문장이 유일한 전달 수단이고, 틀리면 그 자체가 사고다)
+        var rate = await NewErpController(erp).Rate(
+            (string)after["csRequestId"]!,
+            new CsRequestController.RateCsRequest { Rating = 5 }, default);
+        Assert.True(StatusOf(rate) == 400, $"{gate} 멈춘 문의가 평가 가능으로 열려 있다. {Describe(rate)}");
+        Assert.Equal("failed", Field<string>(ValueOf(rate), "reason"));
+        var msg = Field<string>(ValueOf(rate), "message");
+        Assert.DoesNotContain("본사가 확인", msg);
+        Assert.DoesNotContain("지연", msg);           // 「지연」은 곧 될 것처럼 들린다 — 안 된다
+        Assert.Contains("전달되지 않았", msg);         // 사실
+        Assert.Contains("다시 보내", msg);             // 할 수 있는 일
     }
 
     /// <summary>목록 응답의 첫 행을 사전으로 꺼낸다 — 200 이 아니면 그 자리에서 말한다.</summary>
