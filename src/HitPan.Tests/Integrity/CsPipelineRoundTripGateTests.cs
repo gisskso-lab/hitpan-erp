@@ -489,6 +489,75 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-W3-7 — 🔴 **포기 갈래**: 재시도가 다 떨어지면 어떻게 되나
+    //
+    // 왜: 「최종 도는지」의 답은 성공 경로만으로 안 끝난다. 50회(백오프 상한 10분 ⇒ **약 8시간**)
+    //   실패하면 큐는 `terminal_reason='failed'` 로 **멈춘다.** 그 상태를 재는 게이트가 **0건**이었다.
+    //   세 가지가 동시에 참이어야 한다:
+    //     ① 🔴 행이 남는다(유실 0) — 지워지면 고객이 쓴 글이 사라진다
+    //     ② 🔴 다시 집히지 않는다 — 안 멈추면 본사를 영원히 두드린다
+    //     ③ 🔴 **목록이 그 사실을 내려준다** — 화면이 사실을 말할 재료가 있어야 한다.
+    //        (종전 문구는 「전송 지연 — 본사 확인 중」이었는데 **본사는 그 쪽지의 존재를 모른다.**
+    //         도착한 적이 없으니 확인할 사람이 없다 ⇒ 「본사에 전달되지 않음 — 다시 보내 주세요」로 고쳤다.
+    //         🔴 `terminal_reason` 을 비우는 코드가 레포 전체에 **0건**이라 그 행은 영구히 멈춘다 —
+    //         재전송 입구를 만들지 말지는 사장님 결재 몫이고, 그 전에 **거짓말은 멈춰야 한다**)
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-7 🔴 재시도 소진 뒤 — 행은 남고 · 다시 안 집히고 · 목록이 「안 갔다」를 내려준다")]
+    public async Task G_W3_7_포기_갈래가_거짓말을_안_한다()
+    {
+        const string gate = "G-W3-7 포기 갈래";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest { Category = "how_to", SubTag = "etc", Body = "포기 갈래 확인" }, default));
+
+        // 🔴 음성 대조군 — 소진 **전**에는 아직 멈추지 않았고, 목록도 「안 갔음」으로만 말한다.
+        var before = ListFirst(await NewErpController(erp).List(default), gate);
+        Assert.Null(before["terminalReason"]);
+
+        // 재시도를 **한 번 남긴 상태**로 만든다(50회를 실제로 돌리면 8시간이다 — 시계만 당긴다)
+        await erp.ExecuteAsync("UPDATE cs_outbox SET attempt_count = 49, next_attempt_at = UTC_TIMESTAMP(6)");
+
+        // 마지막 시도를 실패시킨다(틀린 시리얼 = 실물 3중 일치가 거부한다)
+        await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo) { License = "W3-GATE-WRONG-9999" },
+            OwnerEmail, NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        // ① 🔴 행이 남았나 — 유실 0
+        Assert.Equal(1, await erp.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM cs_outbox"));
+        Assert.Equal(1, await erp.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM cs_requests"));
+        Assert.Equal("failed", await erp.ExecuteScalarAsync<string>("SELECT terminal_reason FROM cs_outbox LIMIT 1"));
+        Assert.Null(await erp.ExecuteScalarAsync<DateTime?>("SELECT sent_at FROM cs_outbox LIMIT 1"));
+
+        // ② 🔴 다시 집히지 않나 — 시계를 당겨도(백오프를 지워도) 시도 수가 안 늘어야 한다
+        await erp.ExecuteAsync("UPDATE cs_outbox SET next_attempt_at = UTC_TIMESTAMP(6)");
+        await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        Assert.Equal(50, await erp.ExecuteScalarAsync<int>("SELECT attempt_count FROM cs_outbox LIMIT 1"));
+        Assert.Equal(0, await CountTicketsAsync());   // 멈춘 쪽지는 셋이 맞아도 안 올라간다
+
+        // ③ 🔴 목록이 그 사실을 내려주나 — 화면이 사실을 말할 재료
+        var after = ListFirst(await NewErpController(erp).List(default), gate);
+        Assert.Equal("failed", (string?)after["terminalReason"]);
+        Assert.Null(after["sentAt"]);
+    }
+
+    /// <summary>목록 응답의 첫 행을 사전으로 꺼낸다 — 200 이 아니면 그 자리에서 말한다.</summary>
+    private static IDictionary<string, object?> ListFirst(IActionResult res, string gate)
+    {
+        Assert.True(StatusOf(res) == 200, $"{gate} 목록이 200 이 아니다. {Describe(res)}");
+        var rows = Field<System.Collections.IEnumerable>(ValueOf(res), "data").Cast<object>().ToList();
+        Assert.True(rows.Count == 1, $"{gate} 목록이 {rows.Count}건이다(기대 1건).");
+        return (IDictionary<string, object?>)rows[0];
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 다리 — 가짜 응답을 만들지 않는다. 실물 수신 컨트롤러를 부른다.
     // ══════════════════════════════════════════════════════════════
 
