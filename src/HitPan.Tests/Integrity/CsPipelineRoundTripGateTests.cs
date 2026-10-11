@@ -480,7 +480,12 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
             return !DbGateEnvironment.SkipOrFailStrict(gate);
         }
 
-        if (!File.Exists(MysqlExe()))
+        // 🔴 파일 존재 검사는 **로컬에서만** 한다 — 2026-10-11 CI 실측으로 배운 것:
+        //   CI(리눅스 러너)는 `HITPAN_MYSQL=mysql`(PATH 상의 **명령 이름**)을 준다.
+        //   `File.Exists("mysql")` 는 당연히 false 라 게이트 5건이 **전부 미실행 실패**했다
+        //   — 게이트가 제품을 못 재고 **자기 환경 검사에 걸려 넘어진** 것이다.
+        //   `CsMessagePipelineGateTests` 가 쓰는 모양(검사를 `!IsCi` 안에 둔다)이 정본이다.
+        if (!DbGateEnvironment.IsCi && !File.Exists(MysqlExe()))
         {
             Console.Error.WriteLine($"[{gate}] mysql 클라이언트 없음: {MysqlExe()}");
             return !DbGateEnvironment.SkipOrFailStrict(gate);
