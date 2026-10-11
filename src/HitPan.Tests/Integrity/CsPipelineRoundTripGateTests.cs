@@ -300,6 +300,61 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-W3-5 — 🔴 `cs_requests.origin`(DB-144)이 **아직 없는 DB** 에서도 종전 화면이 산다
+    //
+    // 왜 이 게이트가 필요한가: ERP 마이그 적용기는 **실패해도 기동을 계속**한다
+    //   (`Program.cs:535~550` 가 직접 적어 뒀다 — 「새 컬럼을 쓰는 화면은 오류가 날 수 있으나」).
+    //   ⇒ 「코드는 갔는데 칸은 없는」 상태가 **실재한다**(9/29 디스크 부족으로 업데이트가 막힌 전례).
+    //   그 상태에서 새 칸을 조건 없이 읽으면 **되던 CS 쪽지 화면이 전부 500** 이다 —
+    //   신규 기능 실패가 아니라 **회귀**다. 작2 [4] V-2 가 백오피스에서 잡은 바로 그 모양이다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-5 🔴 origin 칸이 없는 DB 에서도 쪽지 목록·평가 판정이 200 이다 (+음성 대조)")]
+    public async Task G_W3_5_칸이_없어도_종전화면이_산다()
+    {
+        const string gate = "G-W3-5 칸 없는 DB";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+
+        // 🔴 음성 대조군 먼저 — 칸이 **있을 때** 200 이고 origin 이 'local' 로 나온다.
+        //   (이게 없으면 「원래 안 되던 것」을 봉합 덕분이라고 읽을 수 있다)
+        CsRequestController.ResetOriginColumnCache();
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest { Category = "use", SubTag = "etc", Body = "칸 있을 때" }, default));
+
+        var withCol = await NewErpController(erp).List(default);
+        Assert.True(StatusOf(withCol) == 200, $"{gate} 칸이 있는데 목록이 200 이 아니다. {Describe(withCol)}");
+        var first = Field<System.Collections.IEnumerable>(ValueOf(withCol), "data").Cast<object>().First();
+        Assert.Equal("local", (string)((IDictionary<string, object?>)first)["origin"]!);
+
+        // 🔴 칸을 **실제로 떼어** 마이그 미적용 상태를 만든다(글자로 흉내내지 않는다)
+        await erp.ExecuteAsync("ALTER TABLE cs_requests DROP INDEX idx_cs_req_origin");
+        await erp.ExecuteAsync("ALTER TABLE cs_requests DROP COLUMN origin");
+        CsRequestController.ResetOriginColumnCache();
+
+        // ① 목록이 **여전히 200** 이어야 한다 — 이것이 회귀 차단의 과녁이다
+        var noCol = await NewErpController(erp).List(default);
+        Assert.True(StatusOf(noCol) == 200,
+            $"{gate} origin 칸이 없을 때 쪽지 목록이 500 이다 — **되던 화면의 회귀**다. {Describe(noCol)}");
+
+        var rows = Field<System.Collections.IEnumerable>(ValueOf(noCol), "data").Cast<object>().ToList();
+        Assert.True(rows.Count == 1, $"{gate} 칸이 없을 때 목록이 {rows.Count}건이다(기대 1건).");
+        Assert.Equal("local", (string)((IDictionary<string, object?>)rows[0])["origin"]!);
+
+        // ② 답·평가 판정 경로도 산다(여기서도 origin 을 읽는다)
+        var id = (string)((IDictionary<string, object?>)rows[0])["csRequestId"]!;
+        var replies = await NewErpController(erp).Replies(id, default);
+        Assert.True(StatusOf(replies) == 200,
+            $"{gate} origin 칸이 없을 때 쪽지함이 500 이다. {Describe(replies)}");
+
+        // 뒷정리 — 다음 시험이 칸 있는 상태를 보게 되돌린다(이 DB 는 이 시험 전용이지만 규율로 남긴다)
+        await erp.ExecuteAsync("ALTER TABLE cs_requests ADD COLUMN origin varchar(10) NOT NULL DEFAULT 'local'");
+        CsRequestController.ResetOriginColumnCache();
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 다리 — 가짜 응답을 만들지 않는다. 실물 수신 컨트롤러를 부른다.
     // ══════════════════════════════════════════════════════════════
 

@@ -66,6 +66,45 @@ public class CsRequestController : ControllerBase
         _logger = logger;
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작3 — `cs_requests.origin`(DB-144)이 **아직 없는 DB** 에서도 종전 화면이 살아 있어야 한다
+    //
+    // 사고 모양(작2 [4] V-2 와 같다): 새 칸을 **조건 없이** SELECT 하면 마이그가 안 들어간 DB 에서
+    //   `Unknown column` → **500**. 그건 신규 기능 실패가 아니라 **되던 CS 쪽지 화면의 회귀**다.
+    //
+    // 🔴 그리고 이 위험은 가설이 아니다 — ERP 마이그 적용기는 **실패해도 기동을 계속**한다
+    //   (`Program.cs:535~550` 가 직접 적어 뒤었다: *「새 컬럼을 쓰는 화면은 오류가 날 수 있으나
+    //   나머지 업무는 계속 사용할 수 있습니다」*). 디스크 부족·락·권한으로 DB-144 가 한 번 실패하면
+    //   그 상태로 새 코드가 선다(9/29 C: 디스크 부족으로 업데이트가 막힌 전례).
+    //
+    // ⇒ 칸이 있는지 **DB 에 직접 물어보고** 조회문을 고른다. 없으면 모두 'local' 로 다룬다
+    //   (선발신 기능만 조용히 비어 보이고, 종전 기능은 그대로 돈다).
+    // 🔴 캐시는 **DB 이름별**이다 — 게이트가 시험 DB 를 여러 개 돌린다(작2 와 같은 규율).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _originColByDb = new();
+
+    private async Task<bool> HasOriginColumnAsync()
+    {
+        var key = _db.Database ?? "";
+        if (_originColByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await _db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'cs_requests' AND column_name = 'origin'");
+
+        var present = found == 1;
+        if (!present)
+            _logger.LogWarning("[CS쪽지] cs_requests.origin 칸 없음(DB-144 미적용) — 본사 안내 구분 없이 돈다");
+        _originColByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>
+    /// 시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.
+    /// <para>🔴 <c>public</c> 인 이유: 게이트 G-W3-5 가 **칸을 실제로 떼고** 다시 물어야 한다
+    /// (글자로 흉내내면 그 게이트는 아무것도 재지 않는다). 제품 경로에서는 부르지 않는다.</para>
+    /// </summary>
+    public static void ResetOriginColumnCache() => _originColByDb.Clear();
+
     // ─────────────────────────────────────────────────────────────
     // 쪽지 보내기 — 로컬 INSERT + 큐 적재 (한 트랜잭션 · 게이트 ③ 「접수됐습니다」는 INSERT 뒤에만)
     // ─────────────────────────────────────────────────────────────
@@ -162,7 +201,8 @@ public class CsRequestController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var rows = await _db.QueryAsync(@"
+        var hasOrigin = await HasOriginColumnAsync();
+        var rows = await _db.QueryAsync($@"
             SELECT r.cs_request_id   AS csRequestId,
                    r.category        AS category,
                    r.sub_tag         AS subTag,
@@ -171,7 +211,8 @@ public class CsRequestController : ControllerBase
                    r.created_at      AS createdAt,
                    -- 🔴 20261012작3 B-4 — 출처(DB-144). 'hq' = 본사가 먼저 보낸 안내다.
                    --   고객이 **자기가 쓰지 않은 쪽지**를 자기 문의와 구별해야 한다.
-                   r.origin          AS origin,
+                   --   칸이 아직 없는 DB 에서는 'local' 로 대체한다(위 HasOriginColumnAsync).
+                   {(hasOrigin ? "r.origin" : "'local'")} AS origin,
                    o.sent_at         AS sentAt,
                    o.terminal_reason AS terminalReason,
                    o.attempt_count   AS attemptCount,
@@ -286,9 +327,10 @@ public class CsRequestController : ControllerBase
     // 작15 E-1 — 열림 판정의 재료를 **한 번의 조회**로 모은다(#16 — 한 요청 = 한 연결 · Task.WhenAll 금지).
     //   🔴 TINYINT/불리언을 dynamic 으로 받으면 캐스팅 500 이 난다(선례) ⇒ 형을 적은 DTO 로 받는다.
     private async Task<RatingStateRow?> LoadRatingStateAsync(string tenantId, string csRequestId)
-        => await _db.QueryFirstOrDefaultAsync<RatingStateRow>(@"
+        => await _db.QueryFirstOrDefaultAsync<RatingStateRow>($@"
             SELECT r.created_by      AS CreatedBy,
-                   r.origin          AS Origin,
+                   -- 칸이 아직 없는 DB 에서는 'local' — 종전 평가 판정이 그대로 돈다(작3 봉합).
+                   {(await HasOriginColumnAsync() ? "r.origin" : "'local'")} AS Origin,
                    o.sent_at         AS SentAt,
                    o.terminal_reason AS TerminalReason,
                    (SELECT COUNT(*) FROM cs_replies p
