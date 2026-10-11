@@ -818,10 +818,46 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         var (vExit, vOut) = RunExe(iscc, "", Path.GetTempPath());
         string banner = vOut.Split('\n').FirstOrDefault(l => l.Contains("Inno Setup", StringComparison.Ordinal))?.Trim()
                         ?? vOut.Split('\n').FirstOrDefault()?.Trim() ?? "(배너 없음)";
-        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 배너='{banner}' (exit {vExit})");
-        if (expectVer.Length > 0 && !vOut.Contains(expectVer, StringComparison.Ordinal))
-            throw new XunitException(
-                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\nISCC={iscc}\n배너={banner}");
+
+        // 🔴 20261012 — 판 확인은 **파일 자신**에게 묻는다. 배너를 읽던 종전 방식은 **거짓 빨강**이었다.
+        //   실측(CI 로그): choco 는 「InnoSetup v6.7.1 already installed」로 판을 확인해 주는데,
+        //   `ISCC.exe` 를 인자 없이 돌리면 사용법만 뜨고(exit 1) 배너가
+        //   `Inno Setup 6 Command-Line Compiler` — **판 번호가 없다.**
+        //   ⇒ 러너의 판은 출하본과 **같은 6.7.1 인데** 이 단언이 못 읽어서 10/8 부터 `Build` 가 빨갰다.
+        //   🔴 단언을 **약하게 만든 게 아니다.** 「시험본과 출하본의 Inno 판이 같아야 한다」는
+        //   약속은 그대로 두고, 그 판을 읽는 방법만 신뢰할 수 있는 것으로 바꾼다.
+        //   🔴 그리고 **판을 못 읽으면 통과가 아니라 실패**다 — 조용한 초록을 새로 만들지 않는다.
+        string fileVer = "", prodVer = "";
+        try
+        {
+            var fvi = FileVersionInfo.GetVersionInfo(iscc);
+            fileVer = (fvi.FileVersion ?? "").Trim();
+            prodVer = (fvi.ProductVersion ?? "").Trim();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[G-T6-5] ISCC 판 읽기 실패: {ex.Message}");   // #15
+        }
+
+        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 파일판='{fileVer}' · 제품판='{prodVer}' · 배너='{banner}' (exit {vExit})");
+
+        if (expectVer.Length > 0)
+        {
+            // `6.7.1` 은 `6.7.1` 과 `6.7.1.0` 에만 맞는다 — 점을 요구해 `6.7.10` 을 걸러낸다.
+            static bool Same(string actual, string expect) =>
+                actual.Length > 0
+                && (actual.Equals(expect, StringComparison.Ordinal)
+                    || actual.StartsWith(expect + ".", StringComparison.Ordinal));
+
+            bool verOk = Same(fileVer, expectVer)
+                   || Same(prodVer, expectVer)
+                   || vOut.Contains(expectVer, StringComparison.Ordinal);   // 옛 Inno 는 배너에 판을 찍었다
+            if (!verOk)
+                throw new XunitException(
+                    $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\n"
+                  + $"ISCC={iscc}\n파일판={(fileVer.Length > 0 ? fileVer : "(못 읽음)")}\n"
+                  + $"제품판={(prodVer.Length > 0 ? prodVer : "(못 읽음)")}\n배너={banner}");
+        }
 
         var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
         var ok = RoundTrip("g5_ok", 200, SuccessBody);
