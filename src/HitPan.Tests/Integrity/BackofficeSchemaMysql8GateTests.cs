@@ -39,6 +39,8 @@ public sealed class BackofficeSchemaMysql8GateTests
         "tenant_update_history", "tenant_update_state",                             // 20
         "bo_cs_tickets", "bo_cs_ticket_logs", "bo_cs_replies", "bo_cs_reject_logs", // 40
         "bo_kb_docs", "bo_kb_doc_logs", "bo_ai_export_consents",                    // 41
+        // 🔴 20261011작2 — 45번 신설분. G-M8-1 이 전 파일을 적용하므로 여기 더하면 MySQL 8 에서 검산된다.
+        "bo_cs_outbound", "bo_cs_retention_policy",                                 // 45
     ];
 
     /// <summary>적용기가 <c>ALTER … ADD COLUMN</c> 으로 붙여야 하는 칸 (11·30·31·32·41·42·44번 소관).</summary>

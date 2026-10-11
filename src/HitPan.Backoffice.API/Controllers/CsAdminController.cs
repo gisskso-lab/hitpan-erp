@@ -154,7 +154,9 @@ public class CsAdminController : ControllerBase
                    k.category, k.shape_tag AS shapeTag, k.sub_tag AS subTag, k.body,
                    k.status, k.screen_code AS screenCode, k.erp_version AS erpVersion,
                    k.handler_type AS handlerType, k.handler_id AS handlerId, k.promised_at AS promisedAt,
-                   k.received_channel AS channel, k.received_at AS receivedAt, k.completed_at AS completedAt
+                   k.received_channel AS channel, k.received_at AS receivedAt, k.completed_at AS completedAt,
+                   -- 🔴 20261011작2 C-13 — 폐기 표식. 화면이 「폐기됨」을 보여주고 두 번 지우지 않게 한다.
+                   k.purged_at AS purgedAt, k.purge_reason AS purgeReason
               FROM bo_cs_tickets k JOIN tenants t ON t.tenant_id = k.tenant_id
              WHERE k.id = @Id", new { Id = id });
         if (ticket is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
@@ -412,6 +414,287 @@ public class CsAdminController : ControllerBase
         _logger.LogInformation("[CS어드민] 전화 접수 — ticket={Id}", id);
         return Ok(new { success = true, id });
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261011작2 — 사장님 오더 3건 (작업지시서 20261011작2 §1·§3)
+    //
+    //   ⓞ 전화접수 창에서 「고객사 코드」 대신 **고객사명**으로 찾게 한다 (A-1)
+    //   ③ 본사가 고객사에 **먼저 쪽지를 보낸다** — 프로모션·이벤트·과금 (C-2·C-3)
+    //      🔴 지금 ERP 수신부는 원본 티켓이 없는 답을 **조용히 버린다**
+    //         (CsOutboxSenderWorker.cs:316 — `FROM cs_requests r WHERE r.cs_request_id=@Uid` 0행 ⇒ INSERT 0건).
+    //         그래서 **보내는 척하지 않는다.** 큐에 쌓고 「전달 대기」로 정직하게 보인다.
+    //         ERP CS 파이프라인(다음 작업)이 열리면 쌓인 것이 그대로 나간다(#20).
+    //      ③ 보관기한 설정 + 임의 폐기 (C-6~C-13) — **자동 삭제 0**, 폐기는 사실을 남긴다.
+    //
+    //   권한: 이 컨트롤러는 [Authorize(Policy="PlatformAdmin")] 이라 새 입구도 같은 정책을 물려받는다
+    //         ⇒ 권한 시드(90번) 변경 0.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// A-1 — 고객사명으로 찾아 코드를 돌려준다. **두 칸만** 나간다(#22 본사 데이터 최소주의).
+    /// <para>🔴 기존 `GET admin/tenants?search=` 를 쓰지 않는 이유: 그 입구는
+    /// <c>[BoPermission("tenants.list")]</c> 라 CS 담당 계정이면 403 이 될 수 있고, 고객사 9칸을 다 돌려준다.
+    /// CS 화면에 필요한 것은 이름과 코드 둘뿐이다.</para>
+    /// </summary>
+    [HttpGet("tenant-lookup")]
+    public async Task<IActionResult> TenantLookup([FromQuery] string? q, CancellationToken ct)
+    {
+        var keyword = q?.Trim() ?? "";
+        if (keyword.Length < 1)
+        {
+            return Ok(new { success = true, items = Array.Empty<object>() });
+        }
+
+        await using var db = await OpenAsync(ct);
+        var rows = await db.QueryAsync<TenantLookupRow>(@"
+            SELECT tenant_code AS TenantCode, company_name AS CompanyName
+              FROM tenants
+             WHERE company_name LIKE @Q OR tenant_code LIKE @Q
+             ORDER BY company_name
+             LIMIT 20",
+            new { Q = $"%{keyword}%" });
+
+        return Ok(new { success = true, items = rows });
+    }
+
+    /// <summary>C-2 — 본사가 먼저 보내는 쪽지를 **전달 대기 큐**에 넣는다.</summary>
+    [HttpPost("outbound")]
+    public async Task<IActionResult> CreateOutbound([FromBody] OutboundRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var code = req?.TenantCode?.Trim() ?? "";
+        var purpose = string.IsNullOrWhiteSpace(req?.Purpose) ? "etc" : req!.Purpose!.Trim();
+        var title = req?.Title?.Trim();
+        var body = req?.Body?.Trim() ?? "";
+
+        if (string.IsNullOrEmpty(code))
+            return BadRequest(new { success = false, message = "어느 고객사에 보낼지 골라 주세요" });
+        if (!AllowedOutboundPurpose.Contains(purpose))
+            return BadRequest(new { success = false, message = "용도를 목록에서 골라 주세요(프로모션·이벤트·과금·기타)" });
+        if (body.Length is 0 or > 2000)
+            return BadRequest(new { success = false, message = "보낼 내용은 1~2000자입니다" });
+        if (title is { Length: > 100 })
+            return BadRequest(new { success = false, message = "제목은 100자까지입니다" });
+
+        // 🔴 금지필드 검사는 쪽지·전화접수와 **같은 한 벌**을 쓴다 — 내보내는 글에도 같은 문이 서야 한다.
+        if (BoForbiddenFieldScanner.Scan(body) is not null
+            || (title is not null && BoForbiddenFieldScanner.Scan(title) is not null))
+        {
+            return BadRequest(new { success = false, message = "적으신 내용에 식별정보 모양이 있습니다 — 그 줄을 지워 주세요" });
+        }
+
+        await using var db = await OpenAsync(ct);
+        var tenantId = await db.ExecuteScalarAsync<string?>(
+            "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE tenant_code = @Code", new { Code = code });
+        if (tenantId is null) return NotFound(new { success = false, message = "그 코드의 고객사가 없습니다" });
+
+        var outboundId = Guid.NewGuid().ToString();
+        await db.ExecuteAsync(@"
+            INSERT INTO bo_cs_outbound (outbound_id, tenant_id, purpose, title, body, created_by)
+            VALUES (@Id, @TenantId, @Purpose, @Title, @Body, @AdminId)",
+            new { Id = outboundId, TenantId = tenantId, Purpose = purpose, Title = title, Body = body, AdminId = adminId });
+
+        _logger.LogInformation("[CS어드민] 선발신 쪽지 큐 적재 — outbound={Id} purpose={P}", outboundId, purpose);
+
+        // 🔴 「보냈습니다」라고 말하지 않는다. 전달은 ERP 통로가 열린 뒤다.
+        return Ok(new
+        {
+            success = true,
+            outboundId,
+            delivered = false,
+            message = "전달 대기함에 넣었습니다 — ERP 수신 통로가 열리면 자동으로 나갑니다",
+        });
+    }
+
+    /// <summary>C-3 — 선발신 쪽지 목록 + 전달 상태.</summary>
+    [HttpGet("outbound")]
+    public async Task<IActionResult> ListOutbound([FromQuery] string? state, CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+        var where = state switch
+        {
+            "pending" => "AND o.delivered_at IS NULL AND o.canceled_at IS NULL",
+            "delivered" => "AND o.delivered_at IS NOT NULL",
+            "canceled" => "AND o.canceled_at IS NOT NULL",
+            _ => "",
+        };
+
+        var rows = await db.QueryAsync($@"
+            SELECT o.outbound_id   AS outboundId,
+                   t.company_name  AS companyName,
+                   t.tenant_code   AS tenantCode,
+                   o.purpose       AS purpose,
+                   o.title         AS title,
+                   o.body          AS body,
+                   o.created_at    AS createdAt,
+                   o.delivered_at  AS deliveredAt,
+                   o.canceled_at   AS canceledAt
+              FROM bo_cs_outbound o
+              LEFT JOIN tenants t ON CAST(t.tenant_id AS CHAR) = o.tenant_id
+             WHERE 1 = 1 {where}
+             ORDER BY o.created_at DESC
+             LIMIT 200");
+
+        return Ok(new { success = true, items = rows });
+    }
+
+    /// <summary>C-3 — 아직 안 나간 선발신 쪽지를 취소한다(임의 삭제의 발신측).</summary>
+    [HttpPost("outbound/{outboundId}/cancel")]
+    public async Task<IActionResult> CancelOutbound(string outboundId, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        await using var db = await OpenAsync(ct);
+        // 이미 나간 것은 취소할 수 없다 — 상대가 이미 받았다.
+        var rows = await db.ExecuteAsync(@"
+            UPDATE bo_cs_outbound
+               SET canceled_at = UTC_TIMESTAMP(6), canceled_by = @AdminId
+             WHERE outbound_id = @Id AND delivered_at IS NULL AND canceled_at IS NULL",
+            new { Id = outboundId, AdminId = adminId });
+
+        if (rows == 0)
+            return BadRequest(new { success = false, message = "이미 전달됐거나 취소된 쪽지입니다" });
+
+        _logger.LogInformation("[CS어드민] 선발신 취소 — outbound={Id}", outboundId);
+        return Ok(new { success = true });
+    }
+
+    /// <summary>C-7 — 보관기한 조회. <c>retainDays = null</c> 이면 무기한(기본값).</summary>
+    [HttpGet("retention")]
+    public async Task<IActionResult> GetRetention(CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+        var row = await db.QueryFirstOrDefaultAsync(@"
+            SELECT retain_days AS retainDays, updated_by AS updatedBy, updated_at AS updatedAt
+              FROM bo_cs_retention_policy WHERE policy_id = 1");
+        return Ok(new { success = true, policy = row });
+    }
+
+    /// <summary>
+    /// C-7 — 보관기한 설정. 🔴 <b>이 값이 아무것도 지우지 않는다.</b>
+    /// 기한이 지난 쪽지는 <c>purge-candidates</c> 에서 **후보로만** 보이고, 지우는 것은 사람이 확정한다.
+    /// </summary>
+    [HttpPost("retention")]
+    public async Task<IActionResult> SetRetention([FromBody] RetentionRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var days = req?.RetainDays;
+        if (days is <= 0 or > 3650)
+            return BadRequest(new { success = false, message = "보관기한은 1~3650일 사이로 적어 주세요(비우면 무기한)" });
+
+        await using var db = await OpenAsync(ct);
+        await db.ExecuteAsync(@"
+            INSERT INTO bo_cs_retention_policy (policy_id, retain_days, updated_by, updated_at)
+            VALUES (1, @Days, @AdminId, UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE retain_days = @Days, updated_by = @AdminId, updated_at = UTC_TIMESTAMP(6)",
+            new { Days = days, AdminId = adminId });
+
+        _logger.LogInformation("[CS어드민] 보관기한 설정 — {Days}", days is null ? "무기한" : $"{days}일");
+        return Ok(new { success = true, retainDays = days, autoDelete = false });
+    }
+
+    /// <summary>
+    /// C-8 — 폐기 후보. 보관기한이 지난 **아직 안 지운** 쪽지만 센다.
+    /// <para>🔴 이 입구는 **읽기만** 한다. 자동 삭제는 어디에도 없다(C-9).</para>
+    /// </summary>
+    [HttpGet("purge-candidates")]
+    public async Task<IActionResult> PurgeCandidates(CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+        var days = await db.ExecuteScalarAsync<int?>(
+            "SELECT retain_days FROM bo_cs_retention_policy WHERE policy_id = 1");
+        if (days is null)
+        {
+            // 무기한 = 후보 없음. 설정하지 않은 상태에서 목록이 뜨면 사람이 오해한다.
+            return Ok(new { success = true, retainDays = (int?)null, items = Array.Empty<object>(), autoDelete = false });
+        }
+
+        var rows = await db.QueryAsync(@"
+            SELECT id, tenant_id AS tenantId, category, status, created_at AS createdAt
+              FROM bo_cs_tickets
+             WHERE purged_at IS NULL
+               AND created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Days DAY)
+             ORDER BY created_at
+             LIMIT 200",
+            new { Days = days });
+
+        return Ok(new { success = true, retainDays = days, items = rows, autoDelete = false });
+    }
+
+    /// <summary>
+    /// C-11·C-12 — 쪽지 폐기. **몸통은 지우고, 지웠다는 사실은 남긴다.**
+    /// <para>🔴 행을 통째로 지우지 않는 이유: <c>bo_cs_ticket_logs</c>·<c>bo_cs_replies</c> 가 그 티켓을 가리키고,
+    /// 「언제 누가 무엇을 지웠나」가 사라지면 고객 분쟁에서 우리 쪽 증거가 없다.</para>
+    /// </summary>
+    [HttpPost("{id:long}/purge")]
+    public async Task<IActionResult> PurgeTicket(long id, [FromBody] PurgeRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var reason = req?.Reason?.Trim() ?? "";
+        if (reason.Length is 0 or > 200)
+            return BadRequest(new { success = false, message = "폐기 사유를 적어 주세요(1~200자)" });
+
+        await using var db = await OpenAsync(ct);
+
+        // 이미 폐기된 것은 두 번 지우지 않는다(멱등 · 사유가 덮이면 첫 기록이 사라진다).
+        var rows = await db.ExecuteAsync(@"
+            UPDATE bo_cs_tickets
+               SET body = NULL,
+                   purged_at = UTC_TIMESTAMP(6),
+                   purged_by = @AdminId,
+                   purge_reason = @Reason
+             WHERE id = @Id AND purged_at IS NULL",
+            new { Id = id, AdminId = adminId, Reason = reason });
+
+        if (rows == 0)
+            return BadRequest(new { success = false, message = "없는 쪽지이거나 이미 폐기된 쪽지입니다" });
+
+        // 🔴 지웠다는 사실은 안 지운다 — 감사기록 1줄(INSERT ONLY).
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? "unknown";
+        var role = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "platform_admin";
+        await db.ExecuteAsync(@"
+            INSERT INTO bo_audit_log (actor_user_id, actor_email, actor_role, action, target_type, target_id, detail_json)
+            VALUES (@AdminId, @Email, @Role, 'cs.purge', 'bo_cs_tickets', @Target, @Detail)",
+            new
+            {
+                AdminId = adminId, Email = email, Role = role,
+                Target = id.ToString(),
+                Detail = $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(reason)}}}",
+            });
+
+        _logger.LogInformation("[CS어드민] 쪽지 폐기 — ticket={Id} by={By}", id, adminId);
+        return Ok(new { success = true });
+    }
+
+    /// <summary>선발신 용도 — 사장님 오더의 세 가지 + 기타. 목록 밖은 거부(자유입력 금지).</summary>
+    private static readonly HashSet<string> AllowedOutboundPurpose = new(StringComparer.Ordinal)
+    {
+        "promo", "event", "billing", "etc",
+    };
+
+    public class TenantLookupRow
+    {
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+    }
+
+    public class OutboundRequest
+    {
+        public string? TenantCode { get; set; }
+        public string? Purpose { get; set; }
+        public string? Title { get; set; }
+        public string? Body { get; set; }
+    }
+
+    public class RetentionRequest { public int? RetainDays { get; set; } }
+    public class PurgeRequest { public string? Reason { get; set; } }
 
     private sealed class TicketKey { public string TenantId { get; set; } = ""; public string Uid { get; set; } = ""; }
     public class ReplyRequest { public string? Body { get; set; } }

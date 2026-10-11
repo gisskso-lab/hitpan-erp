@@ -738,6 +738,18 @@ jobs:
           #      `build` 잡의 전체 시험에서 돈다 — 여기 넣지 않았다(안 넣었다는 사실을 남긴다).
           GATES="$GATES|BackofficePromotionPricingDbGate"
 
+          # 🔴 20261011작2 절 A·C — 고객사명 자동조회 · 본사 선발신 쪽지 · 보관기한 · 임의 폐기
+          #    (G-W2-1·2·3·6·7 · BackofficeCsOutboundGateTests)
+          #    실물 CsAdminController 를 호출해 **그가 자기 SQL 을 DB 에 보내게** 한다 — 신설 45번 SQL 이
+          #    그 흐름에 실제로 끼는지도 여기서 드러난다(표 2개 + bo_cs_tickets 3칸).
+          #    🔴 이 게이트가 지키는 약속 셋(사장님 오더에서 바로 나온다):
+          #      ① 본사가 쓴 쪽지는 사라지지 않는다(큐에 남는다)
+          #      ② 화면이 「보냄」이라고 거짓말하지 않는다(delivered_at NULL ⇒ 대기로 보고 · 응답 delivered=false)
+          #      ③ 보관기한이 지나도 저절로 지워지지 않는다(G-W2-7 이 「행·본문·purged_at」 셋을 직접 센다)
+          #    🔴 로컬 실측 불가(이 PC 는 hitpan 계정이 CREATE DATABASE 거부 · 쓸 수 있는 시험 DB 없음)
+          #      ⇒ **이 잡의 첫 실행이 계측 경로다.** 로컬 초록을 증거로 올리지 않았다.
+          GATES="$GATES|BackofficeCsOutboundGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).
