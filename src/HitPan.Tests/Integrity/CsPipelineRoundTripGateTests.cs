@@ -43,9 +43,36 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
     private const string OwnerEmail = "w3owner@gate.test";
     private const string ChildUserId = "22222222-2222-2222-2222-222222222222";
 
-    private readonly string _erpDb = $"hitpan_gate_w3_erp_{Guid.NewGuid():N}"[..40];
-    private readonly string _boDb = $"hitpan_gate_w3_bo_{Guid.NewGuid():N}"[..40];
+    // 🔴 2026-10-12 실측으로 배운 것 — 이 게이트는 **로컬에서도 돈다.**
+    //   앞서 「로컬 실행 불가」로 적었던 근거는 `CREATE DATABASE` 권한이었는데,
+    //   실제로 재 보니 개발 계정은 **`test_` 접두 이름**이면 만들 수 있었다(MariaDB 기본 허용).
+    //   「불가」라고 적으면 다음 사람이 FAIL 대조를 아예 포기한다 ⇒ 이름을 지정할 수 있게 둔다.
+    //   로컬 실행 =  HITPAN_W3_ERP_DB=test_w3_erp  HITPAN_W3_BO_DB=test_w3_bo  HITPAN_REQUIRE_DB=true
+    private readonly string _erpDb = GateDbName("HITPAN_W3_ERP_DB", "erp");
+    private readonly string _boDb = GateDbName("HITPAN_W3_BO_DB", "bo");
     private bool _erpCreated, _boCreated;
+
+    /// <summary>
+    /// 지정 이름을 받되 🔴 <b>DROP DATABASE 를 하는 게이트</b>이므로 실수로 실물 DB 를 지우지 못하게 막는다.
+    /// `test`·`gate` 가 이름에 없으면 지정을 **거부**하고 무작위 이름으로 돌아간다.
+    /// </summary>
+    private static string GateDbName(string envKey, string role)
+    {
+        var fallback = $"hitpan_gate_w3_{role}_{Guid.NewGuid():N}"[..40];
+        var given = Environment.GetEnvironmentVariable(envKey);
+        if (string.IsNullOrWhiteSpace(given)) return fallback;
+
+        var ok = given.Contains("test", StringComparison.OrdinalIgnoreCase)
+              || given.Contains("gate", StringComparison.OrdinalIgnoreCase);
+        if (!ok)
+        {
+            Console.Error.WriteLine(
+                $"[G-W3] {envKey}='{given}' 는 거부했다 — 이 게이트는 DB 를 DROP 한다. "
+              + "이름에 test 나 gate 가 있어야 한다. 무작위 이름으로 돈다.");
+            return fallback;
+        }
+        return given.Trim();
+    }
 
     // ══════════════════════════════════════════════════════════════
     // G-W3-1 — 올라가는 왕복: ERP 쪽지 → 큐 → 워커 → **실물 수신부** → bo_cs_tickets
@@ -70,7 +97,7 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         var write = await NewErpController(erp).Create(
             new CsRequestController.CreateCsRequest
             {
-                Category = "use", SubTag = "etc", Body = "저장 단추가 안 보입니다",
+                Category = "how_to", SubTag = "etc", Body = "저장 단추가 안 보입니다",
             }, default);
         Assert.IsType<OkObjectResult>(write);
 
@@ -88,13 +115,19 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         await using var bodb = await OpenBoAsync();
         var t = await bodb.QueryFirstOrDefaultAsync(@"
             SELECT tenant_id AS TenantId, received_channel AS Channel, category AS Category,
-                   body AS Body, status AS Status
+                   shape_tag AS Shape, body AS Body, status AS Status
               FROM bo_cs_tickets LIMIT 1");
         Assert.NotNull(t);
         Assert.Equal(TenantId, (string)t!.TenantId);
         Assert.Equal("erp_message", (string)t.Channel);
-        Assert.Equal("use", (string)t.Category);
         Assert.Equal("저장 단추가 안 보입니다", (string)t.Body);
+
+        // 🔴 낱말 축이 둘이다 — ERP 화면은 **7모양**(고객 언어)을 보내고
+        //    백오피스는 **8종 정본**(결-9)으로 받아 적는다. 그 변환을 여기서 뭔다.
+        //    (CI 1차 실측이 잡은 자리 — 게이트가 8종 값을 ERP 에 먹여 400 이 났다.
+        //     두 축 중 한쪽만 적어 두면 다음 사람이 같은 걸 또 틀린다)
+        Assert.Equal("how_to", (string)t.Shape);   // 보낸 모양 그대로 보조축에
+        Assert.Equal("use", (string)t.Category);   // 정본 분류는 변환된 값
 
         // ④ ERP 쪽 큐가 **보냈다고 기록**했나(안 하면 다음 사이클에 또 보낸다)
         Assert.NotNull(await erp.ExecuteScalarAsync<DateTime?>("SELECT sent_at FROM cs_outbox LIMIT 1"));
@@ -282,29 +315,53 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         var bo = NewBoController();
 
         Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
-            new CsRequestController.CreateCsRequest { Category = "use", SubTag = "etc", Body = "인증 대조용" }, default));
+            new CsRequestController.CreateCsRequest { Category = "how_to", SubTag = "etc", Body = "인증 대조용" }, default));
+
+        // 🔴🔴 2026-10-12 로컬 실측이 드러낸 자리 — **이 음성 대조군은 여태 아무것도 재지 않았다.**
+        //   한 번 실패하면 큐가 `next_attempt_at` 을 미래로 민다(백오프 30·60초…상한 10분).
+        //   그래서 ② 번째 음성 축을 바로 호출하면 **집히는 행이 0 개**였고, 창구가 0 건인 이유는
+        //   「부모계정 축이 거부했다」가 아니라 「애초에 안 보냈다」였다. 통과하는 가짜 대조군이다.
+        //   ⇒ 축을 하나 잴 때마다 ⓐ 정말 시도했나(attempt_count 가 올랐나) 를 함께 묻고,
+        //      ⓑ 다음 축 전에 **백오프 시계만** 앞당긴다(인증 우회가 아니다).
+        async Task<int> AttemptsAsync() =>
+            await erp.ExecuteScalarAsync<int>("SELECT attempt_count FROM cs_outbox LIMIT 1");
+        async Task<bool> DeferredAsync() =>
+            await erp.ExecuteScalarAsync<bool>("SELECT next_attempt_at > UTC_TIMESTAMP(6) FROM cs_outbox LIMIT 1");
+        async Task AdvanceBackoffClockAsync() =>
+            await erp.ExecuteAsync("UPDATE cs_outbox SET next_attempt_at = UTC_TIMESTAMP(6) WHERE sent_at IS NULL");
 
         // ① 시리얼 축 — 틀린 라이선스로 보낸다
         await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo) { License = "W3-GATE-WRONG-9999" },
             OwnerEmail, NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
         Assert.Equal(0, await CountTicketsAsync());
+        Assert.Equal(1, await AttemptsAsync());   // 🔴 정말 두드렸나 — 아니면 위 0 건은 거부가 아니다
         // 🔴 쪽지는 큐에 **남아 있다** — 인증 실패가 유실이 되면 안 된다
         Assert.Null(await erp.ExecuteScalarAsync<DateTime?>("SELECT sent_at FROM cs_outbox LIMIT 1"));
+        // 🔴 그리고 즉시 재시도하지 않는다 — 이게 없으면 401 루프가 창구를 때린다
+        Assert.True(await DeferredAsync(), $"{gate} 실패인데 다음 시도가 안 밀렸다 — 401 루프가 된다.");
+        Assert.Null(await erp.ExecuteScalarAsync<string>("SELECT terminal_reason FROM cs_outbox LIMIT 1"));
 
         // ② 부모계정 축 — 등록된 대표와 다른 계정으로 보낸다
+        await AdvanceBackoffClockAsync();
         await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo), "stranger@gate.test",
             NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
         Assert.Equal(0, await CountTicketsAsync());
+        Assert.Equal(2, await AttemptsAsync());   // 🔴 이 축이 실제로 돌았다는 유일한 증거
         Assert.Null(await erp.ExecuteScalarAsync<DateTime?>("SELECT sent_at FROM cs_outbox LIMIT 1"));
 
         // ③ 양성 — 셋이 맞으면 올라간다(음성이 「원래 안 되는 것」이 아님을 보인다)
+        await AdvanceBackoffClockAsync();
         await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo), OwnerEmail,
             NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
         Assert.Equal(1, await CountTicketsAsync());
 
         // ④ 거부가 기록됐나 — 「누가 왜 거부됐나」가 없으면 운영에서 원인을 못 찾는다
+        //   🔴 건수만 세지 않는다. 축 둘이 **각각** 기록돼야 2건이다(한 축이 두 번 적혀도 2건이라서).
         await using var bodb = await OpenBoAsync();
-        Assert.True(await bodb.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM bo_cs_reject_logs") >= 2);
+        Assert.Equal(2, await bodb.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM bo_cs_reject_logs WHERE rule_code = 'auth_mismatch'"));
+        Assert.Equal(TenantCode, await bodb.ExecuteScalarAsync<string>(
+            "SELECT tenant_code FROM bo_cs_reject_logs ORDER BY id LIMIT 1"));
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -364,7 +421,7 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
 
         // ③ 🔴 음성 축 — **고객이 쓴 문의는 본사가 못 지운다.** 같은 회수 경로에 남의 열쇠를 먹여도 안 비워진다.
         Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
-            new CsRequestController.CreateCsRequest { Category = "use", SubTag = "etc", Body = "내가 쓴 문의" }, default));
+            new CsRequestController.CreateCsRequest { Category = "how_to", SubTag = "etc", Body = "내가 쓴 문의" }, default));
         var mine = await erp.ExecuteScalarAsync<string?>(
             "SELECT cs_request_id FROM cs_requests WHERE origin = 'local' LIMIT 1");
         Assert.False(string.IsNullOrEmpty(mine), $"{gate} 음성 대조용 고객 문의가 안 만들어졌다.");
@@ -399,7 +456,7 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         //   (이게 없으면 「원래 안 되던 것」을 봉합 덕분이라고 읽을 수 있다)
         CsRequestController.ResetOriginColumnCache();
         Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
-            new CsRequestController.CreateCsRequest { Category = "use", SubTag = "etc", Body = "칸 있을 때" }, default));
+            new CsRequestController.CreateCsRequest { Category = "how_to", SubTag = "etc", Body = "칸 있을 때" }, default));
 
         var withCol = await NewErpController(erp).List(default);
         Assert.True(StatusOf(withCol) == 200, $"{gate} 칸이 있는데 목록이 200 이 아니다. {Describe(withCol)}");
@@ -580,6 +637,10 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         var psi = new System.Diagnostics.ProcessStartInfo(MysqlExe())
         {
             RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false,
+            // 🔴 2026-10-12 로컬 실측이 잡은 자리 — 이걸 안 적으면 stdin 이 **콘솔 인코딩**(이 PC 는 CP949)으로
+            //   나가서 출하 DDL 의 한글이 `?` 로 깨진다. `status` 기본값 '접수' 가 깨져 **1067** 로 import 가 죽었다.
+            //   리눅스 러너(UTF-8)에서는 안 나므로 CI 만 보면 영원히 안 보이는 함정이다.
+            StandardInputEncoding = new System.Text.UTF8Encoding(false),
         };
         psi.ArgumentList.Add($"--host={Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "localhost"}");
         psi.ArgumentList.Add($"--port={Environment.GetEnvironmentVariable("HITPAN_DB_PORT") ?? "3306"}");
