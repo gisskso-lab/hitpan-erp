@@ -66,6 +66,45 @@ public class CsRequestController : ControllerBase
         _logger = logger;
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작3 — `cs_requests.origin`(DB-144)이 **아직 없는 DB** 에서도 종전 화면이 살아 있어야 한다
+    //
+    // 사고 모양(작2 [4] V-2 와 같다): 새 칸을 **조건 없이** SELECT 하면 마이그가 안 들어간 DB 에서
+    //   `Unknown column` → **500**. 그건 신규 기능 실패가 아니라 **되던 CS 쪽지 화면의 회귀**다.
+    //
+    // 🔴 그리고 이 위험은 가설이 아니다 — ERP 마이그 적용기는 **실패해도 기동을 계속**한다
+    //   (`Program.cs:535~550` 가 직접 적어 뒤었다: *「새 컬럼을 쓰는 화면은 오류가 날 수 있으나
+    //   나머지 업무는 계속 사용할 수 있습니다」*). 디스크 부족·락·권한으로 DB-144 가 한 번 실패하면
+    //   그 상태로 새 코드가 선다(9/29 C: 디스크 부족으로 업데이트가 막힌 전례).
+    //
+    // ⇒ 칸이 있는지 **DB 에 직접 물어보고** 조회문을 고른다. 없으면 모두 'local' 로 다룬다
+    //   (선발신 기능만 조용히 비어 보이고, 종전 기능은 그대로 돈다).
+    // 🔴 캐시는 **DB 이름별**이다 — 게이트가 시험 DB 를 여러 개 돌린다(작2 와 같은 규율).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _originColByDb = new();
+
+    private async Task<bool> HasOriginColumnAsync()
+    {
+        var key = _db.Database ?? "";
+        if (_originColByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await _db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'cs_requests' AND column_name = 'origin'");
+
+        var present = found == 1;
+        if (!present)
+            _logger.LogWarning("[CS쪽지] cs_requests.origin 칸 없음(DB-144 미적용) — 본사 안내 구분 없이 돈다");
+        _originColByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>
+    /// 시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.
+    /// <para>🔴 <c>public</c> 인 이유: 게이트 G-W3-5 가 **칸을 실제로 떼고** 다시 물어야 한다
+    /// (글자로 흉내내면 그 게이트는 아무것도 재지 않는다). 제품 경로에서는 부르지 않는다.</para>
+    /// </summary>
+    public static void ResetOriginColumnCache() => _originColByDb.Clear();
+
     // ─────────────────────────────────────────────────────────────
     // 쪽지 보내기 — 로컬 INSERT + 큐 적재 (한 트랜잭션 · 게이트 ③ 「접수됐습니다」는 INSERT 뒤에만)
     // ─────────────────────────────────────────────────────────────
@@ -119,9 +158,14 @@ public class CsRequestController : ControllerBase
         try
         {
             await _db.ExecuteAsync(@"
+                -- 🔴 [4] V-3 봉합(작3 4차수) — `created_at` 을 **명시**한다(UTC).
+                --   DDL 의 `DEFAULT current_timestamp(6)`(DB-139:33)은 **세션 시간대**(이 서버는 KST)이고,
+                --   본사가 보낸 안내는 본사가 찍은 **UTC** 로 들어온다(`CsAdminController:525` → 워커가 그대로 삽입).
+                --   한 목록(`ORDER BY created_at DESC`)에 기준이 둘이면 **갓 온 본사 안내가 9시간 과거로 묻힌다**
+                --   — 고객은 새 안내를 못 본다. 검증팀 실측 **540분**. 작2 V-6 과 같은 모양이다.
                 INSERT INTO cs_requests
-                    (cs_request_id, tenant_id, created_by, category, sub_tag, body, screen_code, erp_version, status)
-                VALUES (@Id, @TenantId, @UserId, @Category, @SubTag, @Body, @ScreenCode, @ErpVersion, '접수')",
+                    (cs_request_id, tenant_id, created_by, category, sub_tag, body, screen_code, erp_version, status, created_at)
+                VALUES (@Id, @TenantId, @UserId, @Category, @SubTag, @Body, @ScreenCode, @ErpVersion, '접수', UTC_TIMESTAMP(6))",
                 new
                 {
                     Id = requestId,
@@ -162,13 +206,18 @@ public class CsRequestController : ControllerBase
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        var rows = await _db.QueryAsync(@"
+        var hasOrigin = await HasOriginColumnAsync();
+        var rows = await _db.QueryAsync($@"
             SELECT r.cs_request_id   AS csRequestId,
                    r.category        AS category,
                    r.sub_tag         AS subTag,
                    r.body            AS body,
                    r.status          AS status,
                    r.created_at      AS createdAt,
+                   -- 🔴 20261012작3 B-4 — 출처(DB-144). 'hq' = 본사가 먼저 보낸 안내다.
+                   --   고객이 **자기가 쓰지 않은 쪽지**를 자기 문의와 구별해야 한다.
+                   --   칸이 아직 없는 DB 에서는 'local' 로 대체한다(위 HasOriginColumnAsync).
+                   {(hasOrigin ? "r.origin" : "'local'")} AS origin,
                    o.sent_at         AS sentAt,
                    o.terminal_reason AS terminalReason,
                    o.attempt_count   AS attemptCount,
@@ -207,7 +256,15 @@ public class CsRequestController : ControllerBase
         //   판정은 서버가 한다 — 화면이 제 마음대로 열지 못한다(사장님 결재 Q-1).
         var rating = RatingBlock(await LoadRatingStateAsync(tenantId, id), userId);
 
-        return Ok(new { success = true, data = rows, rating });
+        // 🔴 [4] V-4 봉합(4차수) — 화면이 **무엇을 보고 있는지** 알아야 한다.
+        //   본사가 먼저 보낸 안내는 「내가 보낸 문의에 대한 답」이 아니다. 그 사실을 안 주면
+        //   화면이 「보낸 문의에 대한 담당 상담원의 답입니다」라고 **사실과 다른 말**을 한다(#23).
+        var origin = await _db.ExecuteScalarAsync<string?>(
+            $@"SELECT {(await HasOriginColumnAsync() ? "origin" : "'local'")}
+                 FROM cs_requests WHERE tenant_id = @TenantId AND cs_request_id = @Id",
+            new { TenantId = tenantId, Id = id }) ?? "local";
+
+        return Ok(new { success = true, data = rows, rating, origin });
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -283,8 +340,10 @@ public class CsRequestController : ControllerBase
     // 작15 E-1 — 열림 판정의 재료를 **한 번의 조회**로 모은다(#16 — 한 요청 = 한 연결 · Task.WhenAll 금지).
     //   🔴 TINYINT/불리언을 dynamic 으로 받으면 캐스팅 500 이 난다(선례) ⇒ 형을 적은 DTO 로 받는다.
     private async Task<RatingStateRow?> LoadRatingStateAsync(string tenantId, string csRequestId)
-        => await _db.QueryFirstOrDefaultAsync<RatingStateRow>(@"
+        => await _db.QueryFirstOrDefaultAsync<RatingStateRow>($@"
             SELECT r.created_by      AS CreatedBy,
+                   -- 칸이 아직 없는 DB 에서는 'local' — 종전 평가 판정이 그대로 돈다(작3 봉합).
+                   {(await HasOriginColumnAsync() ? "r.origin" : "'local'")} AS Origin,
                    o.sent_at         AS SentAt,
                    o.terminal_reason AS TerminalReason,
                    (SELECT COUNT(*) FROM cs_replies p
@@ -303,12 +362,18 @@ public class CsRequestController : ControllerBase
     private const string ReasonAlreadyRated = "already_rated";
     // 작15 S-1 봉합 — 「내 테넌트의 쪽지」와 「내가 쓴 쪽지」는 다르다. 목록은 회사 전체를 보여준다.
     private const string ReasonNotMine = "not_mine";
+    // 🔴 작3 B-5 — 본사가 먼저 보낸 안내는 **질문이 아니다** ⇒ 평가 대상이 아니다.
+    //   이 갈래가 없으면 `not_mine` 으로 떨어져 「문의를 쓴 분만 평가할 수 있습니다」가 뜬다 —
+    //   고객이 쓴 문의가 아예 아닌데 그 문장은 사실과 다르다(#23 고객 노출 문구는 사실만).
+    private const string ReasonHqNotice = "hq_notice";
 
     // §4 표 그대로 — 이 함수 하나가 「조용히 사라지는 평가」를 막는 전부다.
     //   순서가 뜻이다: 이미 평가한 건이 가장 먼저(Q-2 첫 평가만) → 종결 → 미전송 → 답 0건 → 열림.
     private static string RatingReason(RatingStateRow? s, string? userId)
     {
         if (s is null) return "not_sent";                       // 내 테넌트에 그 쪽지가 없다
+        // 🔴 작3 B-5 — 가장 먼저 가른다. 본사 안내는 평가·재전송 축에 아예 들어오지 않는다.
+        if (string.Equals(s.Origin, "hq", StringComparison.Ordinal)) return ReasonHqNotice;
         // 🔴 S-1 — 이 검사가 가장 먼저다. 남이 먼저 누르면 UNIQUE 때문에 쓴 사람이 영구히 못 하고,
         //    rated_by 칸이 없어 누가 눌렀는지도 모르며, 행 삭제 금지라 되돌릴 수단이 0 이다.
         if (string.IsNullOrEmpty(userId) || !string.Equals(s.CreatedBy, userId, StringComparison.Ordinal))
@@ -326,9 +391,15 @@ public class CsRequestController : ControllerBase
     {
         "not_sent" => "아직 본사에 전달되지 않았습니다. 전달된 뒤에 평가할 수 있습니다.",
         "rejected" => "보낼 수 없는 문의입니다 — 내용을 확인해 주세요.",
-        "failed" => "전달이 지연되고 있습니다. 본사가 확인 중입니다.",
+        // 🔴 20261012작3 — 종전 「전달이 지연되고 있습니다. **본사가 확인 중입니다.**」는 **거짓**이었다.
+        //   `failed` 는 재시도 50회가 다 실패해 **멈춘** 상태다(백오프 상한 10분 ⇒ 약 8시간 뒤).
+        //   그 문의는 **본사에 도착한 적이 없어** 본사는 존재 자체를 모른다 — 확인할 사람이 없다.
+        //   게다가 `terminal_reason` 을 비우는 코드가 레포 전체에 **0건**이라 **영구히 멈춘다**
+        //   ⇒ 「기다리면 된다」고 말하면 고객은 영원히 기다린다. **할 수 있는 일**을 말한다.
+        "failed" => "문의가 본사에 전달되지 않았습니다. 다시 보내 주세요.",
         "no_reply" => "답이 오면 평가할 수 있습니다.",
         "not_mine" => "문의를 쓴 분만 평가할 수 있습니다.",
+        "hq_notice" => "본사에서 보낸 안내입니다. 평가 대상이 아닙니다.",
         _ => "지금은 평가할 수 없습니다.",
     };
 
@@ -423,6 +494,8 @@ public class CsRequestController : ControllerBase
     {
         // 작15 S-1 봉합(사장님 결재 2026-10-08) — 쓴 사람만 평가한다. 판정 재료가 없으면 판정을 못 한다.
         public string? CreatedBy { get; set; }
+        /// <summary>작3 B-5 — 'hq' 면 본사가 먼저 보낸 안내다(질문이 아니라 평가 대상이 아니다).</summary>
+        public string? Origin { get; set; }
         public DateTime? SentAt { get; set; }
         public string? TerminalReason { get; set; }
         public int ReplyCount { get; set; }

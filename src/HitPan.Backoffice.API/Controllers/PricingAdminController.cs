@@ -123,6 +123,18 @@ public class PricingAdminController : ControllerBase
         // plan_id varchar(20) — 넘치면 DB 가 잘라내거나 1406 으로 터진다(DESCRIBE 확인 2026-10-11).
         if (planId.Length > 20)
             return BadRequest(new { success = false, message = "요금제 코드는 20자 이내여야 합니다." });
+        // 🔴 20261012작3 오더 1 ⓒ — 화면 안내와 서버 규칙이 **달랐다.**
+        //   화면은 「영문·숫자 … 이내」라고 약속하는데 서버는 **길이만** 쟀다.
+        //   `plan_id` 는 `plans/{planId}`·`plans/{planId}/toggle-active`·`/history` **네 입구의
+        //   URL 열쇠**다 ⇒ 공백·`/`·`?` 가 든 코드로 등록하면 **등록은 되는데 수정·제외·이력이
+        //   전부 404** 인 요금제가 생긴다. 지울 입구도 없으니(제외는 행을 남긴다) 손으로 못 치운다.
+        //   ⇒ 화면이 한 약속을 서버가 지킨다. 허용은 영문·숫자 + URL 에 안전한 `-`·`_` 뿐.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(planId, @"^[A-Za-z0-9_-]+$"))
+            return BadRequest(new
+            {
+                success = false,
+                message = "요금제 코드는 영문·숫자와 -, _ 만 쓸 수 있습니다. 한글·공백·기호는 넣을 수 없습니다.",
+            });
         if (string.IsNullOrWhiteSpace(req.PlanName))
             return BadRequest(new { success = false, message = "요금제명을 입력해주세요." });
         // PUT 과 같은 규칙(:98) — 음수 가격 거부.

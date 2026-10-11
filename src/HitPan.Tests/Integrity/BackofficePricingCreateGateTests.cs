@@ -508,4 +508,63 @@ public sealed class BackofficePricingCreateGateTests
         Assert.True(StatusOf(retry) == 201,
             $"{gate} 재시도가 201 이 아니다 — 반쪽 상태가 남아 사람이 막혔다. {Describe(retry)}");
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W2-13 — 🔴 20261012작3 오더 1 ⓒ · `plan_id` 는 **URL 열쇠**다
+    //
+    // 사고: 화면은 「영문·숫자 … 이내」라고 약속하는데 서버는 **길이만** 쟀다.
+    //   `plan_id` 는 `plans/{planId}`·`…/toggle-active`·`…/history` **네 입구의 URL 조각**이다
+    //   ⇒ 공백·`/` 가 든 코드로 등록하면 **등록은 되는데 수정·제외·이력이 전부 404** 인
+    //   요금제가 생긴다. 「제외」는 행을 남기고 삭제 입구는 없으니 **손으로 치울 수도 없다.**
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W2-13 🔴 화면이 약속한 plan_id 규칙을 서버가 지킨다 — URL 을 깨는 코드는 400 (+양성 대조)")]
+    public async Task G_W2_13_plan_id_규칙이_화면안내와_같다()
+    {
+        const string gate = "G-W2-13";
+        await using var env = await GateDb.TryCreateAsync(gate, "hitpan_gate_w2_planid");
+        if (env is null) return;
+
+        var c = Controller(env);
+
+        // ① 🔴 URL 을 깨는 모양들 — 하나라도 통과하면 「되돌릴 수 없는 요금제」가 생긴다
+        var bad = new[]
+        {
+            "pro/basic",     // 경로가 쪼개져 toggle-active 가 404
+            "pro basic",     // 공백
+            "프로",           // 한글 — 화면이 「영문·숫자」라고 약속했다
+            "pro?x=1",       // 질의문자
+            "pro#1",         // 조각
+            "pro.basic",     // 확장자로 읽히는 모양
+        };
+        foreach (var id in bad)
+        {
+            var res = await c.CreatePlan(Req(id, "규칙 위반", 1000m, 10000m), default);
+            Assert.True(StatusOf(res) == 400,
+                $"{gate} '{id}' 가 400 이 아니다 — 등록되면 수정·제외·이력이 전부 404 인 요금제가 남는다. {Describe(res)}");
+        }
+
+        // 🔴 하나도 안 들어갔나 — 400 을 돌려주고도 행을 만들었으면 더 나쁘다
+        await using (var db = await env.OpenAsync())
+        {
+            Assert.Equal(0, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM pricing_plans"));
+        }
+
+        // ② 양성 대조군 — 화면 안내가 허용한다고 말한 모양은 **실제로 된다**
+        //   (음성만 있으면 「전부 막는 코드」와 구별이 안 된다)
+        foreach (var id in new[] { "basic", "PRO2", "pro-plus", "pro_plus", "a", "12345678901234567890" })
+        {
+            var ok = await c.CreatePlan(Req(id, $"{id} 요금제", 1000m, 10000m), default);
+            Assert.True(StatusOf(ok) == 201,
+                $"{gate} 화면이 허용한다고 말한 '{id}' 가 201 이 아니다 — 안내가 거짓말이 된다. {Describe(ok)}");
+        }
+
+        // ③ 🔴 그리고 그 코드로 **되돌릴 수 있나** — 이게 이 게이트의 과녁이다.
+        //   등록만 되고 제외가 404 면 오더 1(「요금제 제외 버튼」)이 그 요금제에서 죽는다.
+        var toggled = await c.ToggleActive("pro-plus",
+            new PricingAdminController.ToggleRequest
+            { IsActive = false, Reason = "규칙 확인", ChangedBy = "platform_admin" }, default);
+        Assert.True(StatusOf(toggled) == 200,
+            $"{gate} 등록된 코드인데 제외가 200 이 아니다. {Describe(toggled)}");
+    }
 }

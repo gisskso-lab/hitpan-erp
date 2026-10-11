@@ -65,11 +65,28 @@ else
                 <MudListItem T="string" OnClick="@(() => Nav.NavigateTo($"/support/cs/{it.CsRequestId}"))">
                     <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="width:100%">
                         <div>
-                            <MudText Typo="Typo.body2"><b>@CategoryLabel(it.Category)</b> · @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))</MudText>
+                            @* 🔴 20261012작3 B-4 — 본사가 먼저 보낸 안내는 **내가 쓴 문의가 아니다.**
+                               구별 표시가 없으면 「내가 언제 이런 걸 물었지?」가 된다. *@
+                            <MudText Typo="Typo.body2">
+                                @if (it.Origin == "hq")
+                                {
+                                    <b style="color:var(--mud-palette-info)">본사 안내</b><span> · </span>
+                                }
+                                else
+                                {
+                                    <b>@CategoryLabel(it.Category)</b><span> · </span>
+                                }
+                                @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))
+                            </MudText>
                             <MudText Typo="Typo.caption" Style="color:#6B7280">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
                         </div>
                         <div class="d-flex align-center gap-2">
-                            @if (it.ReplyCount > 0)
+                            @if (it.Origin == "hq")
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
+                                         Icon="@Icons.Material.Filled.Campaign">본사에서 보냄</MudChip>
+                            }
+                            else if (it.ReplyCount > 0)
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">답 @it.ReplyCount</MudChip>
                             }
@@ -158,7 +175,13 @@ else
     private static string StatusLabel(CsItem it) => it switch
     {
         { TerminalReason: "rejected" } => "보낼 수 없음 — 내용 확인",
-        { TerminalReason: "failed" } => "전송 지연 — 본사 확인 중",
+        // 🔴 20261012작3 — 종전 문구는 「전송 지연 — **본사 확인 중**」이었다. **거짓이다.**
+        //   `failed` 는 50회 재시도가 다 실패해 멈춘 상태다(백오프 상한 10분 ⇒ 약 8시간 뒤).
+        //   그 쪽지는 **본사에 도착한 적이 없어 본사는 존재 자체를 모른다** — 확인할 사람이 없다.
+        //   게다가 `terminal_reason` 을 비우는 코드가 레포 전체에 **0건**이라 그 행은 영구히 멈춘다.
+        //   ⇒ 「기다리면 된다」고 말하면 고객은 영원히 기다린다. 할 수 있는 일을 말한다.
+        //   ([4] V-4 「쪽지함이 본사 안내를 「답」이라고 말했다」와 같은 종류다)
+        { TerminalReason: "failed" } => "본사에 전달되지 않음 — 다시 보내 주세요",
         { Status: "답변도착" } => "답변 도착",
         { Status: "종결" } => "종결",
         { SentAt: null } => "아직 본사에 안 갔음",
@@ -188,6 +211,8 @@ else
         public string? SubTag { get; set; }
         public string? Body { get; set; }
         public string Status { get; set; } = "";
+        /// <summary>local = 내가 쓴 문의 · hq = 본사가 먼저 보낸 안내(작3 B-4)</summary>
+        public string? Origin { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? SentAt { get; set; }
         public string? TerminalReason { get; set; }

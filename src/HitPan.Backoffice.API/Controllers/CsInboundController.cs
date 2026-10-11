@@ -170,7 +170,124 @@ public class CsInboundController : ControllerBase
              WHERE tenant_id = @TenantId AND delivered_at IS NULL",
             new { auth.TenantId });
 
-        return Ok(new { success = true, replies = rows });
+        // ══════════════════════════════════════════════════════════
+        // 🔴 20261012작3 A-1·A-2 — **본사 선발신**도 같은 Pull 로 내려보낸다.
+        //
+        // 10/11 작2 가 선발신 큐(`bo_cs_outbound`)를 세웠지만 **나갈 길이 0건**이었다 ⇒
+        //   화면이 「전달 대기 — ERP 수신 통로가 열리면 자동으로 나갑니다」라고 정직하게 말하고 있었다.
+        //   이 블록이 그 통로다.
+        //
+        // 🔴 기존 `replies` 계약은 **한 글자도 안 바꿨다**(#1). 칸을 **더하기만** 한다 —
+        //   고객 PC 에는 판이 섞여 있고, 옛 판 워커는 `replies` 만 읽어 모르는 칸을 무시한다(실측).
+        // 🔴 내려보내는 칸은 **다섯뿐**: 본사 내부 식별자(쓴 사람 id 등)는 안 싣는다(#18·#22).
+        // 🔴 취소·폐기된 것은 **안 내려간다** — 사람이 거둬들인 쪽지가 뒤늦게 고객에게 가면 안 된다.
+        // 🔴 `delivered_at` 은 **여기서 안 채운다**. ERP 가 저장한 뒤 `outbound/ack` 를 보낼 때 채운다 —
+        //   내려보낸 것과 도착한 것은 다른 사실이고, 여기서 채우면 화면이 「전달됨」이라 **거짓말**을 한다
+        //   (작2 가 거부한 「보냈다」의 축소판). ack 가 안 오면 다음 Pull 에 또 내려가고,
+        //   ERP 쪽 멱등(`cs_request_id` PK)이 중복을 막는다 ⇒ **유실 0 · 중복 0**.
+        var outbound = (await db.QueryAsync(@"
+            SELECT outbound_id AS outboundId,
+                   purpose,
+                   title,
+                   body,
+                   created_at  AS createdAt
+              FROM bo_cs_outbound
+             WHERE tenant_id = @TenantId
+               AND delivered_at IS NULL
+               AND canceled_at IS NULL
+               AND purged_at IS NULL
+               AND body IS NOT NULL
+             ORDER BY created_at
+             LIMIT 50",
+            new { auth.TenantId })).ToList();
+
+        if (outbound.Count > 0)
+            _logger.LogInformation("[CS수신] 선발신 {N}건 내려보냄(ack 대기) — code={Code}",
+                outbound.Count, Safe(auth.TenantCode));
+
+        // ══════════════════════════════════════════════════════════
+        // 🔴 [4] V-1 봉합(작3 4차수) — **폐기는 고객 사본까지 간다.**
+        //
+        // 사고: `PurgeOutbound` 는 전달 뒤에도 듣는다(취소와 달리 `delivered_at` 을 안 본다 —
+        //   그게 설계다. 「관리 후 임의 폐기」는 이미 나간 것도 지울 수 있어야 한다).
+        //   그런데 **고객 ERP 에 내려간 사본을 회수할 입구가 0건**이었다 ⇒ 본사 화면에는
+        //   「폐기됨」인데 고객 쪽지함에는 **본문이 영구히 남는다.** 작2 V-3(「대화의 절반만
+        //   비우면 폐기가 아니다」)가 **시스템 경계를 넘어 재발**한 모양이고, 이 PR 이 선발신을
+        //   실제로 내려보내면서 **그 구멍을 새로 만든다.**
+        //
+        // ⇒ 폐기된 선발신의 **열쇠만** 내려보낸다(본문은 안 보낸다 — 지우라는 지시다).
+        //   ERP 는 자기 사본의 본문을 비운다. 열쇠뿐이라 #18·#22 에 걸릴 칸이 없다.
+        // 🔴 14일 창 안에서만 보낸다 — 영원히 들고 다니면 Pull 응답이 끝없이 커진다.
+        //   ERP 쪽은 멱등(이미 비운 것을 또 비워도 같다)이라 창을 넘겨 놓친 건은 피해가 없다.
+        var purged = (await db.QueryAsync<string>(@"
+            SELECT outbound_id
+              FROM bo_cs_outbound
+             WHERE tenant_id = @TenantId
+               AND purged_at IS NOT NULL
+               AND delivered_at IS NOT NULL
+               AND purged_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 14 DAY)
+             ORDER BY purged_at
+             LIMIT 50",
+            new { auth.TenantId })).ToList();
+
+        return Ok(new { success = true, replies = rows, outbound, purgedOutbound = purged });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 🔴 20261012작3 A-3·A-4 — 선발신 **도착 확인**(ack)
+    //
+    // ERP 가 **저장을 끝낸 뒤** 보낸다. 이것을 받은 순간에만 `delivered_at` 을 채운다 ⇒
+    //   CS 창구 화면의 「전달 대기」가 「전달됨」으로 바뀌는 근거가 **고객 쪽 저장 사실**이 된다.
+    // 쪽지·답·평가와 **같은 문**을 쓴다 — 3중 일치 · 봉투 화이트리스트.
+    // ─────────────────────────────────────────────────────────────
+    [HttpPost("outbound/ack")]
+    public async Task<IActionResult> AckOutbound([FromBody] JsonElement envelope, CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+
+        var auth = await AuthenticateAsync(db, envelope, ct);
+        if (auth.Fail is not null) return auth.Fail;
+
+        if (!envelope.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+            return await RejectAsync(db, auth.TenantCode, "bad_payload", BadRequest(Msg("요청 형식 오류")));
+
+        // 화이트리스트 — 이 칸 밖이 하나라도 있으면 통째 거부(쪽지·평가와 같은 규칙)
+        foreach (var p in data.EnumerateObject())
+        {
+            if (p.Name != "outboundIds")
+                return await RejectAsync(db, auth.TenantCode, "forbidden_field", BadRequest(Msg("허용되지 않은 항목 포함")));
+        }
+
+        if (!data.TryGetProperty("outboundIds", out var idsEl) || idsEl.ValueKind != JsonValueKind.Array)
+            return await RejectAsync(db, auth.TenantCode, "bad_payload", BadRequest(Msg("요청 형식 오류")));
+
+        var ids = new List<string>();
+        foreach (var e in idsEl.EnumerateArray())
+        {
+            var v = Str(e);
+            // 열쇠 모양만 받는다(길이 상한 = 칸 폭). 목록 상한은 Pull 상한과 같다.
+            if (string.IsNullOrWhiteSpace(v) || v.Length > 36) continue;
+            ids.Add(v);
+            if (ids.Count >= 50) break;
+        }
+        if (ids.Count == 0) return Ok(new { success = true, acked = 0 });
+
+        // 🔴 **최초 1회만** 채운다 · **자기 테넌트 것만** — 남의 쪽지를 전달됨으로 만들 수 없다.
+        //   이미 취소·폐기된 것은 상태를 안 바꾼다(A-5): 사람이 거둬들인 사실이 정본이다.
+        var acked = await db.ExecuteAsync(@"
+            UPDATE bo_cs_outbound
+               SET delivered_at = UTC_TIMESTAMP(6)
+             WHERE tenant_id = @TenantId
+               AND outbound_id IN @Ids
+               AND delivered_at IS NULL
+               AND canceled_at IS NULL
+               AND purged_at IS NULL",
+            new { auth.TenantId, Ids = ids });
+
+        _logger.LogInformation("[CS수신] 선발신 도착 확인 {N}/{M}건 — code={Code}",
+            acked, ids.Count, Safe(auth.TenantCode));
+
+        return Ok(new { success = true, acked });
     }
 
     // ─────────────────────────────────────────────────────────────

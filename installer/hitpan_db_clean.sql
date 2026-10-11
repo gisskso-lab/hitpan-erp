@@ -3644,7 +3644,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4929,9 +4929,11 @@ CREATE TABLE `cs_requests` (
   `erp_version` varchar(20) NOT NULL COMMENT '어느 판인가(자동)',
   `status` varchar(10) NOT NULL DEFAULT '접수' COMMENT '접수/전송중/전송완료/거부/답변도착/종결',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `origin` varchar(10) NOT NULL DEFAULT 'local' COMMENT 'local = 고객(자식계정) 문의 · hq = 본사가 먼저 보낸 안내(DB-144 · 작3 B-1)',
   PRIMARY KEY (`cs_request_id`),
   KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
-  KEY `idx_cs_req_status` (`tenant_id`,`status`)
+  KEY `idx_cs_req_status` (`tenant_id`,`status`),
+  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 로컬 원본 — 자식계정 작성 · 부모계정 파이프로 송신(작14 B-2)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

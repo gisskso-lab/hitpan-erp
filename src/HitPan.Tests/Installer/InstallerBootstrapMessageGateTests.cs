@@ -818,10 +818,84 @@ public sealed class InstallerBootstrapMessageGateTests : IDisposable
         var (vExit, vOut) = RunExe(iscc, "", Path.GetTempPath());
         string banner = vOut.Split('\n').FirstOrDefault(l => l.Contains("Inno Setup", StringComparison.Ordinal))?.Trim()
                         ?? vOut.Split('\n').FirstOrDefault()?.Trim() ?? "(배너 없음)";
-        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 판 배너='{banner}' (exit {vExit})");
-        if (expectVer.Length > 0 && !vOut.Contains(expectVer, StringComparison.Ordinal))
-            throw new XunitException(
-                $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\nISCC={iscc}\n배너={banner}");
+
+        // 🔴 20261012 — 판 확인은 **파일 자신**에게 묻는다. 배너를 읽던 종전 방식은 **거짓 빨강**이었다.
+        //   실측(CI 로그): choco 는 「InnoSetup v6.7.1 already installed」로 판을 확인해 주는데,
+        //   `ISCC.exe` 를 인자 없이 돌리면 사용법만 뜨고(exit 1) 배너가
+        //   `Inno Setup 6 Command-Line Compiler` — **판 번호가 없다.**
+        //   ⇒ 러너의 판은 출하본과 **같은 6.7.1 인데** 이 단언이 못 읽어서 10/8 부터 `Build` 가 빨갰다.
+        //   🔴 단언을 **약하게 만든 게 아니다.** 「시험본과 출하본의 Inno 판이 같아야 한다」는
+        //   약속은 그대로 두고, 그 판을 읽는 방법만 신뢰할 수 있는 것으로 바꾼다.
+        //   🔴 그리고 **판을 못 읽으면 통과가 아니라 실패**다 — 조용한 초록을 새로 만들지 않는다.
+        string fileVer = "", prodVer = "";
+        try
+        {
+            var fvi = FileVersionInfo.GetVersionInfo(iscc);
+            fileVer = (fvi.FileVersion ?? "").Trim();
+            prodVer = (fvi.ProductVersion ?? "").Trim();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[G-T6-5] ISCC 판 읽기 실패: {ex.Message}");   // #15
+        }
+
+        Console.WriteLine($"[G-T6-5] ISCC={iscc} · 파일판='{fileVer}' · 제품판='{prodVer}' · 배너='{banner}' (exit {vExit})");
+
+        if (expectVer.Length > 0)
+        {
+            // `6.7.1` 은 `6.7.1` 과 `6.7.1.0` 에만 맞는다 — 점을 요구해 `6.7.10` 을 걸러낸다.
+            static bool Same(string actual, string expect) =>
+                actual.Length > 0
+                && (actual.Equals(expect, StringComparison.Ordinal)
+                    || actual.StartsWith(expect + ".", StringComparison.Ordinal));
+
+            // 🔴 실측 2026-10-12(CI) — `ISCC.exe` 는 **판을 아예 안 들고 있다**: 파일판·제품판이
+            //   둘 다 `0.0.0.0` 이고, 인자 없이 돌리면 배너도 `Inno Setup 6 Command-Line Compiler`
+            //   로 판 번호가 없다. ⇒ 파일·배너로는 **원리적으로 못 읽는다.**
+            //   그래서 **컴파일러 자신의 전처리기(ISPP)에게 묻는다** — 출하 `.iss` 도 ISPP 를 쓰므로
+            //   (`installer/HitPan.iss` 의 `#ifndef`) 여기서 답하는 그 전처리기가 **출하를 짓는 바로 그것**이다.
+            //   `#error` 표식 셋으로 갈린다: 낮다 / 높다 / 맞다. 표식이 하나도 없으면
+            //   ISPP 가 없거나 다른 일이 난 것이므로 🔴 **통과가 아니라 실패**다(조용한 초록 금지).
+            string isppVerdict = "(안 재봄)", isppOut = "";
+            var parts = expectVer.Split('.');
+            if (parts.Length >= 3
+                && int.TryParse(parts[0], out int eMaj)
+                && int.TryParse(parts[1], out int eMin)
+                && int.TryParse(parts[2], out int eRev))
+            {
+                string probe = Path.Combine(_root, "iscc_version_probe.iss");
+                File.WriteAllText(probe,
+                    $"#if VER < EncodeVer({eMaj},{eMin},{eRev})\r\n"
+                  + "  #error HPVER_TOO_OLD\r\n"
+                  + "#endif\r\n"
+                  + $"#if VER >= EncodeVer({eMaj},{eMin},{eRev + 1})\r\n"
+                  + "  #error HPVER_TOO_NEW\r\n"
+                  + "#endif\r\n"
+                  + "#error HPVER_MATCH\r\n");
+
+                var (_, pOut) = RunExe(iscc, $"\"{probe}\"", _root);
+                isppOut = pOut;
+                isppVerdict =
+                    pOut.Contains("HPVER_MATCH", StringComparison.Ordinal) ? "맞다"
+                  : pOut.Contains("HPVER_TOO_OLD", StringComparison.Ordinal) ? "기대보다 낮다"
+                  : pOut.Contains("HPVER_TOO_NEW", StringComparison.Ordinal) ? "기대보다 높다"
+                  : "표식 없음(ISPP 가 안 돌았다)";
+                Console.WriteLine($"[G-T6-5] ISPP 판 판정='{isppVerdict}'");
+            }
+
+            bool verOk = isppVerdict == "맞다"
+                   || Same(fileVer, expectVer)
+                   || Same(prodVer, expectVer)
+                   || vOut.Contains(expectVer, StringComparison.Ordinal);   // 옛 Inno 는 배너에 판을 찍었다
+            if (!verOk)
+                throw new XunitException(
+                    $"ISCC 판이 기대({expectVer})와 다르다 — 시험본·출하본 Inno 판 갈림(N4).\n"
+                  + $"ISCC={iscc}\nISPP 판정={isppVerdict}\n"
+                  + $"파일판={(fileVer.Length > 0 ? fileVer : "(못 읽음)")}\n"
+                  + $"제품판={(prodVer.Length > 0 ? prodVer : "(못 읽음)")}\n배너={banner}\n"
+                  + $"--- ISPP 전문 ---\n{Trunc(isppOut, 1200)}\n"
+                  + $"--- Inno 폴더가 들고 있는 판 ---\n{InnoDirVersions(iscc)}");
+        }
 
         var fail = RoundTrip("g5_423", 423, ErrorBody(Msg423));
         var ok = RoundTrip("g5_ok", 200, SuccessBody);
@@ -1068,6 +1142,47 @@ begin
   Result := False;
 end;
 ";
+
+    /// <summary>긴 출력은 잘라 쓴다 — 실패 문구가 로그를 덮지 않게.</summary>
+    private static string Trunc(string s, int max) =>
+        s.Length <= max ? s : s[..max] + $"… (총 {s.Length}자)";
+
+    /// <summary>
+    /// 🔴 ISCC 가 판을 안 들고 있을 때(실측: `0.0.0.0`) **어느 파일이 판을 들고 있나**를
+    /// 실패 문구에 찍어 준다. 다음 사람이 추측하지 않도록 — 한 번의 CI 로 사실이 드러나게.
+    /// </summary>
+    private static string InnoDirVersions(string iscc)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(iscc);
+            if (dir is null || !Directory.Exists(dir)) return "(폴더 없음)";
+            var sb = new StringBuilder();
+            foreach (var f in Directory.EnumerateFiles(dir)
+                         .Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                                  || f.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                                  || f.EndsWith(".e32", StringComparison.OrdinalIgnoreCase))
+                         .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            {
+                string v = "(못 읽음)";
+                try
+                {
+                    var fvi = FileVersionInfo.GetVersionInfo(f);
+                    v = $"파일판={fvi.FileVersion ?? "-"} 제품판={fvi.ProductVersion ?? "-"}";
+                }
+                catch (Exception ex)
+                {
+                    v = $"(읽기 실패: {ex.GetType().Name})";   // #15
+                }
+                sb.AppendLine($"  {Path.GetFileName(f)} · {v}");
+            }
+            return sb.Length > 0 ? sb.ToString().TrimEnd() : "(해당 파일 없음)";
+        }
+        catch (Exception ex)
+        {
+            return $"(폴더 훑기 실패: {ex.Message})";   // #15
+        }
+    }
 
     private static (int Exit, string Output) RunExe(string exe, string args, string cwd)
     {
