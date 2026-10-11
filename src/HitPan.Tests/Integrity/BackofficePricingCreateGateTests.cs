@@ -12,7 +12,7 @@ namespace HitPan.Tests.Integrity;
 
 /// <summary>
 /// 🔴 20261011작2 §B-4 — 요금제 <b>등록</b>(신설 POST)과 <b>제외</b>(toggle-active 노출)를
-/// <b>실제 DB 에서</b> 문다 (G-W2-4 · G-W2-5 · G-W2-6).
+/// <b>실제 DB 에서</b> 문다 (G-W2-4 · G-W2-5 · G-W2-8).
 ///
 /// <para><b>글자가 아니라 동작을 잰다</b>(누적 26번 사고). 이 시험은 SQL 문자열을 복사해 비교하지 않는다:
 /// <list type="bullet">
@@ -385,14 +385,14 @@ public sealed class BackofficePricingCreateGateTests
     }
 
     // ══════════════════════════════════════════════════════════════
-    // G-W2-6 — 제외/포함 왕복. 🔴 행을 지우지 않는다
+    // G-W2-8 — 제외/포함 왕복(번호 = [4] V-7 봉합 · G-W2-6 은 쪽지 폐기 몫이다). 🔴 행을 지우지 않는다
     //   (§B-3 은 화면 버튼이라 글자로만 두면 아무도 안 잰다. 그 버튼이 부르는 입구를 여기서 문다.)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-W2-6 🔴 제외→포함 왕복이 돌고, 제외해도 행이 지워지지 않는다(이력 deactivate/activate)")]
+    [Fact(DisplayName = "G-W2-8 🔴 제외→포함 왕복이 돌고, 제외해도 행이 지워지지 않는다(이력 deactivate/activate)")]
     public async Task G_W2_6_제외_포함_왕복이_행을_안_지운다()
     {
-        const string gate = "G-W2-6";
+        const string gate = "G-W2-8";
         await using var env = await GateDb.TryCreateAsync(gate, "hitpan_gate_w2_toggle");
         if (env is null) return;
 
@@ -449,5 +449,63 @@ public sealed class BackofficePricingCreateGateTests
         { IsActive = false, ChangedBy = "platform_admin" }, default);
         Assert.True(StatusOf(ghost) == 404,
             $"{gate} 없는 요금제 제외가 404 가 아니다 — 입구가 아무것도 확인하지 않는다. {Describe(ghost)}");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W2-12 — [4] V-5 봉합 · 이력이 안 남으면 **요금제도 안 남는다**(한 거래)
+    //
+    // 🔴 이 게이트가 막는 사고: 종전엔 `pricing_plans` INSERT 와 `pricing_history` INSERT 가
+    //   별건이었다. 이력 쪽이 실패하면 **요금제는 이미 있는데** 응답은 500 「등록 실패」였고,
+    //   사람이 다시 누르면 409 「이미 있습니다」 — 화면이 뭐가 참인지 말해 주지 못했다.
+    //   그리고 그 요금제는 **이력 0줄**로 남는다(#3 INSERT ONLY 축이 비는 자리).
+    //
+    // 재현 방법: 시험 DB 에서 `pricing_history.reason` 을 좁혀 **이력 INSERT 만** 실패하게 만든다.
+    //   컨트롤러의 길이 검증(500자)은 통과하되 DB 가 거부하는 값을 보낸다 ⇒ 거래가 없으면
+    //   요금제 행이 남는다. 있으면 **한 줄도 안 남는다.**
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W2-12 🔴 이력 INSERT 가 실패하면 요금제 행도 안 남는다(거래) + 재시도가 409 가 아니다")]
+    public async Task G_W2_12_이력실패면_요금제도_안남는다()
+    {
+        const string gate = "G-W2-12";
+        await using var env = await GateDb.TryCreateAsync(gate, "hitpan_gate_w2_tx");
+        if (env is null) return;
+
+        var c = Controller(env);
+        await using var db = await env.OpenAsync();
+
+        // 🔴 음성 대조군 먼저 — 좁히기 **전**에는 같은 요청이 201 이어야 한다.
+        //   (이게 없으면 「원래 안 되던 것」을 거래 덕분이라고 읽을 수 있다)
+        Assert.True(StatusOf(await c.CreatePlan(Req("txok", "tx ok", 1000m, 10000m), default)) == 201,
+            $"{gate} 좁히기 전 등록이 201 이 아니다 — 시험 전제가 틀렸다.");
+
+        // 이력 칸을 좁힌다 — 이제 이력 INSERT 만 1406 으로 실패한다.
+        // 🔴 `varchar(10)` 이다. 위 음성 대조군이 이미 넣은 행의 사유(6자)가 들어갈 수 있어야
+        //   `MODIFY` 자체가 선다 — 더 좁히면 기존 행 때문에 ALTER 가 먼저 실패한다(실측).
+        await db.ExecuteAsync("ALTER TABLE pricing_history MODIFY COLUMN reason varchar(10) NULL");
+
+        var req = Req("txfail", "tx fail", 2000m, 20000m);
+        req.Reason = "열 글자를 훌쩍 넘기는 긴 사유입니다";   // 컨트롤러 500자 검증은 통과 · DB 는 거부
+        var res = await c.CreatePlan(req, default);
+
+        Assert.True(StatusOf(res) == 500,
+            $"{gate} 이력 실패가 500 으로 안 왔다 — 시험이 의도한 경로를 안 지났다. {Describe(res)}");
+
+        // 🔴 핵심 — 요금제 행이 **없어야** 한다
+        var planRows = await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM pricing_plans WHERE plan_id = 'txfail'");
+        Assert.True(planRows == 0,
+            $"{gate} 이력이 실패했는데 요금제 행이 {planRows}건 남았다 — 거래가 안 묶였다. "
+            + "이 상태의 요금제는 이력 0줄이고, 다시 누르면 409 라 사람이 손쓸 수 없다.");
+
+        var histRows = await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM pricing_history WHERE entity_id = 'txfail'");
+        Assert.True(histRows == 0, $"{gate} 이력이 {histRows}건 남았다(기대 0건).");
+
+        // 🔴 그래서 **다시 누르면 409 가 아니다** — 사람이 고쳐서 재등록할 수 있다
+        await db.ExecuteAsync("ALTER TABLE pricing_history MODIFY COLUMN reason varchar(500) NULL");
+        var retry = await c.CreatePlan(Req("txfail", "tx fail 재시도", 2000m, 20000m), default);
+        Assert.True(StatusOf(retry) == 201,
+            $"{gate} 재시도가 201 이 아니다 — 반쪽 상태가 남아 사람이 막혔다. {Describe(retry)}");
     }
 }

@@ -57,6 +57,12 @@ public sealed class BackofficeSchemaMysql8GateTests
         ("bo_cs_tickets", "rated_at"), ("bo_cs_tickets", "rating_comment"),          // 42
         ("pricing_plans", "price_display"),                                          // 44
         ("pricing_plans", "max_pc_devices"), ("pricing_plans", "max_mobile_devices"),// 44
+        // 🔴 20261011작2 [4] 검증 V-1 봉합 — 45번은 표 2개 **말고 칸 3개도** 더한다.
+        //   표만 `RequiredTables` 에 넣고 칸을 안 넣어서, 작1 사고의 모양(「표는 생겼는데
+        //   칸이 조용히 안 생김」)이 바로 그 자리에 다시 열려 있었다. `ALTER` 는 1060 관용
+        //   경로를 타므로 **실패해도 적용됨으로 기록된다** ⇒ 보증인이 없으면 영영 모른다.
+        ("bo_cs_tickets", "purged_at"), ("bo_cs_tickets", "purged_by"),              // 45
+        ("bo_cs_tickets", "purge_reason"),                                           // 45
     ];
 
     /// <summary>
@@ -80,6 +86,10 @@ public sealed class BackofficeSchemaMysql8GateTests
         ("pricing_plans", "price_display", "varchar(50)"),                 // 44
         ("pricing_plans", "max_pc_devices", "int"),                        // 44
         ("pricing_plans", "max_mobile_devices", "int"),                    // 44
+        // 🔴 20261011작2 [4] V-1 — 형까지 센다(1060 관용은 「있다」만 보장한다).
+        ("bo_cs_tickets", "purged_at", "datetime(6)"),                     // 45
+        ("bo_cs_tickets", "purged_by", "varchar(36)"),                     // 45
+        ("bo_cs_tickets", "purge_reason", "varchar(200)"),                 // 45
     ];
 
     /// <summary>적용기가 <c>ALTER … ADD KEY</c> 로 붙여야 하는 인덱스 — ADD KEY 벗기기 경로의 과녁.</summary>

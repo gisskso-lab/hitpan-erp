@@ -272,6 +272,193 @@ public sealed class BackofficeCsOutboundGateTests
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-W2-9 — [4] V-3 봉합 · 폐기는 **대화 전체**를 비운다(답장도)
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W2-9 🔴 폐기하면 답장 본문도 비워지고 상세가 답장 본문을 안 내보낸다 (+음성 대조)")]
+    public async Task G_W2_9_폐기는_답장도_비운다()
+    {
+        const string gate = "G-W2-9 폐기와 답장";
+        await using var env = await CsGateDb.TryCreateAsync(gate, "hitpan_bo_w2_gate_9");
+        if (env is null) return;
+
+        await env.SeedTenantAsync("W2G9", "답장 게이트 상사");
+        var cs = NewController(env);
+
+        var made = await cs.PhoneIntake(new CsAdminController.PhoneRequest
+        {
+            TenantCode = "W2G9", Category = "use", SubTag = "etc", Body = "고객이 말한 내용",
+        }, default);
+        var ticketId = Field<long>(ValueOf(made), "id");
+
+        const string replyBody = "본사가 쓴 답장 — 개인정보가 섞일 수 있는 자리다";
+        Assert.True(StatusOf(await cs.Reply(ticketId, new CsAdminController.ReplyRequest { Body = replyBody }, default)) == 200,
+            $"{gate} 답 작성이 200 이 아니다.");
+
+        // 🔴 음성 대조군 — 폐기 **전**에는 답장 본문이 보여야 한다(안 보이면 이 게이트가 늘 통과한다)
+        var before = await cs.Detail(ticketId, default);
+        var repliesBefore = Field<IEnumerable<dynamic>>(ValueOf(before), "replies").ToList();
+        Assert.True(repliesBefore.Count == 1, $"{gate} 폐기 전 답장이 1건이어야 한다.");
+        Assert.Equal(replyBody, (string)((IDictionary<string, object?>)repliesBefore[0])["body"]!);
+
+        Assert.True(StatusOf(await cs.PurgeTicket(ticketId,
+            new CsAdminController.PurgeRequest { Reason = "개인정보 삭제 요청" }, default)) == 200);
+
+        // ① DB 에서 실제로 비워졌나 — 「읽는 쪽만 가리는」 눈속임이면 여기서 걸린다
+        await using var db = await env.OpenAsync();
+        var left = await db.ExecuteScalarAsync<string>(
+            "SELECT body FROM bo_cs_replies WHERE ticket_id = @Id", new { Id = ticketId });
+        Assert.True(left == "", $"{gate} 답장 본문이 DB 에 남아 있다(길이 {left?.Length ?? -1}).");
+
+        // ② 행·사실은 남는다 — 「누가 언제 답했나」는 지우지 않는다
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM bo_cs_replies WHERE ticket_id = @Id", new { Id = ticketId }));
+        Assert.NotNull(await db.ExecuteScalarAsync<DateTime?>(
+            "SELECT approved_at FROM bo_cs_replies WHERE ticket_id = @Id", new { Id = ticketId }));
+
+        // ③ 상세도 답장 본문을 안 내보낸다(두 겹)
+        var after = await cs.Detail(ticketId, default);
+        var repliesAfter = Field<IEnumerable<dynamic>>(ValueOf(after), "replies").ToList();
+        Assert.True(repliesAfter.Count == 1, $"{gate} 폐기 뒤에도 답장 행 1건은 보여야 한다(사실은 남는다).");
+        Assert.Null(((IDictionary<string, object?>)repliesAfter[0])["body"]);
+
+        // ④ 감사기록에 답장 몇 건을 함께 비웠는지 남는다
+        var detail = await db.ExecuteScalarAsync<string>(
+            "SELECT detail_json FROM bo_audit_log WHERE action = 'cs.purge' AND target_id = @Id",
+            new { Id = ticketId.ToString() });
+        Assert.Contains("repliesCleared", detail ?? "");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W2-10 — [4] V-4 봉합 · 선발신 쪽지도 보관기한·폐기 축 안에 있다
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W2-10 🔴 전달된 선발신 쪽지도 폐기된다 · 후보에 뜬다 · 행은 남는다 (+음성 대조)")]
+    public async Task G_W2_10_선발신도_폐기축_안이다()
+    {
+        const string gate = "G-W2-10 선발신 폐기";
+        await using var env = await CsGateDb.TryCreateAsync(gate, "hitpan_bo_w2_gate_10");
+        if (env is null) return;
+
+        await env.SeedTenantAsync("W2G10", "선발신 폐기 상사");
+        var cs = NewController(env);
+
+        var sent = await cs.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = "W2G10", Purpose = "billing", Title = "구독요금 안내",
+            Body = "구독요금 미결재 안내드립니다",
+        }, default);
+        Assert.True(StatusOf(sent) == 200, $"{gate} 선발신이 200 이 아니다. {Describe(sent)}");
+        var outboundId = Field<string>(ValueOf(sent), "outboundId");
+
+        await using var db = await env.OpenAsync();
+
+        // 🔴 이미 **전달된** 상태로 만든다 — 종전엔 이 상태가 되면 지울 길이 0 이었다
+        //   (cancel 은 `delivered_at IS NULL` 일 때만 듣는다).
+        await db.ExecuteAsync(
+            "UPDATE bo_cs_outbound SET delivered_at = UTC_TIMESTAMP(6) WHERE outbound_id = @Id",
+            new { Id = outboundId });
+
+        // 🔴 음성 대조군 ① — 전달됐으면 취소는 안 된다(취소로는 못 지운다는 사실 확인)
+        Assert.True(StatusOf(await cs.CancelOutbound(outboundId, default)) == 400,
+            $"{gate} 전달된 쪽지가 취소됐다 — 취소와 폐기의 구분이 무너졌다.");
+
+        // 🔴 음성 대조군 ② — 사유 없는 폐기는 거부
+        Assert.True(StatusOf(await cs.PurgeOutbound(outboundId,
+            new CsAdminController.PurgeRequest { Reason = "" }, default)) == 400);
+
+        // 보관기한 1일 + 작성시각을 2일 전으로 → 폐기 후보에 떠야 한다
+        await db.ExecuteAsync(
+            "UPDATE bo_cs_outbound SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY) WHERE outbound_id = @Id",
+            new { Id = outboundId });
+        Assert.True(StatusOf(await cs.SetRetention(new CsAdminController.RetentionRequest { RetainDays = 1 }, default)) == 200);
+
+        var cand = await cs.PurgeCandidates(default);
+        var outboundCand = Field<System.Collections.IEnumerable>(ValueOf(cand), "outboundItems").Cast<object>().ToList();
+        Assert.True(outboundCand.Count == 1,
+            $"{gate} 선발신 폐기 후보가 {outboundCand.Count}건이다(기대 1건) — 「주고받은」의 보낸 쪽이 축 밖이다.");
+        Assert.False(Field<bool>(ValueOf(cand), "autoDelete"));
+
+        // 🔴 기한이 지나도 **저절로 안 지워졌다**
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM bo_cs_outbound WHERE outbound_id = @Id", new { Id = outboundId }));
+        Assert.NotNull(await db.ExecuteScalarAsync<string?>(
+            "SELECT body FROM bo_cs_outbound WHERE outbound_id = @Id", new { Id = outboundId }));
+
+        // 사람이 사유를 적어 폐기
+        Assert.True(StatusOf(await cs.PurgeOutbound(outboundId,
+            new CsAdminController.PurgeRequest { Reason = "보관기한 경과" }, default)) == 200);
+
+        var row = await db.QueryFirstOrDefaultAsync(@"
+            SELECT body AS Body, purged_at AS PurgedAt, purged_by AS PurgedBy, purge_reason AS PurgeReason
+              FROM bo_cs_outbound WHERE outbound_id = @Id", new { Id = outboundId });
+        Assert.NotNull(row);                        // 🔴 행은 남는다
+        Assert.Null(row!.Body);                     // 몸통은 비었다
+        Assert.NotNull(row.PurgedAt);
+        Assert.Equal(AdminId, (string)row.PurgedBy);
+        Assert.Equal("보관기한 경과", (string)row.PurgeReason);
+
+        // 감사기록 1줄 · 두 번 안 지운다
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM bo_audit_log WHERE action = 'cs.purge' AND target_type = 'bo_cs_outbound' AND target_id = @Id",
+            new { Id = outboundId }));
+        Assert.True(StatusOf(await cs.PurgeOutbound(outboundId,
+            new CsAdminController.PurgeRequest { Reason = "두번째" }, default)) == 400);
+        Assert.Equal("보관기한 경과", await db.ExecuteScalarAsync<string>(
+            "SELECT purge_reason FROM bo_cs_outbound WHERE outbound_id = @Id", new { Id = outboundId }));
+
+        // 폐기된 것은 후보에서 빠진다
+        var cand2 = await cs.PurgeCandidates(default);
+        Assert.Empty(Field<System.Collections.IEnumerable>(ValueOf(cand2), "outboundItems").Cast<object>());
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W2-11 — [4] V-8 봉합 · 새 입구가 **인가 밖에 서 있지 않다**
+    //   🔴 이 게이트는 글자가 아니라 **파이프라인이 읽는 메타데이터**를 본다.
+    //   게이트들이 컨트롤러 메서드를 직접 부르기 때문에 `[Authorize]` 를 한 번도 지나가지 않는다 —
+    //   같은 모양으로 P0 가 세 번 났다(9/22 `mainpc-proof` 가 미들웨어에서 401). 보증인을 세운다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W2-11 🔴 새 입구 9개가 PlatformAdmin 정책 아래 있고 AllowAnonymous 0건 (+음성 대조)")]
+    public void G_W2_11_새입구는_인가_안에_있다()
+    {
+        var t = typeof(CsAdminController);
+
+        // ① 클래스에 정책이 걸려 있나
+        var policy = t.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false)
+                      .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+                      .Select(a => a.Policy).ToList();
+        Assert.Contains("PlatformAdmin", policy);
+
+        // ② 작2 가 더한 입구 전부가 그 클래스 안에 있고, 자기 자리에서 인가를 벗지 않았나
+        var newEndpoints = new[]
+        {
+            nameof(CsAdminController.TenantLookup), nameof(CsAdminController.CreateOutbound),
+            nameof(CsAdminController.ListOutbound), nameof(CsAdminController.CancelOutbound),
+            nameof(CsAdminController.PurgeOutbound), nameof(CsAdminController.GetRetention),
+            nameof(CsAdminController.SetRetention), nameof(CsAdminController.PurgeCandidates),
+            nameof(CsAdminController.PurgeTicket),
+        };
+
+        foreach (var name in newEndpoints)
+        {
+            var m = t.GetMethod(name);
+            Assert.NotNull(m);
+            var anon = m!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute), false);
+            Assert.True(anon.Length == 0, $"{name} 에 AllowAnonymous 가 붙어 있다 — 인가 밖에 서 있다.");
+        }
+
+        // 🔴 음성 대조군 — 이 검사 방식이 실제로 무는지 확인한다.
+        //   익명이 허용된 타입을 같은 식으로 재면 **없음**이 나와야 한다(늘 통과하는 검사가 아니다).
+        var anonType = typeof(HitPan.Backoffice.API.Controllers.CsInboundController);
+        var anonPolicies = anonType
+            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false)
+            .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+            .Select(a => a.Policy).ToList();
+        Assert.DoesNotContain("PlatformAdmin", anonPolicies);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 시험 장치
     // ══════════════════════════════════════════════════════════════
 

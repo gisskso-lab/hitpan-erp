@@ -758,7 +758,7 @@ jobs:
           GATES="$GATES|BackofficeCsOutboundGate"
 
           # 🔴 20261011작2 절 B — 요금제 화면 직접 등록 + 「제외」 버튼
-          #    (G-W2-4·5·6 · BackofficePricingCreateGateTests)
+          #    (G-W2-4·5·8 · BackofficePricingCreateGateTests · 🔴 8 = [4] V-7 봉합 — 6 은 쪽지 폐기 몫)
           #    운영 pricing_plans 는 0행이고 등록 입구가 없었다(PUT·toggle-active 만 있었다) ⇒ 첫 등록 자체가 불가.
           #    🔴 이 게이트가 지키는 약속:
           #      ④ 같은 plan_id 재등록은 409 이고 **기존 행을 한 글자도 안 바꾼다**(updated_at 까지 불변)
@@ -768,7 +768,7 @@ jobs:
           #    봉합 빼기 전후 대조 실측(2026-10-11 · hitpan_trgtest · 절B 개발명세서 §4-3):
           #      S1 중복 선조회 무력화 + ON DUPLICATE KEY UPDATE → G-W2-5 만 FAIL
           #      S2 이력 action 'create' → 'update' → G-W2-4 만 FAIL
-          #      S3 ToggleActive 의 UPDATE → DELETE FROM pricing_plans → G-W2-6 만 FAIL
+          #      S3 ToggleActive 의 UPDATE → DELETE FROM pricing_plans → G-W2-8 만 FAIL
           #      원복 뒤 3/3 PASS · 5~12초(DB 없이면 1초대 — 소요시간이 판별 수단이다)
           GATES="$GATES|BackofficePricingCreateGate"
 

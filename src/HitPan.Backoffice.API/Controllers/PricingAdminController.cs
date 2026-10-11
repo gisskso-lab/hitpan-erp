@@ -129,6 +129,22 @@ public class PricingAdminController : ControllerBase
         if (req.MonthlyPrice < 0 || req.YearlyPrice < 0)
             return BadRequest(new { success = false, message = "가격은 0 이상이어야 합니다." });
 
+        // 🔴 [4] V-11 봉합 — `plan_id` **만** 재던 길이 검사를 칸 정의에 맞춰 전부 채운다.
+        //   종전엔 `plan_name`(varchar 50)·`price_display`(50)·`reason`(500)·`changed_by`(36)·
+        //   `changed_by_name`(50) 이 **무검증**이었다 ⇒ STRICT 에서 1406 이 나고, 그게
+        //   V-5 의 「행은 생겼는데 이력은 없고 응답은 500」 상태를 **입력 하나로 재현**시켰다.
+        //   CS 쪽(`CsAdminController.CreateOutbound`)이 이미 하는 모양을 그대로 베낀다.
+        if (req.PlanName!.Trim().Length > 50)
+            return BadRequest(new { success = false, message = "요금제명은 50자 이내여야 합니다." });
+        if ((req.PriceDisplay ?? "").Length > 50)
+            return BadRequest(new { success = false, message = "가격 표기는 50자 이내여야 합니다." });
+        if ((req.Reason ?? "").Length > 500)
+            return BadRequest(new { success = false, message = "변경 사유는 500자 이내여야 합니다." });
+        if ((req.ChangedBy ?? "").Length > 36)
+            return BadRequest(new { success = false, message = "변경자 식별값이 너무 깁니다(36자 이내)." });
+        if ((req.ChangedByName ?? "").Length > 50)
+            return BadRequest(new { success = false, message = "변경자 이름은 50자 이내여야 합니다." });
+
         try
         {
             await using var db = await OpenAsync(ct);
@@ -145,6 +161,13 @@ public class PricingAdminController : ControllerBase
             var changedBy = req.ChangedBy ?? "system";
             var changedByName = req.ChangedByName ?? "시스템";
             var priceDisplay = string.IsNullOrWhiteSpace(req.PriceDisplay) ? "number" : req.PriceDisplay;
+
+            // 🔴 [4] V-5 봉합 — 요금제 행과 이력을 **한 거래로 묶는다.**
+            //   종전엔 둘이 별건이라, 이력 INSERT 가 실패하면 **요금제는 이미 있는데**
+            //   응답은 500 「등록 실패」였다. 사람이 다시 누르면 409 「이미 있습니다」 —
+            //   화면이 뭐가 참인지 말해 주지 못하고, 그 요금제는 **이력 0줄**로 남았다(#3 이 비는 자리).
+            //   ⇒ 둘이 다 되거나 다 안 된다. 실패하면 요금제도 안 남는다.
+            await using var tx = await db.BeginTransactionAsync(ct);
 
             try
             {
@@ -173,12 +196,13 @@ public class PricingAdminController : ControllerBase
                         req.FeaturesJson,
                         IsVisible = req.IsVisible ? 1 : 0,
                         req.DisplayOrder
-                    });
+                    }, tx);
             }
             catch (MySqlException dup) when (dup.Number == 1062)
             {
                 // PK 경주 — 눈으로 본 SELECT 와 INSERT 사이에 누가 먼저 넣었다.
                 // 결론은 위 409 와 같다. 🔴 기존 행을 덮지 않는다.
+                await tx.RollbackAsync(ct);
                 _logger.LogWarning(dup, "[PricingAdmin] create 경주(1062) planId={Id}", planId);
                 return Conflict(new { success = false, message = $"요금제 코드 '{planId}' 는 이미 있습니다." });
             }
@@ -194,7 +218,9 @@ public class PricingAdminController : ControllerBase
                     req.Reason,
                     ChangedBy = changedBy,
                     ChangedByName = changedByName
-                });
+                }, tx);
+
+            await tx.CommitAsync(ct);
 
             _logger.LogInformation("[PricingAdmin] created planId={Id} name={Name} monthly={M} by={By} reason={R}",
                 planId, req.PlanName, req.MonthlyPrice, changedBy, req.Reason);

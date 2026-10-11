@@ -102,8 +102,13 @@ public class CsAdminController : ControllerBase
     {
         var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         await using var db = await OpenAsync(ct);
-        var rows = await db.QueryAsync(@"
+        // 🔴 [4] V-9 봉합 — PRD C-13 은 「**목록**·상세에 「폐기됨」 표시」다. 목록이 `purged_at` 을
+        //   아예 안 돌려줘서 목록에서는 폐기된 쪽지가 보통 쪽지와 구별되지 않았다(반쪽 구현).
+        //   V-2 와 같은 이유로 **칸이 있을 때만** 읽는다.
+        var hasPurge = await HasPurgeColumnsAsync(db);
+        var rows = await db.QueryAsync($@"
             SELECT k.id              AS id,
+                   {(hasPurge ? "k.purged_at" : "NULL")} AS purgedAt,
                    t.company_name    AS companyName,
                    t.tenant_code     AS tenantCode,
                    k.category        AS category,
@@ -149,20 +154,34 @@ public class CsAdminController : ControllerBase
     public async Task<IActionResult> Detail(long id, CancellationToken ct)
     {
         await using var db = await OpenAsync(ct);
-        var ticket = await db.QueryFirstOrDefaultAsync(@"
+        var hasPurge = await HasPurgeColumnsAsync(db);
+        var ticket = await db.QueryFirstOrDefaultAsync($@"
             SELECT k.id, t.company_name AS companyName, t.tenant_code AS tenantCode,
                    k.category, k.shape_tag AS shapeTag, k.sub_tag AS subTag, k.body,
                    k.status, k.screen_code AS screenCode, k.erp_version AS erpVersion,
                    k.handler_type AS handlerType, k.handler_id AS handlerId, k.promised_at AS promisedAt,
                    k.received_channel AS channel, k.received_at AS receivedAt, k.completed_at AS completedAt,
                    -- 🔴 20261011작2 C-13 — 폐기 표식. 화면이 「폐기됨」을 보여주고 두 번 지우지 않게 한다.
-                   k.purged_at AS purgedAt, k.purge_reason AS purgeReason
+                   --   [4] V-2 봉합: 45번 미적용 서버에서는 이 두 칸을 **안 읽는다**(위 HasPurgeColumnsAsync).
+                   {(hasPurge ? "k.purged_at AS purgedAt, k.purge_reason AS purgeReason"
+                              : "NULL AS purgedAt, NULL AS purgeReason")}
               FROM bo_cs_tickets k JOIN tenants t ON t.tenant_id = k.tenant_id
              WHERE k.id = @Id", new { Id = id });
         if (ticket is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
 
-        var replies = await db.QueryAsync(@"
-            SELECT reply_id AS replyId, body, replied_by_kind AS repliedByKind,
+        // 🔴 [4] V-3 봉합 — 폐기된 티켓이면 **답장 본문도 안 내보낸다.**
+        //   종전엔 `bo_cs_tickets.body` 만 비웠고 `bo_cs_replies.body` 는 그대로 나갔다 ⇒
+        //   「폐기됨」 칩이 뜬 티켓을 열면 **본사 답장 전문이 보였다.** 설계가 선언한
+        //   「몸통은 비우고 사실은 남긴다」가 대화의 절반에서 깨진 자리다(개인정보·법무 축).
+        //   폐기 경로가 `bo_cs_replies.body` 를 이미 비우지만(아래 PurgeTicket), 그 전에 들어온
+        //   행·다른 경로가 남길 수 있으므로 **읽는 쪽에서도 한 번 더 막는다**(두 겹).
+        var purgedNow = hasPurge
+            && ((IDictionary<string, object?>)ticket!).TryGetValue("purgedAt", out var pv) && pv is not null;
+
+        var replies = await db.QueryAsync($@"
+            SELECT reply_id AS replyId,
+                   {(purgedNow ? "NULL AS body" : "body")},
+                   replied_by_kind AS repliedByKind,
                    approved_by AS approvedBy, approved_at AS approvedAt, delivered_at AS deliveredAt
               FROM bo_cs_replies WHERE ticket_id = @Id ORDER BY approved_at", new { Id = id });
 
@@ -399,11 +418,17 @@ public class CsAdminController : ControllerBase
 
         var uid = Guid.NewGuid().ToString();
         var id = await db.ExecuteScalarAsync<long>(@"
+            -- 🔴 [4] V-6 봉합 — `received_at` 을 **명시**한다. DDL 의 `DEFAULT current_timestamp(6)` 는
+            --   세션 시간대(이 서버는 KST)를 쓰고, 이 레포의 코드는 전부 `UTC_TIMESTAMP(6)` 로 쓴다.
+            --   섞이면 같은 표에 **9시간 어긋난 줄**이 생긴다(로컬 실측 540분). 그러면
+            --   보관기한 판정(`received_at < DATE_SUB(UTC_TIMESTAMP(6), …)`)이 전화접수 건만
+            --   9시간 늦게 넘긴다. ERP 수신 경로(`CsInboundController`)는 이미 UTC 를 명시한다 —
+            --   전화접수만 DEFAULT 에 맡기고 있었다. 같은 모양으로 맞춘다.
             INSERT INTO bo_cs_tickets
                 (tenant_id, client_ticket_uid, received_channel, category, sub_tag, body,
-                 status, handler_type, handler_id, promised_at)
+                 status, handler_type, handler_id, promised_at, received_at)
             VALUES (@TenantId, @Uid, 'phone', @Category, @SubTag, @Body,
-                    '접수', '본사2차', @AdminId, @Promise);
+                    '접수', '본사2차', @AdminId, @Promise, UTC_TIMESTAMP(6));
             SELECT LAST_INSERT_ID();",
             new
             {
@@ -492,8 +517,12 @@ public class CsAdminController : ControllerBase
 
         var outboundId = Guid.NewGuid().ToString();
         await db.ExecuteAsync(@"
-            INSERT INTO bo_cs_outbound (outbound_id, tenant_id, purpose, title, body, created_by)
-            VALUES (@Id, @TenantId, @Purpose, @Title, @Body, @AdminId)",
+            -- 🔴 [4] V-6 봉합 — `created_at` 명시(UTC). DEFAULT 에 맡기면 세션 시간대(KST)로 들어가
+            --   같은 표의 `canceled_at`·`delivered_at`(코드가 UTC 로 쓴다)보다 **9시간 뒤**가 된다 ⇒
+            --   넣고 바로 취소하면 「취소가 작성보다 이르다」가 화면에 그대로 보였다.
+            INSERT INTO bo_cs_outbound
+                (outbound_id, tenant_id, purpose, title, body, created_by, created_at)
+            VALUES (@Id, @TenantId, @Purpose, @Title, @Body, @AdminId, UTC_TIMESTAMP(6))",
             new { Id = outboundId, TenantId = tenantId, Purpose = purpose, Title = title, Body = body, AdminId = adminId });
 
         _logger.LogInformation("[CS어드민] 선발신 쪽지 큐 적재 — outbound={Id} purpose={P}", outboundId, purpose);
@@ -530,7 +559,10 @@ public class CsAdminController : ControllerBase
                    o.body          AS body,
                    o.created_at    AS createdAt,
                    o.delivered_at  AS deliveredAt,
-                   o.canceled_at   AS canceledAt
+                   o.canceled_at   AS canceledAt,
+                   -- 🔴 [4] V-4 봉합 — 선발신도 폐기 축 안에 있다. 화면이 「폐기됨」을 보여준다.
+                   o.purged_at     AS purgedAt,
+                   o.purge_reason  AS purgeReason
               FROM bo_cs_outbound o
               -- 🔴 CAST 를 쓰지 않는다(2026-10-11 게이트 G-W2-2 실측).
               --   `CAST(t.tenant_id AS CHAR)` 는 결과를 연결 기본 콜레이션(utf8mb4_general_ci)으로
@@ -620,6 +652,21 @@ public class CsAdminController : ControllerBase
             return Ok(new { success = true, retainDays = (int?)null, items = Array.Empty<object>(), autoDelete = false });
         }
 
+        // 🔴 [4] V-4 봉합 — 「주고받은 쪽지」는 표가 **셋**이다:
+        //     받은 것 = `bo_cs_tickets` · 답 = `bo_cs_replies`(티켓을 따라 비워진다) ·
+        //     본사 선발신 = `bo_cs_outbound`.
+        //   종전엔 **첫 표만** 셌다 ⇒ 이미 전달·취소된 선발신 쪽지는 보관기한으로도,
+        //   임의 폐기로도 지울 길이 **0건**이었다(사장님 오더가 「주고받은」을 못 박았다).
+        var outboundRows = await db.QueryAsync(@"
+            SELECT outbound_id AS outboundId, tenant_id AS tenantId, purpose, title,
+                   created_at AS createdAt
+              FROM bo_cs_outbound
+             WHERE purged_at IS NULL
+               AND created_at < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL @Days DAY)
+             ORDER BY created_at
+             LIMIT 200",
+            new { Days = days });
+
         var rows = await db.QueryAsync(@"
             -- 🔴 `bo_cs_tickets` 의 접수시각 칸 이름은 `received_at` 이다 — `created_at` 은 없다
             --   (40번 DDL `:37`). 게이트 G-W2-7 이 실측으로 잡았다: 이 입구는 호출하는 순간
@@ -633,7 +680,14 @@ public class CsAdminController : ControllerBase
              LIMIT 200",
             new { Days = days });
 
-        return Ok(new { success = true, retainDays = days, items = rows, autoDelete = false });
+        return Ok(new
+        {
+            success = true,
+            retainDays = days,
+            items = rows,
+            outboundItems = outboundRows,   // [4] V-4 — 선발신 쪽지 후보
+            autoDelete = false,
+        });
     }
 
     /// <summary>
@@ -653,6 +707,13 @@ public class CsAdminController : ControllerBase
 
         await using var db = await OpenAsync(ct);
 
+        // 🔴 [4] V-5 봉합 — **거래로 묶는다.**
+        //   종전엔 ① 본문 비우기 ② 감사기록 INSERT 가 **별건**이었다. ②가 실패하면
+        //   「본문은 이미 지워졌고 누가 왜 지웠는지는 없다」 — 설계가 선언한
+        //   「지웠다는 사실은 안 지운다」가 바로 그 자리에서 깨진다.
+        //   ⇒ 셋(티켓 본문 · 답장 본문 · 감사기록)이 **다 되거나 다 안 된다.**
+        await using var tx = await db.BeginTransactionAsync(ct);
+
         // 이미 폐기된 것은 두 번 지우지 않는다(멱등 · 사유가 덮이면 첫 기록이 사라진다).
         var rows = await db.ExecuteAsync(@"
             UPDATE bo_cs_tickets
@@ -661,12 +722,23 @@ public class CsAdminController : ControllerBase
                    purged_by = @AdminId,
                    purge_reason = @Reason
              WHERE id = @Id AND purged_at IS NULL",
-            new { Id = id, AdminId = adminId, Reason = reason });
+            new { Id = id, AdminId = adminId, Reason = reason }, tx);
 
         if (rows == 0)
+        {
+            await tx.RollbackAsync(ct);
             return BadRequest(new { success = false, message = "없는 쪽지이거나 이미 폐기된 쪽지입니다" });
+        }
 
-        // 🔴 지웠다는 사실은 안 지운다 — 감사기록 1줄(INSERT ONLY).
+        // 🔴 [4] V-3 봉합 — **답장 본문도 비운다.** 대화의 절반만 비우면 「폐기」가 아니다.
+        //   `bo_cs_replies.body` 는 `varchar(4000) NOT NULL` 이라 `NULL` 을 넣을 수 없다
+        //   (40번 DDL 은 출하된 파일이라 고치지 않는다 — #1·#36) ⇒ **빈 문자열**로 비운다.
+        //   행·`approved_by`·`approved_at`·`delivered_at` 은 **남긴다**(누가 언제 답했나는 사실이다).
+        var repliesCleared = await db.ExecuteAsync(
+            "UPDATE bo_cs_replies SET body = '' WHERE ticket_id = @Id AND body <> ''",
+            new { Id = id }, tx);
+
+        // 🔴 지웠다는 사실은 안 지운다 — 감사기록 1줄(INSERT ONLY · 같은 거래 안).
         var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? "unknown";
         var role = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "platform_admin";
         await db.ExecuteAsync(@"
@@ -676,10 +748,64 @@ public class CsAdminController : ControllerBase
             {
                 AdminId = adminId, Email = email, Role = role,
                 Target = id.ToString(),
-                Detail = $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(reason)}}}",
-            });
+                Detail = $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(reason)},\"repliesCleared\":{repliesCleared}}}",
+            }, tx);
 
-        _logger.LogInformation("[CS어드민] 쪽지 폐기 — ticket={Id} by={By}", id, adminId);
+        await tx.CommitAsync(ct);
+
+        _logger.LogInformation("[CS어드민] 쪽지 폐기 — ticket={Id} 답장 {N}건 함께 비움 by={By}",
+            id, repliesCleared, adminId);
+        return Ok(new { success = true, repliesCleared });
+    }
+
+    /// <summary>
+    /// 🔴 [4] V-4 봉합 — **선발신 쪽지 폐기.** 사장님 오더는 「주고받은 쪽지 … 폐기기한설정 혹은
+    /// 임의 삭제」다. 취소(<c>cancel</c>)는 **나가기 전에만** 듣기 때문에, 이미 전달·취소된
+    /// 선발신 쪽지를 지울 길이 없었다. 티켓 쪽과 **같은 규칙**이다 — 본문만 비우고 사실은 남긴다.
+    /// </summary>
+    [HttpPost("outbound/{outboundId}/purge")]
+    public async Task<IActionResult> PurgeOutbound(string outboundId, [FromBody] PurgeRequest req, CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var reason = req?.Reason?.Trim() ?? "";
+        if (reason.Length is 0 or > 200)
+            return BadRequest(new { success = false, message = "폐기 사유를 적어 주세요(1~200자)" });
+
+        await using var db = await OpenAsync(ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+
+        var rows = await db.ExecuteAsync(@"
+            UPDATE bo_cs_outbound
+               SET body = NULL,
+                   purged_at = UTC_TIMESTAMP(6),
+                   purged_by = @AdminId,
+                   purge_reason = @Reason
+             WHERE outbound_id = @Id AND purged_at IS NULL",
+            new { Id = outboundId, AdminId = adminId, Reason = reason }, tx);
+
+        if (rows == 0)
+        {
+            await tx.RollbackAsync(ct);
+            return BadRequest(new { success = false, message = "없는 쪽지이거나 이미 폐기된 쪽지입니다" });
+        }
+
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? User.FindFirstValue("email") ?? "unknown";
+        var role = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "platform_admin";
+        await db.ExecuteAsync(@"
+            INSERT INTO bo_audit_log (actor_user_id, actor_email, actor_role, action, target_type, target_id, detail_json)
+            VALUES (@AdminId, @Email, @Role, 'cs.purge', 'bo_cs_outbound', @Target, @Detail)",
+            new
+            {
+                AdminId = adminId, Email = email, Role = role,
+                Target = outboundId,
+                Detail = $"{{\"reason\":{System.Text.Json.JsonSerializer.Serialize(reason)}}}",
+            }, tx);
+
+        await tx.CommitAsync(ct);
+
+        _logger.LogInformation("[CS어드민] 선발신 폐기 — outbound={Id} by={By}", outboundId, adminId);
         return Ok(new { success = true });
     }
 
@@ -721,6 +847,39 @@ public class CsAdminController : ControllerBase
         public string? SubTag { get; set; }
         public string? Body { get; set; }
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 [4] V-2 봉합 — 45번이 **아직 안 들어간 서버**에서도 종전 화면이 살아 있어야 한다
+    //
+    // 사고 모양: 목록·상세가 `purged_at` 을 **조건 없이** SELECT 하면, 45번이 적용되지 않은
+    //   DB 에서 `Unknown column` → **500**. 그건 신규 기능 실패가 아니라 **되던 화면의 회귀**다.
+    //   백오피스 스키마 적용기는 `HITPAN_BO_AUTO_MIGRATE` 를 **켤 때만** 돈다(#29) ⇒
+    //   「코드는 갔는데 칸은 없는」 구간이 실제로 존재한다. 10/11 운영 사고가 정확히 그 모양이었다.
+    //
+    // ⇒ 칸이 있는지 **DB 에 직접 물어보고** 조회문을 고른다. 없으면 폐기 칸을 **안 읽는다**
+    //   (폐기 기능만 조용히 비어 보이고, 종전 기능은 그대로 돈다).
+    // 🔴 캐시는 **DB 이름별**이다. 게이트가 시험 DB 를 여러 개 돌리고, 45번을 일부러 뺀 대조군도
+    //   돌린다 — 하나로 캐시하면 앞 측정이 뒤를 오염시킨다(9/25 권한 축 교훈과 같은 모양).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _purgeColumnsByDb = new();
+
+    private static async Task<bool> HasPurgeColumnsAsync(MySqlConnection db)
+    {
+        var key = db.Database ?? "";
+        if (_purgeColumnsByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = 'bo_cs_tickets'
+               AND column_name IN ('purged_at', 'purged_by', 'purge_reason')");
+
+        var present = found == 3;
+        _purgeColumnsByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.</summary>
+    internal static void ResetPurgeColumnCache() => _purgeColumnsByDb.Clear();
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {

@@ -40,12 +40,21 @@ CREATE TABLE IF NOT EXISTS bo_cs_outbound (
     purpose       varchar(20)   NOT NULL DEFAULT 'etc'
                   COMMENT '용도 — promo/event/billing/etc (사장님 오더 3종 + 기타)',
     title         varchar(100)  NULL     COMMENT '한 줄 제목(선택)',
-    body          varchar(2000) NOT NULL COMMENT '금지필드 검사 통과분만 저장(BoForbiddenFieldScanner)',
+    -- 🔴 NULL 허용 — 폐기하면 본문을 비운다([4] V-4). `NOT NULL` 이면 빈 문자열로 뭉개야 하고
+    --   그러면 「안 쓴 쪽지」와 「폐기된 쪽지」가 구별되지 않는다. 쓰기 경로가 비어 있는 글을 막는다.
+    body          varchar(2000) NULL     COMMENT '금지필드 검사 통과분만 저장(BoForbiddenFieldScanner) · 폐기 시 NULL',
     created_by    varchar(36)   NOT NULL COMMENT '쓴 사람(본사 어드민 id)',
     created_at    datetime(6)   NOT NULL DEFAULT current_timestamp(6),
     delivered_at  datetime(6)   NULL DEFAULT NULL COMMENT 'NULL = 전달 대기 · 값 = ERP 가 가져간 시각',
     canceled_at   datetime(6)   NULL DEFAULT NULL COMMENT '보내기 전 취소',
     canceled_by   varchar(36)   NULL DEFAULT NULL,
+    -- 🔴 [4] V-4 봉합 — 선발신도 「보관기한·임의 폐기」 축 안에 둔다.
+    --   사장님 오더는 「고객사에게 **주고받은** 쪽지는 관리대상 … 폐기기한설정 혹은 임의 삭제」다.
+    --   취소(`canceled_at`)는 **나가기 전에만** 듣는다 ⇒ 이미 전달·취소된 쪽지를 지울 길이 0 이었다.
+    --   폐기 = 본문만 비우고 「누가·언제·왜」는 남긴다(티켓 쪽과 같은 규칙).
+    purged_at     datetime(6)   NULL DEFAULT NULL COMMENT '폐기 시각 — 값이 있으면 본문은 비워져 있다',
+    purged_by     varchar(36)   NULL DEFAULT NULL COMMENT '폐기한 사람',
+    purge_reason  varchar(200)  NULL DEFAULT NULL COMMENT '폐기 사유 — 입력 필수(화면·서버 양쪽이 강제)',
     PRIMARY KEY (outbound_id),
     KEY idx_bo_cs_outbound_pending (delivered_at, created_at),
     KEY idx_bo_cs_outbound_tenant (tenant_id, created_at)
@@ -66,7 +75,10 @@ CREATE TABLE IF NOT EXISTS bo_cs_retention_policy (
   COMMENT='CS 쪽지 보관기한 — 자동삭제 없음(20261011작2 C-6)';
 
 -- 초기 1행 = 무기한. 재실행 안전(INSERT IGNORE) · 이미 사람이 설정한 값은 덮지 않는다.
-INSERT IGNORE INTO bo_cs_retention_policy (policy_id, retain_days) VALUES (1, NULL);
+-- 🔴 `updated_at` 을 **명시**한다([4] V-6) — DEFAULT 에 맡기면 세션 시간대(KST)로 들어가
+--   `SetRetention` 이 쓰는 UTC 와 같은 칸에서 9시간 어긋난다(로컬 실측 540분).
+INSERT IGNORE INTO bo_cs_retention_policy (policy_id, retain_days, updated_at)
+VALUES (1, NULL, UTC_TIMESTAMP(6));
 
 -- ── ③ 쪽지 폐기 표식 — 한 문장에 한 절 (위 ★ 참조) ──────────────────────
 --   왜 행을 지우지 않나: `bo_cs_ticket_logs`·`bo_cs_replies` 가 그 티켓을 가리킨다.
