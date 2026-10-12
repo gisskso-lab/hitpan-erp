@@ -10,11 +10,15 @@
 {
     <MudAlert Severity="Severity.Success" Variant="Variant.Filled" Dense="true" Class="ma-2"
               ContentAlignment="HorizontalAlignment.Left">
+        @* 🔴 20261012 사장님 실측 반려 봉합 — 종전엔 무조건 「CS 답변 N건이 도착했습니다」였다.
+           본사 안내는 **답변이 아니다.** 고객이 「내가 뭘 물었지?」 하며 답을 찾다가 못 찾는다
+           ([4] V-4 와 같은 종류가 이 전역 배너에 남아 있었다).
+           ⇒ 본사 안내만 왔으면 그렇게 말하고, 섞여 왔으면 둘 다 센다. 단추 글자도 맞춘다. *@
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-            <span><strong>CS 답변 @(_unread)건</strong>이 도착했습니다.</span>
+            <span><strong>@HeadlineText()</strong></span>
             <MudButton Color="Color.Inherit" Variant="Variant.Outlined" Size="Size.Small"
                        OnClick="@(() => Nav.NavigateTo("/support/cs"))">
-                답 보러 가기
+                @(_hq > 0 && _reply == 0 ? "안내 보러 가기" : "보러 가기")
             </MudButton>
         </div>
     </MudAlert>
@@ -22,8 +26,16 @@
 
 @code {
     private int _unread;
+    private int _hq;        // 본사가 먼저 보낸 안내 — 답변이 아니다
+    private int _reply;     // 내가 보낸 문의에 온 답
     private bool _onCsPage;
     private Timer? _timer;
+
+    /// <summary>온 것이 무엇인지 **사실대로** 말한다. 섞여 오면 둘 다 센다.</summary>
+    private string HeadlineText() =>
+        _hq > 0 && _reply == 0 ? $"본사 안내 {_hq}건이 도착했습니다."
+      : _hq > 0 && _reply > 0  ? $"본사 안내 {_hq}건 · CS 답변 {_reply}건이 도착했습니다."
+      : $"CS 답변 {_unread}건이 도착했습니다.";
 
     protected override async Task OnInitializedAsync()
     {
@@ -55,6 +67,9 @@
         {
             var res = await Http.GetFromJsonAsync<CountResponse>("api/cs/replies/unread-count");
             _unread = res?.Count ?? 0;
+            // 🔴 옛 판 응답에는 이 두 칸이 없다 ⇒ 0 으로 떨어지고 문구는 종전과 같아진다(안 깨진다).
+            _hq = res?.HqCount ?? 0;
+            _reply = res?.ReplyCount ?? _unread;
         }
         catch (Exception)
         {
@@ -69,5 +84,11 @@
         _timer?.Dispose();
     }
 
-    private sealed class CountResponse { public bool Success { get; set; } public int Count { get; set; } }
+    private sealed class CountResponse
+    {
+        public bool Success { get; set; }
+        public int Count { get; set; }
+        public int HqCount { get; set; }      // 옛 판 응답엔 없다 ⇒ 0
+        public int ReplyCount { get; set; }   // 같음
+    }
 }

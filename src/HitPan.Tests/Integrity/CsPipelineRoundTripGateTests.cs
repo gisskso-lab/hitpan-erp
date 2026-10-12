@@ -565,6 +565,68 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         Assert.Contains("다시 보내", msg);             // 할 수 있는 일
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-W3-8 — 🔴 사장님 실측 반려 봉합: **본사 안내가 「안읽음」으로 세지고, 답변이라 안 불린다**
+    //
+    // 사고(2026-10-12 사장님 실측): 상행은 통과했는데 하행이 반려됐다 —
+    //   「백오피스에서 보낸 메시지를 **어디서 보는지, 메뉴가 없음**」.
+    //   본사 안내는 실제로 `cs_requests`+`cs_replies` 로 착지해 목록에 「본사에서 보냄」 칩까지
+    //   달고 섰는데, **그 도착을 알리는 숫자를 쓰는 곳이 전역 배너 하나뿐**이었고
+    //   그 배너가 무조건 **「CS 답변 N건이 도착했습니다」**라고 말했다 — 본사 안내는 **답변이 아니다.**
+    //   고객은 「내가 뭘 물었지?」 하며 답을 찾다가 못 찾는다([4] V-4 가 전역 배너에 남아 있었다).
+    // ⇒ 여기서 뭐는 것: ① 본사 안내가 **안읽음에 잡히나** ② **출처별로 갈라 내려주나**
+    //   (갈라 주지 않으면 화면이 사실을 말할 수가 없다) ③ 🔴 **고객 자기 문의는 본사 안내로 안 세나**
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-8 🔴 본사 안내가 안읽음으로 세지고 출처별로 갈린다 — 내 문의를 본사 것으로 안 센다")]
+    public async Task G_W3_8_안읽음이_출처를_구분한다()
+    {
+        const string gate = "G-W3-8 안읽음 출처 구분";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+
+        // ── 음성 축 ① — 아무것도 안 왔으면 0 이다
+        var zero = await NewErpController(erp).UnreadCount(default);
+        Assert.True(StatusOf(zero) == 200, $"{gate} 안읽음 조회가 200 이 아니다. {Describe(zero)}");
+        Assert.Equal(0, Field<int>(ValueOf(zero), "count"));
+        Assert.Equal(0, Field<int>(ValueOf(zero), "hqCount"));
+
+        // ── 🔴 음성 축 ② — **고객이 쓴 문의**는 본사 안내로 세면 안 된다
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest { Category = "how_to", SubTag = "etc", Body = "내 문의" }, default));
+        var mineOnly = await NewErpController(erp).UnreadCount(default);
+        Assert.Equal(0, Field<int>(ValueOf(mineOnly), "hqCount"));   // 내 문의는 본사 것이 아니다
+
+        // ── 양성 — 본사가 안내를 보내고 ERP 가 받아간다(실물 경로)
+        var admin = NewCsAdminController();
+        Assert.True(StatusOf(await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = TenantCode, Purpose = "promo", Title = "안읽음 확인", Body = "본사 안내 본문",
+        }, default)) == 200);
+
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        var after = await NewErpController(erp).UnreadCount(default);
+        Assert.True(StatusOf(after) == 200, $"{gate} 안내 도착 뒤 안읽음 조회가 200 이 아니다. {Describe(after)}");
+
+        // ① 🔴 안읽음에 잡히나 — 안 잡히면 메뉴 배지도 배너도 뜰 수가 없다(= 사장님이 못 찾는다)
+        Assert.Equal(1, Field<int>(ValueOf(after), "hqCount"));
+        // ② 🔴 출처가 갈려 있나 — `count` 는 합계라 이것만으로는 화면이 「답변」인지 「안내」인지 모른다.
+        //    이 시점의 실측 상태: 내 문의 1건(답 0) + 본사 안내 1건(답 1행) ⇒ 합계 1 · 본사 1 · 답 0.
+        //    🔴 `replyCount` 가 0 이어야 한다 — 1 이면 화면이 「CS 답변이 왔다」고 거짓을 말한다.
+        Assert.Equal(0, Field<int>(ValueOf(after), "replyCount"));
+        Assert.Equal(1, Field<int>(ValueOf(after), "count"));
+        // 🔴 항등식 — 깨지면 화면이 반드시 거짓을 말한다(숫자 하나가 두 자리에서 다르게 읽힌다).
+        Assert.Equal(Field<int>(ValueOf(after), "count"),
+                     Field<int>(ValueOf(after), "hqCount") + Field<int>(ValueOf(after), "replyCount"));
+    }
+
     /// <summary>목록 응답의 첫 행을 사전으로 꺼낸다 — 200 이 아니면 그 자리에서 말한다.</summary>
     private static IDictionary<string, object?> ListFirst(IActionResult res, string gate)
     {

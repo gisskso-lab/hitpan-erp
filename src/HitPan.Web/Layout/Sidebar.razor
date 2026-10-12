@@ -351,8 +351,22 @@
     }
 
     @* 작14 B-1 (사장님 결-10 · 2026-10-08): CS 메뉴 = 사이드바 하단 「CS 요청」 단독.
-       워크플로우 6단계 밖 신규 자리라 자리 자체가 결재 사항이었다 — 개발팀이 정하지 않았다. *@
-    <MudNavLink Href="/support/cs" Icon="@Icons.Material.Filled.SupportAgent">CS 요청</MudNavLink>
+       워크플로우 6단계 밖 신규 자리라 자리 자체가 결재 사항이었다 — 개발팀이 정하지 않았다.
+
+       🔴 20261012 사장님 실측 반려 봉합 — 「백오피스에서 보낸 메시지를 어디서 보는지, 메뉴가 없음」
+         본사 안내는 실제로 이 메뉴 안에 들어와 「본사에서 보냄」 칩을 달고 서는데, **메뉴 이름이
+         「요청」이라 받는 쪽을 한 글자도 말하지 않았다.** 사장님이 못 찾으셨다 —
+         「이 화면, 처음 보는 사람이 혼자 쓸 수 있냐」에 걸린다.
+       🔴 사장님 결정(2026-10-12): **이름·자리는 그대로 두고 「안읽음 표시」를 붙인다.**
+         그래서 이름을 안 바꾼다(결-10 무접촉). 안 읽은 게 있을 때만 숫자가 뜬다. *@
+    <MudNavLink Href="/support/cs" Icon="@Icons.Material.Filled.SupportAgent">
+        CS 요청
+        @if (_csUnread > 0)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                     Class="ml-2 my-0">@_csUnread</MudChip>
+        }
+    </MudNavLink>
 
     @* ★ 사장님 오더 2026-08-04: "현재 히트판 버전이 어떻게 되는지 자료관리 탭 밑에 작게 버전도 표기해."
        ─ 왜 필요한가: Y/N 동의 업데이트(20260804작2)를 쓰면 고객이 [예] 를 누른 뒤
@@ -450,6 +464,7 @@
     // 헌법 #35 (2026-06-04) — 본사·대리점·Owner 영역 일체 HitPan.Backoffice 신규 프로젝트로 분리 완료.
     // HitPan.Web은 고객사 ERP 전용. /admin/* /reseller/* /owner/* 페이지 0건.
     private int _approvalPendingCount;
+    private int _csUnread;   // 🔴 20261012 — CS 안 읽은 건수(본사 안내 포함). 못 읽으면 0 = 안 보여 준다.
 
     // ★ 사장님 오더 2026-08-04 — 사이드바 최하단 현재 버전 표기.
     //   빈 문자열이면 화면에 아무것도 안 그린다(미인증·조회 실패 시 조용히 생략).
@@ -496,6 +511,7 @@
         PromptBus.StatusChanged += OnUpdateStatusChanged;
 
         await LoadAppVersionAsync();
+        await LoadCsUnreadAsync();
 
         // 결재 대기 건수 로딩
         try
@@ -525,6 +541,31 @@
     ///   버전 한 줄 때문에 사이드바나 ERP 가 막히면 본말전도다(헌법 #20).
     ///   못 읽으면 표기를 생략할 뿐, 기능에는 아무 영향이 없다.
     /// </summary>
+    /// <summary>
+    /// 🔴 20261012 사장님 실측 반려 봉합 — 「CS 요청」 메뉴에 안 읽은 건수를 붙인다.
+    /// 숫자·읽음 기록(<c>cs_replies.read_at</c>)은 종전부터 있었고 쓰는 곳이 전역 배너뿐이었다.
+    /// 배너는 **5분 주기**라서 방금 온 안내는 메뉴에서 먼저 보이는 게 빠르다.
+    /// 🔴 못 읽으면 **0** — 안 보여 준다. 숫자를 틀리게 보여주는 건 안 보여주는 것보다 나쁘다.
+    /// </summary>
+    private async Task LoadCsUnreadAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (auth.User?.Identity?.IsAuthenticated != true) return;
+
+            var res = await Http.GetFromJsonAsync<CsUnreadResponse>("api/cs/replies/unread-count");
+            _csUnread = res?.Count ?? 0;
+        }
+        catch (Exception ex)
+        {
+            _csUnread = 0;
+            Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
+        }
+    }
+
+    private sealed class CsUnreadResponse { public bool Success { get; set; } public int Count { get; set; } }
+
     private async Task LoadAppVersionAsync()
     {
         try
