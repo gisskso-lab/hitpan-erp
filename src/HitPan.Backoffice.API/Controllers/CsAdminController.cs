@@ -511,6 +511,8 @@ public class CsAdminController : ControllerBase
         }
 
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 45번 미적용 서버에서 500 대신 사람이 읽을 답(선행검증서 §2-1).
+        if (!await HasOutboundSchemaAsync(db)) return SchemaPendingResult();
         var tenantId = await db.ExecuteScalarAsync<string?>(
             "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE tenant_code = @Code", new { Code = code });
         if (tenantId is null) return NotFound(new { success = false, message = "그 코드의 고객사가 없습니다" });
@@ -542,6 +544,9 @@ public class CsAdminController : ControllerBase
     public async Task<IActionResult> ListOutbound([FromQuery] string? state, CancellationToken ct)
     {
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 표가 없으면 빈 목록. 목록 화면이 500 으로 죽지 않는다.
+        if (!await HasOutboundSchemaAsync(db))
+            return Ok(new { success = true, items = Array.Empty<object>(), schemaPending = true });
         var where = state switch
         {
             "pending" => "AND o.delivered_at IS NULL AND o.canceled_at IS NULL",
@@ -586,6 +591,8 @@ public class CsAdminController : ControllerBase
         if (string.IsNullOrEmpty(adminId)) return Forbid();
 
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 45번 미적용 서버에서 500 대신 사람이 읽을 답(선행검증서 §2-1).
+        if (!await HasOutboundSchemaAsync(db)) return SchemaPendingResult();
         // 이미 나간 것은 취소할 수 없다 — 상대가 이미 받았다.
         var rows = await db.ExecuteAsync(@"
             UPDATE bo_cs_outbound
@@ -605,6 +612,10 @@ public class CsAdminController : ControllerBase
     public async Task<IActionResult> GetRetention(CancellationToken ct)
     {
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 표가 없으면 **기본값 무기한**으로 화면을 세운다. 500 이 아니다 ⇒
+        //   「쪽지보내기」 창이 열리기는 하고, 보관기한 칸만 「설정 불가」로 정직하게 멈춘다.
+        if (!await HasOutboundSchemaAsync(db))
+            return Ok(new { success = true, policy = (object?)null, schemaPending = true });
         var row = await db.QueryFirstOrDefaultAsync(@"
             SELECT retain_days AS retainDays, updated_by AS updatedBy, updated_at AS updatedAt
               FROM bo_cs_retention_policy WHERE policy_id = 1");
@@ -626,6 +637,8 @@ public class CsAdminController : ControllerBase
             return BadRequest(new { success = false, message = "보관기한은 1~3650일 사이로 적어 주세요(비우면 무기한)" });
 
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 45번 미적용 서버에서 500 대신 사람이 읽을 답(선행검증서 §2-1).
+        if (!await HasOutboundSchemaAsync(db)) return SchemaPendingResult();
         await db.ExecuteAsync(@"
             INSERT INTO bo_cs_retention_policy (policy_id, retain_days, updated_by, updated_at)
             VALUES (1, @Days, @AdminId, UTC_TIMESTAMP(6))
@@ -644,6 +657,9 @@ public class CsAdminController : ControllerBase
     public async Task<IActionResult> PurgeCandidates(CancellationToken ct)
     {
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 표가 없으면 폐기 후보 0건. 자동 삭제는 어디에도 없다(C-9) — 그대로 유지.
+        if (!await HasOutboundSchemaAsync(db))
+            return Ok(new { success = true, retainDays = (int?)null, candidates = 0, schemaPending = true });
         var days = await db.ExecuteScalarAsync<int?>(
             "SELECT retain_days FROM bo_cs_retention_policy WHERE policy_id = 1");
         if (days is null)
@@ -774,6 +790,8 @@ public class CsAdminController : ControllerBase
             return BadRequest(new { success = false, message = "폐기 사유를 적어 주세요(1~200자)" });
 
         await using var db = await OpenAsync(ct);
+        // 🔴 작4 A-1 — 45번 미적용 서버에서 500 대신 사람이 읽을 답(선행검증서 §2-1).
+        if (!await HasOutboundSchemaAsync(db)) return SchemaPendingResult();
         await using var tx = await db.BeginTransactionAsync(ct);
 
         var rows = await db.ExecuteAsync(@"
@@ -880,6 +898,53 @@ public class CsAdminController : ControllerBase
 
     /// <summary>시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.</summary>
     internal static void ResetPurgeColumnCache() => _purgeColumnsByDb.Clear();
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작4 A-1 — **표**에도 같은 가드를 세운다 (사장님 실측 반려 ①②③)
+    //
+    // 10/11 작2 [4] V-2 는 45번이 더한 **칸**(`bo_cs_tickets.purged_*`)에만 가드를 걸었다.
+    //   같은 파일이 더한 **표 2개**(`bo_cs_outbound`·`bo_cs_retention_policy`)는 조건 없이 읽혔다 ⇒
+    //   45번이 안 들어간 서버에서 아래 셋이 전부 500 이었다(10/12 사장님 실측):
+    //     ① `GET  retention`     → 「보관기한 조회 실패: 500」
+    //     ② `POST outbound`      → 500 + 빈 body ⇒ 화면이 JSON 파싱 예외를 그대로 뱉었다
+    //     ③ `POST replies/pull`  → 🔴 **답까지 같이 못 내려갔다**(CsInboundController — 하행 전체가 죽는다)
+    //
+    // 가드가 하는 일은 「안 터지게」 까지다. **기능은 45번이 적용돼야 돈다** —
+    //   둘을 같은 것으로 적지 않는다(선행검증서 §2-3).
+    // 🔴 캐시는 칸 가드와 같은 이유로 **DB 이름별**이다(게이트가 45번 뺀 대조군을 함께 돌린다).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _outboundTablesByDb = new();
+
+    /// <summary>45번이 더한 표 2개가 이 DB 에 실재하나. 없으면 선발신·보관기한은 비활성이다.</summary>
+    internal static async Task<bool> HasOutboundSchemaAsync(MySqlConnection db)
+    {
+        var key = db.Database ?? "";
+        if (_outboundTablesByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema = DATABASE()
+               AND table_name IN ('bo_cs_outbound', 'bo_cs_retention_policy')");
+
+        var present = found == 2;
+        _outboundTablesByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.</summary>
+    internal static void ResetOutboundSchemaCache() => _outboundTablesByDb.Clear();
+
+    /// <summary>
+    /// 45번 미적용 서버에서 사람이 읽을 답. 🔴 500 으로 떨어뜨리지 않는 것이 핵심이다 —
+    /// 500 은 화면이 해석하지 못하고(② 가 그 모양), 사람에게 아무것도 알려주지 않는다.
+    /// </summary>
+    private IActionResult SchemaPendingResult() =>
+        StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            success = false,
+            schemaPending = true,
+            message = "이 서버에는 쪽지 보관기한·선발신 기능의 자료방이 아직 준비되지 않았습니다. "
+                    + "본사 담당자에게 알려 주세요(백오피스 스키마 45번 적용 필요).",
+        });
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {

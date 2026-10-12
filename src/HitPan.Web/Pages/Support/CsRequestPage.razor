@@ -95,6 +95,17 @@ else
                                 <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">답 @it.ReplyCount</MudChip>
                             }
                             <MudChip T="string" Size="Size.Small" Color="@StatusColor(it)" Variant="Variant.Outlined">@StatusLabel(it)</MudChip>
+                            @* 🔴 20261012작4 B-4 — 본사 진행 상태는 **별도 칸**이다(사장님 결재).
+                               위 칩(쪽지 자신의 진행)을 덮지 않고 그 옆에 선다 — 두 축이 섞이면
+                               「답변 도착」이 「완료」에 덮여 어느 쪽 사실인지 사라진다.
+                               NULL(본사 미착수)이면 아무것도 안 보인다 = 종전 화면 그대로. *@
+                            @if (!string.IsNullOrWhiteSpace(it.HqStatus))
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@HqStatusColor(it.HqStatus)"
+                                         Variant="Variant.Filled" Icon="@Icons.Material.Filled.SupportAgent">
+                                    본사 @it.HqStatus
+                                </MudChip>
+                            }
                         </div>
                     </div>
                 </MudListItem>
@@ -192,6 +203,15 @@ else
         _ => "접수됨",
     };
 
+    // 🔴 작4 B-4 — 본사 진행 색. 「완료」만 초록이다 — 처리중을 초록으로 하면 다 끝난 것처럼 읽힌다.
+    private static Color HqStatusColor(string? s) => s switch
+    {
+        "완료" => Color.Success,
+        "처리중" => Color.Info,
+        "보류" => Color.Warning,
+        _ => Color.Default,
+    };
+
     private static Color StatusColor(CsItem it) => it switch
     {
         { TerminalReason: "rejected" } or { TerminalReason: "failed" } => Color.Error,
@@ -222,6 +242,10 @@ else
         public string? TerminalReason { get; set; }
         public int AttemptCount { get; set; }
         public int ReplyCount { get; set; }
+
+        /// <summary>🔴 작4 B-4 — 본사 진행 상태(접수·처리중·보류·완료). null = 본사 미착수.</summary>
+        public string? HqStatus { get; set; }
+        public DateTime? HqStatusAt { get; set; }
     }
 
     private sealed class ApiMessage { public string? Message { get; set; } }

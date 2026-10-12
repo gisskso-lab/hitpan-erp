@@ -637,6 +637,199 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-W3-9 — 🔴 사장님 실측 반려 ①②③ 봉합: **45번이 안 들어간 서버**
+    //
+    // 10/12 사고: `bo_cs_outbound`·`bo_cs_retention_policy` 가 없는 운영 백오피스에서
+    //   ① 보관기한 조회가 500 · ② 선발신 저장이 500+빈 body(화면이 JSON 파싱 예외를 뱉었다) ·
+    //   ③ 🔴 **Pull 전체가 500 이라 「답」까지 같이 못 내려갔다.**
+    //   ③ 이 이 게이트의 과녁이다 — 답은 본사에 있었는데 **담은 응답이 죽었다.**
+    //
+    // 🔴 표를 **실제로 떼고** 잰다(글자로 흉내내면 아무것도 재지 않는다 — G-W3-5 와 같은 규율).
+    // 🔴 음성 대조군을 먼저 둔다: 표가 **있을 때** 답이 내려가는 것을 보고, 그 다음 떼고 또 본다.
+    //    그게 없으면 「원래 안 되던 것」을 봉합 덕이라 읽을 수 있다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-9 🔴 45번 표가 없어도 — 답은 내려가고 · 입구는 500 이 아니다 (+음성 대조)")]
+    public async Task G_W3_9_표가_없어도_하행이_안_끊긴다()
+    {
+        const string gate = "G-W3-9 표 없는 서버";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+        var admin = NewCsAdminController();
+
+        // ── 준비: 고객이 묻고 → 본사에 올라가고 → 본사가 답을 쓴다
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest
+            { Category = "how_to", SubTag = "etc", Body = "답이 오는지 봅니다" }, default));
+        await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        long ticketId;
+        await using (var bodb = await OpenBoAsync())
+        {
+            ticketId = await bodb.ExecuteScalarAsync<long>("SELECT id FROM bo_cs_tickets LIMIT 1");
+        }
+
+        Assert.True(StatusOf(await admin.Reply(ticketId,
+            new CsAdminController.ReplyRequest { Body = "이렇게 하시면 됩니다" }, default)) == 200);
+
+        // ── 🔴 음성 대조군 — 표가 **있을 때** 답이 내려간다
+        CsAdminController.ResetOutboundSchemaCache();
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        Assert.True(1 == await erp.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM cs_replies"),
+            gate + " 대조군: 표가 있는데 답이 안 내려왔다 — 이 게이트가 재는 축이 틀렸다.");
+
+        // 떼기 전 상태로 되돌린다(같은 답이 다시 내려오는지를 봐야 한다)
+        await erp.ExecuteAsync("DELETE FROM cs_replies");
+        await erp.ExecuteAsync("UPDATE cs_requests SET status = '전송완료' WHERE status = '답변도착'");
+
+        // ── 🔴 표 2개를 **실제로 뗀다** = 운영 백오피스의 현재 모양
+        await using (var bodb = await OpenBoAsync())
+        {
+            await bodb.ExecuteAsync("DROP TABLE IF EXISTS bo_cs_outbound");
+            await bodb.ExecuteAsync("DROP TABLE IF EXISTS bo_cs_retention_policy");
+        }
+        CsAdminController.ResetOutboundSchemaCache();
+
+        // ① 🔴 과녁 — 표가 없어도 **답은 내려간다**(사장님 증상 ③)
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        Assert.True(1 == await erp.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM cs_replies"),
+            gate + " 🔴 선발신 표가 없으니 **답까지 같이 막혔다.** Pull 응답이 통째로 죽은 것이다"
+          + " — 사장님 실측 반려 ③ 이 그대로 재발했다.");
+
+        Assert.Equal("답변도착", await erp.ExecuteScalarAsync<string>(
+            "SELECT status FROM cs_requests LIMIT 1"));
+
+        // ② 보관기한 조회가 **500 이 아니다**(사장님 증상 ①)
+        var ret = await admin.GetRetention(default);
+        Assert.True(StatusOf(ret) == 200,
+            gate + " 🔴 보관기한 조회가 " + StatusOf(ret) + " 다 — 사장님 증상 ① 「조회 실패: 500」 그대로다. " + Describe(ret));
+        Assert.True(Field<bool>(ValueOf(ret), "schemaPending"),
+            gate + " 표가 없는데 화면에 알려 주는 표식이 없다 — 사람이 왜 비었는지 모른다.");
+
+        // ③ 선발신 저장이 **사람이 읽을 답**으로 거절된다(사장님 증상 ②: 500 + 빈 body)
+        var create = await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = TenantCode, Purpose = "billing", Title = "안내", Body = "내용",
+        }, default);
+        Assert.True(StatusOf(create) == 503,
+            gate + " 🔴 선발신 저장이 " + StatusOf(create) + " 다 — 500 이면 화면이 해석하지 못하고"
+          + " 사장님 증상 ② 「The input does not contain any JSON tokens」 가 그대로 난다. " + Describe(create));
+        Assert.False(string.IsNullOrWhiteSpace(Field<string>(ValueOf(create), "message")),
+            gate + " 거절은 했는데 사람에게 **왜**를 말하지 않았다.");
+
+        // ④ 목록 입구도 산다(여기도 같은 표를 읽는다)
+        Assert.True(StatusOf(await admin.ListOutbound(null, default)) == 200,
+            gate + " 선발신 목록이 500 이다 — 되던 화면의 회귀다.");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W3-10 — 🔴 사장님 실측 반려 ④ 봉합: **본사 상태가 고객 화면까지 간다**
+    //
+    // 10/12 사고: 백오피스에서 「처리중」·「완료」로 바꿔도 ERP 는 영원히 몰랐다 —
+    //   하행 계약에 상태 칸이 없었고 받는 코드도 0건이었다(미구현).
+    // 🔴 사장님 결재: **별도 칸**이다. `cs_requests.status` 를 덮으면 안 된다 ⇒ 그것도 단언한다.
+    // 🔴 「고쳤다 ≠ 갔다」 — DB 값만 보지 않고 **고객 목록 응답**까지 본다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-10 🔴 본사 상태(처리중·완료)가 고객 목록까지 내려오고 · 쪽지 상태를 안 덮는다")]
+    public async Task G_W3_10_본사상태가_고객화면까지_간다()
+    {
+        const string gate = "G-W3-10 상태 하행";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+        var admin = NewCsAdminController();
+
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest
+            { Category = "how_to", SubTag = "etc", Body = "상태가 내려오는지 봅니다" }, default));
+        await CsOutboxSenderWorker.SendPendingAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        long ticketId;
+        await using (var bodb = await OpenBoAsync())
+        {
+            ticketId = await bodb.ExecuteScalarAsync<long>("SELECT id FROM bo_cs_tickets LIMIT 1");
+        }
+
+        // ── 🔴 음성 대조군 — 본사가 **아직 안 건드렸을 때** 고객 화면에 본사 상태가 없다
+        CsRequestController.ResetHqStatusColumnCache();
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        var before = ListFirst(await NewErpController(erp).List(default), gate);
+        Assert.True(before["hqStatus"] is null,
+            gate + " 대조군: 본사가 손대기 전인데 상태가 이미 있다 — 이 게이트가 아무것도 안 잰다.");
+
+        // ── ① 본사가 「처리중」으로 바꾼다 (실물 입구)
+        Assert.True(StatusOf(await admin.ChangeStatus(ticketId,
+            new CsAdminController.StatusRequest { To = "처리중" }, default)) == 200);
+
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        // 🔴 과녁 — **고객 목록 응답**에 보이나(DB 값만 보면 「갔다」를 증명하지 못한다)
+        var mid = ListFirst(await NewErpController(erp).List(default), gate);
+        Assert.Equal("처리중", (string?)mid["hqStatus"]);
+
+        // 🔴 쪽지 자신의 상태는 **안 덮였다** — 두 축이 섞이면 어느 쪽 사실인지 사라진다(#1)
+        Assert.Equal("전송완료", (string?)mid["status"]);
+
+        // ── ② 「완료」로 닫는다. 본사 규칙상 응대 유형이 먼저다(그 규칙도 여기서 함께 잰다)
+        Assert.True(StatusOf(await admin.ChangeStatus(ticketId,
+            new CsAdminController.StatusRequest { To = "완료" }, default)) == 400,
+            gate + " 응대 유형 없이 완료가 통과했다 — 본사 규칙이 풀렸다.");
+
+        Assert.True(StatusOf(await admin.SetHandledVia(ticketId,
+            new CsAdminController.HandledViaRequest { Via = "message" }, default)) == 200);
+        Assert.True(StatusOf(await admin.ChangeStatus(ticketId,
+            new CsAdminController.StatusRequest { To = "완료" }, default)) == 200);
+
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        Assert.Equal("완료", (string?)(ListFirst(await NewErpController(erp).List(default), gate))["hqStatus"]);
+
+        // ── ③ 🔴 멱등 + **뒤로 안 간다** — 같은 응답을 또 받아도 「처리중」으로 되돌아가지 않는다
+        await using (var bodb = await OpenBoAsync())
+        {
+            await bodb.ExecuteAsync(
+                "UPDATE bo_cs_tickets SET status = '처리중', completed_at = NULL WHERE id = @Id",
+                new { Id = ticketId });
+        }
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+        Assert.Equal("완료", (string?)(ListFirst(await NewErpController(erp).List(default), gate))["hqStatus"]);
+
+        // ── ④ 🔴 칸이 **없는 DB** 에서도 종전 화면이 산다(오늘 사고와 같은 모양을 새로 만들지 않는다)
+        await erp.ExecuteAsync("ALTER TABLE cs_requests DROP COLUMN hq_status");
+        await erp.ExecuteAsync("ALTER TABLE cs_requests DROP COLUMN hq_status_at");
+        CsRequestController.ResetHqStatusColumnCache();
+
+        var noCol = await NewErpController(erp).List(default);
+        Assert.True(StatusOf(noCol) == 200,
+            gate + " 🔴 hq_status 칸이 없을 때 쪽지 목록이 500 이다 — **되던 화면의 회귀**다. " + Describe(noCol));
+
+        // 칸이 없어도 수신 사이클이 죽지 않는다(답 수신까지 같이 막으면 오늘 사고의 재발이다)
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        await erp.ExecuteAsync("ALTER TABLE cs_requests ADD COLUMN hq_status varchar(10) NULL");
+        await erp.ExecuteAsync("ALTER TABLE cs_requests ADD COLUMN hq_status_at datetime(6) NULL");
+        CsRequestController.ResetHqStatusColumnCache();
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 다리 — 가짜 응답을 만들지 않는다. 실물 수신 컨트롤러를 부른다.
     // ══════════════════════════════════════════════════════════════
 
@@ -775,6 +968,18 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
 
         ImportErpShippingDdl();                 // ERP = 출하 DDL 실물(= 신규설치와 같은 판)
         await ApplyBackofficeSchemaAsync();     // 백오피스 = 실물 적용기
+
+        // 🔴 20261012작4 — **판정 캐시를 여기서 비운다.**
+        //   실측으로 배운 것: 이 메서드는 매 시험마다 DB 를 DROP + CREATE 하는데,
+        //   스키마 판정 캐시는 **DB 이름**으로 걸린다. 이름이 같으므로(`test_w3_bo`)
+        //   앞 시험이 「칸·표 없음」으로 캐시한 값이 **새로 만든 DB 에 그대로 적용**됐다 ⇒
+        //   G-W3-9 가 표를 뗀 뒤 G-W3-2·G-W3-8 이 503 을 받아 **봉합과 무관하게 빨강**이 됐다.
+        //   「DB 이름별 캐시」는 같은 이름이 다시 태어나는 경우를 못 가린다 — 그 자리를 여기서 막는다.
+        //   각 시험의 뒷정리에 맡기면 한 군데를 빼먹는 순간 다음 시험이 거짓으로 빨강이 된다.
+        CsAdminController.ResetOutboundSchemaCache();
+        CsAdminController.ResetPurgeColumnCache();
+        CsRequestController.ResetOriginColumnCache();
+        CsRequestController.ResetHqStatusColumnCache();
         return true;
     }
 

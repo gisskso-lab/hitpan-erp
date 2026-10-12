@@ -300,6 +300,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         List<ReplyDto>? replies;
         List<OutboundDto>? outbound;
         List<string>? doc_purged;
+        List<StatusDto>? statuses;
         try
         {
             var doc = JsonSerializer.Deserialize<PullResponse>(body,
@@ -307,6 +308,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
             replies = doc?.Replies;
             outbound = doc?.Outbound;
             doc_purged = doc?.PurgedOutbound;
+            statuses = doc?.Statuses;
         }
         catch (JsonException ex)
         {
@@ -325,6 +327,13 @@ public sealed class CsOutboxSenderWorker : BackgroundService
         //   열쇠만 내려온다(본문 0) · 멱등(이미 빈 것을 또 비워도 같다).
         if (doc_purged is { Count: > 0 })
             await PurgeOutboundCopiesAsync(db, doc_purged, logger, st);
+
+        // 🔴 20261012작4 B-2 — 본사 진행 상태를 **별도 칸**에 앉힌다 (사장님 실측 반려 ④).
+        //   답(replies)과 **독립**으로 처리한다: 답이 0건이어도 상태는 바뀔 수 있고
+        //   (예 — 전화로 응대하고 완료로 닫은 건), 그때도 고객 화면이 움직여야 한다.
+        //   종전엔 아래 `if (replies is null …) return;` 뒤에 뭘 붙이면 그 경우가 조용히 빠졌다.
+        if (statuses is { Count: > 0 })
+            await ApplyHqStatusesAsync(db, statuses, logger, st);
 
         if (replies is null || replies.Count == 0) return;
 
@@ -409,6 +418,17 @@ public sealed class CsOutboxSenderWorker : BackgroundService
 
         /// <summary>🔴 [4] V-1 — 본사가 폐기한 선발신의 **열쇠만**. 고객 사본 본문을 비우라는 지시다.</summary>
         public List<string>? PurgedOutbound { get; set; }
+
+        /// <summary>🔴 20261012작4 B-2 — 본사 진행 상태(처리중·완료). 옛 판 응답에는 없다 ⇒ null 이면 건너뛴다.</summary>
+        public List<StatusDto>? Statuses { get; set; }
+    }
+
+    /// <summary>본사 진행 상태 — 열쇠·상태·시각 셋뿐. 담당자 등 본사 내부 값은 안 내려온다(#18·#22).</summary>
+    public sealed class StatusDto
+    {
+        public string CsRequestId { get; set; } = "";
+        public string? HqStatus { get; set; }
+        public DateTime? ChangedAt { get; set; }
     }
 
     private sealed class ReplyDto
@@ -582,6 +602,70 @@ public sealed class CsOutboxSenderWorker : BackgroundService
     }
 
     // ══════════════════════════════════════════════════════════════
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작4 B-2 — 본사 진행 상태를 고객 ERP 에 앉힌다 (사장님 실측 반려 ④)
+    //
+    // 사고: 백오피스에서 「처리중」·「완료」로 바꿔도 ERP 는 영원히 몰랐다. 버그가 아니라
+    //   **하행 계약에 상태 칸이 없었다** — 상태를 받을 코드도 0건이었다(선행검증서 §2-4).
+    //
+    // 🔴 사장님 결재(10/12): **별도 칸**이다. `cs_requests.status`(접수·전송중·전송완료·
+    //   답변도착·종결)는 **한 글자도 안 덮는다**(#1). 본사 진행은 `hq_status` 에만 쓴다 ⇒
+    //   「답변도착」이 「완료」에 덮여 어느 쪽 사실인지 사라지는 일이 없다.
+    // 🔴 멱등 — 같은 값을 다시 받아도 결과가 같다. Pull 은 14일 창을 매 주기 통째로 내려보낸다.
+    // 🔴 뒤로 가지 않는다 — 더 이른 `changedAt` 은 무시한다. 응답 순서가 어긋나도
+    //   「완료」가 「처리중」으로 되돌아가 보이지 않는다.
+    // 🔴 칸이 없으면 **조용히 건너뛴다.** 오늘 사고가 「나중에 더한 칸을 조건 없이 읽어서」 났다 —
+    //   마이그가 아직 안 돈 순간(업데이트 직후 한 번)에 답 수신까지 같이 죽이지 않는다.
+    // ══════════════════════════════════════════════════════════════
+    public static async Task ApplyHqStatusesAsync(MySqlConnection db, List<StatusDto> items,
+        ILogger logger, CancellationToken st)
+    {
+        if (!await HasHqStatusColumnAsync(db))
+        {
+            logger.LogWarning("[CS수신] hq_status 칸 미적용 — 본사 상태 {N}건 보류(다음 주기 재시도)", items.Count);
+            return;
+        }
+
+        var applied = 0;
+        foreach (var s in items)
+        {
+            if (st.IsCancellationRequested) break;
+            if (string.IsNullOrWhiteSpace(s.CsRequestId) || string.IsNullOrWhiteSpace(s.HqStatus)) continue;
+            // 본사 어휘 그대로 보관하되 길이는 막는다(화면이 깨지지 않게).
+            var status = s.HqStatus.Trim();
+            if (status.Length > 10) continue;
+
+            var n = await db.ExecuteAsync(@"
+                UPDATE cs_requests
+                   SET hq_status    = @Status,
+                       hq_status_at = @ChangedAt
+                 WHERE cs_request_id = @Id
+                   AND (hq_status IS NULL
+                     OR hq_status <> @Status
+                     OR hq_status_at IS NULL)
+                   AND (hq_status_at IS NULL
+                     OR @ChangedAt IS NULL
+                     OR @ChangedAt >= hq_status_at)",
+                new { Id = s.CsRequestId, Status = status, ChangedAt = s.ChangedAt });
+
+            if (n > 0) applied++;
+        }
+
+        if (applied > 0)
+            logger.LogInformation("[CS수신] 본사 상태 {N}건 반영", applied);
+    }
+
+    /// <summary>`hq_status` 칸이 이 DB 에 실재하나. 업데이트 직후 마이그 전 1회를 위해 캐시하지 않는다.</summary>
+    private static async Task<bool> HasHqStatusColumnAsync(MySqlConnection db)
+    {
+        var found = await db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = 'cs_requests'
+               AND column_name IN ('hq_status', 'hq_status_at')");
+        return found == 2;
+    }
     // 🔴 [4] V-1 봉합 — 본사가 폐기한 선발신의 **고객 사본 본문을 비운다**
     //
     // 왜: `PurgeOutbound` 는 전달 뒤에도 듣는다(설계대로 — 「관리 후 임의 폐기」). 그런데

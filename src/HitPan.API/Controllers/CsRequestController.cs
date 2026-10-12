@@ -98,6 +98,30 @@ public class CsRequestController : ControllerBase
         return present;
     }
 
+    // 🔴 20261012작4 B-3 — 본사 진행 상태 칸(DB-145)도 같은 모양으로 묻는다.
+    //   캐시가 **DB 이름별**인 이유는 origin 과 같다 — 게이트가 칸을 실제로 떼고 다시 묻는다.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _hqStatusColByDb = new();
+
+    private async Task<bool> HasHqStatusColumnsAsync()
+    {
+        var key = _db.Database ?? "";
+        if (_hqStatusColByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await _db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'cs_requests'
+               AND column_name IN ('hq_status', 'hq_status_at')");
+
+        var present = found == 2;
+        if (!present)
+            _logger.LogWarning("[CS쪽지] cs_requests.hq_status 칸 없음(DB-145 미적용) — 본사 진행 상태 없이 돈다");
+        _hqStatusColByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>게이트가 칸을 떼고 다시 묻게 한다(제품 경로에서는 부르지 않는다).</summary>
+    public static void ResetHqStatusColumnCache() => _hqStatusColByDb.Clear();
+
     /// <summary>
     /// 시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.
     /// <para>🔴 <c>public</c> 인 이유: 게이트 G-W3-5 가 **칸을 실제로 떼고** 다시 물어야 한다
@@ -207,6 +231,9 @@ public class CsRequestController : ControllerBase
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         var hasOrigin = await HasOriginColumnAsync();
+        // 🔴 20261012작4 B-3 — 본사 진행 상태(DB-145)도 **같은 모양**으로 조건부로 읽는다.
+        //   칸이 없는 DB(업데이트 직후 마이그 전 1회)에서 종전 화면이 죽지 않게 — 작3 origin 선례 그대로.
+        var hasHqStatus = await HasHqStatusColumnsAsync();
         var rows = await _db.QueryAsync($@"
             SELECT r.cs_request_id   AS csRequestId,
                    r.category        AS category,
@@ -218,6 +245,11 @@ public class CsRequestController : ControllerBase
                    --   고객이 **자기가 쓰지 않은 쪽지**를 자기 문의와 구별해야 한다.
                    --   칸이 아직 없는 DB 에서는 'local' 로 대체한다(위 HasOriginColumnAsync).
                    {(hasOrigin ? "r.origin" : "'local'")} AS origin,
+                   -- 🔴 20261012작4 B-3 — 본사 진행 상태(DB-145). `status` 와 **다른 축**이다:
+                   --   status = 이 쪽지가 본사까지 갔나 · hqStatus = 본사가 어디까지 처리했나.
+                   --   NULL = 본사 미착수(종전 모양 그대로 보인다).
+                   {(hasHqStatus ? "r.hq_status" : "NULL")}    AS hqStatus,
+                   {(hasHqStatus ? "r.hq_status_at" : "NULL")} AS hqStatusAt,
                    o.sent_at         AS sentAt,
                    o.terminal_reason AS terminalReason,
                    o.attempt_count   AS attemptCount,
