@@ -463,7 +463,7 @@ public sealed class BackofficeCsOutboundGateTests
     // ══════════════════════════════════════════════════════════════
 
     private static CsAdminController NewController(CsGateDb env) =>
-        new(env.Config(), NullLogger<CsAdminController>.Instance) { ControllerContext = AdminContext() };
+        new(env.Config(), NullLogger<CsAdminController>.Instance, NullLoggerFactory.Instance) { ControllerContext = AdminContext() };
 
     /// <summary>실물 컨트롤러가 요구하는 `sub` 클레임을 가진 문맥 — 없으면 Forbid 가 돈다.</summary>
     private static ControllerContext AdminContext()

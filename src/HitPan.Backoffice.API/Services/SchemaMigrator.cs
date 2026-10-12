@@ -39,7 +39,14 @@ public sealed class SchemaMigrator
     /// 스크립트 폴더의 *.sql을 번호순으로 적용. 환경변수 HITPAN_BO_AUTO_MIGRATE=1 일 때만 호출되도록
     /// Program.cs에서 게이트한다.
     /// </summary>
-    public async Task ApplyAsync(CancellationToken ct = default)
+    /// <param name="fileFilter">
+    /// 🔴 20261012작5 — <b>적용할 파일을 좁히는 체</b>(파일명을 받아 true 면 적용). <c>null</c> = 전부(종전 동작).
+    /// <para>왜 필요한가: 사장님 실측 — 운영 백오피스에 45번이 안 들어가 CS 쪽지보내기가 동작하지 않았다.
+    /// 전체 적용은 <c>HITPAN_BO_AUTO_MIGRATE</c>(기본 off · 사장님 통제권 · #29)로 남겨 두고,
+    /// <b>CS 기능이 자기 자료방만</b> 사람이 누른 순간에 준비할 수 있게 한다.
+    /// 기본값 <c>null</c> 이라 기동 경로(Program.cs)는 **한 글자도 안 바뀐다**(#1).</para>
+    /// </param>
+    public async Task ApplyAsync(CancellationToken ct = default, Func<string, bool>? fileFilter = null)
     {
         if (!Directory.Exists(_scriptsDir))
         {
@@ -85,6 +92,8 @@ public sealed class SchemaMigrator
 
         var files = Directory.GetFiles(_scriptsDir, "*.sql")
             .OrderBy(f => Path.GetFileName(f), StringComparer.Ordinal)
+            // 🔴 작5 — 체가 있으면 거기까지만. 없으면 전부(종전 동작 그대로).
+            .Where(f => fileFilter is null || fileFilter(Path.GetFileName(f)))
             .ToList();
 
         if (files.Count == 0)

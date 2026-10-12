@@ -49,7 +49,7 @@ public sealed class CsKbGateTests : IDisposable
         ControllerContext = Ctx(actor),
     };
 
-    private CsAdminController Cs(string actor) => new(Config(), NullLogger<CsAdminController>.Instance)
+    private CsAdminController Cs(string actor) => new(Config(), NullLogger<CsAdminController>.Instance, NullLoggerFactory.Instance)
     {
         ControllerContext = Ctx(actor),
     };

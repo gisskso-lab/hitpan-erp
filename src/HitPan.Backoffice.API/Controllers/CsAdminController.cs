@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Dapper;
 using HitPan.Backoffice.API.Security;
+using HitPan.Backoffice.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -88,10 +89,14 @@ public class CsAdminController : ControllerBase
                             ELSE 2 END AS stage
                   FROM bo_cs_tickets) s";
 
-    public CsAdminController(IConfiguration config, ILogger<CsAdminController> logger)
+    // 🔴 작5 — ILoggerFactory 는 「지금 준비하기」가 적용기에 넘길 로거용(추가만 · 기존 인자 무변).
+    private readonly ILoggerFactory _loggerFactory;
+
+    public CsAdminController(IConfiguration config, ILogger<CsAdminController> logger, ILoggerFactory loggerFactory)
     {
         _config = config;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     // ── 목록 — 상태·유형 필터 + 회사명 검색 + 「내 응대함」(C-2 · mine=1) ──
@@ -946,6 +951,102 @@ public class CsAdminController : ControllerBase
                     + "본사 담당자에게 알려 주세요(백오피스 스키마 45번 적용 필요).",
         });
 
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261012작5 — **「지금 준비하기」** (사장님 실측: 메시지는 뜨는데 동작 안 됨)
+    //
+    // 작4 가 500 을 사람이 읽을 문장으로 바꿨다. 그런데 사장님이 보신 것은
+    //   「자료방이 아직 준비되지 않았습니다」 + **동작 안 됨** 이었다 ⇒ 봉합이 **막다른 길**을 만들었다.
+    //   안 터지는 것과 되는 것은 다른 사실이고, 사장님이 원한 건 **되는 것**이다.
+    //
+    // 왜 기동 자동적용으로 풀지 않았나
+    //   `HITPAN_BO_AUTO_MIGRATE` 를 켜거나 기본 on 으로 바꾸는 것은 **사장님 통제권**이다
+    //   (#29 · 10/11 작1 작업지시서 §금지에 명시). 그 스위치는 **한 글자도 안 건드린다** —
+    //   켜면 그 서버의 **모든** 미적용 스키마가 한 번에 돈다. 그건 CS 한 기능의 결정이 아니다.
+    //
+    // 그래서 이렇게 한다 — 🔴 **반자동**(사장님 헌법 「100% 자동화 없음」)
+    //   · 본사 어드민이 **직접 누른다**(이 컨트롤러는 `PlatformAdmin` 정책 뒤에 있다)
+    //   · 적용 범위는 **CS 자료방 파일 하나**(`45_backoffice_cs_outbound_retention.sql`)뿐 —
+    //     다른 미적용 스키마는 **건드리지 않는다**. 전체 적용은 여전히 사장님 스위치다.
+    //   · 멱등 — 이미 있으면 아무것도 안 바뀐다(`CREATE TABLE IF NOT EXISTS` · `INSERT IGNORE`)
+    //   · 기존 자료를 바꾸는 DML **0건**(45번 실독 — 선행검증서 §2-3 보강)
+    //   · MySQL 8 보정 경로를 **그대로 탄다**(운영은 MySQL 8 · CI `bo-mysql8-gate` 가 문다)
+    //   · 전후를 **직접 세어** 돌려준다 — 「했다」가 아니라 「생겼다」를 말한다
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>작5 — CS 자료방(45번)만 지금 준비한다. 본사 어드민이 누르는 반자동 입구.</summary>
+    [HttpPost("schema/prepare")]
+    public async Task<IActionResult> PrepareCsSchema(CancellationToken ct)
+    {
+        var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(adminId)) return Forbid();
+
+        var scriptsDir = Environment.GetEnvironmentVariable("HITPAN_BO_SCHEMA_DIR")
+            ?? Path.Combine(AppContext.BaseDirectory, "installer", "backoffice");
+        var target = "45_backoffice_cs_outbound_retention.sql";
+
+        if (!System.IO.File.Exists(Path.Combine(scriptsDir, target)))
+        {
+            // 파일이 없으면 준비할 수 없다 — 추측하지 않고 그대로 말한다.
+            _logger.LogError("[CS어드민] 준비하기 — 스키마 파일 없음 {Dir}/{File}", scriptsDir, target);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "자료방 설계 파일을 이 서버에서 찾지 못했습니다 — 배포가 끝났는지 확인이 필요합니다.",
+            });
+        }
+
+        var cs = _config.GetConnectionString("BackofficeDb")
+                 ?? _config.GetConnectionString("Default")
+                 ?? throw new InvalidOperationException("ConnectionStrings:BackofficeDb 미설정");
+
+        int before, after;
+        await using (var db = await OpenAsync(ct)) before = await CountCsTablesAsync(db);
+
+        try
+        {
+            var migLogger = _loggerFactory.CreateLogger<SchemaMigrator>();
+            await new SchemaMigrator(cs, scriptsDir, migLogger)
+                .ApplyAsync(ct, f => string.Equals(f, target, StringComparison.Ordinal));
+        }
+        catch (Exception ex)
+        {
+            // 빈 catch 금지(#15). 실패는 숨기지 않는다 — 숨기면 다음 사람이 「됐다」로 읽는다.
+            _logger.LogError(ex, "[CS어드민] 준비하기 실패 — 적용기 예외");
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "자료방을 준비하지 못했습니다. 본사 담당자에게 알려 주세요(적용 기록에 사유가 남았습니다).",
+            });
+        }
+
+        ResetOutboundSchemaCache();
+        ResetPurgeColumnCache();
+        await using (var db = await OpenAsync(ct)) after = await CountCsTablesAsync(db);
+
+        var ready = after == 2;
+        _logger.LogInformation(
+            "[CS어드민] 준비하기 — 표 {Before}→{After}건 · 결과 {R} · 누른 사람 있음",
+            before, after, ready ? "준비됨" : "미완");
+
+        return Ok(new
+        {
+            success = ready,
+            ready,
+            tablesBefore = before,
+            tablesAfter = after,
+            message = ready
+                ? "자료방을 준비했습니다 — 이제 보관기한 설정과 쪽지 보내기가 됩니다."
+                : "준비를 돌렸으나 자료방이 아직 없습니다 — 본사 담당자에게 알려 주세요.",
+        });
+    }
+
+    /// <summary>CS 자료방 표가 몇 개 있나(0~2). 「했다」 대신 「생겼다」를 세는 눈.</summary>
+    private static async Task<int> CountCsTablesAsync(MySqlConnection db) =>
+        await db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema = DATABASE()
+               AND table_name IN ('bo_cs_outbound', 'bo_cs_retention_policy')");
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {
         var cs = _config.GetConnectionString("BackofficeDb")

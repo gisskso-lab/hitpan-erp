@@ -91,6 +91,27 @@
 {
     <MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
         <MudText Typo="Typo.h6" Class="mb-1">고객사에 쪽지 보내기</MudText>
+
+        @* 🔴 20261012작5 — 사장님 실측: 「자료방이 아직 준비되지 않았습니다」가 뜨는데 **동작 안 됨**.
+           작4 가 500 을 사람 말로 바꿨지만 **막다른 길**이었다. 여기서 끝낼 수 있게 한다.
+           누르는 것은 사람이다(반자동 · 사장님 헌법) — 자동으로 돌지 않는다. *@
+        @if (_csSchemaPending)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                <MudText Typo="Typo.body2" Class="mb-2">
+                    이 서버에는 <b>쪽지 보관기한·선발신 기능의 자료방</b>이 아직 준비되지 않았습니다.
+                    준비하면 보관기한 설정과 쪽지 보내기가 바로 됩니다 —
+                    <b>기존 자료는 하나도 바뀌지 않습니다</b>(새 자료방 2개를 만들 뿐입니다).
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                           Disabled="@_csSchemaPreparing"
+                           StartIcon="@Icons.Material.Filled.Build"
+                           OnClick="PrepareCsSchemaAsync">
+                    @(_csSchemaPreparing ? "준비 중…" : "지금 준비하기")
+                </MudButton>
+            </MudAlert>
+        }
+
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
             쓰신 쪽지는 <b>전달 대기함</b>에 저장됩니다. 고객사 ERP 수신 통로가 열리면 쌓인 쪽지가 자동으로 나갑니다
             — 지금은 아직 고객사 화면에 뜨지 않습니다.
@@ -568,6 +589,43 @@
         }
     }
 
+    // 🔴 작5 — 자료방이 아직 없나. 서버가 `schemaPending` 으로 말해 준다(작4 가 세운 표식).
+    private bool _csSchemaPending;
+    private bool _csSchemaPreparing;
+
+    /// <summary>작5 — CS 자료방(45번)만 지금 준비한다. 사람이 눌러야 돈다(반자동).</summary>
+    private async Task PrepareCsSchemaAsync()
+    {
+        _csSchemaPreparing = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync("api/admin/cs/schema/prepare", null);
+            var body = await res.Content.ReadFromJsonAsync<PrepareResponse>();
+
+            // 🔴 「했다」가 아니라 「생겼다」를 본다 — 서버가 전후 표 개수를 세어 준다.
+            if (res.IsSuccessStatusCode && body?.Ready == true)
+            {
+                Snackbar.Add(body.Message ?? "자료방을 준비했습니다.", Severity.Success);
+                _csSchemaPending = false;
+                await LoadOutboundAsync();
+                await LoadRetentionAsync();
+            }
+            else
+            {
+                Snackbar.Add(body?.Message ?? "준비하지 못했습니다.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"준비하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _csSchemaPreparing = false;
+        }
+    }
+
     private async Task LoadOutboundAsync()
     {
         try
@@ -576,6 +634,8 @@
             var res = await http.GetFromJsonAsync<OutboundListResponse>("api/admin/cs/outbound");
             _outbound = res?.Items ?? new();
             _outboundPending = _outbound.Count(o => o.DeliveredAt is null && o.CanceledAt is null);
+            // 자료방이 없으면 서버가 빈 목록 + schemaPending 을 준다(작4 A-1).
+            _csSchemaPending = res?.SchemaPending == true;
         }
         catch (Exception ex)
         {
@@ -740,7 +800,11 @@
     }
 
     private sealed class TenantLookupResponse { public List<TenantPick>? Items { get; set; } }
-    private sealed class OutboundListResponse { public List<OutboundRow>? Items { get; set; } }
+    // 🔴 작5 — `SchemaPending` 추가(칸 더하기만 · 기존 키 무변 · #1). 자료방이 없으면 서버가 true 를 준다.
+    private sealed class OutboundListResponse { public List<OutboundRow>? Items { get; set; } public bool SchemaPending { get; set; } }
+
+    // 🔴 작5 — 「지금 준비하기」 응답. `Ready` 는 서버가 **표를 세어** 준 값이다(「했다」가 아니라 「생겼다」).
+    private sealed class PrepareResponse { public bool Ready { get; set; } public int TablesBefore { get; set; } public int TablesAfter { get; set; } public string? Message { get; set; } }
     private sealed class RetentionResponse { public RetentionPolicy? Policy { get; set; } }
     private sealed class RetentionPolicy { public int? RetainDays { get; set; } }
     private sealed class PurgeCandidatesResponse { public int? RetainDays { get; set; } public List<PurgeCandidateRow>? Items { get; set; } }

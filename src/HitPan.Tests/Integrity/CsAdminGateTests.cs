@@ -29,7 +29,7 @@ public sealed class CsAdminGateTests : IDisposable
             {
                 ["ConnectionStrings:BackofficeDb"] = _h.DbConnString(),
             }).Build(),
-            NullLogger<CsAdminController>.Instance)
+            NullLogger<CsAdminController>.Instance, NullLoggerFactory.Instance)
         {
             ControllerContext = new ControllerContext
             {
