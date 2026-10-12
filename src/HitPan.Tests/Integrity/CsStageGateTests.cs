@@ -39,7 +39,7 @@ public sealed class CsStageGateTests : IDisposable
             ["License:Pepper"] = Pepper,
         }).Build();
 
-    private CsAdminController Cs(string actor) => new(Config(), NullLogger<CsAdminController>.Instance)
+    private CsAdminController Cs(string actor) => new(Config(), NullLogger<CsAdminController>.Instance, NullLoggerFactory.Instance)
     {
         ControllerContext = new ControllerContext
         {

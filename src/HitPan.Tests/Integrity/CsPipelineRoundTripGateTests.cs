@@ -830,6 +830,132 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W3-11 — 🔴 작5: **막다른 길을 끝까지 연다** (사장님 실측 「메시지는 뜨는데 동작 안 됨」)
+    //
+    // 작4 는 500 을 사람 말로 바꿨다. 그런데 사장님이 본 것은 문장 + **동작 안 됨** 이었다 ⇒
+    //   봉합이 **막다른 길**을 만들었다. 안 터지는 것과 되는 것은 다른 사실이다.
+    //
+    // 이 게이트가 무는 것은 「메시지가 뜨나」가 아니라 **「누르면 실제로 되나」**다:
+    //   표를 떼고 → 입구가 503 이고 → 준비하기를 누르고 → 표가 생기고 →
+    //   **저장이 실제로 성공하고** → 보관기한 설정까지 된다.
+    //
+    // 🔴 범위 음성 대조군 — 준비하기는 **CS 파일 하나만** 적용해야 한다.
+    //   전체를 돌리면 사장님 스위치(`HITPAN_BO_AUTO_MIGRATE` · #29)를 코드가 빼앗는 것이다.
+    //   그래서 「다른 파일은 안 건드렸나」를 `_schema_migrations` 로 직접 센다.
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W3-11 🔴 자료방이 없을 때 「지금 준비하기」로 실제로 되게 된다 · CS 파일 하나만 적용(+음성 대조)")]
+    public async Task G_W3_11_준비하기가_막다른길을_연다()
+    {
+        const string gate = "G-W3-11 준비하기";
+        if (!await ReadyAsync(gate)) return;
+
+        await SeedBackofficeTenantAsync();
+        var admin = NewCsAdminController();
+
+        // ── 표 2개를 **실제로 뗀다** = 운영 모양(45번 미적용). 이력도 지워 재적용이 가능하게 둔다.
+        int migRowsBefore;
+        await using (var bodb = await OpenBoAsync())
+        {
+            await bodb.ExecuteAsync("DROP TABLE IF EXISTS bo_cs_outbound");
+            await bodb.ExecuteAsync("DROP TABLE IF EXISTS bo_cs_retention_policy");
+            await bodb.ExecuteAsync(
+                "DELETE FROM _schema_migrations WHERE file_name = '45_backoffice_cs_outbound_retention.sql'");
+
+            // 🔴 **범위를 재려면 「다른 파일도 미적용」 상태가 있어야 한다.**
+            //   1차 실측에서 배운 것: `ReadyAsync` 가 이미 전 파일을 적용해 두므로, 범위 체를 빼도
+            //   나머지는 **해시 일치로 건너뛰고** 45번만 돈다 ⇒ 적용 건수가 양쪽 다 1 이었다.
+            //   즉 종전 단언은 **체를 빼도 초록**이었다(게이트가 아무것도 안 재는 그 모양).
+            //   그래서 44번 이력도 지워 **대기 상태**로 만든다. 그러면
+            //     · 체가 있으면 → 45번만 적용 · 44번 이력은 **여전히 없다**
+            //     · 체가 없으면 → 44번까지 적용돼 이력이 생긴다 = FAIL
+            //   44번은 `ADD COLUMN IF NOT EXISTS` 라 재적용이 무해하다(멱등).
+            await bodb.ExecuteAsync(
+                "DELETE FROM _schema_migrations WHERE file_name = '44_backoffice_pricing_plan_columns.sql'");
+
+            migRowsBefore = await bodb.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM _schema_migrations");
+        }
+        CsAdminController.ResetOutboundSchemaCache();
+        CsAdminController.ResetPurgeColumnCache();
+
+        // ① 음성 축 — 준비 전에는 저장이 503 이고, 목록이 `schemaPending` 을 말한다
+        var blocked = await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = TenantCode, Purpose = "billing", Title = "안내", Body = "준비 전",
+        }, default);
+        Assert.True(StatusOf(blocked) == 503,
+            gate + " 준비 전인데 저장이 503 이 아니다 — 이 게이트가 아무것도 안 잰다. " + Describe(blocked));
+
+        var listedBefore = await admin.ListOutbound(null, default);
+        Assert.True(Field<bool>(ValueOf(listedBefore), "schemaPending"),
+            gate + " 준비 전인데 화면에 알려 줄 표식이 없다.");
+
+        // ── ② 🔴 과녁 — 누른다
+        var prep = await admin.PrepareCsSchema(default);
+        Assert.True(StatusOf(prep) == 200,
+            gate + " 🔴 준비하기가 " + StatusOf(prep) + " 다 — 막다른 길이 그대로다. " + Describe(prep));
+        Assert.True(Field<bool>(ValueOf(prep), "ready"),
+            gate + " 🔴 준비하기가 ready=false 다. " + Describe(prep));
+
+        // 🔴 「했다」가 아니라 「생겼다」 — 서버가 전후를 세어 줬나
+        Assert.Equal(0, Field<int>(ValueOf(prep), "tablesBefore"));
+        Assert.Equal(2, Field<int>(ValueOf(prep), "tablesAfter"));
+
+        // ── ③ 🔴 범위 음성 대조군 — **CS 파일 하나만** 적용됐나
+        await using (var bodb = await OpenBoAsync())
+        {
+            var after = await bodb.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM _schema_migrations");
+            Assert.True(after == migRowsBefore + 1,
+                gate + " 🔴 준비하기가 " + (after - migRowsBefore) + "개 파일을 적용했다(기대 1개). "
+              + "전체를 돌리면 사장님 스위치(#29)를 코드가 빼앗는 것이다.");
+
+            Assert.Equal(1, await bodb.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM _schema_migrations WHERE file_name = '45_backoffice_cs_outbound_retention.sql'"));
+
+            // 🔴 **이 줄이 범위를 무는 눈이다** — 44번은 대기 상태로 뒀는데 손대지 않았어야 한다.
+            //   체를 빼면 여기서 1 이 나와 FAIL 한다(1차 실측에서 종전 단언이 못 잡은 자리).
+            Assert.Equal(0, await bodb.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM _schema_migrations WHERE file_name = '44_backoffice_pricing_plan_columns.sql'"));
+
+            // 45번이 더하는 **칸 3개**까지 섰나(표만 보면 절반만 재는 것이다)
+            Assert.Equal(3, await bodb.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema = DATABASE() AND table_name = 'bo_cs_tickets'
+                   AND column_name IN ('purged_at','purged_by','purge_reason')"));
+
+            // 보관기한 기본 1행이 무기한으로 앉았나(45번 INSERT IGNORE)
+            Assert.Equal(1, await bodb.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM bo_cs_retention_policy WHERE policy_id = 1"));
+        }
+
+        // ── ④ 🔴 **실제로 되나** — 「고쳤다 ≠ 됐다」의 자리. 저장이 성공해야 한다
+        var saved = await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = TenantCode, Purpose = "billing", Title = "준비 후", Body = "이제 저장돼야 한다",
+        }, default);
+        Assert.True(StatusOf(saved) == 200,
+            gate + " 🔴 준비했는데 저장이 " + StatusOf(saved) + " 다 — 사장님이 보신 「동작 안 됨」 그대로다. " + Describe(saved));
+        Assert.False(Field<bool>(ValueOf(saved), "delivered"));   // 작2 약속 무변 — 아직 「보냈다」가 아니다
+
+        // 보관기한 조회·설정도 열렸나
+        var ret = await admin.GetRetention(default);
+        Assert.True(StatusOf(ret) == 200, gate + " 보관기한 조회가 200 이 아니다. " + Describe(ret));
+        Assert.True(StatusOf(await admin.SetRetention(
+            new CsAdminController.RetentionRequest { RetainDays = 90 }, default)) == 200,
+            gate + " 보관기한 설정이 열리지 않았다.");
+
+        // ── ⑤ 멱등 — 두 번 눌러도 같다(사람이 두 번 누른다)
+        var again = await admin.PrepareCsSchema(default);
+        Assert.True(StatusOf(again) == 200 && Field<bool>(ValueOf(again), "ready"),
+            gate + " 두 번째 준비하기가 깨졌다 — 사람은 두 번 누른다.");
+        await using (var bodb = await OpenBoAsync())
+        {
+            Assert.Equal(90, await bodb.ExecuteScalarAsync<int?>(
+                "SELECT retain_days FROM bo_cs_retention_policy WHERE policy_id = 1"));
+        }
+    }
     // 다리 — 가짜 응답을 만들지 않는다. 실물 수신 컨트롤러를 부른다.
     // ══════════════════════════════════════════════════════════════
 
@@ -1075,7 +1201,7 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
             new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "platform_admin"),
         }, "gate");
         var ctx = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(identity) };
-        return new CsAdminController(BoConfig(), NullLogger<CsAdminController>.Instance)
+        return new CsAdminController(BoConfig(), NullLogger<CsAdminController>.Instance, NullLoggerFactory.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = ctx },
         };
