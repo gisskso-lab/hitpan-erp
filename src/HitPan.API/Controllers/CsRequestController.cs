@@ -252,7 +252,20 @@ public class CsRequestController : ControllerBase
                    {(hasHqStatus ? "r.hq_status_at" : "NULL")} AS hqStatusAt,
                    o.sent_at         AS sentAt,
                    o.terminal_reason AS terminalReason,
-                   o.attempt_count   AS attemptCount,
+                   -- 🔴 20261012작6 — **`COALESCE` 가 없으면 목록이 통째로 깨진다** (사장님 실측)
+                   --
+                   -- 사고: 본사 선발신 쪽지(`origin='hq'`)는 **올려보낼 일이 없어 `cs_outbox` 행이 없다.**
+                   --   그래서 이 LEFT JOIN 이 NULL 을 주고, 화면 모델의 `public int AttemptCount`
+                   --   (비널러블)에 JSON `null` 이 들어가 **역직렬화가 터진다** ⇒ 목록 전체가
+                   --   「문의 목록을 불러오지 못했습니다」 로 바뀐다. 쪽지 한 건이 화면 전부를 가린다.
+                   --
+                   -- 🔴 왜 게이트가 못 잡았나: G-W3-2 는 **컨트롤러를 바로 불러** 사전으로 읽었다.
+                   --   화면이 쓰는 **JSON → 비널러블 모델** 경로를 아무도 안 지나갔다
+                   --   (「만드는 쪽만 재면 전부 통과하고도 반려난다」 — 8/27 작7 교훈과 같은 모양).
+                   --   ⇒ G-W3-12 가 화면 모델 모양으로 역직렬화해서 이 자리를 문다.
+                   --
+                   -- 숫자 칸은 **서버가 0 을 보장한다** — 클라이언트 모양에 기대지 않는다.
+                   COALESCE(o.attempt_count, 0) AS attemptCount,
                    (SELECT COUNT(*) FROM cs_replies p
                      WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS replyCount
               FROM cs_requests r

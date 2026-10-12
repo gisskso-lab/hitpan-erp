@@ -956,6 +956,135 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
                 "SELECT retain_days FROM bo_cs_retention_policy WHERE policy_id = 1"));
         }
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W3-12 — 🔴 **화면이 읽을 수 있나** (사장님 실측: 알림은 뜨는데 목록이 안 열림)
+    //
+    // 사고(2026-10-12): 본사 선발신이 ERP 에 앉은 뒤 쪽지 목록이 통째로
+    //   「문의 목록을 불러오지 못했습니다」가 됐다. 원인은 한 칸이었다 —
+    //   선발신 행(`origin='hq'`)은 **올려보낼 일이 없어 `cs_outbox` 행이 없다** ⇒
+    //   `LEFT JOIN` 이 `attempt_count` 에 NULL 을 주고, 화면 모델의
+    //   `public int AttemptCount`(**비널러블**)에 JSON `null` 이 들어가 역직렬화가 터졌다.
+    //   **쪽지 한 건이 화면 전부를 가렸다.**
+    //
+    // 🔴 왜 G-W3-2 가 못 잡았나 — 이 게이트의 존재 이유다.
+    //   G-W3-2 는 **컨트롤러를 바로 불러** 결과를 사전(dictionary)으로 읽었다.
+    //   화면이 실제로 지나는 **JSON → 비널러블 모델** 경로를 아무도 안 지나갔다.
+    //   「만드는 쪽만 재면 9건 전부 통과하고도 반려난다」(8/27 작7) 와 같은 모양이고,
+    //   「고쳤다 ≠ 갔다」의 **갔다** 쪽이다.
+    //
+    // ⇒ 그래서 이 게이트는 응답을 **직렬화한 뒤 화면 모델 모양으로 역직렬화**한다.
+    //   아래 `WebCsItem` 은 `CsRequestPage.razor` 의 `CsItem` 과 **같은 널 허용성**을 쓴다
+    //   (특히 `AttemptCount`·`ReplyCount` 는 **비널러블 int**). 거기가 과녁이다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>🔴 `CsRequestPage.razor` 의 `CsItem` 과 **같은 널 허용성**. 숫자 둘은 비널러블이다 — 그게 과녁.</summary>
+    private sealed class WebCsItem
+    {
+        public string CsRequestId { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string? SubTag { get; set; }
+        public string? Body { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public string? Origin { get; set; }
+        public DateTime? SentAt { get; set; }
+        public string? TerminalReason { get; set; }
+        public int AttemptCount { get; set; }
+        public int ReplyCount { get; set; }
+        public string? HqStatus { get; set; }
+        public DateTime? HqStatusAt { get; set; }
+    }
+
+    private sealed class WebListResponse
+    {
+        public List<WebCsItem>? Data { get; set; }
+    }
+
+    [Fact(DisplayName = "G-W3-12 🔴 본사 선발신이 앉은 뒤에도 쪽지 목록을 **화면 모델로 읽을 수 있다**(+음성 대조)")]
+    public async Task G_W3_12_화면이_목록을_읽을_수_있다()
+    {
+        const string gate = "G-W3-12 화면이 읽나";
+        if (!await ReadyAsync(gate)) return;
+
+        await using var erp = await OpenErpAsync();
+        await SeedErpAsync(erp);
+        await SeedBackofficeTenantAsync();
+
+        var bo = NewBoController();
+        var admin = NewCsAdminController();
+
+        // ── 🔴 음성 대조군 — 내 문의만 있을 때는 (cs_outbox 행이 있으니) 읽힌다.
+        //   이게 없으면 「원래 못 읽던 것」을 봉합 덕이라 읽을 수 있다.
+        Assert.IsType<OkObjectResult>(await NewErpController(erp).Create(
+            new CsRequestController.CreateCsRequest
+            { Category = "how_to", SubTag = "etc", Body = "내가 쓴 문의" }, default));
+
+        var mineOnly = ReadAsWeb(await NewErpController(erp).List(default), gate);
+        Assert.True(mineOnly.Count == 1, gate + " 대조군: 내 문의 1건이 안 읽힌다 — 게이트가 축을 잘못 잡았다.");
+        Assert.Equal("local", mineOnly[0].Origin);
+
+        // ── 본사가 선발신을 보내고, 실물 Pull 로 ERP 에 앉힌다
+        var sent = await admin.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            TenantCode = TenantCode, Purpose = "billing", Title = "구독요금 안내",
+            Body = "이번 달 구독요금이 미결재 상태입니다",
+        }, default);
+        Assert.True(StatusOf(sent) == 200, Describe(sent));
+
+        await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
+            NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
+
+        // 앉았나 — 앉지 않았으면 아래 과녁이 성립하지 않는다(전제 확인)
+        Assert.Equal(1, await erp.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM cs_requests WHERE origin = 'hq'"));
+        // 🔴 전제의 핵심: 선발신 행은 `cs_outbox` 행이 **없다**. 그래서 LEFT JOIN 이 NULL 을 준다.
+        Assert.Equal(0, await erp.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM cs_outbox o
+              JOIN cs_requests r ON r.cs_request_id = o.cs_request_id
+             WHERE r.origin = 'hq'"));
+
+        // ── 🔴 과녁 — 화면 모델로 **읽히나**. 봉합이 없으면 여기서 JsonException 이 난다.
+        var rows = ReadAsWeb(await NewErpController(erp).List(default), gate);
+
+        Assert.True(rows.Count == 2,
+            gate + " 목록이 " + rows.Count + "건이다(기대 2건 — 내 문의 + 본사 안내).");
+
+        var hq = rows.Single(r => r.Origin == "hq");
+        Assert.Equal(0, hq.AttemptCount);   // 서버가 0 을 보장한다(COALESCE) — null 이면 화면이 터진다
+        Assert.Contains("구독요금 안내", hq.Body);
+
+        // 내 문의 쪽은 종전과 같아야 한다(봉합이 다른 걸 안 망가뜨렸나)
+        var mine = rows.Single(r => r.Origin == "local");
+        Assert.Equal("내가 쓴 문의", mine.Body);
+    }
+
+    /// <summary>
+    /// 🔴 응답을 **직렬화한 뒤 화면 모델로 역직렬화**한다 — 화면이 실제로 지나는 경로다.
+    /// 사전으로 읽으면 비널러블 칸의 null 을 **영원히 못 잡는다**(10/12 사고의 자리).
+    /// </summary>
+    private static List<WebCsItem> ReadAsWeb(IActionResult res, string gate)
+    {
+        Assert.True(StatusOf(res) == 200, gate + " 목록이 200 이 아니다. " + Describe(res));
+
+        var json = JsonSerializer.Serialize(ValueOf(res));
+        WebListResponse? doc;
+        try
+        {
+            doc = JsonSerializer.Deserialize<WebListResponse>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException ex)
+        {
+            // 🔴 이 메시지가 사장님이 보신 「문의 목록을 불러오지 못했습니다」의 **진짜 사유**다.
+            throw new Xunit.Sdk.XunitException(
+                gate + " 🔴 화면 모델로 목록을 읽지 못했다 — 화면에는 「문의 목록을 불러오지 못했습니다」로 보인다. "
+              + "사유: " + ex.Message);
+        }
+
+        Assert.NotNull(doc?.Data);
+        return doc!.Data!;
+    }
     // 다리 — 가짜 응답을 만들지 않는다. 실물 수신 컨트롤러를 부른다.
     // ══════════════════════════════════════════════════════════════
 
