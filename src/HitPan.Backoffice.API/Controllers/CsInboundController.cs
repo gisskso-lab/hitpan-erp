@@ -185,7 +185,24 @@ public class CsInboundController : ControllerBase
         //   내려보낸 것과 도착한 것은 다른 사실이고, 여기서 채우면 화면이 「전달됨」이라 **거짓말**을 한다
         //   (작2 가 거부한 「보냈다」의 축소판). ack 가 안 오면 다음 Pull 에 또 내려가고,
         //   ERP 쪽 멱등(`cs_request_id` PK)이 중복을 막는다 ⇒ **유실 0 · 중복 0**.
-        var outbound = (await db.QueryAsync(@"
+        // ══════════════════════════════════════════════════════════
+        // 🔴 20261012작4 A-2 — **하행은 선발신 표가 없어도 끊기지 않는다** (사장님 실측 반려 ③)
+        //
+        // 10/12 사고: 이 메서드가 `bo_cs_outbound` 를 **조건 없이** 읽었다. 45번이 안 들어간
+        //   서버에서는 그 SELECT 가 `Unknown table` → **Pull 응답 전체가 500** ⇒ 같은 응답에
+        //   실려야 할 `replies`(= 본사 답변)도 **함께 못 내려갔다.** 사장님 화면에는
+        //   「답이 없다」로 보였지만, 답은 본사에 있었고 **담은 응답이 죽은 것**이었다.
+        //   워커 쪽엔 `[CS수신] Pull 미응답 code=500` 한 줄만 남아 조용했다.
+        //
+        // ⇒ 표가 없으면 선발신·폐기 블록만 건너뛴다. **답은 그대로 내려간다** (#20 — 흐름은 안 끊는다).
+        //   표가 있으면 종전과 한 글자도 다르지 않다.
+        var hasOutboundSchema = await CsAdminController.HasOutboundSchemaAsync(db);
+        if (!hasOutboundSchema)
+            _logger.LogWarning(
+                "[CS수신] 선발신 자료방 미적용(45번) — 답만 내려보낸다. code={Code}", Safe(auth.TenantCode));
+
+        var outbound = hasOutboundSchema
+            ? (await db.QueryAsync(@"
             SELECT outbound_id AS outboundId,
                    purpose,
                    title,
@@ -199,7 +216,8 @@ public class CsInboundController : ControllerBase
                AND body IS NOT NULL
              ORDER BY created_at
              LIMIT 50",
-            new { auth.TenantId })).ToList();
+                new { auth.TenantId })).ToList()
+            : new List<dynamic>();
 
         if (outbound.Count > 0)
             _logger.LogInformation("[CS수신] 선발신 {N}건 내려보냄(ack 대기) — code={Code}",
@@ -219,7 +237,8 @@ public class CsInboundController : ControllerBase
         //   ERP 는 자기 사본의 본문을 비운다. 열쇠뿐이라 #18·#22 에 걸릴 칸이 없다.
         // 🔴 14일 창 안에서만 보낸다 — 영원히 들고 다니면 Pull 응답이 끝없이 커진다.
         //   ERP 쪽은 멱등(이미 비운 것을 또 비워도 같다)이라 창을 넘겨 놓친 건은 피해가 없다.
-        var purged = (await db.QueryAsync<string>(@"
+        var purged = hasOutboundSchema
+            ? (await db.QueryAsync<string>(@"
             SELECT outbound_id
               FROM bo_cs_outbound
              WHERE tenant_id = @TenantId
@@ -228,9 +247,44 @@ public class CsInboundController : ControllerBase
                AND purged_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 14 DAY)
              ORDER BY purged_at
              LIMIT 50",
+                new { auth.TenantId })).ToList()
+            : new List<string>();
+
+        // ══════════════════════════════════════════════════════════
+        // 🔴 20261012작4 B-1 — **본사 진행 상태**를 같은 Pull 로 내려보낸다 (사장님 실측 반려 ④)
+        //
+        // 10/12 사고: 백오피스에서 「처리중」·「완료」로 바꿔도 ERP 는 영원히 몰랐다.
+        //   버그가 아니라 **계약에 칸이 없었다** — Pull 응답은 `replies`·`outbound`·`purgedOutbound`
+        //   뿐이고, ERP 쪽 상태 하행 수신 코드도 0건이었다(선행검증서 §2-4).
+        //
+        // 🔴 사장님 결재(10/12): **본사 상태는 별도 칸**이다. ERP 쪽지 상태(접수·전송중·전송완료·
+        //   답변도착·종결)를 **한 글자도 안 덮는다**(#1). 두 축이 섞이면 「답변도착」이 상태에
+        //   덮여 어느 쪽 사실인지 구분이 사라진다.
+        // 🔴 내려보내는 칸은 **셋뿐** — 열쇠·상태·시각. 담당자 id 등 본사 내부 값은 안 싣는다(#18·#22).
+        // 🔴 기존 계약은 더하기만 한다(#1). 옛 판 ERP 워커는 모르는 칸을 무시한다 —
+        //   고객 PC 에 판이 섞여 있어도 안전하다(작3 A-1 이 같은 방식으로 이미 실증).
+        // 🔴 14일 창 — Pull 응답이 끝없이 커지지 않게. ERP 쪽 반영은 멱등(같은 값을 또 써도 같다).
+        var statuses = (await db.QueryAsync(@"
+            SELECT client_ticket_uid AS csRequestId,
+                   status            AS hqStatus,
+                   -- 🔴 `read_at`(42번)·`purged_*`(45번) 같은 **나중에 더한 칸은 안 읽는다.**
+                   --   그게 오늘 사고의 모양이다 — 뒤 파일이 미적용인 서버에서 이 문장이 500 이 되면
+                   --   답·상태가 **같이** 막힌다. 여기 쓰는 셋은 모두 40번(기반) 소관이다.
+                   COALESCE(completed_at, received_at) AS changedAt
+              FROM bo_cs_tickets
+             WHERE tenant_id = @TenantId
+               AND client_ticket_uid IS NOT NULL
+               -- 🔴 「접수」는 안 내려보낸다. 고객은 그 사실을 이미 안다(자기 쪽지가 `전송완료` 다) ⇒
+               --   내려보내면 **모든 쪽지에 「본사 접수」가 붙어** 본사가 실제로 손댄 건과 구분이 사라진다.
+               --   그래서 `hq_status = NULL` 의 뜻을 「본사 미착수」로 **지킨다**(DB-145 주석과 일치).
+               --   게이트 G-W3-10 의 음성 대조군이 이 줄을 문다.
+               AND status <> '접수'
+               AND received_at >= DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 14 DAY)
+             ORDER BY received_at
+             LIMIT 200",
             new { auth.TenantId })).ToList();
 
-        return Ok(new { success = true, replies = rows, outbound, purgedOutbound = purged });
+        return Ok(new { success = true, replies = rows, outbound, purgedOutbound = purged, statuses });
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -4930,6 +4930,8 @@ CREATE TABLE `cs_requests` (
   `status` varchar(10) NOT NULL DEFAULT '접수' COMMENT '접수/전송중/전송완료/거부/답변도착/종결',
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   `origin` varchar(10) NOT NULL DEFAULT 'local' COMMENT 'local = 고객(자식계정) 문의 · hq = 본사가 먼저 보낸 안내(DB-144 · 작3 B-1)',
+  `hq_status` varchar(10) DEFAULT NULL COMMENT '본사 진행 상태(접수/처리중/보류/완료) — NULL = 본사 미착수 · status 와 다른 축(DB-145 · 작4 B-2)',
+  `hq_status_at` datetime(6) DEFAULT NULL COMMENT '본사가 그 상태로 바꾼 시각(UTC) — 뒤로 가는 반영을 막는 근거(DB-145 · 작4 B-2)',
   PRIMARY KEY (`cs_request_id`),
   KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
   KEY `idx_cs_req_status` (`tenant_id`,`status`),
