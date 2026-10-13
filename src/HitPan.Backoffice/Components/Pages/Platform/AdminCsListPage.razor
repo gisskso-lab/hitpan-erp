@@ -117,7 +117,7 @@
                                 @* 🔴 옛 「평가」 칼럼이 내려온 자리 — 고객이 매긴 뒤에만 값이 생긴다(상시 `-` 칼럼을 없앤다) *@
                                 @if (context.Item.Rating is not null)
                                 {
-                                    <span class="bo-status-chip bo-status-chip--active" style="margin-left:4px">★ @RatingLabel(context.Item.Rating)</span>
+                                    <span class="bo-status-chip bo-status-chip--active" style="margin-left:4px">★ @CsVocab.RatingLabel(context.Item.Rating)</span>
                                 }
                             </CellTemplate>
                         </TemplateColumn>
@@ -212,9 +212,6 @@
     [SupplyParameterFromQuery(Name = "stage")]
     public string? StageFromQuery { get; set; }
 
-    /// <summary>마지막으로 반영한 쿼리값 — 사람이 콤보로 고른 단계를 쿼리가 덮어쓰지 않게 한다.</summary>
-    private string? _appliedStageQuery;
-
     private bool _firstLoadDone;
 
     private static readonly string[] KnownStages = { "unread", "open", "done", "rated" };
@@ -225,14 +222,29 @@
         return Array.IndexOf(KnownStages, v) >= 0 ? v : "all";
     }
 
+    // 🔴 20261013작1 봉합 ([4] 조건-1) — **띠를 다시 눌러도 아무 일이 없던** 자리다.
+    //
+    //   종전 식은 들어온 쿼리를 「직전에 반영한 쿼리값(`_appliedStageQuery`)」과 견줬다. 그래서
+    //   ① 띠에서 「안 읽음」을 누르고 ② 사람이 콤보를 「완료」로 바꿔 조회한 뒤 ③ **같은 띠를 또 누르면**
+    //   쿼리값은 그대로 `unread` 라 early return 이 걸려 **조회가 0회**였다 — 화면은 「완료」에 머문다.
+    //   사장님이 결재하신 결-B 증상(띠를 눌러도 전체 목록)이 조건부로 되살아나는 모양이다.
+    //
+    //   ⇒ 견주는 기준을 **「지금 콤보에 걸린 값(`_stageFilter`)」**으로 바꿨다.
+    //      · 쿼리의 단계와 지금 필터가 **다르면** 반영하고 조회한다 — 띠를 다시 눌러도 먹는다.
+    //      · 같으면 이미 그 상태다 ⇒ 할 일이 없다(2중 조회 0건 · 이건 정상이다).
+    //   🔴 「사람이 고른 단계를 쿼리가 덮지 않는다」는 그대로 지켜진다:
+    //      이 메서드를 깨우는 길은 **길 이동(띠 누르기)** 하나뿐이고, 콤보 변경은 이 메서드를 깨우지 않는다.
+    //      띠 아래 숫자는 자기 타이머로 자기만 다시 그린다(`CsStatusBar.razor:51·55` — 바탕틀을 다시 그리지 않는다)
+    //      ⇒ 숫자가 바뀌어도 이 메서드가 돌지 않는다. 띠를 누른 것은 **사람의 가장 최신 뜻**이라 그게 이겨야 한다.
+    //   🔴 띠·`CsStatusBar`·counts 서버식은 무접촉이다 — 받는 쪽만 고쳤다.
+    //      빈값·목록 밖 값은 종전처럼 `NormalizeStage` 가 전체(`all`)로 떨어뜨린다(아는 척 금지).
     protected override async Task OnParametersSetAsync()
     {
         var incoming = NormalizeStage(StageFromQuery);
-        if (_firstLoadDone && string.Equals(incoming, _appliedStageQuery, StringComparison.Ordinal))
+        if (_firstLoadDone && string.Equals(incoming, _stageFilter, StringComparison.Ordinal))
         {
-            return;   // 쿼리가 안 바뀌었다 — 사람이 콤보로 고른 값을 그대로 둔다
+            return;   // 이미 그 단계를 보고 있다 — 다시 조회할 것이 없다
         }
-        _appliedStageQuery = incoming;
         _stageFilter = incoming;
         _firstLoadDone = true;
         await LoadAsync();
@@ -472,10 +484,8 @@
     }
 
     // 평가 — 고객이 매긴 뒤에만 값이 생긴다(상태 칸의 ★ 표식)
-    private static string RatingLabel(int? r) => r switch
-    {
-        3 => "좋아요", 2 => "보통", 1 => "아쉬워요", _ => "-",
-    };
+    // 🔴 20261013작1 봉합 ([4] 조건-3) — 같은 식이 `CsTicketDetailPanel.razor` 에도 똑같이 있었다.
+    //    한쪽만 고치면 목록 ★ 과 상세 ★ 이 갈리는데 빌드·게이트는 전건 초록이다 ⇒ `CsVocab.RatingLabel` 한 벌.
 
     // 7모양 보조 태그(고객 언어)
     private static string ShapeLabel(string? s) => s switch

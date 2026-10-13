@@ -30,7 +30,7 @@
         }
         @if (Detail.Rating is not null)
         {
-            <span class="bo-status-chip bo-status-chip--active">★ @RatingLabel(Detail.Rating)</span>
+            <span class="bo-status-chip bo-status-chip--active">★ @CsVocab.RatingLabel(Detail.Rating)</span>
         }
         @if (Detail.PurgedAt is not null)
         {
@@ -46,14 +46,18 @@
         <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@(string.IsNullOrEmpty(Detail.Body) ? "(본문 없음 — 태그만 접수)" : Detail.Body)</MudText>
     </MudPaper>
 
-    @* ── ③ 답 이력 ── *@
+    @* ── ③ 답 이력 ──
+         🔴 20261013작1 봉합 ([3-V] 미봉합 1건) — 여기가 **수동 접수 건에도 「전달됨」**이라 적던 자리다.
+            아래 ④ 옆 경고는 「고객사 화면으로 가지 않습니다」라고 적고 있었다 ⇒ 한 화면이 두 말을 했다.
+            낱말은 `CsVocab.ReplyDeliveryText` 한 곳이 정한다 — 경로가 고객사 쪽지가 아니면 「전달」을 안 쓴다.
+            🔴 `ApprovedAt` 은 본사가 **적은** 시각이라 경로와 무관하게 참이다 ⇒ 그대로 둔다. *@
     @foreach (var r in Replies)
     {
         <MudPaper Elevation="0" Class="pa-3 mb-2" Style="border:1px solid var(--mud-palette-lines-default);border-radius:8px">
             <div class="d-flex align-center justify-space-between mb-1">
                 <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">본사 답</MudChip>
                 <MudText Typo="Typo.caption" Style="color:#6B7280">
-                    @r.ApprovedAt.ToLocalTime().ToString("MM-dd HH:mm") · @(r.DeliveredAt is null ? "전달 대기(5분 주기)" : "전달됨")
+                    @r.ApprovedAt.ToLocalTime().ToString("MM-dd HH:mm") · @CsVocab.ReplyDeliveryText(Detail.Channel, r.DeliveredAt)
                 </MudText>
             </div>
             <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@r.Body</MudText>
@@ -233,10 +237,9 @@
         "message" => "쪽지", "phone" => "전화", "remote" => "원격지원", _ => "-",
     };
 
-    private static string RatingLabel(int? r) => r switch
-    {
-        3 => "좋아요", 2 => "보통", 1 => "아쉬워요", _ => "-",
-    };
+    // 🔴 20261013작1 봉합 ([4] 조건-3) — `RatingLabel` 사본이 여기 있었다.
+    //    같은 식이 `AdminCsListPage.razor` 에도 똑같이 있어, 한쪽만 고치면 목록 ★ 과 상세 ★ 이
+    //    서로 다른 말을 하는데 빌드·게이트는 전건 초록이었다 ⇒ `CsVocab.RatingLabel` 한 벌로 옮겼다.
 
     // 7모양 보조 태그(고객 언어)
     private static string ShapeLabel(string? s) => s switch
