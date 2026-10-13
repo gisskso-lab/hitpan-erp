@@ -343,10 +343,10 @@
         <MudNavLink Href="/data/logs" Icon="@Icons.Material.Filled.ManageSearch">ERP 로그 기록</MudNavLink>
         @* 모든데이터 초기화 (사장님 결재 2026-06-23) — 부모계정·회사정보·로그 제외 전체 포맷 *@
         <MudNavLink Href="/data/reset" Icon="@Icons.Material.Filled.DeleteForever">모든데이터 초기화</MudNavLink>
-        @* 🔴 20260930작1 갈래 F — 수동 업데이트·수동 되돌리기 (사장님 9/30 「자료관리에 이전버전으로 회귀하는 메뉴하고,
-             최신버젼 업데이트 메뉴 신설」). 부모계정 if 안 · 메인PC 판정은 화면(MainPcOnly)과 서버([MainPcOnly])가 한다. *@
-        <MudNavLink Href="@LocalSwapUiText.UpdatePath" Icon="@Icons.Material.Filled.SystemUpdateAlt">@LocalSwapUiText.MenuUpdate</MudNavLink>
-        <MudNavLink Href="@LocalSwapUiText.RollbackPath" Icon="@Icons.Material.Filled.Restore">@LocalSwapUiText.MenuRollback</MudNavLink>
+        @* 🔴 20261014작1 T-3 — 수동 업데이트·수동 되돌리기 **2줄은 「고객지원센터」로 옮겼다**(사장님 오더 10/14 ③).
+             옛 자리는 20260930작1 갈래 F 였다(사장님 9/30 「자료관리에 이전버전으로 회귀하는 메뉴하고,
+             최신버젼 업데이트 메뉴 신설」). 자리만 바뀌고 **경로·낱말·메인PC 판정은 한 글자도 안 바뀐다.**
+             옮긴 자리에서도 **부모계정만** 본다(사장님 결재 결-B) — 아래 「고객지원센터」 묶음 안쪽 가드. *@
     </MudNavGroup>
     }
 
@@ -358,15 +358,49 @@
          「요청」이라 받는 쪽을 한 글자도 말하지 않았다.** 사장님이 못 찾으셨다 —
          「이 화면, 처음 보는 사람이 혼자 쓸 수 있냐」에 걸린다.
        🔴 사장님 결정(2026-10-12): **이름·자리는 그대로 두고 「안읽음 표시」를 붙인다.**
-         그래서 이름을 안 바꾼다(결-10 무접촉). 안 읽은 게 있을 때만 숫자가 뜬다. *@
-    <MudNavLink Href="/support/cs" Icon="@Icons.Material.Filled.SupportAgent">
-        CS 요청
-        @if (_csUnread > 0)
+         그래서 이름을 안 바꾼다(결-10 무접촉). 안 읽은 게 있을 때만 숫자가 뜬다.
+
+       🔴 20261014작1 T-2 (사장님 오더 10/14) — **「고객지원센터」 묶음으로 바꾼다.**
+         왜: 10/12 봉합은 이름을 안 바꾸고 숫자만 붙였고, **한 화면이 내 문의와 본사 안내를 함께**
+         보여 줬다. 사장님이 10/14 에 「공지사항과 CS쪽지 분리가 핵심」이라고 못 박으셨다.
+         ─ 묶음 자체는 **가드 밖** = 직원도 본다(CS 요청은 모두의 일이다).
+         ─ 안쪽 업데이트 2종만 `_isTenantAdmin` = 부모계정만(결-B · 1V P-1 이 빌드로 확인).
+         ─ 안읽음 숫자는 **하위 둘에 각각**(결-C) · 묶음 머리에는 **안 붙인다** — 겹쳐 보이면
+           어느 쪽 숫자인지 사라진다. *@
+    @* 🔴 [4] 조건 C-3 — 묶음이 **접혀 있으면 안읽음 숫자가 아예 안 보인다.**
+         숫자는 결재 결-C 에 따라 하위 둘에만 붙고 묶음 머리엔 안 붙는데, 접힌 상태에서는
+         그 하위가 화면에 없다 ⇒ 10/12 반려(「어디서 보는지 모르겠다」)가 그대로 되살아난다.
+         그래서 **안 읽은 것이 있을 때만 처음부터 펼친다.** 머리에 숫자를 붙이지 않으므로
+         결-C 를 깨지 않고, 숫자가 0 이면 종전처럼 접힌 채 선다. *@
+    <MudNavGroup Title="고객지원센터" Icon="@Icons.Material.Filled.SupportAgent"
+                 Expanded="@(_csHqUnread + _csReplyUnread > 0)">
+        @* ① 고객지원 요청 — 쪽지 보내기 + 내가 쓴 문의. 주소는 종전 그대로다(#1 · 입구 4곳이 산다). *@
+        <MudNavLink Href="/support/cs" Icon="@Icons.Material.Filled.EditNote">
+            고객지원 요청
+            @if (_csReplyUnread > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                         Class="ml-2 my-0">@_csReplyUnread</MudChip>
+            }
+        </MudNavLink>
+        @* ② 본사공지사항 — 본사가 보낸 것만. 읽기 전용이다(고객이 쓰는 자리가 아니다). *@
+        <MudNavLink Href="/support/notice" Icon="@Icons.Material.Filled.Campaign">
+            본사공지사항
+            @if (_csHqUnread > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                         Class="ml-2 my-0">@_csHqUnread</MudChip>
+            }
+        </MudNavLink>
+        @* 🔴 T-3 — 자료관리에서 옮겨온 2줄. **이 둘만** 부모계정 가드 안이다(결-B).
+             경로·낱말은 상수 참조 그대로 — 상수값을 바꾸면 기존 게이트가 FAIL 한다(1V C-7).
+             메인PC 판정은 종전처럼 화면(MainPcOnly)과 서버([MainPcOnly])가 한다. *@
+        @if (_isTenantAdmin)
         {
-            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
-                     Class="ml-2 my-0">@_csUnread</MudChip>
+            <MudNavLink Href="@LocalSwapUiText.UpdatePath" Icon="@Icons.Material.Filled.SystemUpdateAlt">@LocalSwapUiText.MenuUpdate</MudNavLink>
+            <MudNavLink Href="@LocalSwapUiText.RollbackPath" Icon="@Icons.Material.Filled.Restore">@LocalSwapUiText.MenuRollback</MudNavLink>
         }
-    </MudNavLink>
+    </MudNavGroup>
 
     @* ★ 사장님 오더 2026-08-04: "현재 히트판 버전이 어떻게 되는지 자료관리 탭 밑에 작게 버전도 표기해."
        ─ 왜 필요한가: Y/N 동의 업데이트(20260804작2)를 쓰면 고객이 [예] 를 누른 뒤
@@ -464,7 +498,11 @@
     // 헌법 #35 (2026-06-04) — 본사·대리점·Owner 영역 일체 HitPan.Backoffice 신규 프로젝트로 분리 완료.
     // HitPan.Web은 고객사 ERP 전용. /admin/* /reseller/* /owner/* 페이지 0건.
     private int _approvalPendingCount;
-    private int _csUnread;   // 🔴 20261012 — CS 안 읽은 건수(본사 안내 포함). 못 읽으면 0 = 안 보여 준다.
+    // 🔴 20261014작1 T-4 — 숫자를 **둘로 나눈다**(사장님 결재 결-C). 서버는 종전부터 세 칸을 준다.
+    //   `_csHqUnread` = 본사공지사항 쪽 · `_csReplyUnread` = 고객지원 요청 쪽. 합계는 안 쓴다.
+    //   못 읽으면 둘 다 0 = 안 보여 준다 — 틀린 숫자는 안 보여주는 것보다 나쁘다.
+    private int _csHqUnread;
+    private int _csReplyUnread;
 
     // ★ 사장님 오더 2026-08-04 — 사이드바 최하단 현재 버전 표기.
     //   빈 문자열이면 화면에 아무것도 안 그린다(미인증·조회 실패 시 조용히 생략).
@@ -555,16 +593,28 @@
             if (auth.User?.Identity?.IsAuthenticated != true) return;
 
             var res = await Http.GetFromJsonAsync<CsUnreadResponse>("api/cs/replies/unread-count");
-            _csUnread = res?.Count ?? 0;
+            // 🔴 20261014작1 T-4 — 출처별 두 칸을 쓴다. 옛 판 서버(두 칸을 안 주는 판)와 섞여도
+            //   역직렬화가 0 을 주므로 숫자가 안 보일 뿐 화면은 산다(전역 배너와 같은 성격).
+            _csHqUnread = res?.HqCount ?? 0;
+            _csReplyUnread = res?.ReplyCount ?? 0;
         }
         catch (Exception ex)
         {
-            _csUnread = 0;
+            _csHqUnread = 0;
+            _csReplyUnread = 0;
             Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
         }
     }
 
-    private sealed class CsUnreadResponse { public bool Success { get; set; } public int Count { get; set; } }
+    // 🔴 20261014작1 T-4 — `HqCount`·`ReplyCount` **추가만**(#1). `Count`(합계)는 지우지 않는다 —
+    //   서버 응답 키가 그대로라 옛 모양이 남아 있어야 나중에 합계가 필요할 때 다시 안 만든다.
+    private sealed class CsUnreadResponse
+    {
+        public bool Success { get; set; }
+        public int Count { get; set; }
+        public int HqCount { get; set; }
+        public int ReplyCount { get; set; }
+    }
 
     private async Task LoadAppVersionAsync()
     {

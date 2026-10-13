@@ -224,8 +224,14 @@ public class CsRequestController : ControllerBase
     // ─────────────────────────────────────────────────────────────
     // 내 쪽지 목록 — 큐 상태를 함께 싣는다 (N-8 짝: 「아직 본사에 안 갔음」이 보여야 한다)
     // ─────────────────────────────────────────────────────────────
+    // 🔴 20261014작1 T-1 — 쪽 가르기 질의칸 `origin` 을 **더한다**(#1 추가만).
+    //   `origin` 없는 종전 호출은 null 로 들어와 **종전 그대로 전체**를 준다(회귀 0 · G-W9-3).
+    //   왜 서버에서 가르나: 화면만 둘로 갈라도 쿼리가 하나면 **본사 공지가 쌓일 때 고객이 쓴 문의가
+    //   LIMIT 밖으로 밀려 사라진다**(1V A-1). 쪽마다 자기 몫을 세야 그 사고가 안 난다(G-W9-4).
     [HttpGet("requests")]
-    public async Task<IActionResult> List(CancellationToken ct)
+    //   🔴 둘 다 **기본값**을 준다 — 기존 게이트가 `List(default)` 한 칸으로 부르고 있어서
+    //   기본값이 없으면 그 파일들을 고쳐야 한다. 그 파일은 이 갈래 소유가 아니다(작지서 §2).
+    public async Task<IActionResult> List(string? origin = null, CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
@@ -234,6 +240,25 @@ public class CsRequestController : ControllerBase
         // 🔴 20261012작4 B-3 — 본사 진행 상태(DB-145)도 **같은 모양**으로 조건부로 읽는다.
         //   칸이 없는 DB(업데이트 직후 마이그 전 1회)에서 종전 화면이 죽지 않게 — 작3 origin 선례 그대로.
         var hasHqStatus = await HasHqStatusColumnsAsync();
+
+        // 🔴 쪽 조건은 **칸이 있을 때만** 단다. 칸이 없는 DB 에서 `WHERE r.origin` 을 넣으면
+        //   1054(Unknown column)로 목록이 통째로 죽는다 — SELECT 쪽 `'local'` 대입은 칸이 없어도
+        //   되지만 WHERE 는 안 된다. 그래서 가드를 둘로 쓰지 않고 이 한 자리에서 가른다(1V C-1).
+        //   낯선 값(`?origin=zzz`)은 **전체**로 떨어뜨린다 — 화면을 비우지 않는다.
+        var sideWhere = hasOrigin
+            ? origin switch
+            {
+                "hq"    => " AND r.origin = 'hq'",
+                "local" => " AND r.origin <> 'hq'",   // 'hq' 가 아닌 것은 전부 고객이 쓴 것이다
+                _       => "",
+            }
+            // 🔴 칸이 없는 DB 에서 본사 쪽을 물으면 **빈 결과**를 준다 — 「전체」가 아니다.
+            //   근거: 본사 선발신을 앉히는 INSERT 가 `origin` 을 **명시**한다
+            //   (CsOutboxSenderWorker.ReceiveOutboundAsync) ⇒ 칸이 없으면 그 행은 애초에 못 들어온다
+            //   ⇒ 본사 쪽 행은 **원리적으로 0건**이다. 여기서 전체를 주면 공지 화면에 **내 문의가
+            //   섞여** 10/12 반려(섞여 보임)가 그대로 되살아난다. 빈 화면이 맞다(설계 §8).
+            : origin == "hq" ? " AND 1 = 0" : "";
+
         var rows = await _db.QueryAsync($@"
             SELECT r.cs_request_id   AS csRequestId,
                    r.category        AS category,
@@ -267,11 +292,23 @@ public class CsRequestController : ControllerBase
                    -- 숫자 칸은 **서버가 0 을 보장한다** — 클라이언트 모양에 기대지 않는다.
                    COALESCE(o.attempt_count, 0) AS attemptCount,
                    (SELECT COUNT(*) FROM cs_replies p
-                     WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS replyCount
+                     WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS replyCount,
+                   -- 🔴 20261014작1 [4] 조건 C-2 — **안 읽은 수**를 쪽지마다 센다(추가만 · 기존 키 무변경).
+                   --   왜 필요한가: 공지 목록의 「안읽음」 칩이 종전엔 `status='답변도착'` 으로 섰는데,
+                   --   읽음 표시는 `cs_replies.read_at` 만 바꾸고 **status 를 내리는 코드가 레포에 0건**이다
+                   --   ⇒ 읽은 뒤에도 칩이 영원히 남는다(거짓 알림). 읽음과 같은 축으로 센다.
+                   --   서브쿼리라 NULL 이 안 나온다 — 서버가 0 을 보장한다(C-6).
+                   (SELECT COUNT(*) FROM cs_replies u
+                     WHERE u.tenant_id = r.tenant_id AND u.cs_request_id = r.cs_request_id
+                       AND u.read_at IS NULL) AS unreadCount
               FROM cs_requests r
               LEFT JOIN cs_outbox o ON o.cs_request_id = r.cs_request_id
-             WHERE r.tenant_id = @TenantId
+             -- 🔴 테넌트는 토큰 클레임에서 온 값 하나뿐이다 — 매개변수로 받지 않는다(#2).
+             --   쪽 가르기 질의칸은 받지만, 그것은 **같은 테넌트 안에서** 쪽을 고를 뿐이다.
+             WHERE r.tenant_id = @TenantId{sideWhere}
              ORDER BY r.created_at DESC
+             -- 🔴 쪽별 LIMIT — 쪽 조건이 걸린 호출은 **그 쪽에서** 200건을 센다.
+             --   한 쪽이 다른 쪽을 밀어내지 못한다(1V A-1 · G-W9-4). 전체 호출은 종전 200 그대로.
              LIMIT 200",
             new { TenantId = tenantId });
 

@@ -16,8 +16,11 @@
            ⇒ 본사 안내만 왔으면 그렇게 말하고, 섞여 왔으면 둘 다 센다. 단추 글자도 맞춘다. *@
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <span><strong>@HeadlineText()</strong></span>
+            @* 🔴 20261014작1 T-7 — 목적지도 **글자와 같은 판정**으로 가른다(사장님 오더 10/14 = 공지/CS 분리).
+               종전엔 글자만 「안내 보러 가기」로 갈라 놓고 **목적지는 둘 다 `/support/cs`** 였다 —
+               「안내 보러 가기」를 눌렀는데 내 문의 목록이 나오면 그 글자가 거짓이다. *@
             <MudButton Color="Color.Inherit" Variant="Variant.Outlined" Size="Size.Small"
-                       OnClick="@(() => Nav.NavigateTo("/support/cs"))">
+                       OnClick="@(() => Nav.NavigateTo(_hq > 0 && _reply == 0 ? "/support/notice" : "/support/cs"))">
                 @(_hq > 0 && _reply == 0 ? "안내 보러 가기" : "보러 가기")
             </MudButton>
         </div>
@@ -40,7 +43,7 @@
     protected override async Task OnInitializedAsync()
     {
         Nav.LocationChanged += OnLocationChanged;
-        _onCsPage = Nav.Uri.Contains("/support/cs");
+        _onCsPage = IsOnSupportPage(Nav.Uri);
         await RefreshAsync();
         // 5분 주기 — 워커의 답 Pull 과 같은 호흡. 화면을 막지 않는다.
         _timer = new Timer(async _ => await InvokeAsync(async () =>
@@ -50,9 +53,17 @@
         }), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
     }
 
+    /// <summary>
+    /// 🔴 20261014작1 T-7 — 배너를 숨길 화면이 **둘**이 됐다(`/support/cs` · `/support/notice`).
+    /// 종전 판정은 문자열 하나만 봐서, **공지 화면에 서 있는데 배너가 또 「안내 보러 가기」를 권했다** —
+    /// 이미 그 화면인데 또 보내면 거짓이다. 판정을 한 자리에 모아 두 화면을 함께 본다.
+    /// </summary>
+    private static bool IsOnSupportPage(string uri) =>
+        uri.Contains("/support/cs") || uri.Contains("/support/notice");
+
     private void OnLocationChanged(object? s, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
-        var on = e.Location.Contains("/support/cs");
+        var on = IsOnSupportPage(e.Location);
         if (on != _onCsPage)
         {
             _onCsPage = on;
