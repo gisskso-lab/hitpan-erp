@@ -91,13 +91,17 @@ public sealed class CsAdminGateTests : IDisposable
         Assert.Null(await db.ExecuteScalarAsync<DateTime?>("SELECT completed_at FROM bo_cs_tickets WHERE id = @Id", new { Id = id }));
 
         // 🔴 2026-10-08 사장님 지시로 **규칙이 하나 늘었다**: 완료로 넘기려면 응대 유형이 있어야 한다
-        //   (쪽지·전화·원격지원 — CS 실적 자료는 소급이 안 되므로 그 자리에서 받는다).
+        //   (CS 실적 자료는 소급이 안 되므로 그 자리에서 받는다).
         //   그래서 이 게이트의 준비 단계에 응대 유형 한 줄이 생겼다. 재는 대상은 그대로
         //   **completed_at 이 「완료일 때만」 박히는가** 이고, 그 축은 바뀌지 않았다.
-        //   (응대 유형 자체를 무는 것은 G-C-12 다 — 음성·양성 양쪽을 거기서 본다.)
-        Assert.IsType<OkObjectResult>(
-            await c.SetHandledVia(id, new CsAdminController.HandledViaRequest { Via = "message" }, default));
-
+        //
+        // 🔴 **2026-10-13 작2 — 그 준비 줄을 뺐다.** 사장님 실측 반려 2) 로 규칙이 다시 갈렸다:
+        //   「응대유형은 **쪽지 건은 「히트판a/s센터」로 고정**, 손으로 적은 건만 받는다」
+        //   ⇒ 이 게이트가 쓰는 티켓은 `erp_message`(위 SeedTicketAsync) 이므로
+        //     ① 사람이 응대 유형을 **꽂을 수 없고**(서버가 400) ② 완료는 **묻지 않고 통과**한다.
+        //   재는 축(`completed_at` 이 그때만 박히나)은 **바뀌지 않았다** — 준비 줄만 없어졌다.
+        //   🔴 응대 유형을 **요구하는** 규칙은 사라진 게 아니라 **수기 건으로 옮겨졌다**:
+        //     음성·양성 쌍은 `G-C-12` 와 `G-W8-2` 가 수기 건으로 문다(규칙이 풀린 게 아니다).
         Assert.IsType<OkObjectResult>(
             await c.ChangeStatus(id, new CsAdminController.StatusRequest { To = "완료" }, default));
         Assert.NotNull(await db.ExecuteScalarAsync<DateTime?>("SELECT completed_at FROM bo_cs_tickets WHERE id = @Id", new { Id = id }));
