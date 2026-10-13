@@ -887,6 +887,15 @@ jobs:
           #      그 형은 베낀 모양이 아니다: HitPan.Tests.csproj 가 화면 파일을 **소스로 링크**한다.
           #      (사전으로 읽은 게이트가 통과하고도 화면이 터진 자리가 10/12 사고다)
           GATES="$GATES|CsNoticeScreenModelGate"
+          # 🔴 20261013작1 갈래② — 고객A/S창구 화면이 **접수 경로를 덮지 않나**
+          #    (G-W7-2 · CsSupportCenterScreenModelGateTests)
+          #    🔴 무는 약속: 목록 응답을 **직렬화 → 화면 모델(CsTicketRow 와 같은 널 허용성)로 역직렬화**한 뒤
+          #      그 행의 값을 CsVocab.ChannelLabel 에 **실제로 넣어** 낱말을 받는다. 5종(phone·email·sns·etc·
+          #      erp_message)이 5개 낱말로 갈려야 한다 + 모르는 값("zzz")은 그대로·null 은 "-"(아는 척 금지).
+          #    🔴 왜 컨트롤러를 바로 불러 사전으로 읽지 않나 — 그러면 화면이 지나는 경로를 안 지나간다.
+          #      10/12 사고가 그 모양이었다(G-W3-2 는 사전으로 읽어 통과했고 화면은 터졌다 · G-W3-12 가 봉합).
+          #    🔴 낱말을 세지 않는다 — 화면 파일에 「이메일」 글자가 있나는 보지 않는다(글자 게이트 금지).
+          GATES="$GATES|CsSupportCenterScreenModelGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

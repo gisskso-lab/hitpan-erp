@@ -1,0 +1,168 @@
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    🔴 20261013작1 갈래② — `＋ A/S 접수` (설계 §4)
+
+    오프라인으로 받은 A/S(전화·이메일·SNS·기타)를 **고객사에서 온 A/S 와 같은 자리**에 적어 넣는다.
+    오늘까지는 화면 맨 위에 늘 펼쳐져 있는 토글 패널이었다 ⇒ 필터와 목록이 첫 화면에서 밀려났다.
+    집안 관례(PromotionCreateDialog)대로 다이얼로그로 옮긴다 — 저장 경로·엔드포인트는 **한 글자도 안 바뀐다**.
+
+    🔴 「고객사 ERP 로 안 간다」를 아는 자리 ①/3 — 아래 고정 안내(설계 §4).
+       여기 적는 A/S 는 `bo_cs_tickets` 에만 앉고, ERP 로 내려가는 길(답)은 ERP 에 원본이 없으면 앉지 못한다.
+    🔴 접수경로 콤보에 `erp_message` 는 **없다** — 그 값은 고객사 수신 통로가 앉히는 값이고,
+       사람이 고르면 「고객사가 보낸 것」으로 꾸며진다(서버도 400 으로 거부한다).
+    🔴 「들은 말」은 없앨 수 없다 — 서버가 1~2000자를 요구한다(CsAdminController.cs:413-414).
+    Razor 에 C# raw string 금지(#14) · 빈 catch 금지(#15)
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            여기 적는 A/S 는 <b>본사 창구 목록에만</b> 남습니다. 고객사 ERP 화면에는 뜨지 않습니다.
+        </MudAlert>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudAutocomplete T="TenantPick" Label="고객사명 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Value="_pick" ValueChanged="OnTenantPicked"
+                                 SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
+                                 ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
+                                 HelperText="@(string.IsNullOrEmpty(_tenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_tenantCode}")"
+                                 HelperTextOnFocus="false" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_category" Label="분류 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var c in CsVocab.Categories)
+                    {
+                        <MudSelectItem Value="@c.Key">@c.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_subTag" Label="업무 영역 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var s in CsVocab.SubTags)
+                    {
+                        <MudSelectItem Value="@s.Key">@s.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" @bind-Value="_channel" Label="A/S 접수경로 (필수)" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var ch in CsVocab.IntakeChannels)
+                    {
+                        <MudSelectItem Value="@ch.Key">@ch.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_body" Label="들은 말 그대로 (필수)" Variant="Variant.Outlined"
+                              Lines="4" MaxLength="2000" Counter="2000"
+                              HelperText="주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다)" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">그만두기</MudButton>
+        <MudButton OnClick="SubmitAsync" Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@_saving">@(_saving ? "접수 중…" : "접수")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    /// <summary>고객사 고르기 — 코드를 외워 치지 않는다(오늘 거동 그대로).</summary>
+    public sealed class TenantPick
+    {
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+    }
+
+    private TenantPick? _pick;
+    private string _tenantCode = "";
+    private string _category = "use";
+    private string _subTag = "etc";
+    private string _channel = "phone";   // 기본 전화 — 오늘까지 서버가 고정해 넣던 값이 기본값이 된다
+    private string? _body;
+    private bool _saving;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void OnTenantPicked(TenantPick? pick)
+    {
+        _pick = pick;
+        _tenantCode = pick?.TenantCode ?? "";
+    }
+
+    private async Task<IEnumerable<TenantPick>> SearchTenantsAsync(string? query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Array.Empty<TenantPick>();
+        }
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<TenantLookupResponse>(
+                $"api/admin/cs/tenant-lookup?q={Uri.EscapeDataString(query)}", ct);
+            return res?.Items ?? (IEnumerable<TenantPick>)Array.Empty<TenantPick>();
+        }
+        catch (Exception ex)
+        {
+            // #15 — 조회가 막히면 사람이 알아야 한다(고객사를 못 고르면 접수가 안 된다).
+            Snackbar.Add($"고객사를 찾지 못했습니다: {ex.Message}", Severity.Warning);
+            return Array.Empty<TenantPick>();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_tenantCode))
+        {
+            Snackbar.Add("고객사를 목록에서 골라 주세요.", Severity.Info);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_body))
+        {
+            Snackbar.Add("들은 말을 그대로 적어 주세요 — 한 줄이면 됩니다.", Severity.Info);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            // 🔴 엔드포인트는 오늘 그대로다. `channel` 칸만 새로 싣는다(갈래① 토대 S-1·S-2).
+            var res = await http.PostAsJsonAsync("api/admin/cs/phone", new
+            {
+                tenantCode = _tenantCode.Trim(),
+                category = _category,
+                subTag = _subTag,
+                channel = _channel,
+                body = _body,
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                // 금지필드(식별정보 모양) 거부는 서버 한 벌이다 — 화면은 **서버가 준 말을 그대로** 보인다.
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "접수하지 못했습니다 — 적은 글은 그대로 있습니다. 다시 눌러 주세요.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"접수하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class TenantLookupResponse { public List<TenantPick>? Items { get; set; } }
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}

@@ -1,0 +1,33 @@
+@*
+    🔴 20261013작1 갈래② — `.MD 미러` 결과 (설계 §3-3 · §7-10)
+
+    오늘은 내보내기 결과(경로 목록)가 **화면 맨 아래에 영구히 쌓였다** — 한 번 누르면
+    문서를 고치는 동안에도 계속 붙어 있어 목록·문서가 그만큼 아래로 밀렸다.
+    결과는 한 번 보고 닫는 것이므로 다이얼로그로 보인다. **내보내는 기능은 한 글자도 안 바뀐다.**
+
+    Razor 에 C# raw string 금지(#14)
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+            승인된 판만 나옵니다. 아래 경로가 레포 8폴더 구조와 같습니다(파일은 사본 · 정본은 이 화면의 문서입니다).
+        </MudText>
+        @foreach (var path in Paths)
+        {
+            <MudText Typo="Typo.body2" Style="font-family:monospace">@path</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">닫기</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    /// <summary>내보낸 파일 경로 — 페이지가 서버에서 받아 그대로 넘긴다(상태는 페이지가 갖는다).</summary>
+    [Parameter] public IReadOnlyList<string> Paths { get; set; } = Array.Empty<string>();
+
+    private void Close() => MudDialog.Close();
+}
