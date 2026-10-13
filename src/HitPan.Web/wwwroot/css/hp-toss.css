@@ -978,3 +978,74 @@ textarea:focus-visible {
         padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   20261014작1 — 조회 게시판(본사공지사항) 규격
+   수석웹디자이너·프론트매니저 참여분 (사장님 지시 10/14 ③ · 설계 §9-2 규격표)
+
+   🔴 왜 전역 CSS 인가: MudBlazor 요소에 `Class` 로 넘기는 자리는 **범위 CSS(.razor.css)가
+      안 닿는다** — 자식 컴포넌트가 그린 요소에는 범위 표식이 안 붙는다. 집 방식 그대로
+      전역에 둔다(`.hp-sidebar-*`·`.hp-nav-2line-*` 선례).
+   🔴 값은 **토큰만** 쓴다 — 하드코딩 hex·px 0건(G-W9-14 가 잰다).
+   ══════════════════════════════════════════════════════════════════════ */
+
+.hp-cs-board {
+    max-width: 860px;                                      /* ①과 같은 폭 — 나란히 볼 때 폭이 튀면 안 된다 */
+    background: var(--hp-surface-raised);
+    border: 1px solid var(--hp-border-default);
+    border-radius: var(--hp-radius-lg);
+}
+
+.hp-cs-board--empty { padding: var(--hp-space-6); }        /* 빈 상태 — 그림·아이콘 없이 한 줄만 */
+
+.hp-cs-empty-line {
+    font-size: var(--hp-fs-body);
+    color: var(--hp-text-tertiary);
+}
+
+/* 한 줄 = 2행 묶음(제목행 + 메타행). MudBlazor 기본 여백을 이겨야 간격이 규격대로 선다. */
+.hp-cs-board .hp-cs-row {
+    padding: var(--hp-space-3) var(--hp-space-4) !important;
+    border-bottom: 1px solid var(--hp-border-subtle);
+}
+
+.hp-cs-board .hp-cs-row:last-child { border-bottom: none; }
+.hp-cs-board .hp-cs-row:hover { background: var(--hp-surface-hover); }   /* 누를 수 있다는 신호 */
+
+.hp-cs-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--hp-space-2);
+    width: 100%;
+}
+
+.hp-cs-row-title {
+    font-size: var(--hp-fs-body);
+    font-weight: var(--hp-fw-semi);
+    color: var(--hp-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;                                   /* 제목이 길어도 줄을 안 넘긴다 */
+}
+
+.hp-cs-row-chips {
+    display: flex;
+    align-items: center;
+    gap: var(--hp-space-2);
+    flex-shrink: 0;                                        /* 칩은 제목행 오른쪽 끝에 모인다 */
+}
+
+.hp-cs-row-meta {
+    margin-top: var(--hp-space-1);
+    font-size: var(--hp-fs-caption);
+    line-height: var(--hp-lh-normal);
+    color: var(--hp-text-tertiary);
+}
+
+/* 🔴 설계 §9-3 — 스크롤 없이 최소 8행. 낮은 화면에서는 위아래 여백을 한 칸 줄인다. */
+@media (max-height: 820px) {
+    .hp-cs-board .hp-cs-row {
+        padding: var(--hp-space-2) var(--hp-space-4) !important;
+    }
+}

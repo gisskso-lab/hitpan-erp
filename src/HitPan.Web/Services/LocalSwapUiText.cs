@@ -62,8 +62,13 @@ public static class LocalSwapUiText
     public static string WhoCanUse =>
         $"이 메뉴는 {UpdatePromptPlan.MainPcPhrase}에서 관리자 계정으로만 쓸 수 있습니다.";
 
-    /// <summary>사이드바 업데이트 이슈 줄 아래 이동 링크 글자(작3 줄은 무변경 · 링크만 더한다).</summary>
-    public const string SidebarIssueLink = "자료관리 › 최신 버전 확인/업데이트";
+    /// <summary>
+    /// 사이드바 업데이트 이슈 줄 아래 이동 링크 글자(작3 줄은 무변경 · 링크만 더한다).
+    /// 🔴 20261014작1 T-5 — 메뉴가 「자료관리」에서 **「고객지원센터」로 옮겨가서**(사장님 오더 10/14 ③)
+    /// 종전 글자가 **거짓이 됐다.** 글자만 고친다 — <see cref="MenuUpdate"/>·<see cref="UpdatePath"/> 는
+    /// 한 글자도 안 바꾼다(바꾸면 기존 게이트가 FAIL · 1V C-7).
+    /// </summary>
+    public const string SidebarIssueLink = "고객지원센터 › 최신 버전 확인/업데이트";
 
     /// <summary>로그인창 [최신버젼업데이트] 를 눌렀을 때(L-1 (가)) — 로그인 뒤 곧장 수동 업데이트 화면.</summary>
     public const string LoginButtonNotice =

@@ -20,7 +20,7 @@
 <PageHeader Title="CS 요청"
             Subtitle="보낸 문의와 그 답, 그리고 히트판 본사가 보낸 안내를 여기서 함께 봅니다" />
 
-<MudPaper Elevation="0" Class="pa-6 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
+<MudPaper Elevation="0" Class="pa-6 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg);max-width:860px">
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="6">
             <MudSelect T="string" @bind-Value="_category" Label="어떤 일인가요?" Variant="Variant.Outlined" Dense="true">
@@ -44,7 +44,7 @@
                           HelperText="주민번호·카드번호·계좌번호·사업자번호는 넣지 마세요 — 담겨 있으면 보낼 수 없습니다" />
         </MudItem>
         <MudItem xs="12" Class="d-flex align-center justify-space-between flex-wrap gap-2">
-            <MudText Typo="Typo.caption" Style="color:#6B7280">이 내용은 담당 대리점과 본사 상담원이 봅니다</MudText>
+            <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">이 내용은 담당 대리점과 본사 상담원이 봅니다</MudText>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_sending" OnClick="SendAsync">
                 @(_sending ? "보내는 중…" : "보내기")
             </MudButton>
@@ -59,11 +59,11 @@
 }
 else if (_items.Count == 0)
 {
-    <MudText Typo="Typo.body2" Style="color:#6B7280">보낸 문의가 없습니다.</MudText>
+    <MudText Typo="Typo.body2" Style="color:var(--hp-text-tertiary)">보낸 문의가 없습니다.</MudText>
 }
 else
 {
-    <MudPaper Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:860px">
+    <MudPaper Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg);max-width:860px">
         <MudList T="string" Dense="true">
             @foreach (var it in _items)
             {
@@ -83,7 +83,7 @@ else
                                 }
                                 @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))
                             </MudText>
-                            <MudText Typo="Typo.caption" Style="color:#6B7280">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
+                            <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
                         </div>
                         <div class="d-flex align-center gap-2">
                             @if (it.Origin == "hq")
@@ -132,7 +132,11 @@ else
         _loading = true;
         try
         {
-            var res = await Http.GetFromJsonAsync<ListResponse>("api/cs/requests");
+            // 🔴 20261014작1 — **내 쪽만** 묻는다(`origin=local`). 사장님 오더 10/14 = 공지/CS 분리.
+            //   왜 서버에서 가르나: 200건 받아 화면에서 걸러내면 본사 공지가 쌓일 때 내 문의가
+            //   LIMIT 밖으로 밀려 사라진다(1V A-1). 칸이 없는 DB 에서는 서버가 조건을 안 달아
+            //   **종전처럼 전부** 온다 — 그때도 목록이 비지 않는다(설계 §8 보장).
+            var res = await Http.GetFromJsonAsync<ListResponse>("api/cs/requests?origin=local");
             _items = res?.Data ?? new();
             _categories = res?.Categories ?? new();
             _subTags = res?.SubTags ?? new();
