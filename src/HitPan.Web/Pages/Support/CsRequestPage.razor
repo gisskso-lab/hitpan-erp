@@ -5,6 +5,7 @@
 @inject HttpClient Http
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject ILogger<CsRequestPage> _logger
 
 @* 작14 B-1 — CS 요청 보내기 + 내 문의 목록 (사장님 결재 2026-10-08 · 결-10 메뉴 = 사이드바 하단 단독)
    · 유형(7모양)·세부태그 콤보 목록의 주인은 서버(CsRequestController) 하나 — 화면은 받아 그린다
@@ -138,8 +139,12 @@ else
             if (string.IsNullOrEmpty(_category) && _categories.Count > 0) _category = _categories.Keys.First();
             if (string.IsNullOrEmpty(_subTag) && _subTags.Count > 0) _subTag = _subTags.Keys.Last(); // 기본 = 기타
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            @* 🔴 20261012작6 — 사유를 삼키지 않는다(#15). 사장님 실측 때 화면은 「불러오지 못했습니다」만
+               말했고 원인(JSON 역직렬화 실패)은 어디에도 안 남았다 ⇒ 다음 사람이 또 헤맨다.
+               고객에게는 개발용어를 안 보인다(사장님 헌법) — 사유는 로그에만 남긴다. *@
+            _logger.LogWarning(ex, "[CS쪽지] 목록 조회 실패 — 화면에는 재시도 안내만 보인다");
             Snackbar.Add("문의 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
         }
         _loading = false;
