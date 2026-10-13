@@ -1,0 +1,157 @@
+@using System.Net.Http.Json
+@using HitPan.Backoffice.Components.Pages.Platform.Components
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    🔴 20261013작1 갈래③ — 「공지 쓰기」 다이얼로그 (설계 §3-2 · R1 입력은 다이얼로그)
+
+    오늘은 이 입력칸이 목록 화면 위에 토글 패널로 붙어 있어, 공지를 쓰려고 열면 보관기한 설정이
+    함께 따라 나왔다. 쓰기를 다이얼로그로 떼면 화면은 늘 「쌓인 것을 보는 자리」로 고정된다.
+
+    🔴 「보냈습니다」라고 쓰지 않는다 — 아직 고객사에 안 닿았다. 서버가 하는 말과 **같은 말**을 한다.
+    🔴 종류 콤보는 4종만. 옛 값 2종(이벤트·요금 안내)은 **조회에서만** 보인다 — 서버 허용값에서는 안 지운다(#1).
+    🔴 엔드포인트·요청 모양은 오늘 그대로다(서버 0줄).
+
+    #14 raw string 금지 · #15 빈 catch 금지
+*@
+
+<MudDialog>
+    <DialogContent>
+        @* 사람이 「보냈다」로 오해하지 않게, 쓰기 전에 한 번 말해 둔다 *@
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            쓰신 공지는 <b>전달 대기함</b>에 쌓입니다. 고객사 ERP 수신 통로가 열리면 자동으로 나갑니다
+            — 지금 바로 고객사 화면에 뜨는 것은 아닙니다.
+        </MudAlert>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="7">
+                <MudAutocomplete T="TenantPick" Label="받는 고객사" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Value="_pick" ValueChanged="OnTenantPicked"
+                                 SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
+                                 ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
+                                 HelperText="@(string.IsNullOrEmpty(_tenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_tenantCode}")"
+                                 HelperTextOnFocus="false" />
+            </MudItem>
+            <MudItem xs="12" sm="5">
+                <MudSelect T="string" @bind-Value="_purpose" Label="공지 종류" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    @foreach (var k in CsVocab.NoticeKinds)
+                    {
+                        <MudSelectItem Value="@k.Key">@k.Value</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_title" Label="제목 (선택)" Variant="Variant.Outlined"
+                              Margin="Margin.Dense" MaxLength="100" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" @bind-Value="_body" Label="공지 내용" Variant="Variant.Outlined"
+                              Lines="6" MaxLength="2000" Counter="2000"
+                              HelperText="주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다)"
+                              HelperTextOnFocus="false" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">그만두기</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@_saving"
+                   StartIcon="@Icons.Material.Filled.Send"
+                   OnClick="SubmitAsync">@(_saving ? "넣는 중…" : "전달 대기함에 넣기")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    /// <summary>
+    /// 고객사 한 줄. 🔴 목록 화면(<c>AdminCsListPage</c>)의 같은 모양을 빌려 쓰지 않고 여기에 둔다 —
+    /// 그 화면은 같은 차수의 다른 갈래가 손보는 중이고, 남의 화면 안쪽 형에 기대면 그쪽이 움직일 때 같이 깨진다.
+    /// </summary>
+    public sealed class TenantPick
+    {
+        public string TenantCode { get; set; } = "";
+        public string CompanyName { get; set; } = "";
+    }
+
+    private TenantPick? _pick;
+    private string _tenantCode = "";
+    private string _purpose = "update";   // 사장님 낱말 순서의 첫째 — 업데이트공지사항
+    private string? _title;
+    private string? _body;
+    private bool _saving;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void OnTenantPicked(TenantPick? pick)
+    {
+        _pick = pick;
+        _tenantCode = pick?.TenantCode ?? "";
+    }
+
+    /// <summary>고객사명(또는 코드 일부)으로 찾는다 — 오늘 쓰는 입구 그대로(서버 0줄).</summary>
+    private async Task<IEnumerable<TenantPick>> SearchTenantsAsync(string? query, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Array.Empty<TenantPick>();
+        }
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<TenantLookupResponse>(
+                $"api/admin/cs/tenant-lookup?q={Uri.EscapeDataString(query)}", ct);
+            return res?.Items ?? (IEnumerable<TenantPick>)Array.Empty<TenantPick>();
+        }
+        catch (Exception ex)
+        {
+            // #15 — 삼키지 않는다. 사람이 「목록이 안 뜬다」로 끝나지 않게 이유를 말해 준다.
+            Snackbar.Add($"고객사를 찾지 못했습니다: {ex.Message}", Severity.Warning);
+            return Array.Empty<TenantPick>();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_tenantCode) || string.IsNullOrWhiteSpace(_body))
+        {
+            Snackbar.Add("받는 고객사와 공지 내용을 채워 주세요.", Severity.Info);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/cs/outbound", new
+            {
+                tenantCode = _tenantCode,
+                purpose = _purpose,
+                title = _title,
+                body = _body,
+            });
+            if (res.IsSuccessStatusCode)
+            {
+                // 🔴 「보냈습니다」가 아니다 — 서버가 하는 말과 같은 말을 한다.
+                Snackbar.Add("전달 대기함에 넣었습니다 — 수신 통로가 열리면 자동으로 나갑니다.", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "넣지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"넣지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class TenantLookupResponse { public List<TenantPick>? Items { get; set; } }
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}

@@ -1,0 +1,169 @@
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+
+@*
+    🔴 20261013작1 갈래③ — 「보관기한」 다이얼로그 (설계 §3-2)
+
+    오늘은 이 설정이 발신 패널 **안**에 섞여 있어, 공지를 쓰려고 열면 설정이 함께 나왔다.
+    자주 안 쓰는 것이므로 머리의 단추 뒤로 내린다(설계 R1·R3).
+
+    🔴 **저절로 지워지는 일은 없다**(2026-10-11 결재). 보관기한은 「폐기 후보」를 고르는 자이고,
+       지우는 것은 사람이 사유를 적어서 한다. 자동삭제 0 — 여기에 그런 길은 없다.
+    🔴 엔드포인트·요청 모양은 오늘 그대로다(서버 0줄).
+
+    #14 raw string 금지 · #15 빈 catch 금지
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-1">
+            기한이 지난 공지는 <b>폐기 후보</b>로만 보입니다. 사람이 사유를 적어 확정해야 지워집니다
+            — 저절로 지워지는 일은 없습니다.
+        </MudText>
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
+            비워 두면 무기한입니다(기본값).
+        </MudText>
+
+        <MudNumericField T="int?" @bind-Value="_retainDays" Label="보관 일수 (비우면 무기한)"
+                         Variant="Variant.Outlined" Margin="Margin.Dense" Min="1" Max="3650"
+                         Style="max-width:240px" Class="mb-3" />
+
+        <MudDivider Class="my-3" />
+
+        <div class="d-flex align-center gap-2 flex-wrap">
+            <MudButton Variant="Variant.Text" Size="Size.Small"
+                       Disabled="@_loadingCandidates"
+                       StartIcon="@Icons.Material.Filled.Inventory2"
+                       OnClick="LoadCandidatesAsync">@(_loadingCandidates ? "세는 중…" : "폐기 후보 보기")</MudButton>
+        </div>
+
+        @if (_counted)
+        {
+            <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mt-2 d-block">
+                기한 지난 공지 <b>@_noticeCandidates 건</b> — 목록에서 한 건씩 골라 폐기하십시오.
+            </MudText>
+            @* 🔴 같은 입구가 A/S 접수 쪽 후보도 함께 세어 준다. 오늘 화면이 보여 주던 숫자가 이것이다 —
+               지우지 않고, 어느 쪽 숫자인지만 정직하게 적는다(설계 R4). *@
+            <MudText Typo="Typo.caption" Style="color:#6B7280" Class="d-block">
+                기한 지난 A/S 접수 @_ticketCandidates 건 — 그쪽은 「고객A/S창구」에서 폐기합니다.
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">닫기</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@_saving" OnClick="SaveAsync">@(_saving ? "저장 중…" : "기한 저장")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    private int? _retainDays;
+    private bool _saving;
+    private bool _loadingCandidates;
+    private bool _counted;
+    private int _noticeCandidates;
+    private int _ticketCandidates;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    protected override async Task OnInitializedAsync() => await LoadRetentionAsync();
+
+    private async Task LoadRetentionAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<RetentionResponse>("api/admin/cs/retention");
+            _retainDays = res?.Policy?.RetainDays;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"보관기한을 불러오지 못했습니다: {ex.Message}", Severity.Warning);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync("api/admin/cs/retention", new { retainDays = _retainDays });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add(_retainDays is null
+                    ? "무기한으로 저장했습니다 — 저절로 지워지지 않습니다."
+                    : $"{_retainDays}일로 저장했습니다 — 기한이 지나도 저절로 지워지지 않고 「폐기 후보」로만 보입니다.",
+                    Severity.Success);
+                _counted = false;
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "저장하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"저장하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task LoadCandidatesAsync()
+    {
+        _loadingCandidates = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<PurgeCandidatesResponse>("api/admin/cs/purge-candidates");
+            _noticeCandidates = res?.OutboundItems?.Count ?? 0;
+            _ticketCandidates = res?.Items?.Count ?? 0;
+            _counted = true;
+            if (res?.RetainDays is null)
+            {
+                Snackbar.Add("보관기한이 무기한입니다 — 폐기 후보가 없습니다.", Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"폐기 후보를 세지 못했습니다: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            _loadingCandidates = false;
+        }
+    }
+
+    private sealed class RetentionResponse { public RetentionPolicy? Policy { get; set; } }
+    private sealed class RetentionPolicy { public int? RetainDays { get; set; } }
+
+    /// <summary>
+    /// 🔴 두 묶음이 함께 온다. <c>items</c> = A/S 접수 후보 · <c>outboundItems</c> = 본사 공지 후보.
+    /// 둘 다 **널 허용**이다 — 무기한이면 서버가 <c>items</c> 를 빈 배열로 주고 <c>outboundItems</c> 는 아예 빼고 준다
+    /// (<c>CsAdminController.PurgeCandidates</c> 의 무기한 가지). 비널러블로 받으면 그 가지에서 역직렬화가 터진다.
+    /// </summary>
+    private sealed class PurgeCandidatesResponse
+    {
+        public int? RetainDays { get; set; }
+        public List<CandidateRow>? Items { get; set; }
+        public List<CandidateRow>? OutboundItems { get; set; }
+    }
+
+    /// <summary>후보 한 줄 — 여기서는 **세기만** 한다(오늘 거동 그대로). 칸은 전부 널 허용.</summary>
+    private sealed class CandidateRow
+    {
+        public string? OutboundId { get; set; }
+        public string? Title { get; set; }
+        public DateTime? CreatedAt { get; set; }
+    }
+
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}

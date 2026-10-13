@@ -1,0 +1,405 @@
+@*
+    🔴 20261013작1 갈래③ — 「히트판공지 전송」 (사장님 결재 2026-10-13 · 설계 §3-2 와이어프레임이 사양)
+
+    무엇을 하는 화면인가: 본사에서 고객사로 보내는 공지를 쓰고, **전달 대기함에 쌓인 것을 지켜본다.**
+
+    왜 새 화면인가 — 오늘은 이 일이 「고객A/S창구」 위에 토글 패널로 얹혀 있었다.
+      ① 공지를 쓰려고 열면 보관기한 설정이 함께 나왔다
+      ② 본문이 목록 셀 안에 접혀 행 높이가 들쭉날쭉했다
+      ③ 서버가 「폐기됨」을 돌려주는데 화면 모델에 칸이 없어 **한 번도 안 보였다**(PM 실측)
+    ⇒ 쓰기·설정은 다이얼로그로, 전문은 오른쪽 상세로, 상태 낱말은 넷으로 고정한다.
+
+    🔴 서버 0줄 — 엔드포인트·쿼리·LIMIT·응답 모양을 손대지 않는다. 그래서 정직한 한계를 화면에 적는다:
+       서버 목록은 **최근 200건**만 주고 종류 필터가 없다 ⇒ 전달 상태는 서버가 거르고, 종류·고객사는
+       **받아 온 200건 안에서만** 거른다. 목록 머리에 「최근 200건 중 N건」이라고 적는다(설계 R4).
+
+    🔴 「보냈습니다」라고 쓰지 않는다 — 「전달 대기함에 넣었습니다」(서버가 하는 말과 같은 말).
+    🔴 「지금 준비하기」 입구를 같이 데려왔다 — 없으면 45번 미적용 서버에서 이 화면도 막다른 길이 된다.
+
+    상태는 이 페이지가 갖고 자식(상세 패널)은 [Parameter]+EventCallback 으로만 말한다(설계 §7).
+    #14 raw string 금지 · #15 빈 catch 금지 · CSS 신설 0건(기존 클래스·변수만)
+*@
+
+@page "/admin/cs/notice"
+@layout PlatformLayout
+@attribute [Authorize(Policy = "PlatformOnlyV2")]
+@using System.Net.Http.Json
+@using HitPan.Backoffice.Components.Pages.Platform.Components
+@inject IHttpClientFactory HttpFactory
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+
+<PageTitle>히트판공지 전송 — 히트판 백오피스</PageTitle>
+
+<BoPageHeader Title="히트판공지 전송"
+              Subtitle="본사에서 고객사로 보내는 공지 — 전달 대기함에 쌓이고, 고객사 ERP 수신 통로가 열리면 자동으로 나갑니다">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Campaign"
+                   OnClick="OpenComposeAsync">공지 쓰기</MudButton>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Schedule"
+                   OnClick="OpenRetentionAsync">보관기한</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="LoadAsync">새로고침</MudButton>
+    </Actions>
+</BoPageHeader>
+
+@* ── 자료방이 아직 없는 서버 — 여기서 끝낼 수 있게 한다. 누르는 것은 사람이다(반자동) ── *@
+@if (_schemaPending)
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4">
+        <MudText Typo="Typo.body2" Class="mb-2">
+            이 서버에는 <b>공지 보관기한·보내기 자료방</b>이 아직 준비되지 않았습니다.
+            준비하면 보관기한 설정과 공지 보내기가 바로 됩니다 —
+            <b>기존 자료는 하나도 바뀌지 않습니다</b>(새 자료방 2개를 만들 뿐입니다).
+        </MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                   Disabled="@_preparing"
+                   StartIcon="@Icons.Material.Filled.Build"
+                   OnClick="PrepareSchemaAsync">@(_preparing ? "준비 중…" : "지금 준비하기")</MudButton>
+    </MudAlert>
+}
+
+<BoFilterBar>
+    <MudTextField @bind-Value="_keyword" Label="검색 (고객사명·코드)" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Immediate="true" />
+    <MudSelect T="string" @bind-Value="_kindFilter" Label="종류" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        @foreach (var k in CsVocab.NoticeKinds)
+        {
+            <MudSelectItem Value="@k.Key">@k.Value</MudSelectItem>
+        }
+        @* 옛 값 2종은 한 묶음으로만 거른다 — 새로 쓸 수는 없지만 이미 보낸 글은 찾을 수 있어야 한다 *@
+        <MudSelectItem Value="@("legacy")">이벤트·요금 안내 (옛 값)</MudSelectItem>
+    </MudSelect>
+    <MudSelect T="string" @bind-Value="_stateFilter" Label="전달 상태" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem Value="@("all")">전체</MudSelectItem>
+        <MudSelectItem Value="@("pending")">전달 대기</MudSelectItem>
+        <MudSelectItem Value="@("delivered")">전달됨</MudSelectItem>
+        <MudSelectItem Value="@("canceled")">취소됨</MudSelectItem>
+    </MudSelect>
+    <div class="bo-filter-bar__action">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
+    </div>
+</BoFilterBar>
+
+<MudGrid Spacing="3">
+    @* ── 목록 7 ── *@
+    <MudItem xs="12" md="7">
+        <div class="bo-list-section">
+            <div class="bo-list-section__head">
+                <span class="bo-list-section__title">보낸 공지</span>
+                @* 🔴 거짓말 금지 — 서버가 주는 창(최근 200건)을 그대로 적는다 *@
+                <span class="bo-list-section__count">최근 200건 중 <strong>@_view.Count.ToString("N0")</strong>건</span>
+            </div>
+
+            @if (!_loading && _view.Count == 0)
+            {
+                <div style="padding:32px 24px;">
+                    <BoEmptyStateCard Title="아직 보낸 공지가 없습니다"
+                                      Description="「공지 쓰기」로 고객사에 보낼 공지를 적으면 이곳에 쌓입니다."
+                                      IllustrationKind="list" />
+                </div>
+            }
+            else
+            {
+                <MudDataGrid T="CsOutboundRow" Items="_view" Loading="_loading"
+                             Hover="true" Dense="true" SortMode="SortMode.Single"
+                             RowClick="@(e => Select(e.Item))">
+                    <Columns>
+                        <TemplateColumn Title="받는 고객사">
+                            <CellTemplate>
+                                <span>@(string.IsNullOrWhiteSpace(context.Item.CompanyName) ? "(고객사 정보 없음)" : context.Item.CompanyName)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="종류">
+                            <CellTemplate>
+                                <span>@CsVocab.NoticeKindLabel(context.Item.Purpose)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        @* 🔴 한 줄로 자른다 — 전문은 오른쪽 상세에서 읽는다(행 높이를 가지런히 둔다) *@
+                        <TemplateColumn Title="제목·내용">
+                            <CellTemplate>
+                                <span title="@context.Item.OneLine" style="display:block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@context.Item.OneLine</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <PropertyColumn Property="x => x.CreatedAt" Title="쓴 때" Format="MM-dd HH:mm" />
+                        <TemplateColumn Title="상태">
+                            <CellTemplate>
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item)">@context.Item.StatusLabel</MudChip>
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <PagerContent>
+                        <MudDataGridPager T="CsOutboundRow" />
+                    </PagerContent>
+                </MudDataGrid>
+            }
+        </div>
+    </MudItem>
+
+    @* ── 상세 5 ── *@
+    <MudItem xs="12" md="5">
+        @if (_selected is null)
+        {
+            <MudPaper Elevation="0" Class="pa-4" Style="border:1px dashed var(--mud-palette-lines-default);border-radius:12px">
+                <MudText Typo="Typo.body2" Style="color:#6B7280">
+                    왼쪽 목록에서 공지를 고르면 전문이 여기에 보입니다.
+                </MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <CsOutboundDetailPanel Row="_selected"
+                                   Busy="_busy"
+                                   OnClose="@(() => _selected = null)"
+                                   OnCancel="CancelSelectedAsync"
+                                   OnPurge="PurgeSelectedAsync" />
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    // ── 서버가 준 것(최근 200건) 과 화면이 거른 것을 따로 든다 ──
+    private List<CsOutboundRow> _rows = new();
+    private List<CsOutboundRow> _view = new();
+    private CsOutboundRow? _selected;
+
+    private bool _loading;
+    private bool _busy;
+    private bool _schemaPending;
+    private bool _preparing;
+
+    private string _keyword = "";
+    private string _kindFilter = "all";
+    private string _stateFilter = "all";
+
+    /// <summary>옛 값 묶음 — 쓰기 콤보에는 없고 조회에서만 한 묶음으로 걸린다(설계 §5-1).</summary>
+    private static readonly string[] LegacyKinds = { "event", "billing" };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static Color StatusColor(CsOutboundRow r) =>
+        r.PurgedAt is not null ? Color.Default
+        : r.CanceledAt is not null ? Color.Default
+        : r.DeliveredAt is not null ? Color.Success
+        : Color.Warning;
+
+    private void Select(CsOutboundRow row) => _selected = row;
+
+    // ══════════════════════════════════════════════════════════════
+    // 조회 — 전달 상태만 서버가 거른다(서버가 받는 값이 그 셋뿐이다). 종류·고객사는 받아 온 200건 안에서.
+    // ══════════════════════════════════════════════════════════════
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var url = _stateFilter == "all" ? "api/admin/cs/outbound" : $"api/admin/cs/outbound?state={_stateFilter}";
+            var res = await http.GetFromJsonAsync<OutboundListResponse>(url);
+            _rows = res?.Items ?? new();
+            // 자료방이 없으면 서버가 빈 목록 + 표식을 준다(500 이 아니다).
+            _schemaPending = res?.SchemaPending == true;
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            // #15 — 삼키지 않는다. #23 — 사람 말로 적는다.
+            Snackbar.Add($"공지 목록을 불러오지 못했습니다 — 잠시 뒤 「조회」를 다시 눌러 주세요. ({ex.Message})",
+                Severity.Warning);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        IEnumerable<CsOutboundRow> q = _rows;
+
+        if (_kindFilter == "legacy")
+        {
+            q = q.Where(r => r.Purpose is not null && LegacyKinds.Contains(r.Purpose));
+        }
+        else if (_kindFilter != "all")
+        {
+            q = q.Where(r => string.Equals(r.Purpose, _kindFilter, StringComparison.Ordinal));
+        }
+
+        var key = _keyword?.Trim() ?? "";
+        if (key.Length > 0)
+        {
+            q = q.Where(r =>
+                (r.CompanyName ?? "").Contains(key, StringComparison.OrdinalIgnoreCase)
+                || (r.TenantCode ?? "").Contains(key, StringComparison.OrdinalIgnoreCase));
+        }
+
+        _view = q.ToList();
+
+        // 거른 결과에 없는 줄이 오른쪽에 남아 있으면 사람이 헷갈린다.
+        if (_selected is not null && !_view.Any(r => r.OutboundId == _selected!.OutboundId))
+        {
+            _selected = null;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 쓰기·보관기한 — 다이얼로그(설계 R1). 닫히고 나서 목록을 다시 읽는다.
+    // ══════════════════════════════════════════════════════════════
+
+    private async Task OpenComposeAsync()
+    {
+        var dialog = await Dialog.ShowAsync<CsNoticeComposeDialog>("공지 쓰기",
+            new DialogParameters(), new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task OpenRetentionAsync()
+    {
+        var dialog = await Dialog.ShowAsync<CsNoticeRetentionDialog>("공지 보관기한",
+            new DialogParameters(), new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        await dialog.Result;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 자료방 준비 — 🔴 판정은 응답의 `Ready`(서버가 **표를 세어** 준 값)다. 「했다」가 아니라 「생겼다」를 본다.
+    // ══════════════════════════════════════════════════════════════
+
+    private async Task PrepareSchemaAsync()
+    {
+        _preparing = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync("api/admin/cs/schema/prepare", null);
+            var body = await res.Content.ReadFromJsonAsync<PrepareResponse>();
+
+            if (res.IsSuccessStatusCode && body?.Ready == true)
+            {
+                Snackbar.Add(body.Message ?? "자료방을 준비했습니다.", Severity.Success);
+                _schemaPending = false;
+                await LoadAsync();
+            }
+            else
+            {
+                Snackbar.Add(body?.Message ?? "준비하지 못했습니다.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"준비하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _preparing = false;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 되돌리기 — 취소(나가기 전에만) · 폐기(사유 필수 · 본문만 비우고 기록은 남는다)
+    // ══════════════════════════════════════════════════════════════
+
+    private async Task CancelSelectedAsync()
+    {
+        if (_selected is null) return;
+        _busy = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsync($"api/admin/cs/outbound/{_selected.OutboundId}/cancel", null);
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("보내기를 취소했습니다 — 이 공지는 고객사에 나가지 않습니다.", Severity.Success);
+                await ReloadKeepingSelectionAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "취소하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"취소하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PurgeSelectedAsync(string reason)
+    {
+        if (_selected is null) return;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            Snackbar.Add("폐기 사유를 적어 주세요 — 기록으로 남습니다.", Severity.Info);
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.PostAsJsonAsync(
+                $"api/admin/cs/outbound/{_selected.OutboundId}/purge", new { reason });
+            if (res.IsSuccessStatusCode)
+            {
+                Snackbar.Add("폐기했습니다 — 내용은 지워졌고, 지웠다는 기록은 남습니다.", Severity.Success);
+                await ReloadKeepingSelectionAsync();
+            }
+            else
+            {
+                var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(err?.Message ?? "폐기하지 못했습니다.", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"폐기하지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>고른 줄을 잃지 않고 다시 읽는다 — 취소·폐기한 바로 그 줄의 바뀐 상태를 사람이 눈으로 봐야 한다.</summary>
+    private async Task ReloadKeepingSelectionAsync()
+    {
+        var keep = _selected?.OutboundId;
+        await LoadAsync();
+        _selected = keep is null ? null : _view.FirstOrDefault(r => r.OutboundId == keep);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 응답 모양 — 🔴 한 칸이라도 비널러블로 적으면 한 건이 목록 전부를 가린다(게이트 G-W7-6 이 문다).
+    //   줄의 모양은 `Components/CsOutboundRow.cs` 한 곳에만 있다(상세 패널·게이트가 같은 형을 본다).
+    // ══════════════════════════════════════════════════════════════
+
+    private sealed class OutboundListResponse
+    {
+        public List<CsOutboundRow>? Items { get; set; }
+        public bool SchemaPending { get; set; }
+    }
+
+    /// <summary>🔴 <c>Ready</c> 는 서버가 **표를 세어** 준 값이다(「했다」가 아니라 「생겼다」).</summary>
+    private sealed class PrepareResponse
+    {
+        public bool Ready { get; set; }
+        public int TablesBefore { get; set; }
+        public int TablesAfter { get; set; }
+        public string? Message { get; set; }
+    }
+
+    private sealed class ApiMessage { public string? Message { get; set; } }
+}
