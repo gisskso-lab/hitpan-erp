@@ -367,7 +367,13 @@
          ─ 안쪽 업데이트 2종만 `_isTenantAdmin` = 부모계정만(결-B · 1V P-1 이 빌드로 확인).
          ─ 안읽음 숫자는 **하위 둘에 각각**(결-C) · 묶음 머리에는 **안 붙인다** — 겹쳐 보이면
            어느 쪽 숫자인지 사라진다. *@
-    <MudNavGroup Title="고객지원센터" Icon="@Icons.Material.Filled.SupportAgent" Expanded="false">
+    @* 🔴 [4] 조건 C-3 — 묶음이 **접혀 있으면 안읽음 숫자가 아예 안 보인다.**
+         숫자는 결재 결-C 에 따라 하위 둘에만 붙고 묶음 머리엔 안 붙는데, 접힌 상태에서는
+         그 하위가 화면에 없다 ⇒ 10/12 반려(「어디서 보는지 모르겠다」)가 그대로 되살아난다.
+         그래서 **안 읽은 것이 있을 때만 처음부터 펼친다.** 머리에 숫자를 붙이지 않으므로
+         결-C 를 깨지 않고, 숫자가 0 이면 종전처럼 접힌 채 선다. *@
+    <MudNavGroup Title="고객지원센터" Icon="@Icons.Material.Filled.SupportAgent"
+                 Expanded="@(_csHqUnread + _csReplyUnread > 0)">
         @* ① 고객지원 요청 — 쪽지 보내기 + 내가 쓴 문의. 주소는 종전 그대로다(#1 · 입구 4곳이 산다). *@
         <MudNavLink Href="/support/cs" Icon="@Icons.Material.Filled.EditNote">
             고객지원 요청

@@ -13,14 +13,16 @@
    · 「접수됐습니다」는 서버 INSERT 성공 응답 뒤에만 띄운다(게이트③ — 유실 0 의 화면 짝)
    · 「아직 본사에 안 갔음」 상태가 보여야 한다 — 안 보이면 고객은 기다리고 우리는 못 받은 걸 모른다 *@
 
-<PageTitle>CS 요청</PageTitle>
-@* 🔴 20261012 사장님 실측 반려 봉합 — 종전 부제는 「…보내면 담당 상담원이 답을 보냅니다」로
-   **보내는 쪽 이야기만** 했다. 본사 안내가 이 화면에 오는데 그 말이 한 자도 없어서
-   사장님이 「어디서 보는지 모르겠다」 하셨다. 받는 쪽도 말한다(이름·자리는 결-10 그대로). *@
-<PageHeader Title="CS 요청"
-            Subtitle="보낸 문의와 그 답, 그리고 히트판 본사가 보낸 안내를 여기서 함께 봅니다" />
+<PageTitle>고객지원 요청</PageTitle>
+@* 🔴 20261012 봉합 때는 이 화면이 본사 안내까지 함께 보여서 부제가 「…본사가 보낸 안내를
+   여기서 함께 봅니다」였다. 20261014작1 에서 **본사 안내를 「본사공지사항」으로 갈라냈다**
+   ⇒ 그 부제는 **거짓이 됐다**([4] 조건 C-1 · 사이드바 안내 글자와 같은 종류의 사고).
+   🔴 메뉴 이름과 화면 머리글을 **같은 말**로 맞춘다 — 처음 보는 사람이 메뉴를 눌렀는데
+   다른 낱말이 뜨면 「잘못 눌렀나」가 된다. 「CS」는 외부 노출 약어이기도 하다(#23). *@
+<PageHeader Title="고객지원 요청"
+            Subtitle="보낸 문의와 그 답을 봅니다. 히트판 본사가 보낸 안내는 「본사공지사항」에 있습니다" />
 
-<MudPaper Elevation="0" Class="pa-6 mb-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg);max-width:860px">
+<MudPaper Elevation="0" Class="pa-6 mb-4" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg);max-width:860px">
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="6">
             <MudSelect T="string" @bind-Value="_category" Label="어떤 일인가요?" Variant="Variant.Outlined" Dense="true">
@@ -63,29 +65,35 @@ else if (_items.Count == 0)
 }
 else
 {
-    <MudPaper Elevation="0" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg);max-width:860px">
+    @* 🔴 [4] 디자인검증 F-2·F-8 — ①의 목록도 ②와 **같은 축**이다(설계 §9-2 머리).
+       종전엔 색·둥근정도만 토큰으로 바꿔서 구분선·hover·제목 굵기·말줄임이 ②와 전부 달랐다
+       ⇒ 두 화면이 한 집으로 안 보인다(작지서 D-13·D-18). 게시판 규격은 `.hp-cs-*` 한 자리에만 둔다.
+       🔴 주소·칩 낱말·상태 축은 **안 건드린다**(#1) — 바뀌는 건 겉모양 클래스뿐이다. *@
+    <MudPaper Elevation="0" Class="hp-cs-board">
         <MudList T="string" Dense="true">
             @foreach (var it in _items)
             {
-                <MudListItem T="string" OnClick="@(() => Nav.NavigateTo($"/support/cs/{it.CsRequestId}"))">
-                    <div class="d-flex align-center justify-space-between flex-wrap gap-2" style="width:100%">
-                        <div>
+                <MudListItem T="string" Class="hp-cs-row"
+                             OnClick="@(() => Nav.NavigateTo($"/support/cs/{it.CsRequestId}"))">
+                    <div class="hp-cs-row-head">
+                        <span class="hp-cs-row-title">
                             @* 🔴 20261012작3 B-4 — 본사가 먼저 보낸 안내는 **내가 쓴 문의가 아니다.**
-                               구별 표시가 없으면 「내가 언제 이런 걸 물었지?」가 된다. *@
-                            <MudText Typo="Typo.body2">
-                                @if (it.Origin == "hq")
-                                {
-                                    <b style="color:var(--mud-palette-info)">본사 안내</b><span> · </span>
-                                }
-                                else
-                                {
-                                    <b>@CategoryLabel(it.Category)</b><span> · </span>
-                                }
-                                @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))
-                            </MudText>
-                            <MudText Typo="Typo.caption" Style="color:var(--hp-text-tertiary)">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudText>
-                        </div>
-                        <div class="d-flex align-center gap-2">
+                               구별 표시가 없으면 「내가 언제 이런 걸 물었지?」가 된다.
+                               (①은 이제 `origin=local` 만 받지만, 칸이 없는 DB 에서는 전부 내려오므로
+                                이 구별 표시를 **지우지 않는다** — 설계 §8 빈 화면 보장의 짝이다.) *@
+                            @if (it.Origin == "hq")
+                            {
+                                <b style="color:var(--hp-status-info-fg)">본사 안내</b><span> · </span>
+                            }
+                            else
+                            {
+                                <b>@CategoryLabel(it.Category)</b><span> · </span>
+                            }
+                            @(string.IsNullOrEmpty(it.Body) ? "(내용 없음)" : Preview(it.Body))
+                        </span>
+                        @* 🔴 ①은 칩이 최대 4개다 — `--many` 가 칩을 아래 줄로 떨어뜨려 제목을 지킨다.
+                           칩 수를 줄이는 것은 정보를 빼는 일이라 사장님 결재 영역이다(안 건드렸다). *@
+                        <span class="hp-cs-row-chips hp-cs-row-chips--many">
                             @if (it.Origin == "hq")
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
@@ -107,8 +115,9 @@ else
                                     본사 @it.HqStatus
                                 </MudChip>
                             }
-                        </div>
+                        </span>
                     </div>
+                    <div class="hp-cs-row-meta">@it.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
                 </MudListItem>
             }
         </MudList>

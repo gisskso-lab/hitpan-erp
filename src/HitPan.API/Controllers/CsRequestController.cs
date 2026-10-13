@@ -292,7 +292,15 @@ public class CsRequestController : ControllerBase
                    -- 숫자 칸은 **서버가 0 을 보장한다** — 클라이언트 모양에 기대지 않는다.
                    COALESCE(o.attempt_count, 0) AS attemptCount,
                    (SELECT COUNT(*) FROM cs_replies p
-                     WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS replyCount
+                     WHERE p.tenant_id = r.tenant_id AND p.cs_request_id = r.cs_request_id) AS replyCount,
+                   -- 🔴 20261014작1 [4] 조건 C-2 — **안 읽은 수**를 쪽지마다 센다(추가만 · 기존 키 무변경).
+                   --   왜 필요한가: 공지 목록의 「안읽음」 칩이 종전엔 `status='답변도착'` 으로 섰는데,
+                   --   읽음 표시는 `cs_replies.read_at` 만 바꾸고 **status 를 내리는 코드가 레포에 0건**이다
+                   --   ⇒ 읽은 뒤에도 칩이 영원히 남는다(거짓 알림). 읽음과 같은 축으로 센다.
+                   --   서브쿼리라 NULL 이 안 나온다 — 서버가 0 을 보장한다(C-6).
+                   (SELECT COUNT(*) FROM cs_replies u
+                     WHERE u.tenant_id = r.tenant_id AND u.cs_request_id = r.cs_request_id
+                       AND u.read_at IS NULL) AS unreadCount
               FROM cs_requests r
               LEFT JOIN cs_outbox o ON o.cs_request_id = r.cs_request_id
              -- 🔴 테넌트는 토큰 클레임에서 온 값 하나뿐이다 — 매개변수로 받지 않는다(#2).

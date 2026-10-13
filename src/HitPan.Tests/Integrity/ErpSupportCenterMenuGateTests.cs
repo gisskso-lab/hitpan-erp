@@ -151,11 +151,49 @@ public sealed class ErpSupportCenterMenuGateTests : IDisposable
                       || f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                      && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                      && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Where(f => File.ReadAllText(f).Contains("자료관리 ›"))
+            // 🔴 **주석을 걷어낸 뒤** 센다. 사고 이력에 옛 글자를 적어 두는 것은 기록이고 화면 글자가 아니다
+            //   (이 게이트가 처음에 「옛 글자가 왜 거짓인가」를 적은 주석에 걸려 빨개졌다).
+            .Where(f => StripComments(File.ReadAllText(f)).Contains("자료관리 ›"))
             .ToList();
 
         Assert.True(stale.Count == 0,
             "메뉴가 고객지원센터로 옮겨갔는데 「자료관리 ›」 라고 말하는 자리가 남았다:\n  " + string.Join("\n  ", stale));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W9-21 — 🔴 접힌 묶음에서 안읽음이 안 보이는 구멍 ([4] 조건 C-3)
+    //   숫자는 하위 둘에만 붙는데(결-C) 묶음이 접혀 있으면 그 하위가 화면에 없다
+    //   ⇒ 10/12 반려(「어디서 보는지 모르겠다」)가 그대로 되살아난다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W9-21 🔴 안 읽은 것이 있으면 고객지원센터 묶음이 펼쳐진다 — 접힌 채면 숫자가 아예 안 보인다")]
+    public void G_W9_21_안읽음이_있으면_펼쳐진다()
+    {
+        var src = SidebarSource();
+        var group = GroupBlock(src, "고객지원센터");
+        // 묶음 머리 선언부(여는 태그)만 본다
+        var head = group[..group.IndexOf('>')];
+
+        Assert.Contains("Expanded=", head);
+        // 🔴 고정값 false 면 숫자를 영원히 못 본다
+        Assert.DoesNotContain("Expanded=\"false\"", head);
+        // 두 안읽음 필드가 그 판정에 쓰였나
+        Assert.Contains("_csHqUnread", head);
+        Assert.Contains("_csReplyUnread", head);
+
+        // 🔴 결-C 는 그대로 — 묶음 머리에 숫자 칩을 붙이지 않았다
+        Assert.DoesNotContain("MudChip", head);
+    }
+
+    /// <summary>Razor 주석 블록·C# 줄주석을 걷어낸다 — 주석은 화면에 안 보이는 글자다.</summary>
+    private static string StripComments(string src)
+    {
+        var s = System.Text.RegularExpressions.Regex.Replace(src, @"@\*.*?\*@", " ",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"/\*.*?\*/", " ",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"^\s*//.*$", " ",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        return s;
     }
 
     /// <summary>해당 MudNavGroup 의 머리부터 그 묶음이 닫히는 줄까지를 잘라 준다(중첩 없음 — 사이드바는 1단이다).</summary>

@@ -28,7 +28,7 @@
 }
 else if (_replies.Count == 0)
 {
-    <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg);max-width:860px">
+    <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg);max-width:860px">
         @* 🔴 본사가 **거둬간** 안내도 이 자리로 온다(본문이 비워졌다 — [4] V-1 봉합).
            「답이 없습니다」라고 하면 사실과 다르다. *@
         <MudText Typo="Typo.body2" Style="color:var(--hp-text-tertiary)">
@@ -42,7 +42,7 @@ else
     <div style="max-width:860px">
         @foreach (var r in _replies)
         {
-            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg)">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg)">
                 <div class="d-flex align-center justify-space-between mb-2">
                     <MudChip T="string" Size="Size.Small" Color="@(_isHq ? Color.Info : Color.Primary)"
                              Variant="@(_isHq ? Variant.Filled : Variant.Outlined)"
@@ -70,7 +70,7 @@ else
            🚫 고객에게 보이는 글자에 개발 용어 0건(#23) *@
         @if (_rating is not null && _rating.CanRate && !_thanks)
         {
-            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg)">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg)">
                 <MudText Typo="Typo.subtitle1" Class="mb-3">답변이 도움이 됐나요?</MudText>
                 <div class="d-flex flex-wrap mb-3" style="gap:8px">
                     @foreach (var c in Choices)
@@ -98,7 +98,7 @@ else
         }
         else if (_rating is not null && (_thanks || _rating.Reason == ReasonAlreadyRated))
         {
-            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg)">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg)">
                 @if (_thanks)
                 {
                     <MudText Typo="Typo.subtitle1">평가 고맙습니다. 더 나은 답으로 보답하겠습니다.</MudText>
@@ -122,7 +122,7 @@ else
         }
         else if (_rating is not null && ClosedNotice(_rating.Reason) is { Length: > 0 } cn)
         {
-            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--mud-palette-lines-default);border-radius:var(--hp-radius-lg)">
+            <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:1px solid var(--hp-border-default);border-radius:var(--hp-radius-lg)">
                 <MudText Typo="Typo.body2" Style="color:var(--hp-text-tertiary)">@cn</MudText>
             </MudPaper>
         }

@@ -102,6 +102,64 @@ public sealed class ErpCsNoticeScreenGateTests : IDisposable
         Assert.Contains("/support/cs", back!);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-W9-16 — 🔴 ① 화면이 **자기 쪽만** 묻는다 (사장님 오더 이행을 묶는 자리)
+    //   [4] 적발: 이 한 줄이 빠지면 공지가 계속 섞여 **오더 미이행**인데 묶는 게이트가 0건이었다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W9-16 🔴 「고객지원 요청」이 ?origin=local 로 묻고 공지 화면은 ?origin=hq 로 묻는다 (분리의 본체)")]
+    public void G_W9_16_두_화면이_자기_쪽만_묻는다()
+    {
+        Assert.Contains("api/cs/requests?origin=local", Support("CsRequestPage.razor"));
+        Assert.Contains("api/cs/requests?origin=hq", Support("CsNoticePage.razor"));
+
+        // 🔴 쪽을 안 묻는 **목록 조회**가 남아 있으면 분리가 새는 자리다.
+        //   단 쪽지를 **보내는** POST 는 같은 주소를 쓴다(`PostAsJsonAsync("api/cs/requests", …)`) —
+        //   그건 분리와 무관하다. 그래서 「목록을 받아오는 호출」만 골라 본다
+        //   (이 게이트가 처음에 그 POST 를 분리 누락으로 오인해 빨개졌다).
+        foreach (var f in new[] { "CsRequestPage.razor", "CsNoticePage.razor" })
+        {
+            var gets = Support(f).Split('\n').Where(l => l.Contains("GetFromJsonAsync")).ToList();
+            Assert.NotEmpty(gets);
+            Assert.All(gets, l => Assert.Contains("?origin=", l));
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W9-18 — 화면 머리글이 메뉴 낱말과 같고, 부제가 거짓이 아니다 ([4] 조건 C-1)
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W9-18 🔴 ① 화면 제목이 메뉴와 같은 「고객지원 요청」이고 부제가 더는 「함께 봅니다」라 말하지 않는다")]
+    public void G_W9_18_제목과_부제가_거짓이_아니다()
+    {
+        var page = Support("CsRequestPage.razor");
+        var visible = NoticeVisibleText(page);
+
+        Assert.Contains("<PageTitle>고객지원 요청</PageTitle>", page);
+        Assert.Contains("Title=\"고객지원 요청\"", page);
+        // 🔴 본사 안내를 갈라냈으므로 「함께 봅니다」는 거짓이다
+        Assert.DoesNotContain("함께 봅니다", visible);
+        // 어디로 가야 하는지는 말해 준다
+        Assert.Contains("본사공지사항", visible);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W9-20 — ① 목록도 같은 게시판 규격을 쓴다 ([4] 디자인검증 F-2)
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W9-20 🔴 두 목록이 같은 게시판 규격 클래스를 쓴다 — ① 이 혼자 다른 집이 아니다")]
+    public void G_W9_20_두_목록이_한_집이다()
+    {
+        foreach (var f in new[] { "CsRequestPage.razor", "CsNoticePage.razor" })
+        {
+            var src = Support(f);
+            Assert.Contains("hp-cs-board", src);
+            Assert.Contains("hp-cs-row", src);
+            Assert.Contains("hp-cs-row-title", src);
+            Assert.Contains("hp-cs-row-meta", src);
+            Assert.Contains("hp-cs-row-chips", src);
+        }
+        // ①은 칩이 최대 4개라 아래 줄로 떨어뜨리는 보조 클래스를 쓴다(제목을 지킨다)
+        Assert.Contains("hp-cs-row-chips--many", Support("CsRequestPage.razor"));
+    }
+
     /// <summary>
     /// 화면에 보이는 글자만 남긴다 — 개발 용어 금지(#23)는 <b>보이는 글자</b>에 대한 규칙이다.
     /// 🔴 줄 머리로 거르면 안 된다 — 여러 줄 주석의 가운데 줄은 아무 글자로나 시작한다

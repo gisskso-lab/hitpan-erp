@@ -175,6 +175,36 @@ public sealed class ErpCsOriginQueryGateTests : IDisposable
         Assert.Equal(2, (await ErpCsGateDb.ListAsync(erp, null)).Count);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-W9-17 — 🔴 안읽음이 **읽음과 같은 축**이다 ([4] 조건 C-2)
+    //   종전 화면 판정은 `status='답변도착'` 이었는데 읽음 표시는 `cs_replies.read_at` 만 바꾼다.
+    //   status 를 내리는 코드가 레포에 0건이라 **읽은 뒤에도 칩이 영원히 남았다**(거짓 알림).
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W9-17 🔴 안읽음 수가 읽으면 줄어든다 — 읽음 표시와 같은 축이다 (status 는 안 내려간다)")]
+    public async Task G_W9_17_안읽음은_읽으면_줄어든다()
+    {
+        const string gate = "G-W9-17 안읽음 축";
+        if (!await _db.ReadyAsync(gate)) return;
+
+        await using var erp = await _db.OpenAsync();
+        await ErpCsGateDb.SeedUsersAsync(erp);
+        await ErpCsGateDb.InsertAsync(erp, "hq-1", "hq", "본사 공지", minutesAgo: 10);
+        await ErpCsGateDb.AddReplyAsync(erp, "r-1", "hq-1");
+
+        // 읽기 전 — 안읽음 1
+        var before = await ErpCsGateDb.ListAsync(erp, "hq");
+        Assert.Equal(1, ErpCsGateDb.Cell<int>(before[0], "unreadCount"));
+
+        // 실물 읽음 표시 경로를 지난다
+        await ErpCsGateDb.NewController(erp).MarkRead("r-1", default);
+
+        var after = await ErpCsGateDb.ListAsync(erp, "hq");
+        Assert.Equal(0, ErpCsGateDb.Cell<int>(after[0], "unreadCount"));
+
+        // 🔴 그리고 `status` 는 **그대로**다 — 그래서 status 로 칩을 세우면 영원히 남는다(이 게이트의 이유)
+        Assert.Equal("답변도착", ErpCsGateDb.Cell<string>(after[0], "status"));
+    }
+
     public void Dispose() => _db.Dispose();
 }
 
@@ -289,8 +319,15 @@ internal sealed class ErpCsGateDb : IDisposable
     public static string Id(object row) => Cell<string>(row, "csRequestId");
     public static string? Origin(object row) => Cell<string?>(row, "origin");
 
+    /// <summary>본사 발신의 답 한 줄(= 공지 본문). <c>read_at</c> 을 넣지 않아 **안 읽은 상태**로 앉는다.</summary>
+    public static async Task AddReplyAsync(MySqlConnection erp, string replyId, string requestId) =>
+        await erp.ExecuteAsync(@"
+            INSERT INTO cs_replies (reply_id, tenant_id, cs_request_id, body, replied_by_kind, replied_at)
+            VALUES (@Id, @Tid, @Req, '본문', '본사', UTC_TIMESTAMP(6))",
+            new { Id = replyId, Tid = TenantId, Req = requestId });
+
     /// <summary>Dapper 의 동적 행에서 칸 하나를 꺼낸다.</summary>
-    private static T Cell<T>(object row, string name)
+    public static T Cell<T>(object row, string name)
     {
         var dict = (IDictionary<string, object>)row;
         return dict.TryGetValue(name, out var v) && v is not null ? (T)Convert.ChangeType(v, typeof(T)) : default!;

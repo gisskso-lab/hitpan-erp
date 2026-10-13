@@ -28,7 +28,9 @@ else if (_items.Count == 0)
 {
     @* 빈 상태 — 카드 안쪽 여백 24px · 본문 글꼴 · 보조 글자색 · 한 줄만(설계 §9-3) *@
     <MudPaper Elevation="0" Class="hp-cs-board hp-cs-board--empty">
-        <MudText Typo="Typo.body2" Class="hp-cs-empty-line">아직 본사에서 보낸 안내가 없습니다.</MudText>
+        @* 🔴 [4] 디자인검증 §5-2 — 빈 상태는 **사실 + 다음에 할 일**을 한 줄로 잇는다.
+           설계 §9-3 의 「한 줄만」을 지키면서 「그럼 문의는 어디서 하지?」를 막는다. *@
+        <MudText Typo="Typo.body2" Class="hp-cs-empty-line">아직 본사에서 보낸 안내가 없습니다. 문의는 「고객지원 요청」에서 보냅니다.</MudText>
     </MudPaper>
 }
 else
@@ -44,10 +46,17 @@ else
                         <span class="hp-cs-row-title">@Title(it)</span>
                         <span class="hp-cs-row-chips">
                             @* 종류 자리 — 지금은 「본사 안내」 한 종류다. 용도 칸이 들어오면(작3)
-                               이 자리가 그 값으로 채워진다. 자리를 미리 비워 둔다(설계 §5). *@
+                               이 자리가 그 값으로 채워진다. 자리를 미리 비워 둔다(설계 §5).
+                               🔴 [4] 디자인검증 F-3 — 색을 **토큰으로 직접** 준다. `Color.Info` 만 쓰면
+                               테마에 Info 가 안 박혀 있어 MudBlazor 기본 하늘색으로 서고 글자 명암비가
+                               3.12:1(AA 미달)이 된다. 전역 팔레트는 이 차수 범위 밖이라 칩에서 막는다. *@
                             <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
-                                     Class="my-0">@KindLabel(it)</MudChip>
-                            @if (it.ReplyCount > 0 && it.Status == "답변도착")
+                                     Class="my-0"
+                                     Style="color:var(--hp-status-info-fg);border-color:var(--hp-status-info-border)">@KindLabel(it)</MudChip>
+                            @* 🔴 [4] 조건 C-2 — 안읽음은 **읽음과 같은 축**으로 센다.
+                               종전 판정(`Status == "답변도착"`)은 읽어도 안 내려간다 — status 를 내리는
+                               코드가 레포에 0건이라 **읽은 뒤에도 칩이 영원히 남았다**(거짓 알림). *@
+                            @if (it.UnreadCount > 0)
                             {
                                 <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
                                          Class="my-0">안읽음</MudChip>
@@ -121,5 +130,7 @@ else
         public DateTime CreatedAt { get; set; }
         public int AttemptCount { get; set; }
         public int ReplyCount { get; set; }
+        /// <summary>🔴 [4] C-2 — 안 읽은 수. 서버가 서브쿼리로 0 을 보장한다(읽으면 줄어든다).</summary>
+        public int UnreadCount { get; set; }
     }
 }
