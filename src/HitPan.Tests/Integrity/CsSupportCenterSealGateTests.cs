@@ -353,9 +353,78 @@ public sealed class CsSupportCenterSealGateTests
         Assert.Equal("-", CsVocab.RatingLabel(null));
     }
 
+    /// <summary>
+    /// 🔴 <b>G-W7-11</b> — 「전체」 공지가 <b>지금 쓰고 있는 고객사에만</b> 들어간다
+    /// (사장님 오더 2026-10-13 「받는고객사 - 전체도 필요할듯」 + 범위 결재 「지금 쓰고 있는 고객사만」).
+    ///
+    /// <para>무는 약속 둘: ① <c>active</c>·<c>trial</c> 고객사에는 <b>각각 한 건</b>이 들어간다
+    /// ② <c>suspended</c>·<c>terminated</c>·<c>pending</c> 고객사에는 <b>0건</b>이다.
+    /// 🔴 ②가 음성 대조군이다 — <b>해지한 고객사에 본사 공지가 들어가는 것</b>이 이 결재가 막은 사고다.</para>
+    ///
+    /// <para>셋째로 「몇 곳에 나가나」를 보여주는 입구가 <b>같은 숫자</b>를 말하는지도 함께 잰다 —
+    /// 화면이 2곳이라 적고 서버가 5곳에 넣으면 그게 가장 나쁜 모양이다.</para>
+    ///
+    /// <para>🔴 봉합을 빼면: 서버의 <c>WHERE status IN ('active','trial')</c> 를 지우면
+    /// 정지·해지 고객사에도 행이 생겨 이 게이트가 FAIL 한다.</para>
+    /// </summary>
+    [Fact(DisplayName = "G-W7-11 전체 공지 — 쓰고 있는 고객사에만 들어가고 정지·해지·가입대기는 0건")]
+    public async Task G_W7_11_전체공지는_쓰는_고객사에만_간다()
+    {
+        const string gate = "G-W7-11 전체 공지 범위";
+        await using var env = await SealGateDb.TryCreateAsync(gate, "hitpan_bo_w7_gate_11");
+        if (env is null) return;
+
+        // 받아야 하는 곳 2 · 받으면 안 되는 곳 3
+        await env.SeedTenantAsync("W7S11A", "쓰는 상사", "active");
+        await env.SeedTenantAsync("W7S11B", "체험 상사", "trial");
+        await env.SeedTenantAsync("W7S11C", "정지 상사", "suspended");
+        await env.SeedTenantAsync("W7S11D", "해지 상사", "terminated");
+        await env.SeedTenantAsync("W7S11E", "가입대기 상사", "pending");
+
+        var cs = NewController(env);
+
+        // ── 화면이 보여줄 숫자를 먼저 읽는다
+        var countRes = await cs.OutboundTargetCount(default);
+        Assert.True(StatusOf(countRes) == 200, $"{gate} 대상 수 입구가 200 이 아니다. {Describe(countRes)}");
+        var shown = JsonSerializer.Deserialize<WebTargetCount>(
+            JsonSerializer.Serialize(ValueOf(countRes)),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.True(shown?.Count == 2,
+            $"{gate} 화면에 보여줄 대상 수가 {shown?.Count?.ToString() ?? "null"} 이다(2 곳이어야 한다).");
+
+        // ── 전체 발송
+        var sent = await cs.CreateOutbound(new CsAdminController.OutboundRequest
+        {
+            All = true, Purpose = "notice", Title = "전체 공지", Body = "전체에게 보내는 본문입니다",
+        }, default);
+        Assert.True(StatusOf(sent) == 200, $"{gate} 전체 발송이 200 이 아니다. {Describe(sent)}");
+
+        // ── ① 받아야 하는 곳 — 각각 한 건
+        Assert.True(await env.OutboundCountOfAsync("W7S11A") == 1,
+            $"{gate} active 고객사에 공지가 1건이 아니다.");
+        Assert.True(await env.OutboundCountOfAsync("W7S11B") == 1,
+            $"{gate} trial 고객사에 공지가 1건이 아니다.");
+
+        // ── ② 🔴 음성 대조군 — 받으면 안 되는 곳은 0건
+        foreach (var (code, 상태) in new[] { ("W7S11C", "suspended"), ("W7S11D", "terminated"), ("W7S11E", "pending") })
+        {
+            var n = await env.OutboundCountOfAsync(code);
+            Assert.True(n == 0,
+                $"{gate} {상태} 고객사에 본사 공지가 {n}건 들어갔다 — 사장님 결재(「지금 쓰고 있는 고객사만」)를 넘었다.");
+        }
+
+        // ── 서버가 넣은 총 건수가 화면이 말한 숫자와 같아야 한다
+        var rows = await ReadOutboundAsWebAsync(cs, gate);
+        Assert.True(rows.Count == 2,
+            $"{gate} 전체 발송으로 {rows.Count}건이 생겼다(화면은 2곳이라 말했다) — 말과 행이 어긋난다.");
+    }
+
     // ══════════════════════════════════════════════════════════════
     // 시험 장치 — 갈래①②③ 게이트와 같은 모양
     // ══════════════════════════════════════════════════════════════
+
+    /// <summary>「몇 곳에 나가나」 응답 — 화면과 <b>같은 널 허용성</b>(못 읽었을 때 0 으로 떨어뜨리지 않는다).</summary>
+    private sealed class WebTargetCount { public int? Count { get; set; } }
 
     /// <summary>🔴 상세를 **화면이 지나는 길**로 읽는다 — 직렬화한 뒤 화면 모델로 되돌려 읽는다.</summary>
     private static async Task<WebDetailResponse> ReadDetailAsWebAsync(CsAdminController cs, long ticketId, string gate)
@@ -511,12 +580,29 @@ public sealed class CsSupportCenterSealGateTests
 
         /// <summary>고객사 1곳.</summary>
         public async Task SeedTenantAsync(string code, string companyName)
+            => await SeedTenantAsync(code, companyName, "active");
+
+        /// <summary>🔴 20261013작1 보강 B-1 — 상태를 지정해 고객사 1곳.
+        /// 「전체」 발송이 <b>어떤 상태까지</b> 가는지를 재려면 상태가 다른 고객사가 있어야 한다.</summary>
+        public async Task SeedTenantAsync(string code, string companyName, string status)
         {
             await using var db = await OpenAsync();
             await db.ExecuteAsync(@"
                 INSERT INTO tenants (tenant_id, tenant_code, company_name, status)
-                VALUES (@Tid, @Code, @Name, 'active')",
-                new { Tid = Guid.NewGuid().ToString(), Code = code, Name = companyName });
+                VALUES (@Tid, @Code, @Name, @Status)",
+                new { Tid = Guid.NewGuid().ToString(), Code = code, Name = companyName, Status = status });
+        }
+
+        /// <summary>그 고객사의 전달 대기 큐에 쌓인 건수(코드로 센다).</summary>
+        public async Task<int> OutboundCountOfAsync(string tenantCode)
+        {
+            await using var db = await OpenAsync();
+            return await db.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(*)
+                  FROM bo_cs_outbound o
+                  JOIN tenants t ON t.tenant_id = o.tenant_id
+                 WHERE t.tenant_code = @Code",
+                new { Code = tenantCode });
         }
 
         /// <summary>

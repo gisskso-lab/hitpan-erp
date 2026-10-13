@@ -503,6 +503,18 @@ public class CsAdminController : ControllerBase
         return Ok(new { success = true, items = rows });
     }
 
+    /// <summary>🔴 20261013작1 보강 B-1 — 「전체」를 고르면 **몇 곳에 나가는지 먼저 보여준다**.
+    /// <para>왜 필요한가: 전체 발송은 누르면 되돌리기가 고객사 수만큼 드는 동작이다.
+    /// 숫자를 보고 누르는 것과 모르고 누르는 것은 다르다. 읽기만 하고 아무것도 쓰지 않는다.</para></summary>
+    [HttpGet("outbound/target-count")]
+    public async Task<IActionResult> OutboundTargetCount(CancellationToken ct)
+    {
+        await using var db = await OpenAsync(ct);
+        var count = await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM tenants WHERE status IN ('active','trial')");
+        return Ok(new { success = true, count });
+    }
+
     /// <summary>C-2 — 본사가 먼저 보내는 쪽지를 **전달 대기 큐**에 넣는다.</summary>
     [HttpPost("outbound")]
     public async Task<IActionResult> CreateOutbound([FromBody] OutboundRequest req, CancellationToken ct)
@@ -511,11 +523,14 @@ public class CsAdminController : ControllerBase
         if (string.IsNullOrEmpty(adminId)) return Forbid();
 
         var code = req?.TenantCode?.Trim() ?? "";
+        var toAll = req?.All == true;
         var purpose = string.IsNullOrWhiteSpace(req?.Purpose) ? "etc" : req!.Purpose!.Trim();
         var title = req?.Title?.Trim();
         var body = req?.Body?.Trim() ?? "";
 
-        if (string.IsNullOrEmpty(code))
+        // 🔴 20261013작1 보강 B-1 — 「전체」는 고객사 코드를 비우고 All=true 로 온다.
+        //   한 곳 보내기 경로는 한 글자도 바뀌지 않는다(#1 — 추가만).
+        if (!toAll && string.IsNullOrEmpty(code))
             return BadRequest(new { success = false, message = "어느 고객사에 보낼지 골라 주세요" });
         if (!AllowedOutboundPurpose.Contains(purpose))
             return BadRequest(new { success = false, message = "용도를 목록에서 골라 주세요(업데이트공지사항·히트판 공지사항·프로모션 안내·기타 공지사항)" });
@@ -534,6 +549,57 @@ public class CsAdminController : ControllerBase
         await using var db = await OpenAsync(ct);
         // 🔴 작4 A-1 — 45번 미적용 서버에서 500 대신 사람이 읽을 답(선행검증서 §2-1).
         if (!await HasOutboundSchemaAsync(db)) return SchemaPendingResult();
+
+        // ── 🔴 20261013작1 보강 B-1 — 「전체」 발송 ───────────────────────────────
+        //   사장님 결재(2026-10-13): 「지금 쓰고 있는 고객사만」 = status ∈ {active, trial}.
+        //   🔴 정지·해지·가입대기 고객사에는 **보내지 않는다** — 해지한 곳에 본사 공지가
+        //      들어가는 것이 이 결재가 막은 사고다.
+        //   왜 고객사마다 한 행인가: `bo_cs_outbound.tenant_id` 가 NOT NULL 이고
+        //   `outbound_id` 가 ERP 전달의 멱등 열쇠다(45번 DDL). 한 행으로 묶으면
+        //   ① 고객사별 취소·폐기가 불가능해지고 ② ERP 가 고객사별로 가져가는 길이 끊긴다(#20).
+        //   ⇒ DDL 0건으로 가는 유일한 모양이 **N행**이다.
+        if (toAll)
+        {
+            var targets = (await db.QueryAsync<string>(
+                @"SELECT CAST(tenant_id AS CHAR)
+                    FROM tenants
+                   WHERE status IN ('active','trial')
+                   ORDER BY company_name")).ToList();
+
+            if (targets.Count == 0)
+                return BadRequest(new { success = false, message = "지금 쓰고 있는 고객사가 없습니다 — 보낼 곳이 없습니다" });
+
+            var rows = targets.Select(t => new
+            {
+                Id = Guid.NewGuid().ToString(),
+                TenantId = t,
+                Purpose = purpose,
+                Title = title,
+                Body = body,
+                AdminId = adminId,
+            }).ToList();
+
+            // 🔴 한 거래로 묶는다 — 중간에 끊기면 「절반만 나간 공지」가 남는다.
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.ExecuteAsync(@"
+                INSERT INTO bo_cs_outbound
+                    (outbound_id, tenant_id, purpose, title, body, created_by, created_at)
+                VALUES (@Id, @TenantId, @Purpose, @Title, @Body, @AdminId, UTC_TIMESTAMP(6))",
+                rows, tx);
+            await tx.CommitAsync(ct);
+
+            _logger.LogInformation("[CS어드민] 선발신 전체 발송 — 고객사 {Count}곳 purpose={P}", rows.Count, purpose);
+
+            // 🔴 「보냈습니다」라고 말하지 않는다 — 전달은 ERP 통로가 열린 뒤다.
+            return Ok(new
+            {
+                success = true,
+                sentCount = rows.Count,
+                delivered = false,
+                message = $"고객사 {rows.Count}곳의 전달 대기함에 넣었습니다 — ERP 수신 통로가 열리면 자동으로 나갑니다",
+            });
+        }
+
         var tenantId = await db.ExecuteScalarAsync<string?>(
             "SELECT CAST(tenant_id AS CHAR) FROM tenants WHERE tenant_code = @Code", new { Code = code });
         if (tenantId is null) return NotFound(new { success = false, message = "그 코드의 고객사가 없습니다" });
@@ -872,6 +938,12 @@ public class CsAdminController : ControllerBase
         public string? Purpose { get; set; }
         public string? Title { get; set; }
         public string? Body { get; set; }
+
+        /// <summary>🔴 20261013작1 보강 B-1 — <c>true</c> 면 <b>지금 쓰고 있는 고객사 전부</b>
+        /// (<c>status ∈ {active, trial}</c>)에게 각각 한 건씩 넣는다(사장님 결재 2026-10-13).
+        /// <para>비거나 <c>false</c> 면 종전 그대로 <see cref="TenantCode"/> 한 곳만 — 이 칸을 모르는
+        /// 종전 호출자가 그대로 돌아야 한다(#1).</para></summary>
+        public bool? All { get; set; }
     }
 
     public class RetentionRequest { public int? RetainDays { get; set; } }
