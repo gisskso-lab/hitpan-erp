@@ -515,6 +515,28 @@ public sealed class CsAsCounterStatusGateTests
             Assert.Contains(CsVocab.HandledViasManual, kv => kv.Key == via);
         }
 
+        // ── ⓐ-2 🔴 [4] §8-4 봉합 — **두 목록이 말없이 어긋나지 않는다.**
+        //   사고 모양: S-2 가 입력 검사를 Manual 로 갈아타면서 `AllowedHandledVia` 를 **읽는 곳이 0곳**이 됐다.
+        //   그런데 문서에는 「옛 3값을 여기서 지켰다」고 적혀 있었다 ⇒ 아무것도 집행하지 않는 목록이
+        //   보안 장치처럼 보였다. [4] 가 가설로 적고 PM 이 grep 으로 확인한 자리다.
+        //   ⇒ 이제 게이트가 **포함 관계**를 센다: 사람이 고를 값은 모두 「알려진 값 사전」 안에 있어야 한다.
+        foreach (var m in CsAdminController.AllowedHandledViaManual)
+        {
+            Assert.True(CsAdminController.AllowedHandledVia.Contains(m),
+                $"{gate} 사람이 고를 수 있는 「{m}」이 알려진 값 사전 밖이다 — 두 목록이 어긋났다.");
+            Assert.True(CsVocab.HandledViaLabel(m) != m,
+                $"{gate} 「{m}」의 낱말이 없다 — 고를 수는 있는데 화면이 코드값을 그대로 적는다.");
+        }
+        // 🔴 옛 3값과 서버만 앉히는 값도 사전에 있어야 한다(사전이 좁아지면 읽을 낱말을 잃는다)
+        foreach (var known in new[] { "message", "phone", "remote", CsVocab.AsCenterHandledVia })
+        {
+            Assert.True(CsAdminController.AllowedHandledVia.Contains(known),
+                $"{gate} 알려진 값 「{known}」이 사전에서 빠졌다 — 그 값으로 앉은 행을 못 읽는다(#1).");
+        }
+        // 🔴 음성 — 서버만 앉히는 값과 옛 쪽지 값은 **사람이 고를 수 없다**
+        Assert.DoesNotContain(CsVocab.AsCenterHandledVia, CsAdminController.AllowedHandledViaManual);
+        Assert.DoesNotContain("message", CsAdminController.AllowedHandledViaManual);
+
         // ── ⓑ 🔴 옛 값 전수 보존 — 낱말 사전이 그 값을 아직 읽는다
         Assert.Equal("쪽지", CsVocab.HandledViaLabel("message"));
         Assert.Equal("전화", CsVocab.HandledViaLabel("phone"));

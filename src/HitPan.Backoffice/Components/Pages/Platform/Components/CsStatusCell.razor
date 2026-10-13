@@ -15,7 +15,7 @@
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.BottomLeft">
         <ActivatorContent>
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
-                @Status
+                @CsVocab.StatusLabel(Status)
                 <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
             </span>
         </ActivatorContent>
@@ -23,13 +23,13 @@
             @if (CsVocab.IsLegacyStatus(Channel, Status))
             {
                 @* 🔴 목록 밖 옛 값 — 보여만 준다. 누를 수 없다 *@
-                <MudMenuItem Disabled="true">@Status (예전 기록 — 그대로 둡니다)</MudMenuItem>
+                <MudMenuItem Disabled="true">@CsVocab.StatusLabel(Status) (예전 기록 — 그대로 둡니다)</MudMenuItem>
                 <MudDivider />
             }
             @foreach (var s in CsVocab.StatusesFor(Channel))
             {
                 <MudMenuItem Disabled="@(s == Status)" OnClick="@(() => OnPick.InvokeAsync(s))">
-                    @(s == Status ? $"{s} (지금)" : s)
+                    @(s == Status ? $"{CsVocab.StatusLabel(s)} (지금)" : CsVocab.StatusLabel(s))
                 </MudMenuItem>
             }
         </ChildContent>

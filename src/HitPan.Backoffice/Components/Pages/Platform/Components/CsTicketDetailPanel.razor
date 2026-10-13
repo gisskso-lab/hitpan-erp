@@ -26,7 +26,7 @@
          「안 읽음」은 여기서 뺐다 — 상세를 **여는 순간이 읽음**이라 상세 머리에 적으면 거짓이 된다
          (목록 칸에는 그대로 있다 · 서버 `Detail` 이 read_at 을 그 자리에서 박는다). *@
     <div class="d-flex align-center flex-wrap gap-2 mb-2">
-        <span class="bo-status-chip @CsVocab.StatusChipClass(Detail.Status)">@Detail.Status</span>
+        <span class="bo-status-chip @CsVocab.StatusChipClass(Detail.Status)">@CsVocab.StatusLabel(Detail.Status)</span>
         <MudChip T="string" Size="Size.Small" Color="Color.Default">@CsVocab.CategoryLabel(Detail.Category)</MudChip>
         @if (Detail.Rating is not null)
         {

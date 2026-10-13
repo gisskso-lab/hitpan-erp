@@ -69,7 +69,16 @@ public class CsAdminController : ControllerBase
     //   🔴 `received_channel`(들어온 길)과 **다른 축**이다. 전화로 들어와 원격지원으로 끝날 수 있다.
     //   🔴 20261013작2 S-1 — 사장님 실측 반려로 값을 **넓혔다**. 옛 3값은 그대로 산다(#1 추가만).
     //      옛 값 `message` 를 지우지 않는 이유: 이미 그 값으로 앉은 행을 읽어야 한다.
-    private static readonly HashSet<string> AllowedHandledVia = new(StringComparer.Ordinal)
+    //
+    //   🔴 20261013작2 [4] §8-4 봉합 — **이 집합은 한때 죽은 코드였다.**
+    //     S-2 가 입력 검사를 `AllowedHandledViaManual` 로 갈아타면서 이 집합을 **읽는 곳이 0곳**이 됐다.
+    //     그런데 개발명세서·커밋에는 「옛 3값을 여기서 지켰다」고 적혀 있었다 ⇒ **아무것도 집행하지 않는
+    //     목록이 보안 장치처럼 보이는** 상태였다(다음 사람이 이 목록을 고쳐 「풀었다」고 믿을 수 있다).
+    //     [4] 검증팀장이 가설로 적어 둔 것을 PM 이 grep 으로 실측해 사실로 확인했다.
+    //   ⇒ 지우지 않고(#1) **뜻을 분명히 한다**: 이것은 「알려진 값 사전」이고
+    //     **집행은 `AllowedHandledViaManual` 이 한다.** 둘의 포함 관계(Manual ⊂ 사전)는
+    //     게이트 **G-W8-7** 이 문다 — 그래서 `public` 이다(게이트가 읽어야 한다).
+    public static readonly HashSet<string> AllowedHandledVia = new(StringComparer.Ordinal)
     {
         "message",   // 쪽지로 응대 (옛 값 — 읽기 전용으로 산다)
         "phone",     // 전화로 응대
@@ -86,7 +95,9 @@ public class CsAdminController : ControllerBase
     //   「히트판 A/S센터가 받은 것」으로 꾸밀 수 있다.** 쪽지로 들어온 건만 그 값을 가져야 한다
     //   (작1 S-1 에서 `erp_message` 를 접수경로 입력에서 뺀 것과 **같은 선**이다).
     //   옛 값 `message` 도 여기엔 없다 — 쪽지 응대의 정본은 이제 `as_center` 다.
-    private static readonly HashSet<string> AllowedHandledViaManual = new(StringComparer.Ordinal)
+    //   🔴 `public` 인 이유: 게이트 G-W8-7 이 **이 집합이 「알려진 값 사전」 안에 들어 있는지**를 센다
+    //     (두 목록이 말없이 어긋나면 사람이 고를 수 있는 값이 사전 밖으로 나가 낱말을 잃는다).
+    public static readonly HashSet<string> AllowedHandledViaManual = new(StringComparer.Ordinal)
     {
         "phone", "remote", "email", "sns", "etc",
     };
@@ -317,6 +328,12 @@ public class CsAdminController : ControllerBase
                 FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
         var from = cur?.Status;
         if (from is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
+        // 🔴🔴 **이 줄을 아래 수기 제한 밑으로 내리지 마라**(20261013작2 [4] N-6).
+        //   순서를 뒤집으면: 운영에 「처리중」으로 앉은 수기건의 상세를 열면 콤보가 그 값을 들고 있고,
+        //   사람이 **아무것도 바꾸지 않은 채** 「상태 변경」을 누르면 400(「접수와 완료만 기록합니다」)이 뜬다.
+        //   목록 칸에서 지금 값을 다시 누르는 손도 같다 ⇒ 사람은 **왜 막혔는지 모르고**,
+        //   사장님 반려 4)「상태변경이 잘 안 됨」이 **그 행에서만** 되살아난다.
+        //   🔴 게이트 G-W8-4 ③ 이 이 순서를 문다(같은 값 재선택이 200 인지) — 뒤집으면 빨개진다(FAIL 대조 ⓜ).
         if (from == to) return Ok(new { success = true, unchanged = true });
 
         var isErpMessage = string.Equals(cur!.Channel, ErpMessageChannel, StringComparison.Ordinal);
