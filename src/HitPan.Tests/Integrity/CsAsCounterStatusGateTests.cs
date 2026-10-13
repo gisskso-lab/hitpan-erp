@@ -152,6 +152,28 @@ public sealed class CsAsCounterStatusGateTests
         var page1 = await ReadDetailAsWebAsync(cs, emptyId, gate);
         Assert.Equal("히트판 A/S센터", CsVocab.HandledViaTextFor(page1.Ticket!.Channel, page1.Ticket.HandledVia));
 
+        // ── ④-2 🔴 [3-V] V-4 봉합 — **보존한 옛 값을 화면이 숨기지 않는다.**
+        //   첫 판은 쪽지건이면 저장값을 무시하고 늘 「히트판 A/S센터」만 적었다 ⇒ 서버가 #1 로 지킨
+        //   `phone` 이 목록·상세 **어디에도 안 나왔다**(보존이 반쪽). 고정 낱말은 그대로 두고 괄호로 덧붙인다.
+        var pageFilled = await ReadDetailAsWebAsync(cs, filledId, gate);
+        Assert.Equal("phone", pageFilled.Ticket!.HandledVia);
+        var filledWord = CsVocab.HandledViaTextFor(pageFilled.Ticket.Channel, pageFilled.Ticket.HandledVia);
+        Assert.True(filledWord.Contains("히트판 A/S센터", StringComparison.Ordinal),
+            $"{gate} 쪽지건의 고정 낱말이 사라졌다 — 「{filledWord}」(사장님 결재는 고정이다).");
+        Assert.True(filledWord.Contains("전화", StringComparison.Ordinal),
+            $"{gate} 보존한 옛 값(phone)이 화면에서 「{filledWord}」로 가려졌다 — 서버는 지켰는데 화면이 덮었다.");
+
+        // 🔴 음성 — 칸이 비었거나 as_center 면 덧붙일 것이 없다(없는 기록을 지어내지 않는다)
+        Assert.Equal("히트판 A/S센터", CsVocab.HandledViaTextFor(CsVocab.ErpMessageChannel, null));
+        Assert.Equal("히트판 A/S센터", CsVocab.HandledViaTextFor(CsVocab.ErpMessageChannel, CsVocab.AsCenterHandledVia));
+
+        // ── ④-3 🔴 [3-V] V-7 봉합 — 서버가 앉힌 사실이 **처리 과정에 남는다.**
+        //   다른 다섯 자리는 기록을 남기는데 이 자리만 조용히 칸을 바꿨다.
+        var fills = await env.LogFromStatusesOfAsync(emptyId);
+        Assert.Contains("응대", fills);
+        // 🔴 음성 — 옛 값이 있어 **채우지 않은** 건에는 그 기록이 없다(안 한 일을 적지 않는다)
+        Assert.DoesNotContain("응대", await env.LogFromStatusesOfAsync(filledId));
+
         // 🔴 칸이 비어 있어도 쪽지건은 「히트판 A/S센터」다 — 새 쪽지(미완료)로 확인한다
         await env.SeedErpMessageTicketAsync("W8G1", "쪽지 ③: 아직 완료 안 한 건");
         var freshId = await env.TicketIdByBodyAsync("쪽지 ③: 아직 완료 안 한 건");
@@ -524,6 +546,88 @@ public sealed class CsAsCounterStatusGateTests
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-W8-8 — 🔴 [3-V] V-6: 폐기된 건의 **고객이 쓴 말**이 안 나간다
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>작2 가 만든 구멍</b>(병렬검증이 잡았다): 폐기는 <c>body</c> 와 답 본문만 비우는데,
+    /// S-5 가 고객 자유입력 <c>rating_comment</c>(varchar(500))를 <b>처음으로</b> 상세에 내려주기 시작했다
+    /// ⇒ 「폐기됨」 칩이 뜬 건을 열면 <b>고객이 쓴 말이 그대로 보였다.</b>
+    ///
+    /// <para>작1 V-3 와 같은 선으로 **두 겹**을 건다: ① 폐기가 그 칸을 비운다 ② 읽는 쪽이 한 번 더 가린다
+    /// (옛 폐기건에는 값이 남아 있으니 ②가 필요하다).</para>
+    ///
+    /// <para>🟢 양성 = 폐기 안 한 건은 고객이 쓴 말이 보인다(과봉합 감시) ·
+    /// 🔴 음성 = 폐기한 건은 <b>본문도 평가 글도</b> 안 나오고, <b>평가 점수·시각은 남는다</b>(사실이다).</para>
+    /// </summary>
+    [Fact(DisplayName = "G-W8-8 🔴 폐기된 A/S 는 고객이 평가에 쓴 말도 안 내보낸다 · 점수·시각은 남는다")]
+    public async Task G_W8_8_폐기건은_고객이_쓴_말을_안_내보낸다()
+    {
+        const string gate = "G-W8-8 폐기건 평가 글";
+        await using var env = await StatusGateDb.TryCreateAsync(gate, "hitpan_bo_w8_gate_8");
+        if (env is null) return;
+
+        await env.SeedTenantAsync("W8G8", "폐기 누출 게이트 상사");
+        var cs = NewController(env);
+
+        // ── ① 두 건 — 하나는 폐기하고 하나는 그냥 둔다(양성 대조군)
+        await env.SeedErpMessageTicketAsync("W8G8", "폐기할 쪽지 A/S");
+        var purgeId = await env.TicketIdByBodyAsync("폐기할 쪽지 A/S");
+        await env.SeedErpMessageTicketAsync("W8G8", "그냥 둘 쪽지 A/S");
+        var keepId = await env.TicketIdByBodyAsync("그냥 둘 쪽지 A/S");
+
+        const string secret = "담당자 김○○ 010-0000-0000 으로 연락 주세요";
+        await env.StampRatingAsync(purgeId, 1, secret);
+        await env.StampRatingAsync(keepId, 3, "친절했어요");
+
+        // 🔴 대조 — 봉합 전이라면 보일 조건이 실제로 만들어졌나(안 만들어지면 「없으니 통과」가 된다)
+        var before = await ReadDetailAsWebAsync(cs, purgeId, gate);
+        Assert.Equal(secret, before.Ticket!.RatingComment);
+
+        // ── ② 폐기 — 실물 엔드포인트로
+        var purged = await cs.PurgeTicket(purgeId,
+            new CsAdminController.PurgeRequest { Reason = "고객 요청으로 지웁니다" }, default);
+        Assert.True(StatusOf(purged) == 200, $"{gate} 폐기가 200 이 아니다. {Describe(purged)}");
+
+        // ── ③ 🔴 음성 — 폐기한 건: 본문도 평가 글도 안 나온다
+        var after = await ReadDetailAsWebAsync(cs, purgeId, gate);
+        Assert.True(string.IsNullOrEmpty(after.Ticket!.Body),
+            $"{gate} 폐기한 건의 본문이 「{after.Ticket.Body}」로 나온다.");
+        Assert.True(string.IsNullOrEmpty(after.Ticket.RatingComment),
+            $"{gate} 🔴 폐기한 건에 고객이 쓴 말이 「{after.Ticket.RatingComment}」로 남아 보인다 — "
+          + "폐기는 몸통을 비우는 일이고, 평가에 쓴 말도 몸통이다.");
+
+        // 🔴 **사실은 남는다** — 점수·시각을 같이 지우면 과봉합이다(「무엇을 지웠나」가 사라진다)
+        Assert.Equal(1, after.Ticket.Rating);
+        Assert.True(after.Ticket.RatedAt is not null, $"{gate} 평가 시각까지 지웠다 — 사실은 남겨야 한다.");
+
+        // 🔴 표에서도 비었나(읽는 쪽 가림 하나에만 기대지 않는다 — 두 겹의 첫 겹)
+        Assert.Null(await env.RatingCommentOfAsync(purgeId));
+
+        // ── ④ 🟢 양성 — 폐기 안 한 건은 그대로 보인다
+        var keep = await ReadDetailAsWebAsync(cs, keepId, gate);
+        Assert.Equal("친절했어요", keep.Ticket!.RatingComment);
+        Assert.Equal(3, keep.Ticket.Rating);
+
+        // ── ⑤ 🔴 **두 겹의 둘째 겹** — 이 봉합 **전에** 폐기된 건에는 값이 그대로 남아 있다.
+        //   운영에 그런 행이 몇 건인지 우리는 모른다(#39 · 운영 DB 무접촉) ⇒ 읽는 쪽이 가려야 한다.
+        //   그 상태를 표에 직접 만든다(지금 엔드포인트로는 만들 수 없다 — 그게 ②·③이다).
+        await env.SeedErpMessageTicketAsync("W8G8", "작2 전에 폐기된 옛 쪽지");
+        var legacyId = await env.TicketIdByBodyAsync("작2 전에 폐기된 옛 쪽지");
+        await env.StampRatingAsync(legacyId, 2, secret);
+        await env.StampLegacyPurgeAsync(legacyId);
+
+        // 대조 — 표에는 값이 **남아 있다**(안 남아 있으면 아래 단언이 「없으니 통과」가 된다)
+        Assert.Equal(secret, await env.RatingCommentOfAsync(legacyId));
+
+        var legacy = await ReadDetailAsWebAsync(cs, legacyId, gate);
+        Assert.True(string.IsNullOrEmpty(legacy.Ticket!.RatingComment),
+            $"{gate} 🔴 작2 **전에** 폐기된 건의 평가 글이 「{legacy.Ticket.RatingComment}」로 나온다 — "
+          + "읽는 쪽 가림이 없다. 폐기 때 비우는 것만으로는 옛 행을 못 덮는다(두 겹이 필요한 이유).");
+        Assert.Equal(2, legacy.Ticket.Rating);   // 사실은 남는다
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 공통 — 화면이 지나는 경로로 읽는 두 함수
     // ══════════════════════════════════════════════════════════════
 
@@ -720,6 +824,30 @@ public sealed class CsAsCounterStatusGateTests
             await using var db = await OpenAsync();
             return await db.ExecuteScalarAsync<string?>(
                 "SELECT handled_via FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        }
+
+        /// <summary>
+        /// 🔴 작2 봉합 **전에** 폐기된 모양을 만든다 — 본문은 비었고 폐기 표식은 있는데
+        /// <c>rating_comment</c> 는 **그대로 남은** 행. 지금 엔드포인트로는 만들 수 없다.
+        /// </summary>
+        public async Task StampLegacyPurgeAsync(long id)
+        {
+            await using var db = await OpenAsync();
+            var hit = await db.ExecuteAsync(@"
+                UPDATE bo_cs_tickets
+                   SET body = NULL, purged_at = UTC_TIMESTAMP(6),
+                       purged_by = @Admin, purge_reason = '작2 전에 지운 건'
+                 WHERE id = @Id",
+                new { Id = id, Admin = AdminId });
+            Assert.True(hit == 1, $"옛 폐기 모양을 만들 티켓을 {hit} 건 찾았다(1 건이어야 한다).");
+        }
+
+        /// <summary>표에 앉은 고객 자유입력 — 읽는 쪽 가림 하나에만 기대지 않으려 직접 본다(두 겹의 첫 겹).</summary>
+        public async Task<string?> RatingCommentOfAsync(long id)
+        {
+            await using var db = await OpenAsync();
+            return await db.ExecuteScalarAsync<string?>(
+                "SELECT rating_comment FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
         }
 
         /// <summary>그 티켓의 전이 기록 출발점들 — 「어디서 떠났나」가 과정의 참·거짓을 가른다.</summary>

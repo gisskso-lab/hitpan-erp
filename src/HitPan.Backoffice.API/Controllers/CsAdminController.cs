@@ -212,7 +212,14 @@ public class CsAdminController : ControllerBase
                    -- 🔴 20261013작2 S-5 — 오늘까지 이 SELECT 가 **안 읽던 네 칸**(사장님 반려 2)).
                    --   그래서 상세에서 고객평가 ★ 가 **영영 안 떴고**, 「안 읽음」이 늘 붙었다.
                    --   칸은 `42_backoffice_cs_stages.sql` 에 이미 있었다 — 읽는 쪽이 없었을 뿐이다.
-                   k.rating, k.rated_at AS ratedAt, k.rating_comment AS ratingComment,
+                   k.rating, k.rated_at AS ratedAt,
+                   -- 🔴 20261013작2 [3-V] V-6 봉합 — **폐기된 건의 고객 자유입력은 안 내보낸다.**
+                   --   사고 모양: 폐기는 `body`(와 답 본문)만 비우는데, S-5 가 고객이 평가에 쓴 말
+                   --   (`rating_comment` · varchar(500))을 **처음으로** 상세에 내려주기 시작했다
+                   --   ⇒ 「폐기됨」 칩이 뜬 건을 열면 고객이 쓴 말이 그대로 보였다.
+                   --   작1 V-3 와 **같은 선**이다: 몸통은 비우고 사실은 남긴다. 평가 점수·시각은 사실이라 남긴다.
+                   {(hasPurge ? "CASE WHEN k.purged_at IS NULL THEN k.rating_comment ELSE NULL END AS ratingComment"
+                              : "k.rating_comment AS ratingComment")},
                    k.read_at AS readAt,
                    -- 🔴 20261011작2 C-13 — 폐기 표식. 화면이 「폐기됨」을 보여주고 두 번 지우지 않게 한다.
                    --   [4] V-2 봉합: 45번 미적용 서버에서는 이 두 칸을 **안 읽는다**(위 HasPurgeColumnsAsync).
@@ -336,10 +343,21 @@ public class CsAdminController : ControllerBase
                 if (isErpMessage)
                 {
                     // 🔴 **빈 칸만 채운다**(조건 C-2) — `AND handled_via IS NULL` 이 옛 값을 지킨다.
-                    await db.ExecuteAsync(
+                    var filled = await db.ExecuteAsync(
                         @"UPDATE bo_cs_tickets SET handled_via = @Via
                            WHERE id = @Id AND (handled_via IS NULL OR handled_via = '')",
                         new { Id = id, Via = AsCenterHandledVia });
+
+                    // 🔴 20261013작2 [3-V] V-7 봉합 — 서버가 앉힌 사실도 **처리 과정에 남긴다.**
+                    //   다른 다섯 자리는 전부 기록을 남기는데 이 자리만 조용히 칸을 바꿨다 ⇒
+                    //   「응대유형이 언제 생겼나」가 사장님이 보는 과정에서 빠졌다(반려 1) 이 물은 바로 그 칸).
+                    if (filled > 0)
+                    {
+                        await db.ExecuteAsync(@"
+                            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+                            VALUES (@Id, '응대', @Via, @AdminId)",
+                            new { Id = id, Via = AsCenterHandledVia, AdminId = adminId });
+                    }
                 }
                 else
                 {
@@ -918,6 +936,10 @@ public class CsAdminController : ControllerBase
         var rows = await db.ExecuteAsync(@"
             UPDATE bo_cs_tickets
                SET body = NULL,
+                   -- 🔴 20261013작2 [3-V] V-6 봉합 — 고객이 평가에 **쓴 말**도 같이 비운다.
+                   --   점수(`rating`)·시각(`rated_at`)은 사실이라 남긴다. 몸통만 비운다(작1 과 같은 선).
+                   --   읽는 쪽(Detail)에서도 한 번 더 가린다 — **두 겹**이다(옛 폐기건에는 값이 남아 있다).
+                   rating_comment = NULL,
                    purged_at = UTC_TIMESTAMP(6),
                    purged_by = @AdminId,
                    purge_reason = @Reason

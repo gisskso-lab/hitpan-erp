@@ -102,9 +102,18 @@
                         </TemplateColumn>
                         @* 🔴 「고객사 ERP 로 안 간다」를 아는 자리 ②/3 — 「고객사 쪽지」와 전화·이메일·SNS·기타가
                            한눈에 갈린다. 오늘까지 이 칸은 `erp_message` 가 아니면 **전부 「전화」**로 찍었다. *@
+                        @* 🔴 「고객사 ERP 로 안 간다」를 아는 자리 ②/3 (작1 S-2 신설) — 「고객사 쪽지」와
+                             전화·이메일·SNS·기타가 한눈에 갈린다.
+                             🔴 20261013작2 [3-V] V-11 봉합: 작2 첫 판이 이 칼럼을 **응대유형으로 바꿔 끼웠다.**
+                             두 축이 다른데 한 자리를 돌려 쓴 것이라, 작1 이 하루 전 신설한 자리가 목록에서 사라졌다
+                             ⇒ 덮지 않고 **둘 다 둔다**(#1 추가만). 어떤 게이트도 이걸 못 잡았다(렌더 하네스 0건). *@
+                        <TemplateColumn Title="접수 경로">
+                            <CellTemplate>
+                                <span>@CsVocab.ChannelLabel(context.Item.Channel)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
                         @* 🔴 20261013작2 — 사장님 반려 2): 응대유형이 목록에서 바로 보인다.
-                             쪽지건은 「히트판 A/S센터」 고정이고, 손으로 적은 건은 적어 넣은 값이 보인다.
-                             🔴 접수 경로는 **다른 축**이라 버리지 않고 상세 머리줄에 남겼다(정보 손실 0). *@
+                             쪽지건은 「히트판 A/S센터」 고정이고, 손으로 적은 건은 적어 넣은 값이 보인다. *@
                         <TemplateColumn Title="응대유형">
                             <CellTemplate>
                                 <span>@CsVocab.HandledViaTextFor(context.Item.Channel, context.Item.HandledVia)</span>

@@ -216,10 +216,26 @@ public static class CsVocab
     /// <para>🔴 쪽지로 들어온 건은 <b>DB 칸이 비어 있어도</b> 「히트판 A/S센터」다 — 그 건의 창구가
     /// 하나뿐이라 참이다(서버가 완료 시점에 같은 값을 칸에도 앉힌다 · 설계 S-3).</para>
     /// </summary>
-    public static string HandledViaTextFor(string? channel, string? handledVia) =>
-        string.Equals(channel, ErpMessageChannel, StringComparison.Ordinal)
-            ? HandledViaLabel(AsCenterHandledVia)
-            : HandledViaLabel(handledVia);
+    /// <remarks>
+    /// 🔴 20261013작2 [3-V] V-4 봉합 — 쪽지건이라도 <b>칸에 다른 값이 앉아 있으면 그 값을 함께 적는다.</b>
+    /// <para>사고 모양: 쪽지로 들어와 <b>전화로</b> 응대한 건(조건 C-2 가 일부러 보존하는 값)의 <c>phone</c> 이
+    /// 목록·상세 어디에도 안 나왔다 — 서버는 #1 로 값을 지켰는데 <b>화면이 덮어 가렸다</b>(보존이 반쪽).
+    /// 응대유형은 스스로 「접수경로와 다른 축」이라 적어 둔 칸이다.</para>
+    /// <para>⇒ 고정 낱말은 그대로 두고(사장님 결재) <b>괄호로 기록을 덧붙인다.</b>
+    /// 칸이 비었거나 <c>as_center</c> 면 덧붙일 것이 없어 고정 낱말만 나온다.</para>
+    /// </remarks>
+    public static string HandledViaTextFor(string? channel, string? handledVia)
+    {
+        if (!string.Equals(channel, ErpMessageChannel, StringComparison.Ordinal))
+            return HandledViaLabel(handledVia);
+
+        var fixedWord = HandledViaLabel(AsCenterHandledVia);
+        if (string.IsNullOrEmpty(handledVia)
+            || string.Equals(handledVia, AsCenterHandledVia, StringComparison.Ordinal))
+            return fixedWord;
+
+        return $"{fixedWord} (기록: {HandledViaLabel(handledVia)})";
+    }
 
     // ══════════════════════════════════════════════════════════════
     // 상태 — 손으로 적은 A/S 는 접수·완료만 (사장님 지시 2026-10-13)
