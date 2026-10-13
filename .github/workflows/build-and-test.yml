@@ -876,6 +876,18 @@ jobs:
           #      HITPAN_DB_USER/PASS + HITPAN_REQUIRE_DB=true · **클래스를 하나씩** 돌린다(DB 가 하나다).
           GATES="$GATES|CsSupportCenterFoundationGate"
 
+          # 🔴 20261013작1 갈래③ — 「히트판공지 전송」 목록을 **화면 모델로 읽을 수 있나**
+          #    (G-W7-6 · CsNoticeScreenModelGateTests)
+          #    🔴 무는 약속:
+          #      ① 폐기된 줄(body NULL) · 고아 줄(companyName NULL · LEFT JOIN) · 제목 없는 줄을 **섞어도**
+          #         목록 전체가 읽힌다 — 한 건이 목록 전부를 가리지 않는다(2026-10-12 attempt_count 사고의 모양).
+          #      ② 상태 낱말 **4종 판정**이 맞다 — 전달 대기·전달됨·취소됨·**폐기됨**.
+          #         「폐기됨」은 서버가 이미 돌려주는데 화면 모델에 칸이 없어 한 번도 안 보였다(PM 실측 2026-10-13).
+          #    🔴 **사전으로 읽지 않는다** — 응답을 직렬화한 뒤 화면이 쓰는 그 형(CsOutboundRow)으로 되돌려 읽는다.
+          #      그 형은 베낀 모양이 아니다: HitPan.Tests.csproj 가 화면 파일을 **소스로 링크**한다.
+          #      (사전으로 읽은 게이트가 통과하고도 화면이 터진 자리가 10/12 사고다)
+          GATES="$GATES|CsNoticeScreenModelGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).
