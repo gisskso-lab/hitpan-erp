@@ -25,14 +25,50 @@
         </MudAlert>
 
         <MudGrid Spacing="2">
-            <MudItem xs="12" sm="7">
-                <MudAutocomplete T="TenantPick" Label="받는 고객사" Variant="Variant.Outlined" Margin="Margin.Dense"
-                                 Value="_pick" ValueChanged="OnTenantPicked"
-                                 SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
-                                 ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
-                                 HelperText="@(string.IsNullOrEmpty(_tenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_tenantCode}")"
-                                 HelperTextOnFocus="false" />
+            @* 🔴 20261013작1 보강 B-1 (사장님 오더 「받는고객사 - 전체도 필요할듯」) —
+               받는 곳을 먼저 고른다. 전체는 되돌리기가 고객사 수만큼 드는 동작이라 **숫자를 보고 누르게** 한다. *@
+            <MudItem xs="12">
+                <MudRadioGroup T="bool" Value="_toAll" ValueChanged="OnScopeChangedAsync">
+                    <MudRadio T="bool" Value="false" Size="Size.Small">고객사 한 곳</MudRadio>
+                    <MudRadio T="bool" Value="true" Size="Size.Small">
+                        전체 — 지금 쓰고 있는 고객사@(_targetCount is null ? "" : $" {_targetCount}곳")
+                    </MudRadio>
+                </MudRadioGroup>
             </MudItem>
+
+            @if (_toAll)
+            {
+                <MudItem xs="12" sm="7">
+                    @* 숫자를 못 받아왔으면 아는 척하지 않는다 *@
+                    <MudAlert Severity="Severity.Warning" Dense="true">
+                        @if (_targetCount is null)
+                        {
+                            <text>몇 곳에 나가는지 아직 못 읽었습니다 — 「다시 세기」를 눌러 주세요.</text>
+                        }
+                        else
+                        {
+                            <text>
+                                <b>@_targetCount 곳</b>에 각각 한 건씩 들어갑니다(정지·해지·가입대기 고객사는 빠집니다).
+                                되돌리려면 건마다 취소해야 합니다.
+                            </text>
+                        }
+                    </MudAlert>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Class="mt-1"
+                               StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="LoadTargetCountAsync">다시 세기</MudButton>
+                </MudItem>
+            }
+            else
+            {
+                <MudItem xs="12" sm="7">
+                    <MudAutocomplete T="TenantPick" Label="받는 고객사" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Value="_pick" ValueChanged="OnTenantPicked"
+                                     SearchFunc="SearchTenantsAsync" ToStringFunc="@(p => p?.CompanyName ?? "")"
+                                     ResetValueOnEmptyText="true" CoerceText="true" MinCharacters="1"
+                                     HelperText="@(string.IsNullOrEmpty(_tenantCode) ? "회사명을 치면 목록이 뜹니다" : $"코드 {_tenantCode}")"
+                                     HelperTextOnFocus="false" />
+                </MudItem>
+            }
             <MudItem xs="12" sm="5">
                 <MudSelect T="string" @bind-Value="_purpose" Label="공지 종류" Variant="Variant.Outlined" Margin="Margin.Dense">
                     @foreach (var k in CsVocab.NoticeKinds)
@@ -51,14 +87,35 @@
                               HelperText="주민번호·카드·계좌 같은 숫자는 적지 마세요(저장이 거부됩니다)"
                               HelperTextOnFocus="false" />
             </MudItem>
+            @if (_toAll)
+            {
+                <MudItem xs="12">
+                    @* 🔴 전체는 한 번 더 손을 쓰게 한다 — 실수로 눌리는 자리가 아니게 *@
+                    <MudCheckBox T="bool" @bind-Value="_allConfirmed" Dense="true" Size="Size.Small"
+                                 Label="@($"위 내용을 {( _targetCount is null ? "전체" : _targetCount + "곳")} 고객사에 보내는 것을 확인했습니다")" />
+                </MudItem>
+            }
         </MudGrid>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">그만두기</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   Disabled="@_saving"
+        <MudButton Variant="Variant.Filled" Color="@(_toAll ? Color.Warning : Color.Primary)"
+                   Disabled="@(_saving || (_toAll && (!_allConfirmed || _targetCount is null)))"
                    StartIcon="@Icons.Material.Filled.Send"
-                   OnClick="SubmitAsync">@(_saving ? "넣는 중…" : "전달 대기함에 넣기")</MudButton>
+                   OnClick="SubmitAsync">
+            @if (_saving)
+            {
+                <text>넣는 중…</text>
+            }
+            else if (_toAll)
+            {
+                <text>전체 @_targetCount 곳 전달 대기함에 넣기</text>
+            }
+            else
+            {
+                <text>전달 대기함에 넣기</text>
+            }
+        </MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -82,7 +139,40 @@
     private string? _body;
     private bool _saving;
 
+    // 🔴 20261013작1 보강 B-1 — 받는 곳(한 곳 / 전체) · 전체 대상 수 · 전체 확인
+    private bool _toAll;
+    private int? _targetCount;      // null = 아직 못 읽었다(아는 척하지 않는다)
+    private bool _allConfirmed;
+
     private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>받는 곳을 바꿨다. 전체로 바꾸면 **몇 곳인지 먼저 읽는다**.</summary>
+    private async Task OnScopeChangedAsync(bool toAll)
+    {
+        _toAll = toAll;
+        _allConfirmed = false;
+        if (toAll && _targetCount is null)
+        {
+            await LoadTargetCountAsync();
+        }
+    }
+
+    /// <summary>전체 대상 고객사 수 — 읽기만 한다(사장님 결재: status active·trial).</summary>
+    private async Task LoadTargetCountAsync()
+    {
+        try
+        {
+            var http = HttpFactory.CreateClient("backoffice-authed");
+            var res = await http.GetFromJsonAsync<TargetCountResponse>("api/admin/cs/outbound/target-count");
+            _targetCount = res?.Count;
+        }
+        catch (Exception ex)
+        {
+            // #15 — 삼키지 않는다. 숫자를 못 읽었으면 화면이 그렇게 말하고 단추를 잠근다.
+            _targetCount = null;
+            Snackbar.Add($"몇 곳에 나가는지 못 읽었습니다: {ex.Message}", Severity.Warning);
+        }
+    }
 
     private void OnTenantPicked(TenantPick? pick)
     {
@@ -114,9 +204,14 @@
 
     private async Task SubmitAsync()
     {
-        if (string.IsNullOrWhiteSpace(_tenantCode) || string.IsNullOrWhiteSpace(_body))
+        if (string.IsNullOrWhiteSpace(_body))
         {
-            Snackbar.Add("받는 고객사와 공지 내용을 채워 주세요.", Severity.Info);
+            Snackbar.Add("공지 내용을 채워 주세요.", Severity.Info);
+            return;
+        }
+        if (!_toAll && string.IsNullOrWhiteSpace(_tenantCode))
+        {
+            Snackbar.Add("받는 고객사를 골라 주세요.", Severity.Info);
             return;
         }
         _saving = true;
@@ -125,7 +220,9 @@
             var http = HttpFactory.CreateClient("backoffice-authed");
             var res = await http.PostAsJsonAsync("api/admin/cs/outbound", new
             {
-                tenantCode = _tenantCode,
+                // 🔴 전체면 코드를 비우고 all=true 로 보낸다 — 한 곳 보내기 경로는 그대로다.
+                tenantCode = _toAll ? null : _tenantCode,
+                all = _toAll ? true : (bool?)null,
                 purpose = _purpose,
                 title = _title,
                 body = _body,
@@ -133,7 +230,10 @@
             if (res.IsSuccessStatusCode)
             {
                 // 🔴 「보냈습니다」가 아니다 — 서버가 하는 말과 같은 말을 한다.
-                Snackbar.Add("전달 대기함에 넣었습니다 — 수신 통로가 열리면 자동으로 나갑니다.", Severity.Success);
+                var ok = await res.Content.ReadFromJsonAsync<ApiMessage>();
+                Snackbar.Add(
+                    ok?.Message ?? "전달 대기함에 넣었습니다 — 수신 통로가 열리면 자동으로 나갑니다.",
+                    Severity.Success);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
@@ -154,4 +254,8 @@
 
     private sealed class TenantLookupResponse { public List<TenantPick>? Items { get; set; } }
     private sealed class ApiMessage { public string? Message { get; set; } }
+
+    /// <summary>🔴 보강 B-1 — 전체 대상 수. <c>Count</c> 는 **널 허용**이다:
+    /// 못 읽었을 때 0 으로 떨어뜨리면 「보낼 곳이 0곳」이라는 거짓이 화면에 선다.</summary>
+    private sealed class TargetCountResponse { public int? Count { get; set; } }
 }
