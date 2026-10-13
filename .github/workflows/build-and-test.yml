@@ -995,6 +995,28 @@ jobs:
           #    🔴 로컬 실측 경로: HITPAN_BO_GATE_DB=test_w8_bo(이름에 test/gate 없으면 거부) +
           #      HITPAN_DB_USER/PASS · **클래스를 하나씩** 돌린다(지정 DB 는 하나다).
           GATES="$GATES|CsAsCounterStatusGate"
+          # 🔴 20261014작1 — ERP 「고객지원센터」 공지사항 ↔ CS쪽지 분리 게이트 4묶음(G-W9-1~21 + 14b).
+          #    🔴 **등록을 안 하면 CI 에서 한 건도 안 돈다.** 이번에 그 자리를 실제로 밟았다:
+          #      첫 PR 에서 검사 10/10 초록이었는데 로그를 보니 `Build` 잡(DB 없음)에서 `[SKIP]` 로
+          #      건너뛰고 이 잡에서는 **필터에 없어서 0건** 돌았다 ⇒ **초록이 증거가 아니었다.**
+          #      (누적 지적 그대로 — 「게이트는 글자가 아니라 동작」의 CI 쪽 짝이 바로 이 목록이다.)
+          #
+          #    등록 근거는 「초록불이라서」가 아니라 **무력화 시험**이다 (2026-10-14 실측 · 배터리 2회):
+          #      · 쪽 조건을 지우면 → G-W9-1·2·4·15 빨간불 (공지/내문의가 섞이고 내 문의가 LIMIT 밖으로 밀린다)
+          #      · 테넌트 조건을 무력화하면 → G-W9-5 단독 빨간불
+          #      · 서버 안읽음 수를 0 으로 바꾸면 → G-W9-6, 읽음 축을 무력화하면 → G-W9-17 빨간불
+          #      · COALESCE 를 지우면 → G-W9-7 빨간불 (화면 모델 역직렬화가 터진다)
+          #      · 부모계정 가드를 지우면 → G-W9-9 빨간불 (결-B 「직원 노출 금지」를 지키는 자리)
+          #      · 경로·낱말 상수를 바꾸면 → G-W9-10 + 기존 LocalSwapUiGateTests 가 **함께** 빨간불
+          #      · 없는 토큰을 쓰면 → G-W9-19 빨간불 (브라우저가 조용히 기본값으로 서는 자리)
+          #    음성 대조군 **22/22 성립**(그중 2건은 CRLF 치환 0건으로 무효가 나와 손으로 다시 깨뜨렸다).
+          #    🔴 3묶음은 **정적**(DB 불필요)이고 `ErpCsOriginQueryGate` 와 G-W9-6·7 만 DB 를 쓴다 —
+          #      DB 를 쓰는 쪽은 `CsPipelineRoundTripGate` 와 같은 모양으로 `test_`/무작위 이름을
+          #      만들고 지운다(이 잡은 root 라 CREATE DATABASE 가 된다).
+          GATES="$GATES|ErpCsOriginQueryGate"
+          GATES="$GATES|ErpSupportCenterMenuGate"
+          GATES="$GATES|ErpCsNoticeScreenGate"
+          GATES="$GATES|ErpSupportDesignTokenGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
