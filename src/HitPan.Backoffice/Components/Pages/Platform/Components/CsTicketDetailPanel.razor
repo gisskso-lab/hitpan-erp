@@ -22,24 +22,48 @@
         <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                        title="상세 닫기" OnClick="@(() => OnClose.InvokeAsync())" />
     </div>
+    @* 🔴 20261013작2 — 사장님 반려 2): **상태 · 분류 · 고객평가 세 가지**가 머리에 나란히 보인다.
+         「안 읽음」은 여기서 뺐다 — 상세를 **여는 순간이 읽음**이라 상세 머리에 적으면 거짓이 된다
+         (목록 칸에는 그대로 있다 · 서버 `Detail` 이 read_at 을 그 자리에서 박는다). *@
     <div class="d-flex align-center flex-wrap gap-2 mb-2">
-        <span class="bo-status-chip @StatusChipClass(Detail.Status)">@Detail.Status</span>
-        @if (Detail.ReadAt is null)
-        {
-            <span class="bo-status-chip bo-status-chip--suspended">안 읽음</span>
-        }
+        <span class="bo-status-chip @CsVocab.StatusChipClass(Detail.Status)">@CsVocab.StatusLabel(Detail.Status)</span>
+        <MudChip T="string" Size="Size.Small" Color="Color.Default">@CsVocab.CategoryLabel(Detail.Category)</MudChip>
         @if (Detail.Rating is not null)
         {
             <span class="bo-status-chip bo-status-chip--active">★ @CsVocab.RatingLabel(Detail.Rating)</span>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Style="color:#6B7280">고객평가 — 아직 없음</MudText>
         }
         @if (Detail.PurgedAt is not null)
         {
             <MudChip T="string" Size="Size.Small" Color="Color.Default">폐기됨</MudChip>
         }
     </div>
-    <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
-        @CsVocab.ChannelLabel(Detail.Channel) · @ShapeLabel(Detail.ShapeTag) · 화면 @(Detail.ScreenCode ?? "-") · 판 @(Detail.ErpVersion ?? "-") · @Detail.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+
+    @* 🔴 응대유형 — 쪽지 건은 **「히트판 A/S센터」 고정**(사장님 결재). 사람이 고르지 않는다. *@
+    <MudText Typo="Typo.body2" Class="mb-1">
+        응대유형 · <strong>@CsVocab.HandledViaTextFor(Detail.Channel, Detail.HandledVia)</strong>
+        @if (IsErpMessage)
+        {
+            <MudText Typo="Typo.caption" Style="color:#6B7280">— 쪽지로 들어온 A/S 는 히트판 A/S센터가 받습니다</MudText>
+        }
     </MudText>
+
+    <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+        접수 경로 @CsVocab.ChannelLabel(Detail.Channel) · @ShapeLabel(Detail.ShapeTag) · 화면 @(Detail.ScreenCode ?? "-") · 판 @(Detail.ErpVersion ?? "-") · @Detail.ReceivedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        @if (Detail.RatedAt is not null)
+        {
+            <span> · 고객평가 @Detail.RatedAt!.Value.ToLocalTime().ToString("MM-dd HH:mm")</span>
+        }
+    </MudText>
+    @if (!string.IsNullOrWhiteSpace(Detail.RatingComment))
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+            고객이 남긴 말 — @Detail.RatingComment
+        </MudAlert>
+    }
 
     @* ── ② 고객이 보낸 말 ── *@
     <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:var(--mud-palette-background-gray);border-radius:8px">
@@ -87,18 +111,35 @@
         </MudButton>
     </div>
 
-    @* ── ▸ 처리 — 기본 접힘(설계 R3). 자주 쓰는 것만 펼쳐 둔다 ── *@
+    @* ── ▸ 처리 과정 — 사장님 반려 1) · 전이와 답을 한 줄기로 시간순 (기본 펼침) ── *@
     <MudExpansionPanels Dense="true" Elevation="0" Outlined="true" Class="mt-3">
-        <MudExpansionPanel Text="처리 (상태·분류·담당·약속·응대·등재·폐기)">
+        <MudExpansionPanel Text="@($"처리 과정 ({ProgressCount}건)")" @bind-Expanded="_progressOpen">
+            <CsTicketProgressList Logs="Logs" Replies="Replies"
+                                  Channel="@Detail.Channel" ReceivedAt="Detail.ReceivedAt" />
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    @* ── ▸ 처리 — 🔴 20261013작2: **기본 펼침으로 되돌렸다**(사장님 반려 4)).
+         작1 에서 접은 것이 「상태변경이 잘 안 됨」의 범인 ②였다. 상태는 목록 칸에서도 바꿀 수 있고
+         여기서도 바꿀 수 있다 — 두 자리가 **같은 서버 1곳**을 부른다. ── *@
+    <MudExpansionPanels Dense="true" Elevation="0" Outlined="true" Class="mt-3">
+        <MudExpansionPanel Text="처리 (상태·분류·담당·약속·응대·등재·폐기)" @bind-Expanded="_handleOpen">
 
             <div class="d-flex align-center flex-wrap gap-2 mb-2">
+                @* 🔴 20261013작2 — 고를 수 있는 상태가 **건마다 다르다**(사장님 지시):
+                     쪽지건 5종 / 손으로 적은 건 2종(접수·완료).
+                     🔴 지금 값이 목록 밖이면(예전부터 「처리중」인 수기건) 그 값을 **그대로** 한 줄 더 놓는다 —
+                        지우면 사실이 사라진다(#1). *@
                 <MudSelect T="string" Value="@NewStatus" ValueChanged="@(v => NewStatusChanged.InvokeAsync(v))"
                            Label="상태" Dense="true" Variant="Variant.Outlined" Style="min-width:150px">
-                    <MudSelectItem Value="@("접수")">접수</MudSelectItem>
-                    <MudSelectItem Value="@("처리중")">처리중</MudSelectItem>
-                    <MudSelectItem Value="@("보류")">보류</MudSelectItem>
-                    <MudSelectItem Value="@("고객답대기")">고객 답 대기</MudSelectItem>
-                    <MudSelectItem Value="@("완료")">완료</MudSelectItem>
+                    @if (CsVocab.IsLegacyStatus(Detail.Channel, Detail.Status))
+                    {
+                        <MudSelectItem Value="@Detail.Status">@CsVocab.StatusLabel(Detail.Status) (예전 기록)</MudSelectItem>
+                    }
+                    @foreach (var s in CsVocab.StatusesFor(Detail.Channel))
+                    {
+                        <MudSelectItem Value="@s">@CsVocab.StatusLabel(s)</MudSelectItem>
+                    }
                 </MudSelect>
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                            OnClick="@(() => OnChangeStatus.InvokeAsync())">상태 변경</MudButton>
@@ -116,21 +157,32 @@
                            OnClick="@(() => OnChangeCategory.InvokeAsync())">분류 저장</MudButton>
             </div>
 
-            @* 🔴 목록 「응대」 칼럼이 내려온 자리 — 완료로 넘기려면 이 칸이 채워져 있어야 한다(버린 게 아니다) *@
-            <div class="d-flex align-center flex-wrap gap-2 mb-2">
-                <MudSelect T="string" Value="@NewHandledVia" ValueChanged="@(v => NewHandledViaChanged.InvokeAsync(v))"
-                           Label="응대 유형" Dense="true" Variant="Variant.Outlined" Style="min-width:150px">
-                    @foreach (var v in HandledVias)
-                    {
-                        <MudSelectItem Value="@v.Key">@v.Value</MudSelectItem>
-                    }
-                </MudSelect>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           OnClick="@(() => OnSetHandledVia.InvokeAsync())">응대 저장</MudButton>
-                <MudText Typo="Typo.caption" Style="color:#6B7280">
-                    지금 @HandledViaLabel(Detail.HandledVia)
-                </MudText>
-            </div>
+            @* 🔴 20261013작2 S-2 — **응대유형은 손으로 적은 건만 받는다**(사장님 지시 3)).
+                 쪽지건은 창구가 하나뿐이라 고를 것이 없다 ⇒ 콤보를 아예 내지 않는다.
+                 서버도 같은 선에서 막는다(쪽지건에 꽂으면 400) — 화면만 숨기면 거짓 안심이 된다. *@
+            @if (IsErpMessage)
+            {
+                <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-2">
+                    응대유형 · <strong>히트판 A/S센터</strong> 고정 — 쪽지로 들어온 A/S 는 고르지 않습니다.
+                </MudAlert>
+            }
+            else
+            {
+                <div class="d-flex align-center flex-wrap gap-2 mb-2">
+                    <MudSelect T="string" Value="@NewHandledVia" ValueChanged="@(v => NewHandledViaChanged.InvokeAsync(v))"
+                               Label="응대 유형" Dense="true" Variant="Variant.Outlined" Style="min-width:150px">
+                        @foreach (var v in CsVocab.HandledViasManual)
+                        {
+                            <MudSelectItem Value="@v.Key">@v.Value</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                               OnClick="@(() => OnSetHandledVia.InvokeAsync())">응대 저장</MudButton>
+                    <MudText Typo="Typo.caption" Style="color:#6B7280">
+                        지금 @CsVocab.HandledViaLabel(Detail.HandledVia) · 완료로 넘기려면 이 칸이 필요합니다
+                    </MudText>
+                </div>
+            }
 
             <div class="d-flex align-center flex-wrap gap-2 mb-2">
                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
@@ -190,6 +242,9 @@
     [Parameter, EditorRequired] public AdminCsListPage.CsTicketDetail Detail { get; set; } = null!;
     [Parameter] public List<AdminCsListPage.ReplyRow> Replies { get; set; } = new();
 
+    /// <summary>처리 과정 — 상태 전이·응대·분류·배정·약속 기록(20261013작2 S-6 · 서버 상세 응답에 얹혀 온다).</summary>
+    [Parameter] public List<AdminCsListPage.ProgressLogRow> Logs { get; set; } = new();
+
     [Parameter] public string NewStatus { get; set; } = "접수";
     [Parameter] public EventCallback<string> NewStatusChanged { get; set; }
 
@@ -225,17 +280,22 @@
     [Parameter] public EventCallback OnCancelPurge { get; set; }
     [Parameter] public EventCallback OnConfirmPurge { get; set; }
 
-    // ── 낱말 — 분류·경로는 CsVocab 한 벌(갈래①). 아래 셋은 이 화면만 쓰는 축이다 ──
+    // ── 이 건이 고객사 쪽지로 올라온 건인가 — 상태 목록·응대유형·과정 낱말이 전부 이 하나로 갈린다 ──
 
-    private static readonly List<KeyValuePair<string, string>> HandledVias = new()
-    {
-        new("message", "쪽지로 응대"), new("phone", "전화로 응대"), new("remote", "원격지원"),
-    };
+    private bool IsErpMessage =>
+        string.Equals(Detail.Channel, CsVocab.ErpMessageChannel, StringComparison.Ordinal);
 
-    private static string HandledViaLabel(string? v) => v switch
-    {
-        "message" => "쪽지", "phone" => "전화", "remote" => "원격지원", _ => "-",
-    };
+    // 🔴 기본 펼침이지만 **접을 수 있다**(묶음이라 두 칸 각각 기억한다 · 사장님이 접어 두고 쓰실 수 있게)
+    private bool _progressOpen = true;
+    private bool _handleOpen = true;
+
+    /// <summary>처리 과정 줄 수 — 접수 1줄 + 기록 + 답.</summary>
+    private int ProgressCount => 1 + Logs.Count + Replies.Count;
+
+    // 🔴 20261013작2 — 응대유형 낱말 사본(`HandledVias`·`HandledViaLabel`)이 여기 있었다.
+    //    사장님 결재로 값이 5종으로 넓어지면서 **두 벌이 되면 또 서로 다른 말을 한다**
+    //    ⇒ `CsVocab.HandledViasManual`·`HandledViaLabel` 한 벌로 옮겼다(G-W7-10 과 같은 선).
+    //    옛 값 `message` 는 그 사전에 그대로 살아 있다 — 지운 값 0개.
 
     // 🔴 20261013작1 봉합 ([4] 조건-3) — `RatingLabel` 사본이 여기 있었다.
     //    같은 식이 `AdminCsListPage.razor` 에도 똑같이 있어, 한쪽만 고치면 목록 ★ 과 상세 ★ 이
@@ -249,14 +309,8 @@
         "feature_request" => "되게 해주세요", _ => s ?? "",
     };
 
-    private static string StatusChipClass(string s) => s switch
-    {
-        "접수" => "bo-status-chip--suspended",
-        "처리중" => "bo-status-chip--trial",
-        "보류" or "고객답대기" => "bo-status-chip--neutral",
-        "완료" => "bo-status-chip--active",
-        _ => "bo-status-chip--neutral"
-    };
+    // 🔴 20261013작2 — 상태 띠 색 사본도 `CsVocab.StatusChipClass` 한 벌로 옮겼다.
+    //    목록·목록칸·상세 세 곳이 쓰는 식이라, 두 벌이면 같은 상태가 세 색으로 보일 수 있었다.
 
     private static string PromiseText(DateTime? at)
     {

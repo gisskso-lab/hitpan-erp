@@ -786,16 +786,33 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         // 🔴 쪽지 자신의 상태는 **안 덮였다** — 두 축이 섞이면 어느 쪽 사실인지 사라진다(#1)
         Assert.Equal("전송완료", (string?)mid["status"]);
 
-        // ── ② 「완료」로 닫는다. 본사 규칙상 응대 유형이 먼저다(그 규칙도 여기서 함께 잰다)
+        // ── ② 「완료」로 닫는다.
+        //
+        // 🔴 **2026-10-13 작2 — 여기서 곁가지로 재던 규칙이 사장님 결재로 갈렸다.**
+        //   종전엔 「모든 건은 응대 유형이 먼저」라서 이 자리에서 **400** 을 기대했다.
+        //   새 규칙(실측 반려 2)·3)): 쪽지 건의 응대유형은 **「히트판a/s센터」 고정**이고 사람에게 묻지 않는다
+        //   (쪽지 건에 사람 손을 요구한 것이 반려 4)「상태변경이 잘 안 됨」의 범인이었다).
+        //   이 게이트가 쓰는 건은 **고객사 ERP 쪽지**(파이프라인 왕복)이므로 이제 **묻지 않고 통과**한다.
+        //
+        //   🔴 **규칙이 풀린 게 아니라 옮겨졌다** — 「응대 유형 없으면 거부」의 음성 대조군은
+        //     **손으로 적은 건**으로 옮겨 `G-C-12` ⓑ 와 `G-W8-2` 가 문다. 여기서 그 음성을 지우는 대신,
+        //     아래에 **새 사실을 못 박는다**: 완료가 통과하고 **그 자리에서 고정값이 앉는다.**
+        //   ⇒ 이 게이트의 본래 과녁(본사 상태가 고객 목록까지 내려오나)은 그대로다.
         Assert.True(StatusOf(await admin.ChangeStatus(ticketId,
-            new CsAdminController.StatusRequest { To = "완료" }, default)) == 400,
-            gate + " 응대 유형 없이 완료가 통과했다 — 본사 규칙이 풀렸다.");
+            new CsAdminController.StatusRequest { To = "완료" }, default)) == 200,
+            gate + " 쪽지 건의 완료가 막혔다 — 사장님 결재(응대유형 고정)가 서버에서 풀렸다.");
 
-        Assert.True(StatusOf(await admin.SetHandledVia(ticketId,
-            new CsAdminController.HandledViaRequest { Via = "message" }, default)) == 200);
-        Assert.True(StatusOf(await admin.ChangeStatus(ticketId,
-            new CsAdminController.StatusRequest { To = "완료" }, default)) == 200);
+        await using (var boChk = await OpenBoAsync())
+        {
+            var via = await boChk.ExecuteScalarAsync<string?>(
+                "SELECT handled_via FROM bo_cs_tickets WHERE id = @Id", new { Id = ticketId });
+            Assert.True(via == "as_center",
+                gate + $" 완료된 쪽지 건의 응대유형이 「{via ?? "빈 칸"}」이다 — 화면은 「히트판 A/S센터」라 적는데 자료가 비면 거짓이 된다.");
+        }
 
+        // 🔴 20261013작2 — 여기 있던 「응대 유형 저장 → 완료」 두 줄을 **뺐다.**
+        //   쪽지 건의 응대유형은 이제 고정이라 ① 사람이 꽂으면 400 이고 ② 완료는 위에서 이미 통과했다.
+        //   재는 축(완료가 고객 목록까지 내려오나)은 아래 한 줄 그대로다.
         await CsOutboxSenderWorker.PullRepliesAsync(erp, new BridgeHq(bo), OwnerEmail,
             NullLogger<CsPipelineRoundTripGateTests>.Instance, default);
         Assert.Equal("완료", (string?)(ListFirst(await NewErpController(erp).List(default), gate))["hqStatus"]);

@@ -67,11 +67,53 @@ public class CsAdminController : ControllerBase
 
     // ── 사장님 지시 2026-10-08 — 응대 유형 3종 ────────────────────────
     //   🔴 `received_channel`(들어온 길)과 **다른 축**이다. 전화로 들어와 원격지원으로 끝날 수 있다.
-    private static readonly HashSet<string> AllowedHandledVia = new(StringComparer.Ordinal)
+    //   🔴 20261013작2 S-1 — 사장님 실측 반려로 값을 **넓혔다**. 옛 3값은 그대로 산다(#1 추가만).
+    //      옛 값 `message` 를 지우지 않는 이유: 이미 그 값으로 앉은 행을 읽어야 한다.
+    //
+    //   🔴 20261013작2 [4] §8-4 봉합 — **이 집합은 한때 죽은 코드였다.**
+    //     S-2 가 입력 검사를 `AllowedHandledViaManual` 로 갈아타면서 이 집합을 **읽는 곳이 0곳**이 됐다.
+    //     그런데 개발명세서·커밋에는 「옛 3값을 여기서 지켰다」고 적혀 있었다 ⇒ **아무것도 집행하지 않는
+    //     목록이 보안 장치처럼 보이는** 상태였다(다음 사람이 이 목록을 고쳐 「풀었다」고 믿을 수 있다).
+    //     [4] 검증팀장이 가설로 적어 둔 것을 PM 이 grep 으로 실측해 사실로 확인했다.
+    //   ⇒ 지우지 않고(#1) **뜻을 분명히 한다**: 이것은 「알려진 값 사전」이고
+    //     **집행은 `AllowedHandledViaManual` 이 한다.** 둘의 포함 관계(Manual ⊂ 사전)는
+    //     게이트 **G-W8-7** 이 문다 — 그래서 `public` 이다(게이트가 읽어야 한다).
+    public static readonly HashSet<string> AllowedHandledVia = new(StringComparer.Ordinal)
     {
-        "message",   // 쪽지로 응대
+        "message",   // 쪽지로 응대 (옛 값 — 읽기 전용으로 산다)
         "phone",     // 전화로 응대
         "remote",    // 원격지원
+        // ↓ 20261013작2 추가분
+        "as_center", // 히트판 A/S센터 — 🔴 **서버만 앉힌다**(사람 입력 목록에 없다)
+        "email",     // 이메일로 응대
+        "sns",       // SNS 로 응대
+        "etc",       // 기타
+    };
+
+    // 🔴 20261013작2 S-1 — **사람이 고를 수 있는** 응대 유형(사장님 결재 2026-10-13).
+    //   왜 집합을 둘로 두나: `as_center` 를 여기에 넣으면 본사 담당자가 **손으로 적은 A/S 를
+    //   「히트판 A/S센터가 받은 것」으로 꾸밀 수 있다.** 쪽지로 들어온 건만 그 값을 가져야 한다
+    //   (작1 S-1 에서 `erp_message` 를 접수경로 입력에서 뺀 것과 **같은 선**이다).
+    //   옛 값 `message` 도 여기엔 없다 — 쪽지 응대의 정본은 이제 `as_center` 다.
+    //   🔴 `public` 인 이유: 게이트 G-W8-7 이 **이 집합이 「알려진 값 사전」 안에 들어 있는지**를 센다
+    //     (두 목록이 말없이 어긋나면 사람이 고를 수 있는 값이 사전 밖으로 나가 낱말을 잃는다).
+    public static readonly HashSet<string> AllowedHandledViaManual = new(StringComparer.Ordinal)
+    {
+        "phone", "remote", "email", "sns", "etc",
+    };
+
+    /// <summary>쪽지로 들어온 A/S 의 응대 유형 — 고정값(사장님 결재 2026-10-13).</summary>
+    private const string AsCenterHandledVia = "as_center";
+
+    /// <summary>고객사 ERP 쪽지로 들어온 건의 <c>received_channel</c> — 수신 통로가 앉히는 값.</summary>
+    private const string ErpMessageChannel = "erp_message";
+
+    // 🔴 20261013작2 S-4 — 손으로 적은 A/S 가 **기록할 수 있는 상태**(사장님 지시).
+    //   「처리상태를 고객사에게 보여주지 않으므로 접수와 완료만 기록한다」
+    //   ⇒ 중간 상태는 고객사가 볼 수 없는데 본사만 적어 두면 **아무도 안 읽는 기록**이 된다.
+    private static readonly HashSet<string> AllowedManualStatus = new(StringComparer.Ordinal)
+    {
+        "접수", "완료",
     };
 
     // ── 진행 4단계 — 파생값이다(칸을 새로 만들지 않는다) ──────────────
@@ -177,6 +219,19 @@ public class CsAdminController : ControllerBase
                    k.status, k.screen_code AS screenCode, k.erp_version AS erpVersion,
                    k.handler_type AS handlerType, k.handler_id AS handlerId, k.promised_at AS promisedAt,
                    k.received_channel AS channel, k.received_at AS receivedAt, k.completed_at AS completedAt,
+                   k.handled_via AS handledVia,
+                   -- 🔴 20261013작2 S-5 — 오늘까지 이 SELECT 가 **안 읽던 네 칸**(사장님 반려 2)).
+                   --   그래서 상세에서 고객평가 ★ 가 **영영 안 떴고**, 「안 읽음」이 늘 붙었다.
+                   --   칸은 `42_backoffice_cs_stages.sql` 에 이미 있었다 — 읽는 쪽이 없었을 뿐이다.
+                   k.rating, k.rated_at AS ratedAt,
+                   -- 🔴 20261013작2 [3-V] V-6 봉합 — **폐기된 건의 고객 자유입력은 안 내보낸다.**
+                   --   사고 모양: 폐기는 `body`(와 답 본문)만 비우는데, S-5 가 고객이 평가에 쓴 말
+                   --   (`rating_comment` · varchar(500))을 **처음으로** 상세에 내려주기 시작했다
+                   --   ⇒ 「폐기됨」 칩이 뜬 건을 열면 고객이 쓴 말이 그대로 보였다.
+                   --   작1 V-3 와 **같은 선**이다: 몸통은 비우고 사실은 남긴다. 평가 점수·시각은 사실이라 남긴다.
+                   {(hasPurge ? "CASE WHEN k.purged_at IS NULL THEN k.rating_comment ELSE NULL END AS ratingComment"
+                              : "k.rating_comment AS ratingComment")},
+                   k.read_at AS readAt,
                    -- 🔴 20261011작2 C-13 — 폐기 표식. 화면이 「폐기됨」을 보여주고 두 번 지우지 않게 한다.
                    --   [4] V-2 봉합: 45번 미적용 서버에서는 이 두 칸을 **안 읽는다**(위 HasPurgeColumnsAsync).
                    {(hasPurge ? "k.purged_at AS purgedAt, k.purge_reason AS purgeReason"
@@ -201,6 +256,17 @@ public class CsAdminController : ControllerBase
                    approved_by AS approvedBy, approved_at AS approvedAt, delivered_at AS deliveredAt
               FROM bo_cs_replies WHERE ticket_id = @Id ORDER BY approved_at", new { Id = id });
 
+        // 🔴 20261013작2 S-6 — **처리 과정**(사장님 반려 1)).
+        //   이 표는 상태 전이마다 5곳에서 INSERT 해 왔는데 **읽는 SELECT 가 레포 전체에 0건**이었다.
+        //   쌓아 두고 아무도 안 보여준 자료다. 엔드포인트를 새로 내지 않고 **상세 응답에 얹는다.**
+        //   🔴 폐기된 건에도 과정은 내보낸다 — 여기엔 몸통이 없다(상태값·시각·누가). 작1 V-3 와 같은 선:
+        //      「몸통은 비우고 사실은 남긴다」.
+        //   🔴 `bo_cs_ticket_logs` 는 INSERT ONLY — 여기서는 **읽기만** 한다.
+        var logs = await db.QueryAsync(@"
+            SELECT from_status AS fromStatus, to_status AS toStatus,
+                   actor_id AS actorId, acted_at AS actedAt
+              FROM bo_cs_ticket_logs WHERE ticket_id = @Id ORDER BY acted_at", new { Id = id });
+
         // 🔴 여는 순간이 「읽음」이다 — 단 **최초 1회만** 기록한다(WHERE read_at IS NULL).
         //    덮어쓰면 「아무도 안 본 채 며칠 지났다」는 사실이 사라진다. 그 사실이 CS 의 핵심 자료다.
         var reader = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -210,7 +276,8 @@ public class CsAdminController : ControllerBase
              WHERE id = @Id AND read_at IS NULL",
             new { Id = id, Reader = reader });
 
-        return Ok(new { success = true, ticket, replies });
+        // 🔴 기존 두 칸(`ticket`·`replies`)의 모양은 **한 글자도 안 바뀐다** — `logs` 는 더한 칸이다(하위호환).
+        return Ok(new { success = true, ticket, replies, logs });
     }
 
     // ── 답 작성 — 사람이 쓰고 그 사람이 승인자다(반자동 ②겹의 문) ────
@@ -255,19 +322,65 @@ public class CsAdminController : ControllerBase
             return BadRequest(new { success = false, message = "허용되지 않은 상태입니다" });
 
         await using var db = await OpenAsync(ct);
-        var from = await db.ExecuteScalarAsync<string?>(
-            "SELECT status FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        // 🔴 20261013작2 — 상태와 **들어온 길**을 같이 읽는다. 길에 따라 규칙이 갈린다(S-3·S-4).
+        var cur = await db.QueryFirstOrDefaultAsync<TicketRuleRow>(
+            @"SELECT status AS Status, received_channel AS Channel, handled_via AS HandledVia
+                FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        var from = cur?.Status;
         if (from is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
+        // 🔴🔴 **이 줄을 아래 수기 제한 밑으로 내리지 마라**(20261013작2 [4] N-6).
+        //   순서를 뒤집으면: 운영에 「처리중」으로 앉은 수기건의 상세를 열면 콤보가 그 값을 들고 있고,
+        //   사람이 **아무것도 바꾸지 않은 채** 「상태 변경」을 누르면 400(「접수와 완료만 기록합니다」)이 뜬다.
+        //   목록 칸에서 지금 값을 다시 누르는 손도 같다 ⇒ 사람은 **왜 막혔는지 모르고**,
+        //   사장님 반려 4)「상태변경이 잘 안 됨」이 **그 행에서만** 되살아난다.
+        //   🔴 게이트 G-W8-4 ③ 이 이 순서를 문다(같은 값 재선택이 200 인지) — 뒤집으면 빨개진다(FAIL 대조 ⓜ).
         if (from == to) return Ok(new { success = true, unchanged = true });
 
-        // 🔴 완료로 넘길 때는 **응대 유형**이 있어야 한다(쪽지·전화·원격지원 중 하나).
+        var isErpMessage = string.Equals(cur!.Channel, ErpMessageChannel, StringComparison.Ordinal);
+
+        // 🔴 20261013작2 S-4 — 손으로 적은 A/S 는 **접수·완료만** 기록한다(사장님 지시 2026-10-13).
+        //   🔴 막는 것은 **새로 고르는 것**뿐이다. 이미 다른 값으로 앉은 행은 위 `from == to` 에서
+        //      그대로 통과하고, 이 컨트롤러는 그 값을 **고치지 않는다**(#1 · 지우면 사실이 사라진다).
+        if (!isErpMessage && !AllowedManualStatus.Contains(to))
+            return BadRequest(new
+            {
+                success = false,
+                message = "손으로 적은 A/S 는 접수와 완료만 기록합니다 — 중간 과정은 고객사에 보이지 않습니다",
+            });
+
+        // 🔴 완료로 넘길 때는 **응대 유형**이 있어야 한다.
         //    나중에 CS 실적을 만들 때 이 칸이 비어 있으면 **소급이 안 된다** — 그래서 지금 막는다.
+        //    🔴 20261013작2 S-3 — 단, **쪽지로 들어온 건은 묻지 않는다.** 그 건의 응대 창구는
+        //       처음부터 히트판 A/S센터 하나다(사장님 결재). 사람 손을 요구한 것이 반려 사유 4) 였다.
         if (to == "완료")
         {
-            var via = await db.ExecuteScalarAsync<string?>(
-                "SELECT handled_via FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+            var via = cur.HandledVia;
             if (string.IsNullOrEmpty(via))
-                return BadRequest(new { success = false, message = "어떻게 응대했는지(쪽지·전화·원격지원) 먼저 골라 주세요" });
+            {
+                if (isErpMessage)
+                {
+                    // 🔴 **빈 칸만 채운다**(조건 C-2) — `AND handled_via IS NULL` 이 옛 값을 지킨다.
+                    var filled = await db.ExecuteAsync(
+                        @"UPDATE bo_cs_tickets SET handled_via = @Via
+                           WHERE id = @Id AND (handled_via IS NULL OR handled_via = '')",
+                        new { Id = id, Via = AsCenterHandledVia });
+
+                    // 🔴 20261013작2 [3-V] V-7 봉합 — 서버가 앉힌 사실도 **처리 과정에 남긴다.**
+                    //   다른 다섯 자리는 전부 기록을 남기는데 이 자리만 조용히 칸을 바꿨다 ⇒
+                    //   「응대유형이 언제 생겼나」가 사장님이 보는 과정에서 빠졌다(반려 1) 이 물은 바로 그 칸).
+                    if (filled > 0)
+                    {
+                        await db.ExecuteAsync(@"
+                            INSERT INTO bo_cs_ticket_logs (ticket_id, from_status, to_status, actor_id)
+                            VALUES (@Id, '응대', @Via, @AdminId)",
+                            new { Id = id, Via = AsCenterHandledVia, AdminId = adminId });
+                    }
+                }
+                else
+                {
+                    return BadRequest(new { success = false, message = "어떻게 응대했는지 먼저 골라 주세요" });
+                }
+            }
         }
 
         await db.ExecuteAsync(@"
@@ -309,11 +422,30 @@ public class CsAdminController : ControllerBase
         var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(adminId)) return Forbid();
 
+        // 🔴 20261013작2 S-2 — **사람이 고를 수 있는 목록**으로만 받는다(`as_center` 는 여기 없다).
         var via = req?.Via?.Trim() ?? "";
-        if (!AllowedHandledVia.Contains(via))
-            return BadRequest(new { success = false, message = "응대 유형은 쪽지·전화·원격지원 중 하나입니다" });
+        if (!AllowedHandledViaManual.Contains(via))
+            return BadRequest(new
+            {
+                success = false,
+                message = "응대 유형은 전화·원격지원·이메일·SNS·기타 중 하나입니다",
+            });
 
         await using var db = await OpenAsync(ct);
+
+        // 🔴 20261013작2 S-2 — 쪽지로 들어온 건의 응대 유형은 **사람이 바꾸지 못한다**(사장님 결재).
+        //   그 건의 창구는 히트판 A/S센터 하나다. 열어 두면 「전화로 응대했다」로 바꿔 적을 수 있고,
+        //   그 순간 쪽지가 전화를 얼마나 줄였는지를 세는 자료가 뜻을 잃는다.
+        var channel = await db.ExecuteScalarAsync<string?>(
+            "SELECT received_channel FROM bo_cs_tickets WHERE id = @Id", new { Id = id });
+        if (channel is null) return NotFound(new { success = false, message = "티켓이 없습니다" });
+        if (string.Equals(channel, ErpMessageChannel, StringComparison.Ordinal))
+            return BadRequest(new
+            {
+                success = false,
+                message = "쪽지로 들어온 A/S 는 히트판 A/S센터 응대로 고정입니다",
+            });
+
         var n = await db.ExecuteAsync(
             "UPDATE bo_cs_tickets SET handled_via = @Via WHERE id = @Id", new { Id = id, Via = via });
         if (n == 0) return NotFound(new { success = false, message = "티켓이 없습니다" });
@@ -821,6 +953,10 @@ public class CsAdminController : ControllerBase
         var rows = await db.ExecuteAsync(@"
             UPDATE bo_cs_tickets
                SET body = NULL,
+                   -- 🔴 20261013작2 [3-V] V-6 봉합 — 고객이 평가에 **쓴 말**도 같이 비운다.
+                   --   점수(`rating`)·시각(`rated_at`)은 사실이라 남긴다. 몸통만 비운다(작1 과 같은 선).
+                   --   읽는 쪽(Detail)에서도 한 번 더 가린다 — **두 겹**이다(옛 폐기건에는 값이 남아 있다).
+                   rating_comment = NULL,
                    purged_at = UTC_TIMESTAMP(6),
                    purged_by = @AdminId,
                    purge_reason = @Reason
@@ -952,6 +1088,17 @@ public class CsAdminController : ControllerBase
     private sealed class TicketKey { public string TenantId { get; set; } = ""; public string Uid { get; set; } = ""; }
     public class ReplyRequest { public string? Body { get; set; } }
     public class StatusRequest { public string? To { get; set; } }
+
+    /// <summary>
+    /// 🔴 20261013작2 — 상태를 바꾸기 전에 **규칙을 가르는 데 필요한 세 칸**만 읽는 모양.
+    /// (들어온 길에 따라 상태 목록과 응대 유형 규칙이 갈린다 — 설계 §3 S-3·S-4)
+    /// </summary>
+    public class TicketRuleRow
+    {
+        public string? Status { get; set; }
+        public string? Channel { get; set; }
+        public string? HandledVia { get; set; }
+    }
     public class CategoryRequest { public string? To { get; set; } }
     public class HandledViaRequest { public string? Via { get; set; } }
     public class AssignRequest { public string? HandlerType { get; set; } }

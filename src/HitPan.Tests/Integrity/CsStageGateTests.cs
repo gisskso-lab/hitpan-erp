@@ -116,12 +116,14 @@ public sealed class CsStageGateTests : IDisposable
         // ②로 하나 — 상세를 열면 읽음이 박힌다
         await cs.Detail(t[0].Id, default);
 
-        // ③으로 하나 — 응대 유형 고르고 완료
-        await cs.SetHandledVia(t[1].Id, new CsAdminController.HandledViaRequest { Via = "remote" }, default);
+        // ③으로 하나 — 완료
+        // 🔴 20261013작2 — 여기 있던 `SetHandledVia` 한 줄을 **뺐다.** 이 건들은 쪽지 건(`erp_message`)이고
+        //   응대유형이 고정으로 바뀌어 그 호출은 이제 **400 으로 거부된다.** 반환값을 안 보던 줄이라
+        //   남겨 두면 「거부된 호출에 기대어 도는 시험」이 된다(조용한 초록의 씨앗).
+        //   완료 전이는 쪽지 건이라 **묻지 않고 통과**하므로 단계 셈(이 게이트의 과녁)은 그대로다.
         await cs.ChangeStatus(t[1].Id, new CsAdminController.StatusRequest { To = "완료" }, default);
 
         // ④로 하나 — 완료 + 평가
-        await cs.SetHandledVia(t[2].Id, new CsAdminController.HandledViaRequest { Via = "phone" }, default);
         await cs.ChangeStatus(t[2].Id, new CsAdminController.StatusRequest { To = "완료" }, default);
         await using (var db = await _h.OpenAsync())
         {
@@ -170,37 +172,85 @@ public sealed class CsStageGateTests : IDisposable
     }
 
     // ── G-C-12 ───────────────────────────────────────────────────────
-    [Fact(DisplayName = "G-C-12 🔴 완료 전이 — 응대 유형(쪽지·전화·원격) 없으면 거부(음성) · 고르면 통과(양성)")]
+    //
+    // 🔴 **2026-10-13 작2 — 이 게이트가 무는 규칙이 사장님 결재로 갈렸다.**
+    //   종전 규칙(10/08): 완료로 넘기려면 **모든 건이** 응대 유형을 먼저 가져야 한다.
+    //   새 규칙(10/13 실측 반려 2)·3)): 「응대유형은 **쪽지 건은 「히트판a/s센터」로 고정**,
+    //   손으로 적은 건만 받는다」 ⇒ 쪽지 건에 사람 손을 요구한 것이 반려 4)「상태변경이 잘 안 됨」의 범인이었다.
+    //
+    //   🔴 **음성 대조군을 버리지 않았다 — 수기 건으로 옮겼다.** 「규칙이 풀렸나」를 재는 축은 그대로 살아 있고,
+    //   재는 대상이 「모든 건」에서 「손으로 적은 건」으로 좁혀졌을 뿐이다.
+    //   양성도 둘로 늘었다: ⓐ 쪽지 건은 **묻지 않고 통과**(새 규칙) ⓑ 수기 건은 **고르면 통과**(옛 규칙 보존).
+    //   ⇒ 게이트를 코드에 맞춰 느슨하게 만든 것이 아니라, **단언이 늘었다**(2 → 5).
+    //
+    [Fact(DisplayName = "G-C-12 🔴 완료 전이 — 손으로 적은 건은 응대 유형 필수(음성) · 쪽지 건은 묻지 않는다(양성)")]
     public async Task G_C_12_완료전이_응대유형_필수()
     {
         if (!await _h.TrySetUpAsync("G-C-12")) return;
         var (_, t) = await SeedAsync(1);
         var cs = Cs("cs-1");
-
-        // 음성 — 응대 유형이 빈 채 완료 시도
-        Assert.IsType<BadRequestObjectResult>(
-            await cs.ChangeStatus(t[0].Id, new CsAdminController.StatusRequest { To = "완료" }, default));
         await using var db = await _h.OpenAsync();
-        Assert.Equal("접수", await db.ExecuteScalarAsync<string>(
-            "SELECT status FROM bo_cs_tickets WHERE id = @Id", new { Id = t[0].Id }));
 
-        // 음성 — 목록 밖 응대 유형
-        Assert.IsType<BadRequestObjectResult>(
-            await cs.SetHandledVia(t[0].Id, new CsAdminController.HandledViaRequest { Via = "카톡" }, default));
-
-        // 양성 — 고르면 완료가 된다 + 완료 시각 · 읽음 보정까지
-        Assert.IsType<OkObjectResult>(
-            await cs.SetHandledVia(t[0].Id, new CsAdminController.HandledViaRequest { Via = "remote" }, default));
+        // ── ⓐ 🟢 양성(새 규칙) — **쪽지 건**은 응대 유형 없이도 완료가 된다
         Assert.IsType<OkObjectResult>(
             await cs.ChangeStatus(t[0].Id, new CsAdminController.StatusRequest { To = "완료" }, default));
 
-        var row = await db.QueryFirstAsync(@"
+        var erpRow = await db.QueryFirstAsync(@"
             SELECT status AS S, handled_via AS V, completed_at AS C, read_at AS R
               FROM bo_cs_tickets WHERE id = @Id", new { Id = t[0].Id });
-        Assert.Equal("완료", (string)row.S);
-        Assert.Equal("remote", (string)row.V);
-        Assert.NotNull(row.C);
-        Assert.NotNull(row.R);   // 완료된 건이 「안 읽음」으로 남아 단계가 꼬이지 않는다
+        Assert.Equal("완료", (string)erpRow.S);
+        // 🔴 서버가 그 자리에서 고정값을 앉힌다 — 화면이 「히트판 A/S센터」라 적는 것과 자료가 맞아야 한다
+        Assert.Equal("as_center", (string)erpRow.V);
+        Assert.NotNull(erpRow.C);
+        Assert.NotNull(erpRow.R);   // 완료된 건이 「안 읽음」으로 남아 단계가 꼬이지 않는다
+
+        // ── ⓑ 🔴 음성(옛 규칙 보존) — **손으로 적은 건**은 응대 유형이 없으면 완료 거부
+        var manualId = await SeedManualTicketAsync();
+
+        Assert.IsType<BadRequestObjectResult>(
+            await cs.ChangeStatus(manualId, new CsAdminController.StatusRequest { To = "완료" }, default));
+        Assert.Equal("접수", await db.ExecuteScalarAsync<string>(
+            "SELECT status FROM bo_cs_tickets WHERE id = @Id", new { Id = manualId }));
+        // 🔴 거부한 건에 칸을 몰래 채우지도 않았나(쪽지 가지가 수기 건으로 새면 이 줄이 잡는다)
+        Assert.Null(await db.ExecuteScalarAsync<string>(
+            "SELECT handled_via FROM bo_cs_tickets WHERE id = @Id", new { Id = manualId }));
+
+        // ── ⓒ 🔴 음성 — 목록 밖 응대 유형은 수기 건에서도 거부
+        Assert.IsType<BadRequestObjectResult>(
+            await cs.SetHandledVia(manualId, new CsAdminController.HandledViaRequest { Via = "카톡" }, default));
+
+        // ── ⓓ 🔴 음성 — 쪽지 건에는 응대 유형을 **꽂을 수 없다**(고정이다)
+        Assert.IsType<BadRequestObjectResult>(
+            await cs.SetHandledVia(t[0].Id, new CsAdminController.HandledViaRequest { Via = "phone" }, default));
+
+        // ── ⓔ 🟢 양성(옛 규칙 보존) — 수기 건은 고르면 완료가 된다
+        Assert.IsType<OkObjectResult>(
+            await cs.SetHandledVia(manualId, new CsAdminController.HandledViaRequest { Via = "remote" }, default));
+        Assert.IsType<OkObjectResult>(
+            await cs.ChangeStatus(manualId, new CsAdminController.StatusRequest { To = "완료" }, default));
+
+        var manualRow = await db.QueryFirstAsync(@"
+            SELECT status AS S, handled_via AS V, completed_at AS C
+              FROM bo_cs_tickets WHERE id = @Id", new { Id = manualId });
+        Assert.Equal("완료", (string)manualRow.S);
+        Assert.Equal("remote", (string)manualRow.V);
+        Assert.NotNull(manualRow.C);
+    }
+
+    /// <summary>
+    /// 🔴 20261013작2 — **손으로 적은 A/S** 한 건(경로가 `erp_message` 가 아니다).
+    /// 이 파일의 <c>SeedAsync</c> 는 쪽지 건만 만들어서, 갈라진 규칙의 음성 대조군을 세울 수 없었다.
+    /// </summary>
+    private async Task<long> SeedManualTicketAsync()
+    {
+        await using var db = await _h.OpenAsync();
+        return await db.ExecuteScalarAsync<long>(@"
+            INSERT INTO bo_cs_tickets (tenant_id, client_ticket_uid, received_channel, category, sub_tag, body)
+            SELECT tenant_id, @Uid, 'phone', 'use', 'etc', '전화로 받은 A/S 입니다'
+              FROM bo_cs_tickets WHERE received_channel = 'erp_message' ORDER BY id LIMIT 1;
+            SELECT LAST_INSERT_ID();",
+            // 🔴 `client_ticket_uid` 는 varchar(36) — 접두어를 붙이면 39자가 되어 STRICT 에서 잘린다(실측).
+            new { Uid = Guid.NewGuid().ToString() });
     }
 
     // ── G-C-13 ───────────────────────────────────────────────────────
