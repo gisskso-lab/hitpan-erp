@@ -1,0 +1,152 @@
+@*
+    🔴 20261013작1 갈래③ — 「히트판공지 전송」 오른쪽 상세 패널 (설계 §3-2 와이어프레임)
+
+    왜 오른쪽인가: 오늘은 본문이 목록 셀 안에 접혀 행 높이가 들쭉날쭉했다. 목록은 한 줄로 가지런히 두고
+    전문은 여기서 읽는다 — 행을 고르면 눈이 아래로 내려갔다 올라오지 않는다(설계 R2).
+
+    🔴 상태는 **페이지가 갖는다**. 이 패널은 받은 한 줄을 그리고, 사람이 누른 사실만 위로 올린다
+       ([Parameter] + EventCallback · 설계 §7). 두 곳에서 같은 값을 들면 「고쳤는데 안 바뀐다」가 생긴다.
+       폐기 사유 글자만 이 패널이 들고 있다 — 적다 그만두면 그 자리에서 사라져야 하는 값이다.
+
+    #14 raw string 금지 · #15 빈 catch 금지(이 패널은 통신하지 않는다 — 부르는 쪽이 한다)
+*@
+
+@if (Row is not null)
+{
+    <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px">
+
+        @* ── 머리: 받는 고객사 · 종류 · 상태 · 닫기 ── *@
+        <div class="d-flex align-center justify-space-between flex-wrap gap-2 mb-1">
+            <MudText Typo="Typo.h6">
+                @(string.IsNullOrWhiteSpace(Row.CompanyName) ? "(고객사 정보 없음)" : Row.CompanyName)
+                — @CsVocab.NoticeKindLabel(Row.Purpose)
+            </MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           title="상세 닫기" OnClick="@(() => OnClose.InvokeAsync())" />
+        </div>
+
+        <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-3 d-block">
+            @Row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") 작성
+            · @Row.StatusLabel
+            @if (!string.IsNullOrWhiteSpace(Row.TenantCode))
+            {
+                <span> · 고객사 코드 @Row.TenantCode</span>
+            }
+            @if (Row.DeliveredAt is not null)
+            {
+                <span> · @Row.DeliveredAt.Value.ToLocalTime().ToString("MM-dd HH:mm") 전달</span>
+            }
+        </MudText>
+
+        @* ── 제목 ── *@
+        @if (!string.IsNullOrWhiteSpace(Row.Title))
+        {
+            <MudText Typo="Typo.subtitle1" Class="mb-2">@Row.Title</MudText>
+        }
+
+        @* ── 본문 전문 — 폐기된 공지는 본문이 비어 있다(지운 것이고 사라진 것이 아니다) ── *@
+        <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background:var(--mud-palette-background-gray);border-radius:8px">
+            @if (Row.PurgedAt is not null)
+            {
+                <MudText Typo="Typo.body2" Style="color:#6B7280">
+                    이 공지의 내용은 @Row.PurgedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") 에 폐기됐습니다.
+                    @if (!string.IsNullOrWhiteSpace(Row.PurgeReason))
+                    {
+                        <span> 사유 — @Row.PurgeReason</span>
+                    }
+                </MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body1" Style="white-space:pre-wrap">@(string.IsNullOrWhiteSpace(Row.Body) ? "(내용 없음)" : Row.Body)</MudText>
+            }
+        </MudPaper>
+
+        @* ── 아직 안 나간 공지만 되돌릴 수 있다 ── *@
+        @if (Row.IsWaiting)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                아직 고객사에 나가지 않았습니다 — 지금은 되돌릴 수 있습니다.
+            </MudAlert>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small" FullWidth="true"
+                       Disabled="@Busy"
+                       StartIcon="@Icons.Material.Filled.Undo"
+                       OnClick="@(() => OnCancel.InvokeAsync())">보내기 취소</MudButton>
+        }
+
+        @* ── 폐기 — 사유 필수 · 본문만 비우고 기록은 남는다(10/11 결재) ── *@
+        @if (Row.PurgedAt is null)
+        {
+            <MudDivider Class="my-3" />
+            @if (!_purging)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.DeleteOutline"
+                           OnClick="@(() => { _purging = true; _reason = ""; })">폐기</MudButton>
+            }
+            else
+            {
+                <MudPaper Elevation="0" Class="pa-3" Style="border:1px solid var(--mud-palette-error);border-radius:8px">
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">이 공지를 폐기합니다</MudText>
+                    <MudText Typo="Typo.caption" Style="color:#6B7280" Class="mb-2 d-block">
+                        내용이 지워집니다. 되돌릴 수 없습니다. 「누가 언제 왜 지웠는지」는 기록으로 남습니다.
+                    </MudText>
+                    <MudTextField @bind-Value="_reason" Label="폐기 사유 (필수)" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" MaxLength="200" Immediate="true" Class="mb-2"
+                                  HelperText="사유를 적으면 「폐기 확정」이 눌립니다 — 사유는 기록으로 남습니다"
+                                  HelperTextOnFocus="false" />
+                    <div class="d-flex align-center gap-2 flex-wrap">
+                        @* 🔴 사유가 비면 **눌리지 않게** 둔다 — 눌렀는데 아무 일도 안 나는 단추가 가장 헷갈린다 *@
+                        <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small"
+                                   Disabled="@(Busy || string.IsNullOrWhiteSpace(_reason))"
+                                   OnClick="ConfirmPurgeAsync">폐기 확정</MudButton>
+                        <MudButton Variant="Variant.Text" Size="Size.Small"
+                                   OnClick="@(() => { _purging = false; _reason = ""; })">그만두기</MudButton>
+                    </div>
+                </MudPaper>
+            }
+        }
+    </MudPaper>
+}
+
+@code {
+    /// <summary>보여 줄 한 줄. null 이면 아무것도 그리지 않는다(아직 고르지 않은 상태).</summary>
+    [Parameter] public CsOutboundRow? Row { get; set; }
+
+    /// <summary>통신 중 — 페이지가 쥐고 있는 값. 두 번 누르는 것을 막는다.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>[X] — 상세를 닫는다.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>「보내기 취소」 — 실제 호출은 페이지가 한다.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>「폐기 확정」 — 사람이 적은 사유를 그대로 올린다. 빈 사유는 여기서 막는다(서버도 다시 막는다).</summary>
+    [Parameter] public EventCallback<string> OnPurge { get; set; }
+
+    private bool _purging;
+    private string _reason = "";
+
+    /// <summary>고른 줄이 바뀌면 폐기 칸은 접힌다 — 다른 공지의 사유가 남아 있으면 안 된다.</summary>
+    private string? _lastId;
+
+    protected override void OnParametersSet()
+    {
+        var id = Row?.OutboundId;
+        if (!string.Equals(id, _lastId, StringComparison.Ordinal))
+        {
+            _lastId = id;
+            _purging = false;
+            _reason = "";
+        }
+    }
+
+    private async Task ConfirmPurgeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_reason)) return;
+        await OnPurge.InvokeAsync(_reason.Trim());
+        _purging = false;
+        _reason = "";
+    }
+}
