@@ -177,4 +177,122 @@ public static class CsVocab
     /// </summary>
     public static string OutboundCountLabel(int receivedCount) =>
         receivedCount >= ServerOutboundListLimit ? $"최근 {ServerOutboundListLimit:N0}건 중" : "총";
+
+    // ══════════════════════════════════════════════════════════════
+    // 응대 유형 — 20261013작2 (사장님 실측 반려 2)·3) · 결재 2026-10-13)
+    //
+    //   🔴 「들어온 길」(`received_channel`)과 **다른 축**이다. 전화로 들어와 원격지원으로 끝날 수 있다.
+    //   🔴 사장님 결재로 두 갈래가 됐다:
+    //      · 쪽지로 들어온 건  → **「히트판 A/S센터」 고정** (사람이 안 고른다)
+    //      · 손으로 적은 건    → 전화·원격지원·이메일·SNS·기타 중에서 **사람이 고른다**
+    //   🔴 옛 값 `message` 는 **지우지 않는다** — 이미 그 값으로 앉은 행을 읽어야 한다(#1).
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>사람이 고를 수 있는 응대 유형 — 서버 <c>AllowedHandledViaManual</c> 과 같은 값.
+    /// <para>🔴 <c>as_center</c> 는 여기 <b>없다</b>. 서버만 앉히는 값이다(수기건을 「히트판 A/S센터가
+    /// 받은 것」으로 꾸미는 길을 막는다 — 작1 S-1 과 같은 선).</para></summary>
+    public static readonly IReadOnlyList<KeyValuePair<string, string>> HandledViasManual = new List<KeyValuePair<string, string>>
+    {
+        new("phone", "전화"), new("remote", "원격지원"),
+        new("email", "이메일"), new("sns", "SNS"), new("etc", "기타"),
+    };
+
+    /// <summary>쪽지로 들어온 건의 고정 응대 유형 값.</summary>
+    public const string AsCenterHandledVia = "as_center";
+
+    /// <summary>응대 유형 낱말. 모르는 값은 <b>아는 척하지 않고</b> 받은 값을 그대로 돌려준다.</summary>
+    public static string HandledViaLabel(string? v) => v switch
+    {
+        "as_center" => "히트판 A/S센터",
+        "phone" => "전화", "remote" => "원격지원",
+        "email" => "이메일", "sns" => "SNS", "etc" => "기타",
+        "message" => "쪽지",   // 옛 값 — 읽기 전용으로 산다
+        null or "" => "아직 없음",
+        _ => v,
+    };
+
+    /// <summary>
+    /// 이 건의 응대 유형을 화면이 적을 말.
+    /// <para>🔴 쪽지로 들어온 건은 <b>DB 칸이 비어 있어도</b> 「히트판 A/S센터」다 — 그 건의 창구가
+    /// 하나뿐이라 참이다(서버가 완료 시점에 같은 값을 칸에도 앉힌다 · 설계 S-3).</para>
+    /// </summary>
+    public static string HandledViaTextFor(string? channel, string? handledVia) =>
+        string.Equals(channel, ErpMessageChannel, StringComparison.Ordinal)
+            ? HandledViaLabel(AsCenterHandledVia)
+            : HandledViaLabel(handledVia);
+
+    // ══════════════════════════════════════════════════════════════
+    // 상태 — 손으로 적은 A/S 는 접수·완료만 (사장님 지시 2026-10-13)
+    //   🔴 「처리상태를 고객사에게 보여주지 않으므로 접수와 완료만 기록한다」
+    //   🔴 운영에 이미 다른 값으로 앉은 수기건이 있을 수 있다 ⇒ **지금 값은 지우지 않고 보여준다.**
+    //      막는 것은 **새로 고르는 것**뿐이다(서버 S-4 와 같은 선).
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>쪽지로 들어온 건의 상태 5종 — 서버 <c>AllowedStatus</c> 와 같은 값.</summary>
+    public static readonly IReadOnlyList<string> StatusesErpMessage = new List<string>
+    {
+        "접수", "처리중", "보류", "고객답대기", "완료",
+    };
+
+    /// <summary>손으로 적은 건의 상태 2종 — 서버 <c>AllowedManualStatus</c> 와 같은 값.</summary>
+    public static readonly IReadOnlyList<string> StatusesManual = new List<string> { "접수", "완료" };
+
+    /// <summary>이 건에서 <b>새로 고를 수 있는</b> 상태 목록.</summary>
+    public static IReadOnlyList<string> StatusesFor(string? channel) =>
+        string.Equals(channel, ErpMessageChannel, StringComparison.Ordinal)
+            ? StatusesErpMessage
+            : StatusesManual;
+
+    /// <summary>
+    /// 지금 값이 <b>고를 수 있는 목록 밖</b>인가 — 운영에 예전부터 앉아 있던 수기건(예: 「처리중」).
+    /// <para>🔴 참이면 화면은 그 값을 <b>그대로 보여주고 고르지 못하게</b> 한다. 지우거나 다른 값으로
+    /// 바꿔 적으면 사실이 사라진다.</para>
+    /// </summary>
+    public static bool IsLegacyStatus(string? channel, string? status) =>
+        !string.IsNullOrEmpty(status) && !StatusesFor(channel).Contains(status);
+
+    // ══════════════════════════════════════════════════════════════
+    // 처리 과정 한 줄 — `bo_cs_ticket_logs` 를 사람 말로 (20261013작2 S-6)
+    //   이 표는 상태 전이만 담지 않는다. 5가지 모양이 섞여 있다:
+    //     ① 상태 전이   from=접수      to=처리중
+    //     ② 응대 저장   from='응대'    to=phone
+    //     ③ 분류 바꿈   from='분류:use' to='분류:net'
+    //     ④ 담당 배정   from='배정'    to=본사2차
+    //     ⑤ 답 약속     from='약속'    to='약속설정'
+    //   🔴 모르는 모양은 **아는 척하지 않고** 받은 값을 그대로 보인다.
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>상태 낱말 — 저장값은 붙여 쓰고(<c>고객답대기</c>) 화면은 띄어 읽는다.</summary>
+    public static string StatusLabel(string? s) => s switch
+    {
+        "고객답대기" => "고객 답 대기",
+        null or "" => "-",
+        _ => s,
+    };
+
+    /// <summary>상태 띠 색. 🔴 목록·상세·목록칸 **세 곳이 같은 식을 쓴다**(두 번째 사전 금지 · G-W7-10 선례).</summary>
+    public static string StatusChipClass(string? s) => s switch
+    {
+        "접수" => "bo-status-chip--suspended",
+        "처리중" => "bo-status-chip--trial",
+        "보류" or "고객답대기" => "bo-status-chip--neutral",
+        "완료" => "bo-status-chip--active",
+        _ => "bo-status-chip--neutral",
+    };
+
+    /// <summary>처리 과정 한 줄을 사람 말로 적는다(개발 낱말 금지 · #23).</summary>
+    public static string ProgressText(string? fromStatus, string? toStatus)
+    {
+        var f = fromStatus ?? "";
+        var t = toStatus ?? "";
+
+        if (f == "응대") return $"응대 유형을 「{HandledViaLabel(t)}」로 적음";
+        if (f == "배정") return $"담당을 「{t}」로 배정";
+        if (f == "약속") return "답 약속 시각을 정함";
+        if (f.StartsWith("분류:", StringComparison.Ordinal))
+            return $"분류를 「{CategoryLabel(f.Substring(3))}」 → 「{CategoryLabel(t.StartsWith("분류:", StringComparison.Ordinal) ? t.Substring(3) : t)}」로 바꿈";
+
+        if (string.IsNullOrEmpty(f) || string.IsNullOrEmpty(t)) return $"{f}{t}";
+        return $"상태를 「{f}」 → 「{t}」로 바꿈";
+    }
 }

@@ -1,0 +1,62 @@
+@*
+    목록 한 줄의 상태 칸 — 그 자리에서 바로 바꾼다 (20261013작2 · 사장님 결재 2026-10-13)
+
+    🔴 왜 이 컴포넌트가 생겼나: 작1 에서 상태 콤보를 오른쪽 **접힌 칸** 안에 넣었다.
+       CS 담당자는 목록을 훑으며 상태를 턴다 — 그 손을 한 번 더 접게 만든 것이 반려 사유 4) 였다.
+
+    🔴 지키는 약속 3개
+      ① 값 목록이 건마다 다르다 — 쪽지건 5종 / 손으로 적은 건 2종(접수·완료)
+      ② 지금 값이 목록 밖이면(예전부터 「처리중」으로 앉은 수기건) **그대로 보여주고 고르지 못하게** 한다.
+         지우거나 다른 값으로 바꿔 적으면 사실이 사라진다(#1).
+      ③ 메뉴를 누른 손이 **행 클릭(상세 열기)으로 새지 않는다** — `@onclick:stopPropagation`
+*@
+
+<div @onclick:stopPropagation="true">
+    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.BottomLeft">
+        <ActivatorContent>
+            <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
+                @Status
+                <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
+            </span>
+        </ActivatorContent>
+        <ChildContent>
+            @if (CsVocab.IsLegacyStatus(Channel, Status))
+            {
+                @* 🔴 목록 밖 옛 값 — 보여만 준다. 누를 수 없다 *@
+                <MudMenuItem Disabled="true">@Status (예전 기록 — 그대로 둡니다)</MudMenuItem>
+                <MudDivider />
+            }
+            @foreach (var s in CsVocab.StatusesFor(Channel))
+            {
+                <MudMenuItem Disabled="@(s == Status)" OnClick="@(() => OnPick.InvokeAsync(s))">
+                    @(s == Status ? $"{s} (지금)" : s)
+                </MudMenuItem>
+            }
+        </ChildContent>
+    </MudMenu>
+
+    @if (ReadAt is null)
+    {
+        <span class="bo-status-chip bo-status-chip--suspended" style="margin-left:4px">안 읽음</span>
+    }
+    @* 고객이 매긴 뒤에만 값이 생긴다 — 상시 「-」 칸을 만들지 않는다 *@
+    @if (Rating is not null)
+    {
+        <span class="bo-status-chip bo-status-chip--active" style="margin-left:4px">★ @CsVocab.RatingLabel(Rating)</span>
+    }
+</div>
+
+@code {
+    [Parameter] public string Status { get; set; } = "";
+    [Parameter] public string? Channel { get; set; }
+    [Parameter] public DateTime? ReadAt { get; set; }
+    [Parameter] public int? Rating { get; set; }
+
+    /// <summary>고른 상태를 페이지로 올린다 — 서버를 부르는 것은 페이지 몫이다(서버 1곳 원칙).</summary>
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+
+    private string PickTitle =>
+        CsVocab.StatusesFor(Channel).Count <= 2
+            ? "손으로 적은 A/S — 접수·완료만 기록합니다"
+            : "눌러서 상태를 바꿉니다";
+}

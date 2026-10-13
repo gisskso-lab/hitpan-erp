@@ -102,23 +102,21 @@
                         </TemplateColumn>
                         @* 🔴 「고객사 ERP 로 안 간다」를 아는 자리 ②/3 — 「고객사 쪽지」와 전화·이메일·SNS·기타가
                            한눈에 갈린다. 오늘까지 이 칸은 `erp_message` 가 아니면 **전부 「전화」**로 찍었다. *@
-                        <TemplateColumn Title="접수 경로">
+                        @* 🔴 20261013작2 — 사장님 반려 2): 응대유형이 목록에서 바로 보인다.
+                             쪽지건은 「히트판 A/S센터」 고정이고, 손으로 적은 건은 적어 넣은 값이 보인다.
+                             🔴 접수 경로는 **다른 축**이라 버리지 않고 상세 머리줄에 남겼다(정보 손실 0). *@
+                        <TemplateColumn Title="응대유형">
                             <CellTemplate>
-                                <span>@CsVocab.ChannelLabel(context.Item.Channel)</span>
+                                <span>@CsVocab.HandledViaTextFor(context.Item.Channel, context.Item.HandledVia)</span>
                             </CellTemplate>
                         </TemplateColumn>
+                        @* 🔴 20261013작2 — 사장님 반려 4): **이 자리에서 바로 상태를 바꾼다.**
+                             작1 에서 오른쪽 접힌 칸으로 보낸 것이 「상태변경이 잘 안 됨」의 범인이었다. *@
                         <TemplateColumn Title="상태">
                             <CellTemplate>
-                                <span class="bo-status-chip @StatusChipClass(context.Item.Status)">@context.Item.Status</span>
-                                @if (context.Item.ReadAt is null)
-                                {
-                                    <span class="bo-status-chip bo-status-chip--suspended" style="margin-left:4px">안 읽음</span>
-                                }
-                                @* 🔴 옛 「평가」 칼럼이 내려온 자리 — 고객이 매긴 뒤에만 값이 생긴다(상시 `-` 칼럼을 없앤다) *@
-                                @if (context.Item.Rating is not null)
-                                {
-                                    <span class="bo-status-chip bo-status-chip--active" style="margin-left:4px">★ @CsVocab.RatingLabel(context.Item.Rating)</span>
-                                }
+                                <CsStatusCell Status="@context.Item.Status" Channel="@context.Item.Channel"
+                                              ReadAt="context.Item.ReadAt" Rating="context.Item.Rating"
+                                              OnPick="@(s => PickStatusAsync(context.Item, s))" />
                             </CellTemplate>
                         </TemplateColumn>
                         <PropertyColumn Property="x => x.ReceivedAt" Title="접수" Format="MM-dd HH:mm" />
@@ -135,7 +133,7 @@
     <MudItem xs="12" md="5">
         @if (_detail is not null)
         {
-            <CsTicketDetailPanel Detail="_detail" Replies="_replies"
+            <CsTicketDetailPanel Detail="_detail" Replies="_replies" Logs="_logs"
                                  NewStatus="_newStatus" NewStatusChanged="@(v => _newStatus = v)"
                                  NewCategory="_newCategory" NewCategoryChanged="@(v => _newCategory = v)"
                                  NewHandledVia="_newHandledVia" NewHandledViaChanged="@(v => _newHandledVia = v)"
@@ -177,6 +175,7 @@
 
     private CsTicketDetail? _detail;
     private List<ReplyRow> _replies = new();
+    private List<ProgressLogRow> _logs = new();   // 🔴 20261013작2 — 처리 과정(상세 응답에 얹혀 온다)
     private string? _replyBody;
     private string _newStatus = "접수";
     private bool _sendingReply;
@@ -307,6 +306,7 @@
     {
         _detail = null;
         _replies = new();
+        _logs = new();
         _replyBody = null;
         _purgeTargetId = null;
         _purgeReason = "";
@@ -328,9 +328,15 @@
             var res = await http.GetFromJsonAsync<DetailResponse>($"api/admin/cs/{row.Id}");
             _detail = res?.Ticket;
             _replies = res?.Replies ?? new();
+            _logs = res?.Logs ?? new();
             _newStatus = _detail?.Status ?? "접수";
             _newCategory = string.IsNullOrEmpty(_detail?.Category) ? "etc" : _detail!.Category;
-            _newHandledVia = string.IsNullOrEmpty(_detail?.HandledVia) ? "message" : _detail!.HandledVia!;
+            // 🔴 20261013작2 — 빈 칸일 때의 제안값이 `message`(쪽지 응대)였다. 그 값은 이제
+            //    **사람이 고를 수 없는 옛 값**이다 ⇒ 손으로 적은 건의 첫 제안은 「전화」로 둔다.
+            //    (쪽지건은 콤보 자체가 안 뜨고 서버가 히트판 A/S센터를 앉힌다)
+            _newHandledVia = CsVocab.HandledViasManual.Any(v => v.Key == _detail?.HandledVia)
+                ? _detail!.HandledVia!
+                : "phone";
             _replyBody = null;
             // 상세를 여는 순간 서버가 「읽음」을 박는다 ⇒ 아래 띠·사이드바 숫자를 바로 다시 센다
             await Counts.RefreshAsync();
@@ -373,18 +379,37 @@
     private async Task ChangeStatusAsync()
     {
         if (_detail is null) return;
+        await PostStatusAsync(_detail.Id, _newStatus, reopenDetail: true);
+    }
+
+    // 🔴 20261013작2 — 목록 한 줄에서 바로 고른 상태(사장님 결재).
+    //   상세를 열지 않아도 바뀐다. 🔴 지금 열려 있는 상세가 **그 건이면** 같이 새로 읽는다
+    //   (목록은 바뀌고 오른쪽은 옛 값을 들고 있는 어긋남을 막는다).
+    private async Task PickStatusAsync(CsTicketRow row, string to)
+    {
+        if (string.IsNullOrWhiteSpace(to) || string.Equals(row.Status, to, StringComparison.Ordinal)) return;
+        await PostStatusAsync(row.Id, to, reopenDetail: _detail?.Id == row.Id);
+    }
+
+    // 🔴 상태 전이를 부르는 자리는 **이 한 곳**이다 — 목록 칸과 상세 단추가 같은 길을 쓴다.
+    //   두 곳이 각자 부르면 한쪽만 고쳐지고, 그 순간 화면 둘이 다른 말을 한다.
+    private async Task PostStatusAsync(long id, string to, bool reopenDetail)
+    {
         try
         {
             var http = HttpFactory.CreateClient("backoffice-authed");
-            var res = await http.PostAsJsonAsync($"api/admin/cs/{_detail.Id}/status", new { to = _newStatus });
+            var res = await http.PostAsJsonAsync($"api/admin/cs/{id}/status", new { to });
             if (res.IsSuccessStatusCode)
             {
-                Snackbar.Add("상태를 바꿨습니다.", Severity.Success);
+                Snackbar.Add($"상태를 「{CsVocab.StatusLabel(to)}」로 바꿨습니다.", Severity.Success);
                 await LoadAsync();
-                await SelectAsync(new CsTicketRow { Id = _detail.Id });
+                if (reopenDetail) await SelectAsync(new CsTicketRow { Id = id });
+                await Counts.RefreshAsync();
             }
             else
             {
+                // 🔴 서버가 사람 말로 거부하는 자리가 둘 있다(응대유형 없음 · 수기건 상태 제한)
+                //    ⇒ 서버 글귀를 **그대로** 보인다. 화면이 다시 지어내면 사람이 왜 막혔는지 모른다.
                 var err = await res.Content.ReadFromJsonAsync<ApiMessage>();
                 Snackbar.Add(err?.Message ?? "상태를 바꾸지 못했습니다.", Severity.Warning);
             }
@@ -495,14 +520,7 @@
         "feature_request" => "되게 해주세요", _ => s ?? "",
     };
 
-    private static string StatusChipClass(string s) => s switch
-    {
-        "접수" => "bo-status-chip--suspended",
-        "처리중" => "bo-status-chip--trial",
-        "보류" or "고객답대기" => "bo-status-chip--neutral",
-        "완료" => "bo-status-chip--active",
-        _ => "bo-status-chip--neutral"
-    };
+    // 🔴 20261013작2 — 상태 띠 색 사본을 `CsVocab.StatusChipClass` 한 벌로 옮겼다(목록칸·상세가 같이 쓴다).
 
     public class CsTicketRow
     {
@@ -531,6 +549,9 @@
         public string? ScreenCode { get; set; }
         public string? ErpVersion { get; set; }
 
+        // 🔴 20261013작2 S-5 — 고객이 평가와 함께 남긴 말. 서버 상세가 오늘부터 읽어 준다.
+        public string? RatingComment { get; set; }
+
         // 🔴 20261011작2 C-13 — 폐기 표식(값이 있으면 본문은 비어 있다).
         public DateTime? PurgedAt { get; set; }
         public string? PurgeReason { get; set; }
@@ -545,6 +566,26 @@
     }
 
     private sealed class ListResponse { public bool Success { get; set; } public List<CsTicketRow> Data { get; set; } = new(); }
-    private sealed class DetailResponse { public bool Success { get; set; } public CsTicketDetail? Ticket { get; set; } public List<ReplyRow> Replies { get; set; } = new(); }
+    /// <summary>
+    /// 처리 과정 한 줄 — <c>bo_cs_ticket_logs</c>. 상태 전이만 담지 않는다(응대·분류·배정·약속이 섞여 있다).
+    /// <para>🔴 칸을 전부 <b>널 허용</b>으로 둔다 — 옛 행에 빈 칸이 있어도 목록 전체가 안 가려진다
+    /// (10/12 사고: 널 하나가 쪽지 목록 전부를 가렸다).</para>
+    /// </summary>
+    public class ProgressLogRow
+    {
+        public string? FromStatus { get; set; }
+        public string? ToStatus { get; set; }
+        public string? ActorId { get; set; }
+        public DateTime ActedAt { get; set; }
+    }
+
+    private sealed class DetailResponse
+    {
+        public bool Success { get; set; }
+        public CsTicketDetail? Ticket { get; set; }
+        public List<ReplyRow> Replies { get; set; } = new();
+        // 🔴 20261013작2 S-6 — 더한 칸. 옛 서버(이 칸을 안 주는 판)면 빈 목록이 되고 화면은 「아직 기록이 없습니다」를 적는다.
+        public List<ProgressLogRow> Logs { get; set; } = new();
+    }
     private sealed class ApiMessage { public string? Message { get; set; } }
 }

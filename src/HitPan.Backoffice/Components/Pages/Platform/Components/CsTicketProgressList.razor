@@ -1,0 +1,74 @@
+@*
+    처리 과정 — 사장님 반려 1) 「어떤 대화를 했고, CS건을 처리 했는지 과정또한 쉽게 볼 수 있어야 함」
+
+    🔴 왜 두 자료를 **한 줄기**로 섞나: 상태 전이(`bo_cs_ticket_logs`)와 답(`bo_cs_replies`)이
+       따로 놓이면 「언제 답하고 언제 완료했나」를 사람이 머리로 맞춰야 한다. 그러면 안 읽는다.
+       시간순 한 줄기로 놓으면 **읽는 순서가 곧 일한 순서**다.
+
+    🔴 이 표는 상태 전이만 담지 않는다(응대·분류·배정·약속이 섞여 있다) — 낱말은 `CsVocab.ProgressText` 한 곳.
+    🔴 수기 접수 건에는 「전달」이라는 말을 쓰지 않는다 — 고객사로 가지 않는 기록이다(작1 G-W7-8 과 같은 선).
+*@
+
+@if (Rows.Count == 0)
+{
+    <MudText Typo="Typo.body2" Style="color:#6B7280">
+        아직 기록이 없습니다 — 상태를 바꾸거나 답을 보내면 이곳에 한 줄씩 쌓입니다.
+    </MudText>
+}
+else
+{
+    <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineAlign="TimelineAlign.Start">
+        @foreach (var r in Rows)
+        {
+            <MudTimelineItem Size="Size.Small" Color="@(r.IsReply ? Color.Primary : Color.Default)">
+                <MudText Typo="Typo.body2">@r.Text</MudText>
+                <MudText Typo="Typo.caption" Style="color:#6B7280">
+                    @r.At.ToLocalTime().ToString("MM-dd HH:mm")
+                </MudText>
+            </MudTimelineItem>
+        }
+    </MudTimeline>
+}
+
+@code {
+    [Parameter] public List<AdminCsListPage.ProgressLogRow> Logs { get; set; } = new();
+    [Parameter] public List<AdminCsListPage.ReplyRow> Replies { get; set; } = new();
+
+    /// <summary>이 건이 고객사 ERP 쪽지로 올라온 건인가 — 「전달」 낱말을 쓸 수 있는지 가른다.</summary>
+    [Parameter] public string? Channel { get; set; }
+
+    /// <summary>접수된 때 — 줄기의 첫 칸.</summary>
+    [Parameter] public DateTime ReceivedAt { get; set; }
+
+    private sealed record Line(DateTime At, string Text, bool IsReply);
+
+    private List<Line> Rows => Build();
+
+    private List<Line> Build()
+    {
+        var lines = new List<Line>
+        {
+            new(ReceivedAt, IsErpMessage ? "고객사가 쪽지로 접수" : "손으로 적어 접수", false),
+        };
+
+        foreach (var l in Logs)
+            lines.Add(new(l.ActedAt, CsVocab.ProgressText(l.FromStatus, l.ToStatus), false));
+
+        foreach (var r in Replies)
+            lines.Add(new(r.ApprovedAt, ReplyText(r), true));
+
+        return lines.OrderBy(x => x.At).ToList();
+    }
+
+    private bool IsErpMessage =>
+        string.Equals(Channel, CsVocab.ErpMessageChannel, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 답 한 줄. 🔴 고객사로 **가지 않는** 건(손으로 적은 건)에는 전달 여부를 적지 않는다 —
+    /// 적으면 화면이 거짓말을 한다(작1 봉합과 같은 선 · <c>CsVocab.ReplyDeliveryText</c>).
+    /// </summary>
+    private string ReplyText(AdminCsListPage.ReplyRow r) =>
+        IsErpMessage
+            ? $"본사가 답을 씀 — {CsVocab.ReplyDeliveryText(Channel, r.DeliveredAt)}"
+            : "본사가 처리 내용을 적음";
+}

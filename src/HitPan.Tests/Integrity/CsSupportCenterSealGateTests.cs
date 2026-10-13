@@ -337,11 +337,41 @@ public sealed class CsSupportCenterSealGateTests
         //
         //   🔴 아래는 **오늘의 사실을 못으로 박는 자리**다. 서버가 `rating` 을 내주기 시작하면 이 단언이
         //      깨지고, 깨진 사람이 위의 「목록 ↔ 상세 낱말 맞대기」를 되살리면 된다(지우지 말고 되살려라).
-        var anyRated = rows.First(r => r.Rating is not null);
-        var detail = await ReadDetailAsWebAsync(cs, anyRated.Id, gate);
-        Assert.True(detail.Ticket!.Rating is null,
-            $"{gate} 🔴 상세 응답이 이제 평가({detail.Ticket.Rating})를 준다 — 종전엔 안 줬다. "
-          + "상세 ★ 이 살아났다는 뜻이다 ⇒ 이 단언을 지우고 「목록 ↔ 상세 같은 낱말」 맞대기를 되살려라.");
+        //
+        // ──────────────────────────────────────────────────────────
+        // 🟢 **2026-10-13 작2 — 그 덫이 울렸다.** 사장님 실측 반려 2) 로 상세 SELECT 에
+        //   `rating`·`rated_at`·`rating_comment`·`read_at` 을 더했다(작2 S-5) ⇒ 상세 ★ 이 살아났다.
+        //   덫이 적어 둔 대로 **단언을 바꾸고 「목록 ↔ 상세 같은 낱말」 맞대기를 되살린다.**
+        //   🔴 위의 이야기(왜 상세 ★ 이 한 번도 안 떴나)는 **지우지 않는다** — 다음 사람이 그 자리를
+        //      다시 안 밟게 하는 기록이다.
+        // ──────────────────────────────────────────────────────────
+        var ratedRows = rows.Where(r => r.Rating is not null).ToList();
+        Assert.True(ratedRows.Count == 3, $"{gate} 맞대기 대조군이 {ratedRows.Count} 건이다(3 건이어야 한다).");
+
+        foreach (var row in ratedRows)
+        {
+            var detail = await ReadDetailAsWebAsync(cs, row.Id, gate);
+
+            // ⓐ 상세가 평가를 **실제로 내려주나** — 작2 전까지 여기가 늘 null 이었다
+            Assert.True(detail.Ticket!.Rating is not null,
+                $"{gate} 🔴 상세가 평가를 안 내려준다 — 상세 ★ 이 다시 죽었다(SELECT 에서 rating 이 빠졌다).");
+
+            // ⓑ 🔴 **같은 값인가** — 목록과 상세가 다른 숫자를 들고 있으면 그게 가장 나쁜 모양이다
+            Assert.Equal(row.Rating, detail.Ticket.Rating);
+
+            // ⓒ 🔴 **같은 낱말인가** — [4] 조건-3 이 말한 그 맞대기다(사본이 두 벌이면 여기서 갈린다)
+            var listWord = CsVocab.RatingLabel(row.Rating);
+            var detailWord = CsVocab.RatingLabel(detail.Ticket.Rating);
+            Assert.True(listWord == detailWord,
+                $"{gate} 평가 {row.Rating} 이 목록에서 「{listWord}」, 상세에서 「{detailWord}」로 보인다 — 낱말이 두 벌이다.");
+            Assert.Equal(expected[row.Rating!.Value], detailWord);
+        }
+
+        // ⓓ 🔴 음성 — 평가를 안 매긴 건은 상세에서도 null 이고 「-」다(아는 척 금지)
+        var unratedRow = rows.First(r => r.Rating is null);
+        var unrated = await ReadDetailAsWebAsync(cs, unratedRow.Id, gate);
+        Assert.Null(unrated.Ticket!.Rating);
+        Assert.Equal("-", CsVocab.RatingLabel(unrated.Ticket.Rating));
 
         // 🔴 세 낱말이 서로 갈려야 한다 — 하나로 뭉개지면 평가 축 자체가 뜻을 잃는다
         var distinct = expected.Keys.Select(r => CsVocab.RatingLabel(r)).Distinct(StringComparer.Ordinal).Count();
