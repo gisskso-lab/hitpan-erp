@@ -44,6 +44,17 @@ public class CsAdminController : ControllerBase
         "accounting", "hr_payroll", "settings_perm", "etc",
     };
 
+    // 🔴 20261013작1 S-1 — A/S 접수경로(손으로 적는 접수). 자유입력 불가.
+    //   왜 칸만 더하면 안 되나: 요청에 경로 칸을 열면 아무 글자나 그대로 `received_channel` 에 앉는다
+    //   ⇒ 목록·상세의 경로 낱말이 뜻을 잃는다. 칸과 화이트리스트는 **한 몸**이다(설계 §6).
+    //   🔴 `erp_message`(고객사에서 올라온 쪽지)는 여기에 **넣지 않는다** — 그 값은 수신 통로
+    //      (CsInboundController)가 앉히는 값이고, 사람이 손으로 고를 값이 아니다.
+    //      여기에 넣으면 본사 담당자가 「고객사가 보낸 것」으로 꾸밀 수 있는 길이 열린다.
+    private static readonly HashSet<string> AllowedIntakeChannel = new(StringComparer.Ordinal)
+    {
+        "phone", "email", "sns", "etc",
+    };
+
     // 응대 주체 — ERP 계정 계층(#38)과 무관한 본사/대리점 축이다.
     private static readonly HashSet<string> AllowedHandlerType = new(StringComparer.Ordinal)
     {
@@ -402,6 +413,9 @@ public class CsAdminController : ControllerBase
         var category = req?.Category?.Trim() ?? "";
         var subTag = string.IsNullOrWhiteSpace(req?.SubTag) ? "etc" : req!.SubTag!.Trim();
         var body = req?.Body?.Trim() ?? "";
+        // 🔴 20261013작1 S-2 — 안 보내면 '전화'로 떨어뜨린다. 종전 호출자(경로 칸을 모르는 화면)는
+        //   그대로 돌아야 한다(#1 — 덮어쓰기 금지 · 하위호환).
+        var channel = string.IsNullOrWhiteSpace(req?.Channel) ? "phone" : req!.Channel!.Trim();
 
         if (string.IsNullOrEmpty(code))
             return BadRequest(new { success = false, message = "고객사(테넌트넘버)를 골라 주세요" });
@@ -409,6 +423,8 @@ public class CsAdminController : ControllerBase
             return BadRequest(new { success = false, message = "분류를 8종 중에서 골라 주세요" });
         if (!AllowedSubTags.Contains(subTag))
             return BadRequest(new { success = false, message = "업무 영역이 목록 밖입니다" });
+        if (!AllowedIntakeChannel.Contains(channel))
+            return BadRequest(new { success = false, message = "접수경로를 목록에서 골라 주세요(전화·이메일·SNS·기타)" });
         if (body.Length is 0 or > 2000)
             return BadRequest(new { success = false, message = "통화 내용은 1~2000자입니다" });
 
@@ -432,12 +448,12 @@ public class CsAdminController : ControllerBase
             INSERT INTO bo_cs_tickets
                 (tenant_id, client_ticket_uid, received_channel, category, sub_tag, body,
                  status, handler_type, handler_id, promised_at, received_at)
-            VALUES (@TenantId, @Uid, 'phone', @Category, @SubTag, @Body,
+            VALUES (@TenantId, @Uid, @Channel, @Category, @SubTag, @Body,
                     '접수', '본사2차', @AdminId, @Promise, UTC_TIMESTAMP(6));
             SELECT LAST_INSERT_ID();",
             new
             {
-                TenantId = tenantId, Uid = uid, Category = category, SubTag = subTag, Body = body,
+                TenantId = tenantId, Uid = uid, Channel = channel, Category = category, SubTag = subTag, Body = body,
                 AdminId = adminId, Promise = DateTime.UtcNow.AddHours(DefaultPromiseHours),
             });
 
@@ -502,7 +518,7 @@ public class CsAdminController : ControllerBase
         if (string.IsNullOrEmpty(code))
             return BadRequest(new { success = false, message = "어느 고객사에 보낼지 골라 주세요" });
         if (!AllowedOutboundPurpose.Contains(purpose))
-            return BadRequest(new { success = false, message = "용도를 목록에서 골라 주세요(프로모션·이벤트·과금·기타)" });
+            return BadRequest(new { success = false, message = "용도를 목록에서 골라 주세요(업데이트공지사항·히트판 공지사항·프로모션 안내·기타 공지사항)" });
         if (body.Length is 0 or > 2000)
             return BadRequest(new { success = false, message = "보낼 내용은 1~2000자입니다" });
         if (title is { Length: > 100 })
@@ -832,10 +848,16 @@ public class CsAdminController : ControllerBase
         return Ok(new { success = true });
     }
 
-    /// <summary>선발신 용도 — 사장님 오더의 세 가지 + 기타. 목록 밖은 거부(자유입력 금지).</summary>
+    /// <summary>선발신 용도 — 사장님 오더의 세 가지 + 기타. 목록 밖은 거부(자유입력 금지).
+    /// <para>🔴 20261013작1 S-3 — 사장님 낱말 4종에 맞춰 <c>update</c>(업데이트공지사항)·
+    /// <c>notice</c>(히트판 공지사항)를 <b>더했다</b>. 옛 값 <c>event</c>·<c>billing</c> 은
+    /// <b>하나도 지우지 않는다</b>(#1) — 이미 그 값으로 들어간 줄이 있고, 지우면 그 줄을 다시
+    /// 저장·재전송할 길이 막힌다. 새 화면의 쓰기 콤보는 4종만 보여 주고, 옛 값은 조회에서만 보인다
+    /// (설계 §5-1). 게이트 G-W7-4 가 이 자리를 지킨다.</para></summary>
     private static readonly HashSet<string> AllowedOutboundPurpose = new(StringComparer.Ordinal)
     {
         "promo", "event", "billing", "etc",
+        "update", "notice",
     };
 
     public class TenantLookupRow
@@ -869,6 +891,11 @@ public class CsAdminController : ControllerBase
         public string? Category { get; set; }
         public string? SubTag { get; set; }
         public string? Body { get; set; }
+
+        /// <summary>🔴 20261013작1 S-1 — 접수경로(<c>phone</c>·<c>email</c>·<c>sns</c>·<c>etc</c>).
+        /// <para>비거나 null 이면 <c>phone</c> 으로 떨어진다 — 이 칸을 모르는 종전 호출자가 그대로 돌아야 한다(#1).
+        /// 목록 밖 값은 <see cref="AllowedIntakeChannel"/> 가 400 으로 거부한다(자유입력 금지).</para></summary>
+        public string? Channel { get; set; }
     }
 
     // ══════════════════════════════════════════════════════════════
