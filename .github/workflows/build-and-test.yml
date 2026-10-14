@@ -1254,7 +1254,14 @@ jobs:
           #    🔴 반환값을 버렸는지는 **소스를 세지 않고** 두 경로(첨부 있음=SendWithAttachmentAsync ·
           #      첨부 없음=SendAsync)의 응답 문장으로 잰다 — 한쪽만 받으면 그 경로가 다시 거짓이 된다.
           #    근거·음성 대조군 전문: docs/개발/백오피스/20261015_개발명세서_작B1_갈래E_손님문구정직화.md §4
-          GATES="$GATES|BackofficeResellerMailTruthGate"
+          #
+          # 🔴 20261015작B1 갈래 G(G-5 · 잡-1 · PM 재결재3 §19 판정4) — **이 잡에서 뺐다. 지우지 않고 옮겼다.**
+          #    이 잡은 MariaDB 11.4 다. 백오피스 **운영 판은 MySQL 8** 이고 짝 게이트
+          #    BackofficeMailHistoryGate 는 `bo-mysql8-gate` 에 있다 ⇒ 여기서 재고
+          #    「백오피스를 쟀다」고 말할 수 없었다. 1차 조건4(「bo-mysql8-gate 초록 1회」)도
+          #    G-B1-E-* 를 **안 덮었다**. 옮긴 뒤엔 덮는다.
+          #    새 자리: 아래 `bo-mysql8-gate` 잡 · 단계 이름 「작B1 게이트 — 협력업체 신청자 문구 정직성 (E·G · MySQL 8 판)」
+          # GATES="$GATES|BackofficeResellerMailTruthGate"   ← 옮김(위 근거). 되살리려면 MySQL 8 판인지 먼저 확인해라.
 
           # 🔴 20261015작B1 갈래F — **손님 화면·메일이 사실을 말하나** G-B1-F-1~5
           #    (BackofficeResellerScreenTruthGateTests). 갈래 E 가 API 를 정직하게 만들었는데
@@ -1522,3 +1529,77 @@ jobs:
             echo "::error::게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
           fi
           echo "작B1 G2 게이트가 SKIP 없이 실제로 돌았다(소요시간은 위 Passed! 줄 참조)."
+
+      # ══════════════════════════════════════════════════════════════════════
+      # 🔴 20261015작B1 갈래 G(G-5 · 잡-1) — 협력업체 신청자 문구 정직성 게이트를
+      #    **db-gate(MariaDB 11.4) 에서 여기로 옮겼다** (PM 재결재3 §19 판정4).
+      #
+      # 왜 옮기나:
+      #   ① 운영 백오피스는 **MySQL 8** 이다. 짝 게이트 BackofficeMailHistoryGate 가 이 잡에 있는데
+      #      같은 영역의 G-B1-E-*·G-B1-G-3 만 MariaDB 에서 돌고 있었다 ⇒ **판이 달랐다.**
+      #   ② 1차 [4] 조건4 의 게시 차단 문장은 「bo-mysql8-gate 초록 1회」다. 옮기기 전엔 그 조건이
+      #      G-B1-E-* 를 **덮지 않았다**. 옮기면 덮는다 — 그래서 「조건4 는 E-* 를 안 덮는다」는
+      #      단서를 작지서에 더하는 대신 **배치를 고쳤다**(§19 판정4).
+      #   ③ 🔴 `build` 잡에는 두지 않는다. 그 잡 머리의 HITPAN_GATE_SKIP_OK="1" 때문에
+      #      DbGateEnvironment.SkipOrFailStrict 가 [SKIP] 한 줄 찍고 **PASS** 한다 = 조용한 초록.
+      #      여기서는 HITPAN_REQUIRE_DB='true' 라 DB 에 못 붙으면 **스킵이 아니라 FAIL** 이다.
+      #
+      # 이 게이트가 무는 것:
+      #   · G-B1-E-1·2·5 — 메일이 안 갔으면 「발송되었습니다」를 말하지 않는다 · 접수는 성공(#20)
+      #   · G-B1-E-3     — 보낸 경로는 종전 문구 그대로(#1)
+      #   · G-B1-E-4     — 첨부 없는 경로(SendAsync)도 반환값을 받는다
+      #   · G-B1-G-3 🆕  — **(첨부 X · 발송 O)** 조합: 초안이 안 붙었는데 「초안이 발송되었습니다」를
+      #                     말하면 FAIL. 그 조합을 무는 게이트가 종전 **0건**이었다(갈래 G · P1-3).
+      #
+      # 🔴 판 확인 — 짝 게이트와 같은 모양으로 **판을 재서 로그에 남기고, MySQL 8 이 아니면 FAIL** 한다.
+      #    MailTruthGateDb 는 스스로 판을 묻지 않으므로(스키마 게이트와 달리) 이 단계가 그 자리를 맡는다.
+      #    글자가 아니라 **SELECT VERSION() 의 실측값**으로 가른다.
+      # ══════════════════════════════════════════════════════════════════════
+      - name: 작B1 게이트 — 협력업체 신청자 문구 정직성 (E·G · MySQL 8 판)
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'bomysql8_ci'
+        run: |
+          set -o pipefail
+          # 🔴 판 확인 — MariaDB 거나 8.x 가 아니면 여기서 멈춘다(게이트 오배치 재발 방지).
+          CID="$(docker ps --filter ancestor=mysql:8.0 --format '{{.ID}}' | head -1)"
+          if [ -z "$CID" ]; then
+            echo "::error::MySQL 8 서비스 컨테이너가 없다 — 이 게이트는 MySQL 8 판에서만 유효하다."; exit 1
+          fi
+          VER="$(docker exec "$CID" mysql -uroot -p"$HITPAN_DB_PASS" -N -B -e "SELECT VERSION()" 2>/dev/null | tr -d '\r')"
+          echo "▶ 재는 판: $VER"
+          case "$VER" in
+            *MariaDB*|*mariadb*)
+              echo "::error::판이 MariaDB 다($VER) — 백오피스 게이트를 여기서 재면 「백오피스를 쟀다」고 말할 수 없다."; exit 1 ;;
+            8.*) : ;;
+            *)
+              echo "::error::MySQL 8 이 아니다($VER)."; exit 1 ;;
+          esac
+
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~BackofficeResellerMailTruthGate" \
+            --logger "console;verbosity=normal" 2>&1 | tee bo-reseller-mail.log
+          # 🔴 돈 시험 수를 세서 남긴다 — 「필터가 0건을 골라 조용히 초록」을 막는다.
+          grep -E "Passed!|Failed!|Passed:|Failed:" bo-reseller-mail.log | tail -3
+          if grep -qE "No test matches the given testcase filter" bo-reseller-mail.log; then
+            echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
+          fi
+          # 🔴 조건17 — 「[SKIP] 없이 돌았다」를 로그가 직접 말해야 한다(8/28 조용한 SKIP 전례).
+          if grep -q "\[SKIP\]" bo-reseller-mail.log; then
+            echo "::error::게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          # 🔴 몇 건이 돌았나 — G-B1-G-3 을 더했으니 숫자도 센다(한 건이 조용히 빠지는 길 차단).
+          #    딱 4건으로 못 박지 않는다: 나중에 게이트가 늘어도 CI 가 거짓으로 빨강이 되면 안 된다.
+          #    대신 **4건 미만이면 FAIL** — 지금 있는 E-1·2·5 / E-3 / E-4 / G-3 이 빠지는 길을 막는다.
+          PASSED="$(grep -oE "Passed: +[0-9]+" bo-reseller-mail.log | tail -1 | grep -oE "[0-9]+")"
+          echo "▶ 통과한 시험 수: ${PASSED:-0}"
+          if [ "${PASSED:-0}" -lt 4 ]; then
+            echo "::error::E·G 게이트가 4건 미만 돌았다(${PASSED:-0}건). E-1·2·5 / E-3 / E-4 / G-3 중 빠진 게 있다."; exit 1
+          fi
+          echo "작B1 E·G 게이트 4건이 MySQL 8 판에서 SKIP 없이 실제로 돌았다."

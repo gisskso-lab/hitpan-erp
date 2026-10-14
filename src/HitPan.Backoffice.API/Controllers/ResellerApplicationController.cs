@@ -133,11 +133,19 @@ public class ResellerApplicationController : ControllerBase
         //    (EmailSender 의 미저장 분기). 그래서 아래 catch 만으로는 「안 갔다」를 알 수 없었다.
         //    반환값을 받아 신청자에게 **사실만** 말한다. 접수 자체는 그대로 성공이다(#20).
         var mailSent = false;
+
+        // 🔴 20261015작B1 갈래 G(G-3 · P1-3) — 첨부 유무를 **try 밖으로 끌어올린다.**
+        //    종전엔 try 안에만 있어 아래 return 이 못 봤고, 그래서 응답 문구가 mailSent 만 보고
+        //    **(발송 O · 첨부 X)** 에서 「초안이 발송되었습니다」를 말했다 —
+        //    같은 건의 메일 본문은 「초안은 본사 확인 후 별도로 보내드립니다」였다(서로 반대).
+        //    🔴 판정의 출처는 계속 한 곳이다(여기 한 변수). pdfBytes 를 return 에서 다시 보면 출처가 둘이 된다.
+        var hasAttachment = false;
+
         try
         {
             // 🔴 PM 합류 2026-10-15 — 이 자리에서 갈래 E(반환값을 받는다)와 갈래 F(본문을 첨부 유무로
             //    갈라 만든다)가 겹쳤다. 둘 다 살렸다. 한쪽만 살리면 거짓 하나가 남는다.
-            var hasAttachment = pdfBytes is not null;
+            hasAttachment = pdfBytes is not null;
             var html = BuildEmailHtml(req.CompanyName, applicationId, hasAttachment);
             // 뒤 `pdfBytes is not null` 은 컴파일러 널 흐름 분석용이다(#19 경고 0). 판정은 hasAttachment 가 한다.
             if (hasAttachment && pdfBytes is not null)
@@ -181,7 +189,12 @@ public class ResellerApplicationController : ControllerBase
         {
             success = true,
             // 🔴 갈래 E — 종전 문구는 지우지 않고(#1) 보냈을 때만 쓴다. 안 갔으면 안 갔다고 말한다(#23 개발 용어 0).
-            message = mailSent ? MsgMailSent : MsgMailPending,
+            // 🔴 갈래 G(G-3 · 작지서 §18-3) — 2종 → **3종**. 종전 두 문구는 한 글자도 안 바꿨고(#1)
+            //    가운데 한 경우를 **더했다**: 메일은 갔지만 **초안이 안 붙은** 경우.
+            //    그 경우 종전엔 MsgMailSent 가 나가 화면이 「초안이 발송되었습니다」라고 거짓을 말했다.
+            message = mailSent
+                ? (hasAttachment ? MsgMailSent : MsgMailSentNoAttachment)
+                : MsgMailPending,
             applicationId
         });
     }
@@ -190,6 +203,14 @@ public class ResellerApplicationController : ControllerBase
     //    MsgMailSent 는 종전 문구 그대로다(#1 덮어쓰기 금지).
     internal const string MsgMailSent =
         "신청이 접수되었습니다. 가입계약서 초안이 이메일로 발송되었습니다. 본사 검토 후 정식 계약서가 별도로 발송됩니다.";
+
+    // 🔴 20261015작B1 갈래 G(G-3 · P1-3) — **메일은 갔고 초안은 안 붙은** 경로. 작지서 §18-3 표 그대로다.
+    //    종전엔 이 경우도 MsgMailSent 였다 ⇒ 화면은 「초안이 발송되었습니다」, 같은 건의 메일 본문은
+    //    「초안은 본사 확인 후 별도로 보내드립니다」 — 서로 반대고 거짓인 쪽이 화면이었다.
+    //    도달 경로는 실재한다: 위 PDF 생성 실패(catch) → pdfBytes 널 → 첨부 없는 발송이 성공.
+    //    🔴 이 문장은 같은 건의 **메일 본문과 일치한다**(BuildEmailHtml 의 첨부 없는 가지).
+    internal const string MsgMailSentNoAttachment =
+        "신청이 접수되었습니다. 접수 안내 메일을 보내드렸습니다. 가입계약서 초안은 담당자 확인 후 입력하신 이메일로 보내드립니다. 본사 검토 후 정식 계약서가 별도로 발송됩니다.";
 
     //    메일이 아직 안 간 경로 — 「발송되었다」고 말하지 않는다. 접수는 성공이므로 신청번호는 그대로 안내한다.
     internal const string MsgMailPending =

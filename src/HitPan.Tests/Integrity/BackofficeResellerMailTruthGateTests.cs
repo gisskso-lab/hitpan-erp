@@ -177,6 +177,88 @@ public sealed class BackofficeResellerMailTruthGateTests
     }
 
     // ══════════════════════════════════════════════════════════════
+    // 🔴 G-B1-G-3 — **(첨부 X · 발송 O)** 조합 (갈래 G · P1-3)
+    //
+    //   적발: 응답 `message` 가 `mailSent` 만 보고 `hasAttachment` 를 안 봤다 ⇒ 이 조합에서
+    //     화면은 「가입계약서 초안이 이메일로 **발송되었습니다**」, 같은 건의 **메일 본문**은
+    //     「초안은 본사 확인 후 별도로 보내드립니다」 — 서로 반대고 **거짓인 쪽이 화면**이었다.
+    //   도달 경로는 실재한다: PDF 생성 실패(컨트롤러 catch) → pdfBytes 널 → 첨부 없는 발송이 **성공**.
+    //   종전 게이트는 이 조합을 **0건** 물었다(E-3 = 첨부O·발송O · E-4 = 첨부X·발송X).
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-B1-G-3 메일은 갔고 초안은 안 붙은 경우, 화면 문구가 메일 본문과 같은 말을 한다")]
+    public async Task G_B1_G_3_첨부없이_발송된_경우_화면과_메일이_같은_말을_한다()
+    {
+        const string gate = "G-B1-G-3 (첨부 X · 발송 O) 조합";
+        await using var env = await MailTruthGateDb.TryCreateAsync(gate, "hitpan_bo_b1g_gate_3");
+        if (env is null) return;
+
+        // 계약서 생성 실패(null) + 발송은 성공(대역) = 바로 그 조합. 실발송 0통.
+        var sender = new SpyEmailSender(new AlwaysSentSender());
+        var controller = NewController(env, sender, new FakePdfGenerator(null));
+
+        var res = await controller.Submit(NewRequest("정직상사5"), default);
+
+        Assert.True(StatusOf(res) == 200, $"{gate} 접수가 200 이 아니다. {Describe(res)}");
+        var value = ValueOf(res);
+
+        // ── ① 조합이 실제로 섰나 — 첨부 없는 경로로 갔고, 발송기는 true 를 돌려줬다
+        Assert.True(sender.WithAttachment == 0 && sender.WithoutAttachment == 1,
+            $"{gate} 첨부 없는 경로를 안 탔다(첨부 {sender.WithAttachment} · 비첨부 {sender.WithoutAttachment}).");
+        Assert.True(sender.LastResult, $"{gate} 대역이 true 를 안 돌려줬다 — 시험 설정이 틀렸다.");
+
+        // ── ② 접수는 성공이고 신청번호는 그대로 나간다(#20)
+        Assert.True(Field<bool>(value, "success"), $"{gate} 접수가 실패로 바뀌었다 — #20 위반. {Describe(res)}");
+        Assert.False(string.IsNullOrWhiteSpace(Field<string>(value, "applicationId")),
+            $"{gate} applicationId 가 비어 나갔다.");
+
+        var message = Field<string>(value, "message");
+
+        // ── ③ 🔴 거짓 금지 — 초안이 안 붙었는데 「초안이 이메일로 발송되었습니다」를 말하면 안 된다
+        Assert.False(message.Contains(SentPhrase, StringComparison.Ordinal),
+            $"{gate} 초안이 안 붙었는데 화면 문구가 「{SentPhrase}」라고 말한다. " +
+            $"같은 건의 메일 본문은 「초안은 별도로 보내드립니다」다 — 서로 반대다.\n  문구: {message}");
+
+        // ── ④ 🔴 완료형 단정 3모양 — **화면 게이트와 같은 한 벌**을 쓴다(§19 판정2).
+        //     금지어 목록이 두 벌이 되면 한 벌만 고쳐지는 날이 온다.
+        foreach (var shape in BackofficeResellerScreenTruthGateTests.SendCompletedShapes)
+        {
+            Assert.False(message.Contains(shape, StringComparison.Ordinal),
+                $"{gate} 손님 문구에 완료형 단정 「{shape}」이 있다 — 초안은 안 갔다.\n  문구: {message}");
+        }
+
+        // ── ⑤ 🔴 화면과 메일이 **같은 말**을 한다 — 이게 이 게이트의 본문이다
+        var html = ResellerApplicationController.BuildEmailHtml(
+            "정직상사5", "00000000-1111-2222-3333-444444444444", hasAttachment: false);
+        Assert.DoesNotContain("첨부된", html);
+        Assert.True(message.Contains("담당자 확인 후", StringComparison.Ordinal),
+            $"{gate} 메일 본문은 「별도로 보내드린다」고 하는데 화면 문구엔 그 말이 없다.\n  문구: {message}");
+
+        // ── ⑥ 접수 사실·다음 절차는 끊지 않는다(#20)
+        Assert.True(message.Contains("신청이 접수되었습니다", StringComparison.Ordinal),
+            $"{gate} 접수 성공 안내가 사라졌다.\n  문구: {message}");
+        Assert.True(message.Contains("정식 계약서", StringComparison.Ordinal),
+            $"{gate} 다음 절차 안내가 사라졌다.\n  문구: {message}");
+        AssertNoDevWords(gate, message);
+
+        // ── ⑦ 🔴 음성 대조 — 세 경우가 **서로 다른 문장**이어야 분기가 산 것이다.
+        //     분기를 되돌리면(mailSent 만 보면) ③·④ 가 FAIL 하고, 여기서는 첨부O 와 같아진다.
+        var attachedSender = new SpyEmailSender(new AlwaysSentSender());
+        var attached = Field<string>(ValueOf(await NewController(
+            env, attachedSender, new FakePdfGenerator(new byte[] { 9 }))
+            .Submit(NewRequest("정직상사6"), default)), "message");
+
+        var pendingSender = new SpyEmailSender(RealSenderWithoutCredentials());
+        var pending = Field<string>(ValueOf(await NewController(
+            env, pendingSender, new FakePdfGenerator(null))
+            .Submit(NewRequest("정직상사7"), default)), "message");
+
+        Assert.NotEqual(attached, message);
+        Assert.NotEqual(pending, message);
+        Assert.NotEqual(attached, pending);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // 거치대
     // ══════════════════════════════════════════════════════════════
 
