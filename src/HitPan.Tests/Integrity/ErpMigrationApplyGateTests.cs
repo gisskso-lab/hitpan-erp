@@ -127,6 +127,13 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
         // ① 신규설치본 그대로의 모양 — 이것이 #36 의 단일 진실원이 말하는 모습이다.
         var before = await MigrationGateDb.ShapeAsync(db);
 
+        // 🔴 **[4] 조건 C-6 봉합 — 양성 대조.** 모양이 **비어 있어도** before==after 로 통과한다.
+        //   출하 DDL import 가 조용히 실패했거나 ShapeAsync 가 아무것도 못 세면 그 자리에서
+        //   거짓 초록이 난다. ⇒ 「무엇을 세고 있는지」를 먼저 단언한다.
+        Assert.True(before.Count >= 2000,
+            $"[{gate}] 🔴 신규설치본에서 센 것이 {before.Count}줄뿐이다 — 출하 DDL 이 제대로 안 들어갔거나 "
+          + "모양을 뜨는 질의가 아무것도 못 세고 있다(이 자리에서 모양 비교가 통째로 무의미해진다).");
+
         await db.ExecuteAsync("DELETE FROM schema_migrations WHERE migration_id = @Id;", new { Id = newest });
 
         MigrationGateDb.MaterializeRepoSql();
@@ -134,6 +141,10 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
         {
             var r = await _db.RunRealRunnerAsync();
             Assert.True(r.Success, $"[{gate}] 러너가 실패했다(G-W13-1 을 먼저 보라): {r.FailureMessage}");
+
+            // 🔴 **[4] C-6 봉합 ②** — 러너 폴더가 비면 「적용 대상 0건 · Success=true」로 끝나고
+            //   before==after 라서 통과한다. **그 마이그가 실제로 돌았다**는 것을 단언한다.
+            Assert.Contains(newest, r.AppliedMigrationIds);
 
             // ② 마이그를 돌린 뒤의 모양
             var after = await MigrationGateDb.ShapeAsync(db);
@@ -305,6 +316,7 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
             var broken = new List<(string Id, string Why)>();
             var all = MigrationGateDb.AllMigrationIdsOnDisk();
             var measured = 0;   // 🔴 **몇 바퀴 돌았나** — 아래에서 단언한다([3-V] P-1)
+            var applied = 0;    // 🔴 **몇 건이 실제로 적용됐나** — 바퀴 수만으로는 모자랐다([4] P-1 평가)
 
             // 🔴 먼저 **전건을 적용됨으로** 앉힌다. 출하 DDL 시드에 빠진 파일이 하나라도 있으면
             //    첫 바퀴에서 그 파일까지 함께 돌아 「한 건씩 독립으로」가 깨지고(러너는 첫 실패에서
@@ -328,12 +340,14 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
                 string? why = null;
                 for (var pass = 1; pass <= 2 && why is null; pass++)
                 {
-                    // 그 한 건만 미적용으로 만든다 ⇒ 러너는 그 한 건만 돈다(다른 파일의 그림자 0).
+                    // 🔴 그 한 건만 **미적용 이력**으로 만든다 ⇒ 러너는 그 한 건만 **실행**한다.
+                    //    독립인 것은 **이력**이다. 스키마는 누적된다([4] C-4 · 위 remarks).
                     await db.ExecuteAsync(
                         "DELETE FROM schema_migrations WHERE migration_id = @Id;", new { Id = id });
 
                     var r = await _db.RunRealRunnerAsync();
                     if (!r.Success) why = $"{pass}회차 — {FirstLine(r.FailureMessage)}";
+                    else if (r.AppliedMigrationIds.Contains(id, StringComparer.OrdinalIgnoreCase)) applied++;
                 }
                 if (why is not null) broken.Add((id, why));
                 measured++;
@@ -352,7 +366,18 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
             Assert.Equal(all.Count, measured);
             Assert.True(measured >= 100,
                 $"[{gate}] 🔴 {measured}건만 재고 끝났다 — 마이그가 110건 규모인데 너무 적다. "
-              + "러너 폴더나 레포 폴더가 비었나(그 자리에서 조용한 초록이 난다).");
+              + "레포 폴더가 비었나(그 자리에서 조용한 초록이 난다).");
+
+            // 🔴 **[4] P-1 평가 봉합** — 바퀴 수만 세면 모자랐다.
+            //   [4] 지적: **러너 폴더**가 비면 110 바퀴를 다 돌면서 매번 「적용 대상 0건 · Success=true」다
+            //   ⇒ `measured` 는 110 인데 **SQL 은 한 줄도 안 돌았다.** 그 길을 `nowFixed` 축이
+            //   **우연히** 막고 있었다(목록이 비는 날 그 보증도 사라진다).
+            //   ⇒ 「실제로 적용된 건수」를 직접 센다. 안 깨지는 마이그는 1회차에 반드시 적용된다.
+            Assert.True(applied >= all.Count - KnownNotReapplyable.Length,
+                $"[{gate}] 🔴 {measured}바퀴를 돌았는데 실제로 적용된 것은 {applied}건뿐이다 — "
+              + "러너가 SQL 을 한 줄도 안 돌리고 「적용 대상 0건」으로 성공을 보고했을 수 있다"
+              + $"(러너 폴더 {MigrationGateDb.RunnerSqlDir()} 가 비었나 · 다른 시험 클래스가 지웠나). "
+              + "바퀴 수는 돌았다는 증거가 아니다.");
 
             var brokenIds = broken.Select(b => b.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -458,15 +483,27 @@ public sealed class MigrationRunnerSqlDirCollection
 internal sealed class MigrationGateDb : IDisposable
 {
     /// <summary>
-    /// 🔴 재적용에서 깨지는 옛 마이그 — <b>실물 러너 기준 측정값</b>(2026-10-14 작9 G-W13-5 로 실측).
+    /// 🔴 재적용에서 깨지는 옛 마이그 <b>10건</b> — <b>실물 러너 기준 측정값</b>(2026-10-14 작9 G-W13-5 로 실측).
+    ///
+    /// <para>🔴 <b>[4] 조건 C-4 — 이 명단은 「파일 순서에 의존한다」.</b> 루프는 파일마다 시드만 비우고
+    /// <b>스키마는 되돌리지 않는다</b>(MariaDB DDL 은 암묵 커밋이라 러너에 롤백이 0건이다) ⇒
+    /// 앞 파일이 만든 것이 뒤 파일의 자리에 남는다. 내 첫 주석은 「다른 파일의 영향 0」이라 적었는데
+    /// <b>그건 틀렸다</b> — 독립인 것은 <b>시드(적용 이력)</b>뿐이고 스키마는 누적이다.
+    /// <br/>🔴 그래도 이 측정이 쓸모 있는 이유: 루프가 도는 순서가 <b>번호순 = 제품 적용기와 같은 순서</b>다.
+    /// 즉 이 명단은 「업데이트가 실제로 밟는 순서에서 깨지는 것」이고, 그것이 재야 할 축이다.
+    /// <b>역순 측정은 안 했다</b>([4] 도 못 쟀다) — 다른 순서의 명단은 미지다.</para>
+    ///
+    /// <para>🔴 <b>[4] 조건 C-7 답</b>: G-W13-1·2·4 는 번호 최대 <b>한 건</b>만 잰다. 그 공백은
+    /// 이 게이트가 메운다 — 여기 <b>1회차가 전건의 「첫 적용」</b>이다(110건 전부). 한 차수가 마이그를
+    /// 둘 더해도 둘 다 1회차를 받는다.</para>
     ///
     /// <para>🔴 <b>고치라는 목록이 아니다.</b> 옛 마이그 수정은 #1·#43 이고 결재 거리 <b>결-G</b> 로
     /// 올렸다. 시드가 막아 주는 동안은 고객에게 닿지 않는다. 이 목록이 하는 일은 <b>늘지 못하게</b>
     /// 하는 것이다 — 그리고 <b>새 마이그는 한 건도 못 들어온다</b>.</para>
     ///
-    /// <para>🔴 [1-V] 가 mysql CLI 로 센 수는 <b>10</b> 이었다. 그건 <b>다른 파서</b>의 숫자이고,
-    /// 게다가 앞 파일이 중간에 멈춘 <b>그림자</b>를 포함했다([1-V] P-8·P-9). <b>이 배열이 정본</b>이다 —
-    /// 실물 러너로, 한 건씩 독립으로 쟀다.</para>
+    /// <para>🔴 [1-V] 가 mysql CLI 로 센 수도 <b>10</b> 이었지만 <b>명단이 다르다</b> — CLI 는
+    /// <c>DB-89</c> 를 넣고 <c>DB-35</c> 를 못 봤고, 실물 러너는 그 반대다. <b>같은 수라고 같은 사실이 아니다.</b>
+    /// <b>이 배열이 정본</b>이다 — 실물 러너로, 시드를 한 건씩만 비워 두 바퀴 돌려 쟀다.</para>
     /// </summary>
     /// <remarks>
     /// 🔴 <b>CLI 로 센 수(10)와 실물 러너로 센 수(9)가 다르고, 사유도 다르다.</b> 2026-10-14 실측:

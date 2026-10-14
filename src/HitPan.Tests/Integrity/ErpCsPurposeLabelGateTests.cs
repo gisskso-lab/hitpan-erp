@@ -366,9 +366,16 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
     public void G_W10_8_본사낱말과_고객낱말이_어긋나지_않는다()
     {
         var block = BackofficeNoticeKindLabelBlock();
+        var writeCombo = BackofficeWriteComboValues();
 
         // 🔴 규칙 — 백오피스 낱말은 「ERP 낱말」 그 자체이거나, 거기에 본사 전용 꼬리표가 붙은 것뿐이다.
         //    예외 목록이 **없다**: 어느 값이든 몸통이 어긋나면 빨강이고 비켜 갈 길이 없다.
+        //
+        // 🔴 20261014작9 [4] 조건 C-2 봉합 — **꼬리표는 「옛 값」에만 허용한다.**
+        //    [4] 실측: `"promo" => "프로모션 안내(옛 값)"` 로 바꿔도 **전건 초록**이었다.
+        //    그런데 `promo` 는 **쓰기 콤보에 있는 값**이다 ⇒ 같은 화면이 콤보에선 「프로모션 안내」,
+        //    목록에선 「프로모션 안내(옛 값)」로 **두 낱말**을 쓴다. 결-A″ 가 막으려던 모양 그대로다.
+        //    ⇒ 꼬리표 가지는 **쓰기 콤보 밖의 값**(= 새로 못 쓰는 옛 값)에만 열어 둔다.
         var mismatched = new List<string>();
         var withSuffix = new List<string>();
 
@@ -380,7 +387,20 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
             var tagged = $"\"{p}\" => \"{erp}{StaffOnlySuffix}\"";      // 몸통 같고 꼬리표만 붙었다
 
             if (block.Contains(plain, StringComparison.Ordinal)) continue;
-            if (block.Contains(tagged, StringComparison.Ordinal)) { withSuffix.Add(p); continue; }
+
+            if (block.Contains(tagged, StringComparison.Ordinal))
+            {
+                if (writeCombo.Contains(p))
+                {
+                    mismatched.Add(
+                        $"{p} → 🔴 **쓰기 콤보에 있는 값**인데 낱말표가 꼬리표 「{StaffOnlySuffix}」를 달았다. "
+                      + $"콤보에선 「{erp}」, 목록에선 「{erp}{StaffOnlySuffix}」 — 같은 화면이 두 낱말을 쓴다. "
+                      + "꼬리표는 **새로 못 쓰는 옛 값**에만 붙인다");
+                    continue;
+                }
+                withSuffix.Add(p);
+                continue;
+            }
 
             mismatched.Add(
                 $"{p} → 고객은 「{erp}」로 본다. 본사 낱말표에 「{erp}」도 「{erp}{StaffOnlySuffix}」도 없다");
@@ -400,15 +420,51 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
           + "옛 값(event·billing)이 본사 낱말표에서 사라졌나(#1 위반 의심).");
     }
 
-    /// <summary>백오피스 <c>NoticeKindLabel</c> 의 <c>switch</c> 블록을 <b>소스 글자</b>로 떠 온다.</summary>
-    private static string BackofficeNoticeKindLabelBlock()
+    /// <summary>
+    /// 백오피스 <c>NoticeKindLabel</c> 의 <c>switch</c> 블록을 <b>소스 글자</b>로 떠 온다.
+    ///
+    /// <para>🔴 <b>20261014작9 [4] 조건 C-1 봉합 — 주석을 먼저 벗긴다.</b>
+    /// [4] 실측: 낱말 몸통을 「과금<b> </b>결재 안내(옛 값)」(공백 한 칸 삽입)으로 깨뜨리고
+    /// 같은 블록에 정본 글자가 든 <c>//</c> 주석 한 줄을 넣으니 <b>G-W10-8·G-W12 5건이 전건 초록</b>이었다
+    /// (주석 없이 같은 공백만 넣으면 빨강). ⇒ 「예외 0건」으로 닫았다던 규칙이
+    /// <b>주석 한 줄짜리 무제한 예외 통로</b>로 바뀌어 있었다.</para>
+    ///
+    /// <para>🔴 이 트랙에서 같은 함정을 <b>다섯 번째</b> 밟았다. 나는 G-W12 쪽에만
+    /// <see cref="StripComments"/> 를 걸고 <b>본체 게이트에는 안 걸었다</b> — 더 나쁜 것은
+    /// 그 사실을 모른 채 「닫았다」고 코드 주석과 결재 문서에 적었다는 점이다.
+    /// <b>글자를 세는 게이트는 예외 없이 주석을 먼저 벗긴다.</b></para>
+    /// </summary>
+    private static string BackofficeNoticeKindLabelBlock() => BackofficeBlock("NoticeKindLabel");
+
+    /// <summary>
+    /// 백오피스 <b>쓰기 콤보</b>(<c>NoticeKinds</c>)에 든 값들 — 「새로 쓸 수 있는 종류」다.
+    /// <para>🔴 꼬리표 「(옛 값)」을 허용할지 가르는 기준이다([4] C-2).</para>
+    /// </summary>
+    private static HashSet<string> BackofficeWriteComboValues()
     {
-        var src = File.ReadAllText(BackofficeVocabPath());
-        var start = src.IndexOf("NoticeKindLabel", StringComparison.Ordinal);
-        Assert.True(start > 0, "백오피스 NoticeKindLabel 을 못 찾았다 — 이름이 바뀌었나");
+        var block = BackofficeBlock("NoticeKinds =");
+        var set = System.Text.RegularExpressions.Regex
+            .Matches(block, @"new\(""(?<v>[a-z_]+)""")
+            .Select(m => m.Groups["v"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(set.Count >= 4,
+            $"백오피스 쓰기 콤보에서 값을 {set.Count}개만 읽었다 — 모양이 바뀌었나(이 게이트가 아무것도 못 센다)");
+        return set;
+    }
+
+    /// <summary>
+    /// 백오피스 낱말표 파일에서 <paramref name="marker"/> 로 시작하는 블록을 뜬다.
+    /// <para>🔴 <b>주석을 먼저 벗긴다</b>([4] C-1·C-3) — 벗기지 않으면 주석 한 줄이 과녁을 대신한다.</para>
+    /// </summary>
+    private static string BackofficeBlock(string marker)
+    {
+        var src = StripComments(File.ReadAllText(BackofficeVocabPath()));
+        var start = src.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start > 0, $"백오피스 {marker} 을 못 찾았다 — 이름이 바뀌었나");
         var block = src[start..];
         var end = block.IndexOf("};", StringComparison.Ordinal);
-        Assert.True(end > 0, "백오피스 낱말표 블록의 끝을 못 찾았다");
+        Assert.True(end > 0, $"{marker} 블록의 끝을 못 찾았다");
         return block[..end];
     }
 
@@ -472,12 +528,8 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
     [Fact(DisplayName = "G-W12-2 🔴 쓰기 콤보는 4종 그대로 — 낱말을 고쳤다고 옛 값으로 **새로 보낼** 길이 열리지 않았다")]
     public void G_W12_2_쓰기콤보는_4종_그대로()
     {
-        var src = File.ReadAllText(BackofficeVocabPath());
-        var start = src.IndexOf("NoticeKinds =", StringComparison.Ordinal);
-        Assert.True(start > 0, "백오피스 쓰기 콤보(NoticeKinds)를 못 찾았다 — 이름이 바뀌었나");
-        var end = src.IndexOf("};", start, StringComparison.Ordinal);
-        Assert.True(end > 0, "쓰기 콤보 블록의 끝을 못 찾았다");
-        var block = src[start..end];
+        // 🔴 [4] C-3 봉합 — 이 게이트도 **주석을 벗긴 뒤** 읽는다(C-1 과 같은 통로였다).
+        var block = BackofficeBlock("NoticeKinds =");
 
         // 🔴 옛 값이 쓰기 콤보에 들어오면 빨강 — 사장님 10/14 교정(「축이 아니라 명분의 한 예」).
         foreach (var legacy in new[] { LegacyBillingPurpose, "event" })
