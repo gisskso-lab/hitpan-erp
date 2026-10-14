@@ -1237,6 +1237,40 @@ jobs:
           #    스텁 모드 SendAsync 가 true 를 돌려주면 빨강(= 보내지도 않고 보냈다고 말하는 상태).
           #    근거: docs/운영기록/20261015작B1_배포준비1차수_작업지시서.md §5 G4
           GATES="$GATES|ErpMailStubHonestGate"
+          # 🔴 20261015작B1 갈래 D(조건2) — 소스 벗기개 자체의 게이트 (SourceTextStripGateTests · G-B1-D-1~7).
+          #    DB 불필요(순수 문자열). 소스 숫자를 세는 게이트 5곳이 전부 이 벗기개에 기댄다 —
+          #    벗기개가 틀리면 그 5곳이 **빨강도 없이** 거짓 판정으로 돌아간다(「주석을 세는 자리」 6번째 재발).
+          #    근거: docs/검증/백오피스/20261015_작업리뷰서_작B1_배포준비1차수.md §3-② (조건2)
+          GATES="$GATES|SourceTextStripGate"
+
+
+          # 🔴 20261015작B1 갈래 E — 협력업체 신청자에게 **거짓을 말하는 자리** (G-B1-E-1~5 ·
+          #    BackofficeResellerMailTruthGateTests · 작지서 §14 · PM 재결재 §15).
+          #    적발: 발송기는 자격증명 미저장 시 **예외를 던지지 않고 false** 를 돌려주는데 컨트롤러가
+          #      그 bool 을 안 받았다 ⇒ 메일 0통인데 응답이 「이메일로 발송되었습니다」였다.
+          #    과녁은 전부 실물이다 — 격리 DB + 실물 SchemaMigrator(installer/backoffice/*.sql) +
+          #      실물 ResellerApplicationController.Submit + 실물 EmailSender(자격증명 0칸).
+          #      🔴 메일 실발송 0통(붙을 곳이 없다) · 성공 경로만 「보냈다」 대역으로 태운다.
+          #    🔴 반환값을 버렸는지는 **소스를 세지 않고** 두 경로(첨부 있음=SendWithAttachmentAsync ·
+          #      첨부 없음=SendAsync)의 응답 문장으로 잰다 — 한쪽만 받으면 그 경로가 다시 거짓이 된다.
+          #    근거·음성 대조군 전문: docs/개발/백오피스/20261015_개발명세서_작B1_갈래E_손님문구정직화.md §4
+          GATES="$GATES|BackofficeResellerMailTruthGate"
+
+          # 🔴 20261015작B1 갈래F — **손님 화면·메일이 사실을 말하나** G-B1-F-1~5
+          #    (BackofficeResellerScreenTruthGateTests). 갈래 E 가 API 를 정직하게 만들었는데
+          #    화면이 그 문장을 안 읽어 메일 0통에도 「발송했습니다」가 떴다. 메일 본문도 첨부 0건인데
+          #    「첨부된 PDF를 확인해주십시오」라고 말했다.
+          #    [음성 대조군 5건 — 전부 봉합을 빼고 FAIL 을 눈으로 봤다]
+          #      NC-1 성공 경로가 payload.Message 를 안 읽음  ⇒ F-1 빨강
+          #      NC-2 「발송했습니다」를 마크업에 되박음        ⇒ F-2 빨강
+          #      NC-3 기본 문장을 「발송했습니다」로 되돌림      ⇒ F-3·F-2 빨강 (2건)
+          #      NC-4 메일 본문을 고정(첨부된 고정)으로 되돌림  ⇒ F-4·F-5 빨강 (2건)
+          #      NC-5 첨부 본문에서 「첨부된」 삭제            ⇒ F-5 빨강
+          #    🔴 DB 불필요(실물 BuildEmailHtml 호출 + 실물 .razor 읽기) — SKIP 이 찍히면 안 돈 것이다.
+          #    근거: docs/개발/백오피스/20261015_개발명세서_작B1_갈래F_화면문구정직화.md
+          GATES="$GATES|BackofficeResellerScreenTruthGate"
+
+
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).

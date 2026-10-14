@@ -118,8 +118,38 @@ public class ErpMailStubHonestGateTests
     }
 
     /// <summary>
-    /// 🔴 소스에 <c>true</c> 반환 경로가 <b>0개</b>인지 — §5 G4 숫자.
-    /// 동작 시험(위)만 두면 새 분기를 하나 더 만들면서 다시 <c>true</c> 를 넣어도 안 잡힌다.
+    /// 🔴 §5 G4 「성공 반환 0개」를 <b>동작으로</b> 잰다 — 소스 세기를 대체하는 쪽.
+    /// 위 Theory 는 provider 5가지만 보므로, 벤더 이름을 새로 하나 붙이면서 <c>true</c> 를 끼워 넣으면
+    /// 통과해 버린다. 실제로 붙을 만한 이름 + 아무 이름을 전수로 넣어 <b>무엇을 넣어도 성공이 없다</b>를 고정한다.
+    /// </summary>
+    [Theory]
+    [InlineData("smtp")]
+    [InlineData("mailgun")]
+    [InlineData("postmark")]
+    [InlineData("resend")]
+    [InlineData("naver")]
+    [InlineData("SES")]          // 대문자 — 분기 비교가 대소문자를 안 가리는지까지
+    [InlineData("")]
+    [InlineData("아무거나")]
+    public async Task 어떤_provider_를_넣어도_성공은_없다(string provider)
+    {
+        foreach (var withKey in new[] { false, true })
+        {
+            var result = await Build(provider, withKey).SendAsync(To, Subject, Body, "token-0000");
+
+            Assert.False(
+                result.Success,
+                $"provider={provider} · 열쇠={(withKey ? "있음" : "없음")} 에서 Success=true 가 나왔다 — "
+                + "실제 전송 코드가 0줄인데 보냈다고 말한다.");
+            Assert.Null(result.VendorMessageId);
+        }
+    }
+
+    /// <summary>
+    /// 🔴 소스에 <c>true</c> 반환 경로가 <b>0개</b>인지 — §5 G4 숫자. 위 동작 전수시험의 <b>뒷받침</b>이다.
+    /// 왜 소스가 아직 필요한가: 동작시험은 <c>SendAsync</c> 로 들어가는 경로만 본다. 다른 공개 메서드나
+    /// 새 오버로드가 생기면서 거기에 <c>true</c> 를 넣으면 호출되지 않아 안 잡힌다 —
+    /// 「그 파일 안에 성공 반환이 한 줄도 없다」는 부재는 돌려서 잴 수 없다.
     /// </summary>
     [Fact]
     public void 발송기_소스에_성공반환_경로가_0개다()
@@ -128,13 +158,16 @@ public class ErpMailStubHonestGateTests
             FindSrcRoot(), "HitPan.API", "Services", "Notifications", "EmailSenderService.cs");
         Assert.True(File.Exists(path), $"발송기 소스를 못 찾았다: {path}");
 
+        // 🔴 2026-10-15 [4] 적발 (조건2): 옛 방식은 `//` 로 **시작하는 줄만** 뺐다 —
+        //   줄 끝 주석(`doSomething(); // new NotificationResult(true …`)과 블록주석 `/* */` 은 그대로 세었다.
+        //   공용 상태기계로 통일한다. 줄바꿈을 보존하므로 아래 줄 번호는 원본과 1:1 로 맞는다.
+        //   (자물쇠: `SourceTextStripGateTests`)
         var offenders = new List<string>();
-        var lines = File.ReadAllLines(path);
+        var lines = SourceText.ExecutableCode(File.ReadAllText(path))
+            .Replace("\r\n", "\n").Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
             var code = lines[i];
-            // 주석줄은 뺀다 — 설명 문장에 true 가 나올 수 있다.
-            if (code.TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
             if (Regex.IsMatch(code, @"new\s+NotificationResult\s*\(\s*true"))
                 offenders.Add($"{i + 1}: {code.Trim()}");
         }

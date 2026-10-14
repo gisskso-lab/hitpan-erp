@@ -190,13 +190,31 @@ public sealed class BackofficeMailHistoryGateTests
         var sentAt = await db.QueryFirstOrDefaultAsync<DateTime?>($"SELECT sent_at FROM {Table} LIMIT 1");
         Assert.True(sentAt.HasValue && sentAt.Value.Year >= 2026, $"{gate} sent_at 이 비정상이다(실측 {sentAt}).");
 
-        // ── ② 배선: 성공 분기가 적재를 부르는가 ──
-        //   🔴 이것만 글자로 잰다. 이유를 숨기지 않는다: 실경로 성공이 G5 결재에 막혀 있어서다.
-        //      2단(값 투입 후)에서 이 줄은 실경로 조회로 대체된다.
+        // ── ② 배선(성공 분기가 적재를 부르는가) 은 아래 `G_B1_B_4_배선_세경로가_적재를_부른다` 로 떼어 냈다 ──
+        //   🔴 2026-10-15 갈래 D(조건2): ② 는 DB 가 필요 없는 소스 판독인데 이 DB 시험 안에 갇혀 있었다.
+        //      ⇒ DB 없는 자리(로컬·build 잡)에서는 ② 가 **한 번도 돌지 않았다**. 떼어 내 항상 돌게 한다.
+    }
+
+    /// <summary>
+    /// G-B1-B-4 ② — 성공 분기가 적재를 부르는 **배선**. DB 불필요(소스 판독).
+    /// </summary>
+    [Fact(DisplayName = "G-B1-B-4 ② 적재 호출이 세 경로(미설정·성공·예외) 모두에 배선돼 있다 (DB 불필요)")]
+    public void G_B1_B_4_배선_세경로가_적재를_부른다()
+    {
+        const string gate = "G-B1-B-4 ② 배선";
+
+        // 🔴 왜 아직 소스를 세나: 미설정·예외 두 경로는 G-B1-B-2·B-3 이 **실제 적재 행**으로 재지만,
+        //   성공 경로는 살아 있는 SMTP 서버가 있어야 도달한다(자격증명 값 = G5 결재 대기 · 실발송 금지).
+        //   그 한 경로 때문에 소스 판독이 남는다. 2단(값 투입 후)에서 이 줄은 실경로 조회로 대체된다.
+        // 🔴 주석·문자열을 먼저 벗긴다 — 원문을 세면 「세 경로」를 설명하는 주석까지 세어 거짓 판정이 된다 (조건2).
         var src = ReadSource("src/HitPan.Backoffice.API/Services/EmailSender.cs");
-        Assert.Contains("RecordAsync(toEmail, subject, sent: true", src.Replace("\r\n", "\n").Replace("\n", " "));
-        // 세 경로 모두 적재한다 — 호출 3곳(미설정·성공·예외) + 선언 1곳.
-        var calls = System.Text.RegularExpressions.Regex.Matches(src, @"RecordAsync\(toEmail, subject, sent:").Count;
+        var code = SourceText.ExecutableCode(src);
+
+        Assert.Contains("RecordAsync(toEmail, subject, sent: true",
+            code.Replace("\r\n", "\n").Replace("\n", " "), StringComparison.Ordinal);
+
+        // 호출 3곳(미설정·성공·예외) — 선언은 `RecordAsync(string toEmail, …)` 라 이 모양에 안 걸린다.
+        var calls = System.Text.RegularExpressions.Regex.Matches(code, @"RecordAsync\(toEmail, subject, sent:").Count;
         Assert.True(calls == 3,
             $"{gate} 세 경로(미설정·성공·예외) 모두 적재해야 한다. 실측 호출 {calls}곳.");
     }
@@ -224,7 +242,10 @@ public sealed class BackofficeMailHistoryGateTests
             //   「`_ = _email.SendAsync(…)` 로 버려서 아무도 몰랐다」고 **설명하는 주석**까지 세어
             //   봉합을 끝낸 코드가 빨간불이 된다(2026-10-15 로컬 실측: 1곳 FAIL — 그 1곳이 주석이었다).
             //   재는 것은 **실행되는 코드**다.
-            var code = System.Text.RegularExpressions.Regex.Replace(src, @"//[^\n]*", "");
+            // 🔴 2026-10-15 [4] 적발 (조건2): 옛 `Regex.Replace(src, "//[^\n]*", "")` 는 블록주석 `/* */` 과
+            //   문자열 리터럴을 못 다룬다(문자열 안의 `http://` 뒤 실코드를 통째로 날린다).
+            //   공용 상태기계로 바꿨다 — 벗기기 자체의 자물쇠는 `SourceTextStripGateTests`.
+            var code = SourceText.ExecutableCode(src);
 
             // 작업지시서 §5 G2 ⓒ 의 숫자 그대로: 실행코드에서 `_ = _email.` == 0
             var discarded = System.Text.RegularExpressions.Regex.Matches(code, @"_\s*=\s*_email\s*\.").Count;
@@ -232,14 +253,16 @@ public sealed class BackofficeMailHistoryGateTests
                 $"{gate} {rel} 에 버려지는 발송 결과가 {discarded}곳 남았다 — 되살리면 메일 실패를 다시 아무도 모른다.");
 
             // 🔴 버림을 없앴으면 결과를 **쓰는** 자리가 있어야 한다. 그냥 지운 것과 구별한다.
-            Assert.Contains("ReportMailAsync", src);
+            //   주석에 `ReportMailAsync` 라고 적어 두기만 해도 통과하던 자리다 → 주석을 벗기고 본다.
+            Assert.Contains("ReportMailAsync", code, StringComparison.Ordinal);
         }
 
         // 결과를 받는 쪽이 실패를 경고로 남기는가 — 「조용히 성공처럼」을 막는다.
-        var landing = ReadSource(targets[0]);
-        Assert.Contains("메일 발송 실패", landing);
-        var reseller = ReadSource(targets[1]);
-        Assert.Contains("메일 발송 실패", reseller);
+        // 🔴 로그 문구는 **문자열 리터럴**에 있어야 한다 — 주석만 벗기고(리터럴은 남기고) 센다.
+        var landing = SourceText.StripComments(ReadSource(targets[0]));
+        Assert.Contains("메일 발송 실패", landing, StringComparison.Ordinal);
+        var reseller = SourceText.StripComments(ReadSource(targets[1]));
+        Assert.Contains("메일 발송 실패", reseller, StringComparison.Ordinal);
     }
 
     // ══════════════════════════════════════════════════════════════

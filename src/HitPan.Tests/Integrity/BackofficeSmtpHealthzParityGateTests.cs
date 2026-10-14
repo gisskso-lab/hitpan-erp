@@ -360,8 +360,14 @@ public sealed class BackofficeSmtpHealthzParityGateTests
     {
         var root = RepoRoot();
 
-        var sender = File.ReadAllText(Path.Combine(root,
-            "src", "HitPan.Backoffice.API", "Services", "EmailSender.cs"));
+        // 🔴 2026-10-15 [4] 적발 (조건2): 원문을 세면 `_config["Smtp:Host"]` 라고 **설명하는 주석**만 있어도
+        //   통과한다(= 발송기가 그 키를 안 읽어도 초록). 주석을 벗기고 본다.
+        //   여기선 `StripComments` 다 — 키 이름이 **문자열 리터럴 안**에 있어야 하므로 리터럴은 남겨야 한다.
+        // 🔴 왜 소스를 보나: 「발송기가 어느 구성 키를 읽나」는 위 G-B1A-4·5 가 env 1:1 로 재지만,
+        //   `GetEnvironmentVariable` 직독이 없다·폐기 이름이 Probe 판정에 안 쓰인다는 **부재(不在)** 는
+        //   돌려서 잴 수 없다(없는 코드는 호출되지 않는다). 그래서 이 한 자리는 소스 판독으로 남는다.
+        var sender = SourceText.StripComments(File.ReadAllText(Path.Combine(root,
+            "src", "HitPan.Backoffice.API", "Services", "EmailSender.cs")));
 
         // 발송기가 읽는 키 6개가 전부 그 파일에 있다 — 위 기대 집합이 실물과 틀어지면 여기서 터진다.
         foreach (var k in SenderReadKeys)
@@ -375,8 +381,9 @@ public sealed class BackofficeSmtpHealthzParityGateTests
         // 발송기는 환경변수를 직접 읽지 않는다(구성 한 통로).
         Assert.DoesNotContain("GetEnvironmentVariable", sender);
 
-        var controller = File.ReadAllText(Path.Combine(root,
-            "src", "HitPan.Backoffice.API", "Controllers", "CredentialsStatusController.cs"));
+        // 주석 안의 `Probe("SMTP_HOST"…)` 같은 설명문을 위반으로 세지 않게 — 리터럴은 남긴다(이름을 봐야 한다).
+        var controller = SourceText.StripComments(File.ReadAllText(Path.Combine(root,
+            "src", "HitPan.Backoffice.API", "Controllers", "CredentialsStatusController.cs")));
 
         // 폐기 이름이 **env-or-config 판정**(Probe 의 첫 인자)으로 다시 들어가면 거짓 초록이 재발한다.
         foreach (var dead in DeprecatedSmtpEnvNames)

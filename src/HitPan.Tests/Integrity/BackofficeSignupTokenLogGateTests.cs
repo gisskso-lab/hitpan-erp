@@ -96,9 +96,16 @@ public sealed class BackofficeSignupTokenLogGateTests
         const string gate = "G-B1-B-8 원문 인자 0건";
         var src = ReadSource("src/HitPan.Backoffice.API/Controllers/LandingSignupController.cs");
 
+        // 🔴 2026-10-15 [4] 적발 (조건2): 원문을 세면 **주석·로그 메시지 문구**에 든 같은 글자까지 세어
+        //   거짓 판정이 난다. 재는 것은 실행되는 코드다 → 주석 + 문자열 리터럴 내용을 먼저 벗긴다.
+        //   (메시지 템플릿 `token={Token}` 은 리터럴이라 사라지고, 인자 `MaskToken(req.SignupToken)` 은 코드라 남는다.)
+        // 🔴 왜 소스를 세나: 로그 3곳 중 접수·성공 경로는 백오피스 DB 가 붙어야 도달한다(닫힌 포트로는 catch 1곳만
+        //   도달 — 그 1곳은 위 G-B1-B-6·B-7 이 **실물 로그**로 잰다). 나머지 2곳은 동작으로 못 잰다.
+        var code = SourceText.ExecutableCode(src);
+
         // _logger.Log*( … ) 한 덩어리씩 떼어, 그 안에 마스킹을 거치지 않은 토큰 인자가 있는지 본다.
         var calls = System.Text.RegularExpressions.Regex.Matches(
-            src, @"_logger\.Log\w+\((?:[^;])*?\);",
+            code, @"_logger\.Log\w+\((?:[^;])*?\);",
             System.Text.RegularExpressions.RegexOptions.Singleline);
 
         var offenders = new List<string>();
@@ -117,11 +124,12 @@ public sealed class BackofficeSignupTokenLogGateTests
             + string.Join("\n- ", offenders));
 
         // 🔴 음성 대조의 뒷면 — 마스킹이 **실제로 쓰이고 있다**(0곳이면 그냥 로그를 지운 것이다).
-        var masked = System.Text.RegularExpressions.Regex.Matches(src, @"MaskToken\(").Count;
+        var masked = System.Text.RegularExpressions.Regex.Matches(code, @"MaskToken\(").Count;
         Assert.True(masked >= 4,
             $"{gate} MaskToken 사용이 {masked}곳뿐이다 — 선언 1 + 로그 3곳(접수·결제확인·실패)이 기대값이다.");
 
         // 선례 규범을 코드가 알고 있는지 — 다음 사람이 왜 해시인지 되묻지 않게.
+        // 🔴 이건 일부러 **주석**으로 남긴 선례 표기다 → 원문(src)에서 본다. 벗긴 코드에는 없다.
         Assert.Contains("TelemetryController", src, StringComparison.Ordinal);
     }
 

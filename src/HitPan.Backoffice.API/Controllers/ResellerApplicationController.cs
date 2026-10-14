@@ -129,12 +129,20 @@ public class ResellerApplicationController : ControllerBase
             _logger.LogWarning(ex, "[ResellerApply] PDF 생성 실패 id={Id}", applicationId);
         }
 
+        // 🔴 20261015작B1 갈래 E — 발송기는 자격증명 미저장 시 **예외를 던지지 않고 false 를 돌려준다**
+        //    (EmailSender 의 미저장 분기). 그래서 아래 catch 만으로는 「안 갔다」를 알 수 없었다.
+        //    반환값을 받아 신청자에게 **사실만** 말한다. 접수 자체는 그대로 성공이다(#20).
+        var mailSent = false;
         try
         {
-            var html = BuildEmailHtml(req.CompanyName, applicationId);
-            if (pdfBytes is not null)
+            // 🔴 PM 합류 2026-10-15 — 이 자리에서 갈래 E(반환값을 받는다)와 갈래 F(본문을 첨부 유무로
+            //    갈라 만든다)가 겹쳤다. 둘 다 살렸다. 한쪽만 살리면 거짓 하나가 남는다.
+            var hasAttachment = pdfBytes is not null;
+            var html = BuildEmailHtml(req.CompanyName, applicationId, hasAttachment);
+            // 뒤 `pdfBytes is not null` 은 컴파일러 널 흐름 분석용이다(#19 경고 0). 판정은 hasAttachment 가 한다.
+            if (hasAttachment && pdfBytes is not null)
             {
-                await _email.SendWithAttachmentAsync(
+                mailSent = await _email.SendWithAttachmentAsync(
                     req.Email,
                     "[히트판] 협력업체 가입계약서 (초안)",
                     html,
@@ -145,11 +153,23 @@ public class ResellerApplicationController : ControllerBase
             }
             else
             {
-                await _email.SendAsync(
+                mailSent = await _email.SendAsync(
                     req.Email,
                     "[히트판] 협력업체 가입 신청 접수",
                     html,
                     ct);
+            }
+
+            if (mailSent)
+            {
+                _logger.LogInformation("[ResellerApply] 메일 송부 완료 id={Id} email={Email} attached={Att}",
+                    applicationId, req.Email, pdfBytes is not null);
+            }
+            else
+            {
+                // #15 — 발송기가 false 를 돌려준 경로(예외 아님). 이 줄이 없으면 아무도 모른다.
+                _logger.LogWarning("[ResellerApply] 메일 미송부(발송기 false) id={Id} email={Email} attached={Att}",
+                    applicationId, req.Email, pdfBytes is not null);
             }
         }
         catch (Exception ex)
@@ -160,10 +180,20 @@ public class ResellerApplicationController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "신청이 접수되었습니다. 가입계약서 초안이 이메일로 발송되었습니다. 본사 검토 후 정식 계약서가 별도로 발송됩니다.",
+            // 🔴 갈래 E — 종전 문구는 지우지 않고(#1) 보냈을 때만 쓴다. 안 갔으면 안 갔다고 말한다(#23 개발 용어 0).
+            message = mailSent ? MsgMailSent : MsgMailPending,
             applicationId
         });
     }
+
+    // 🔴 20261015작B1 갈래 E — 신청자가 읽는 문장. 사실이면서 평범해야 한다(#23).
+    //    MsgMailSent 는 종전 문구 그대로다(#1 덮어쓰기 금지).
+    internal const string MsgMailSent =
+        "신청이 접수되었습니다. 가입계약서 초안이 이메일로 발송되었습니다. 본사 검토 후 정식 계약서가 별도로 발송됩니다.";
+
+    //    메일이 아직 안 간 경로 — 「발송되었다」고 말하지 않는다. 접수는 성공이므로 신청번호는 그대로 안내한다.
+    internal const string MsgMailPending =
+        "신청이 접수되었습니다. 가입계약서 초안은 담당자 확인 후 입력하신 이메일로 보내드립니다. 본사 검토 후 정식 계약서가 별도로 발송됩니다.";
 
     private async Task<MySqlConnection> OpenAsync(CancellationToken ct)
     {
@@ -189,7 +219,28 @@ public class ResellerApplicationController : ControllerBase
     private static string FormatBizNo(string bn) =>
         bn.Length == 10 ? $"{bn[..3]}-{bn.Substring(3, 2)}-{bn.Substring(5)}" : bn;
 
-    private static string BuildEmailHtml(string companyName, string applicationId) => $@"
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 갈래F(F-3) — 메일 본문. 첨부가 **실제로 붙는지**에 따라 한 문장이 갈린다.
+    //
+    //   [고친 거짓] 이 함수는 본문을 한 번만 만들었고 그 안에 「첨부된 가입계약서 초안 PDF를
+    //   확인해주십시오」가 고정으로 있었다. PDF 생성이 실패하면(:129 LogWarning 후 null 유지)
+    //   첨부 없이 메일이 나가는데 본문은 그대로 「첨부된 PDF」를 말했다 — 손님은 없는 첨부를 찾는다.
+    //
+    //   [#1 덮어쓰기 금지] 첨부가 붙는 경로의 문장은 **한 글자도 안 바꿨다.** 분기를 더했을 뿐이다.
+    //   [#23] 손님 메일이므로 개발 용어 금지 — 왜 첨부가 없는지(생성 실패)는 말하지 않는다.
+    //
+    //   [public static 인 이유] 게이트 BackofficeResellerScreenTruthGateTests(G-B1-F-4·F-5)가
+    //   **실물 본문**을 직접 읽어 「첨부된」 유무를 잰다. 베낀 모양으로 재면 여기가 바뀌어도 초록이다.
+    //   MVC 는 static 메서드를 액션으로 보지 않는다([NonAction] 은 의도 표시).
+    // ══════════════════════════════════════════════════════════════════════════
+    [NonAction]
+    public static string BuildEmailHtml(string companyName, string applicationId, bool hasAttachment)
+    {
+        var contractLine = hasAttachment
+            ? "첨부된 <b>가입계약서 초안 PDF</b>를 확인해주십시오. 본사 검토·승인 후 정식 계약서가 별도로 발송됩니다."
+            : "<b>가입계약서 초안</b>은 본사 확인 후 별도로 보내드립니다. 본사 검토·승인 후 정식 계약서가 함께 전달됩니다.";
+
+        return $@"
 <div style='font-family:-apple-system,BlinkMacSystemFont,Pretendard,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#1A2B4A;'>
   <h2 style='color:#0F6E56;margin:0 0 16px;'>협력업체 가입 신청이 접수되었습니다</h2>
   <p>안녕하세요, <b>{System.Net.WebUtility.HtmlEncode(companyName)}</b> 담당자님.</p>
@@ -198,9 +249,10 @@ public class ResellerApplicationController : ControllerBase
     <div style='font-size:13px;color:#6B7280;margin-bottom:4px;'>신청 번호</div>
     <div style='font-size:16px;font-weight:700;color:#0F6E56;font-family:Consolas,Monaco,monospace;'>{applicationId}</div>
   </div>
-  <p>첨부된 <b>가입계약서 초안 PDF</b>를 확인해주십시오. 본사 검토·승인 후 정식 계약서가 별도로 발송됩니다.</p>
+  <p>{contractLine}</p>
   <p style='margin-top:24px;color:#6B7280;font-size:13px;'>이 메일은 발신 전용입니다. 문의는 partners@hitpan.kr 로 부탁드립니다.</p>
 </div>";
+    }
 
     public class ApplyRequest
     {

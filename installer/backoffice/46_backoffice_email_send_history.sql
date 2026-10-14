@@ -29,7 +29,9 @@
 --   🔴 본문(htmlBody)은 담지 않는다. 담으면 임시비번·라이선스 키가 표에 눕는다.
 -- ★ #29 — SMTP 자격증명은 한 칸도 없다(이 표에 값이 들어올 길이 없다).
 --
--- ★ 감시 게이트: `BackofficeMailHistoryGateTests` (G-B1-B-1~5) — CI `db-gate` 잡.
+-- ★ 감시 게이트: `BackofficeMailHistoryGateTests` (G-B1-B-1~5) — CI `bo-mysql8-gate` 잡 (MySQL 8).
+--   🔴 2026-10-15 [4] 교정(조건3): 여기 `db-gate` 라고 적혀 있었다. `db-gate` 는 **MariaDB 11.4** 판이고
+--   이 게이트는 한 줄도 돌지 않는다 — 다음 사람이 MariaDB 초록을 이 표의 증거로 읽을 뻔했다.
 --   출하 편입은 기존 `BackofficeSchemaShipGateTests` G-BO-SHIP-2 가 이미 문다
 --   (csproj 의 `installer\backoffice\*.sql` 와일드카드 — 새 번호는 자동으로 따라온다).
 -- ============================================================================
