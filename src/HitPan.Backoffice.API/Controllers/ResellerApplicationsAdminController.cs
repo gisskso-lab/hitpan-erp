@@ -217,10 +217,15 @@ public class ResellerApplicationsAdminController : ControllerBase
                 id, resellerCode, app.Email);
 
             // 4) 메일 송부 (트랜잭션 밖, 실패해도 승인은 저장됨)
-            _ = _email.SendAsync(app.Email,
-                "[히트판] 협력업체 가입 승인 — 계정 발급 완료",
-                BuildApproveHtml(app.CompanyName, resellerCode, app.Email, tempPassword),
-                ct);
+            // 🔴 20261015작B1 B-6 (G2) — `_ = …` 로 버리던 자리. 이 메일에는 **계정 발급 안내**가 들어 있어
+            //   안 가면 신청자가 로그인 자체를 못 한다. 그런데 버려진 false 때문에 본사도 몰랐다.
+            //   이제 기다리고 결과를 남긴다. 승인은 이미 커밋됐고 흐름은 끊지 않는다(#20) —
+            //   그래서 await 를 ReportMailAsync 안의 try 로 감싼다(바깥 catch 는 롤백·500 이다).
+            await ReportMailAsync(_email.SendAsync(app.Email,
+                    "[히트판] 협력업체 가입 승인 — 계정 발급 완료",
+                    BuildApproveHtml(app.CompanyName, resellerCode, app.Email, tempPassword),
+                    ct),
+                "협력업체 승인 계정발급", app.Email, id);
 
             return Ok(new
             {
@@ -272,10 +277,12 @@ public class ResellerApplicationsAdminController : ControllerBase
 
             _logger.LogInformation("[ResellerAppsAdmin] rejected id={Id} reason={Reason}", id, req.Reason);
 
-            _ = _email.SendAsync(app.Email,
-                "[히트판] 협력업체 가입 신청 검토 결과",
-                BuildRejectHtml(app.CompanyName, req.Reason),
-                ct);
+            // 🔴 20261015작B1 B-6 (G2) — B-4 와 동일. 반려 안내가 안 가면 신청자는 영영 기다린다.
+            await ReportMailAsync(_email.SendAsync(app.Email,
+                    "[히트판] 협력업체 가입 신청 검토 결과",
+                    BuildRejectHtml(app.CompanyName, req.Reason),
+                    ct),
+                "협력업체 반려 안내", app.Email, id);
 
             return Ok(new { success = true, message = "반려 처리되었습니다. 신청자 이메일로 안내가 발송되었습니다.", affected });
         }
@@ -283,6 +290,41 @@ public class ResellerApplicationsAdminController : ControllerBase
         {
             _logger.LogError(ex, "[ResellerAppsAdmin] 반려 처리 실패 id={Id}", id);
             return StatusCode(500, new { success = false, message = "반려 처리 중 오류가 발생했습니다." });
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 B-6 (G2) — 버려지던 발송 결과를 받아 남긴다
+    //   (LandingSignupController.ReportMailAsync 와 같은 규범 · 그 쪽은 가입 축, 여기는 협력업체 축이다.
+    //    공용 통로로 묶지 않은 이유: 이 차수 갈래표 밖 파일을 새로 만들어야 하고,
+    //    로그 머리말(`[ResellerAppsAdmin]`)과 식별자(신청 id)가 다르다.)
+    //
+    // 🔴 흐름은 끊지 않는다(#20): 승인은 이미 `tx.CommitAsync` 로 저장됐다.
+    //   여기서 예외가 바깥으로 번지면 바깥 catch 가 **커밋된 트랜잭션을 롤백 시도하고 500 을 돌려준다** —
+    //   화면은 "승인 실패"로 보이는데 DB 에는 승인이 남는 최악의 모양이 된다. 그래서 전부 삼키고 남긴다.
+    private async Task ReportMailAsync(Task<bool> sending, string what, string toEmail, string applicationId)
+    {
+        try
+        {
+            var ok = await sending;
+            if (ok)
+            {
+                _logger.LogInformation("[ResellerAppsAdmin] 메일 발송 성공 what={What} id={Id} to={To}", what, applicationId, toEmail);
+            }
+            else
+            {
+                // 🔴 이 한 줄이 이 차수의 요점이다. 표(bo_email_send_history)에도 같은 사실이 1행 남는다.
+                _logger.LogWarning(
+                    "[ResellerAppsAdmin] 메일 발송 실패 what={What} id={Id} to={To} — 처리 결과는 저장됐다. 사유는 bo_email_send_history 를 보라.",
+                    what, applicationId, toEmail);
+            }
+        }
+        catch (Exception ex)
+        {
+            // #15 — 삼키지 않는다(기록은 남긴다). #20 — 그래도 승인·반려 결과는 안 깬다.
+            _logger.LogWarning(ex,
+                "[ResellerAppsAdmin] 메일 발송 중 예외 what={What} id={Id} to={To} — 처리 결과는 저장됐다.",
+                what, applicationId, toEmail);
         }
     }
 

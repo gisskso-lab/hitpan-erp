@@ -340,15 +340,22 @@ public class LandingSignupController : ControllerBase
                     "[LandingSignup] S-2 owner_email 기록 실패 — 가입은 계속 (칸 미적용 가능성 · 32_backoffice_s2_owner.sql 적용 여부 확인)");
             }
 
+            // 🔴 20261015작B1 B-5 (G3) — 가입 토큰은 **원문을 로그에 남기지 않는다**.
+            //   선례(같은 레포·같은 규범): TelemetryController.cs:106 주석 "원문은 여기서만 쓰고 절대 저장·로깅하지 않는다"
+            //   + :118 이 해시만 남긴다. 이 줄도 그 규범을 따른다.
             _logger.LogInformation("[LandingSignup] submitted token={Token} tenant={TenantCode} email={Email} plan={Plan}",
-                signupToken, tenantCode, req.Email, req.PlanType);
+                MaskToken(signupToken), tenantCode, req.Email, req.PlanType);
 
             // 신청 접수 안내 메일 (헌법 #20·#22·#35 정합 — 고객사 코드는 백오피스 PK 영역, 고객 노출 절대 금지)
             // 사장님 결재 2026-06-08: tenantCode 메일에 저장하지 않음. 시리얼 키는 백오피스 승인 후 별도 발송.
-            _ = _email.SendAsync(req.Email,
-                "[히트판] 가입 신청 접수 완료",
-                BuildSignupReceivedHtml(req.CompanyName),
-                ct);
+            // 🔴 20261015작B1 B-4 (G2) — `_ = …` 로 버리던 자리. 발송기는 미설정이면 정직하게 false 를
+            //   돌려주는데 그 false 를 버려서 **아무도 메일 실패를 몰랐다**. 이제 기다리고 결과를 남긴다.
+            //   가입 흐름은 끊지 않는다(#20) — 메일이 안 가도 가입은 접수된다.
+            await ReportMailAsync(_email.SendAsync(req.Email,
+                    "[히트판] 가입 신청 접수 완료",
+                    BuildSignupReceivedHtml(req.CompanyName),
+                    ct),
+                "가입 신청 접수 완료", req.Email);
 
             return Ok(new
             {
@@ -403,8 +410,9 @@ public class LandingSignupController : ControllerBase
                   WHERE company_name = @CompanyName AND status = 'pending'",
                 new { Hash = licenseHash, signup.CompanyName });
 
+            // 🔴 20261015작B1 B-5 (G3 · 경보 1665 의 바로 그 줄) — 토큰 원문 → 마스킹.
             _logger.LogInformation("[LandingSignup] payment confirmed token={Token} tenants_updated={Cnt} license_issued=1",
-                req.SignupToken, affected);
+                MaskToken(req.SignupToken), affected);
 
             // 저장 완료 2026-06-08 (브라운킴 PM) — 결제 완료 저장 저장한 영역 ERP 저장할 영역 webhook 저장.
             // 사장님 결재 저장 = 카운트 저장 저장한 영역 = 결제 완료 저장 영역. 헌법 #20·#35 정합.
@@ -421,10 +429,14 @@ public class LandingSignupController : ControllerBase
             // SMTP 미저장 시 로그만, 가입 흐름은 중단 없음
             if (!string.IsNullOrWhiteSpace(signup.Email))
             {
-                _ = _email.SendAsync(signup.Email,
-                    "[히트판] 가입 완료 — 부모 계정ID(라이선스 키)",
-                    BuildLicenseHtml(signup.CompanyName, licenseKey),
-                    ct);
+                // 🔴 20261015작B1 B-4 (G2) — 여기가 가장 아픈 자리였다. 라이선스 키 메일이 안 가면
+                //   고객은 설치를 시작할 수 없는데, 버려진 false 때문에 본사도 몰랐다.
+                //   이제 결과를 남긴다. 결제 확인 흐름은 끊지 않는다(#20).
+                await ReportMailAsync(_email.SendAsync(signup.Email,
+                        "[히트판] 가입 완료 — 부모 계정ID(라이선스 키)",
+                        BuildLicenseHtml(signup.CompanyName, licenseKey),
+                        ct),
+                    "가입 완료 라이선스 키", signup.Email);
             }
 
             return Ok(new
@@ -436,7 +448,9 @@ public class LandingSignupController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[LandingSignup] confirm payment failed token={Token}", req.SignupToken);
+            // 🔴 20261015작B1 B-5 (G3) — 실패 경로도 원문을 남기지 않는다.
+            //   실패 로그가 가장 많이 복사·전달된다 ⇒ 여기 원문이 남으면 가장 멀리 퍼진다.
+            _logger.LogError(ex, "[LandingSignup] confirm payment failed token={Token}", MaskToken(req.SignupToken));
             return StatusCode(500, new { success = false, message = "결제 확인 중 오류가 발생했습니다." });
         }
     }
@@ -499,6 +513,58 @@ public class LandingSignupController : ControllerBase
         public string CompanyName { get; set; } = "";
         public string Status { get; set; } = "";
         public string Email { get; set; } = "";
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 B-5 (G3) — 가입 토큰 로그 마스킹
+    //
+    // 왜 「앞 4자」가 아니라 해시인가:
+    //   토큰 모양이 `sgn-` + GUID("N") 32자다. 앞 4자는 전부 `sgn-` 이라 **구별값이 0** 이고,
+    //   그 뒤를 조금 남기면 남긴 만큼 그대로 유출이다. 조사에 필요한 것은 「같은 토큰이냐」뿐이다.
+    //   ⇒ 같은 레포의 정반대 선례를 따른다: TelemetryController.cs:106 주석
+    //      "원문은 여기서만 쓰고 절대 저장·로깅하지 않는다" + :118 이 해시만 남긴다.
+    //
+    // 🔴 Pepper 를 쓰지 않는다(HMAC 아님): 이 값은 대조용 표식일 뿐 인증에 쓰이지 않고,
+    //   Pepper 미설정 시 예외를 던지면 **로그 한 줄이 가입 흐름을 깨뜨린다**(#20).
+    //   토큰 자체가 128bit 난수라 사전공격 대상이 아니다.
+    private static string MaskToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return "(없음)";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return "sha256:" + Convert.ToHexString(hash)[..12].ToLowerInvariant();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 B-4 (G2) — 버려지던 발송 결과를 받아 남긴다
+    //
+    // 발송기는 자격증명 미저장이면 **정직하게 false** 를 돌려준다(EmailSender.cs:60-66).
+    // 그런데 호출자가 `_ = _email.SendAsync(…)` 로 버려서 「메일이 안 갔다」를 아무도 몰랐다.
+    //
+    // 🔴 흐름은 끊지 않는다(#20): 메일이 실패해도 가입·결제확인은 그대로 성공으로 돌려준다.
+    //   그래서 await 를 try 로 감싼다 — 발송기 안에서 예상 못 한 예외가 나와도
+    //   바깥 catch(롤백·500)로 번지면 **이미 커밋된 가입이 실패로 보고된다**.
+    private async Task ReportMailAsync(Task<bool> sending, string what, string toEmail)
+    {
+        try
+        {
+            var ok = await sending;
+            if (ok)
+            {
+                _logger.LogInformation("[LandingSignup] 메일 발송 성공 what={What} to={To}", what, toEmail);
+            }
+            else
+            {
+                // 🔴 이 한 줄이 이 차수의 요점이다. 표(bo_email_send_history)에도 같은 사실이 1행 남는다.
+                _logger.LogWarning(
+                    "[LandingSignup] 메일 발송 실패 what={What} to={To} — 가입 흐름은 계속한다. 사유는 bo_email_send_history 를 보라.",
+                    what, toEmail);
+            }
+        }
+        catch (Exception ex)
+        {
+            // #15 — 삼키지 않는다. #20 — 그래도 흐름은 안 깬다.
+            _logger.LogWarning(ex, "[LandingSignup] 메일 발송 중 예외 what={What} to={To} — 가입 흐름은 계속한다.", what, toEmail);
+        }
     }
 
     // 사장님 결재 2026-06-08 — 고객사 코드(tenantCode)는 백오피스 PK 영역, 고객 메일 노출 절대 금지.
