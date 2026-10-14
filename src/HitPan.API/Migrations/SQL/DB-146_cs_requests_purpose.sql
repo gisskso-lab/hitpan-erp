@@ -36,7 +36,7 @@
 
 ALTER TABLE cs_requests
     ADD COLUMN IF NOT EXISTS purpose varchar(20) DEFAULT NULL
-        COMMENT '본사 발신 종류(update/notice/promo/etc/event/billing) — NULL = 작3 이전에 내려온 옛 쪽지(종류를 모른다) · 고객 문의(origin=local)는 늘 NULL (작3 T-1)';
+        COMMENT '본사 발신 종류(update/notice/promo/etc/event/billing) — NULL = 작3 이전에 내려온 옛 쪽지(종류를 모른다) · 고객 문의(origin=local)는 늘 NULL (DB-146 · 작3 T-1)';
 
 -- 공지 화면이 「이 종류만 보기」를 할 때 타는 길.
 -- 🔴 `origin` 을 선행 칸으로 둔다 — 필터는 **항상 공지 쪽(origin='hq')에서만** 걸린다.

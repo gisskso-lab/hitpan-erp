@@ -317,11 +317,22 @@ public class CsRequestController : ControllerBase
         //   🔴 칸이 없는 DB 에서는 **전체**를 준다. `origin=hq` 와 다르다 — 그때는 본사 행이
         //     원리적으로 0건이었지만, 여기서는 **모든 공지가 「기타」**이므로 비우면 거짓이다.
         // ══════════════════════════════════════════════════════════════
-        var purposeWhere = hasPurpose
+        // 🔴 20261014작3 [4] 봉합 — 종류 필터는 **공지 쪽에서만** 건다.
+        //
+        //   [4] 계측(PROBE-C)이 드러낸 것: 쪽을 안 묻고 종류만 물으면(`?purpose=etc`)
+        //   **고객이 쓴 내 문의가 1건 나왔다.** 고객 문의는 종류가 없어서(NULL) 「기타」 조건에
+        //   걸린 것이다 ⇒ **내 문의가 「기타 공지사항」으로 분류돼 보인다.**
+        //   설계 §1 이 「필터는 항상 공지 쪽에서만 걸린다」고 적어 뒀는데(인덱스도 origin 선행)
+        //   **코드로는 그걸 안 걸어 놨다.** 글자로만 적힌 조건은 조건이 아니다.
+        var purposeAxis = hasPurpose && origin == "hq";
+        var purposeWhere = purposeAxis
             ? purpose switch
             {
                 null or ""      => "",
-                "etc"           => " AND (r.purpose = 'etc' OR r.purpose IS NULL)",
+                // 🔴 「기타」는 **종류를 알 수 없는 것 전부**를 모은다 — NULL(작3 이전 옛 쪽지)과
+                //   빈 글자·공백(들어온 적 없어야 하지만 들어오면 어느 칩에도 안 보인다 · PROBE-B).
+                //   화면에 「기타 공지사항」으로 보이는 것과 걸러지는 것이 **같아야** 한다.
+                "etc"           => " AND (r.purpose = 'etc' OR r.purpose IS NULL OR TRIM(r.purpose) = '')",
                 _ when PurposeFilterable.Contains(purpose) => " AND r.purpose = @Purpose",
                 _               => "",   // 낯선 값 = 전체
             }
@@ -405,7 +416,14 @@ public class CsRequestController : ControllerBase
             var src = (IDictionary<string, object>)r;
             var row = new Dictionary<string, object>(src.Count + 1);
             foreach (var kv in src) row[kv.Key] = kv.Value;
+            // 🔴 20261014작3 [4] 봉합 — 낱말은 **본사가 보낸 쪽지에만** 붙인다.
+            //   [4] 계측(PROBE-C): 고객이 쓴 문의에도 `purposeLabel` = 「기타 공지사항」이 붙었다.
+            //   고객 문의에는 **종류라는 축이 없다** — 거기에 종류 낱말을 붙이면 거짓이다.
+            var isHq = string.Equals(src.TryGetValue("origin", out var og) ? og as string : null,
+                                     "hq", StringComparison.Ordinal);
+            // 🔴 빈 글자·공백도 「모른다」로 눕힌다(PROBE-B — 그러면 「기타 공지사항」으로 보인다).
             var raw = src.TryGetValue("purpose", out var p) ? p as string : null;
+            if (string.IsNullOrWhiteSpace(raw)) raw = null;
             // 🔴 종류를 **모르는** 쪽지(작3 이전에 내려온 것 · 칸이 비어 있다)는 「기타 공지사항」으로
             //   보여 준다(사장님 결-D). 저장은 「모른다」 그대로 두고 **표시만** 그렇게 한다.
             //
@@ -414,7 +432,7 @@ public class CsRequestController : ControllerBase
             //   「모르는 옛 쪽지」와 「모르는 새 값」은 **다른 사실**이라 같은 낱말로 묶으면 안 된다.
             //   🔴 그렇다고 여기에 「기타 공지사항」을 **글자로 적지 않는다** — 낱말 정본은 하나다.
             //   `"etc"` 를 그 표에 물어서 받는다(G-W11-7 이 사본을 막는다).
-            row["purposeLabel"] = CsOutboxSenderWorker.PurposeLabel(raw ?? "etc");
+            row["purposeLabel"] = isHq ? CsOutboxSenderWorker.PurposeLabel(raw ?? "etc") : "";
             return row;
         }).ToList();
 

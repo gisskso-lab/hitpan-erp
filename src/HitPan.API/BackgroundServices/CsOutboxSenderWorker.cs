@@ -547,8 +547,7 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                         Id = o.OutboundId, TenantId = tenantId, Body = shown,
                         Ver = "hq",   // erp_version 은 NOT NULL — 본사발신은 ERP 판이 없다는 표식
                         CreatedAt = o.CreatedAt == default ? DateTime.UtcNow : o.CreatedAt,
-                        // 🔴 빈 문자열은 NULL 로 눕힌다 — 「골랐지만 비었다」와 「모른다」를 한 값으로 모은다.
-                        Purpose = string.IsNullOrWhiteSpace(o.Purpose) ? null : o.Purpose!.Trim(),
+                        Purpose = NormalizePurpose(o.Purpose, o.OutboundId, logger),
                     }, tx);
 
                 if (inserted == 0)
@@ -764,6 +763,50 @@ public sealed class CsOutboxSenderWorker : BackgroundService
     /// (<c>:495</c>). 이미 내려간 쪽지는 <c>[본사안내]</c> 그대로다 — 되돌아가 고쳐 적으면
     /// 「이미 보낸 글의 종류를 다른 이름으로 덮어 적는」 거짓말이고 #1 위반이다. 게이트 G-W10-4 가 지킨다.</para>
     /// </summary>
+    /// <summary>
+    /// 🔴 20261014작3 [4] 봉합 — 본사가 보낸 종류 값을 <b>칸에 넣기 전에 눕힌다.</b>
+    ///
+    /// <para>[4] 독립검증이 계측기로 세 가지를 드러냈다(PM 이 직접 돌려 숫자를 봤다):</para>
+    /// <list type="bullet">
+    /// <item>🔴 <b>20자를 넘는 값이 조용히 잘렸다.</b> <c>INSERT IGNORE</c> 가 1406(Data too long)을
+    /// 경고로 눕혀서, <c>promotion_year_end_2026</c> 가 <c>promotion_year_end_2</c> 로 저장됐다.
+    /// 쪽지가 막히지는 않았지만 <b>아무 기록 없이</b> 종류가 뭉개진다 — 그 쪽지는 어느 칩에도 안 걸리고
+    /// 「전체」에서만 보인다. 작2 가 본문 자름에 경고를 남긴 것(<c>[4] V-5</c>)과 <b>같은 원칙</b>이
+    /// 이 자리에 빠져 있었다.</item>
+    /// <item>🔴 <b>대문자 값이 낱말과 어긋났다.</b> <c>'UPDATE'</c> 는 DB 조회(대소문자 무관 콜레이션)에는
+    /// 걸리는데 <see cref="PurposeLabel"/> 은 <c>switch</c> 가 정확히 비교하므로 「본사안내」로 떨어진다
+    /// ⇒ <b>칩은 잡는데 낱말이 다른 말을 한다.</b></item>
+    /// <item>빈 글자·공백은 어느 칩에도 안 걸린다.</item>
+    /// </list>
+    ///
+    /// <para>그래서 <b>들어올 때 한 번</b> 눕힌다 — 공백을 떼고, 소문자로 맞추고, 20자를 넘으면
+    /// <b>자르지 않고 「모른다」(NULL)로 두고 경고를 남긴다.</b> 잘라서 넣으면 <b>있지도 않은 종류</b>가
+    /// 생기고, 막으면 흐름이 끊긴다(#20) ⇒ 「모른다」가 정직하다. 그 쪽지는 「기타 공지사항」 칩에서
+    /// 보인다(목록 쪽이 NULL 을 그렇게 모은다).</para>
+    ///
+    /// <para>🔴 본문 머리 한 줄은 <b>원래 값</b>으로 이미 적혔다(<c>:497</c>) — 거기엔 손대지 않는다.
+    /// 본사가 보낸 글을 고쳐 적는 게 아니라, <b>우리 칸에 무엇을 적을지</b>만 정하는 것이다.</para>
+    /// </summary>
+    private static string? NormalizePurpose(string? raw, string outboundId, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var v = raw.Trim().ToLowerInvariant();
+
+        // 칸 폭(varchar(20) · DB-146)을 넘으면 「모른다」로 둔다 — 자르면 없는 종류가 생긴다.
+        if (v.Length > 20)
+        {
+            // #15 — 삼키지 않는다. 사람이 「왜 종류가 비었나」를 찾을 수 있어야 한다.
+            logger.LogWarning(
+                "[CS수신] 본사 발신 종류가 칸보다 길어 비워 둔다 outbound={Id} 길이={Len} "
+              + "— 쪽지는 그대로 받았고 「기타 공지사항」으로 보인다. 본사 쪽 값 확인 필요.",
+                outboundId, v.Length);
+            return null;
+        }
+
+        return v;
+    }
+
     /// <remarks>
     /// 🔴 20261014작3 T-4 — 접근성을 <c>private</c> → <c>internal</c> 로 **한 낱말** 올렸다.
     /// 목록 API 가 화면에 **낱말을 함께** 내려보내야 하는데(설계 §3-1), <c>HitPan.Web</c> 은

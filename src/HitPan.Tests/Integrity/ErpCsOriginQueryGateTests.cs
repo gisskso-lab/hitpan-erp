@@ -270,6 +270,11 @@ internal sealed class ErpCsGateDb : IDisposable
         // 🔴 판정 캐시는 **DB 이름**으로 걸린다 — 같은 이름이 다시 태어나면 옛 판정이 그대로 적용된다.
         CsRequestController.ResetOriginColumnCache();
         CsRequestController.ResetHqStatusColumnCache();
+        // 🔴 20261014작3 [4] 조건 C-6 — 용도 칸(DB-146) 판정도 **여기서 비운다.**
+        //   안 비우면: 앞 시험이 칸을 떼고 「없다」로 굳힌 판정이 **다음 시험까지 살아남아**,
+        //   칸이 있는 DB 에서도 「없다」로 돌아 **종류 필터가 조용히 안 걸린 채 초록**이 된다.
+        //   origin·hq_status 는 같은 이유로 이미 비우고 있었고, 새 칸만 빠져 있었다.
+        CsRequestController.ResetPurposeColumnCache();
         return true;
     }
 

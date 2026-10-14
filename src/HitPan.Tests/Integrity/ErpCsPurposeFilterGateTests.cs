@@ -62,6 +62,20 @@ public sealed class ErpCsPurposeFilterGateTests : IDisposable
         CsRequestController.ResetPurposeColumnCache();
     }
 
+    /// <summary>
+    /// 🔴 20261014작3 [4] 조건 C-6 — 뗀 칸을 **되돌린다.**
+    /// <para>안 되돌리면: 이 시험이 떼어 놓은 상태와 「없다」로 굳은 판정이 <b>다음 시험까지</b>
+    /// 살아남아, 칸이 있어야 하는 시험이 <b>종류 필터가 안 걸린 채 조용히 초록</b>이 된다.
+    /// (하네스가 시험마다 DB 를 다시 세우지만 <b>판정 캐시는 프로세스에 남는다</b> — 캐시 쪽은
+    /// <c>ReadyAsync</c> 에도 비우기를 넣었고, 이 메서드는 <b>같은 시험 안에서</b> 바로 되돌린다.)</para>
+    /// </summary>
+    private static async Task RestorePurposeColumnAsync(MySqlConnector.MySqlConnection erp)
+    {
+        await erp.ExecuteAsync(
+            "ALTER TABLE cs_requests ADD COLUMN IF NOT EXISTS purpose varchar(20) DEFAULT NULL");
+        CsRequestController.ResetPurposeColumnCache();
+    }
+
     // ══════════════════════════════════════════════════════════════
     // G-W11-1 — 🔴 받은 종류가 **칸에 값으로** 앉는다 (허용값 전수)
     //   기대값 출처 = **시험이 봉투에 넣은 값**. 과녁에서 가져오지 않는다.
@@ -128,6 +142,11 @@ public sealed class ErpCsPurposeFilterGateTests : IDisposable
         //    (칸이 없으면 모든 공지가 「기타」이므로 「기타」를 골랐을 때 0건이면 사라진 것처럼 보인다)
         var filtered = await ListAsync(erp, "hq", "etc");
         Assert.Single(filtered);
+
+        // 🔴 [4] C-6 — 뗀 칸을 **되돌린다.** 안 되돌리면 다음 시험이 조용히 초록이 될 씨앗이 된다.
+        await RestorePurposeColumnAsync(erp);
+        var back = await ListAsync(erp, "hq", null);
+        Assert.Single(back);   // 되돌린 뒤에도 목록이 돈다(복원이 깨뜨리지 않았다)
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -364,6 +383,141 @@ public sealed class ErpCsPurposeFilterGateTests : IDisposable
         var worker = File.ReadAllText(Path.Combine(ErpCsGateDb.RepoRoot(),
             "src", "HitPan.API", "BackgroundServices", "CsOutboxSenderWorker.cs"));
         Assert.Contains("\"본사안내\"", worker);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W11-9 — 🔴 **칸보다 긴 종류 값**이 와도 쪽지는 받고 종류는 「모른다」로 둔다
+    //
+    //   [4] 독립검증 계측(PROBE-A)이 드러낸 자리다. `INSERT IGNORE` 가 1406(Data too long)을
+    //   **경고로 눕혀서** `promotion_year_end_2026` 가 `promotion_year_end_2` 로 **조용히 잘려**
+    //   저장됐다(`sql_mode=STRICT_TRANS_TABLES` 인데도). 쪽지는 막히지 않았지만
+    //   **있지도 않은 종류**가 생기고, 그 쪽지는 **어느 칩에도 안 걸린다.**
+    //   ⇒ 들어올 때 눕힌다: 20자 초과면 **자르지 않고 NULL**(+경고). 「기타」에서 보인다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W11-9 🔴 칸보다 긴 종류 값이 와도 쪽지는 받고, 잘린 값 대신 「모른다」로 둔다 ([4] PROBE-A)")]
+    public async Task G_W11_9_긴_값은_자르지_않고_모른다로()
+    {
+        const string gate = "G-W11-9 긴 종류 값";
+        if (!await _db.ReadyAsync(gate)) return;
+
+        await using var erp = await _db.OpenAsync();
+        await ErpCsGateDb.SeedUsersAsync(erp);
+
+        await ReceiveAsync(erp,
+            Out("w11-long", "promotion_year_end_2026", 2),   // 23자 — 칸은 20자다
+            Out("w11-short", "promo", 3));
+
+        // ① 🔴 쪽지는 **들어온다**(흐름을 끊지 않는다 · #20)
+        var n = await erp.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM cs_requests WHERE cs_request_id = 'w11-long'");
+        Assert.Equal(1L, n);
+
+        // ② 🔴 **잘린 값이 저장되지 않는다** — 있지도 않은 종류를 만들지 않는다
+        var stored = await erp.ExecuteScalarAsync<string?>(
+            "SELECT purpose FROM cs_requests WHERE cs_request_id = 'w11-long'");
+        Assert.Null(stored);
+        Assert.NotEqual("promotion_year_end_2", stored);   // 조용한 자름의 흔적이 없다
+
+        // ③ 🔴 「기타 공지사항」 칩에서 **보인다** — 사라지지 않는다
+        var etc = await ListAsync(erp, "hq", "etc");
+        Assert.Contains("w11-long", etc.Select(x => x.CsRequestId));
+        Assert.Equal("기타 공지사항", etc.Single(x => x.CsRequestId == "w11-long").PurposeLabel);
+
+        // ④ 같은 봉투의 정상 건은 제 종류로 앉는다(옆 건을 끌고 넘어지지 않는다)
+        var ok = await erp.ExecuteScalarAsync<string?>(
+            "SELECT purpose FROM cs_requests WHERE cs_request_id = 'w11-short'");
+        Assert.Equal("promo", ok);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W11-10 — 🔴 **대문자·공백 값이 칩과 낱말을 어긋나게 하지 않는다**
+    //
+    //   [4] 계측(PROBE-B): `'UPDATE'` 는 DB 조회(대소문자 무관 콜레이션)에는 걸리는데
+    //   `PurposeLabel` 은 정확히 비교하므로 「본사안내」로 떨어졌다 ⇒ **칩은 잡는데 낱말이 다른 말**.
+    //   빈 글자·공백은 **어느 칩에도 안 걸렸다.**
+    //   ⇒ 들어올 때 공백 떼고 소문자로 눕힌다 · 빈 값은 「기타」가 모은다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W11-10 🔴 대문자·공백 종류 값이 와도 칩과 낱말이 같은 말을 한다 ([4] PROBE-B)")]
+    public async Task G_W11_10_대문자_공백도_어긋나지_않는다()
+    {
+        const string gate = "G-W11-10 대문자·공백";
+        if (!await _db.ReadyAsync(gate)) return;
+
+        await using var erp = await _db.OpenAsync();
+        await ErpCsGateDb.SeedUsersAsync(erp);
+
+        await ReceiveAsync(erp,
+            Out("w11-upper", "UPDATE", 2),
+            Out("w11-pad", "  promo  ", 3),
+            Out("w11-blank", "   ", 4));
+
+        // ① 눕혀서 저장된다
+        Assert.Equal("update", await erp.ExecuteScalarAsync<string?>(
+            "SELECT purpose FROM cs_requests WHERE cs_request_id = 'w11-upper'"));
+        Assert.Equal("promo", await erp.ExecuteScalarAsync<string?>(
+            "SELECT purpose FROM cs_requests WHERE cs_request_id = 'w11-pad'"));
+        Assert.Null(await erp.ExecuteScalarAsync<string?>(
+            "SELECT purpose FROM cs_requests WHERE cs_request_id = 'w11-blank'"));
+
+        // ② 🔴 칩과 낱말이 **같은 말**을 한다
+        var upd = await ListAsync(erp, "hq", "update");
+        Assert.Single(upd);
+        Assert.Equal("업데이트공지사항", upd[0].PurposeLabel);   // 「본사안내」로 떨어지지 않는다
+
+        // ③ 🔴 비어 있는 것은 「기타 공지사항」에서 보인다 — 어느 칩에도 안 보이는 쪽지가 없다
+        var etc = await ListAsync(erp, "hq", "etc");
+        Assert.Contains("w11-blank", etc.Select(x => x.CsRequestId));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W11-11 — 🔴 **종류 필터가 고객 문의를 건드리지 않는다**
+    //
+    //   [4] 계측(PROBE-C): 쪽을 안 묻고 `?purpose=etc` 로 물으면 **내 문의가 1건 나왔다.**
+    //   고객 문의는 종류가 없어서(NULL) 「기타」 조건에 걸린 것이다 ⇒ **내 문의가
+    //   「기타 공지사항」으로 분류돼 보인다.** 설계는 「필터는 공지 쪽에서만」이라 적었는데
+    //   **코드로는 안 걸려 있었다** — 글자로만 적힌 조건은 조건이 아니다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W11-11 🔴 종류 필터·낱말이 공지 쪽에만 걸린다 — 내 문의가 「기타」로 분류되지 않는다 ([4] PROBE-C)")]
+    public async Task G_W11_11_필터가_내문의를_안_건드린다()
+    {
+        const string gate = "G-W11-11 공지 축 전용";
+        if (!await _db.ReadyAsync(gate)) return;
+
+        await using var erp = await _db.OpenAsync();
+        await ErpCsGateDb.SeedUsersAsync(erp);
+
+        await ErpCsGateDb.InsertAsync(erp, "w11-mine", "local", "내가 쓴 문의입니다", minutesAgo: 1);
+        await ReceiveAsync(erp, Out("w11-notice", "update", 2));
+
+        // ① 🔴 쪽을 안 묻고 종류를 물으면 **조건이 아예 안 걸린다** ⇒ 「전체」와 같다.
+        //   PM 자기정정: 이 게이트의 첫 판은 「내 문의가 안 나온다」고 단언해 **빨개졌다.**
+        //   봉합의 사실은 「내 문의를 숨긴다」가 아니라 **「종류로 내 문의를 분류하지 않는다」**다 —
+        //   전체 목록에 내 문의가 있는 것은 정상이고, 거기에 **종류 낱말이 붙으면** 거짓이다.
+        foreach (var chip in new[] { "etc", "update", "promo", "notice" })
+        {
+            var rows = await ListAsync(erp, null, chip);
+            Assert.Equal(2, rows.Count);   // 조건이 안 걸려 전체가 온다
+
+            var mineRow = rows.Single(x => x.CsRequestId == "w11-mine");
+            Assert.Equal("", mineRow.PurposeLabel);   // 🔴 내 문의엔 종류 낱말이 안 붙는다
+            Assert.Null(mineRow.Purpose);
+        }
+
+        // ② ① 화면(`origin=local`)에서 종류를 물어도 내 문의가 **사라지지 않는다**
+        //    — 종류는 그 화면의 축이 아니므로 조건이 걸리면 안 된다
+        var local = await ListAsync(erp, "local", "update");
+        Assert.Contains("w11-mine", local.Select(x => x.CsRequestId));
+
+        // ③ 🔴 고객 문의에는 **종류 낱말이 안 붙는다** — 거기엔 종류라는 축이 없다
+        var all = await ListAsync(erp, "local", null);
+        var mine = all.Single(x => x.CsRequestId == "w11-mine");
+        Assert.Equal("", mine.PurposeLabel);
+        Assert.Null(mine.Purpose);
+
+        // ④ 공지 쪽은 그대로 걸린다(봉합이 필터를 죽이지 않았다)
+        var hq = await ListAsync(erp, "hq", "update");
+        Assert.Single(hq);
+        Assert.Equal("w11-notice", hq[0].CsRequestId);
     }
 
     /// <summary>가짜 본사 — 도착확인만 받는다(Pull 은 404 로 둔다 · 작2 선례).</summary>
