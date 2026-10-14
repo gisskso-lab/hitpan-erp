@@ -122,6 +122,36 @@ jobs:
           if [ -n "$MISSING" ]; then echo "::error::목록에 있는데 한 건도 안 돈 게이트:$MISSING"; exit 1; fi
           echo "작1 게이트 전부 실제로 돌았다."
 
+      # 🔴 20261015작B1 갈래 B · G3 — 가입 토큰 평문 로그 봉합(CodeQL 경보 1665 · 진짜 high 1건)을 **이름으로** 문다.
+      #   왜 이 잡인가: DB 가 필요 없다. 실물 LandingSignupController.ConfirmPayment 를 **닫힌 포트**(127.0.0.1:1)로
+      #     돌려 예외 경로를 확정시키고, 그때 남는 로그 문자열에 토큰 원문이 있는지 본다 — 바깥 연결 0.
+      #   🔴 이 게이트는 DbGateEnvironment 를 **쓰지 않는다**. 그래서 이 잡 머리의 HITPAN_GATE_SKIP_OK="1"(:57)에
+      #     걸려 조용히 [SKIP] PASS 로 빠질 길이 없다(그 함정 때문에 짝 게이트 BackofficeMailHistoryGate 는
+      #     이 잡이 아니라 bo-mysql8-gate 잡에 두었다 — PM 교정 2026-10-15).
+      #   위 전체 시험에도 들어 있지만 전체 시험 초록은 「이 게이트가 돌았다」의 증거가 아니다(이름이 바뀌면 초록).
+      #   음성 대조 실측(2026-10-15 로컬 · 개발명세서 §4): MaskToken 을 빼고 원문을 돌려주게 하면
+      #     G-B1-B-6·7·8 이 빨강(로그 문자열에 토큰 원문이 그대로 나타난다).
+      - name: 작B1 게이트 — 가입토큰 평문로그 봉합 (G3 · 목록으로 · 실행 수 확인)
+        shell: bash
+        run: |
+          set -o pipefail
+          GATES="BackofficeSignupTokenLogGateTests"
+          echo "▶ 이 단계가 무는 게이트: $GATES"
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~BackofficeSignupTokenLogGate" \
+            --logger "trx;LogFileName=b1-tokenlog-results.trx" 2>&1 | tee "$RUNNER_TEMP/b1tokenlog.log"
+          TRX=$(find . -name 'b1-tokenlog-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::b1-tokenlog-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          N=$(grep -o 'className="[^"]*\.BackofficeSignupTokenLogGateTests"' "$TRX" | wc -l)
+          echo "  BackofficeSignupTokenLogGateTests : $N 건"
+          if [ "$N" -eq 0 ]; then echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1; fi
+          # 🔴 조용한 SKIP 차단 — 이 게이트는 SKIP 할 길이 없다. 찍히면 과녁이 바뀐 것이다.
+          if grep -q "\[SKIP\] G-B1-B" "$RUNNER_TEMP/b1tokenlog.log"; then
+            echo "::error::G3 게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          echo "작B1 G3 게이트가 SKIP 없이 실제로 돌았다."
+
       # 🔴 20261007작12 2차수 T-6 — **실물 Inno Pascal** 게이트(G-T6-5 · 갈래 ⓑ1).
       #   왜 별 단계인가: Inno 의 LoadStringsFromFile 이 **UTF-8 BOM 파일을 어떤 인코딩으로 읽는지**
       #   아무도 모른다(U1). 틀리면 42자 한글이 고객 설치 화면에서 깨지고 「문구가 닿았다」가 통째로 무너진다.
@@ -1394,3 +1424,52 @@ jobs:
           if grep -qE "No test matches the given testcase filter" bo-mysql8.log; then
             echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
           fi
+
+      # ══════════════════════════════════════════════════════════════════════
+      # 🔴 20261015작B1 갈래 B · G2 — 메일 발송기록 게이트 (BackofficeMailHistoryGate)
+      #
+      # 왜 **이 잡**인가 (PM 교정 2026-10-15 · §13 확2):
+      #   ① 운영 백오피스는 MySQL 8 이다. `db-gate` 잡은 MariaDB 라 **판이 다르다**.
+      #      이 게이트는 신설 46 번 SQL 을 실물 SchemaMigrator 로 적용하고 표 모양을 묻는다
+      #      ⇒ 운영과 같은 판에서 재야 의미가 있다.
+      #   ② 🔴 `build` 잡에는 **절대 두지 않는다.** 그 잡 머리에 HITPAN_GATE_SKIP_OK="1"(:57) 이 있어
+      #      DbGateEnvironment.SkipOrFailStrict 가 `[SKIP]` 한 줄 찍고 **PASS 로 통과**한다
+      #      (DbGateEnvironment.cs:112-117). 요약에는 안 보인다 = 조용한 초록.
+      #      여기서는 HITPAN_REQUIRE_DB='true' 라 DB 에 못 붙으면 **스킵이 아니라 FAIL** 이다.
+      #
+      # 이 게이트가 지키는 약속:
+      #   · 46 번이 적재기 흐름에 끼어 표가 **실제로 생긴다**(ENGINE=InnoDB · 칸 6종) — G-B1-B-1
+      #   · 자격증명 미설정 발송 1회 → 표에 **실패 1행**(not_configured) — G-B1-B-2
+      #   · SMTP 가 안 붙는 발송 1회 → 표에 **실패 1행**(smtp_error) — G-B1-B-3
+      #   · 성공 행 모양 + 성공 분기 배선 — G-B1-B-4 (§6 ① 2단 중 1단 · 값은 G5 결재 대기)
+      #   · `_ = _email.SendAsync(…)` 버림 잔존 **0건** — G-B1-B-5
+      #
+      # 음성 대조 실측(2026-10-15 로컬 hitpan_trgtest · 개발명세서 §4):
+      #   ⓐ EmailSender 의 RecordAsync 호출 3곳 제거 → 표 0행 ⇒ G-B1-B-2·3·4 FAIL
+      #   ⓑ `_ = _email.SendAsync(…)` 버림 복구 → G-B1-B-5 FAIL
+      # ══════════════════════════════════════════════════════════════════════
+      - name: 작B1 게이트 — 메일 발송기록 (G2 · MySQL 8 판)
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'bomysql8_ci'
+        run: |
+          set -o pipefail
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~BackofficeMailHistoryGate" \
+            --logger "console;verbosity=normal" 2>&1 | tee bo-mailhist.log
+          # 🔴 돈 시험 수를 세서 남긴다 — 「필터가 0건을 골라 조용히 초록」을 막는다.
+          grep -E "Passed!|Failed!|Passed:|Failed:" bo-mailhist.log | tail -3
+          if grep -qE "No test matches the given testcase filter" bo-mailhist.log; then
+            echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
+          fi
+          # 🔴 §13 확2 조건 — 「[SKIP] 없이 돌았다」를 로그가 직접 말해야 한다(8/28 조용한 SKIP 전례).
+          if grep -q "\[SKIP\]" bo-mailhist.log; then
+            echo "::error::게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          echo "작B1 G2 게이트가 SKIP 없이 실제로 돌았다(소요시간은 위 Passed! 줄 참조)."
