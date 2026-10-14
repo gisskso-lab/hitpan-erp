@@ -491,7 +491,9 @@ public sealed class CsOutboxSenderWorker : BackgroundService
 
             var title = (o.Title ?? "").Trim();
             // 🔴 용도·제목을 **본문 머리 한 줄**로 얹는다 — 칸을 새로 만들지 않는다.
-            //   용도는 사람 말로 적는다(「프로모션」·「이벤트」·「요금안내」) — 화면에 개발 용어 금지(#23).
+            //   용도는 사람 말로 적는다 — 화면에 개발 용어 금지(#23). 낱말 정본은 `PurposeLabel` 하나다.
+            //   🔴 20261014작2 — 여기에 낱말을 나열해 두면 표가 늘 때 이 주석만 낡는다(실제로 그랬다:
+            //     「프로모션·이벤트·요금안내」 3개만 적혀 있었고 표는 6종이 됐다). 그래서 메서드를 가리킨다.
             var head = title.Length > 0 ? $"[{PurposeLabel(o.Purpose)}] {title}" : $"[{PurposeLabel(o.Purpose)}]";
             var shown = head + "\n" + o.Body;
             if (shown.Length > 2000)
