@@ -31,7 +31,11 @@ public sealed class ErpCsNoticeScreenGateTests : IDisposable
         await using var erp = await _db.OpenAsync();
         await ErpCsGateDb.SeedUsersAsync(erp);
         // 🔴 cs_outbox 행을 **일부러 만들지 않는다** — 본사 선발신의 실제 모양이다.
-        await ErpCsGateDb.InsertAsync(erp, "hq-1", "hq", "[프로모션] 10월 안내\n본문입니다", minutesAgo: 10);
+        // 🔴 20261014작2 — 고정값의 낱말을 「프로모션」→「프로모션 안내」로 옮겼다. 작2 가 낱말 표를
+        //   고쳐 **생산 쪽은 이제 「프로모션 안내」만 만든다** ⇒ 옛 글자를 여기 남겨 두면 다음 사람에게
+        //   죽은 낱말을 가르친다([4] C-6). 이 시험이 **낱말 표를 지나지 않는다**는 사실은 그대로다 —
+        //   낱말을 보는 자리는 G-W10-1·2·5·7 이다.
+        await ErpCsGateDb.InsertAsync(erp, "hq-1", "hq", "[프로모션 안내] 10월 안내\n본문입니다", minutesAgo: 10);
 
         var res = await ErpCsGateDb.NewController(erp).List("hq", default);
         var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(res);
@@ -49,7 +53,7 @@ public sealed class ErpCsNoticeScreenGateTests : IDisposable
         Assert.Equal("hq", items[0].Origin);
 
         // 제목 자리 — 본사는 본문 머리에 「[종류] 제목」 한 줄을 얹어 보낸다. 화면이 그 줄을 제목으로 쓴다.
-        Assert.StartsWith("[프로모션]", items[0].Body);
+        Assert.StartsWith("[프로모션 안내]", items[0].Body);
     }
 
     // ══════════════════════════════════════════════════════════════

@@ -190,7 +190,12 @@ public sealed class CsPipelineRoundTripGateTests : IDisposable
         Assert.Equal(outboundId, (string)row!.Id);          // 멱등 열쇠를 그대로 쓴다
         Assert.Equal("headquarters", (string)row.CreatedBy);
         Assert.Contains("구독요금 안내", (string)row.Body);
-        Assert.Contains("요금안내", (string)row.Body);        // 용도가 사람 말로 보인다(#23)
+        // 🔴 20261014작2 — 옛 기대값은 「요금안내」였다. 그 차수가 `billing` 의 고객 표시 낱말을
+        //   사장님 결-A 의 낱말(「과금결재 안내」)로 고쳤으므로 **이 기대값도 함께 옮긴다.**
+        //   게이트를 느슨하게 풀지 않는다(10/13 교훈) — 낱말을 **박아 둔 채** 자리만 옮겼고,
+        //   아래 한 줄로 **원값이 새지 않는다**는 축을 더했다.
+        Assert.Contains("과금결재 안내", (string)row.Body);    // 용도가 사람 말로 보인다(#23)
+        Assert.DoesNotContain("billing", (string)row.Body);    // 🔴 개발 값이 고객 글에 새지 않는다
 
         // ⑤ 🔴 쪽지함이 **실제로 보여주나** — 「고쳤다 ≠ 갔다」의 자리다
         var replies = await NewErpController(erp).Replies(outboundId, default);
