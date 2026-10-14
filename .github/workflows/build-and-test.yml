@@ -1193,6 +1193,14 @@ jobs:
           #    근거: docs/검증/선행/20261015_1V_작11_백오피스전체401_세션사망_선행검증서.md
           GATES="$GATES|BackofficeSessionGuardGate"
 
+          # 🔴 20261015작B1 갈래 C(G4) — ERP 메일 스텁 정직화 게이트.
+          #    DB 가 필요 없다(구성 조립 + 소스 읽기) ⇒ build 잡 Test (Unit + Integration) 가 이미 전량 실행한다.
+          #    그래도 여기 이름으로 한 번 더 물린다 — 「return 으로 조용히 SKIP」 전례(8/28) 때문에
+          #    게이트 이름이 로그에 찍히는 자리를 하나는 가지고 있어야 한다.
+          #    스텁 모드 SendAsync 가 true 를 돌려주면 빨강(= 보내지도 않고 보냈다고 말하는 상태).
+          #    근거: docs/운영기록/20261015작B1_배포준비1차수_작업지시서.md §5 G4
+          GATES="$GATES|ErpMailStubHonestGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).
