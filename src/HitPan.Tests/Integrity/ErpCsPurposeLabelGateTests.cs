@@ -271,6 +271,118 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
             "고객에게 보이는 낱말에 개발 용어·내부 꼬리표가 있다(#23):\n  " + string.Join("\n  ", bad));
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-W10-7 — 🔴 낱말 **내용**을 고정 기대값으로 못 박는다
+    //
+    //   [4] 적발(C-3): G-W10-1·2·5 는 기대값을 **과녁 자신**(`PurposeLabel` 리플렉션)에서
+    //   가져온다 ⇒ **배선은 진짜로 재지만 낱말 내용은 원리적으로 못 잰다.**
+    //   [4] 가 자체 음성 대조군으로 증명했다: `etc`·`event` 를 「엉뚱한말」·「행사꾸러미」로
+    //   바꿨는데 **6/6 그대로 초록**이었다(PM 이 직접 재현 확인 · 2026-10-14).
+    //
+    //   그래서 이 한 건만 **글자를 박는다.** 낱말은 사장님이 정한 것이고 코드에서
+    //   끌어올 수 있는 상위 출처가 없다 — **내용 자체가 규격**이다. 출처:
+    //     · 4종 = docs/설계/백오피스/20261013_설계_고객지원센터_3화면_프론트재구성.md §5-1 ①~④
+    //     · `billing` = 사장님 결-A(2026-10-14) 「과금결재 안내」
+    //     · `event`  = §5-1 옛 값 — ERP(고객) 쪽은 「(옛 값)」 꼬리표를 안 붙인다(#23)
+    //     · fallback = 모르는 값의 안전망
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W10-7 🔴 발신종류 낱말이 사장님이 정한 글자 그대로다 (내용을 못 박는다 — [4] C-3 봉합)")]
+    public void G_W10_7_낱말_내용이_정본_그대로다()
+    {
+        var spec = new (string Purpose, string Label)[]
+        {
+            ("update",  "업데이트공지사항"),
+            ("notice",  "히트판 공지사항"),
+            ("promo",   "프로모션 안내"),
+            ("etc",     "기타 공지사항"),
+            ("event",   "이벤트"),
+            ("billing", "과금결재 안내"),
+        };
+
+        var wrong = new List<string>();
+        foreach (var (purpose, label) in spec)
+        {
+            var actual = ErpLabel(purpose);
+            if (actual != label) wrong.Add($"{purpose} → 「{actual}」 (정본 「{label}」)");
+        }
+
+        Assert.True(wrong.Count == 0,
+            "발신종류 낱말이 정본과 다르다 — 낱말은 사장님이 정한 것이다(일정표 §1 결-A · 10/13 설계 §5-1):\n  "
+          + string.Join("\n  ", wrong)
+          + "\n  낱말을 바꿔야 한다면 **이 기대값과 정본 문서를 함께** 고쳐라.");
+
+        // 모르는 값의 안전망 낱말도 못 박는다 — 이 글자가 바뀌면 고객이 보는 말이 바뀐다
+        Assert.Equal("본사안내", ErpLabel("zzz-unknown"));
+
+        // 🔴 규격이 **허용값 전수를 덮나** — 백오피스가 값을 더하면 이 게이트가 먼저 알려 준다
+        var uncovered = BackofficeAllowed().Except(spec.Select(s => s.Purpose)).ToList();
+        Assert.True(uncovered.Count == 0,
+            "백오피스 허용값인데 이 규격표에 없다(낱말을 정하지 않은 채 보내지고 있다): "
+          + string.Join(", ", uncovered));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-W10-8 — 🔴 **본사 직원이 보는 낱말과 고객이 보는 낱말이 어긋나는지** 드러낸다
+    //
+    //   [4] 적발(C-2): 백오피스 화면도 자기 낱말표를 코드로 들고 있다
+    //   (`src/HitPan.Backoffice/.../CsVocab.cs`). PM 의 [1-V] P-10 은 「백오피스 화면
+    //   프로젝트가 레포에 없다」고 적었는데 **그건 틀렸다**(글로브 오류 — 1-V 에 정정을 적었다).
+    //
+    //   🔴 어긋나면 지원이 안 된다: 고객이 「과금결재 안내 쪽지 받았는데요」라고 전화하면
+    //   직원 화면에는 그 낱말이 없다. 그래서 **어긋남을 게이트로 드러내 둔다.**
+    //
+    //   🔴 두 쪽을 **다른 길로** 읽는다: ERP = 메서드 리플렉션 호출 / 백오피스 = **소스 글자**.
+    //   (`HitPan.Tests` 는 `HitPan.Backoffice` 를 ProjectReference 하지 않는다 — 같은 형이
+    //   둘이 되는 것을 막으려고 일부러 그렇게 뒀다 · `HitPan.Tests.csproj:67` 주석.)
+    //
+    //   🔴 **알면서 다른 두 값은 사유를 적어 예외로 둔다.** 몰라서 다른 것과 알고 다른 것은
+    //   다른 사실이다. 예외가 늘면 이 게이트가 막는다.
+    // ══════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-W10-8 🔴 본사 화면 낱말과 고객 화면 낱말이 어긋나지 않는다 — 어긋난 2값은 사유 적힌 예외뿐 ([4] C-2)")]
+    public void G_W10_8_본사낱말과_고객낱말이_어긋나지_않는다()
+    {
+        var path = Path.Combine(ErpCsGateDb.RepoRoot(),
+            "src", "HitPan.Backoffice", "Components", "Pages", "Platform", "Components", "CsVocab.cs");
+        Assert.True(File.Exists(path),
+            $"백오피스 낱말표를 못 찾았다: {path} — 자리가 바뀌었으면 이 게이트도 함께 옮겨라");
+
+        var src = File.ReadAllText(path);
+        var start = src.IndexOf("NoticeKindLabel", StringComparison.Ordinal);
+        Assert.True(start > 0, "백오피스 NoticeKindLabel 을 못 찾았다 — 이름이 바뀌었나");
+        var block = src[start..];
+        var end = block.IndexOf("};", StringComparison.Ordinal);
+        Assert.True(end > 0, "백오피스 낱말표 블록의 끝을 못 찾았다");
+        block = block[..end];
+
+        // 🔴 알면서 다른 값 — 사유를 여기 적는다. 「고객에게는 내부 꼬리표를 안 보인다」(#23)
+        var knownDifferent = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["event"] = "백오피스는 「이벤트(옛 값)」 — 「(옛 값)」은 본사 직원용 꼬리표다(#23)",
+            ["billing"] = "백오피스는 「요금 안내(옛 값)」 · ERP 는 사장님 결-A 의 「과금결재 안내」"
+                        + " ⇒ 🔴 **낱말 자체가 다르다**. 백오피스를 맞추는 것은 작7(결재 거리 결-A″)",
+        };
+
+        var mismatched = new List<string>();
+        foreach (var p in BackofficeAllowed())
+        {
+            if (knownDifferent.ContainsKey(p)) continue;
+
+            var erp = ErpLabel(p);
+            // 백오피스 소스에 `"<값>" => "<낱말>"` 짝이 **그 글자대로** 있나
+            var pair = $"\"{p}\" => \"{erp}\"";
+            if (!block.Contains(pair, StringComparison.Ordinal))
+                mismatched.Add($"{p} → ERP 는 「{erp}」인데 본사 화면 낱말표에 그 짝이 없다");
+        }
+
+        Assert.True(mismatched.Count == 0,
+            "본사 직원이 보는 낱말과 고객이 보는 낱말이 어긋난다 — 고객이 전화로 말한 낱말을 직원이 못 찾는다:\n  "
+          + string.Join("\n  ", mismatched)
+          + "\n  알면서 다르게 두려면 이 게이트의 knownDifferent 에 **사유와 함께** 적어라.");
+
+        // 🔴 예외가 조용히 늘지 않게 — 2건 그대로여야 한다
+        Assert.Equal(2, knownDifferent.Count);
+    }
+
     /// <summary>
     /// 가짜 본사 — 도착확인만 받는다. 🔴 <b>Pull 은 404 로 둔다</b>: 이 묶음은 수신 사이클을
     /// 직접 돌리므로 Pull 을 흉내 내면 재는 자리가 둘이 된다(10/12 「가짜 봉투」의 교훈).
