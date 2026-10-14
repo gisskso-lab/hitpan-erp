@@ -304,6 +304,7 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
         {
             var broken = new List<(string Id, string Why)>();
             var all = MigrationGateDb.AllMigrationIdsOnDisk();
+            var measured = 0;   // 🔴 **몇 바퀴 돌았나** — 아래에서 단언한다([3-V] P-1)
 
             // 🔴 먼저 **전건을 적용됨으로** 앉힌다. 출하 DDL 시드에 빠진 파일이 하나라도 있으면
             //    첫 바퀴에서 그 파일까지 함께 돌아 「한 건씩 독립으로」가 깨지고(러너는 첫 실패에서
@@ -335,6 +336,7 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
                     if (!r.Success) why = $"{pass}회차 — {FirstLine(r.FailureMessage)}";
                 }
                 if (why is not null) broken.Add((id, why));
+                measured++;
 
                 // 다음 한 건을 깨끗한 자리에서 재려고 시드를 되돌린다(실패면 success=0 이 남는다).
                 await db.ExecuteAsync(@"
@@ -342,6 +344,15 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
                     VALUES (@Id, 'w13-gate', 1, CURRENT_TIMESTAMP(3))
                     ON DUPLICATE KEY UPDATE success = 1;", new { Id = id });
             }
+
+            // 🔴 **아무것도 안 재고 초록이 되는 길을 막는다** ([3-V] P-1).
+            //   루프가 0바퀴여도 newlyBroken·nowFixed 가 둘 다 비면 초록이 될 수 있었다.
+            //   (지금은 nowFixed 축이 **우연히** 막아 준다 — 목록이 비는 날 그 보증도 사라진다.)
+            //   ⇒ 「몇 건을 실제로 돌려 봤나」를 직접 단언한다.
+            Assert.Equal(all.Count, measured);
+            Assert.True(measured >= 100,
+                $"[{gate}] 🔴 {measured}건만 재고 끝났다 — 마이그가 110건 규모인데 너무 적다. "
+              + "러너 폴더나 레포 폴더가 비었나(그 자리에서 조용한 초록이 난다).");
 
             var brokenIds = broken.Select(b => b.Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
