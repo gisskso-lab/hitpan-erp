@@ -303,15 +303,38 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
         try
         {
             var broken = new List<(string Id, string Why)>();
+            var all = MigrationGateDb.AllMigrationIdsOnDisk();
 
-            foreach (var id in MigrationGateDb.AllMigrationIdsOnDisk())
+            // 🔴 먼저 **전건을 적용됨으로** 앉힌다. 출하 DDL 시드에 빠진 파일이 하나라도 있으면
+            //    첫 바퀴에서 그 파일까지 함께 돌아 「한 건씩 독립으로」가 깨지고(러너는 첫 실패에서
+            //    멈춘다) 뒤의 측정이 전부 그 그림자를 먹는다. 시드 누락 자체는
+            //    MigrationLocationGuardTests 의 과녁이다 — 여기서는 **측정을 독립으로 묶는 것**만 한다.
+            foreach (var id in all)
             {
-                // 그 한 건만 미적용으로 만든다 ⇒ 러너는 그 한 건만 돈다(다른 파일의 그림자 0).
-                await db.ExecuteAsync(
-                    "DELETE FROM schema_migrations WHERE migration_id = @Id;", new { Id = id });
+                await db.ExecuteAsync(@"
+                    INSERT INTO schema_migrations (migration_id, app_version, success, applied_at)
+                    VALUES (@Id, 'w13-gate-baseline', 1, CURRENT_TIMESTAMP(3))
+                    ON DUPLICATE KEY UPDATE success = 1;", new { Id = id });
+            }
 
-                var r = await _db.RunRealRunnerAsync();
-                if (!r.Success) broken.Add((r.FailedMigrationId ?? id, FirstLine(r.FailureMessage)));
+            foreach (var id in all)
+            {
+                // 🔴 **두 번** 돌린다. 한 번만 돌리면 새 마이그의 멱등을 못 잰다 —
+                //    새 칸은 출하본에 아직 없으니 **1회차는 성공**한다. 음성 대조군 NC-9 가 이 구멍을
+                //    드러냈다: `ADD COLUMN`(IF NOT EXISTS 없음) 파일을 새로 더했는데 이 게이트가
+                //    **초록이었다**. 멱등이 깨지는 자리는 **2회차**다. 옛 마이그는 출하본이 이미 그
+                //    모양이라 1회차에서 드러난다 ⇒ 두 바퀴를 보면 옛 것·새 것을 **같은 잣대**로 잰다.
+                string? why = null;
+                for (var pass = 1; pass <= 2 && why is null; pass++)
+                {
+                    // 그 한 건만 미적용으로 만든다 ⇒ 러너는 그 한 건만 돈다(다른 파일의 그림자 0).
+                    await db.ExecuteAsync(
+                        "DELETE FROM schema_migrations WHERE migration_id = @Id;", new { Id = id });
+
+                    var r = await _db.RunRealRunnerAsync();
+                    if (!r.Success) why = $"{pass}회차 — {FirstLine(r.FailureMessage)}";
+                }
+                if (why is not null) broken.Add((id, why));
 
                 // 다음 한 건을 깨끗한 자리에서 재려고 시드를 되돌린다(실패면 success=0 이 남는다).
                 await db.ExecuteAsync(@"
@@ -457,6 +480,12 @@ internal sealed class MigrationGateDb : IDisposable
         "DB-20",   // 1060 — sales_deliveries.tax_invoice_id 중복
         "DB-27",   // 1060 — tenants.ai_mode 중복
         "DB-34",   // 1060 — sales_orders.is_auto 중복
+        // 🔴 DB-35 는 **1회차가 성공하고 2회차에서** 깨진다(1061 uk_journal_line_dedup).
+        //   한 번만 돌려 보던 첫 판은 이걸 못 봤다 — 음성 대조군 NC-9 가 구멍을 드러내 두 바퀴로 고쳤다.
+        //   🔴 그리고 1회차가 성공한다는 것은 **그 UNIQUE 키가 출하본에 없다**는 뜻이다(실측:
+        //      `uk_journal_line_dedup` 는 레포 전체에서 DB-35 파일에만 있고 출하 DDL 에 0건)
+        //      ⇒ 신규 설치 고객의 journal_lines 에는 **분개 중복 방지 키가 없다**(결-F 두 번째 사례).
+        "DB-35",   // 1061(2회차) — 키 uk_journal_line_dedup · 🔴 출하본에 그 키가 0건
         "DB-36",   // 1060 — purchase_orders.is_auto 중복
         "DB-37",   // 1061 — 키 uq_stock_ledger_source 중복
         "DB-38",   // 1146 — 표 reseller_commission_policies 가 출하본에 없다(#18·#22 로 내린 듯 · 미확정)
