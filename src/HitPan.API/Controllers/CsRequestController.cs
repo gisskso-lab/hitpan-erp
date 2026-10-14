@@ -1,6 +1,9 @@
 using System.Data;
 using System.Text.Json;
 using Dapper;
+// 🔴 20261014작3 T-5 — 발신종류 **낱말 정본**이 여기 하나 있다(`CsOutboxSenderWorker.PurposeLabel`).
+//   화면에 낱말표를 복사하지 않으려고 서버가 낱말을 함께 내려보낸다(설계 §3-1 · 1V P-7).
+using HitPan.API.BackgroundServices;
 using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -45,6 +48,19 @@ public class CsRequestController : ControllerBase
         ["billing"] = "요금·결제 문의",
         ["feature_request"] = "되게 해주세요(기능 요청)",
     };
+
+    // ══════════════════════════════════════════════════════════════
+    // 🔴 20261014작3 T-5 — 「종류별 보기」에 **세울 수 있는 종류**
+    //
+    //   본사 쓰기 콤보 4종만이다(사장님 낱말 ①~④). 옛 값(`event`·`billing`)은 **일부러 뺐다** —
+    //   본사가 더는 그 종류로 보내지 않으므로 칩으로 세우면 **늘 0건으로 보인다.**
+    //   그 쪽지는 「전체」에서 보인다(사라지지 않는다).
+    //
+    //   🔴 **값만** 둔다. 낱말은 `CsOutboxSenderWorker.PurposeLabel` 하나에서 가져온다 —
+    //   여기에 낱말을 또 적으면 작2 가 밟은 「사본이 둘」이 ERP 안에서 재발한다.
+    //   🔴 `etc` 는 걸 때 **옛 쪽지(NULL)까지** 데려온다(아래 `purposeWhere` · 1V A-1).
+    // ══════════════════════════════════════════════════════════════
+    private static readonly string[] PurposeFilterable = { "update", "notice", "promo", "etc" };
 
     // 세부태그 고정 목록 — 업무 영역 축. 1차 최소 목록이며 조정은 CS팀장 몫(반자동 — 거부 집계를 보고).
     //   화면 콤보도 이 목록을 그대로 받아 그린다(GET 응답에 동봉) — 목록의 주인은 이 파일 하나다.
@@ -121,6 +137,29 @@ public class CsRequestController : ControllerBase
 
     /// <summary>게이트가 칸을 떼고 다시 묻게 한다(제품 경로에서는 부르지 않는다).</summary>
     public static void ResetHqStatusColumnCache() => _hqStatusColByDb.Clear();
+
+    // 🔴 20261014작3 T-5 — 용도 칸(DB-146)도 **같은 모양**으로 묻는다.
+    //   origin·hq_status 가 이미 이 모양으로 서 있어서 새 모양을 만들지 않았다(판정이 셋이 되면 어긋난다).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _purposeColByDb = new();
+
+    private async Task<bool> HasPurposeColumnAsync()
+    {
+        var key = _db.Database ?? "";
+        if (_purposeColByDb.TryGetValue(key, out var cached)) return cached;
+
+        var found = await _db.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'cs_requests' AND column_name = 'purpose'");
+
+        var present = found == 1;
+        if (!present)
+            _logger.LogWarning("[CS쪽지] cs_requests.purpose 칸 없음(DB-146 미적용) — 종류별 보기 없이 돈다");
+        _purposeColByDb[key] = present;
+        return present;
+    }
+
+    /// <summary>게이트가 칸을 떼고 다시 묻게 한다(제품 경로에서는 부르지 않는다 · 작3 T-5).</summary>
+    public static void ResetPurposeColumnCache() => _purposeColByDb.Clear();
 
     /// <summary>
     /// 시험이 같은 프로세스에서 DB 를 바꿔 쓸 때 판정을 다시 묻게 한다.
@@ -231,12 +270,15 @@ public class CsRequestController : ControllerBase
     [HttpGet("requests")]
     //   🔴 둘 다 **기본값**을 준다 — 기존 게이트가 `List(default)` 한 칸으로 부르고 있어서
     //   기본값이 없으면 그 파일들을 고쳐야 한다. 그 파일은 이 갈래 소유가 아니다(작지서 §2).
-    public async Task<IActionResult> List(string? origin = null, CancellationToken ct = default)
+    //   🔴 20261014작3 T-5 — `purpose` 질의칸도 **기본값을 둔 뒤에** 더했다(같은 이유다).
+    public async Task<IActionResult> List(string? origin = null, string? purpose = null, CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
         var hasOrigin = await HasOriginColumnAsync();
+        // 🔴 20261014작3 T-5 — 용도 칸(DB-146)도 같은 모양으로 조건부로 읽는다.
+        var hasPurpose = await HasPurposeColumnAsync();
         // 🔴 20261012작4 B-3 — 본사 진행 상태(DB-145)도 **같은 모양**으로 조건부로 읽는다.
         //   칸이 없는 DB(업데이트 직후 마이그 전 1회)에서 종전 화면이 죽지 않게 — 작3 origin 선례 그대로.
         var hasHqStatus = await HasHqStatusColumnsAsync();
@@ -258,6 +300,43 @@ public class CsRequestController : ControllerBase
             //   ⇒ 본사 쪽 행은 **원리적으로 0건**이다. 여기서 전체를 주면 공지 화면에 **내 문의가
             //   섞여** 10/12 반려(섞여 보임)가 그대로 되살아난다. 빈 화면이 맞다(설계 §8).
             : origin == "hq" ? " AND 1 = 0" : "";
+
+        // ══════════════════════════════════════════════════════════════
+        // 🔴 20261014작3 T-5 — 종류 필터는 **서버에서** 거른다 (설계 §3 · 1V P-5)
+        //
+        //   왜 화면이 아닌가: 아래 `LIMIT 200` 은 **쪽마다** 걸린다. 화면에서 거르면 공지가 쌓였을 때
+        //   「프로모션만 보기」가 **200건 안에 든 프로모션만** 보여 준다 — 옛 프로모션은 아예 안 온다.
+        //   작1 A-1 에서 이미 같은 모양을 한 번 밟았다(쪽을 안 가르면 내 문의가 LIMIT 밖으로 밀렸다).
+        //
+        //   🔴 `etc` 는 **옛 쪽지(NULL)까지 데려온다** (1V A-1).
+        //   칸이 생기기 전에 내려온 쪽지는 종류를 **모른다**(DB-146 이 일부러 비워 뒀다). 화면에는
+        //   사장님 결-D 대로 「기타 공지사항」으로 보인다 ⇒ **그 칩을 눌렀을 때 그 쪽지가 사라지면
+        //   「쪽지가 없어졌다」로 보인다.** 보이는 것과 걸러지는 것이 같아야 한다.
+        //
+        //   🔴 낯선 값(`?purpose=zzz`)은 **전체**로 떨어뜨린다 — 화면을 비우지 않는다(origin 선례).
+        //   🔴 칸이 없는 DB 에서는 **전체**를 준다. `origin=hq` 와 다르다 — 그때는 본사 행이
+        //     원리적으로 0건이었지만, 여기서는 **모든 공지가 「기타」**이므로 비우면 거짓이다.
+        // ══════════════════════════════════════════════════════════════
+        // 🔴 20261014작3 [4] 봉합 — 종류 필터는 **공지 쪽에서만** 건다.
+        //
+        //   [4] 계측(PROBE-C)이 드러낸 것: 쪽을 안 묻고 종류만 물으면(`?purpose=etc`)
+        //   **고객이 쓴 내 문의가 1건 나왔다.** 고객 문의는 종류가 없어서(NULL) 「기타」 조건에
+        //   걸린 것이다 ⇒ **내 문의가 「기타 공지사항」으로 분류돼 보인다.**
+        //   설계 §1 이 「필터는 항상 공지 쪽에서만 걸린다」고 적어 뒀는데(인덱스도 origin 선행)
+        //   **코드로는 그걸 안 걸어 놨다.** 글자로만 적힌 조건은 조건이 아니다.
+        var purposeAxis = hasPurpose && origin == "hq";
+        var purposeWhere = purposeAxis
+            ? purpose switch
+            {
+                null or ""      => "",
+                // 🔴 「기타」는 **종류를 알 수 없는 것 전부**를 모은다 — NULL(작3 이전 옛 쪽지)과
+                //   빈 글자·공백(들어온 적 없어야 하지만 들어오면 어느 칩에도 안 보인다 · PROBE-B).
+                //   화면에 「기타 공지사항」으로 보이는 것과 걸러지는 것이 **같아야** 한다.
+                "etc"           => " AND (r.purpose = 'etc' OR r.purpose IS NULL OR TRIM(r.purpose) = '')",
+                _ when PurposeFilterable.Contains(purpose) => " AND r.purpose = @Purpose",
+                _               => "",   // 낯선 값 = 전체
+            }
+            : "";
 
         var rows = await _db.QueryAsync($@"
             SELECT r.cs_request_id   AS csRequestId,
@@ -300,19 +379,76 @@ public class CsRequestController : ControllerBase
                    --   서브쿼리라 NULL 이 안 나온다 — 서버가 0 을 보장한다(C-6).
                    (SELECT COUNT(*) FROM cs_replies u
                      WHERE u.tenant_id = r.tenant_id AND u.cs_request_id = r.cs_request_id
-                       AND u.read_at IS NULL) AS unreadCount
+                       AND u.read_at IS NULL) AS unreadCount,
+                   -- ══════════════════════════════════════════════════════
+                   -- 🔴 20261014작3 T-5 — 용도(DB-146). **값과 낱말을 둘 다** 내려보낸다.
+                   --
+                   --   값(`purpose`)   = 필터가 쓰는 것. 낱말을 몇 번 고쳐도 안 바뀐다.
+                   --   낱말(`purposeLabel`) = 화면이 보여 주는 것. 사람이 정하는 글자다.
+                   --
+                   --   🔴 **왜 낱말까지 서버가 주나**: `HitPan.Web` 은 서버 코드를 참조하지 않는다
+                   --   (`HitPan.Contracts` 만). 화면이 자기 낱말표를 들면 **사본이 둘**이 되고,
+                   --   작2 가 바로 그 자리에서 어긋났다(본사 「요금 안내(옛 값)」 vs 고객 「과금결재 안내」).
+                   --   낱말 정본은 `CsOutboxSenderWorker.PurposeLabel` **하나**다.
+                   --
+                   --   🔴 NULL(= 작3 이전 옛 쪽지 · 종류를 모른다)은 「기타 공지사항」으로 보인다
+                   --   (사장님 결-D). 저장은 「모른다」, 표시는 「기타」 — 두 사실을 데이터에서 구분한다.
+                   -- ══════════════════════════════════════════════════════
+                   {(hasPurpose ? "r.purpose" : "NULL")} AS purpose
               FROM cs_requests r
               LEFT JOIN cs_outbox o ON o.cs_request_id = r.cs_request_id
              -- 🔴 테넌트는 토큰 클레임에서 온 값 하나뿐이다 — 매개변수로 받지 않는다(#2).
              --   쪽 가르기 질의칸은 받지만, 그것은 **같은 테넌트 안에서** 쪽을 고를 뿐이다.
-             WHERE r.tenant_id = @TenantId{sideWhere}
+             WHERE r.tenant_id = @TenantId{sideWhere}{purposeWhere}
              ORDER BY r.created_at DESC
              -- 🔴 쪽별 LIMIT — 쪽 조건이 걸린 호출은 **그 쪽에서** 200건을 센다.
              --   한 쪽이 다른 쪽을 밀어내지 못한다(1V A-1 · G-W9-4). 전체 호출은 종전 200 그대로.
+             --   🔴 20261014작3 — 종류 조건도 **이 LIMIT 앞에** 걸린다. 그게 화면 필터로는 못 되는
+             --     자리다(화면은 200건을 받은 뒤에 거르니 옛 쪽지를 못 본다).
              LIMIT 200",
-            new { TenantId = tenantId });
+            new { TenantId = tenantId, Purpose = purpose });
 
-        return Ok(new { success = true, data = rows, categories = Categories, subTags = SubTags });
+        // 🔴 20261014작3 T-5 — 낱말을 **여기서** 붙인다. SQL 로는 못 한다(낱말 정본이 C# 에 있다).
+        //   행 모양은 한 칸만 늘어난다 — 기존 칸 이름·값은 한 글자도 안 바뀐다(#1).
+        //   기존 게이트가 `(IDictionary<string, object>)row` 로 읽으므로 그 모양을 그대로 유지한다.
+        var data = rows.Select(r =>
+        {
+            var src = (IDictionary<string, object>)r;
+            var row = new Dictionary<string, object>(src.Count + 1);
+            foreach (var kv in src) row[kv.Key] = kv.Value;
+            // 🔴 20261014작3 [4] 봉합 — 낱말은 **본사가 보낸 쪽지에만** 붙인다.
+            //   [4] 계측(PROBE-C): 고객이 쓴 문의에도 `purposeLabel` = 「기타 공지사항」이 붙었다.
+            //   고객 문의에는 **종류라는 축이 없다** — 거기에 종류 낱말을 붙이면 거짓이다.
+            var isHq = string.Equals(src.TryGetValue("origin", out var og) ? og as string : null,
+                                     "hq", StringComparison.Ordinal);
+            // 🔴 빈 글자·공백도 「모른다」로 눕힌다(PROBE-B — 그러면 「기타 공지사항」으로 보인다).
+            var raw = src.TryGetValue("purpose", out var p) ? p as string : null;
+            if (string.IsNullOrWhiteSpace(raw)) raw = null;
+            // 🔴 종류를 **모르는** 쪽지(작3 이전에 내려온 것 · 칸이 비어 있다)는 「기타 공지사항」으로
+            //   보여 준다(사장님 결-D). 저장은 「모른다」 그대로 두고 **표시만** 그렇게 한다.
+            //
+            //   🔴 왜 `PurposeLabel(null)` 에 맡기지 않나: 그 fallback 은 「본사안내」이고 그건
+            //   **백오피스가 7번째 값을 보냈을 때의 안전망**이다(작2 G-W10-3·7 이 그 글자를 박아 뒀다).
+            //   「모르는 옛 쪽지」와 「모르는 새 값」은 **다른 사실**이라 같은 낱말로 묶으면 안 된다.
+            //   🔴 그렇다고 여기에 「기타 공지사항」을 **글자로 적지 않는다** — 낱말 정본은 하나다.
+            //   `"etc"` 를 그 표에 물어서 받는다(G-W11-7 이 사본을 막는다).
+            row["purposeLabel"] = isHq ? CsOutboxSenderWorker.PurposeLabel(raw ?? "etc") : "";
+            return row;
+        }).ToList();
+
+        // 🔴 종류 칩 줄의 재료도 **서버가 준다**(화면이 낱말을 들지 않게 — 설계 §3-1).
+        //   쓰기 콤보 4종만 세운다. 옛 값(event·billing)은 칩으로 세우지 않는다 —
+        //   본사가 더는 그 종류로 보내지 않으므로 늘 0건으로 보인다. 그 쪽지는 「전체」에서 보인다.
+        return Ok(new
+        {
+            success = true,
+            data,
+            categories = Categories,
+            subTags = SubTags,
+            noticePurposes = PurposeFilterable
+                .Select(p => new { value = p, label = CsOutboxSenderWorker.PurposeLabel(p) })
+                .ToList(),
+        });
     }
 
     // ─────────────────────────────────────────────────────────────

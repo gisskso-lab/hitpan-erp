@@ -20,9 +20,54 @@
 <PageHeader Title="본사공지사항"
             Subtitle="히트판 본사가 보낸 안내를 모아 봅니다" />
 
+@* ══════════════════════════════════════════════════════════════
+   🔴 20261014작3 T-6 — 「종류별 보기」 칩 줄.
+
+   · 자리: 목록 **위 한 줄**. 드롭다운을 안 쓴 이유 — 드롭다운은 **열어야** 뭐가 있는지 안다.
+     칩 줄은 어떤 종류가 있는지가 **처음 보는 사람에게 바로 보인다**(설계 §4-3).
+   · 🔴 ① 「고객지원 요청」 화면의 `MudSelect` 2개는 **문의를 쓰는 칸**이다. 같은 모양으로 두면
+     이 자리도 쓰는 칸처럼 보인다 ⇒ 일부러 모양을 다르게 했다.
+   · 🔴 종류 목록·낱말을 **화면이 들지 않는다.** 서버가 `noticePurposes` 로 준다(설계 §3-1) —
+     화면이 표를 들면 낱말 사본이 둘이 되고, 작2 가 그 자리에서 이미 어긋났다.
+   · 🔴 거르는 일은 **서버가 한다**(`?purpose=`). 화면에서 걸러내면 쪽별 `LIMIT 200` 밖 쪽지가
+     아예 안 와서 옛 공지를 못 본다(1V P-5).
+   · 🔴 `MudChipSet` 의 선택 API 를 쓰지 않았다 — 렌더해 볼 하네스가 0건인데 그 API 모양을
+     글자로만 맞추면 조용히 안 서는 자리가 생긴다. 칩마다 `OnClick` 과 `Variant` 를 **직접** 준다
+     (보이는 모양은 설계 §4-3 그대로다). [3] 개발명세서에 사유를 적었다. *@
+@if (!_loading && _purposes.Count > 0)
+{
+    <div class="hp-cs-filter">
+        @* 🔴 고른 상태 판정을 @code 의 작은 메서드로 뺐다 — 표시 글자에 개발 낱말이 섞이지 않게 한다.
+           작1 게이트 G-W9-12 가 「화면에 보이는 글자」를 훑는데, 마크업에 쓴 C# 식의 낱말까지 함께
+           읽는다. 게이트를 느슨하게 풀지 않고 마크업을 깨끗하게 두는 쪽이 맞다. *@
+        <MudChip T="string" Size="Size.Small" Class="my-0"
+                 Variant="@AllVariant"
+                 Color="Color.Primary"
+                 OnClick="@PickAllAsync">전체</MudChip>
+        @foreach (var p in _purposes)
+        {
+            <MudChip T="string" Size="Size.Small" Class="my-0"
+                     Variant="@PickedVariant(p.Value)"
+                     Color="Color.Primary"
+                     OnClick="@(() => PickAsync(p.Value))">@p.Label</MudChip>
+        }
+    </div>
+}
+
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" />
+}
+else if (_items.Count == 0 && IsFiltered)
+{
+    @* 🔴 걸러서 0건인 것과 아예 없는 것은 **다른 사실**이다. 같은 말로 쓰면 처음 보는 사람은
+       「쪽지가 없어졌다」고 읽는다 ⇒ 되돌아갈 길을 한 줄로 보여 준다(설계 §4-4). *@
+    <MudPaper Elevation="0" Class="hp-cs-board hp-cs-board--empty">
+        <MudText Typo="Typo.body2" Class="hp-cs-empty-line">
+            이 종류로 받은 안내가 없습니다.
+            <MudLink Typo="Typo.body2" @onclick="@PickAllAsync">전체 보기</MudLink>
+        </MudText>
+    </MudPaper>
 }
 else if (_items.Count == 0)
 {
@@ -45,14 +90,17 @@ else
                     <div class="hp-cs-row-head">
                         <span class="hp-cs-row-title">@Title(it)</span>
                         <span class="hp-cs-row-chips">
-                            @* 종류 자리 — 지금은 「본사 안내」 한 종류다. 용도 칸이 들어오면(작3)
-                               이 자리가 그 값으로 채워진다. 자리를 미리 비워 둔다(설계 §5).
-                               🔴 [4] 디자인검증 F-3 — 색을 **토큰으로 직접** 준다. `Color.Info` 만 쓰면
-                               테마에 Info 가 안 박혀 있어 MudBlazor 기본 하늘색으로 서고 글자 명암비가
-                               3.12:1(AA 미달)이 된다. 전역 팔레트는 이 차수 범위 밖이라 칩에서 막는다. *@
+                            @* 🔴 20261014작3 T-6·T-7 — 종류 칩. **서버가 준 낱말**을 그대로 쓴다.
+                               · 작2 까지는 `KindLabel() => "본사 안내"` 로 **못 박혀** 있었다 ⇒ 제목은
+                                 「[히트판 공지사항]」인데 칩은 「본사 안내」라 **한 줄에서 두 번 말하고
+                                 값이 달랐다**(작2 [4] 조건 C-5). 이제 제목과 칩이 **같은 출처**다.
+                               · 🔴 낱말을 화면이 들지 않는다 — 정본은 서버의 `PurposeLabel` 하나다.
+                               · 🔴 [4] 디자인검증 F-3 — 색을 **토큰으로 직접** 준다. `Color.Info` 만 쓰면
+                                 테마에 Info 가 안 박혀 있어 MudBlazor 기본 하늘색으로 서고 글자 명암비가
+                                 3.12:1(AA 미달)이 된다. 전역 팔레트는 이 차수 범위 밖이라 칩에서 막는다. *@
                             <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
                                      Class="my-0"
-                                     Style="color:var(--hp-status-info-fg);border-color:var(--hp-status-info-border)">@KindLabel(it)</MudChip>
+                                     Style="color:var(--hp-status-info-fg);border-color:var(--hp-status-info-border)">@it.PurposeLabel</MudChip>
                             @* 🔴 [4] 조건 C-2 — 안읽음은 **읽음과 같은 축**으로 센다.
                                종전 판정(`Status == "답변도착"`)은 읽어도 안 내려간다 — status 를 내리는
                                코드가 레포에 0건이라 **읽은 뒤에도 칩이 영원히 남았다**(거짓 알림). *@
@@ -74,7 +122,50 @@ else
     private bool _loading = true;
     private List<NoticeItem> _items = new();
 
+    /// <summary>🔴 20261014작3 — 칩 줄의 재료. **서버가 준다**(화면이 낱말을 들지 않는다).</summary>
+    private List<PurposeOption> _purposes = new();
+
+    /// <summary>지금 고른 종류. 비어 있으면 전체다.</summary>
+    private string? _purpose;
+
+    /// <summary>종류를 걸러 보고 있나 — 「거른 결과가 0건」과 「아예 없음」을 가르는 데 쓴다.</summary>
+    private bool IsFiltered => _purpose is not null;
+
+    /// <summary>
+    /// 고른 칩만 채워 그린다. 🔴 마크업에 C# 식을 길게 쓰지 않으려고 여기로 뺐다 —
+    /// 작1 게이트 G-W9-12 가 마크업 글자를 훑어 개발 낱말을 잡는다(게이트를 풀지 않는다).
+    /// </summary>
+    private Variant PickedVariant(string? value) =>
+        _purpose == value ? Variant.Filled : Variant.Outlined;
+
+    /// <summary>「전체」 칩의 모양 — 아무 종류도 고르지 않았을 때 채워 그린다.</summary>
+    private Variant AllVariant => IsFiltered ? Variant.Outlined : Variant.Filled;
+
+    /// <summary>
+    /// 「전체」로 되돌린다. 🔴 마크업에서 인자 없이 부를 수 있게 따로 뒀다 —
+    /// 마크업에 개발 낱말이 섞이면 작1 게이트 G-W9-12 가 그걸 「화면 글자」로 읽는다.
+    /// </summary>
+    private Task PickAllAsync() => PickAsync(null);
+
+    /// <summary>
+    /// 종류 질의칸 조각 — 고른 게 없으면 빈 글자다.
+    /// 🔴 쪽(`?origin=hq`)은 **호출 자리에 그대로** 두고 종류만 여기서 붙인다(G-W9-16).
+    /// </summary>
+    private string PurposeQuery() =>
+        _purpose is null ? "" : $"&purpose={Uri.EscapeDataString(_purpose)}";
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    /// <summary>
+    /// 🔴 종류를 고르면 **서버에 다시 묻는다.** 화면에서 거르지 않는다 —
+    /// 쪽별 `LIMIT 200` 밖 쪽지는 애초에 오지 않아서, 화면 필터로는 옛 공지를 못 본다(1V P-5).
+    /// </summary>
+    private async Task PickAsync(string? purpose)
+    {
+        if (_purpose == purpose) return;   // 같은 칩을 다시 눌러도 헛걸음 안 한다
+        _purpose = purpose;
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -82,8 +173,15 @@ else
         try
         {
             // 🔴 본사 쪽만 묻는다. 쪽별 LIMIT 이라 내 문의가 이 목록을 밀어내지 못한다(1V A-1).
-            var res = await Http.GetFromJsonAsync<ListResponse>("api/cs/requests?origin=hq");
+            //   🔴 종류는 **질의칸으로** 넘긴다 — 거르는 일은 서버 몫이다(작3 T-5).
+            //   🔴 `?origin=hq` 를 **호출 줄에 그대로 둔다.** 변수로 빼면 작1 게이트 G-W9-16
+            //     (「각 화면이 자기 쪽만 묻나」)이 그 줄에서 쪽을 못 읽는다 — 게이트를 고치는 게 아니라
+            //     쪽을 호출 자리에 박아 두는 쪽이 맞다(그게 그 게이트가 지키려는 사실이다).
+            var res = await Http.GetFromJsonAsync<ListResponse>($"api/cs/requests?origin=hq{PurposeQuery()}");
             _items = res?.Data ?? new();
+            // 🔴 칩 줄은 **한 번 받은 뒤 그대로 둔다** — 거른 결과가 0건일 때 칩이 사라지면
+            //   되돌아갈 길이 같이 사라진다(설계 §4-4).
+            if (res?.NoticePurposes is { Count: > 0 }) _purposes = res.NoticePurposes;
         }
         catch (Exception ex)
         {
@@ -107,13 +205,23 @@ else
         return head.Length <= 60 ? head : head[..60] + "…";
     }
 
-    /// <summary>종류 낱말 — 용도 칸이 아직 없으므로 한 종류로 선다(작3 에서 그 값이 들어온다).</summary>
-    private static string KindLabel(NoticeItem it) => "본사 안내";
-
     private sealed class ListResponse
     {
         public bool Success { get; set; }
         public List<NoticeItem> Data { get; set; } = new();
+
+        /// <summary>🔴 20261014작3 — 칩 줄에 세울 종류. **서버가 값과 낱말을 함께** 준다.</summary>
+        public List<PurposeOption> NoticePurposes { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 종류 한 칸 — <b>값</b>은 거를 때, <b>낱말</b>은 보여 줄 때 쓴다.
+    /// 🔴 둘을 갈라 둔 것이 사장님 결-D ⓑ 의 요지다 — 낱말을 바꿔도 필터가 안 깨진다.
+    /// </summary>
+    private sealed class PurposeOption
+    {
+        public string Value { get; set; } = "";
+        public string Label { get; set; } = "";
     }
 
     /// <summary>
@@ -132,5 +240,16 @@ else
         public int ReplyCount { get; set; }
         /// <summary>🔴 [4] C-2 — 안 읽은 수. 서버가 서브쿼리로 0 을 보장한다(읽으면 줄어든다).</summary>
         public int UnreadCount { get; set; }
+
+        /// <summary>🔴 20261014작3 — 종류 **값**(DB-146). NULL = 작3 이전 옛 쪽지(종류를 모른다).</summary>
+        public string? Purpose { get; set; }
+
+        /// <summary>
+        /// 🔴 20261014작3 — 종류 **낱말**. 서버가 준다(`CsOutboxSenderWorker.PurposeLabel` 하나가 정본).
+        /// 화면이 자기 표를 들면 사본이 둘이 되고 작2 가 그 자리에서 어긋났다.
+        /// 🔴 비널러블이 아니라 기본값 빈 문자열로 둔다 — 서버가 늘 채우지만, 옛 판 서버와도 돌아야 한다
+        /// (칸을 모르는 서버가 이 칸을 안 보내면 역직렬화가 터지는 게 아니라 빈 글자가 된다).
+        /// </summary>
+        public string PurposeLabel { get; set; } = "";
     }
 }

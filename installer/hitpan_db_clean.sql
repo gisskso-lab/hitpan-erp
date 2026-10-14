@@ -3644,7 +3644,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4932,10 +4932,12 @@ CREATE TABLE `cs_requests` (
   `origin` varchar(10) NOT NULL DEFAULT 'local' COMMENT 'local = 고객(자식계정) 문의 · hq = 본사가 먼저 보낸 안내(DB-144 · 작3 B-1)',
   `hq_status` varchar(10) DEFAULT NULL COMMENT '본사 진행 상태(접수/처리중/보류/완료) — NULL = 본사 미착수 · status 와 다른 축(DB-145 · 작4 B-2)',
   `hq_status_at` datetime(6) DEFAULT NULL COMMENT '본사가 그 상태로 바꾼 시각(UTC) — 뒤로 가는 반영을 막는 근거(DB-145 · 작4 B-2)',
+  `purpose` varchar(20) DEFAULT NULL COMMENT '본사 발신 종류(update/notice/promo/etc/event/billing) — NULL = 작3 이전에 내려온 옛 쪽지(종류를 모른다) · 고객 문의(origin=local)는 늘 NULL (DB-146 · 작3 T-1)',
   PRIMARY KEY (`cs_request_id`),
   KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
   KEY `idx_cs_req_status` (`tenant_id`,`status`),
-  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`)
+  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`),
+  KEY `idx_cs_req_purpose` (`tenant_id`,`origin`,`purpose`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 로컬 원본 — 자식계정 작성 · 부모계정 파이프로 송신(작14 B-2)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

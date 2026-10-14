@@ -485,6 +485,24 @@ public sealed class CsOutboxSenderWorker : BackgroundService
 
         var saved = new List<string>();
 
+        // 🔴 20261014작3 T-3 — 용도 칸(DB-146)이 **이 DB 에 있나**를 한 주기에 한 번 묻는다.
+        //
+        //   왜 캐시를 안 두나: 칸은 **업데이트 직후 마이그가 돌 때** 생긴다. 캐시를 두면
+        //   그 사이에 「없다」로 굳은 판정이 남아 **칸이 생긴 뒤에도 안 적는** 창이 열린다
+        //   (컨트롤러 쪽은 그래서 `ResetPurposeColumnCache` 같은 손잡이를 둬야 했다).
+        //   이 사이클은 30초마다 돌고 내려올 쪽지가 있을 때만 여기 오므로, 한 줄 질의 한 번이
+        //   그 위험을 아예 없애는 값으로 싸다.
+        //
+        //   🔴 칸이 없으면 **적지 않고 그대로 앉힌다** — 종전과 똑같이 돈다. 본문 머리 한 줄
+        //   (`[업데이트공지사항] 제목`)이 그대로 있으므로 그 쪽지도 화면에서 종류를 읽을 수 있다.
+        var hasPurpose = await db.ExecuteScalarAsync<long>(@"
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cs_requests' AND COLUMN_NAME = 'purpose'") > 0;
+
+        if (!hasPurpose)
+            logger.LogInformation(
+                "[CS수신] 용도 칸이 아직 없다(DB-146 미적용) — 종류를 적지 않고 받는다. 본문 머리 한 줄은 그대로다.");
+
         foreach (var o in items)
         {
             if (string.IsNullOrWhiteSpace(o.OutboundId) || string.IsNullOrWhiteSpace(o.Body)) continue;
@@ -513,18 +531,23 @@ public sealed class CsOutboxSenderWorker : BackgroundService
                 //   그게 **고객 자기 문의**일 수도 있다(열쇠 공간이 한 표를 공유한다).
                 //   그 상태에서 ②를 그냥 넣으면 **본사 글이 고객 문의의 답으로 붙는다** —
                 //   조용한 오배치다. 그래서 ①의 결과를 보고 ②를 할지 정한다.
-                var inserted = await db.ExecuteAsync(@"
+                // 🔴 20261014작3 T-3 — 용도를 **값으로** 적는다(낱말이 아니다).
+                //   낱말로 적으면 사장님이 결-D 에서 ⓑ 를 고른 이유(「낱말을 바꿔도 필터가 안 깨진다」)가
+                //   무너진다 — 실제로 작2 가 낱말 6종을 고쳤고, 그때 값으로 적어 둔 행은 멀쩡했다.
+                //   칸이 없는 DB 에서는 칸 이름을 아예 넣지 않는다(1054 를 피한다).
+                var inserted = await db.ExecuteAsync($@"
                     INSERT IGNORE INTO cs_requests
                         (cs_request_id, tenant_id, created_by, category, sub_tag, body,
-                         screen_code, erp_version, status, origin, created_at)
+                         screen_code, erp_version, status, origin, created_at{(hasPurpose ? ", purpose" : "")})
                     VALUES
                         (@Id, @TenantId, 'headquarters', 'etc', 'etc', @Body,
-                         NULL, @Ver, '답변도착', 'hq', @CreatedAt)",
+                         NULL, @Ver, '답변도착', 'hq', @CreatedAt{(hasPurpose ? ", @Purpose" : "")})",
                     new
                     {
                         Id = o.OutboundId, TenantId = tenantId, Body = shown,
                         Ver = "hq",   // erp_version 은 NOT NULL — 본사발신은 ERP 판이 없다는 표식
                         CreatedAt = o.CreatedAt == default ? DateTime.UtcNow : o.CreatedAt,
+                        Purpose = NormalizePurpose(o.Purpose, o.OutboundId, logger),
                     }, tx);
 
                 if (inserted == 0)
@@ -740,7 +763,61 @@ public sealed class CsOutboxSenderWorker : BackgroundService
     /// (<c>:495</c>). 이미 내려간 쪽지는 <c>[본사안내]</c> 그대로다 — 되돌아가 고쳐 적으면
     /// 「이미 보낸 글의 종류를 다른 이름으로 덮어 적는」 거짓말이고 #1 위반이다. 게이트 G-W10-4 가 지킨다.</para>
     /// </summary>
-    private static string PurposeLabel(string? purpose) => purpose switch
+    /// <summary>
+    /// 🔴 20261014작3 [4] 봉합 — 본사가 보낸 종류 값을 <b>칸에 넣기 전에 눕힌다.</b>
+    ///
+    /// <para>[4] 독립검증이 계측기로 세 가지를 드러냈다(PM 이 직접 돌려 숫자를 봤다):</para>
+    /// <list type="bullet">
+    /// <item>🔴 <b>20자를 넘는 값이 조용히 잘렸다.</b> <c>INSERT IGNORE</c> 가 1406(Data too long)을
+    /// 경고로 눕혀서, <c>promotion_year_end_2026</c> 가 <c>promotion_year_end_2</c> 로 저장됐다.
+    /// 쪽지가 막히지는 않았지만 <b>아무 기록 없이</b> 종류가 뭉개진다 — 그 쪽지는 어느 칩에도 안 걸리고
+    /// 「전체」에서만 보인다. 작2 가 본문 자름에 경고를 남긴 것(<c>[4] V-5</c>)과 <b>같은 원칙</b>이
+    /// 이 자리에 빠져 있었다.</item>
+    /// <item>🔴 <b>대문자 값이 낱말과 어긋났다.</b> <c>'UPDATE'</c> 는 DB 조회(대소문자 무관 콜레이션)에는
+    /// 걸리는데 <see cref="PurposeLabel"/> 은 <c>switch</c> 가 정확히 비교하므로 「본사안내」로 떨어진다
+    /// ⇒ <b>칩은 잡는데 낱말이 다른 말을 한다.</b></item>
+    /// <item>빈 글자·공백은 어느 칩에도 안 걸린다.</item>
+    /// </list>
+    ///
+    /// <para>그래서 <b>들어올 때 한 번</b> 눕힌다 — 공백을 떼고, 소문자로 맞추고, 20자를 넘으면
+    /// <b>자르지 않고 「모른다」(NULL)로 두고 경고를 남긴다.</b> 잘라서 넣으면 <b>있지도 않은 종류</b>가
+    /// 생기고, 막으면 흐름이 끊긴다(#20) ⇒ 「모른다」가 정직하다. 그 쪽지는 「기타 공지사항」 칩에서
+    /// 보인다(목록 쪽이 NULL 을 그렇게 모은다).</para>
+    ///
+    /// <para>🔴 본문 머리 한 줄은 <b>원래 값</b>으로 이미 적혔다(<c>:497</c>) — 거기엔 손대지 않는다.
+    /// 본사가 보낸 글을 고쳐 적는 게 아니라, <b>우리 칸에 무엇을 적을지</b>만 정하는 것이다.</para>
+    /// </summary>
+    private static string? NormalizePurpose(string? raw, string outboundId, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var v = raw.Trim().ToLowerInvariant();
+
+        // 칸 폭(varchar(20) · DB-146)을 넘으면 「모른다」로 둔다 — 자르면 없는 종류가 생긴다.
+        if (v.Length > 20)
+        {
+            // #15 — 삼키지 않는다. 사람이 「왜 종류가 비었나」를 찾을 수 있어야 한다.
+            logger.LogWarning(
+                "[CS수신] 본사 발신 종류가 칸보다 길어 비워 둔다 outbound={Id} 길이={Len} "
+              + "— 쪽지는 그대로 받았고 「기타 공지사항」으로 보인다. 본사 쪽 값 확인 필요.",
+                outboundId, v.Length);
+            return null;
+        }
+
+        return v;
+    }
+
+    /// <remarks>
+    /// 🔴 20261014작3 T-4 — 접근성을 <c>private</c> → <c>internal</c> 로 **한 낱말** 올렸다.
+    /// 목록 API 가 화면에 **낱말을 함께** 내려보내야 하는데(설계 §3-1), <c>HitPan.Web</c> 은
+    /// 서버 코드를 참조하지 않아서(`HitPan.Contracts` 만) 화면이 자기 표를 들면 **낱말 사본이 둘**이 된다.
+    /// 작2 가 바로 그 자리에서 어긋났다(본사 「요금 안내(옛 값)」 vs 고객 「과금결재 안내」).
+    /// <para>🔴 <b>이 메서드를 다른 자리로 옮기지 마라.</b> 작2 게이트 <c>G-W10-1·7</c> 이
+    /// <c>typeof(CsOutboxSenderWorker).GetMethod("PurposeLabel", NonPublic|Static)</c> 로 찾는다.
+    /// 이름·클래스를 그대로 두고 접근성만 올렸으므로 그 리플렉션은 그대로 맞는다
+    /// (<c>NonPublic</c> 은 <c>internal</c> 도 포함한다 — 작3 에서 8/8 로 확인했다).</para>
+    /// </remarks>
+    internal static string PurposeLabel(string? purpose) => purpose switch
     {
         // ── 사장님 낱말 4종 (10/13 설계 §5-1 ①~④) ──
         "update" => "업데이트공지사항",
