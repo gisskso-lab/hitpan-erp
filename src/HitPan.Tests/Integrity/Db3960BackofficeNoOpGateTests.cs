@@ -46,6 +46,15 @@ namespace HitPan.Tests.Integrity;
 ///    봉합 전 FAIL·봉합 후 PASS 실측(시험 DB hitpan_e2e · 2026-10-06):
 ///    docs/개발/erp/20261006작8_갈래라_DB3960_개발명세서.md §3.
 /// </summary>
+// 🔴 20261014작9 갈래B ([1-V] P-15) — 이 파일 머리의 경고가 현실이 됐다:
+//   「이 폴더를 쓰는 다른 시험 클래스가 생기면 병렬 충돌 주의(지금은 이 클래스뿐)」.
+//   `ErpMigrationApplyGateTests`(G-W13)가 그 **둘째 클래스**다. 둘 다 러너 폴더
+//   (`AppContext.BaseDirectory/Migrations/SQL`)를 지우고 다시 만드는데, xUnit 은 클래스를
+//   병렬로 돌린다 ⇒ 한쪽이 다른 쪽 폴더를 지우면 러너가 「적용 대상 0건」으로 **Success=true** 가
+//   된다. **아무것도 안 재고 초록**이다.
+//   ⇒ 같은 Collection(DisableParallelization)에 넣어 직렬화한다. 속성 한 줄 **추가만**(#1) —
+//      이 파일의 시험 본문은 한 글자도 안 건드렸다. G-W13-6 이 이 봉합을 지킨다.
+[Collection(MigrationRunnerSqlDirCollection.Name)]
 public sealed class Db3960BackofficeNoOpGateTests : IDisposable
 {
     private readonly string _dbName = "hitpan_db3960_" + Guid.NewGuid().ToString("N")[..8];

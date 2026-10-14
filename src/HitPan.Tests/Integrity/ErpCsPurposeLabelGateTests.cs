@@ -335,52 +335,281 @@ public sealed class ErpCsPurposeLabelGateTests : IDisposable
     //   (`HitPan.Tests` 는 `HitPan.Backoffice` 를 ProjectReference 하지 않는다 — 같은 형이
     //   둘이 되는 것을 막으려고 일부러 그렇게 뒀다 · `HitPan.Tests.csproj:67` 주석.)
     //
-    //   🔴 **알면서 다른 두 값은 사유를 적어 예외로 둔다.** 몰라서 다른 것과 알고 다른 것은
-    //   다른 사실이다. 예외가 늘면 이 게이트가 막는다.
+    //   🔴 **20261014작9 개정 (결-A″ 봉합) — 예외 목록을 「규칙」으로 바꿨다.**
+    //
+    //   종전: 어긋난 두 값(`event`·`billing`)을 **사유 적힌 자유 예외**로 뺐다.
+    //     · `event`   = 꼬리표 「(옛 값)」만 달랐다 → 양해할 수 있는 차이
+    //     · `billing` = 🔴 **낱말 몸통 자체가 달랐다**(「요금 안내」 vs 「과금결재 안내」) → 양해 못 할 차이
+    //     그런데 게이트는 **둘을 똑같이 봤다.** 자유 예외 목록은 「꼬리표뿐」과 「몸통이 다르다」를
+    //     가르지 못한다 ⇒ 진짜 사고가 주석 한 줄로 조용히 사는 자리가 된다.
+    //
+    //   봉합 뒤: 백오피스가 `billing` 낱말을 고객 쪽 말에 맞췄으므로 **남은 차이는 꼬리표 하나**다.
+    //     ⇒ 예외를 지우고 **규칙**으로 잰다: 「백오피스 낱말 = ERP 낱말, 또는 ERP 낱말 + 「(옛 값)」」.
+    //     🔴 **예외 0건.** 몸통이 어긋나면 어느 값이든 빨강이고, 예외로 비켜 갈 길이 없다.
+    //
+    //   🔴 꼬리표를 왜 허용하나: 그 값들은 **쓰기 콤보에 없어 새로 못 쓴다** — 꼬리표가 없으면
+    //     직원이 「이걸로 보내면 되나」로 읽는다. 그리고 꼬리표는 **본사 화면에만** 있으므로
+    //     고객에게 내부 낱말이 안 간다(#23). 꼬리표가 **고객 쪽에** 생기면 G-W10-7 이 잡는다.
+    //
+    //   🔴 두 쪽을 **다른 길로** 읽는다: ERP = 메서드 리플렉션 호출 / 백오피스 = **소스 글자**.
+    //   (`HitPan.Tests` 는 `HitPan.Backoffice` 를 ProjectReference 하지 않는다 — 같은 형이
+    //   둘이 되는 것을 막으려고 일부러 그렇게 뒀다 · `HitPan.Tests.csproj:67` 주석.)
     // ══════════════════════════════════════════════════════════════
-    [Fact(DisplayName = "G-W10-8 🔴 본사 화면 낱말과 고객 화면 낱말이 어긋나지 않는다 — 어긋난 2값은 사유 적힌 예외뿐 ([4] C-2)")]
+
+    /// <summary>
+    /// 🔴 본사 화면에만 허용되는 꼬리표 — 「이 값은 이미 보낸 글의 종류이고 새로 쓸 수는 없다」를
+    /// 직원에게 알리는 말이다. <b>낱말 몸통에는 못 붙는다</b>(G-W10-8 의 규칙).
+    /// </summary>
+    private const string StaffOnlySuffix = "(옛 값)";
+
+    [Fact(DisplayName = "G-W10-8 🔴 본사 화면 낱말 = 고객 화면 낱말 (+ 「(옛 값)」 꼬리표만 허용) — 예외 0건 (20261014작9 결-A″)")]
     public void G_W10_8_본사낱말과_고객낱말이_어긋나지_않는다()
+    {
+        var block = BackofficeNoticeKindLabelBlock();
+        var writeCombo = BackofficeWriteComboValues();
+
+        // 🔴 규칙 — 백오피스 낱말은 「ERP 낱말」 그 자체이거나, 거기에 본사 전용 꼬리표가 붙은 것뿐이다.
+        //    예외 목록이 **없다**: 어느 값이든 몸통이 어긋나면 빨강이고 비켜 갈 길이 없다.
+        //
+        // 🔴 20261014작9 [4] 조건 C-2 봉합 — **꼬리표는 「옛 값」에만 허용한다.**
+        //    [4] 실측: `"promo" => "프로모션 안내(옛 값)"` 로 바꿔도 **전건 초록**이었다.
+        //    그런데 `promo` 는 **쓰기 콤보에 있는 값**이다 ⇒ 같은 화면이 콤보에선 「프로모션 안내」,
+        //    목록에선 「프로모션 안내(옛 값)」로 **두 낱말**을 쓴다. 결-A″ 가 막으려던 모양 그대로다.
+        //    ⇒ 꼬리표 가지는 **쓰기 콤보 밖의 값**(= 새로 못 쓰는 옛 값)에만 열어 둔다.
+        var mismatched = new List<string>();
+        var withSuffix = new List<string>();
+
+        foreach (var p in BackofficeAllowed())
+        {
+            var erp = ErpLabel(p);
+
+            var plain = $"\"{p}\" => \"{erp}\"";                        // 글자까지 같다
+            var tagged = $"\"{p}\" => \"{erp}{StaffOnlySuffix}\"";      // 몸통 같고 꼬리표만 붙었다
+
+            if (block.Contains(plain, StringComparison.Ordinal)) continue;
+
+            if (block.Contains(tagged, StringComparison.Ordinal))
+            {
+                if (writeCombo.Contains(p))
+                {
+                    mismatched.Add(
+                        $"{p} → 🔴 **쓰기 콤보에 있는 값**인데 낱말표가 꼬리표 「{StaffOnlySuffix}」를 달았다. "
+                      + $"콤보에선 「{erp}」, 목록에선 「{erp}{StaffOnlySuffix}」 — 같은 화면이 두 낱말을 쓴다. "
+                      + "꼬리표는 **새로 못 쓰는 옛 값**에만 붙인다");
+                    continue;
+                }
+                withSuffix.Add(p);
+                continue;
+            }
+
+            mismatched.Add(
+                $"{p} → 고객은 「{erp}」로 본다. 본사 낱말표에 「{erp}」도 「{erp}{StaffOnlySuffix}」도 없다");
+        }
+
+        Assert.True(mismatched.Count == 0,
+            "🔴 본사 직원이 보는 낱말과 고객이 보는 낱말의 **몸통**이 어긋난다 — "
+          + "고객이 전화로 말한 낱말을 직원이 못 찾는다(결-A″ 가 봉합한 바로 그 사고):\n  "
+          + string.Join("\n  ", mismatched)
+          + $"\n  🔴 허용되는 차이는 꼬리표 「{StaffOnlySuffix}」 **하나뿐**이다. 예외 목록은 없앴다 — "
+          + "사유 한 줄로 어긋남을 재워 두는 길을 닫았다(20261014작9).");
+
+        // 양성 축 — 규칙이 **아무것도 안 세고** 초록이 되는 것을 막는다.
+        //   꼬리표 가지를 한 번도 안 탔다면, 꼬리표 규칙 자체가 죽은 글자다.
+        Assert.True(withSuffix.Count >= 1,
+            "🔴 꼬리표 가지를 한 건도 안 탔다 — 이 규칙이 실제로 무엇을 재는지 알 수 없다. "
+          + "옛 값(event·billing)이 본사 낱말표에서 사라졌나(#1 위반 의심).");
+    }
+
+    /// <summary>
+    /// 백오피스 <c>NoticeKindLabel</c> 의 <c>switch</c> 블록을 <b>소스 글자</b>로 떠 온다.
+    ///
+    /// <para>🔴 <b>20261014작9 [4] 조건 C-1 봉합 — 주석을 먼저 벗긴다.</b>
+    /// [4] 실측: 낱말 몸통을 「과금<b> </b>결재 안내(옛 값)」(공백 한 칸 삽입)으로 깨뜨리고
+    /// 같은 블록에 정본 글자가 든 <c>//</c> 주석 한 줄을 넣으니 <b>G-W10-8·G-W12 5건이 전건 초록</b>이었다
+    /// (주석 없이 같은 공백만 넣으면 빨강). ⇒ 「예외 0건」으로 닫았다던 규칙이
+    /// <b>주석 한 줄짜리 무제한 예외 통로</b>로 바뀌어 있었다.</para>
+    ///
+    /// <para>🔴 이 트랙에서 같은 함정을 <b>다섯 번째</b> 밟았다. 나는 G-W12 쪽에만
+    /// <see cref="StripComments"/> 를 걸고 <b>본체 게이트에는 안 걸었다</b> — 더 나쁜 것은
+    /// 그 사실을 모른 채 「닫았다」고 코드 주석과 결재 문서에 적었다는 점이다.
+    /// <b>글자를 세는 게이트는 예외 없이 주석을 먼저 벗긴다.</b></para>
+    /// </summary>
+    private static string BackofficeNoticeKindLabelBlock() => BackofficeBlock("NoticeKindLabel");
+
+    /// <summary>
+    /// 백오피스 <b>쓰기 콤보</b>(<c>NoticeKinds</c>)에 든 값들 — 「새로 쓸 수 있는 종류」다.
+    /// <para>🔴 꼬리표 「(옛 값)」을 허용할지 가르는 기준이다([4] C-2).</para>
+    /// </summary>
+    private static HashSet<string> BackofficeWriteComboValues()
+    {
+        var block = BackofficeBlock("NoticeKinds =");
+        var set = System.Text.RegularExpressions.Regex
+            .Matches(block, @"new\(""(?<v>[a-z_]+)""")
+            .Select(m => m.Groups["v"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(set.Count >= 4,
+            $"백오피스 쓰기 콤보에서 값을 {set.Count}개만 읽었다 — 모양이 바뀌었나(이 게이트가 아무것도 못 센다)");
+        return set;
+    }
+
+    /// <summary>
+    /// 백오피스 낱말표 파일에서 <paramref name="marker"/> 로 시작하는 블록을 뜬다.
+    /// <para>🔴 <b>주석을 먼저 벗긴다</b>([4] C-1·C-3) — 벗기지 않으면 주석 한 줄이 과녁을 대신한다.</para>
+    /// </summary>
+    private static string BackofficeBlock(string marker)
+    {
+        var src = StripComments(File.ReadAllText(BackofficeVocabPath()));
+        var start = src.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start > 0, $"백오피스 {marker} 을 못 찾았다 — 이름이 바뀌었나");
+        var block = src[start..];
+        var end = block.IndexOf("};", StringComparison.Ordinal);
+        Assert.True(end > 0, $"{marker} 블록의 끝을 못 찾았다");
+        return block[..end];
+    }
+
+    private static string BackofficeVocabPath()
     {
         var path = Path.Combine(ErpCsGateDb.RepoRoot(),
             "src", "HitPan.Backoffice", "Components", "Pages", "Platform", "Components", "CsVocab.cs");
         Assert.True(File.Exists(path),
             $"백오피스 낱말표를 못 찾았다: {path} — 자리가 바뀌었으면 이 게이트도 함께 옮겨라");
+        return path;
+    }
 
-        var src = File.ReadAllText(path);
-        var start = src.IndexOf("NoticeKindLabel", StringComparison.Ordinal);
-        Assert.True(start > 0, "백오피스 NoticeKindLabel 을 못 찾았다 — 이름이 바뀌었나");
-        var block = src[start..];
-        var end = block.IndexOf("};", StringComparison.Ordinal);
-        Assert.True(end > 0, "백오피스 낱말표 블록의 끝을 못 찾았다");
-        block = block[..end];
+    // ══════════════════════════════════════════════════════════════
+    // G-W12 — 🔴 20261014작9 갈래A · 결재 거리 **결-A″** 봉합 묶음
+    //
+    //   [사고] 같은 쪽지를 본사 직원은 「요금 안내」, 고객은 「과금결재 안내」로 봤다.
+    //     G-W10-8 이 그 어긋남을 **드러내 뒀고**, 사장님 전결(「전결. 이 두개까지만 해.」)로 봉합했다.
+    //
+    //   🔴 [1-V] 가 내 셈을 고쳤다: 나는 「낱말 한 줄」이라 말했는데 **자리가 셋**이었다.
+    //     세 번째가 **조회 필터 콤보**(`AdminCsNoticePage.razor`)이고, 그게 이 사고의 **본체**다 —
+    //     고객이 말한 낱말로 **거를 칸**이 없으면 직원은 끝까지 그 쪽지를 못 찾는다.
+    //     낱말표(`CsVocab`)만 고치고 필터 칸을 두면 **같은 화면이 두 낱말**을 쓴다.
+    //
+    //   🔴 기대값을 글자로 박지 않는다 — `PurposeLabel("billing")` 을 **실제로 불러** 받는다.
+    //     사장님이 낱말을 또 고치시면 게이트가 **따라간다**(작2 G-W10-1 이 자기 과녁에서
+    //     기대값을 꺼내 동어반복이 됐던 사고의 반대편: 여기서 과녁은 **백오피스 글자**이고
+    //     기대값 출처는 **ERP 메서드**다 — 두 쪽이 다른 길이다).
+    // ══════════════════════════════════════════════════════════════
 
-        // 🔴 알면서 다른 값 — 사유를 여기 적는다. 「고객에게는 내부 꼬리표를 안 보인다」(#23)
-        var knownDifferent = new Dictionary<string, string>(StringComparer.Ordinal)
+    private const string LegacyBillingPurpose = "billing";
+
+    [Fact(DisplayName = "G-W12-1 🔴 본사 조회 필터 칸이 **고객이 말한 낱말**을 품는다 — 결-A″ 의 본체")]
+    public void G_W12_1_조회필터_칸이_고객낱말을_품는다()
+    {
+        var expected = ErpLabel(LegacyBillingPurpose);   // 🔴 글자 하드코딩 금지 — ERP 에서 받아 온다
+
+        var page = Path.Combine(ErpCsGateDb.RepoRoot(),
+            "src", "HitPan.Backoffice", "Components", "Pages", "Platform", "AdminCsNoticePage.razor");
+        Assert.True(File.Exists(page), $"본사 공지 화면을 못 찾았다: {page}");
+
+        // 🔴 주석을 걷어낸 뒤에 센다 — 내 주석에 든 낱말을 「화면이 쓴다」로 읽으면 거짓 초록이다
+        //    (이 트랙에서 네 번 밟은 함정: Razor 주석 `@* *@` 과 C# 블록 주석 둘 다 벗긴다).
+        var body = StripComments(File.ReadAllText(page));
+
+        // 옛 값 묶음을 거르는 칸 — 값은 `legacy` 다(화면이 두 옛 값을 한 묶음으로 거른다).
+        var idx = body.IndexOf("\"legacy\"", StringComparison.Ordinal);
+        Assert.True(idx > 0,
+            "본사 공지 화면에 옛 값 묶음 필터 칸(`legacy`)이 없다 — 이미 보낸 옛 쪽지를 거를 길이 사라졌나");
+
+        // 그 칸이 **고객이 보는 낱말**을 품어야 한다. 한 줄 안에서 본다(칸 하나의 글자).
+        var lineEnd = body.IndexOf('\n', idx);
+        var line = lineEnd < 0 ? body[idx..] : body[idx..lineEnd];
+
+        Assert.True(line.Contains(expected, StringComparison.Ordinal),
+            $"🔴 본사 조회 필터 칸에 고객이 말한 낱말 「{expected}」이 없다.\n"
+          + $"  그 칸의 글자: {line.Trim()}\n"
+          + "  고객이 「" + expected + " 쪽지 받았는데요」라고 전화하면 직원은 **거를 칸에 그 말이 없어** "
+          + "끝까지 그 쪽지를 못 찾는다. 낱말표만 고치고 이 칸을 두면 같은 화면이 두 낱말을 쓴다(결-A″).");
+    }
+
+    [Fact(DisplayName = "G-W12-2 🔴 쓰기 콤보는 4종 그대로 — 낱말을 고쳤다고 옛 값으로 **새로 보낼** 길이 열리지 않았다")]
+    public void G_W12_2_쓰기콤보는_4종_그대로()
+    {
+        // 🔴 [4] C-3 봉합 — 이 게이트도 **주석을 벗긴 뒤** 읽는다(C-1 과 같은 통로였다).
+        var block = BackofficeBlock("NoticeKinds =");
+
+        // 🔴 옛 값이 쓰기 콤보에 들어오면 빨강 — 사장님 10/14 교정(「축이 아니라 명분의 한 예」).
+        foreach (var legacy in new[] { LegacyBillingPurpose, "event" })
         {
-            ["event"] = "백오피스는 「이벤트(옛 값)」 — 「(옛 값)」은 본사 직원용 꼬리표다(#23)",
-            ["billing"] = "백오피스는 「요금 안내(옛 값)」 · ERP 는 사장님 결-A 의 「과금결재 안내」"
-                        + " ⇒ 🔴 **낱말 자체가 다르다**. 백오피스를 맞추는 것은 작7(결재 거리 결-A″)",
-        };
-
-        var mismatched = new List<string>();
-        foreach (var p in BackofficeAllowed())
-        {
-            if (knownDifferent.ContainsKey(p)) continue;
-
-            var erp = ErpLabel(p);
-            // 백오피스 소스에 `"<값>" => "<낱말>"` 짝이 **그 글자대로** 있나
-            var pair = $"\"{p}\" => \"{erp}\"";
-            if (!block.Contains(pair, StringComparison.Ordinal))
-                mismatched.Add($"{p} → ERP 는 「{erp}」인데 본사 화면 낱말표에 그 짝이 없다");
+            Assert.False(block.Contains($"\"{legacy}\"", StringComparison.Ordinal),
+                $"🔴 옛 값 `{legacy}` 이 **쓰기 콤보**에 들어왔다. 작9 는 **낱말만** 맞춘 차수다 — "
+              + "보내는 길을 여는 것은 별 결재다(사장님 10/14: 「축이 아니라 명분의 한 예」).");
         }
 
-        Assert.True(mismatched.Count == 0,
-            "본사 직원이 보는 낱말과 고객이 보는 낱말이 어긋난다 — 고객이 전화로 말한 낱말을 직원이 못 찾는다:\n  "
-          + string.Join("\n  ", mismatched)
-          + "\n  알면서 다르게 두려면 이 게이트의 knownDifferent 에 **사유와 함께** 적어라.");
+        // 4종 전건이 그대로 있나 — 줄어든 것도 사고다.
+        foreach (var kind in new[] { "update", "notice", "promo", "etc" })
+        {
+            Assert.True(block.Contains($"\"{kind}\"", StringComparison.Ordinal),
+                $"쓰기 콤보에서 `{kind}` 가 사라졌다 — 사장님 낱말 4종(10/13 설계 §5-1)이 줄었다");
+        }
+    }
 
-        // 🔴 예외가 조용히 늘지 않게 — 2건 그대로여야 한다
-        Assert.Equal(2, knownDifferent.Count);
+    [Fact(DisplayName = "G-W12-3 🔴 서버 허용값 6종 그대로 — 낱말을 고치면서 옛 값을 지우지 않았다 (#1)")]
+    public void G_W12_3_허용값_6종_그대로()
+    {
+        var allowed = BackofficeAllowed();
+
+        foreach (var v in new[] { "promo", "event", LegacyBillingPurpose, "etc", "update", "notice" })
+        {
+            Assert.True(allowed.Contains(v),
+                $"🔴 서버 허용값에서 `{v}` 가 사라졌다 — 이미 그 값으로 앉은 줄을 다시 저장·재전송할 길이 막힌다(#1).");
+        }
+    }
+
+    [Fact(DisplayName = "G-W12-4 🔴 옛 낱말 「요금 안내」가 **낱말 자리**에 0건 — 제목·문장은 과녁 밖")]
+    public void G_W12_4_옛낱말이_낱말자리에_0건()
+    {
+        const string oldWord = "요금 안내";
+
+        // 🔴 과녁을 **낱말이 앉는 자리**로 좁힌다. 작3 G-W11-8 에서 레포 전체를 금지했다가
+        //    「본사 안내를 불러오지 못했습니다」 같은 **문장** 7건이 빨강이 됐다 — 한국어가 깨진다.
+        //    여기서 보는 것은 ①백오피스 낱말표 switch ②옛 값 목록 ③조회 필터 칸, 셋뿐이다.
+        var vocab = StripComments(File.ReadAllText(BackofficeVocabPath()));
+        var page = StripComments(File.ReadAllText(Path.Combine(ErpCsGateDb.RepoRoot(),
+            "src", "HitPan.Backoffice", "Components", "Pages", "Platform", "AdminCsNoticePage.razor")));
+
+        var hits = new List<string>();
+
+        // ① · ② 낱말표와 옛 값 목록 — `=> "…"` / `new("…", "…")` 로 앉는 자리만 본다
+        foreach (var marker in new[] { $"=> \"{oldWord}", $"\"{oldWord}" })
+        {
+            if (vocab.Contains(marker, StringComparison.Ordinal))
+                hits.Add($"CsVocab.cs 에 낱말 「{oldWord}…」이 남아 있다");
+        }
+
+        // ③ 조회 필터 칸 — `legacy` 칸 한 줄
+        var idx = page.IndexOf("\"legacy\"", StringComparison.Ordinal);
+        if (idx > 0)
+        {
+            var lineEnd = page.IndexOf('\n', idx);
+            var line = lineEnd < 0 ? page[idx..] : page[idx..lineEnd];
+            if (line.Contains(oldWord, StringComparison.Ordinal))
+                hits.Add($"AdminCsNoticePage.razor 의 옛 값 필터 칸에 「{oldWord}」이 남아 있다");
+        }
+
+        Assert.True(hits.Count == 0,
+            $"🔴 옛 낱말 「{oldWord}」이 낱말 자리에 남았다 — 직원과 고객이 다른 말을 본다(결-A″):\n  "
+          + string.Join("\n  ", hits.Distinct())
+          + "\n  🔴 쪽지 **제목**(예: 시험의 「구독요금 안내」)과 **문장**은 이 게이트의 과녁이 아니다.");
+    }
+
+    /// <summary>
+    /// Razor 주석(<c>@* *@</c>)·C# 블록 주석·줄 주석을 걷어낸다.
+    /// <para>🔴 왜: 이 트랙에서 **네 번** 밟았다 — 내가 주석에 적은 낱말을 「화면이 쓴다」로 읽어
+    /// 게이트가 거짓 초록(또는 애먼 빨강)이 됐다. 글자를 세는 게이트는 주석을 먼저 벗긴다.</para>
+    /// </summary>
+    private static string StripComments(string text)
+    {
+        var s = System.Text.RegularExpressions.Regex.Replace(
+            text, @"@\*.*?\*@", " ", System.Text.RegularExpressions.RegexOptions.Singleline);
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s, @"/\*.*?\*/", " ", System.Text.RegularExpressions.RegexOptions.Singleline);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"^\s*//.*$", " ",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        return s;
     }
 
     /// <summary>
