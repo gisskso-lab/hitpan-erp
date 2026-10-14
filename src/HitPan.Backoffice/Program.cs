@@ -1,5 +1,6 @@
 using HitPan.Backoffice.Components;
 using HitPan.Backoffice.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using MudBlazor.Services;
@@ -50,6 +51,42 @@ public class Program
                 o.Cookie.SameSite = SameSiteMode.Lax;
                 o.ExpireTimeSpan = TimeSpan.FromHours(8);
                 o.SlidingExpiration = true;
+
+                // ══════════════════════════════════════════════════════════════
+                // 🔴 20261015작11 봉합 (사장님 「백오피스 전체가 죽었잖아!! 즉시 봉합해」)
+                //
+                //   [사고] 백오피스 모든 화면의 조회가 한꺼번에 401. 그런데 화면은 로그인 상태였다.
+                //   [진범] 쿠키는 위 SlidingExpiration 으로 계속 사는데, 그 안에 굳혀 둔
+                //     access_token(JWT)은 로그인 시각 + Jwt:ExpiresHours(8) 에 멈춰 있다.
+                //     API 는 ValidateLifetime=true 로 수명을 본다 ⇒ 8시간 뒤부터
+                //     **화면은 로그인 상태 · 모든 조회는 401**. 갱신 경로가 0건이라 영영 안 풀린다.
+                //   [봉합] 쿠키가 그 안의 JWT 보다 오래 살지 못하게 한다. 죽은 토큰을 든 쿠키는
+                //     버리고 LoginPath 로 보낸다 ⇒ 「401 이 20곳에 뜨는 화면」이 아니라
+                //     「다시 로그인하세요」가 된다.
+                //
+                //   🔴 판정은 BackofficeSessionGuard 에 있다 — 이 람다 안에 두면 게이트가 못 부른다
+                //      (글자 세는 가짜 게이트밖에 안 나온다 · 누적 30회+ 사고). 게이트 G-W14-*.
+                //   🔴 확실할 때만 버린다 — 못 읽는 토큰·exp 없는 토큰은 **판정하지 않는다**.
+                //      멀쩡한 세션을 내 판단 착오로 끊는 쪽이 더 나쁘다.
+                //   ⚠️ 남은 것 = 결재 거리(결-M): 이 봉합은 8시간마다 재로그인을 만든다.
+                //      없애려면 토큰 갱신(refresh) 경로를 만들어야 하고 그건 인증 설계 변경이다.
+                // ══════════════════════════════════════════════════════════════
+                o.Events.OnValidatePrincipal = async ctx =>
+                {
+                    var token = ctx.Principal?.FindFirst("access_token")?.Value;
+                    if (!BackofficeSessionGuard.ShouldDropCookie(token, DateTimeOffset.UtcNow)) return;
+
+                    // #15 — 삼키지 않는다. 왜 끊겼는지 로그에 남는다(토큰 값은 안 적는다).
+                    ctx.HttpContext.RequestServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("BackofficeSessionGuard")
+                        .LogInformation(
+                            "[SessionGuard] 쿠키 안의 토큰이 만료 — 쿠키를 버리고 로그인으로 보낸다 user={User}",
+                            ctx.Principal?.Identity?.Name ?? "(이름없음)");
+
+                    ctx.RejectPrincipal();
+                    await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                };
             });
         builder.Services.AddAuthorization(o =>
         {
