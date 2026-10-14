@@ -69,6 +69,14 @@
     <Compile Include="..\HitPan.Backoffice\Components\Pages\Platform\Components\CsVocab.cs"
              Link="Linked\CsVocab.cs" />
 
+    <!-- 🔴 20261015작11 (G-W14-*) — 「백오피스 전체가 401」 사고의 판정을 **실제로 불러** 잰다.
+         쿠키 안에 굳어 있는 JWT 가 죽었나를 보는 판정이다. Program.cs 람다 안에 두면 게이트가
+         부를 수 없어 글자검사밖에 못 만든다(누적 30회+ 사고) ⇒ 판정을 이 파일로 떼어 뒀다.
+         Blazor·ASP.NET 의존 0 인 순수 C#(System.Text.Json 만) — CsVocab.cs 와 같은 이유·같은 방식.
+         ⚠️ HitPan.Tests 는 HitPan.Backoffice 를 ProjectReference 하지 않는다 ⇒ CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Backoffice\Services\BackofficeSessionGuard.cs"
+             Link="Linked\BackofficeSessionGuard.cs" />
+
     <!-- 🔴 20260928작2 절O (W-1) — 갱신 판정표 RefreshGate.Decide 를 **실제로 불러** 잰다.
          Blazor 의존 없는 순수 C# 이다(그 파일 머리에 적어 뒀다). 글자검사가 아니다. -->
     <Compile Include="..\HitPan.Web\Services\RefreshGate.cs"

@@ -1166,6 +1166,33 @@ jobs:
           #    근거: docs/개발/20261014_개발명세서_작9_결재거리2건.md
           GATES="$GATES|ErpMigrationApplyGate"
 
+          # 🔴🔴 20261015작11 — **「백오피스 전체가 죽었다」 사고 게이트** G-W14-1~8
+          #    (BackofficeSessionGuardGateTests). 사장님 신고: 모든 조회가 401 인데 화면은 로그인 상태.
+          #
+          #    [진범] 쿠키(hitpan_bo)는 SlidingExpiration 으로 계속 사는데, 로그인 때 그 안에
+          #      굳혀 둔 access_token(JWT)은 로그인 시각 + Jwt:ExpiresHours(8) 에 멈춰 있다.
+          #      API 는 ValidateLifetime=true 로 수명을 본다 ⇒ 8시간 뒤부터
+          #      **화면은 로그인 상태 · 모든 조회는 401**. 갱신(refresh) 경로가 0건이라 영영 안 풀린다.
+          #
+          #    [실측 2026-10-15 · 운영 읽기만(#39)] API 살아 있음(401 + WWW-Authenticate: Bearer) ·
+          #      화면 살아 있음(login 200 · admin/tenants 302) ⇒ 서버는 멀쩡하고 **세션만 죽었다.**
+          #
+          #    [음성 대조군 — 봉합을 빼면 실제로 빨강이다 · 4개 전부 실측]
+          #      NC-1 ShouldDropCookie => false        ⇒ G-W14-2·4·5 빨강 (3건)
+          #      NC-2 유예(graceSeconds) 무시           ⇒ G-W14-5 빨강 (1건)
+          #      NC-3 못 읽는 토큰을 Expired 로 판정     ⇒ G-W14-3 빨강 (4건)
+          #      NC-4 Program.cs 배선 제거              ⇒ G-W14-7 빨강
+          #        🔴 NC-4 가 내 게이트의 구멍을 먼저 잡았다: 이름을 OnValidatePrincipalDISABLED_NC4 로
+          #           바꿨는데 Contains("OnValidatePrincipal") 가 **부분일치로 통과**했다
+          #           ⇒ 대입문 모양(`o.Events.OnValidatePrincipal =`)을 정규식으로 보게 고쳤다.
+          #
+          #    🔴 이 게이트는 DB 가 필요 없다(순수 판정 + 소스 읽기) — 그래도 이 잡에 두는 이유는
+          #       한 잡에서 함께 보이게 하려는 것이다. SKIP 이 찍히면 안 돈 것이다(아래 자기점검).
+          #    ⚠️ G-W14-8 은 **갱신 경로가 아직 0건**임을 고정한다. 그 줄이 빨강이 되는 날이
+          #       「8시간마다 재로그인」을 없앨 수 있게 된 날이다(결-M · 사장님 결재 거리).
+          #    근거: docs/검증/선행/20261015_1V_작11_백오피스전체401_세션사망_선행검증서.md
+          GATES="$GATES|BackofficeSessionGuardGate"
+
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
           #    🔴 20260922작3 추가 — **MainPcSealRegistryGate 도 문다**(위 등록).
