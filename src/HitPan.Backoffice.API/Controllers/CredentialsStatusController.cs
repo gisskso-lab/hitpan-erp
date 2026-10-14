@@ -111,10 +111,13 @@ public class CredentialsStatusController : ControllerBase
             Probe("HITPAN_LICENSE_PEPPER",   "License:Pepper",           "라이선스 Pepper"),
             Probe("HITPAN_BIZNO_PEPPER",     "Backoffice:BizNoPepper",   "사업자번호 Pepper"),
             Probe("HITPAN_NTS_API_KEY",      "BizVerify:NtsApiKey",      "국세청 API"),
-            Probe("HITPAN_SMTP_HOST",        "Smtp:Host",                "SMTP Host"),
-            Probe("HITPAN_SMTP_USER",        "Smtp:User",                "SMTP User"),
-            Probe("HITPAN_SMTP_PASS",        "Smtp:Password",            "SMTP Password"),
-            Probe("HITPAN_SMTP_FROM",        "Smtp:From",                "SMTP From"),
+            // 🔴 20261015작B1 갈래 A(G1) — 거짓 초록 봉합. 발송기와 **같은 키만** 본다.
+            //    봉합 전에는 폐기 이름(아래 DeprecatedSmtpEnvNames)을 env-or-config 판정의 첫 인자로
+            //    넘겼고, 그 이름 쪽만 채워도 present=true 가 됐다 ⇒ 화면 초록 · 메일 0통(§4 갈래 A).
+            ProbeSmtp("Smtp:Host",     "SMTP Host"),
+            ProbeSmtp("Smtp:User",     "SMTP User"),
+            ProbeSmtp("Smtp:Password", "SMTP Password"),
+            ProbeSmtp("Smtp:From",     "SMTP From"),
             Probe("HITPAN_TOSS_CLIENT_KEY",  "Toss:ClientKey",           "토스 Client Key"),
             Probe("HITPAN_TOSS_SECRET_KEY",  "Toss:SecretKey",           "토스 Secret Key"),
             Probe("HITPAN_BOOTSTRAP_TOKEN_KEY", "Bootstrap:TokenKey",    "부트스트랩 토큰 키 (백오피스↔ERP 동일)"),
@@ -126,8 +129,76 @@ public class CredentialsStatusController : ControllerBase
             allPresent = checks.All(c => c.Present),
             anyDev = checks.Any(c => c.IsDev),
             checkedAt = DateTime.UtcNow,
+            // 🔴 20261015작B1 갈래 A(G1) — 폐기된 이름이 환경에 들어와 있으면 조용히 넘기지 않고
+            //    "이 이름은 안 먹는다" 를 화면과 로그에 같이 알린다(#15).
+            warnings = DeprecatedSmtpEnvWarnings(),
             items = checks
         });
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 갈래 A(G1) — healthz 거짓 초록 봉합
+    //
+    // [사고] 자격증명 화면이 초록인데 메일은 0통 나갔다. SMTP 4칸을 Probe(envName, configKey, …)
+    //        로 재서 **폐기 이름 HITPAN_SMTP_HOST 하나만** 환경에 있어도 present=true 가 됐는데,
+    //        발송기(Services/EmailSender.cs:51-56)는 Smtp:Host · Smtp:User · Smtp:Password ·
+    //        Smtp:From **만** 읽는다. 화면이 보는 집합 ≠ 발송기가 읽는 집합이었다.
+    //
+    // [정본 이름] Smtp__* — ASP.NET Core 환경변수 구성이 "__" 를 ":" 로 접는다.
+    //             HITPAN_SMTP_* 는 폐기다(매핑 코드 0건이라 아무 데도 연결돼 있지 않았다).
+    //
+    // 🔴 SMTP 외 칸(JWT·Pepper·NTS·Toss·Bootstrap)의 판정은 범위 밖이다 — 기존 Probe 를
+    //    그대로 두고 SMTP 전용 판정을 **더했다**(#1 추가만).
+    //
+    // 근거: docs/운영기록/20261015작B1_배포준비1차수_작업지시서.md §4 갈래 A · §5 G1 행
+    // 게이트: src/HitPan.Tests/Integrity/BackofficeSmtpHealthzParityGateTests.cs
+    // ══════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>폐기된 SMTP 환경변수 이름 — 판정에 쓰지 않고, 들어와 있으면 경고만 낸다.</summary>
+    private static readonly string[] DeprecatedSmtpEnvNames =
+    {
+        "HITPAN_SMTP_HOST", "HITPAN_SMTP_USER", "HITPAN_SMTP_PASS", "HITPAN_SMTP_FROM"
+    };
+
+    /// <summary>
+    /// SMTP 칸 판정 — 발송기와 **같은 구성키만** 본다. 환경변수 이름으로 우회하는 길을 두지 않는다.
+    /// 화면에 내놓는 이름표는 정본 이름(<c>Smtp__Host</c> 꼴)이라, 사장님이 그 이름 그대로 넣으면 바로 먹는다.
+    /// </summary>
+    private CredentialCheck ProbeSmtp(string configKey, string display)
+    {
+        var v = _config[configKey];
+        var present = !string.IsNullOrWhiteSpace(v);
+        var isDev = !present || v!.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase);
+        return new CredentialCheck
+        {
+            Name = display,
+            EnvName = configKey.Replace(":", "__"),   // Smtp:Host → Smtp__Host (정본 이름)
+            Present = present,
+            IsDev = isDev
+        };
+    }
+
+    /// <summary>
+    /// 폐기 이름이 환경에 들어와 있으면 경고 1줄. 값은 절대 담지 않는다 — **이름만** 말한다(#29).
+    /// </summary>
+    private List<string> DeprecatedSmtpEnvWarnings()
+    {
+        var hit = DeprecatedSmtpEnvNames
+            .Where(n => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(n)))
+            .ToList();
+
+        if (hit.Count == 0) return new List<string>();
+
+        _logger.LogWarning(
+            "[CredentialsStatus] 폐기된 SMTP 환경변수 이름이 설정돼 있습니다 — 메일 발송에 반영되지 않습니다. " +
+            "count={Count} names={Names} / 정본 이름은 Smtp__Host · Smtp__User · Smtp__Password · Smtp__From 입니다.",
+            hit.Count, string.Join(", ", hit));
+
+        return new List<string>
+        {
+            $"환경변수 {string.Join(" · ", hit)} 는 더 이상 쓰이지 않습니다(메일 발송에 반영되지 않습니다). " +
+            "SMTP 는 Smtp__Host · Smtp__User · Smtp__Password · Smtp__From 이름으로 저장해야 발송기가 읽습니다."
+        };
     }
 
     private CredentialCheck Probe(string envName, string configKey, string display)

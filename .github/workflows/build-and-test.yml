@@ -1222,6 +1222,13 @@ jobs:
           #       「8시간마다 재로그인」을 없앨 수 있게 된 날이다(결-M · 사장님 결재 거리).
           #    근거: docs/검증/선행/20261015_1V_작11_백오피스전체401_세션사망_선행검증서.md
           GATES="$GATES|BackofficeSessionGuardGate"
+          # 🔴 20261015작B1 갈래 A — G1 「healthz 거짓 초록」. DB 불필요(구성 조립 단위시험 · 실발송 0회)라
+          #    위 `build` 잡 전체 시험에도 들어가지만, 전체 시험 초록은 「이 게이트가 돌았다」의 증거가 아니다
+          #    (이름이 바뀌거나 클래스가 빠져도 초록). 그래서 이 잡의 **이름 목록**으로도 문다.
+          #    음성 대조군(2026-10-15 실측 · 봉합 전 코드): 폐기 이름 HITPAN_SMTP_* 4개만 채웠을 때
+          #      allPresent=true(거짓 초록) ⇒ 6건 중 5건 빨강. 봉합 후 allPresent=false + 경고 1줄 ⇒ 6/6 초록.
+          #    근거: docs/개발/백오피스/20261015_개발명세서_작B1_갈래A_healthz거짓초록.md
+          GATES="$GATES|BackofficeSmtpHealthzParityGate"
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
