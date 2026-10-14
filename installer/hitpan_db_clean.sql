@@ -4932,10 +4932,12 @@ CREATE TABLE `cs_requests` (
   `origin` varchar(10) NOT NULL DEFAULT 'local' COMMENT 'local = 고객(자식계정) 문의 · hq = 본사가 먼저 보낸 안내(DB-144 · 작3 B-1)',
   `hq_status` varchar(10) DEFAULT NULL COMMENT '본사 진행 상태(접수/처리중/보류/완료) — NULL = 본사 미착수 · status 와 다른 축(DB-145 · 작4 B-2)',
   `hq_status_at` datetime(6) DEFAULT NULL COMMENT '본사가 그 상태로 바꾼 시각(UTC) — 뒤로 가는 반영을 막는 근거(DB-145 · 작4 B-2)',
+  `purpose` varchar(20) DEFAULT NULL COMMENT '본사 발신 종류(update/notice/promo/etc/event/billing) — NULL = 작3 이전에 내려온 옛 쪽지(종류를 모른다) · 고객 문의(origin=local)는 늘 NULL (DB-146 · 작3 T-1)',
   PRIMARY KEY (`cs_request_id`),
   KEY `idx_cs_req_tenant` (`tenant_id`,`created_at`),
   KEY `idx_cs_req_status` (`tenant_id`,`status`),
-  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`)
+  KEY `idx_cs_req_origin` (`tenant_id`,`origin`,`created_at`),
+  KEY `idx_cs_req_purpose` (`tenant_id`,`origin`,`purpose`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='CS 쪽지 로컬 원본 — 자식계정 작성 · 부모계정 파이프로 송신(작14 B-2)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

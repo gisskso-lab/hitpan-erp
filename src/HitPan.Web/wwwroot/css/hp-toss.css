@@ -1100,3 +1100,30 @@ textarea:focus-visible {
         padding: var(--hp-space-2) var(--hp-space-4) !important;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   20261014작3 — 공지 「종류별 보기」 칩 줄 (설계 §4-3)
+   · 목록 위 한 줄. 스크롤 없이 보이는 줄 수를 깎지 않으려고 아래 여백을 최소로 둔다.
+   · 숫자를 적지 않는다 — 간격·둥근정도는 토큰만 쓴다(작1 디자인 기준 §7).
+   · MudBlazor 기본 .mud-chip 의 margin 이 칩 사이 틈을 덮으므로 여기서 눕힌다(작1에서 실측).
+   ══════════════════════════════════════════════════════════════ */
+.hp-cs-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--hp-space-2);
+    align-items: center;
+    max-width: 860px;
+    margin-bottom: var(--hp-space-3);
+}
+
+.hp-cs-filter .mud-chip {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    border-radius: var(--hp-radius-full);
+    cursor: pointer;
+}
+
+/* 세로가 짧은 화면에서는 칩 줄이 목록을 밀어내지 않게 아래 여백을 더 줄인다(작1 티어와 같은 기준). */
+@media (max-height: 820px) {
+    .hp-cs-filter { margin-bottom: var(--hp-space-2); }
+}
