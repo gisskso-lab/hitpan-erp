@@ -37,8 +37,10 @@
 | `HITPAN_BO_JWT_SECRET` | JWT 서명 키 | 64자 |
 | `HITPAN_BOOTSTRAP_TOKEN_KEY` | 백오피스→ERP 부트스트랩 서명 키 | 64자 |
 | `HITPAN_BO_MFA_KEY` | MFA(TOTP) AES 키 | 64자 |
-| `BACKOFFICE_License__Pepper` | 시리얼 키 HMAC Pepper | 44자 |
-| `BACKOFFICE_Backoffice__BizNoPepper` | 사업자번호 HMAC Pepper | 44자 |
+| ~~`BACKOFFICE_License__Pepper`~~ → 🔴 **`License__Pepper`** | 시리얼 키 HMAC Pepper | 44자 |
+| ⬅ | 🔴 **20261019작P0 §2 — 왼쪽 취소선 이름은 코드에 닿지 않는다**(실측 2026-10-18 · 접두사 공급자 미등록 ⇒ 설정키가 `BACKOFFICE_License:Pepper` 가 된다). 머리 §정정 블록 참조 | |
+| ~~`BACKOFFICE_Backoffice__BizNoPepper`~~ → 🔴 **`Backoffice__BizNoPepper`** | 사업자번호 HMAC Pepper | 44자 |
+| ⬅ | 🔴 **20261019작P0 §2** — 같은 이유로 닿지 않는다. 🟡 **이 표의 `HITPAN_*` 이름들은 이 차수에서 다시 재지 않았다** — 「맞다」고 읽지 마라 | |
 
 ## 자동 생성된 값
 
@@ -53,8 +55,12 @@ PowerShell 관리자 권한:
 [Environment]::SetEnvironmentVariable("HITPAN_BO_JWT_SECRET", "<값>", "Machine")
 [Environment]::SetEnvironmentVariable("HITPAN_BOOTSTRAP_TOKEN_KEY", "<값>", "Machine")
 [Environment]::SetEnvironmentVariable("HITPAN_BO_MFA_KEY", "<값>", "Machine")
-[Environment]::SetEnvironmentVariable("BACKOFFICE_License__Pepper", "<값>", "Machine")
-[Environment]::SetEnvironmentVariable("BACKOFFICE_Backoffice__BizNoPepper", "<값>", "Machine")
+# 🔴 20261019작P0 §2 — 아래 두 줄은 닿지 않는다. 종전 줄은 지우지 않는다(#1):
+#   [Environment]::SetEnvironmentVariable("BACKOFFICE_License__Pepper", "<값>", "Machine")
+#   [Environment]::SetEnvironmentVariable("BACKOFFICE_Backoffice__BizNoPepper", "<값>", "Machine")
+# 정본은 이것이다:
+[Environment]::SetEnvironmentVariable("License__Pepper", "<값>", "Machine")
+[Environment]::SetEnvironmentVariable("Backoffice__BizNoPepper", "<값>", "Machine")
 ```
 
 또는 `setx` 1회만:

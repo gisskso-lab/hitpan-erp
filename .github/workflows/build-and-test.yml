@@ -1291,6 +1291,10 @@ jobs:
           #           ⇒ 문을 통째로 열면 이 셋이 빨강이 된다
           #    🔴 DB 불필요(정책 평가만) — SKIP 이 찍히면 안 돈 것이다.
           GATES="$GATES|BackofficeOwnerPolicyGate"
+          # 🔴 20261019작P0 §4 — 전달 경로 게이트(사장님 결재 2026-10-19).
+          #   셸을 bash 로 실제로 돌리고(G-P0-1-*), 화면 판정기를 직접 불러 잰다(G-P0-4-*).
+          #   이 잡은 ubuntu-latest 라 bash 가 있다 — 그래서 여기에 둔다.
+          GATES="$GATES|P0DeliveryPathGate"
 
 
 
