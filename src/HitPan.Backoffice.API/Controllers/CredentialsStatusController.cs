@@ -259,8 +259,10 @@ public class CredentialsStatusController : ControllerBase
         }
     }
 
-    private bool IsOwner() =>
-        string.Equals(User.FindFirst("role")?.Value, "owner", StringComparison.OrdinalIgnoreCase);
+    // 🔴 2026-10-18 작B2-A — 종전은 role=="owner" 하나만 봤다. 그 값은 DB enum 에 없어 **발급 불가**였고
+    //   운영 계정(super_admin)이 403 으로 막혔다. 판정을 OwnerClaims 한 자리로 옮긴다(#1 — 종전 식은 아래에 남긴다).
+    //       string.Equals(User.FindFirst("role")?.Value, "owner", StringComparison.OrdinalIgnoreCase);
+    private bool IsOwner() => HitPan.Backoffice.API.Auth.OwnerClaims.IsOwner(User);
 
     private static string Mask(string? v)
     {
