@@ -54,7 +54,7 @@
 
 ### 1-4. demo 로그인 불가(암호화 키 불일치) → DB 초기화
 - 증상: "이메일/비번 틀림" = 실은 `EncryptionService.Decrypt` Padding 실패(키 불일치)
-- **사장님 결정**: demo 데이터 초기화 + 새 부모계정 `master@hitpan.kr` / `Thtnsrms1!`
+- **사장님 결정**: demo 데이터 초기화 + 새 부모계정 `master@hitpan.kr` / `‹비번 제거 2026-10-18 · 교체 대상›`
 - **수행**: hitpan_erp DROP+clean DDL import(121테이블) → tenant+local_company(잠금) 시드 → 부모계정 직접 시드(users+employees+warehouses MAIN+accounts 8계정)
 - **시드 중 정정**: users.role 'tenant_admin'→'TenantAdmin'(UserRole enum 멤버명), emp_type 'regular'(소문자 면역)
 - **진짜 키 규명**: API 키는 `C:\Program Files\HitPan\hitpan-keys.conf`의 ERP_ENCRYPTION_KEY(배치 hitpan-start.bat이 환경변수로 주입). PM 환경변수 키와 달라서 헤맴.
@@ -152,7 +152,7 @@
 | demo DB | hitpan_erp (clean DDL 초기화됨, 121테이블) |
 | 진짜 암호화 키 | `C:\Program Files\HitPan\hitpan-keys.conf` ERP_ENCRYPTION_KEY (권한보호, 관리자만 읽힘) |
 | DB 초기화 전 백업 | `C:\Users\소순근\hitpan-web-live\db-backup\hitpan_erp_before_reset_*.sql` (458MB) |
-| 새 부모계정 | master@hitpan.kr / Thtnsrms1! (tenant=demo-tenant-0001) |
+| 새 부모계정 | master@hitpan.kr / ‹비번 제거 2026-10-18 · 교체 대상› (tenant=demo-tenant-0001) |
 | cloudflared | `C:\cloudflared\config.yml` (demo→5234, api-demo→5257), 서비스 CloudflaredAgent Running |
 | 원래 배치 | `C:\Program Files\HitPan\hitpan-start.bat` (DB·키 env 주입, API를 5234로 띄움=옛 단일구조) |
 

@@ -26,7 +26,14 @@
             <div class="ra-done">
                 <div class="ra-done-icon">✓</div>
                 <h2>신청이 접수되었습니다</h2>
-                <p>가입계약서 초안 PDF를 <b>@_form.Email</b> 로 발송했습니다.</p>
+                @*
+                    🔴 20261015작B1 갈래F(F-1·F-2) — 메일에 관한 문장은 **서버가 말한 그대로** 보여 준다.
+                       여기엔 「발송했습니다」를 글자로 박지 않는다. 박으면 메일이 0통 나가도 화면이 거짓을 말한다.
+                       서버가 아무 말도 안 했으면(널·빈 문장) 단정하지 않는 문장이 선다 — MailNotice() 참조.
+                       🔴 접수 성공 표시(위 ✓ · 「신청이 접수되었습니다」)는 그대로다(#1·#20).
+                *@
+                <p>@MailNotice(_message)</p>
+                <p>신청 이메일 <b>@_form.Email</b></p>
                 <p>본사 검토 후 정식 계약서가 별도로 발송됩니다.</p>
                 @if (!string.IsNullOrEmpty(_applicationId))
                 {
@@ -130,6 +137,23 @@
     private string? _error;
     private string? _applicationId;
 
+    // 🔴 20261015작B1 갈래F(F-1) — 서버가 메일에 대해 말한 문장. 화면이 박아 둔 문장이 아니다.
+    private string? _message;
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261015작B1 갈래F(F-3) — 서버가 아무 말도 안 했을 때 세우는 문장.
+    //
+    //   🔴🔴 여기에 「발송했습니다」로 되돌리면 그 자체가 반려 사유다.
+    //      모를 때는 **단정하지 않는 문장**이 기본값이다. 화면이 모르는 것을 아는 척하면
+    //      메일 0통에도 손님은 메일함을 뒤지다 포기한다(갈래 E·F 가 함께 닫는 거짓).
+    //   [#23] 손님 화면이므로 개발 용어 금지 — 왜 모르는지는 말하지 않는다.
+    // ══════════════════════════════════════════════════════════════════════
+    internal const string MailNoticeUnknown =
+        "가입계약서 초안 메일은 순차 처리됩니다. 잠시 뒤 메일함을 확인해주시고, 메일이 보이지 않으면 partners@hitpan.kr 로 문의해주세요.";
+
+    internal static string MailNotice(string? serverMessage) =>
+        string.IsNullOrWhiteSpace(serverMessage) ? MailNoticeUnknown : serverMessage.Trim();
+
     private async Task HandleSubmit()
     {
         _error = null;
@@ -148,6 +172,10 @@
             if (res.IsSuccessStatusCode && payload is not null && payload.Success)
             {
                 _applicationId = payload.ApplicationId;
+                // 🔴 20261015작B1 갈래F(F-1) — 성공 경로도 payload.Message 를 읽는다.
+                //    예전엔 실패 분기(아래 _error)에서만 읽었다 ⇒ 서버가 「메일은 아직 못 보냈다」고
+                //    말해도 화면은 그 문장을 버리고 박아 둔 「발송했습니다」를 띄웠다.
+                _message = payload.Message;
                 _submitted = true;
             }
             else

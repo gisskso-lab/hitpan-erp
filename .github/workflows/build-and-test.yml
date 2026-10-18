@@ -122,6 +122,36 @@ jobs:
           if [ -n "$MISSING" ]; then echo "::error::목록에 있는데 한 건도 안 돈 게이트:$MISSING"; exit 1; fi
           echo "작1 게이트 전부 실제로 돌았다."
 
+      # 🔴 20261015작B1 갈래 B · G3 — 가입 토큰 평문 로그 봉합(CodeQL 경보 1665 · 진짜 high 1건)을 **이름으로** 문다.
+      #   왜 이 잡인가: DB 가 필요 없다. 실물 LandingSignupController.ConfirmPayment 를 **닫힌 포트**(127.0.0.1:1)로
+      #     돌려 예외 경로를 확정시키고, 그때 남는 로그 문자열에 토큰 원문이 있는지 본다 — 바깥 연결 0.
+      #   🔴 이 게이트는 DbGateEnvironment 를 **쓰지 않는다**. 그래서 이 잡 머리의 HITPAN_GATE_SKIP_OK="1"(:57)에
+      #     걸려 조용히 [SKIP] PASS 로 빠질 길이 없다(그 함정 때문에 짝 게이트 BackofficeMailHistoryGate 는
+      #     이 잡이 아니라 bo-mysql8-gate 잡에 두었다 — PM 교정 2026-10-15).
+      #   위 전체 시험에도 들어 있지만 전체 시험 초록은 「이 게이트가 돌았다」의 증거가 아니다(이름이 바뀌면 초록).
+      #   음성 대조 실측(2026-10-15 로컬 · 개발명세서 §4): MaskToken 을 빼고 원문을 돌려주게 하면
+      #     G-B1-B-6·7·8 이 빨강(로그 문자열에 토큰 원문이 그대로 나타난다).
+      - name: 작B1 게이트 — 가입토큰 평문로그 봉합 (G3 · 목록으로 · 실행 수 확인)
+        shell: bash
+        run: |
+          set -o pipefail
+          GATES="BackofficeSignupTokenLogGateTests"
+          echo "▶ 이 단계가 무는 게이트: $GATES"
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~BackofficeSignupTokenLogGate" \
+            --logger "trx;LogFileName=b1-tokenlog-results.trx" 2>&1 | tee "$RUNNER_TEMP/b1tokenlog.log"
+          TRX=$(find . -name 'b1-tokenlog-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::b1-tokenlog-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          N=$(grep -o 'className="[^"]*\.BackofficeSignupTokenLogGateTests"' "$TRX" | wc -l)
+          echo "  BackofficeSignupTokenLogGateTests : $N 건"
+          if [ "$N" -eq 0 ]; then echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1; fi
+          # 🔴 조용한 SKIP 차단 — 이 게이트는 SKIP 할 길이 없다. 찍히면 과녁이 바뀐 것이다.
+          if grep -q "\[SKIP\] G-B1-B" "$RUNNER_TEMP/b1tokenlog.log"; then
+            echo "::error::G3 게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          echo "작B1 G3 게이트가 SKIP 없이 실제로 돌았다."
+
       # 🔴 20261007작12 2차수 T-6 — **실물 Inno Pascal** 게이트(G-T6-5 · 갈래 ⓑ1).
       #   왜 별 단계인가: Inno 의 LoadStringsFromFile 이 **UTF-8 BOM 파일을 어떤 인코딩으로 읽는지**
       #   아무도 모른다(U1). 틀리면 42자 한글이 고객 설치 화면에서 깨지고 「문구가 닿았다」가 통째로 무너진다.
@@ -1192,6 +1222,77 @@ jobs:
           #       「8시간마다 재로그인」을 없앨 수 있게 된 날이다(결-M · 사장님 결재 거리).
           #    근거: docs/검증/선행/20261015_1V_작11_백오피스전체401_세션사망_선행검증서.md
           GATES="$GATES|BackofficeSessionGuardGate"
+          # 🔴 20261015작B1 갈래 A — G1 「healthz 거짓 초록」. DB 불필요(구성 조립 단위시험 · 실발송 0회)라
+          #    위 `build` 잡 전체 시험에도 들어가지만, 전체 시험 초록은 「이 게이트가 돌았다」의 증거가 아니다
+          #    (이름이 바뀌거나 클래스가 빠져도 초록). 그래서 이 잡의 **이름 목록**으로도 문다.
+          #    음성 대조군(2026-10-15 실측 · 봉합 전 코드): 폐기 이름 HITPAN_SMTP_* 4개만 채웠을 때
+          #      allPresent=true(거짓 초록) ⇒ 6건 중 5건 빨강. 봉합 후 allPresent=false + 경고 1줄 ⇒ 6/6 초록.
+          #    근거: docs/개발/백오피스/20261015_개발명세서_작B1_갈래A_healthz거짓초록.md
+          GATES="$GATES|BackofficeSmtpHealthzParityGate"
+
+          # 🔴 20261015작B1 갈래 C(G4) — ERP 메일 스텁 정직화 게이트.
+          #    DB 가 필요 없다(구성 조립 + 소스 읽기) ⇒ build 잡 Test (Unit + Integration) 가 이미 전량 실행한다.
+          #    그래도 여기 이름으로 한 번 더 물린다 — 「return 으로 조용히 SKIP」 전례(8/28) 때문에
+          #    게이트 이름이 로그에 찍히는 자리를 하나는 가지고 있어야 한다.
+          #    스텁 모드 SendAsync 가 true 를 돌려주면 빨강(= 보내지도 않고 보냈다고 말하는 상태).
+          #    근거: docs/운영기록/20261015작B1_배포준비1차수_작업지시서.md §5 G4
+          GATES="$GATES|ErpMailStubHonestGate"
+          # 🔴 20261015작B1 갈래 D(조건2) — 소스 벗기개 자체의 게이트 (SourceTextStripGateTests · G-B1-D-1~7).
+          #    DB 불필요(순수 문자열). 소스 숫자를 세는 게이트 5곳이 전부 이 벗기개에 기댄다 —
+          #    벗기개가 틀리면 그 5곳이 **빨강도 없이** 거짓 판정으로 돌아간다(「주석을 세는 자리」 6번째 재발).
+          #    근거: docs/검증/백오피스/20261015_작업리뷰서_작B1_배포준비1차수.md §3-② (조건2)
+          GATES="$GATES|SourceTextStripGate"
+
+
+          # 🔴 20261015작B1 갈래 E — 협력업체 신청자에게 **거짓을 말하는 자리** (G-B1-E-1~5 ·
+          #    BackofficeResellerMailTruthGateTests · 작지서 §14 · PM 재결재 §15).
+          #    적발: 발송기는 자격증명 미저장 시 **예외를 던지지 않고 false** 를 돌려주는데 컨트롤러가
+          #      그 bool 을 안 받았다 ⇒ 메일 0통인데 응답이 「이메일로 발송되었습니다」였다.
+          #    과녁은 전부 실물이다 — 격리 DB + 실물 SchemaMigrator(installer/backoffice/*.sql) +
+          #      실물 ResellerApplicationController.Submit + 실물 EmailSender(자격증명 0칸).
+          #      🔴 메일 실발송 0통(붙을 곳이 없다) · 성공 경로만 「보냈다」 대역으로 태운다.
+          #    🔴 반환값을 버렸는지는 **소스를 세지 않고** 두 경로(첨부 있음=SendWithAttachmentAsync ·
+          #      첨부 없음=SendAsync)의 응답 문장으로 잰다 — 한쪽만 받으면 그 경로가 다시 거짓이 된다.
+          #    근거·음성 대조군 전문: docs/개발/백오피스/20261015_개발명세서_작B1_갈래E_손님문구정직화.md §4
+          #
+          # 🔴 20261015작B1 갈래 G(G-5 · 잡-1 · PM 재결재3 §19 판정4) — **이 잡에서 뺐다. 지우지 않고 옮겼다.**
+          #    이 잡은 MariaDB 11.4 다. 백오피스 **운영 판은 MySQL 8** 이고 짝 게이트
+          #    BackofficeMailHistoryGate 는 `bo-mysql8-gate` 에 있다 ⇒ 여기서 재고
+          #    「백오피스를 쟀다」고 말할 수 없었다. 1차 조건4(「bo-mysql8-gate 초록 1회」)도
+          #    G-B1-E-* 를 **안 덮었다**. 옮긴 뒤엔 덮는다.
+          #    새 자리: 아래 `bo-mysql8-gate` 잡 · 단계 이름 「작B1 게이트 — 협력업체 신청자 문구 정직성 (E·G · MySQL 8 판)」
+          # GATES="$GATES|BackofficeResellerMailTruthGate"   ← 옮김(위 근거). 되살리려면 MySQL 8 판인지 먼저 확인해라.
+
+          # 🔴 20261015작B1 갈래F — **손님 화면·메일이 사실을 말하나** G-B1-F-1~5
+          #    (BackofficeResellerScreenTruthGateTests). 갈래 E 가 API 를 정직하게 만들었는데
+          #    화면이 그 문장을 안 읽어 메일 0통에도 「발송했습니다」가 떴다. 메일 본문도 첨부 0건인데
+          #    「첨부된 PDF를 확인해주십시오」라고 말했다.
+          #    [음성 대조군 5건 — 전부 봉합을 빼고 FAIL 을 눈으로 봤다]
+          #      NC-1 성공 경로가 payload.Message 를 안 읽음  ⇒ F-1 빨강
+          #      NC-2 「발송했습니다」를 마크업에 되박음        ⇒ F-2 빨강
+          #      NC-3 기본 문장을 「발송했습니다」로 되돌림      ⇒ F-3·F-2 빨강 (2건)
+          #      NC-4 메일 본문을 고정(첨부된 고정)으로 되돌림  ⇒ F-4·F-5 빨강 (2건)
+          #      NC-5 첨부 본문에서 「첨부된」 삭제            ⇒ F-5 빨강
+          #    🔴 DB 불필요(실물 BuildEmailHtml 호출 + 실물 .razor 읽기) — SKIP 이 찍히면 안 돈 것이다.
+          #    근거: docs/개발/백오피스/20261015_개발명세서_작B1_갈래F_화면문구정직화.md
+          GATES="$GATES|BackofficeResellerScreenTruthGate"
+
+          # 🔴 20261018작B2-A — `/owner/…` 화면 5장이 **누구도 못 들어가는** 상태였다(2026-10-18 실측 P0).
+          #    화면 정책은 role=owner 하나만 요구했는데 platform_admins.role enum 에 owner 가 없다
+          #    (00_backoffice_core.sql:55) ⇒ 그 claim 은 발급될 수 없다(BackofficeAuthController.cs:60).
+          #    정본은 권한표가 이미 적어 뒀다 — 90_seed_permissions.sql:78-85 allowed_roles =
+          #    'owner,platform_owner,super_admin'. 그 세 축을 허용하도록 고쳤다(enum 무접촉).
+          #    🔴 게이트는 정책을 베끼지 않는다 — 제품(Program.cs)이 쓰는 그 메서드
+          #    BackofficePolicies.AddBackofficePolicies 를 불러 **실제 인가 평가**를 돌린다.
+          #    [음성 대조군 — 봉합을 빼고 FAIL 을 눈으로 봤다]
+          #      NC-1 OwnerRoles 에서 super_admin 제거 · OwnerAccountTypes 비움
+          #           ⇒ G-B2A-1(super_admin) · G-B2A-3(platform_owner) **2건 빨강** (2026-10-18 실측)
+          #      G-B2A-4(cs_admin 차단) · G-B2A-5(미인증 차단) · G-B2A-6(대리점이 본사 화면 차단)
+          #           ⇒ 문을 통째로 열면 이 셋이 빨강이 된다
+          #    🔴 DB 불필요(정책 평가만) — SKIP 이 찍히면 안 돈 것이다.
+          GATES="$GATES|BackofficeOwnerPolicyGate"
+
+
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
           # 🔴 20260913작2 정정 — 이제 기기 계열 중 **MainPcRestartMarkGate 는 문다**(임시 DB 권한 실측 · C-3).
@@ -1394,3 +1495,126 @@ jobs:
           if grep -qE "No test matches the given testcase filter" bo-mysql8.log; then
             echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
           fi
+
+      # ══════════════════════════════════════════════════════════════════════
+      # 🔴 20261015작B1 갈래 B · G2 — 메일 발송기록 게이트 (BackofficeMailHistoryGate)
+      #
+      # 왜 **이 잡**인가 (PM 교정 2026-10-15 · §13 확2):
+      #   ① 운영 백오피스는 MySQL 8 이다. `db-gate` 잡은 MariaDB 라 **판이 다르다**.
+      #      이 게이트는 신설 46 번 SQL 을 실물 SchemaMigrator 로 적용하고 표 모양을 묻는다
+      #      ⇒ 운영과 같은 판에서 재야 의미가 있다.
+      #   ② 🔴 `build` 잡에는 **절대 두지 않는다.** 그 잡 머리에 HITPAN_GATE_SKIP_OK="1"(:57) 이 있어
+      #      DbGateEnvironment.SkipOrFailStrict 가 `[SKIP]` 한 줄 찍고 **PASS 로 통과**한다
+      #      (DbGateEnvironment.cs:112-117). 요약에는 안 보인다 = 조용한 초록.
+      #      여기서는 HITPAN_REQUIRE_DB='true' 라 DB 에 못 붙으면 **스킵이 아니라 FAIL** 이다.
+      #
+      # 이 게이트가 지키는 약속:
+      #   · 46 번이 적재기 흐름에 끼어 표가 **실제로 생긴다**(ENGINE=InnoDB · 칸 6종) — G-B1-B-1
+      #   · 자격증명 미설정 발송 1회 → 표에 **실패 1행**(not_configured) — G-B1-B-2
+      #   · SMTP 가 안 붙는 발송 1회 → 표에 **실패 1행**(smtp_error) — G-B1-B-3
+      #   · 성공 행 모양 + 성공 분기 배선 — G-B1-B-4 (§6 ① 2단 중 1단 · 값은 G5 결재 대기)
+      #   · `_ = _email.SendAsync(…)` 버림 잔존 **0건** — G-B1-B-5
+      #
+      # 음성 대조 실측(2026-10-15 로컬 hitpan_trgtest · 개발명세서 §4):
+      #   ⓐ EmailSender 의 RecordAsync 호출 3곳 제거 → 표 0행 ⇒ G-B1-B-2·3·4 FAIL
+      #   ⓑ `_ = _email.SendAsync(…)` 버림 복구 → G-B1-B-5 FAIL
+      # ══════════════════════════════════════════════════════════════════════
+      - name: 작B1 게이트 — 메일 발송기록 (G2 · MySQL 8 판)
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'bomysql8_ci'
+        run: |
+          set -o pipefail
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~BackofficeMailHistoryGate" \
+            --logger "console;verbosity=normal" 2>&1 | tee bo-mailhist.log
+          # 🔴 돈 시험 수를 세서 남긴다 — 「필터가 0건을 골라 조용히 초록」을 막는다.
+          grep -E "Passed!|Failed!|Passed:|Failed:" bo-mailhist.log | tail -3
+          if grep -qE "No test matches the given testcase filter" bo-mailhist.log; then
+            echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
+          fi
+          # 🔴 §13 확2 조건 — 「[SKIP] 없이 돌았다」를 로그가 직접 말해야 한다(8/28 조용한 SKIP 전례).
+          if grep -q "\[SKIP\]" bo-mailhist.log; then
+            echo "::error::게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          echo "작B1 G2 게이트가 SKIP 없이 실제로 돌았다(소요시간은 위 Passed! 줄 참조)."
+
+      # ══════════════════════════════════════════════════════════════════════
+      # 🔴 20261015작B1 갈래 G(G-5 · 잡-1) — 협력업체 신청자 문구 정직성 게이트를
+      #    **db-gate(MariaDB 11.4) 에서 여기로 옮겼다** (PM 재결재3 §19 판정4).
+      #
+      # 왜 옮기나:
+      #   ① 운영 백오피스는 **MySQL 8** 이다. 짝 게이트 BackofficeMailHistoryGate 가 이 잡에 있는데
+      #      같은 영역의 G-B1-E-*·G-B1-G-3 만 MariaDB 에서 돌고 있었다 ⇒ **판이 달랐다.**
+      #   ② 1차 [4] 조건4 의 게시 차단 문장은 「bo-mysql8-gate 초록 1회」다. 옮기기 전엔 그 조건이
+      #      G-B1-E-* 를 **덮지 않았다**. 옮기면 덮는다 — 그래서 「조건4 는 E-* 를 안 덮는다」는
+      #      단서를 작지서에 더하는 대신 **배치를 고쳤다**(§19 판정4).
+      #   ③ 🔴 `build` 잡에는 두지 않는다. 그 잡 머리의 HITPAN_GATE_SKIP_OK="1" 때문에
+      #      DbGateEnvironment.SkipOrFailStrict 가 [SKIP] 한 줄 찍고 **PASS** 한다 = 조용한 초록.
+      #      여기서는 HITPAN_REQUIRE_DB='true' 라 DB 에 못 붙으면 **스킵이 아니라 FAIL** 이다.
+      #
+      # 이 게이트가 무는 것:
+      #   · G-B1-E-1·2·5 — 메일이 안 갔으면 「발송되었습니다」를 말하지 않는다 · 접수는 성공(#20)
+      #   · G-B1-E-3     — 보낸 경로는 종전 문구 그대로(#1)
+      #   · G-B1-E-4     — 첨부 없는 경로(SendAsync)도 반환값을 받는다
+      #   · G-B1-G-3 🆕  — **(첨부 X · 발송 O)** 조합: 초안이 안 붙었는데 「초안이 발송되었습니다」를
+      #                     말하면 FAIL. 그 조합을 무는 게이트가 종전 **0건**이었다(갈래 G · P1-3).
+      #
+      # 🔴 판 확인 — 짝 게이트와 같은 모양으로 **판을 재서 로그에 남기고, MySQL 8 이 아니면 FAIL** 한다.
+      #    MailTruthGateDb 는 스스로 판을 묻지 않으므로(스키마 게이트와 달리) 이 단계가 그 자리를 맡는다.
+      #    글자가 아니라 **SELECT VERSION() 의 실측값**으로 가른다.
+      # ══════════════════════════════════════════════════════════════════════
+      - name: 작B1 게이트 — 협력업체 신청자 문구 정직성 (E·G · MySQL 8 판)
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'bomysql8_ci'
+        run: |
+          set -o pipefail
+          # 🔴 판 확인 — MariaDB 거나 8.x 가 아니면 여기서 멈춘다(게이트 오배치 재발 방지).
+          CID="$(docker ps --filter ancestor=mysql:8.0 --format '{{.ID}}' | head -1)"
+          if [ -z "$CID" ]; then
+            echo "::error::MySQL 8 서비스 컨테이너가 없다 — 이 게이트는 MySQL 8 판에서만 유효하다."; exit 1
+          fi
+          VER="$(docker exec "$CID" mysql -uroot -p"$HITPAN_DB_PASS" -N -B -e "SELECT VERSION()" 2>/dev/null | tr -d '\r')"
+          echo "▶ 재는 판: $VER"
+          case "$VER" in
+            *MariaDB*|*mariadb*)
+              echo "::error::판이 MariaDB 다($VER) — 백오피스 게이트를 여기서 재면 「백오피스를 쟀다」고 말할 수 없다."; exit 1 ;;
+            8.*) : ;;
+            *)
+              echo "::error::MySQL 8 이 아니다($VER)."; exit 1 ;;
+          esac
+
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~BackofficeResellerMailTruthGate" \
+            --logger "console;verbosity=normal" 2>&1 | tee bo-reseller-mail.log
+          # 🔴 돈 시험 수를 세서 남긴다 — 「필터가 0건을 골라 조용히 초록」을 막는다.
+          grep -E "Passed!|Failed!|Passed:|Failed:" bo-reseller-mail.log | tail -3
+          if grep -qE "No test matches the given testcase filter" bo-reseller-mail.log; then
+            echo "::error::필터가 시험을 0건 골랐다 — 게이트가 안 돌았다."; exit 1
+          fi
+          # 🔴 조건17 — 「[SKIP] 없이 돌았다」를 로그가 직접 말해야 한다(8/28 조용한 SKIP 전례).
+          if grep -q "\[SKIP\]" bo-reseller-mail.log; then
+            echo "::error::게이트가 [SKIP] 으로 지나갔다 — 초록을 검증으로 읽지 마라."; exit 1
+          fi
+          # 🔴 몇 건이 돌았나 — G-B1-G-3 을 더했으니 숫자도 센다(한 건이 조용히 빠지는 길 차단).
+          #    딱 4건으로 못 박지 않는다: 나중에 게이트가 늘어도 CI 가 거짓으로 빨강이 되면 안 된다.
+          #    대신 **4건 미만이면 FAIL** — 지금 있는 E-1·2·5 / E-3 / E-4 / G-3 이 빠지는 길을 막는다.
+          PASSED="$(grep -oE "Passed: +[0-9]+" bo-reseller-mail.log | tail -1 | grep -oE "[0-9]+")"
+          echo "▶ 통과한 시험 수: ${PASSED:-0}"
+          if [ "${PASSED:-0}" -lt 4 ]; then
+            echo "::error::E·G 게이트가 4건 미만 돌았다(${PASSED:-0}건). E-1·2·5 / E-3 / E-4 / G-3 중 빠진 게 있다."; exit 1
+          fi
+          echo "작B1 E·G 게이트 4건이 MySQL 8 판에서 SKIP 없이 실제로 돌았다."
