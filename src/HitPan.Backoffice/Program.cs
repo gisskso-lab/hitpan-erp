@@ -88,16 +88,14 @@ public class Program
                     await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                 };
             });
-        builder.Services.AddAuthorization(o =>
-        {
-            o.AddPolicy("PlatformOnlyV2", p => p.RequireAuthenticatedUser()
-                .RequireClaim("account_type", "platform_admin", "platform_owner"));
-            o.AddPolicy("PlatformManagerOrAbove", p => p.RequireAuthenticatedUser()
-                .RequireClaim("account_type", "platform_admin", "platform_owner"));
-            // Owner 전용 (사장님 본인) — 본사 직원 관리·시스템 설정
-            o.AddPolicy("OwnerOnly", p => p.RequireAuthenticatedUser()
-                .RequireClaim("role", "owner"));
-        });
+        // 🔴 2026-10-18 작B2-A — 정책 3종을 BackofficePolicies 한 자리로 옮겼다.
+        //   이유: 게이트가 「정책이 실제로 누구를 통과시키나」를 **불러서** 재야 하고,
+        //   `/owner/…` 5장이 누구도 못 들어가는 상태였어서 그것을 봉합했다(P0 · BackofficePolicies.cs 주석).
+        //   아래 종전 세 줄은 #1 에 따라 지우지 않고 남긴다.
+        //       o.AddPolicy("PlatformOnlyV2", … RequireClaim("account_type", "platform_admin", "platform_owner"));
+        //       o.AddPolicy("PlatformManagerOrAbove", … 같은 조건);
+        //       o.AddPolicy("OwnerOnly", … RequireClaim("role", "owner"));   ← 통과 불가여서 고침
+        builder.Services.AddAuthorization(HitPan.Backoffice.Auth.BackofficePolicies.AddBackofficePolicies);
         builder.Services.AddCascadingAuthenticationState();
 
         // HttpClient — 백오피스 API 호출 (헌법 #35 객체 완전 분리, 사장님 결재 2026-06-04)

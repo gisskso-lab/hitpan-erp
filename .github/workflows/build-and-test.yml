@@ -1277,6 +1277,21 @@ jobs:
           #    근거: docs/개발/백오피스/20261015_개발명세서_작B1_갈래F_화면문구정직화.md
           GATES="$GATES|BackofficeResellerScreenTruthGate"
 
+          # 🔴 20261018작B2-A — `/owner/…` 화면 5장이 **누구도 못 들어가는** 상태였다(2026-10-18 실측 P0).
+          #    화면 정책은 role=owner 하나만 요구했는데 platform_admins.role enum 에 owner 가 없다
+          #    (00_backoffice_core.sql:55) ⇒ 그 claim 은 발급될 수 없다(BackofficeAuthController.cs:60).
+          #    정본은 권한표가 이미 적어 뒀다 — 90_seed_permissions.sql:78-85 allowed_roles =
+          #    'owner,platform_owner,super_admin'. 그 세 축을 허용하도록 고쳤다(enum 무접촉).
+          #    🔴 게이트는 정책을 베끼지 않는다 — 제품(Program.cs)이 쓰는 그 메서드
+          #    BackofficePolicies.AddBackofficePolicies 를 불러 **실제 인가 평가**를 돌린다.
+          #    [음성 대조군 — 봉합을 빼고 FAIL 을 눈으로 봤다]
+          #      NC-1 OwnerRoles 에서 super_admin 제거 · OwnerAccountTypes 비움
+          #           ⇒ G-B2A-1(super_admin) · G-B2A-3(platform_owner) **2건 빨강** (2026-10-18 실측)
+          #      G-B2A-4(cs_admin 차단) · G-B2A-5(미인증 차단) · G-B2A-6(대리점이 본사 화면 차단)
+          #           ⇒ 문을 통째로 열면 이 셋이 빨강이 된다
+          #    🔴 DB 불필요(정책 평가만) — SKIP 이 찍히면 안 돈 것이다.
+          GATES="$GATES|BackofficeOwnerPolicyGate"
+
 
 
           echo "▶ 이 잡이 무는 게이트: $GATES"
