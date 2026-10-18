@@ -103,10 +103,24 @@ public sealed class BackofficeSmtpHealthzParityGateTests
         "Smtp:Host", "Smtp:User", "Smtp:Password", "Smtp:From"
     };
 
-    /// <summary>SMTP 를 뺀 나머지 11칸의 구성키 — healthz 가 묻는 그대로.</summary>
+    /// <summary>
+    /// SMTP 를 뺀 나머지 칸의 구성키 — healthz 가 묻는 그대로.
+    /// <para>🔴 20261019작P0-2·3 교정. 종전 목록은 지우지 않는다(헌법 1번):</para>
+    /// <code>
+    ///   "Jwt:Key", "Backoffice:JwtKey", "License:Pepper", "Backoffice:BizNoPepper",
+    ///   "BizVerify:NtsApiKey", "Toss:ClientKey", "Toss:SecretKey", "Bootstrap:TokenKey"
+    /// </code>
+    /// <para>🔴 그 목록에 틀린 것이 둘 있었다 — 이 게이트는 <b>초록이면서 덜 재고 있었다</b>:</para>
+    /// <list type="bullet">
+    ///   <item><c>Jwt:Key</c> — 읽는 소비자가 레포 전체에 0건. 유령 칸이었고 사장님 결재로 <b>삭제됐다</b>.</item>
+    ///   <item><c>Backoffice:JwtKey</c> — 읽는 소비자가 0건. 실제 백오피스 JWT 는
+    ///     <c>HITPAN_BO_JWT_SECRET</c> → <c>Jwt:Secret</c> 이다(<c>Program.cs:74-76</c>).</item>
+    /// </list>
+    /// <para>⇒ 채워도 아무 칸을 못 움직이는 키를 채우고 있었다. 정본으로 바꿨다.</para>
+    /// </summary>
     private static readonly string[] NonSmtpKeys =
     {
-        "Jwt:Key", "Backoffice:JwtKey", "License:Pepper", "Backoffice:BizNoPepper",
+        "Jwt:Secret", "License:Pepper", "Backoffice:BizNoPepper",
         "BizVerify:NtsApiKey", "Toss:ClientKey", "Toss:SecretKey", "Bootstrap:TokenKey"
     };
 
