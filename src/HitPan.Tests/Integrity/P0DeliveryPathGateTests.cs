@@ -1,0 +1,315 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Security.Claims;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using HitPan.Backoffice.API.Controllers;
+using HitPan.Backoffice.API.Services;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+using Xunit.Sdk;
+
+namespace HitPan.Tests.Integrity;
+
+/// <summary>
+/// 🔴 20261019작P0 — <b>전달 경로 게이트</b>. 작업지시서 <c>20261019작P0_전달경로봉합_작업지시서.md</c> §4.
+///
+/// <para>무엇을 지키나 — 「본사가 만든 자격증명이 서버에 닿는 길」 세 자리:</para>
+/// <list type="bullet">
+///   <item>G-P0-1-* : <c>scripts/deploy-ncp-secrets.sh</c> 가 <b>섞인 대소문자 키를 실제로 적는지</b></item>
+///   <item>G-P0-3-1 : <c>ENV_SECRETS.md</c> 가 닿지 않는 이름을 <b>정정 표시 없이</b> 지시하지 않는지</item>
+///   <item>G-P0-4-* : 자격증명 화면이 <b>소비자와 같은 자리</b>를 보는지 (거짓 초록 금지)</item>
+/// </list>
+///
+/// <para>🔴 <b>글자 단언이 아니다.</b> 셸은 <c>bash</c> 로 실제로 돌리고, 화면 판정은
+/// <c>Probe</c> 를 직접 불러 잰다. 음성 대조군을 건별로 둔다 — 「막는다」가 아니라
+/// 「맞는 것은 통과하고 틀린 것만 막는다」를 재야 게이트다.</para>
+///
+/// <para>🔴 <c>HITPAN_GATE_SKIP_OK</c> 를 쓰지 않는다. 돌 수 없으면 FAIL 이다.</para>
+/// </summary>
+public class P0DeliveryPathGateTests
+{
+    // ── 공통: 레포 뿌리 찾기 ────────────────────────────────────────────────────
+    private static string RepoRoot()
+    {
+        // 🔴 「installer 폴더가 있나」로 찾으면 안 된다 — 시험 산출물 폴더에도 installer 가
+        //   복사돼 들어와서 bin/Release/net8.0 을 뿌리로 잘못 집는다(2026-10-19 실측 FAIL 6건).
+        //   선례(AbsenceGuardTests.RepoRoot)와 같이 src 를 기준으로 찾는다.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !(Directory.Exists(Path.Combine(dir.FullName, "src"))
+                                 && Directory.Exists(Path.Combine(dir.FullName, "scripts"))))
+            dir = dir.Parent;
+        if (dir is null) throw new XunitException("레포 뿌리를 못 찾았다(src + scripts 폴더 기준).");
+        return dir.FullName;
+    }
+
+    private static string ScriptPath() =>
+        Path.Combine(RepoRoot(), "scripts", "deploy-ncp-secrets.sh");
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  G-P0-1 — 비밀 배포 스크립트를 **실제로 돌린다**
+    //
+    //  🔴 스크립트 위쪽에는 root 검사·systemctl 이 있어 시험 기계에서 못 돈다.
+    //    그래서 스크립트가 스스로 표시해 둔 구간(P0GATE-BEGIN ~ P0GATE-END)만 떼어 돌린다.
+    //    🔴 떼어낸 구간은 제품 파일의 그 줄 그대로다 — 시험이 따로 구현한 게 아니다.
+    // ══════════════════════════════════════════════════════════════════════════
+    private const string NewRegex = "^([A-Za-z_][A-Za-z0-9_]*)=(.+)$";
+    private const string OldRegex = "^([A-Z_][A-Z0-9_]*)=(.+)$";
+
+    private static string ExtractGatedBlock()
+    {
+        var text = File.ReadAllText(ScriptPath());
+        var begin = text.IndexOf("# >>> P0GATE-BEGIN", StringComparison.Ordinal);
+        var end = text.IndexOf("# >>> P0GATE-END", StringComparison.Ordinal);
+        if (begin < 0 || end < 0 || end <= begin)
+            throw new XunitException(
+                "deploy-ncp-secrets.sh 의 P0GATE-BEGIN/END 표시가 사라졌다. " +
+                "그 표시는 이 게이트가 제품 코드를 그대로 떼어 돌리는 유일한 연결점이다 — 지우면 안 된다.");
+        return text.Substring(begin, end - begin).Replace("\r\n", "\n");
+    }
+
+    private static string BashExe()
+    {
+        foreach (var c in new[] { "/bin/bash", "/usr/bin/bash", @"C:\Program Files\Git\bin\bash.exe" })
+            if (File.Exists(c)) return c;
+        throw new XunitException("bash 를 못 찾았다. 이 게이트는 셸 스크립트를 실제로 돌려야 의미가 있다.");
+    }
+
+    private static string ToPosix(string path)
+    {
+        if (path.Length > 2 && path[1] == ':')
+            return "/" + char.ToLowerInvariant(path[0]) + path.Substring(2).Replace('\\', '/');
+        return path.Replace('\\', '/');
+    }
+
+    private sealed record ShellRun(int ExitCode, string StdOut, string Written);
+
+    /// <summary>
+    /// 제품 블록을 돌린다. <paramref name="revertSeal"/> 가 true 면 <b>정규식만</b> 종전 모양으로
+    /// 되돌린 사본을 돌린다 — 음성 대조군용이고 <b>제품 파일은 건드리지 않는다</b>.
+    /// </summary>
+    private static ShellRun RunBlock(string secretBody, bool revertSeal = false)
+    {
+        var block = ExtractGatedBlock();
+        if (revertSeal)
+        {
+            var reverted = block.Replace(NewRegex, OldRegex);
+            if (reverted == block)
+                throw new XunitException(
+                    $"되돌릴 자리를 못 찾았다 — 제품 블록에 '{NewRegex}' 가 없다. 봉합이 사라졌거나 모양이 바뀌었다.");
+            block = reverted;
+        }
+
+        var tmp = Directory.CreateTempSubdirectory("p0gate");
+        try
+        {
+            var secretFile = Path.Combine(tmp.FullName, "sec.txt");
+            var outFile = Path.Combine(tmp.FullName, "override.conf");
+            var runner = Path.Combine(tmp.FullName, "run.sh");
+            var utf8 = new UTF8Encoding(false);
+
+            File.WriteAllText(secretFile, secretBody.Replace("\r\n", "\n"), utf8);
+
+            var sh = new StringBuilder();
+            sh.Append("OVERRIDE_FILE=").Append(ToPosix(outFile)).Append('\n');
+            sh.Append("SECRET_FILE=").Append(ToPosix(secretFile)).Append('\n');
+            sh.Append(block);
+            File.WriteAllText(runner, sh.ToString(), utf8);
+
+            var psi = new ProcessStartInfo(BashExe())
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                WorkingDirectory = tmp.FullName,
+                // 🔴 2026-10-19 실측 FAIL 2건 — 이것 없으면 한글 출력이 깨진다.
+                //   윈도우 기본 코드페이지로 읽혀 「등록한 키 개수」가 「?깅줉…」 이 됐다.
+                //   🔴 리눅스 CI 는 기본이 UTF-8 이라 **CI 에서는 통과하고 개발 PC 에서만 깨진다** —
+                //   그 비대칭이 더 위험하다. 양쪽에서 같은 결과를 내도록 못 박는다.
+                StandardOutputEncoding = new UTF8Encoding(false),
+                StandardErrorEncoding = new UTF8Encoding(false)
+            };
+            psi.ArgumentList.Add(ToPosix(runner));
+
+            using var p = Process.Start(psi) ?? throw new XunitException("bash 를 못 띄웠다.");
+            var so = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit(60_000);
+
+            var written = File.Exists(outFile) ? File.ReadAllText(outFile) : "";
+            return new ShellRun(p.ExitCode, so, written);
+        }
+        finally
+        {
+            try { tmp.Delete(true); } catch { /* 시험 임시방이다. 못 지워도 판정에 영향 0 */ }
+        }
+    }
+
+    [Fact(DisplayName = "G-P0-1-1 섞인 대소문자 정본 키가 실제로 override 파일에 적힌다")]
+    public void G_P0_1_1_섞인_대소문자_키가_적힌다()
+    {
+        // 코드가 실제로 읽는 정본 이름들이다(실측 2026-10-18).
+        var run = RunBlock("License__Pepper=aaa\nBackoffice__BizNoPepper=bbb\nSmtp__Host=ccc\n");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains("Environment=\"License__Pepper=", run.Written);
+        Assert.Contains("Environment=\"Backoffice__BizNoPepper=", run.Written);
+        Assert.Contains("Environment=\"Smtp__Host=", run.Written);
+    }
+
+    [Fact(DisplayName = "G-P0-1-2 종전 정규식으로 되돌리면 정본 키가 조용히 떨어진다 (음성 대조군)")]
+    public void G_P0_1_2_봉합을_빼면_떨어진다()
+    {
+        // 🔴 봉합이 실제로 일하고 있다는 증거. 봉합을 빼면 FAIL 한다는 것을 게이트가 스스로 보인다.
+        var run = RunBlock("License__Pepper=aaa\nHITPAN_OLD_STYLE=bbb\n", revertSeal: true);
+
+        Assert.DoesNotContain("License__Pepper", run.Written);   // 🔴 종전엔 조용히 떨어졌다
+        Assert.Contains("HITPAN_OLD_STYLE", run.Written);        // 대문자 키는 그때도 들어갔다
+    }
+
+    [Fact(DisplayName = "G-P0-1-3 모양이 틀린 줄이 있으면 종료코드가 0이 아니고 그 줄을 말한다")]
+    public void G_P0_1_3_안맞는_줄이면_실패한다()
+    {
+        var run = RunBlock("License__Pepper=aaa\n망가진줄\n");
+
+        Assert.NotEqual(0, run.ExitCode);
+        Assert.Contains("건너뛴 줄", run.StdOut);
+        Assert.Contains("망가진줄", run.StdOut);
+    }
+
+    [Fact(DisplayName = "G-P0-1-4 빈 줄·주석만 섞이면 정상 종료한다 (음성 대조군)")]
+    public void G_P0_1_4_주석과_빈줄은_통과한다()
+    {
+        var run = RunBlock("# 주석\n\nLicense__Pepper=aaa\n\n#끝\n");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.DoesNotContain("건너뛴 줄", run.StdOut);
+        Assert.Contains("등록한 키 개수: 1", run.StdOut);
+    }
+
+    [Fact(DisplayName = "G-P0-1-5 출력에 값이 한 글자도 안 찍힌다")]
+    public void G_P0_1_5_값은_안_찍힌다()
+    {
+        const string secret = "ZZtopSecretValue9";
+        var run = RunBlock("License__Pepper=" + secret + "\n");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.DoesNotContain(secret, run.StdOut);      // 🔴 값 금지
+        Assert.Contains("License__Pepper", run.StdOut); // 이름은 말한다
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  G-P0-4 — 자격증명 화면이 **소비자와 같은 자리**를 보는가
+    // ══════════════════════════════════════════════════════════════════════════
+    private static CredentialsStatusController MakeController(params (string Key, string Value)[] cfg)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(cfg.Select(c => new KeyValuePair<string, string?>(c.Key, c.Value)))
+            .Build();
+
+        var owner = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("role", "owner") }, "test"));
+        return new CredentialsStatusController(config, new SilentSender(),
+            NullLogger<CredentialsStatusController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = owner }
+            }
+        };
+    }
+
+    [Fact(DisplayName = "G-P0-4-1 화면이 지시하던 옛 환경변수 이름만 있으면 칸은 빨강이다")]
+    public void G_P0_4_1_옛_이름만으로는_초록이_안_된다()
+    {
+        // 🔴 봉합 전에는 이 상황에서 칸이 초록이었다 — 그래서 「지시대로 넣었는데 설치 500」이 났다.
+        //   이제는 소비자가 읽는 자리(License:Pepper)가 비어 있으므로 빨강이어야 한다.
+        var before = Environment.GetEnvironmentVariable("HITPAN_LICENSE_PEPPER");
+        Environment.SetEnvironmentVariable("HITPAN_LICENSE_PEPPER", "looks-like-a-real-value");
+        try
+        {
+            var c = MakeController();   // 설정에는 License:Pepper 가 없다
+            var check = c.Probe("License:Pepper", "라이선스 Pepper");
+
+            Assert.False(check.Present);
+        }
+        finally { Environment.SetEnvironmentVariable("HITPAN_LICENSE_PEPPER", before); }
+    }
+
+    [Fact(DisplayName = "G-P0-4-2 소비자가 읽는 설정키가 있으면 칸은 초록이다 (음성 대조군)")]
+    public void G_P0_4_2_정본_설정키면_초록이다()
+    {
+        var c = MakeController(("License:Pepper", "real-pepper-value"));
+        var check = c.Probe("License:Pepper", "라이선스 Pepper");
+
+        Assert.True(check.Present);
+        Assert.False(check.IsDev);
+    }
+
+    [Fact(DisplayName = "G-P0-4-3 화면에 보여주는 이름은 설정키에서 기계적으로 만든다")]
+    public void G_P0_4_3_보여주는_이름이_설정키에서_나온다()
+    {
+        var c = MakeController(("License:Pepper", "v"), ("Backoffice:BizNoPepper", "v"));
+
+        Assert.Equal("License__Pepper", c.Probe("License:Pepper", "x").EnvName);
+        Assert.Equal("Backoffice__BizNoPepper", c.Probe("Backoffice:BizNoPepper", "x").EnvName);
+    }
+
+    [Fact(DisplayName = "G-P0-4-4 Probe 와 ProbeSmtp 가 같은 모양이다 — 인자 1개(설정키)")]
+    public void G_P0_4_4_두_판정기가_같은_모양이다()
+    {
+        // 🔴 왜 이걸 재나: 두 판정기가 서로 다른 모양이던 것이 이번 결함의 뿌리였다.
+        //   20261015작B1 이 SMTP 4칸만 ProbeSmtp 로 고치고 나머지 8칸을 그대로 뒀다.
+        const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        var t = typeof(CredentialsStatusController);
+        var probe = t.GetMethod("Probe", Any);
+        var smtp = t.GetMethod("ProbeSmtp", Any);
+
+        Assert.NotNull(probe);
+        Assert.NotNull(smtp);
+        Assert.Equal(smtp!.GetParameters().Length, probe!.GetParameters().Length);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  G-P0-3 — 문서가 닿지 않는 이름을 정정 표시 없이 지시하지 않는다
+    // ══════════════════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-P0-3-1 ENV_SECRETS.md 에 BACKOFFICE_ 가 정정 표시 없이 나오지 않는다")]
+    public void G_P0_3_1_문서가_틀린_이름을_지시하지_않는다()
+    {
+        var path = Path.Combine(RepoRoot(), "docs", "개발", "설치배포", "ENV_SECRETS.md");
+        Assert.True(File.Exists(path), "문서가 없다: " + path);
+
+        var bad = new List<string>();
+        foreach (var raw in File.ReadAllLines(path))
+        {
+            if (!raw.Contains("BACKOFFICE_", StringComparison.Ordinal)) continue;
+
+            // 정정 표시로 인정하는 것: 취소선(~~) · 주석(#) · 설명 문맥(「닿」 · 작P0)
+            var corrected = raw.Contains("~~", StringComparison.Ordinal)
+                         || raw.TrimStart().StartsWith("#", StringComparison.Ordinal)
+                         || raw.Contains("닿", StringComparison.Ordinal)
+                         || raw.Contains("작P0", StringComparison.Ordinal);
+            if (!corrected) bad.Add(raw.Trim());
+        }
+
+        Assert.True(bad.Count == 0,
+            "🔴 닿지 않는 이름을 정정 표시 없이 지시하는 줄이 있다 — 표부터 읽는 사람이 재발시킨다:\n  "
+            + string.Join("\n  ", bad));
+    }
+
+    private sealed class SilentSender : IEmailSender
+    {
+        public Task<bool> SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        public Task<bool> SendWithAttachmentAsync(string toEmail, string subject, string htmlBody,
+            byte[] attachment, string attachmentFileName, string attachmentMimeType, CancellationToken ct = default)
+            => Task.FromResult(false);
+    }
+}

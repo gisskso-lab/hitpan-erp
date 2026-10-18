@@ -104,13 +104,27 @@ public class CredentialsStatusController : ControllerBase
         if (!IsOwner())
             return StatusCode(403, new { success = false, message = "사장님(Owner)만 접근할 수 있습니다." });
 
+        // ══════════════════════════════════════════════════════════════════
+        // 🔴 20261019작P0 §3 — Probe 의 첫 인자(화면에 지시하던 환경변수 이름)를 없앴다.
+        //   종전에 넘기던 이름은 기록으로 남긴다(#1 — 지우지 않는다):
+        //     Jwt:Key                ← HITPAN_JWT_SECRET
+        //     Backoffice:JwtKey      ← HITPAN_BO_JWT_SECRET
+        //     License:Pepper         ← HITPAN_LICENSE_PEPPER
+        //     Backoffice:BizNoPepper ← HITPAN_BIZNO_PEPPER
+        //     BizVerify:NtsApiKey    ← HITPAN_NTS_API_KEY
+        //     Toss:ClientKey         ← HITPAN_TOSS_CLIENT_KEY
+        //     Toss:SecretKey         ← HITPAN_TOSS_SECRET_KEY
+        //     Bootstrap:TokenKey     ← HITPAN_BOOTSTRAP_TOKEN_KEY
+        //   🔴 저 8개 이름 중 코드가 실제로 읽는 것은 **하나도 없다**(실측 2026-10-18,
+        //     서버 /proc/<pid>/environ 로 확인). 그런데 화면은 저것을 넣으라고 지시했다.
+        // ══════════════════════════════════════════════════════════════════
         var checks = new List<CredentialCheck>
         {
-            Probe("HITPAN_JWT_SECRET",       "Jwt:Key",                  "JWT (ERP API)"),
-            Probe("HITPAN_BO_JWT_SECRET",    "Backoffice:JwtKey",        "JWT (백오피스)"),
-            Probe("HITPAN_LICENSE_PEPPER",   "License:Pepper",           "라이선스 Pepper"),
-            Probe("HITPAN_BIZNO_PEPPER",     "Backoffice:BizNoPepper",   "사업자번호 Pepper"),
-            Probe("HITPAN_NTS_API_KEY",      "BizVerify:NtsApiKey",      "국세청 API"),
+            Probe("Jwt:Key",                  "JWT (ERP API)"),
+            Probe("Backoffice:JwtKey",        "JWT (백오피스)"),
+            Probe("License:Pepper",           "라이선스 Pepper"),
+            Probe("Backoffice:BizNoPepper",   "사업자번호 Pepper"),
+            Probe("BizVerify:NtsApiKey",      "국세청 API"),
             // 🔴 20261015작B1 갈래 A(G1) — 거짓 초록 봉합. 발송기와 **같은 키만** 본다.
             //    봉합 전에는 폐기 이름(아래 DeprecatedSmtpEnvNames)을 env-or-config 판정의 첫 인자로
             //    넘겼고, 그 이름 쪽만 채워도 present=true 가 됐다 ⇒ 화면 초록 · 메일 0통(§4 갈래 A).
@@ -118,9 +132,9 @@ public class CredentialsStatusController : ControllerBase
             ProbeSmtp("Smtp:User",     "SMTP User"),
             ProbeSmtp("Smtp:Password", "SMTP Password"),
             ProbeSmtp("Smtp:From",     "SMTP From"),
-            Probe("HITPAN_TOSS_CLIENT_KEY",  "Toss:ClientKey",           "토스 Client Key"),
-            Probe("HITPAN_TOSS_SECRET_KEY",  "Toss:SecretKey",           "토스 Secret Key"),
-            Probe("HITPAN_BOOTSTRAP_TOKEN_KEY", "Bootstrap:TokenKey",    "부트스트랩 토큰 키 (백오피스↔ERP 동일)"),
+            Probe("Toss:ClientKey",           "토스 Client Key"),
+            Probe("Toss:SecretKey",           "토스 Secret Key"),
+            Probe("Bootstrap:TokenKey",       "부트스트랩 토큰 키 (백오피스↔ERP 동일)"),
         };
 
         return Ok(new
@@ -201,17 +215,41 @@ public class CredentialsStatusController : ControllerBase
         };
     }
 
-    private CredentialCheck Probe(string envName, string configKey, string display)
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261019작P0 §3 (사장님 결재 2026-10-19) — 종전 본문은 지우지 않는다(#1):
+    //
+    //   private CredentialCheck Probe(string envName, string configKey, string display)
+    //   {
+    //       var env = Environment.GetEnvironmentVariable(envName);
+    //       var cfg = _config[configKey];
+    //       var v = !string.IsNullOrWhiteSpace(env) ? env : cfg;   // 🔴 둘 중 하나만 있으면 present
+    //       ...
+    //       EnvName = envName,                                     // 🔴 사람에게 보여주는 이름
+    //   }
+    //
+    // 🔴 왜 바꾸나 — 「이름이 다르다」가 아니라 **지시를 따르면 거짓 초록이 만들어졌다**:
+    //   화면은 `HITPAN_LICENSE_PEPPER` 를 넣으라 지시하는데, 소비자 11곳/8컨트롤러는
+    //   `License:Pepper` 를 읽는다. 지시대로 넣으면 env 쪽이 채워져 **칸은 초록**이 되고,
+    //   설치 경로는 **그대로 500** 이다. 화면과 소비자가 서로 다른 자리를 봤다.
+    //
+    // 🔴 이 진단은 새것이 아니다 — 바로 아래 Status() 의 20261015작B1 갈래 A 주석이
+    //   **똑같은 말을 이미 적어 뒀다**. 그때 SMTP 4칸만 ProbeSmtp 로 고치고,
+    //   같은 구조인 나머지 8칸은 그대로 뒀다. 이번 차수가 그 나머지다.
+    //
+    // 🟢 정본 모양은 이 파일의 ProbeSmtp 다 — **설정키 1개**만 받고,
+    //   화면에 보여줄 이름은 설정키에서 **기계적으로** 만든다(사람이 손으로 안 적는다).
+    // ══════════════════════════════════════════════════════════════════════
+    internal CredentialCheck Probe(string configKey, string display)
     {
-        var env = Environment.GetEnvironmentVariable(envName);
-        var cfg = _config[configKey];
-        var v = !string.IsNullOrWhiteSpace(env) ? env : cfg;
+        // 🔴 소비자가 읽는 자리 하나만 본다. 환경변수는 여기서 따로 읽지 않는다 —
+        //   설정 공급자가 이미 `License__Pepper` → `License:Pepper` 로 넣어 준다.
+        var v = _config[configKey];
         var present = !string.IsNullOrWhiteSpace(v);
         var isDev = !present || (v != null && (v.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase) || v == "dev-pepper-2026"));
         return new CredentialCheck
         {
             Name = display,
-            EnvName = envName,
+            EnvName = configKey.Replace(":", "__"),   // License:Pepper → License__Pepper (정본 이름)
             Present = present,
             IsDev = isDev
         };
