@@ -120,11 +120,20 @@ public class CredentialsStatusController : ControllerBase
         // ══════════════════════════════════════════════════════════════════
         var checks = new List<CredentialCheck>
         {
+            // 🔴🔴 유령 칸 — `Jwt:Key` 를 읽는 소비자가 레포 전체에 **0건**이다(실측 2026-10-19).
+            //   이 칸은 처음부터 아무것도 재지 않았다. 지우면 화면이 바뀌므로 PM 이 임의로 못 지운다
+            //   ⇒ 사장님 결재 대기(별건). 그때까지 설정키만 보게 둔다 — 빨강이 사실이다.
             Probe("Jwt:Key",                  "JWT (ERP API)"),
-            Probe("Backoffice:JwtKey",        "JWT (백오피스)"),
+            // 🔴 20261019작P0-2 — 종전 줄은 지우지 않는다(#1):
+            //   Probe("Backoffice:JwtKey",        "JWT (백오피스)"),
+            // 🔴 `Backoffice:JwtKey` 를 읽는 소비자는 레포 전체에 0건이다(실측). 실제 백오피스 JWT 는
+            //   `HITPAN_BO_JWT_SECRET` → `Jwt:Secret` 이다(Program.cs:74-76 · BackofficeAuthController.cs:162).
+            //   🟢 그 키가 없으면 Program.cs:76 이 **기동을 중단**한다 ⇒ 서비스가 떠 있다 = 키가 있다.
+            Probe("Jwt:Secret",               "JWT (백오피스)", "HITPAN_BO_JWT_SECRET"),
             Probe("License:Pepper",           "라이선스 Pepper"),
             Probe("Backoffice:BizNoPepper",   "사업자번호 Pepper"),
-            Probe("BizVerify:NtsApiKey",      "국세청 API"),
+            // 소비자 BizNoVerifyController.cs:70 · LandingSignupController.cs:83 — 환경변수 우선
+            Probe("BizVerify:NtsApiKey",      "국세청 API", "NTS_API_KEY"),
             // 🔴 20261015작B1 갈래 A(G1) — 거짓 초록 봉합. 발송기와 **같은 키만** 본다.
             //    봉합 전에는 폐기 이름(아래 DeprecatedSmtpEnvNames)을 env-or-config 판정의 첫 인자로
             //    넘겼고, 그 이름 쪽만 채워도 present=true 가 됐다 ⇒ 화면 초록 · 메일 0통(§4 갈래 A).
@@ -132,9 +141,11 @@ public class CredentialsStatusController : ControllerBase
             ProbeSmtp("Smtp:User",     "SMTP User"),
             ProbeSmtp("Smtp:Password", "SMTP Password"),
             ProbeSmtp("Smtp:From",     "SMTP From"),
-            Probe("Toss:ClientKey",           "토스 Client Key"),
-            Probe("Toss:SecretKey",           "토스 Secret Key"),
-            Probe("Bootstrap:TokenKey",       "부트스트랩 토큰 키 (백오피스↔ERP 동일)"),
+            // 소비자 TossPaymentsController.cs:47 ResolveEnv — 환경변수 우선
+            Probe("Toss:ClientKey",           "토스 Client Key", "HITPAN_TOSS_CLIENT_KEY"),
+            Probe("Toss:SecretKey",           "토스 Secret Key", "HITPAN_TOSS_SECRET_KEY"),
+            // 소비자 InstallerBootstrapController.cs:275 · LandingPublicController.cs:217 — 환경변수 우선
+            Probe("Bootstrap:TokenKey",       "부트스트랩 토큰 키 (백오피스↔ERP 동일)", "HITPAN_BOOTSTRAP_TOKEN_KEY"),
         };
 
         return Ok(new
@@ -239,17 +250,36 @@ public class CredentialsStatusController : ControllerBase
     // 🟢 정본 모양은 이 파일의 ProbeSmtp 다 — **설정키 1개**만 받고,
     //   화면에 보여줄 이름은 설정키에서 **기계적으로** 만든다(사람이 손으로 안 적는다).
     // ══════════════════════════════════════════════════════════════════════
-    internal CredentialCheck Probe(string configKey, string display)
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261019작P0-2 정정 — 바로 위 차수(작P0 §3)의 내 규칙이 틀렸다.
+    //
+    //   나는 「설정키만 본다」로 통일했다. 그런데 소비자들이 한 모양이 아니다:
+    //     · pepper 2칸  → _config 설정키만 읽는다 (DeviceRegistrationController:56 등)
+    //     · SMTP 4칸    → 발송기도 설정키만 읽는다 (ProbeSmtp 가 맞았다)
+    //     · 🔴 그 밖 4칸 → 환경변수를 **먼저** 보고 없으면 설정
+    //       (BizNoVerifyController:70 · TossPaymentsController:47 · InstallerBootstrapController:275)
+    //   ⇒ 설정키만 보게 하니 env 우선 소비자 쪽이 **거짓 빨강**이 됐다(사장님 실측 6칸).
+    //
+    // 🔴 올바른 규칙은 「설정키만」이 아니다:
+    //      칸은 소비자가 보는 자리를, 소비자와 같은 순서로 본다.
+    //   그래서 envName 을 되살린다 — 단 소비자가 실제로 쓰는 이름만(실측 확인) 넘긴다.
+    //   종전 결함은 env 를 본 것이 아니라 없는 이름을 봤던 것이다
+    //   (화면 HITPAN_JWT_SECRET ↔ 소비자 HITPAN_BO_JWT_SECRET 처럼).
+    // ══════════════════════════════════════════════════════════════════════
+    internal CredentialCheck Probe(string configKey, string display, string? envName = null)
     {
         // 🔴 소비자가 읽는 자리 하나만 본다. 환경변수는 여기서 따로 읽지 않는다 —
         //   설정 공급자가 이미 `License__Pepper` → `License:Pepper` 로 넣어 준다.
-        var v = _config[configKey];
+        // 🔴 소비자와 같은 순서. envName 이 없으면 설정키만 보는 소비자다.
+        var v = envName is null ? null : Environment.GetEnvironmentVariable(envName);
+        if (string.IsNullOrWhiteSpace(v)) v = _config[configKey];
         var present = !string.IsNullOrWhiteSpace(v);
         var isDev = !present || (v != null && (v.StartsWith("DEV-", StringComparison.OrdinalIgnoreCase) || v == "dev-pepper-2026"));
         return new CredentialCheck
         {
             Name = display,
-            EnvName = configKey.Replace(":", "__"),   // License:Pepper → License__Pepper (정본 이름)
+            // 🔴 사람이 서버에 넣어야 할 이름을 말한다 — 소비자가 보는 그 이름이다.
+            EnvName = envName ?? configKey.Replace(":", "__"),
             Present = present,
             IsDev = isDev
         };
