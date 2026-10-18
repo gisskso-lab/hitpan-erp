@@ -24,7 +24,11 @@
          ■ 근거 문서: docs/운영기록/20261014인계4_작9_결재거리2건_PR550_인수인계서.md §6
                       docs/운영기록/20261014일보3_작9_결재거리2건_일일작업보고서.md §5
                       일정표 docs/운영기록/20261014_일정표_ERP고객지원센터_트랙_사장님결재5건.md §3 순 8 · §8 -->
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.11" />
+    <!-- 🔴 20261018작8 (사장님 결재 18 · 2026-10-18) — NU1903 봉합. 종전 줄은 지우지 않는다(#1):
+         <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.11" />
+         🟢 실측 근거: 사장님 손 4번(의존성 경보 Enable) 직후 Dependabot 경보 = high · nuget · 패치판 8.0.32.
+         🔴 위 주석의 「판 올리기 금지」는 결재 18 로 해제됐다. 그 글자는 지우지 않았다. -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.32" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.7" />
     <PackageReference Include="MySqlConnector" Version="2.5.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
@@ -41,7 +45,11 @@
     <!-- 🔴 20261014 메모 — NU1903 권고 꾸러미(둘째). 위 `Components.WebAssembly.Server` 주석과 **같은 축**이다.
          🔴 이 선언은 `HitPan.Application.csproj` 에도 **같은 판으로** 있다 ⇒ 올릴 때 **두 군데를 함께** 올려야 한다
             (한쪽만 올리면 판이 갈려 조용히 낮은 판이 복원된다). 🚫 작8 + 사장님 결재. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <!-- 🔴 20261018작8 (사장님 결재 18 · 2026-10-18) — NU1903 봉합. 종전 줄은 지우지 않는다(#1):
+         <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+         🔴 이 선언은 HitPan.API.csproj 와 HitPan.Application.csproj 두 곳에 있고 같은 판이어야 한다
+            (한쪽만 올리면 판이 갈려 조용히 낮은 판이 복원된다 — 종전 주석의 경고 그대로다). -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="[8.0.1,9.0.0)" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="MailKit" Version="4.16.0" />
