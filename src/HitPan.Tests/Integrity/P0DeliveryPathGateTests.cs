@@ -380,6 +380,61 @@ public class P0DeliveryPathGateTests
             + string.Join("\n  ", bad));
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    //  🔴 20261019작P0-3 — 유령 칸을 영구히 막는다
+    //
+    //  사장님 결재로 `Jwt:Key` 칸을 없앴다. 그런데 **왜 그 칸이 거기 있었는지**를
+    //  아무도 막지 않으면 다음 사람이 또 만든다. 실제로 둘이나 있었다:
+    //    · Jwt:Key           — 읽는 소비자 0건
+    //    · Backoffice:JwtKey — 읽는 소비자 0건 (실제는 Jwt:Secret)
+    //  그 둘은 「빨강」도 「초록」도 뜻이 없는 칸이었고, 사장님이 그걸 보고 판단하셨다.
+    //
+    //  🔴 한계를 적어 둔다: `Jwt:Secret` 은 소비자가 분할 조회한다
+    //    (`GetSection("Jwt")` 다음 `jwt["Secret"]`) ⇒ 설정키 리터럴이 소비자 소스에 없다.
+    //    그래서 「설정키 **또는** env 이름」 중 하나만 있으면 통과로 본다.
+    //    더 조이면 정상 코드를 막는다. 덜 조이면 유령이 다시 산다.
+    // ══════════════════════════════════════════════════════════════════════════
+    [Fact(DisplayName = "G-P0-4-7 모든 칸은 어느 소비자가 실제로 읽는 자리를 가리킨다 (유령 칸 금지)")]
+    public void G_P0_4_7_유령_칸이_없다()
+    {
+        var apiDir = Path.Combine(RepoRoot(), "src", "HitPan.Backoffice.API");
+        var screen = Path.Combine(apiDir, "Controllers", "CredentialsStatusController.cs");
+        var screenText = File.ReadAllText(screen);
+
+        // 주석 줄은 뺀다 — 종전 선언을 주석으로 남기는 것이 이 레포 규칙(헌법 1번)이라
+        // 주석까지 세면 지운 유령이 영원히 살아 있는 것으로 읽힌다.
+        var live = string.Join("\n",
+            screenText.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+        var panels = System.Text.RegularExpressions.Regex
+            .Matches(live,
+                @"Probe(?:Smtp)?\(\s*""([^""]+)""\s*,\s*""[^""]+""(?:\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)"")?\s*\)")
+            .Select(m => (Key: m.Groups[1].Value, Env: m.Groups[2].Success ? m.Groups[2].Value : null))
+            .ToList();
+
+        // 🔴 조용한 통과 금지 — 칸이 10개 미만이면 정규식이 썩은 것이다.
+        Assert.True(panels.Count >= 10,
+            $"칸을 {panels.Count} 개만 찾았다. 정규식이 화면 모양을 못 따라간다 — 게이트가 거짓 초록이 된다.");
+
+        var consumerText = new StringBuilder();
+        foreach (var f in Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories))
+        {
+            if (string.Equals(f, screen, StringComparison.OrdinalIgnoreCase)) continue;
+            consumerText.Append(File.ReadAllText(f));
+        }
+        var consumers = consumerText.ToString();
+
+        var phantom = panels
+            .Where(p => !consumers.Contains(p.Key, StringComparison.Ordinal)
+                     && (p.Env is null || !consumers.Contains(p.Env, StringComparison.Ordinal)))
+            .Select(p => p.Env is null ? p.Key : $"{p.Key} (env {p.Env})")
+            .ToList();
+
+        Assert.True(phantom.Count == 0,
+            "🔴 아무 소비자도 읽지 않는 자리를 가리키는 칸이 있다 — 그 칸의 빨강·초록은 뜻이 없다:\n  "
+            + string.Join("\n  ", phantom));
+    }
+
     private sealed class SilentSender : IEmailSender
     {
         public Task<bool> SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default)
