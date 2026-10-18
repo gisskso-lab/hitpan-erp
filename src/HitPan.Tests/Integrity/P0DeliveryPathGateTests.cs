@@ -261,19 +261,96 @@ public class P0DeliveryPathGateTests
         Assert.Equal("Backoffice__BizNoPepper", c.Probe("Backoffice:BizNoPepper", "x").EnvName);
     }
 
-    [Fact(DisplayName = "G-P0-4-4 Probe 와 ProbeSmtp 가 같은 모양이다 — 인자 1개(설정키)")]
-    public void G_P0_4_4_두_판정기가_같은_모양이다()
+    // 🔴 20261019작P0-2 — G-P0-4-4 를 바꿨다. 종전 단언은 지우지 않고 아래에 남긴다(헌법 1번):
+    //
+    //   [Fact] G_P0_4_4_두_판정기가_같은_모양이다()
+    //       Assert.Equal(smtp.GetParameters().Length, probe.GetParameters().Length);
+    //
+    // 🔴 왜 바꾸나 — 그 단언 자체가 내 틀린 규칙을 굳히고 있었다.
+    //   「두 판정기가 같은 모양이어야 한다」가 아니다. 소비자가 두 모양이기 때문이다
+    //   (설정키만 보는 소비자 / 환경변수를 먼저 보는 소비자). 같은 모양을 강요하면
+    //   env 우선 소비자 쪽이 거짓 빨강이 된다 — 사장님 실측 6칸이 그것이었다.
+    //
+    // 🟢 지켜야 할 진짜 불변식은 이것이다:
+    //      화면이 말하는 환경변수 이름은, 어느 소비자가 실제로 읽는 이름이어야 한다.
+    //   이 단언이면 두 사고를 한꺼번에 막는다 —
+    //     ① 20261015작B1 의 「화면 HITPAN_JWT_SECRET ↔ 소비자 HITPAN_BO_JWT_SECRET」
+    //     ② 20261019작P0 의 내 과잉교정(env 를 통째로 없앤 것)
+    [Fact(DisplayName = "G-P0-4-4 화면이 말하는 환경변수 이름은 실제 소비자가 읽는 이름이다")]
+    public void G_P0_4_4_화면이_말하는_이름이_실재한다()
     {
-        // 🔴 왜 이걸 재나: 두 판정기가 서로 다른 모양이던 것이 이번 결함의 뿌리였다.
-        //   20261015작B1 이 SMTP 4칸만 ProbeSmtp 로 고치고 나머지 8칸을 그대로 뒀다.
-        const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
-        var t = typeof(CredentialsStatusController);
-        var probe = t.GetMethod("Probe", Any);
-        var smtp = t.GetMethod("ProbeSmtp", Any);
+        var apiDir = Path.Combine(RepoRoot(), "src", "HitPan.Backoffice.API");
+        var screen = Path.Combine(apiDir, "Controllers", "CredentialsStatusController.cs");
+        Assert.True(File.Exists(screen), "자격증명 화면 소스가 없다: " + screen);
 
-        Assert.NotNull(probe);
-        Assert.NotNull(smtp);
-        Assert.Equal(smtp!.GetParameters().Length, probe!.GetParameters().Length);
+        // 화면이 Probe 에 넘기는 세 번째 인자(환경변수 이름)를 모은다.
+        var names = System.Text.RegularExpressions.Regex
+            .Matches(File.ReadAllText(screen),
+                @"Probe\(\s*""[^""]+""\s*,\s*""[^""]+""\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)""\s*\)")
+            .Select(m => m.Groups[1].Value)
+            .Distinct()
+            .ToList();
+
+        Assert.NotEmpty(names);   // 하나도 못 찾으면 정규식이 썩은 것이다 — 조용한 통과 금지
+
+        // 소비자 쪽 소스 전부(화면 자신은 뺀다). 화면이 자기를 근거로 삼으면 순환이다.
+        var consumerText = new StringBuilder();
+        foreach (var f in Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories))
+        {
+            if (string.Equals(f, screen, StringComparison.OrdinalIgnoreCase)) continue;
+            consumerText.Append(File.ReadAllText(f));
+        }
+        var consumers = consumerText.ToString();
+
+        var phantom = names.Where(n => !consumers.Contains(n, StringComparison.Ordinal)).ToList();
+        Assert.True(phantom.Count == 0,
+            "🔴 화면이 아무도 읽지 않는 환경변수 이름을 지시한다 — 그 이름을 넣으면 칸만 초록이 되고 기능은 안 된다:\n  "
+            + string.Join("\n  ", phantom));
+    }
+
+    [Fact(DisplayName = "G-P0-4-5 소비자가 읽는 환경변수 이름이면 칸이 초록이다 (env 우선 소비자)")]
+    public void G_P0_4_5_소비자_env_이름이면_초록이다()
+    {
+        // 🔴 작P0-2 정정의 핵심: env 우선 소비자(InstallerBootstrapController:275 등)는
+        //   환경변수만 있어도 실제로 동작한다. 그러면 칸도 초록이어야 한다.
+        const string envName = "HITPAN_BOOTSTRAP_TOKEN_KEY";
+        var before = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "real-bootstrap-key");
+        try
+        {
+            var c = MakeController();   // 설정에는 Bootstrap:TokenKey 가 없다
+            var check = c.Probe("Bootstrap:TokenKey", "부트스트랩", envName);
+
+            Assert.True(check.Present);
+            Assert.Equal(envName, check.EnvName);   // 사람이 넣어야 할 이름을 그대로 말한다
+        }
+        finally { Environment.SetEnvironmentVariable(envName, before); }
+    }
+
+    [Fact(DisplayName = "G-P0-4-6 소비자가 안 읽는 이름을 넣어도 칸은 빨강이다 (음성 대조군)")]
+    public void G_P0_4_6_엉뚱한_이름으로는_초록이_안_된다()
+    {
+        // 🔴 20261015작B1 이 적발한 그 사고 모양 그대로다 — 그럴듯하지만 아무도 안 읽는 이름.
+        // 🔴 2026-10-19 실측: 이 시험이 처음엔 개발 PC 환경에 끌려 실패했다.
+        //   이 PC 에는 진짜 HITPAN_BO_JWT_SECRET 이 깔려 있어서 「빨강이어야 한다」가 초록이 됐다.
+        //   ⇒ 재는 동안 그 이름을 **비워** 결정적으로 만든다. 끝나면 되돌린다.
+        //   환경에 끌리는 게이트는 기계에 따라 결과가 갈려 게이트가 아니다.
+        var wrong = Environment.GetEnvironmentVariable("HITPAN_JWT_SECRET");
+        var real = Environment.GetEnvironmentVariable("HITPAN_BO_JWT_SECRET");
+        Environment.SetEnvironmentVariable("HITPAN_JWT_SECRET", "looks-real-but-nobody-reads-it");
+        Environment.SetEnvironmentVariable("HITPAN_BO_JWT_SECRET", null);
+        try
+        {
+            var c = MakeController();
+            var check = c.Probe("Jwt:Secret", "JWT (백오피스)", "HITPAN_BO_JWT_SECRET");
+
+            Assert.False(check.Present);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HITPAN_JWT_SECRET", wrong);
+            Environment.SetEnvironmentVariable("HITPAN_BO_JWT_SECRET", real);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
