@@ -35,6 +35,10 @@ namespace HitPan.Tests.Integrity;
 /// 둘 다 안 되면 <see cref="DbGateEnvironment.SkipOrFailStrict"/> — 선언 없는 조용한 초록은 못 낸다.
 /// 🔴 로컬 초록은 증거가 아니다. 판별은 <b>소요시간</b>이고, 증거로 올리는 것은 CI <c>db-gate</c> 잡뿐이다.</para>
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — 🟡 이 클래스는 **하네스 경유가 아니다**(:45 는 주석에서만 하네스를
+//    언급한다 · PM 재실측 전제오류 ②). 그래도 직렬화 대상이다 — **같은 격리 DB·전역을 만지기 때문**이다.
+//    Collection 직렬화. 기존 줄 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class BackofficePromotionPricingDbGateTests
 {
     private const string Pepper = "work16-gate-license-pepper";

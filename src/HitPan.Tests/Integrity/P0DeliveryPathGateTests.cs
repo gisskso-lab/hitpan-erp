@@ -35,6 +35,8 @@ namespace HitPan.Tests.Integrity;
 ///
 /// <para>🔴 <c>HITPAN_GATE_SKIP_OK</c> 를 쓰지 않는다. 돌 수 없으면 FAIL 이다.</para>
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — HITPAN_BO_JWT_SECRET 전역 직렬화. 기존 줄 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public class P0DeliveryPathGateTests
 {
     // ── 공통: 레포 뿌리 찾기 ────────────────────────────────────────────────────

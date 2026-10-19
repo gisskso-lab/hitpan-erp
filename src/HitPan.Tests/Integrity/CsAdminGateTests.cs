@@ -15,6 +15,8 @@ namespace HitPan.Tests.Integrity;
 /// ② 답 작성 = 쓴 사람이 승인자(approved_by = 호출자 · 반자동 ②겹의 문)
 /// 표면 정책(PlatformAdmin)은 BackofficeAnonymousAdminApiGateTests 반사 점검이 자동으로 문다.
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — 하네스가 HITPAN_BO_JWT_SECRET 전역을 쓴다. Collection 직렬화. 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class CsAdminGateTests : IDisposable
 {
     private readonly BackofficeRoleGateHarness _h =

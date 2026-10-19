@@ -44,6 +44,9 @@ namespace HitPan.Tests;
 //   G-W11-1·2·4·5·6·7 이 FAIL 한다(토큰없음이 401 대신 200·500, 대리점이 403 대신 통과, 반사 점검이 2건 적발).
 //   되돌림을 원복하면 전건 PASS 로 바뀐다. 「초록불이라서 등록」이 아니다.
 //   음성 대조군(G-W11-8·9)은 되돌림 여부와 무관하게 PASS 였다 — 정당한 익명 경로를 안 막는다는 증거.
+// 🔴 20261019작B2 절 A (G-P0-A-1) — HITPAN_BO_JWT_SECRET 는 프로세스 전역이다. 같은 전역을
+//    세우고 지우는 시험 클래스 11개를 한 Collection 으로 직렬화한다. 기존 줄 삭제 0(#1).
+[Collection(HitPan.Tests.Integrity.BoSignupTenantKeyGateCollection.Name)]
 public class BackofficeAnonymousAdminApiGate : IClassFixture<BackofficeAnonymousAdminApiGate.Factory>
 {
     // 로컬·CI 공통 시험 전용 서명키. Program.cs:54 가 "DEV-" 접두어를 거부하므로 그 모양을 피한다.
