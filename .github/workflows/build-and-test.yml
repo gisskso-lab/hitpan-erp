@@ -1295,6 +1295,22 @@ jobs:
           #   셸을 bash 로 실제로 돌리고(G-P0-1-*), 화면 판정기를 직접 불러 잰다(G-P0-4-*).
           #   이 잡은 ubuntu-latest 라 bash 가 있다 — 그래서 여기에 둔다.
           GATES="$GATES|P0DeliveryPathGate"
+          # 🔴 20261019작B2 절 A — G-P0-A-1 (P0EnvCollectionGateTests).
+          #   HITPAN_BO_JWT_SECRET 는 프로세스 전역이다. 그 전역을 세우고 지우는 시험 클래스가
+          #   11개인데 xUnit 은 클래스를 병렬로 돌린다 ⇒ 한쪽이 지우는 사이 읽은 쪽은
+          #   「값이 없다」로 판정한다. 아무도 안 건드린 코드가 빨강이 되거나 안 재고 초록이 된다.
+          #   🔴 「간헐 빨강 봉합」이 아니다 — 5회 반복 36/36 · CI 797건 미재현. **잠재 제거**다.
+          #   봉합 = 11개를 BoSignupTenantKeyGateCollection(DisableParallelization=true) 으로 직렬화.
+          #   🔴 신설 0건 · 기존 줄 삭제 0건 — 이미 그 Collection 에 든 2개는 무접촉(#1).
+          #   🔴 게이트는 소스 글자를 grep 하지 않는다. 리플렉션으로 실물 속성을 읽는다 —
+          #      [Collection(Xxx.Name)] 처럼 상수를 참조한 줄을 리터럴 grep 이 놓치는 맹점이 없다.
+          #   [음성 대조군 — 봉합을 빼고 FAIL 을 눈으로 봤다 · 2026-10-19 실측]
+          #     NC-1 CsAdminGateTests 의 [Collection] 1줄을 주석 처리
+          #          ⇒ "[Collection] 이 없는 시험 클래스: CsAdminGateTests" **빨강**
+          #     NC-2 CollectionDefinition 에서 DisableParallelization 제거
+          #          ⇒ "DisableParallelization 가 꺼져 있다" **빨강**
+          #   🔴 DB 불필요(리플렉션만) — SKIP 이 찍히면 안 돈 것이다.
+          GATES="$GATES|P0EnvCollectionGate"
 
 
 

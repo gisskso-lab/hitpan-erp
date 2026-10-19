@@ -18,6 +18,8 @@ namespace HitPan.Tests.Integrity;
 /// 컨트롤러는 실물 설정(연결문자열+Pepper)으로 직접 돌린다(S-2 게이트와 같은 방식).
 /// 라우팅·[AllowAnonymous] 표면은 BackofficeAnonymousAdminApiGateTests 가 따로 감시한다(기지 등록).</para>
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — 하네스가 HITPAN_BO_JWT_SECRET 전역을 쓴다. Collection 직렬화. 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class CsInboundGateTests : IDisposable
 {
     private const string Pepper = "gate-pepper-cs-inbound";

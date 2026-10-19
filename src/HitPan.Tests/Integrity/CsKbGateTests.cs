@@ -28,6 +28,8 @@ namespace HitPan.Tests.Integrity;
 /// <item>G-C-9 전화 접수 — 식별정보 모양 거부(음성) · 깨끗한 통화는 1행(양성)</item>
 /// </list>
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — 하네스가 HITPAN_BO_JWT_SECRET 전역을 쓴다. Collection 직렬화. 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class CsKbGateTests : IDisposable
 {
     private readonly BackofficeRoleGateHarness _h =
