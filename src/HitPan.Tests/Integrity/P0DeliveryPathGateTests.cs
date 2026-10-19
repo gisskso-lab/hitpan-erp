@@ -284,9 +284,23 @@ public class P0DeliveryPathGateTests
         Assert.True(File.Exists(screen), "자격증명 화면 소스가 없다: " + screen);
 
         // 화면이 Probe 에 넘기는 세 번째 인자(환경변수 이름)를 모은다.
+        //
+        // 🔴 20261019작B2 절 C — 종전 두 줄은 지우지 않고 아래에 남긴다(헌법 1번):
+        //
+        //   .Matches(File.ReadAllText(screen),
+        //       @"Probe\(\s*""[^""]+""\s*,\s*""[^""]+""\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)""\s*\)")
+        //
+        // 🔴 왜 바꾸나 — 두 군데가 틀려 있었다.
+        //   ① (V-7 · G-P0-C-3) **원문**을 읽어서 주석까지 셌다. 형제 게이트 4-7 은 주석을 벗긴다.
+        //      ⇒ 헌법 1번대로 종전 선언을 주석으로 남기면 4-4 만 **거짓 빨강**이 됐다.
+        //        지금 이 주석 블록 자체가 바로 그 함정이다 — `LiveSource` 로 같은 규칙을 쓴다.
+        //   ② (V-9 확장) `\(\s*""` 라서 **명명된 인자**를 못 읽었다. 형제 게이트와 같은 맹점이고,
+        //      못 읽은 칸은 이 게이트도 통째로 빠져나간다 ⇒ 같은 봉합을 여기에도 넣는다.
         var names = System.Text.RegularExpressions.Regex
-            .Matches(File.ReadAllText(screen),
-                @"Probe\(\s*""[^""]+""\s*,\s*""[^""]+""\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)""\s*\)")
+            .Matches(LiveSource(File.ReadAllText(screen)),
+                @"Probe\(\s*" + OptionalArgName + @"""[^""]+""\s*,\s*"
+                + OptionalArgName + @"""[^""]+""\s*,\s*"
+                + OptionalArgName + @"""([A-Za-z_][A-Za-z0-9_]*)""\s*\)")
             .Select(m => m.Groups[1].Value)
             .Distinct()
             .ToList();
@@ -406,15 +420,39 @@ public class P0DeliveryPathGateTests
         var live = string.Join("\n",
             screenText.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
 
+        // 🔴 20261019작B2 절 C — G-P0-C-3. 위 두 줄은 **한 글자도 손대지 않았다**(헌법 1번 · 삭제 0).
+        //   대신 형제 게이트 4-4 가 쓰는 공용 규칙 `LiveSource` 가 **이것과 똑같은지**를 여기서 문다.
+        //   이 단언이 깨지면 두 게이트의 주석 제거 규칙이 또 갈라진 것이고,
+        //   그때가 바로 4-4 가 거짓 빨강이 되는 순간이다(V-7 사고의 재발).
+        Assert.Equal(live, LiveSource(screenText));
+
+        // 🔴 20261019작B2 절 C(V-9) — 종전 정규식은 지우지 않고 아래에 남긴다(헌법 1번):
+        //
+        //   @"Probe(?:Smtp)?\(\s*""([^""]+)""\s*,\s*""[^""]+""(?:\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)"")?\s*\)"
+        //
+        // 🔴 왜 바꾸나 — `\(\s*""` 로 시작해서 **명명된 인자**(`Probe(configKey: "...")`)를 못 읽었다.
+        //   못 읽은 칸은 `panels` 에 안 담기고 ⇒ 아래 유령 검사를 **통째로 빠져나간다**.
+        //   그게 거짓 초록의 뿌리였다. 바닥값(`>= 10`)은 원인이 아니라 **안 선 안전망**이었다.
         var panels = System.Text.RegularExpressions.Regex
             .Matches(live,
-                @"Probe(?:Smtp)?\(\s*""([^""]+)""\s*,\s*""[^""]+""(?:\s*,\s*""([A-Za-z_][A-Za-z0-9_]*)"")?\s*\)")
+                @"Probe(?:Smtp)?\(\s*" + OptionalArgName + @"""([^""]+)""\s*,\s*"
+                + OptionalArgName + @"""[^""]+"""
+                + @"(?:\s*,\s*" + OptionalArgName + @"""([A-Za-z_][A-Za-z0-9_]*)"")?\s*\)")
             .Select(m => (Key: m.Groups[1].Value, Env: m.Groups[2].Success ? m.Groups[2].Value : null))
             .ToList();
 
         // 🔴 조용한 통과 금지 — 칸이 10개 미만이면 정규식이 썩은 것이다.
         Assert.True(panels.Count >= 10,
             $"칸을 {panels.Count} 개만 찾았다. 정규식이 화면 모양을 못 따라간다 — 게이트가 거짓 초록이 된다.");
+
+        // 🔴 20261019작B2 절 C — G-P0-C-1. 위 `>= 10` 바닥값은 지우지 않고 그대로 둔다(헌법 1번).
+        //   왜 더 조이나 — 바닥값은 **안 선 안전망**이었다. 칸이 11개인데 단언이 `>=10` 이라,
+        //   정규식이 못 읽는 모양(명명된 인자 등)으로 칸을 하나 심어도 11 로 통과했다.
+        //   ⇒ 「정규식이 읽은 칸 수」와 「화면이 실제로 부른 판정기 호출 수」를 **동치**로 묶는다.
+        var probeCount = ProbeCallCount(live);
+        Assert.True(panels.Count == probeCount,
+            $"판정기 호출 {probeCount} 건인데 정규식은 칸 {panels.Count} 건만 읽었다 — "
+            + "못 읽은 호출이 있으면 그 칸은 이 게이트를 통째로 빠져나간다(유령 칸이 산다).");
 
         var consumerText = new StringBuilder();
         foreach (var f in Directory.EnumerateFiles(apiDir, "*.cs", SearchOption.AllDirectories))
@@ -433,6 +471,42 @@ public class P0DeliveryPathGateTests
         Assert.True(phantom.Count == 0,
             "🔴 아무 소비자도 읽지 않는 자리를 가리키는 칸이 있다 — 그 칸의 빨강·초록은 뜻이 없다:\n  "
             + string.Join("\n  ", phantom));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  🔴 20261019작B2 절 C — G-P0-C-3 보조. **4-4 와 4-7 이 같은 주석 제거 규칙을 쓴다.**
+    //
+    //  왜 공용인가 — 종전에는 4-7 만 주석을 벗기고 4-4 는 **원문**을 썼다.
+    //  그래서 「종전 선언을 주석으로 남긴다」(헌법 1번)를 지키면 4-4 가 지운 유령을
+    //  살아 있는 것으로 읽어 **거짓 빨강**이 됐다. 규칙이 한 곳에 있어야 다시 안 갈린다.
+    //  🔴 음성 대조군: 주석 처리된 3-인자 `Probe(` 1건을 심으면 봉합 전에는 4-4 만 FAIL 했다.
+    // ══════════════════════════════════════════════════════════════════════════
+    private static string LiveSource(string text)
+        => string.Join("\n",
+            text.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+
+    //  🔴 20261019작B2 절 C(V-9) — 명명된 인자 접두사(`configKey:` `display:` `envName:`).
+    //    C# 은 `Probe(configKey: "x", display: "y")` 를 똑같이 허용한다. 정규식이 이걸 못 읽으면
+    //    그 칸은 유령 검사를 빠져나간다 ⇒ **인자 이름을 고정하지 않고** 식별자 일반형으로 받는다.
+    private const string OptionalArgName = @"(?:[A-Za-z_][A-Za-z0-9_]*\s*:\s*)?";
+
+    // ══════════════════════════════════════════════════════════════════════════
+    //  🔴 20261019작B2 절 C — G-P0-C-1 보조. 화면이 부른 판정기 호출 수를 센다.
+    //
+    //  🔴 제외 규칙 (이 한 줄이 없으면 CI 즉시 빨강 — 실측 `13 != 11`):
+    //    주석 벗긴 본문의 `Probe(`·`ProbeSmtp(` 등장 13건 중 2건은 **메서드 선언**이다
+    //    (`internal CredentialCheck Probe(...)` · `private CredentialCheck ProbeSmtp(...)`).
+    //    선언은 칸이 아니므로 뺀다 ⇒ 호출 11 == 칸 11.
+    //  🔴 선언을 「줄 번호」나 「2」 같은 상수로 빼지 않는다 — 반환형 토큰으로 가려낸다.
+    //    선언이 하나 늘거나 줄면 이 식이 따라가고, 숫자로 박아 두면 그때 거짓 초록이 된다.
+    // ══════════════════════════════════════════════════════════════════════════
+    private static int ProbeCallCount(string live)
+    {
+        var all = System.Text.RegularExpressions.Regex
+            .Matches(live, @"\bProbe(?:Smtp)?\s*\(").Count;
+        var declarations = System.Text.RegularExpressions.Regex
+            .Matches(live, @"\bCredentialCheck\s+Probe(?:Smtp)?\s*\(").Count;
+        return all - declarations;
     }
 
     private sealed class SilentSender : IEmailSender
