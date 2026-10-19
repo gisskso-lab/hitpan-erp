@@ -1243,6 +1243,22 @@ jobs:
           #    근거: docs/검증/백오피스/20261015_작업리뷰서_작B1_배포준비1차수.md §3-② (조건2)
           GATES="$GATES|SourceTextStripGate"
 
+          # 🔴 20261019작B2 절 ④ — 종단 성적서 판정 게이트 (G-B2-4-1 · G-B2-4-2 ·
+          #    B2EndToEndReportVerdictGateTests). DB 불필요(문서 읽기 + 순수 판정).
+          #    [무는 것] 성적서 추가 절이 ① 「검증팀」 팀명을 전건 병기하는지(C-1~C-3 은 3팀
+          #      동명이의 — 성적서 §6-2-1) ② 검증팀 C-3 = 「미채증」 · 검증팀 C-8 = 「신규·미착수」
+          #      로 적혔는지. 수행 0건인 조건의 **등급 상향**을 막는다.
+          #    🔴 §9-1 교정: 종전 작지서는 검증팀 C-8 을 「부분」으로 적게 했는데, 성적서 :558 은
+          #      「신규 · 미착수」이고 「부분」은 검증팀 C-7(:557)의 등급이었다 ⇒ 폐기.
+          #    [음성 대조군 — 2026-10-19 실측 · 전부 FAIL 을 눈으로 보고 되돌렸다]
+          #      NC-1 닻 없음(봉합 전)         ⇒ G-B2-4-1·2 빨강 「갱신분이 없다 — 여는 닻을 못 찾았다」
+          #      NC-2 팀명 없는 표기 3건        ⇒ G-B2-4-1 빨강. 🔴 내가 쓴 본문에서 실제로 잡혔다
+          #      NC-3 검증팀 C-3 을 「해소」로    ⇒ G-B2-4-2 빨강 Not found: "미채증"
+          #      NC-4 검증팀 C-8 을 「부분」으로  ⇒ G-B2-4-2 빨강 Not found: "신규"
+          #      + G-B2-4-N1·N2 가 검출기·해독기 자신을 합성 표본으로 잰다(가짜 검출기 금지).
+          #    근거: docs/개발/백오피스/20261019_개발명세서_작B2_절4_종단성적서판정.md
+          GATES="$GATES|B2EndToEndReportVerdictGate"
+
 
           # 🔴 20261015작B1 갈래 E — 협력업체 신청자에게 **거짓을 말하는 자리** (G-B1-E-1~5 ·
           #    BackofficeResellerMailTruthGateTests · 작지서 §14 · PM 재결재 §15).
@@ -1294,7 +1310,30 @@ jobs:
           # 🔴 20261019작P0 §4 — 전달 경로 게이트(사장님 결재 2026-10-19).
           #   셸을 bash 로 실제로 돌리고(G-P0-1-*), 화면 판정기를 직접 불러 잰다(G-P0-4-*).
           #   이 잡은 ubuntu-latest 라 bash 가 있다 — 그래서 여기에 둔다.
+          # 🔴 20261019작B2 절 C — G-P0-C-1·C-2·C-3 을 같은 클래스(P0DeliveryPathGateTests)에
+          #   더했다. 위 필터가 클래스 이름으로 무므로 **줄 추가 없이 그대로 돈다** — 신설 잡 0.
+          #   [음성 대조군 — 봉합을 빼고 FAIL 을 눈으로 봤다 (2026-10-19 실측)]
+          #     NC1 선언 2건 제외를 빼면  → G-P0-4-7 「판정기 호출 13 건인데 칸 11 건」 빨강
+          #     NC2 명명된 인자 칸 1건 심으면 → G-P0-4-7 「호출 12 건인데 칸 11 건」 빨강
+          #          (🔴 종전 `>= 10` 단언으로는 심어도 11 로 통과했다 = 음성 대조군이 안 섰다)
+          #     NC3 주석 처리된 3-인자 Probe 1건 심으면 → G-P0-4-4 **만** 빨강(4-7 은 초록)
           GATES="$GATES|P0DeliveryPathGate"
+          # 🔴 20261019작B2 절 A — G-P0-A-1 (P0EnvCollectionGateTests).
+          #   HITPAN_BO_JWT_SECRET 는 프로세스 전역이다. 그 전역을 세우고 지우는 시험 클래스가
+          #   11개인데 xUnit 은 클래스를 병렬로 돌린다 ⇒ 한쪽이 지우는 사이 읽은 쪽은
+          #   「값이 없다」로 판정한다. 아무도 안 건드린 코드가 빨강이 되거나 안 재고 초록이 된다.
+          #   🔴 「간헐 빨강 봉합」이 아니다 — 5회 반복 36/36 · CI 797건 미재현. **잠재 제거**다.
+          #   봉합 = 11개를 BoSignupTenantKeyGateCollection(DisableParallelization=true) 으로 직렬화.
+          #   🔴 신설 0건 · 기존 줄 삭제 0건 — 이미 그 Collection 에 든 2개는 무접촉(#1).
+          #   🔴 게이트는 소스 글자를 grep 하지 않는다. 리플렉션으로 실물 속성을 읽는다 —
+          #      [Collection(Xxx.Name)] 처럼 상수를 참조한 줄을 리터럴 grep 이 놓치는 맹점이 없다.
+          #   [음성 대조군 — 봉합을 빼고 FAIL 을 눈으로 봤다 · 2026-10-19 실측]
+          #     NC-1 CsAdminGateTests 의 [Collection] 1줄을 주석 처리
+          #          ⇒ "[Collection] 이 없는 시험 클래스: CsAdminGateTests" **빨강**
+          #     NC-2 CollectionDefinition 에서 DisableParallelization 제거
+          #          ⇒ "DisableParallelization 가 꺼져 있다" **빨강**
+          #   🔴 DB 불필요(리플렉션만) — SKIP 이 찍히면 안 돈 것이다.
+          GATES="$GATES|P0EnvCollectionGate"
 
 
 

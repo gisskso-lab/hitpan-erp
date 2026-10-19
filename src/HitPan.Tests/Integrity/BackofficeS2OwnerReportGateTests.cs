@@ -29,6 +29,8 @@ namespace HitPan.Tests.Integrity;
 /// <para>DB 없는 로컬 = SKIP 선언 · CI db-gate(HITPAN_REQUIRE_DB)에서는 SKIP 이 곧 FAIL
 /// (<see cref="DbGateEnvironment.SkipOrFailStrict"/> — 하네스 TrySetUpAsync 내장).</para>
 /// </summary>
+// 🔴 20261019작B2 절 A (G-P0-A-1) — 하네스가 HITPAN_BO_JWT_SECRET 전역을 쓴다. Collection 직렬화. 삭제 0(#1).
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class BackofficeS2OwnerReportGateTests : IDisposable
 {
     private const string Pepper = "gate-pepper-s2-owner";

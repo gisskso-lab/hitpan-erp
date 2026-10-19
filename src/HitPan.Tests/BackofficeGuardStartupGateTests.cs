@@ -26,6 +26,8 @@ namespace HitPan.Tests;
 // ── 봉합 전 FAIL 재현 ────────────────────────────────────────────────
 //   Program.cs 의 o.Filters.Add<BoAccessGuard>() 를 지우면 G-14 가 FAIL 한다(ON 줄이 안 나오고 OFF 가 나온다).
 //   G-14음 은 그 전환을 **지우지 않고도** 재현한다(Inspect 에 그 필터가 없는 목록을 준다).
+// 🔴 20261019작B2 절 A (G-P0-A-1) — HITPAN_BO_JWT_SECRET 전역 직렬화. 기존 줄 삭제 0(#1).
+[Collection(HitPan.Tests.Integrity.BoSignupTenantKeyGateCollection.Name)]
 public class BackofficeGuardStartupGate : IClassFixture<BackofficeGuardStartupGate.Factory>
 {
     private readonly Factory _factory;
