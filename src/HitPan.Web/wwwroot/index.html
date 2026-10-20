@@ -163,6 +163,37 @@
             }, 1000);
         };
 
+        // 세금계산서 「인쇄」 — 같은 PDF 를 인쇄창까지 (20261021작 절 C-3)
+        //   되돌아갈 길 2단: ① 새 창으로 열기(열람기 인쇄 단추) ② 내려받기.
+        //   🔴 숨은 액자(iframe) 경로는 쓰지 않는다 — 서버가 모든 응답에
+        //     X-Frame-Options: DENY 를 붙인다(API Program.cs). 액자에 들어가는 것부터 막힌다.
+        //   🔴 window.print() 로는 되돌아가지 않는다 — 그러면 화면 사진이 다시 나간다.
+        //   돌려주는 값 = 어느 길로 갔나('window' | 'download' | 'failed').
+        window.hitpan.printPdf = function (url) {
+            try {
+                var w = window.open(url, '_blank');
+                if (w) {
+                    // 연 창이 이쪽 창을 되짚지 못하게 끊는다(주소에 일회용 열쇠가 들어 있다).
+                    try { w.opener = null; } catch (e1) { }
+                    return 'window';
+                }
+            } catch (e2) {
+                if (window.console && window.console.warn) {
+                    window.console.warn('[hitpan] 새 창 열기 실패 — 내려받기로 간다.', e2);
+                }
+            }
+
+            try {
+                window.hitpan.openFile(url);
+                return 'download';
+            } catch (e3) {
+                if (window.console && window.console.warn) {
+                    window.console.warn('[hitpan] 내려받기도 막혔다.', e3);
+                }
+            }
+            return 'failed';
+        };
+
         // 네비게이션 앱 딥링크 + 웹 폴백
         window.hitpan.openNavi = function (deepLink, webUrl) {
             var iframe = document.createElement('iframe');

@@ -283,13 +283,31 @@
 
     private async Task PrintAsync()
     {
-        // 브라우저 인쇄 — 선택이 없으면 화면 전체, 있으면 첫 건 상세 후 인쇄.
+        // 🔴 20261021작 절 C-4 — 종전에는 화면을 그대로 찍어(Js "print") 「거래처 검색」 같은
+        //   화면 글자가 종이에 나갔다. 이제 「PDF」·「이메일」과 같은 PDF 를 인쇄창까지 보낸다.
         var selected = _items.Where(x => x.IsChecked).ToList();
-        if (selected.Count == 1)
+        if (selected.Count == 0)
         {
-            await OpenDetailAsync(selected[0]);
+            Snackbar.Add("인쇄할 계산서를 선택해주세요.", Severity.Warning);
+            return;
         }
-        await Js.InvokeVoidAsync("print");
+
+        foreach (var item in selected)
+        {
+            var route = await DocService.PrintPdfAsync("tax-invoice", item.DeliveryId);
+            if (route == "window")
+            {
+                Snackbar.Add("새 창에 계산서를 열었습니다. 열린 창에서 인쇄해 주세요.", Severity.Info);
+            }
+            else if (route == "download")
+            {
+                Snackbar.Add("계산서를 내려받았습니다. 받은 파일을 열어 인쇄해 주세요.", Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add("계산서 창을 열지 못했습니다. 「PDF」로 내려받아 인쇄해 주세요.", Severity.Warning);
+            }
+        }
     }
 
     private async Task ExcelAsync()
@@ -302,7 +320,8 @@
         }
         foreach (var item in selected)
         {
-            await DocService.DownloadExcelAsync("delivery", item.DeliveryId);
+            // 🔴 20261021작 절 A — 종전에는 "delivery" 라서 거래명세서 서식이 나왔다.
+            await DocService.DownloadExcelAsync("tax-invoice", item.DeliveryId);
         }
     }
 
@@ -316,7 +335,8 @@
         }
         foreach (var item in selected)
         {
-            await DocService.DownloadPdfAsync("delivery", item.DeliveryId);
+            // 🔴 20261021작 절 C-4 — 종전에는 "delivery" 라서 거래명세서 서식이 나왔다.
+            await DocService.DownloadPdfAsync("tax-invoice", item.DeliveryId);
         }
     }
 

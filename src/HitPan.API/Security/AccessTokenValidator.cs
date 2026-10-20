@@ -73,7 +73,13 @@ public sealed class AccessTokenValidator
     /// 다운로드 전용 강화 검증: 토큰 타입='download' + 최대 수명 2시간 + 문서 ID 바인딩 필수.
     /// URL 공유 위험을 차단하기 위해 일반 access 토큰은 거부한다.
     /// </summary>
-    public ClaimsPrincipal? ValidateDownloadToken(string? token, string documentId)
+    /// <param name="documentType">
+    /// 🔴 20261021작 — 문서 종류 바인딩. 값을 주면 발급 때 넣어 둔 <c>doc_type</c> 과 같아야 한다.
+    /// 종전에는 이 칸을 검사하지 않았다. 이번 차수가 거래명세서와 세금계산서의 <b>id 를 같게</b>
+    /// 만들어, 거래명세서 토큰으로 세금계산서를 받아 갈 수 있게 된다 ⇒ 그 구멍을 메우고 간다.
+    /// 값을 안 주면 종전 그대로 검사하지 않는다(#1 — 기존 호출자 무영향).
+    /// </param>
+    public ClaimsPrincipal? ValidateDownloadToken(string? token, string documentId, string? documentType = null)
     {
         var principal = ValidateAccessToken(token);
         if (principal is null) return null;
@@ -89,6 +95,17 @@ public sealed class AccessTokenValidator
         if (string.IsNullOrEmpty(boundDocId) || !string.Equals(boundDocId, documentId, StringComparison.Ordinal))
         {
             return null;
+        }
+
+        // 🔴 문서 종류 바인딩 검증 — 같은 id 를 쓰는 다른 종류의 종이를 받아 가지 못하게 한다.
+        if (!string.IsNullOrEmpty(documentType))
+        {
+            var boundDocType = principal.FindFirst("doc_type")?.Value;
+            if (string.IsNullOrEmpty(boundDocType) ||
+                !string.Equals(boundDocType, documentType, StringComparison.Ordinal))
+            {
+                return null;
+            }
         }
 
         // 최대 수명 2시간 강제 (exp - iat ≤ 7200초)

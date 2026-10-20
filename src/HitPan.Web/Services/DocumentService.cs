@@ -31,6 +31,22 @@ public class DocumentService
     }
 
     /// <summary>
+    /// 같은 PDF 를 인쇄창까지 보낸다 (20261021작 절 C-3).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 화면을 찍지 않는다 — 「인쇄」·「PDF」·「이메일」이 <b>같은 PDF</b> 를 쓴다.
+    /// 서버는 <c>?disposition=inline</c> 일 때만 바로 열리게 돌려준다(기본은 내려받기).
+    /// 돌려주는 값은 <b>어느 길로 갔나</b> 다 — <c>window</c>(새 창) · <c>download</c>(내려받기) ·
+    /// <c>failed</c>. 화면은 이 값으로 고객에게 다음 할 일을 알려 준다.
+    /// </remarks>
+    public async Task<string> PrintPdfAsync(string docType, string docId)
+    {
+        var url = await BuildDocumentUrlAsync(docType, docId, "pdf");
+        var inlineUrl = url.Contains('?') ? $"{url}&disposition=inline" : $"{url}?disposition=inline";
+        return await _js.InvokeAsync<string>("hitpan.printPdf", inlineUrl);
+    }
+
+    /// <summary>
     /// 다운로드 URL 생성 — 보안 정책:
     /// 1) 서버에 POST /documents/{type}/{id}/download-token 요청
     /// 2) 서버가 2시간 유효 + doc_id 바인딩된 전용 토큰 발급
