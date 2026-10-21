@@ -467,24 +467,204 @@ public class TaxInvoicePdfRenderGuardTests
     }
 
     /// <summary>
-    /// 🔴 벌이 하나뿐이면(<c>supplier</c>·<c>recipient</c>) 절취선도 쪽 나눔도 없다 —
-    /// 쪽 나눔 봉합이 <b>한 벌 경로를 안 건드렸는지</b> 지킨다.
+    /// 🔴 벌이 하나뿐이면(<c>supplier</c>·<c>recipient</c>) 절취선도 「외 N건」도 없다 —
+    /// <b>품목이 적으면</b> 한 장에 다 들어간다.
     /// </summary>
+    /// <remarks>
+    /// 🔴🔴 <b>T-5 — 이름과 단언의 범위를 좁혔다</b>([4] 2차 N-2 봉합 · 20261021작 §17).
+    /// 종전 이름은 「한 벌만 낼 때는 <b>쪽을 안 나눈다</b>」, 단언은 「<b>늘</b> 1쪽」이었고
+    /// 입력은 <c>MakeSnapshot(3)</c> <b>3줄 하나로 고정</b>이었다. T-2(이어쓰기) 뒤에는 그
+    /// 일반화가 <b>거짓</b>이다 — 실측 <c>recipient</c> 40줄 <b>2쪽</b> · 100줄 <b>3쪽</b>.
+    /// <para>
+    /// 🔴 <b>집행 전에 재서 보았다</b>: 종전 단언에 <c>InlineData(80)</c> 을 넣으니 <b>4건 빨강</b>.
+    /// 제품이 틀려서가 아니라 <b>시험의 전제</b>가 틀려서다. 빨개지는 것을 보고 고쳤다(T-4 와 같은 순서).
+    /// </para>
+    /// 🔴 <b>단언을 지우지 않았다</b>(#1) — <b>품목이 적은 축</b>에만 남기고, 많은 축은 다음 시험이 받는다.
+    /// </remarks>
     [Theory]
-    [InlineData("supplier", false)]
-    [InlineData("recipient", false)]
-    [InlineData("supplier", true)]
-    [InlineData("recipient", true)]
-    public void 한_벌만_낼_때는_쪽을_안_나눈다(string copyMode, bool showTearLine)
+    [InlineData("supplier", false, 1)]
+    [InlineData("recipient", false, 1)]
+    [InlineData("supplier", true, 1)]
+    [InlineData("recipient", true, 1)]
+    [InlineData("supplier", false, 3)]
+    [InlineData("recipient", false, 3)]
+    [InlineData("supplier", true, 3)]
+    [InlineData("recipient", true, 3)]
+    [InlineData("supplier", false, 30)]
+    [InlineData("recipient", false, 30)]
+    [InlineData("supplier", true, 30)]
+    [InlineData("recipient", true, 30)]
+    public void 한_벌만_낼_때_품목이_적으면_한_장이다(string copyMode, bool showTearLine, int lineCount)
     {
         var svc = MakeService();
-        var pdf = Render(svc, MakeSnapshot(3), MakeCompany(), copyMode, 10f, showTearLine);
-        Dump($"one-{copyMode}-tear{showTearLine}.pdf", pdf);
+        var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), copyMode, 10f, showTearLine);
+        Dump($"one-small-{copyMode}-tear{showTearLine}-{lineCount}lines.pdf", pdf);
         Assert.Equal(1, CountPages(pdf));
         // 🔴 벌이 하나뿐이면 「한 장에 모으기」 설정은 아무 일도 하지 않는다 —
         //   품목도 그대로 다 나온다(상한이 안 걸린다).
-        Assert.Equal(3, Occurrences(string.Concat(PageTexts(pdf)), LineMarker));
+        Assert.Equal(lineCount, Occurrences(string.Concat(PageTexts(pdf)), LineMarker));
     }
+
+    /// <summary>
+    /// 🔴🔴 <b>T-5 (N-2 봉합) — 벌이 하나여도 품목이 많으면 이어 찍는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 20261021작 <b>§15-7 이 글자로 지시한 대조군 ⓔⓕ</b> 다 — ⓔ <c>recipient</c> 단일 + 80줄
+    /// → 품목 0줄 쪽 0건 · 품목 합계 = 입력 줄 수 / ⓕ <c>supplier</c> 단일도 같게.
+    /// <b>그 축이 게이트에 0건이었다</b>([4] 2차 N-2). 제품은 맞는데 <b>게이트가 안 지키고 있었다</b>
+    /// ⇒ 다음 사람이 단일 벌 이어쓰기를 깨도 전건 초록이 났다.
+    /// <para>
+    /// 🔴 벌이 하나이므로 품목 합계는 <b>입력 × 1</b> 이고, 쪽마다 머리가 <b>꼭 하나</b>다.
+    /// 머리 없는 쪽이 생기면 그것이 <b>앞 벌의 꼬리 조각</b>이다(<c>AssertNoCopyFragment</c>).
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("supplier", false, 40)]
+    [InlineData("recipient", false, 40)]
+    [InlineData("supplier", true, 40)]
+    [InlineData("recipient", true, 40)]
+    [InlineData("supplier", false, 80)]
+    [InlineData("recipient", false, 80)]
+    [InlineData("supplier", true, 80)]
+    [InlineData("recipient", true, 80)]
+    [InlineData("supplier", false, 100)]
+    [InlineData("recipient", false, 100)]
+    [InlineData("supplier", true, 100)]
+    [InlineData("recipient", true, 100)]
+    public void 한_벌만_낼_때_품목이_많으면_이어_찍는다(string copyMode, bool showTearLine, int lineCount)
+    {
+        var svc = MakeService();
+        var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), copyMode, 10f, showTearLine);
+        Dump($"one-many-{copyMode}-tear{showTearLine}-{lineCount}lines.pdf", pdf);
+
+        var pages = PageTexts(pdf);
+        var where = $"{copyMode} · 한장모으기 {showTearLine} · 품목 {lineCount}줄 · 여백 10mm";
+
+        // 🔴 ⓔⓕ 그대로 — 벌이 하나이므로 품목 합계는 입력 × 1. 한 줄도 사라지지 않는다.
+        Assert.Equal(lineCount, Occurrences(string.Concat(pages), LineMarker));
+
+        // 🔴 머리 없는 쪽 0 · 품목 0줄 쪽 0 (어제의 반려 모양이 단일 벌에서 나는지)
+        AssertNoCopyFragment(pages, where);
+
+        // 🔴 벌이 하나뿐이므로 쪽마다 머리는 꼭 하나다 — 둘이면 벌이 복제된 것이다.
+        var heads = CopyHeadsPerPage(pages);
+        Assert.All(heads, n => Assert.True(n == 1,
+            $"벌이 하나인데 한 쪽에 머리가 {n}개다. {where} / [{string.Join(",", heads)}]"));
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>T-7 (N-3 봉합) — 여백을 어떻게 줘도 조각이 나지 않고, 종이는 반드시 나온다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>[4] 2차까지 아무도 안 잰 축이다.</b> 1·2차 검증과 종전 게이트는 여백을
+    /// <b>10·20mm 두 값</b>으로만 쟀다. 폴백 경계를 재다가 드러난 실측(품목 1·3·40·80·100줄 × 0~120mm):
+    /// <list type="bullet">
+    /// <item>🔴 <b>여백 40~60mm</b> — 재는 쪽은 들어간다고 답하는데 깔면 넘쳐
+    ///   <c>1/33, 0/0, 1/7</c>(머리 없는 쪽 + 품목 0줄 쪽) ⇒ <b>어제의 반려 모양 그대로</b></item>
+    /// <item>🔴 <b>80mm 이상</b> — <c>DocumentLayoutException</c> ⇒ <b>종이가 아예 안 나온다</b></item>
+    /// </list>
+    /// 그리고 <b>고객이 그 값을 넣을 수 있었다</b> — 편집창 여백 4칸에 상·하한이 <b>없었고</b>
+    /// DTO 는 <c>Range(0, 100)</c> 이었다. ⇒ 셋을 같이 조였다(화면 <c>Max=30</c> ·
+    /// DTO <c>Range(0, 30)</c> · 그리는 쪽 <c>ClampTaxInvoiceMargin</c>).
+    /// 🔴 <b>고객이 저장한 값은 안 지운다</b> — 그릴 때만 조인다.
+    /// <para>
+    /// 🔴 이 시험은 <b>조인 뒤의 참</b>을 잰다 — 40·60·100mm 를 줘도 조각 0 · 예외 0.
+    /// 조이는 네 줄을 빼면 빨개진다(대조군은 아래 시험).
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(0f, 40)]
+    [InlineData(0f, 80)]
+    [InlineData(0f, 100)]
+    [InlineData(10f, 40)]
+    [InlineData(10f, 80)]
+    [InlineData(10f, 100)]
+    [InlineData(20f, 40)]
+    [InlineData(20f, 80)]
+    [InlineData(20f, 100)]
+    [InlineData(30f, 40)]
+    [InlineData(30f, 80)]
+    [InlineData(30f, 100)]
+    [InlineData(40f, 40)]
+    [InlineData(40f, 80)]
+    [InlineData(40f, 100)]
+    [InlineData(60f, 40)]
+    [InlineData(60f, 80)]
+    [InlineData(60f, 100)]
+    [InlineData(100f, 40)]
+    [InlineData(100f, 80)]
+    [InlineData(100f, 100)]
+    public void T7_여백을_어떻게_줘도_조각이_안_나고_종이가_나온다(float margin, int lineCount)
+    {
+        var svc = MakeService();
+        foreach (var copyMode in new[] { "both", "recipient" })
+        {
+            var where = $"{copyMode} · 품목 {lineCount}줄 · 여백 {margin}mm";
+            var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), copyMode, margin);
+            var pages = PageTexts(pdf);
+
+            Assert.True(pages.Length > 0, $"종이가 한 장도 안 나왔다. {where}");
+
+            var copies = copyMode == "both" ? 2 : 1;
+            Assert.Equal(lineCount * copies, Occurrences(string.Concat(pages), LineMarker));
+
+            AssertNoCopyFragment(pages, where);
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>T-7 음성 대조군 — 조이지 않으면 그 자리가 실제로 깨진다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 조이는 코드가 <b>무엇을 막고 있는지</b>를 숫자로 고정한다. 조이기를 거치지 않고
+    /// <c>ResolveCopyPageChunks</c> 를 100mm 로 직접 부르면 <b>null</b> — 이어쓰기가 폴백으로
+    /// 떨어진다(= T-2 이전 길 = 어제의 반려 모양). 조이는 함수는 그 값을 30mm 로 돌려준다.
+    /// <para>
+    /// 🔴 <b>지원 범위(0~30mm)에서는 폴백으로 떨어지지 않는다</b> — <c>TaxInvoicePageSlackPt</c>
+    /// 2pt 여유가 선 자리가 바로 이 판정이다([4] 2차 N-1: 그 상수를 재는 게이트가 0건이었다).
+    /// 상수를 키우거나 재는 코드가 보수적으로 기울면 <b>이 단언이 빨개진다.</b>
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void T7_대조군_조이지_않으면_폴백이고_조이면_30mm_다()
+    {
+        var svc = MakeService();
+
+        var clamp = Method("ClampTaxInvoiceMargin");
+        Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 100f, "상", "T7" })!);
+        Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 40f, "상", "T7" })!);
+        Assert.Equal(0f, (float)clamp.Invoke(svc, new object?[] { -5f, "상", "T7" })!);
+        // 🔴 지원 범위 안은 한 글자도 안 바꾼다 — 고객 종이가 달라지면 안 된다.
+        Assert.Equal(15f, (float)clamp.Invoke(svc, new object?[] { 15f, "상", "T7" })!);
+        Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 30f, "상", "T7" })!);
+
+        // 🔴🔴 배선 확인 — 조이는 함수가 "있다"는 것만으로는 아무것도 안 지킨다.
+        //   100mm 로 부른 종이와 30mm 로 부른 종이의 글자가 **같아야** 조이기가 실제로 걸린 것이다.
+        //   🔴 이 단언이 2026-10-21 에 실제로 사고를 잡았다: 제품 파일을 되돌릴 때 Copy-Item 이
+        //   **수정시각까지 함께 되돌려** 소스가 빌드산물보다 오래된 파일이 됐고, MSBuild 가
+        //   재빌드를 건너뛰어 **조이기 없는 DLL** 로 전체 시험을 쟀다([4] 2차 등재 E-5 와 같은 모양).
+        //   함수 존재만 보는 단언은 그때 초록이었다 — 배선을 보는 이 단언만 빨개진다.
+        var at100 = PageTexts(Render(svc, MakeSnapshot(80), MakeCompany(), "both", 100f));
+        var at30 = PageTexts(Render(svc, MakeSnapshot(80), MakeCompany(), "both", 30f));
+        Assert.Equal(at30, at100);
+
+        // 조이기를 거치지 않은 100mm — 이어쓰기가 폴백(null)으로 떨어진다.
+        Assert.Null(CopyChunks(svc, MakeSnapshot(80), MakeCompany(), 100f));
+
+        // 지원 범위에서는 폴백으로 떨어지지 않는다.
+        foreach (var m in new[] { 0f, 5f, 10f, 15f, 20f, 25f, 30f })
+        {
+            foreach (var lines in new[] { 1, 3, 40, 80, 100 })
+            {
+                Assert.NotNull(CopyChunks(svc, MakeSnapshot(lines), MakeCompany(), m));
+            }
+        }
+    }
+
+    /// <summary>벌 하나를 몇 장에 나눠 담나 — 조이기를 거치지 않고 직접 부른다(대조군 전용).</summary>
+    private static object? CopyChunks(object svc, object snap, object company, float margin) =>
+        Method("ResolveCopyPageChunks").Invoke(svc,
+            new object?[] { snap, company, null, "공급받는 자 보관용", margin, margin, margin, margin });
 
     /// <summary>
     /// 잰 숫자를 글로 남긴다 — 「한 장이냐」 판정의 근거를 사람이 확인할 수 있게.

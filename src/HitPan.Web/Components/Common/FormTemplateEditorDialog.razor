@@ -89,16 +89,16 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" Min="0" Max="30" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginLeftMm" Label="여백 좌(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginLeftMm" Label="여백 좌(mm)" Margin="Margin.Dense" Min="0" Max="30" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginRightMm" Label="여백 우(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginRightMm" Label="여백 우(mm)" Margin="Margin.Dense" Min="0" Max="30" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginBottomMm" Label="여백 하(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginBottomMm" Label="여백 하(mm)" Margin="Margin.Dense" Min="0" Max="30" />
             </MudItem>
             <MudItem xs="12" md="4">
                 <MudCheckBox T="bool" @bind-Value="_form.ShowCompanyLogo" Label="회사 로고 표시" Dense="true" />

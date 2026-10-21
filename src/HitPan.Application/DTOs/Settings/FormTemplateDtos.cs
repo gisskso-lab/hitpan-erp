@@ -63,11 +63,16 @@ public class CreateFormTemplateRequest
 
     public string PaperSize { get; set; } = "A4";
     public string Orientation { get; set; } = "portrait";
+    // 🔴🔴 20261021작 §17 T-7 — 0~100 → 0~30 으로 조인다(N-3 봉합).
+    //   실측: 여백 40mm 이상에서 세금계산서 이어쓰기가 어제의 반려 모양(머리 없는 쪽 ·
+    //   품목 0줄 쪽)을 다시 내고, 80mm 이상은 종이가 아예 안 나온다(DocumentLayoutException).
+    //   상한 근거 = PdfRenderService.TaxInvoiceMaxMarginMm 주석의 실측표.
+    //   🔴 이미 30mm 를 넘겨 저장해 둔 고객의 값은 지우지 않는다 — 그릴 때 조인다(같은 절).
 
-    [Range(0, 100)] public decimal MarginTopMm { get; set; } = 15m;
-    [Range(0, 100)] public decimal MarginLeftMm { get; set; } = 15m;
-    [Range(0, 100)] public decimal MarginRightMm { get; set; } = 15m;
-    [Range(0, 100)] public decimal MarginBottomMm { get; set; } = 15m;
+    [Range(0, 30)] public decimal MarginTopMm { get; set; } = 15m;
+    [Range(0, 30)] public decimal MarginLeftMm { get; set; } = 15m;
+    [Range(0, 30)] public decimal MarginRightMm { get; set; } = 15m;
+    [Range(0, 30)] public decimal MarginBottomMm { get; set; } = 15m;
 
     public string? FieldCoordsJson { get; set; }
     public string? BackgroundImageUrl { get; set; }

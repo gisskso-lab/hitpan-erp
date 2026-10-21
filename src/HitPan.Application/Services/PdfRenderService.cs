@@ -656,6 +656,15 @@ public sealed class PdfRenderService : IPdfRenderService
         bool showTearLine,
         float marginTop, float marginLeft, float marginRight, float marginBottom)
     {
+        // 🔴🔴 20261021작 §17 T-7 (N-3 봉합) — 지원 범위를 넘는 여백을 먼저 조인다.
+        //   까닭·실측은 TaxInvoiceMaxMarginMm 주석에 있다. 요지: 40mm 이상에서 어제의 반려
+        //   모양(머리 없는 쪽·품목 0줄 쪽)이 다시 나고, 80mm 이상은 종이가 아예 안 나왔다.
+        //   🔴 고객이 저장한 값은 안 건드린다 — 여기서만 조인다.
+        marginTop = ClampTaxInvoiceMargin(marginTop, "상", d.DocNo);
+        marginLeft = ClampTaxInvoiceMargin(marginLeft, "좌", d.DocNo);
+        marginRight = ClampTaxInvoiceMargin(marginRight, "우", d.DocNo);
+        marginBottom = ClampTaxInvoiceMargin(marginBottom, "하", d.DocNo);
+
         var sealImage = TryLoadSealImage(c.SealUrl);
         var drawSupplier = !string.Equals(copyMode, "recipient", StringComparison.Ordinal);
         var drawRecipient = !string.Equals(copyMode, "supplier", StringComparison.Ordinal);
@@ -954,6 +963,44 @@ public sealed class PdfRenderService : IPdfRenderService
     /// 밀리면 <b>품목 0줄짜리 꼬리 종이</b>가 다시 난다 — T-2 가 없애려는 바로 그 모양이다.
     /// </summary>
     private const float TaxInvoicePageSlackPt = 2f;
+
+    /// <summary>
+    /// 🔴🔴 20261021작 §17 T-7 — 세금계산서 이어쓰기가 <b>실측으로 버티는 여백 상한(mm)</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>실측(2026-10-21 · 품목 1·3·40·80·100줄 × 여백 0~120mm)</b>:
+    /// <list type="bullet">
+    /// <item>0~30mm — 쪽마다 머리가 붙고 품목 0줄짜리 쪽이 <b>0건</b>(T-2 가 설계대로 돈다).</item>
+    /// <item>🔴 <b>40~60mm</b> — 재는 쪽은 「들어간다」고 답하는데 실제로 깔면 넘쳐서
+    ///   <c>1/33, 0/0, 1/7</c> 처럼 <b>머리 없는 쪽 + 품목 0줄 쪽</b>이 난다
+    ///   — <b>[4] 가 반려한 그 모양 그대로</b>다.</item>
+    /// <item>🔴 <b>80mm 이상</b> — QuestPDF 가 <c>DocumentLayoutException</c> 을 던져
+    ///   <b>종이가 아예 안 나온다</b>(100mm 이상은 이어쓰기 자체가 폴백으로 떨어진다).</item>
+    /// </list>
+    /// 🔴 그런데 고객은 그 값을 넣을 수 있었다 — 편집창 여백 4칸에 상·하한이 <b>없었고</b>
+    /// DTO 는 <c>[Range(0, 100)]</c> 을 받았다. ⇒ 셋을 같이 조인다(화면·DTO·그리는 쪽).
+    /// <para>
+    /// 🔴 <b>고객이 저장한 값은 지우지 않는다</b> — 그릴 때만 조인다. 30mm 이하면 아무 일도 안 한다.
+    /// 이미 40mm 로 저장해 둔 고객도 다음 인쇄부터 <b>종이가 나온다</b>(고객 손 0번).
+    /// </para>
+    /// </remarks>
+    internal const float TaxInvoiceMaxMarginMm = 30f;
+
+    /// <summary>🔴 §17 T-7 — 지원 범위를 넘는 여백을 조인다. 조였으면 글로 남긴다.</summary>
+    private float ClampTaxInvoiceMargin(float mm, string which, string? docNo)
+    {
+        if (mm >= 0f && mm <= TaxInvoiceMaxMarginMm)
+        {
+            return mm;
+        }
+
+        var clamped = mm < 0f ? 0f : TaxInvoiceMaxMarginMm;
+        _logger.LogWarning(
+            "세금계산서 여백이 지원 범위를 벗어났다 — {Which} {Given}mm 를 {Clamped}mm 로 보고 그린다. " +
+            "양식정보설정에서 여백을 0~{Max}mm 로 맞추시면 됩니다. 문서번호 {DocNo}",
+            which, mm, clamped, TaxInvoiceMaxMarginMm, docNo);
+        return clamped;
+    }
 
     /// <summary>
     /// 🔴🔴 20261021작 §15-6 T-2 — <b>벌 하나를 몇 장에 어떻게 나눠 담나</b>.
