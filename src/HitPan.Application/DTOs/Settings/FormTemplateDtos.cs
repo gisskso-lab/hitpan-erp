@@ -34,6 +34,18 @@ public class FormTemplateDto
     /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
     public string StyleKey { get; set; } = "basic";
 
+    /// <summary>
+    /// 둘 다 찍을 때 <b>한 장에 모을까</b>(true) <b>쪽을 나눌까</b>(false) — DB-147.
+    /// 20261021작 §10-2 ⓑ 사장님 재결재.
+    /// </summary>
+    /// <remarks>
+    /// print_copy_mode 와 축이 다르다 — 저쪽은 <b>누구 몫</b>을, 이쪽은 <b>어떻게 담을지</b>를 고른다.
+    /// both 가 아니면 이 값은 아무 일도 하지 않는다.
+    /// 기본 false 인 까닭은 DB-147 머리글에 적었다(지금 동작과 같게 · 품목 줄이 조용히 빠지면 안 된다).
+    /// </remarks>
+    public bool ShowTearLine { get; set; }
+
+
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
 }
@@ -75,6 +87,18 @@ public class CreateFormTemplateRequest
 
     /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
     public string StyleKey { get; set; } = "basic";
+
+    /// <summary>
+    /// 둘 다 찍을 때 <b>한 장에 모을까</b>(true) <b>쪽을 나눌까</b>(false) — DB-147.
+    /// 20261021작 §10-2 ⓑ 사장님 재결재.
+    /// </summary>
+    /// <remarks>
+    /// print_copy_mode 와 축이 다르다 — 저쪽은 <b>누구 몫</b>을, 이쪽은 <b>어떻게 담을지</b>를 고른다.
+    /// both 가 아니면 이 값은 아무 일도 하지 않는다.
+    /// 기본 false 인 까닭은 DB-147 머리글에 적었다(지금 동작과 같게 · 품목 줄이 조용히 빠지면 안 된다).
+    /// </remarks>
+    public bool ShowTearLine { get; set; }
+
 
     public bool IsDefault { get; set; }
 }

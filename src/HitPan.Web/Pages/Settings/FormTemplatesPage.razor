@@ -231,6 +231,16 @@ else
         /// <summary>디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일.</summary>
         public string StyleKey { get; set; } = "basic";
 
+        /// <summary>
+        /// 두 장을 찍을 때 <b>한 장에 모아 가운데를 자르게</b> 할까 (DB-147).
+        /// 20261021작 §10-2 ⓑ 사장님 재결재.
+        /// </summary>
+        /// <remarks>
+        /// ⚠️ 서버 DTO(HitPan.Application.DTOs.Settings.FormTemplateDto)와 이름이 같아야
+        /// JSON 이 매핑된다 — 다르면 값이 조용히 기본값으로 떨어진다.
+        /// </remarks>
+        public bool ShowTearLine { get; set; }
+
         public bool IsDefault { get; set; }
         public bool IsActive { get; set; } = true;
     }
