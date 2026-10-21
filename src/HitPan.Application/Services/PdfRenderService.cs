@@ -656,6 +656,17 @@ public sealed class PdfRenderService : IPdfRenderService
         var drawSupplier = !string.Equals(copyMode, "recipient", StringComparison.Ordinal);
         var drawRecipient = !string.Equals(copyMode, "supplier", StringComparison.Ordinal);
 
+        // 🔴 20261021작 §9-1 봉합(R-1) — 쪽 나눔 판정.
+        //   반려 사유: 두 벌을 한 Column 에 그냥 쌓아 두면 QuestPDF 가 **벌 한가운데에서** 쪽을
+        //   끊었다. 1쪽 한가운데 절취선 + 그 아래 미완성 종이 ⇒ 자르면 반 토막 계산서.
+        //   집행: **두 벌이 한 장에 실제로 들어가는지 먼저 재고**(MeasureBothCopiesFitOnePage),
+        //     · 들어가면 → 한 장에 두 벌 + 절취선 (기본 · 사장님 결재)
+        //     · 안 들어가면 → 절취선을 빼고 벌마다 제 쪽에서 시작한다(PageBreak)
+        //   🔴 품목을 줄이는 코드는 여전히 0건이다.
+        var bothCopies = drawSupplier && drawRecipient;
+        var fitsOnePage = !bothCopies || MeasureBothCopiesFitOnePage(
+            d, c, sealImage, marginTop, marginLeft, marginRight, marginBottom);
+
         return Document.Create(doc =>
         {
             doc.Page(page =>
@@ -681,9 +692,11 @@ public sealed class PdfRenderService : IPdfRenderService
                     {
                         col.Item().Element(e => ComposeTaxInvoiceCopy(e, d, c, "공급자 보관용", sealImage));
                     }
-                    if (drawSupplier && drawRecipient)
+                    if (bothCopies)
                     {
-                        col.Item().Element(ComposeTearLine);
+                        // 🔴 들어갈 때만 절취선. 안 들어가면 절취선 0건 + 쪽을 나눈다.
+                        if (fitsOnePage) col.Item().Element(ComposeTearLine);
+                        else col.Item().PageBreak();
                     }
                     if (drawRecipient)
                     {
@@ -724,6 +737,130 @@ public sealed class PdfRenderService : IPdfRenderService
             col.Item().LineHorizontal(0.8f).LineColor(Colors.Grey.Darken1);
             col.Item().PaddingTop(2).AlignCenter().Text("절취선").FontSize(8);
         });
+    }
+
+    /// <summary>
+    /// 🔴 20261021작 §9-1(R-1) — 두 벌 + 절취선이 A4 한 장에 <b>실제로</b> 들어가는지 잰다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>품목 줄 수로 눈대중하지 않는다.</b> 같은 종이·같은 여백·같은 글꼴로 한 장을 깔게 한 뒤
+    /// QuestPDF 가 <b>그때 잰 높이</b>를 받는다 — 공급자 벌 높이 · 절취선 높이 · 공급받는 자 벌 높이,
+    /// 그리고 머리·꼬리를 뺀 <b>실제 남은 높이</b>. 넷을 견주어 판정한다.
+    /// </para>
+    /// <para>
+    /// 설계 §7 의 「136mm + 7mm + 136mm = 279mm ≤ 297mm」는 설계 당시의 손계산이다.
+    /// 여기서는 그 숫자를 <b>쓰지 않는다</b> — 여백 설정·거래처 주소 길이·품목 줄 수에 따라
+    /// 벌 높이가 달라지므로, 고정 숫자로 판정하면 또 틀린다.
+    /// </para>
+    /// <para>
+    /// 🔴 재다가 실패하면 <b>「안 들어간다」로 본다.</b> 쪽을 나누면 종이가 두 장 나올 뿐이지만,
+    /// 잘못 「들어간다」로 보면 <b>반 토막 계산서</b>가 고객에게 나간다.
+    /// </para>
+    /// </remarks>
+    private bool MeasureBothCopiesFitOnePage(DocumentSnapshot d, CompanyInfo c, byte[]? sealImage,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        var probe = new TaxInvoiceFitProbe(d, c, sealImage);
+        try
+        {
+            Document.Create(doc =>
+            {
+                doc.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.MarginTop(marginTop, Unit.Millimetre);
+                    page.MarginLeft(marginLeft, Unit.Millimetre);
+                    page.MarginRight(marginRight, Unit.Millimetre);
+                    page.MarginBottom(marginBottom, Unit.Millimetre);
+                    page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(9));
+                    page.PageColor(Colors.White);
+                    page.Content().Dynamic(probe);
+
+                    // 꼬리를 똑같이 달아야 「남은 높이」가 실제와 같아진다.
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.CurrentPageNumber().FontSize(8);
+                        t.Span(" / ").FontSize(8);
+                        t.TotalPages().FontSize(8);
+                        t.Span(" 쪽").FontSize(8);
+                    });
+                });
+            }).GeneratePdf();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "세금계산서 쪽 나눔을 재지 못했다 — 안전하게 두 쪽으로 나눠 낸다. 문서번호 {DocNo}", d.DocNo);
+            return false;
+        }
+
+        if (!probe.Measured)
+        {
+            _logger.LogWarning(
+                "세금계산서 쪽 나눔 높이를 받지 못했다 — 안전하게 두 쪽으로 나눠 낸다. 문서번호 {DocNo}", d.DocNo);
+            return false;
+        }
+
+        var needed = probe.SupplierHeight + probe.TearHeight + probe.RecipientHeight;
+
+        // 판정 근거를 남긴다 — 「왜 두 쪽이 나왔냐」는 문의가 오면 이 줄이 답이다.
+        _logger.LogDebug(
+            "세금계산서 쪽 나눔 판정 — 공급자 {Supplier}pt · 절취선 {Tear}pt · 공급받는자 {Recipient}pt " +
+            "= {Needed}pt / 남은 높이 {Available}pt (문서번호 {DocNo})",
+            probe.SupplierHeight, probe.TearHeight, probe.RecipientHeight,
+            needed, probe.AvailableHeight, d.DocNo);
+
+        return needed <= probe.AvailableHeight;
+    }
+
+    /// <summary>
+    /// 쪽 나눔 판정을 위한 자 — 종이는 버리고 <b>높이만</b> 가져온다(20261021작 §9-1).
+    /// </summary>
+    private sealed class TaxInvoiceFitProbe : IDynamicComponent
+    {
+        private readonly DocumentSnapshot _d;
+        private readonly CompanyInfo _c;
+        private readonly byte[]? _seal;
+
+        public TaxInvoiceFitProbe(DocumentSnapshot d, CompanyInfo c, byte[]? seal)
+        {
+            _d = d;
+            _c = c;
+            _seal = seal;
+        }
+
+        /// <summary>높이를 한 번이라도 받았나.</summary>
+        public bool Measured { get; private set; }
+        public float SupplierHeight { get; private set; }
+        public float TearHeight { get; private set; }
+        public float RecipientHeight { get; private set; }
+        public float AvailableHeight { get; private set; }
+
+        public DynamicComponentComposeResult Compose(QuestPDF.Elements.DynamicContext context)
+        {
+            if (!Measured)
+            {
+                var supplier = context.CreateElement(
+                    x => ComposeTaxInvoiceCopy(x, _d, _c, "공급자 보관용", _seal));
+                var tear = context.CreateElement(ComposeTearLine);
+                var recipient = context.CreateElement(
+                    x => ComposeTaxInvoiceCopy(x, _d, _c, "공급받는 자 보관용", _seal));
+
+                SupplierHeight = supplier.Size.Height;
+                TearHeight = tear.Size.Height;
+                RecipientHeight = recipient.Size.Height;
+                AvailableHeight = context.AvailableSize.Height;
+                Measured = true;
+            }
+
+            // 잰 뒤에는 빈 자리만 돌려준다 — 이 종이는 쓰지 않고 버린다.
+            return new DynamicComponentComposeResult
+            {
+                Content = context.CreateElement(x => x.Height(0)),
+                HasMoreContent = false
+            };
+        }
     }
 
     /// <summary>세금계산서 한 벌.</summary>
@@ -1212,9 +1349,14 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 자르는 동작(limit)·max_rows·row_pitch 해석은 **한 글자도 안 바꿨다.**
         //   쪽 이어찍기는 이번 범위 밖(결재 Q-4)이라, 조용히 사라지던 것을 **말해 주기만** 한다.
         //   조용히 사라지는 것은 세금 사고다 — 적어도 고객이 알아야 한다.
+        //   🔴 20261021작 §9-2 봉합(R-2) — **세금계산서 경로에서만** 나온다.
+        //   반려 사유: 이 메서드는 10종이 **같이 타는** 길이라, 거래명세서·견적서 등에서도
+        //   알림이 찍혔다 ⇒ 결재 Q-4 의 집행 조건 「나머지 9종 종이 무변화」가 깨졌다.
+        //   🔴 자르는 동작·지우는 코드는 여전히 0건이다 — 나오는 **자리**만 좁힌다.
         var rowLimit = maxRows > 0 ? (int)maxRows : d.Lines.Count;
         var printedRows = Math.Min(d.Lines.Count, rowLimit);
-        var overflowed = d.Lines.Count > printedRows;
+        var overflowed = d.Lines.Count > printedRows
+            && string.Equals(d.DocType, TaxInvoiceDocType, StringComparison.Ordinal);
 
         // 안내를 붙일 자리 = 품목 줄 중 가장 왼쪽 칸의 좌표. 그 아래 한 줄에 적는다.
         var noticeAnchor = overflowed
