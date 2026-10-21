@@ -557,19 +557,18 @@ public class TaxInvoicePdfRenderGuardTests
     /// </summary>
     /// <remarks>
     /// 🔴 <b>[4] 2차까지 아무도 안 잰 축이다.</b> 1·2차 검증과 종전 게이트는 여백을
-    /// <b>10·20mm 두 값</b>으로만 쟀다. 폴백 경계를 재다가 드러난 실측(품목 1·3·40·80·100줄 × 0~120mm):
+    /// <b>10·20mm 두 값</b>으로만 쟀다. 1mm 간격으로 다시 재서 확정한 실측:
     /// <list type="bullet">
-    /// <item>🔴 <b>여백 40~60mm</b> — 재는 쪽은 들어간다고 답하는데 깔면 넘쳐
-    ///   <c>1/33, 0/0, 1/7</c>(머리 없는 쪽 + 품목 0줄 쪽) ⇒ <b>어제의 반려 모양 그대로</b></item>
+    /// <item>🟢 <b>0~39mm</b> — 전건 정상(1mm 간격 × 3모드 × 품목 3축 실측)</item>
+    /// <item>🔴 <b>첫 고장은 40mm</b> — 세 모드 전부 <c>[33,0,7]</c>(가운데 쪽에 머리도 품목도 없다)</item>
     /// <item>🔴 <b>80mm 이상</b> — <c>DocumentLayoutException</c> ⇒ <b>종이가 아예 안 나온다</b></item>
     /// </list>
-    /// 그리고 <b>고객이 그 값을 넣을 수 있었다</b> — 편집창 여백 4칸에 상·하한이 <b>없었고</b>
-    /// DTO 는 <c>Range(0, 100)</c> 이었다. ⇒ 셋을 같이 조였다(화면 <c>Max=30</c> ·
-    /// DTO <c>Range(0, 30)</c> · 그리는 쪽 <c>ClampTaxInvoiceMargin</c>).
-    /// 🔴 <b>고객이 저장한 값은 안 지운다</b> — 그릴 때만 조인다.
+    /// 🔴 <b>§20 교정</b>: PM 의 첫 실측은 여백 4칸을 <b>같은 값</b>으로, <b>10mm 간격</b>으로만 쟀기에
+    /// 「40mm 이상」은 맞았다. 다만 상한 30mm 는 과했다 — <b>고장이 없던 31~39mm 고객의 종이가
+    /// 근거 없이 바뀐다</b> ⇒ 상한은 <b>35mm</b>(경계 39 에 4mm 여유).
     /// <para>
-    /// 🔴 이 시험은 <b>조인 뒤의 참</b>을 잰다 — 40·60·100mm 를 줘도 조각 0 · 예외 0.
-    /// 조이는 네 줄을 빼면 빨개진다(대조군은 아래 시험).
+    /// 🔴 <b>모드 셋 전부 돈다</b> — `both`·`recipient`·<b>`supplier`</b>. ([4] 3차 등재 E-1:
+    /// 종전 판은 `supplier` 를 안 쟀다 — N-2 와 같은 모양의 구멍 1칸이었다.)
     /// </para>
     /// </remarks>
     [Theory]
@@ -585,19 +584,28 @@ public class TaxInvoicePdfRenderGuardTests
     [InlineData(30f, 40)]
     [InlineData(30f, 80)]
     [InlineData(30f, 100)]
+    [InlineData(35f, 40)]
+    [InlineData(35f, 80)]
+    [InlineData(35f, 100)]
     [InlineData(40f, 40)]
     [InlineData(40f, 80)]
     [InlineData(40f, 100)]
+    [InlineData(50f, 40)]
+    [InlineData(50f, 80)]
+    [InlineData(50f, 100)]
     [InlineData(60f, 40)]
     [InlineData(60f, 80)]
     [InlineData(60f, 100)]
+    [InlineData(80f, 40)]
+    [InlineData(80f, 80)]
+    [InlineData(80f, 100)]
     [InlineData(100f, 40)]
     [InlineData(100f, 80)]
     [InlineData(100f, 100)]
     public void T7_여백을_어떻게_줘도_조각이_안_나고_종이가_나온다(float margin, int lineCount)
     {
         var svc = MakeService();
-        foreach (var copyMode in new[] { "both", "recipient" })
+        foreach (var copyMode in new[] { "both", "recipient", "supplier" })
         {
             var where = $"{copyMode} · 품목 {lineCount}줄 · 여백 {margin}mm";
             var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), copyMode, margin);
@@ -613,46 +621,87 @@ public class TaxInvoicePdfRenderGuardTests
     }
 
     /// <summary>
+    /// 🔴🔴 <b>T-6 (N-1 봉합) — 쪽 나눔 실측표를 고정한다. 이것이 2pt 여유를 지키는 자가 된다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴🔴 <b>[4] 3차 C-1 교정 — PM 의 첫 봉합은 그 상수를 전혀 안 지켰다.</b>
+    /// PM 은 「지원 범위에서 <c>chunks != null</c>」을 단언하면 <c>TaxInvoicePageSlackPt</c> 가
+    /// 지켜진다고 적었다. <b>거짓이었다</b> — 상수를 <b>2f → 50f(25배)</b> 로 틀어도 가드
+    /// <b>94/94 초록</b>이었고 <b>400f</b> 에서야 빨개졌다.
+    /// <para>
+    /// 🔴 <b>왜 안 걸렸나</b>: 상수는 <c>MeasureCopyPageFits</c>(= <c>ResolveCopyPageChunks</c> 가
+    /// 쓰는 함수) 안에 있다. 여유를 키우면 <b>한 장에 담는 줄 수가 줄어</b> 쪽이 <b>더 많아질 뿐</b>,
+    /// 조각이 나지도 <c>null</c> 이 되지도 않는다. ⇒ <b>조각·합계만 재는 단언은 원리적으로 못 잡는다.</b>
+    /// </para>
+    /// <para>
+    /// 🟢 <b>그래서 「쪽마다 품목 몇 줄」을 그대로 못박는다.</b> 여유가 1pt 라도 달라지면
+    /// 첫 장이 담는 줄 수가 달라져 <b>이 표가 빨개진다.</b> 🔴 표의 숫자는 <b>실측값</b>이다 —
+    /// 고칠 일이 생기면 눈대중으로 고치지 말고 <b>다시 재서</b> 고친다.
+    /// </para>
+    /// 🔴 쪽 수만 세지 않는다(작지서 §10-5 경고) — <b>쪽마다 몇 줄</b>을 센다. 쪽 수는 설정에 따라
+    /// 정당하게 늘 수 있지만, <b>줄 배분</b>은 재는 코드가 바뀌지 않는 한 변하지 않는다.
+    /// </remarks>
+    [Theory]
+    [InlineData(0f, 40, "40,40")]
+    [InlineData(10f, 40, "39,1,39,1")]
+    [InlineData(10f, 80, "46,34,46,34")]
+    [InlineData(10f, 100, "46,46,8,46,46,8")]
+    [InlineData(20f, 80, "42,37,1,42,37,1")]
+    [InlineData(30f, 40, "37,3,37,3")]
+    [InlineData(30f, 100, "37,37,26,37,37,26")]
+    public void T6_쪽마다_품목_몇_줄인지를_못박는다(float margin, int lineCount, string expected)
+    {
+        var svc = MakeService();
+        var pages = PageTexts(Render(svc, MakeSnapshot(lineCount), MakeCompany(), "both", margin));
+        var actual = string.Join(",", ItemLinesPerPage(pages));
+
+        Assert.Equal(expected, actual);
+    }
+
+    /// <summary>
     /// 🔴🔴 <b>T-7 음성 대조군 — 조이지 않으면 그 자리가 실제로 깨진다.</b>
     /// </summary>
     /// <remarks>
     /// 🔴 조이는 코드가 <b>무엇을 막고 있는지</b>를 숫자로 고정한다. 조이기를 거치지 않고
     /// <c>ResolveCopyPageChunks</c> 를 100mm 로 직접 부르면 <b>null</b> — 이어쓰기가 폴백으로
-    /// 떨어진다(= T-2 이전 길 = 어제의 반려 모양). 조이는 함수는 그 값을 30mm 로 돌려준다.
+    /// 떨어진다(= T-2 이전 길 = 어제의 반려 모양). 조이는 함수는 그 값을 35mm 로 돌려준다.
     /// <para>
-    /// 🔴 <b>지원 범위(0~30mm)에서는 폴백으로 떨어지지 않는다</b> — <c>TaxInvoicePageSlackPt</c>
-    /// 2pt 여유가 선 자리가 바로 이 판정이다([4] 2차 N-1: 그 상수를 재는 게이트가 0건이었다).
-    /// 상수를 키우거나 재는 코드가 보수적으로 기울면 <b>이 단언이 빨개진다.</b>
+    /// 🔴 <b>2pt 여유를 지키는 자는 이 시험이 아니다</b> — <c>T6_쪽마다_품목_몇_줄인지를_못박는다</c> 다
+    /// ([4] 3차 C-1). 여기서 재는 <c>chunks != null</c> 은 <b>폴백으로 떨어지지 않는다</b>만 지킨다.
     /// </para>
     /// </remarks>
     [Fact]
-    public void T7_대조군_조이지_않으면_폴백이고_조이면_30mm_다()
+    public void T7_대조군_조이지_않으면_폴백이고_조이면_35mm_다()
     {
         var svc = MakeService();
 
         var clamp = Method("ClampTaxInvoiceMargin");
-        Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 100f, "상", "T7" })!);
-        Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 40f, "상", "T7" })!);
+        Assert.Equal(35f, (float)clamp.Invoke(svc, new object?[] { 100f, "상", "T7" })!);
+        Assert.Equal(35f, (float)clamp.Invoke(svc, new object?[] { 60f, "상", "T7" })!);
+        Assert.Equal(35f, (float)clamp.Invoke(svc, new object?[] { 40f, "상", "T7" })!);
         Assert.Equal(0f, (float)clamp.Invoke(svc, new object?[] { -5f, "상", "T7" })!);
         // 🔴 지원 범위 안은 한 글자도 안 바꾼다 — 고객 종이가 달라지면 안 된다.
+        //   🔴 §20: 30·35mm 가 여기 들어와야 한다. 상한을 30 으로 뒀던 첫 판은
+        //   고장이 없던 31~39mm 고객의 종이를 바꾸고 있었다(1mm 실측).
         Assert.Equal(15f, (float)clamp.Invoke(svc, new object?[] { 15f, "상", "T7" })!);
         Assert.Equal(30f, (float)clamp.Invoke(svc, new object?[] { 30f, "상", "T7" })!);
+        Assert.Equal(35f, (float)clamp.Invoke(svc, new object?[] { 35f, "상", "T7" })!);
 
         // 🔴🔴 배선 확인 — 조이는 함수가 "있다"는 것만으로는 아무것도 안 지킨다.
-        //   100mm 로 부른 종이와 30mm 로 부른 종이의 글자가 **같아야** 조이기가 실제로 걸린 것이다.
+        //   100mm 로 부른 종이와 35mm 로 부른 종이의 글자가 **같아야** 조이기가 실제로 걸린 것이다.
         //   🔴 이 단언이 2026-10-21 에 실제로 사고를 잡았다: 제품 파일을 되돌릴 때 Copy-Item 이
         //   **수정시각까지 함께 되돌려** 소스가 빌드산물보다 오래된 파일이 됐고, MSBuild 가
         //   재빌드를 건너뛰어 **조이기 없는 DLL** 로 전체 시험을 쟀다([4] 2차 등재 E-5 와 같은 모양).
         //   함수 존재만 보는 단언은 그때 초록이었다 — 배선을 보는 이 단언만 빨개진다.
         var at100 = PageTexts(Render(svc, MakeSnapshot(80), MakeCompany(), "both", 100f));
-        var at30 = PageTexts(Render(svc, MakeSnapshot(80), MakeCompany(), "both", 30f));
-        Assert.Equal(at30, at100);
+        var at35 = PageTexts(Render(svc, MakeSnapshot(80), MakeCompany(), "both", 35f));
+        Assert.Equal(at35, at100);
 
         // 조이기를 거치지 않은 100mm — 이어쓰기가 폴백(null)으로 떨어진다.
         Assert.Null(CopyChunks(svc, MakeSnapshot(80), MakeCompany(), 100f));
 
         // 지원 범위에서는 폴백으로 떨어지지 않는다.
-        foreach (var m in new[] { 0f, 5f, 10f, 15f, 20f, 25f, 30f })
+        foreach (var m in new[] { 0f, 5f, 10f, 15f, 20f, 25f, 30f, 33f, 35f })
         {
             foreach (var lines in new[] { 1, 3, 40, 80, 100 })
             {

@@ -656,9 +656,10 @@ public sealed class PdfRenderService : IPdfRenderService
         bool showTearLine,
         float marginTop, float marginLeft, float marginRight, float marginBottom)
     {
-        // 🔴🔴 20261021작 §17 T-7 (N-3 봉합) — 지원 범위를 넘는 여백을 먼저 조인다.
-        //   까닭·실측은 TaxInvoiceMaxMarginMm 주석에 있다. 요지: 40mm 이상에서 어제의 반려
-        //   모양(머리 없는 쪽·품목 0줄 쪽)이 다시 나고, 80mm 이상은 종이가 아예 안 나왔다.
+        // 🔴🔴 20261021작 §17 T-7 / §20 — 지원 범위를 넘는 여백을 먼저 조인다.
+        //   까닭·실측표는 TaxInvoiceMaxMarginMm 주석에 있다. 요지: 0~39mm 는 전건 정상,
+        //   첫 고장은 40mm(3모드 전부 `[33,0,7]`), 80mm 이상은 종이가 아예 안 나온다.
+        //   🔴 §20: 「40mm 이상에서 깨진다」는 맞았고, 상한 30mm 는 과했다(1mm 실측 = 39mm 까지 정상).
         //   🔴 고객이 저장한 값은 안 건드린다 — 여기서만 조인다.
         marginTop = ClampTaxInvoiceMargin(marginTop, "상", d.DocNo);
         marginLeft = ClampTaxInvoiceMargin(marginLeft, "좌", d.DocNo);
@@ -965,26 +966,39 @@ public sealed class PdfRenderService : IPdfRenderService
     private const float TaxInvoicePageSlackPt = 2f;
 
     /// <summary>
-    /// 🔴🔴 20261021작 §17 T-7 — 세금계산서 이어쓰기가 <b>실측으로 버티는 여백 상한(mm)</b>.
+    /// 🔴🔴 20261021작 §17 T-7 / §20 — 세금계산서 이어쓰기가 <b>실측으로 버티는 여백 상한(mm)</b>.
     /// </summary>
     /// <remarks>
-    /// 🔴 <b>실측(2026-10-21 · 품목 1·3·40·80·100줄 × 여백 0~120mm)</b>:
+    /// 🔴 <b>실측 — 여백 24~63mm 를 1mm 간격으로, 모드 셋(<c>both</c>·<c>recipient</c>·<c>supplier</c>) ×
+    /// 품목 40·80·100줄.</b>
     /// <list type="bullet">
-    /// <item>0~30mm — 쪽마다 머리가 붙고 품목 0줄짜리 쪽이 <b>0건</b>(T-2 가 설계대로 돈다).</item>
-    /// <item>🔴 <b>40~60mm</b> — 재는 쪽은 「들어간다」고 답하는데 실제로 깔면 넘쳐서
-    ///   <c>1/33, 0/0, 1/7</c> 처럼 <b>머리 없는 쪽 + 품목 0줄 쪽</b>이 난다
-    ///   — <b>[4] 가 반려한 그 모양 그대로</b>다.</item>
-    /// <item>🔴 <b>80mm 이상</b> — QuestPDF 가 <c>DocumentLayoutException</c> 을 던져
-    ///   <b>종이가 아예 안 나온다</b>(100mm 이상은 이어쓰기 자체가 폴백으로 떨어진다).</item>
+    /// <item>🟢 <b>0~39mm</b> — 전건 정상. 머리 없는 쪽 0 · 품목 0줄 쪽 0 · 품목 합계 전건 일치.</item>
+    /// <item>🔴 <b>첫 고장은 40mm</b> — <b>세 모드 전부</b> <c>[33,0,7]</c>(가운데 쪽이 머리도 품목도 없다).
+    ///   품목 합계는 맞다 ⇒ <b>줄이 사라지는 것이 아니라 빈 쪽이 끼는</b> 고장이다.
+    ///   재는 쪽은 「33줄 들어간다」는데 깔면 넘쳐 다음 장으로 밀린다.</item>
+    /// <item>🔴 <b>80mm 이상</b> — <c>DocumentLayoutException</c> ⇒ <b>종이가 아예 안 나온다</b>.</item>
+    /// <item>🔴 <b>100mm 이상</b> — 이어쓰기 자체가 폴백(<c>chunks == null</c>)으로 떨어진다.</item>
     /// </list>
-    /// 🔴 그런데 고객은 그 값을 넣을 수 있었다 — 편집창 여백 4칸에 상·하한이 <b>없었고</b>
-    /// DTO 는 <c>[Range(0, 100)]</c> 을 받았다. ⇒ 셋을 같이 조인다(화면·DTO·그리는 쪽).
     /// <para>
-    /// 🔴 <b>고객이 저장한 값은 지우지 않는다</b> — 그릴 때만 조인다. 30mm 이하면 아무 일도 안 한다.
-    /// 이미 40mm 로 저장해 둔 고객도 다음 인쇄부터 <b>종이가 나온다</b>(고객 손 0번).
+    /// 🔴 <b>상한을 39 가 아니라 35 로 두는 사유</b>: 고장의 뿌리는 <b>재는 쪽과 깔리는 쪽의 어긋남</b>이고,
+    /// 그 어긋남은 <b>내용 높이에 따라</b> 움직인다. 위 실측은 <b>한 가지 자료 모양</b>으로만 쟀으므로
+    /// 경계값(39)에 딱 붙이지 않고 <b>4mm 여유</b>를 둔다. 🔴 이 숫자를 바꿀 일이 생기면
+    /// <b>눈대중으로 바꾸지 말고 1mm 실측을 다시 돌린다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴🔴 <b>§20 — PM 이 이 자리에서 두 번 틀렸다.</b> ① 첫 봉합은 상한을 <b>30mm</b> 로 뒀다.
+    /// 「40mm 이상에서 깨진다」는 맞았지만 <b>31~39mm 는 고장이 없던 구간</b>이라 그 고객의 종이를
+    /// 바꿀 근거가 없었다. ② [4] 3차가 「31~50mm 전건 정상 · 첫 고장 60mm」라 보고해 상한을 50 으로
+    /// 올렸더니 <b>40·50mm 가 전부 빨개졌다</b> ⇒ 그 보고도 틀렸다. 🟢 <b>둘 다 1mm 실측으로 갈랐다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 왜 고객 값을 조이기까지 하나 — 편집창 여백 4칸에 상·하한이 <b>없었고</b> DTO 가
+    /// <c>Range(0, 100)</c> 을 받았다. 화면·DTO 만 조이면 <b>이미 큰 값으로 저장한 고객의 종이는
+    /// 계속 깨진다</b>(고객이 손을 대야 풀린다). 그래서 그리는 쪽에서도 조인다.
+    /// 🔴 <b>고객이 저장한 값은 지우지 않는다</b> — 그릴 때만 조인다. 35mm 이하면 아무 일도 안 한다.
     /// </para>
     /// </remarks>
-    internal const float TaxInvoiceMaxMarginMm = 30f;
+    internal const float TaxInvoiceMaxMarginMm = 35f;
 
     /// <summary>🔴 §17 T-7 — 지원 범위를 넘는 여백을 조인다. 조였으면 글로 남긴다.</summary>
     private float ClampTaxInvoiceMargin(float mm, string which, string? docNo)

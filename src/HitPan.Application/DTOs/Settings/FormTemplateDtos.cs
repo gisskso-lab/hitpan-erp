@@ -63,16 +63,17 @@ public class CreateFormTemplateRequest
 
     public string PaperSize { get; set; } = "A4";
     public string Orientation { get; set; } = "portrait";
-    // 🔴🔴 20261021작 §17 T-7 — 0~100 → 0~30 으로 조인다(N-3 봉합).
-    //   실측: 여백 40mm 이상에서 세금계산서 이어쓰기가 어제의 반려 모양(머리 없는 쪽 ·
-    //   품목 0줄 쪽)을 다시 내고, 80mm 이상은 종이가 아예 안 나온다(DocumentLayoutException).
+    // 🔴🔴 20261021작 §17 T-7 / §20 — 0~100 → 0~35 으로 조인다(N-3 봉합).
+    //   실측(1mm 간격 × 3모드 × 품목 40·80·100줄): 0~39mm 전건 정상 · 첫 고장 40mm ·
+    //   80mm 이상은 종이가 아예 안 나온다(DocumentLayoutException). 🔴 처음 적은 「40mm 이상」은 틀렸다.
     //   상한 근거 = PdfRenderService.TaxInvoiceMaxMarginMm 주석의 실측표.
-    //   🔴 이미 30mm 를 넘겨 저장해 둔 고객의 값은 지우지 않는다 — 그릴 때 조인다(같은 절).
+    //   🔴 Range 를 소수(0.0~50.0)로 둔다 — 정수 경계는 decimal 칸에서 35.5 를 통과시킨다(등재 E-4).
+    //   🔴 이미 35mm 를 넘겨 저장해 둔 고객의 값은 지우지 않는다 — 그릴 때 조인다(같은 절).
 
-    [Range(0, 30)] public decimal MarginTopMm { get; set; } = 15m;
-    [Range(0, 30)] public decimal MarginLeftMm { get; set; } = 15m;
-    [Range(0, 30)] public decimal MarginRightMm { get; set; } = 15m;
-    [Range(0, 30)] public decimal MarginBottomMm { get; set; } = 15m;
+    [Range(0.0, 35.0)] public decimal MarginTopMm { get; set; } = 15m;
+    [Range(0.0, 35.0)] public decimal MarginLeftMm { get; set; } = 15m;
+    [Range(0.0, 35.0)] public decimal MarginRightMm { get; set; } = 15m;
+    [Range(0.0, 35.0)] public decimal MarginBottomMm { get; set; } = 15m;
 
     public string? FieldCoordsJson { get; set; }
     public string? BackgroundImageUrl { get; set; }
