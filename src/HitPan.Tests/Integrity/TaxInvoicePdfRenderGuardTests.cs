@@ -186,6 +186,56 @@ public class TaxInvoicePdfRenderGuardTests
         return n;
     }
 
+    /// <summary>쪽마다 「그 쪽에서 시작한 벌」의 수.</summary>
+    private static int[] CopyHeadsPerPage(string[] pages) =>
+        pages.Select(t => Occurrences(t, CopyMarker)).ToArray();
+
+    /// <summary>쪽마다 그 쪽에 실제로 찍힌 품목 줄 수.</summary>
+    private static int[] ItemLinesPerPage(string[] pages) =>
+        pages.Select(t => Occurrences(t, LineMarker)).ToArray();
+
+    /// <summary>
+    /// 🔴🔴 <b>C-1 봉합 — 어느 쪽도 벌의 조각을 담지 않는다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>종전 판정식이 왜 조각을 원리적으로 못 잡았나</b> — 「벌 머리 합계 == 2」 +
+    /// 「각 쪽 ≤ 1」 이었다. [4] 재검증 실측값 <c>[1,0,1,0]</c>(2·4쪽이 앞 벌의 꼬리)은
+    /// 합이 <b>2</b> 이고 각 원소가 <b>1 이하</b>라 <b>두 단언을 다 통과</b>한다.
+    /// 합계도, 쪽 수도 조각을 세는 자가 아니다.
+    /// <para>
+    /// 🔴 <b>바꾼 판정 — 조각의 정의를 그대로 센다.</b> 벌 머리(공급받는 자 등록번호
+    /// <c>987-65-43210</c>)는 벌 하나에 꼭 한 번 찍힌다. 그러므로 <b>머리가 없는 쪽</b>은
+    /// 정의상 <b>앞 벌의 꼬리</b>다. ⇒ <b>머리 없는 쪽이 0개</b>여야 한다.
+    /// <c>[1,0,1,0]</c> 은 머리 없는 쪽이 <b>2개</b> ⇒ <b>빨개진다.</b>
+    /// (이어 찍는 장에도 머리를 붙이는 것이 §15-6 T-2 이므로, 봉합 뒤에도 이 자가 맞다.)
+    /// </para>
+    /// <para>
+    /// 🔴 <b>같이 센다 — 품목 0줄짜리 쪽이 0개.</b> [4] 가 찾은 40줄의 2·4쪽은 품목이
+    /// 한 줄도 없이 결제구분·영수/청구·비고란·서명란만 떨어져 나온 <b>꼬리 종이</b>였다
+    /// (<c>[40,0,40,0]</c>). 머리 판정만으로도 걸리지만, 「빈 종이」라는 모양 자체를
+    /// 글자로 남겨야 다음 사람이 무엇을 고쳐야 하는지 안다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>쪽 수만 세지 않는다</b> — 작지서 §10-5 가 경고한 자리다. 쪽 수는 고객 설정과
+    /// 품목 수에 따라 정당하게 늘 수 있다. 금지된 것은 <b>쪽 수</b>가 아니라 <b>조각</b>이다.
+    /// </para>
+    /// </remarks>
+    private static void AssertNoCopyFragment(string[] pages, string where)
+    {
+        var heads = CopyHeadsPerPage(pages);
+        var lines = ItemLinesPerPage(pages);
+        var shape = string.Join(" · ",
+            heads.Select((n, i) => $"{i + 1}쪽=머리{n}·품목{lines[i]}줄"));
+
+        var headless = heads.Count(n => n == 0);
+        Assert.True(headless == 0,
+            $"벌 머리가 없는 쪽이 {headless}개 — 앞 벌의 꼬리 조각이다(자르면 반 토막 계산서). {where} / {shape}");
+
+        var itemless = lines.Count(n => n == 0);
+        Assert.True(itemless == 0,
+            $"품목이 한 줄도 없는 쪽이 {itemless}개 — 서명란·비고만 떨어져 나온 꼬리 종이다. {where} / {shape}");
+    }
+
     private static string Dump(string name, byte[] pdf)
     {
         Directory.CreateDirectory(DumpDir);
@@ -227,6 +277,11 @@ public class TaxInvoicePdfRenderGuardTests
     [InlineData(1)]
     [InlineData(3)]
     [InlineData(30)]
+    [InlineData(40)]
+    [InlineData(50)]
+    [InlineData(60)]
+    [InlineData(80)]
+    [InlineData(100)]
     public void 쪽_나눔_판정과_실제_쪽수가_일치한다(int lineCount)
     {
         var svc = MakeService();
@@ -238,7 +293,13 @@ public class TaxInvoicePdfRenderGuardTests
         var pages = PageTexts(pdf);
 
         // 끔 = 벌마다 제 쪽. 재는 값이 무엇이든 한 장으로 합치지 않는다(§10-2).
-        Assert.Equal(2, pages.Length);
+        // 🔴 종전 「정확히 두 쪽」을 「두 쪽 이상」으로 고친다(지우지 않는다 · #1).
+        //    까닭: 품목이 많으면 벌마다 이어 찍으므로 쪽 수가 정당하게 는다(§15-6 T-2).
+        //    금지된 것은 쪽 수가 아니라 조각이다 ⇒ 조각은 아래에서 센다(§10-5).
+        Assert.True(pages.Length >= 2,
+            $"끔인데 {pages.Length}쪽이다 — 한 장으로 합쳤다(품목 {lineCount}줄).");
+
+        AssertNoCopyFragment(pages, $"끔 · 품목 {lineCount}줄 · 여백 10mm · {pages.Length}쪽");
     }
 
     /// <summary>
@@ -249,6 +310,11 @@ public class TaxInvoicePdfRenderGuardTests
     [InlineData(1)]
     [InlineData(3)]
     [InlineData(30)]
+    [InlineData(40)]
+    [InlineData(50)]
+    [InlineData(60)]
+    [InlineData(80)]
+    [InlineData(100)]
     public void 자르는선_켜면_늘_한_장에_담는다(int lineCount)
     {
         var svc = MakeService();
@@ -276,20 +342,39 @@ public class TaxInvoicePdfRenderGuardTests
     /// 2쪽이 <b>0</b> 을 담았다 ⇒ 이 자리가 빨개진다.
     /// </remarks>
     [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
-    [InlineData(30)]
-    public void 한_벌이_쪽_경계에_걸쳐_쪼개지지_않는다(int lineCount)
+    [InlineData(1, 10f)]
+    [InlineData(3, 10f)]
+    [InlineData(30, 10f)]
+    [InlineData(40, 10f)]
+    [InlineData(50, 10f)]
+    [InlineData(60, 10f)]
+    [InlineData(80, 10f)]
+    [InlineData(100, 10f)]
+    [InlineData(1, 20f)]
+    [InlineData(3, 20f)]
+    [InlineData(30, 20f)]
+    [InlineData(40, 20f)]
+    [InlineData(50, 20f)]
+    [InlineData(60, 20f)]
+    [InlineData(80, 20f)]
+    [InlineData(100, 20f)]
+    public void 한_벌이_쪽_경계에_걸쳐_쪼개지지_않는다(int lineCount, float margin)
     {
         var svc = MakeService();
-        var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), "both", 10f);
-        Dump($"split-check-{lineCount}lines.pdf", pdf);
+        var pdf = Render(svc, MakeSnapshot(lineCount), MakeCompany(), "both", margin);
+        Dump($"split-check-{lineCount}lines-{margin}mm.pdf", pdf);
 
         var pages = PageTexts(pdf);
         var copiesPerPage = pages.Select(t => Occurrences(t, CopyMarker)).ToArray();
-        var where = string.Join(" · ", copiesPerPage.Select((n, i) => $"{i + 1}쪽={n}벌"));
+        var where = string.Join(" · ", copiesPerPage.Select((n, i) => $"{i + 1}쪽={n}벌"))
+                    + $" (품목 {lineCount}줄 · 여백 {margin}mm)";
 
-        Assert.Equal(2, copiesPerPage.Sum());
+        // 🔴 종전 「합계 == 2」 를 「>= 2」 로 고친다(지우지 않는다 · #1).
+        //    까닭: §15-6 T-2 는 이어 찍는 장에도 벌 머리를 붙인다 ⇒ 봉합 뒤 합계는 쪽 수까지
+        //    늘어난다. 「정확히 2」로 묶어 두면 올바른 봉합을 게이트가 막는다.
+        //    벌이 둘보다 적으면 여전히 빨개진다.
+        Assert.True(copiesPerPage.Sum() >= 2,
+            $"벌이 둘이 아니다 — 한 벌이 통째로 빠졌다. {where}");
 
         if (pages.Length == 1)
         {
@@ -299,6 +384,9 @@ public class TaxInvoicePdfRenderGuardTests
 
         Assert.All(copiesPerPage, n => Assert.True(n <= 1,
             $"한 쪽이 벌을 둘 담았다 — 그 쪽 한가운데가 경계가 된다(자르면 반 토막 계산서). {where}"));
+
+        // 🔴🔴 C-1 봉합 — 위 두 단언을 모두 통과하는 [1,0,1,0] 을 여기서 잡는다.
+        AssertNoCopyFragment(pages, where);
     }
 
     /// <summary>
@@ -309,6 +397,11 @@ public class TaxInvoicePdfRenderGuardTests
     [InlineData(1)]
     [InlineData(3)]
     [InlineData(30)]
+    [InlineData(40)]
+    [InlineData(50)]
+    [InlineData(60)]
+    [InlineData(80)]
+    [InlineData(100)]
     public void 품목_줄은_한_줄도_사라지지_않는다(int lineCount)
     {
         var svc = MakeService();
