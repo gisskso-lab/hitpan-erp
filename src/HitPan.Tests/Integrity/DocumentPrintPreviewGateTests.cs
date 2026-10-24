@@ -214,13 +214,35 @@ public class DocumentPrintPreviewGateTests
 
         // 🔴 InvokeVoidAsync 면 JS 의 false 가 버려진다 ⇒ 예외도 없고 catch 도 안 돈다
         //    ⇒ "눌렀는데 아무 일도 안 난다". 이 한 줄이 돌아오면 그 사고가 돌아온다.
+        //    🔴 **인쇄 호출로만 좁힌다** — `InvokeVoidAsync(` 를 통째로 막으면
+        //       blob 정리(`hitpanRevokeBlobUrl`) 같은 **정당한 호출까지 빨개진다**(거짓 빨강).
         Assert.DoesNotContain("InvokeVoidAsync(\"hitpanPrintPreviewFrame\"", body);
+        Assert.DoesNotContain("InvokeVoidAsync(\"printPreviewFrame\"", body);
+
+        // 🔴 20261024작2 — **주 경로가 모듈로 바뀌었다.** index.html 이 캐시되면 전역 함수가
+        //   브라우저에 아예 없어 호출이 예외로 죽었다(1.3.62·1.3.63 사고). 그래서 C# 이 경로로 import 한다.
+        //   🔴 돌려받는 것은 bool 이 아니라 **까닭 문자열**이다 — 어느 칸에서 막혔는지 알려면 그래야 한다.
+        Assert.Contains("InvokeAsync<string>(\"printPreviewFrame\"", body);
+
+        // 🔴 묵은 index.html 에서도 한 번은 더 해보는 **폴백이 남아 있어야 한다**.
+        //   이걸 지우면 캐시된 브라우저에서 인쇄가 통째로 사라진다.
         Assert.Contains("InvokeAsync<bool>(\"hitpanPrintPreviewFrame\"", body);
 
-        // 🔴 받아 놓고 안 쓰면 같은 사고다 — false 일 때 사람에게 말해야 한다.
-        var upToCatch = body.Substring(0, Math.Max(0, body.IndexOf("catch (Exception", StringComparison.Ordinal)));
-        Assert.Contains("if (!ok)", upToCatch);
-        Assert.Contains("Snackbar.Add", upToCatch);
+        // 🔴 받아 놓고 안 쓰면 같은 사고다 — 막힌 경우를 **사람에게 말해야** 한다.
+        Assert.Contains("\"blocked-popup\"", body);
+        Assert.Contains("\"no-script\"", body);
+
+        // 🔴 「막혔다」 갈래와 「스크립트가 없다」 갈래 **각각**에 안내가 붙어야 한다.
+        //   갈래만 만들어 놓고 안내를 한 군데만 달면 나머지는 조용히 실패한다.
+        foreach (var branch in new[] { "case \"blocked-popup\":", "case \"no-script\":" })
+        {
+            var at2 = body.IndexOf(branch, StringComparison.Ordinal);
+            Assert.True(at2 > 0, $"{branch} 갈래가 없다.");
+            var seg = body.Substring(at2, Math.Min(400, body.Length - at2));
+            var brk = seg.IndexOf("break;", StringComparison.Ordinal);
+            Assert.True(brk > 0, $"{branch} 갈래가 안 닫힌다.");
+            Assert.Contains("Snackbar.Add", seg.Substring(0, brk));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

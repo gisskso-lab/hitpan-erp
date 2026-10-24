@@ -146,6 +146,16 @@ while ($listener.IsListening) {
         $ext = [System.IO.Path]::GetExtension($filePath).ToLower()
         $contentType = if ($mimeTypes.ContainsKey($ext)) { $mimeTypes[$ext] } else { "application/octet-stream" }
         $ctx.Response.ContentType = $contentType
+        # ─── 🔴 20261024작2 부트 자산 캐시 금지 (1.3.62 인쇄 사고의 뿌리) ───
+        #   ■ 무엇을 겪고서
+        #     storage.js 를 고쳐 보내고 index.html 의 ?v= 꼬리표도 올렸는데, 사장님 브라우저는
+        #     여전히 옛 함수를 썼다. index.html 자체가 Cache-Control 없이 나가서 캐시된 탓이다.
+        #   ■ 한 줄로
+        #     꼬리표는 **자식 파일**을 갈아주지, **꼬리표를 적어둔 부모(index.html)** 는 못 갈아준다.
+        #   ■ 그래서 부트 자산만 캐시를 끈다 — 나머지 정적 파일은 그대로 캐시된다(느려지지 않는다).
+        if ($localPath -ieq "/index.html" -or $localPath -ilike "*blazor.boot.json*" -or $localPath -ilike "*service-worker*") {
+            $ctx.Response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
+        }
         $bytes = [System.IO.File]::ReadAllBytes($filePath)
         $ctx.Response.ContentLength64 = $bytes.Length
         $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
@@ -153,6 +163,8 @@ while ($listener.IsListening) {
         # SPA fallback — index.html 반환
         $indexPath = Join-Path $webRoot "index.html"
         if (Test-Path $indexPath) {
+            # 🔴 20261024작2 — SPA 폴백도 index.html 이다. 같은 이유로 캐시 금지.
+            $ctx.Response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
             $ctx.Response.ContentType = "text/html; charset=utf-8"
             $bytes = [System.IO.File]::ReadAllBytes($indexPath)
             $ctx.Response.ContentLength64 = $bytes.Length

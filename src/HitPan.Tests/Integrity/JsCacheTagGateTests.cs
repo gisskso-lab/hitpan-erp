@@ -136,4 +136,96 @@ public class JsCacheTagGateTests
         Assert.True(razor.Contains("\"hitpanPrintPreviewFrame\"", StringComparison.Ordinal),
             "🔴 DocumentPrintPreviewDialog.razor 가 그 함수를 안 부른다 — 정의만 있고 쓰는 곳이 없다.");
     }
+
+    /// <summary>
+    /// 🔴 레포 루트 — <b>`installer` 폴더를 찾아 올라가면 안 된다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>bin\Debug\net8.0</c> <b>아래에도 `installer` 가 복사돼 있다</b>. 그걸 찾아 올라가면
+    ///   출력 폴더에서 멈춰 엉뚱한 곳을 가리킨다 — 세우자마자 이 함정에 걸렸다.
+    ///   ⇒ 이미 검증된 <see cref="WebRoot"/>(<c>src/HitPan.Web</c>) 에서 두 칸 올라간다.
+    /// </remarks>
+    private static string RepoRoot()
+        => Directory.GetParent(Path.GetDirectoryName(WebRoot())!)!.FullName;
+
+    /// <summary>
+    /// 🔴 <b>인쇄 모듈은 C# 이 경로로 불러온다</b> — 꼬리표와 내용을 쌍으로 묶는다(20261024작2).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 이 축이 따로 있나.</b> <c>doc-print.js</c> 는 <c>index.html</c> 에 안 실린다.
+    ///   <b>일부러 안 싣는다</b> — index.html 이 캐시되면 거기 적힌 꼬리표가 옛 값으로 굳기 때문이다.
+    ///   대신 <b>`.razor` 안의 경로 상수</b>가 꼬리표를 든다. 그 상수는 DLL 안에 있어 같이 갱신된다.
+    /// 🔴 그래서 <b>여기서도 쌍으로 재야 한다</b> — 안 그러면 모듈만 고치고 꼬리표를 안 올려
+    ///   <b>같은 사고가 이 경로에서 다시 난다</b>.
+    /// </remarks>
+    [Fact]
+    public void 인쇄모듈_꼬리표와_내용이_쌍으로_맞는다()
+    {
+        const string expectedTag = "20261024a";
+        const string expectedHash = "2f507e4e694951b0013d0f2a0ac5f217763c7d887e20c86333c8acd265aed9a6";
+
+        var web = WebRoot();
+        var jsPath = Path.Combine(web, "wwwroot", "js", "doc-print.js");
+        var razorPath = Path.Combine(web, "Components", "Common", "DocumentPrintPreviewDialog.razor");
+
+        Assert.True(File.Exists(jsPath), $"doc-print.js 가 없다: {jsPath}");
+
+        var razor = File.ReadAllText(razorPath);
+        var m = Regex.Match(razor, @"\./js/doc-print\.js\?v=([0-9a-zA-Z]+)");
+        Assert.True(m.Success,
+            "🔴 .razor 가 doc-print.js 를 경로로 불러오지 않는다. index.html 의 전역에 기대면 캐시에 묶인다.");
+
+        var actualHash = HashNormalized(jsPath);
+
+        Assert.True(actualHash == expectedHash,
+            $"🔴 doc-print.js 가 바뀌었다(해시 {actualHash}). " +
+            $"PrintModulePath 의 ?v= 꼬리표를 올리고 이 시험의 기대값 둘을 같이 고쳐라.");
+
+        Assert.True(m.Groups[1].Value == expectedTag,
+            $"🔴 doc-print.js 내용은 그대로인데 꼬리표가 {m.Groups[1].Value} 다(기대 {expectedTag}).");
+    }
+
+    /// <summary>
+    /// 🔴 <b>부르는 쪽·정의하는 쪽이 같은 이름을 쓴다</b> — 한쪽만 고치면 빨개진다.
+    /// </summary>
+    [Fact]
+    public void 인쇄모듈_함수이름이_양쪽에서_같다()
+    {
+        var web = WebRoot();
+        var js = File.ReadAllText(Path.Combine(web, "wwwroot", "js", "doc-print.js"));
+        var razor = File.ReadAllText(Path.Combine(web, "Components", "Common", "DocumentPrintPreviewDialog.razor"));
+
+        Assert.True(js.Contains("export function printPreviewFrame", StringComparison.Ordinal),
+            "🔴 doc-print.js 가 printPreviewFrame 을 export 하지 않는다.");
+        Assert.True(razor.Contains("\"printPreviewFrame\"", StringComparison.Ordinal),
+            "🔴 .razor 가 printPreviewFrame 을 부르지 않는다.");
+    }
+
+    /// <summary>
+    /// 🔴 <b>부트 자산 no-cache 봉합이 지워지지 않았나</b> (20261024작2 뿌리 봉합).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>이 게이트가 못 재는 것</b>: 서버를 띄워 헤더가 실제로 나가는지는 <b>안 잰다</b>
+    ///   (PowerShell 스크립트라 시험에서 못 돌린다). 봉합 당시 <b>HttpListener 로 띄워
+    ///   실제 응답에 헤더가 붙는 것을 사람이 확인했고</b>, 이 시험은 <b>그 줄이 지워지는 것</b>만 막는다.
+    ///   ⇒ <b>「헤더가 나간다」가 아니라 「끄는 코드가 남아 있다」를 재는 글자 게이트다.</b> 그렇게 읽어라.
+    /// </remarks>
+    [Fact]
+    public void 부트자산_no_cache_봉합이_남아있다()
+    {
+        var path = Path.Combine(RepoRoot(), "installer", "web-server.ps1");
+        Assert.True(File.Exists(path), $"web-server.ps1 이 없다: {path}");
+
+        var text = File.ReadAllText(path);
+
+        Assert.True(text.Contains("no-cache, no-store, must-revalidate", StringComparison.Ordinal),
+            "🔴 web-server.ps1 에서 부트 자산 no-cache 가 사라졌다. index.html 이 캐시되면 " +
+            "꼬리표를 아무리 올려도 브라우저가 옛 js 를 쓴다 — 1.3.62·1.3.63 이 그 사고다.");
+
+        // 🔴 index.html 과 blazor.boot.json **둘 다** 걸려 있어야 한다. 하나만 남으면 반쪽이다.
+        Assert.True(text.Contains("/index.html", StringComparison.Ordinal),
+            "🔴 no-cache 대상에서 index.html 이 빠졌다.");
+        Assert.True(text.Contains("blazor.boot.json", StringComparison.Ordinal),
+            "🔴 no-cache 대상에서 blazor.boot.json 이 빠졌다.");
+    }
 }
