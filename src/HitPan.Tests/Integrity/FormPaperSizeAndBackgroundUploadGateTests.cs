@@ -2,6 +2,7 @@ using System.Reflection;
 using HitPan.Application.DTOs.Settings;
 using HitPan.Application.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using QuestPDF.Fluent;
 using Xunit;
 
 namespace HitPan.Tests.Integrity;
@@ -36,6 +37,9 @@ namespace HitPan.Tests.Integrity;
 /// </remarks>
 public class FormPaperSizeAndBackgroundUploadGateTests
 {
+    static FormPaperSizeAndBackgroundUploadGateTests() =>
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
     // 1x1 PNG — 작성기가 실제로 받아들이는 바이트.
     private static readonly byte[] RealPng = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
@@ -515,6 +519,80 @@ public class FormPaperSizeAndBackgroundUploadGateTests
 
         // 🔴 주소 칸을 지우지 않았나(#1) — 이미 주소로 맞춰 둔 고객이 있을 수 있다
         Assert.Contains("@bind-Value=\"_form.BackgroundImageUrl\"", src, StringComparison.Ordinal);
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // 축 ⒣ 🔴 **종이 치수가 PDF 에 실제로 찍히나** — 사장님이 프린터로 보실 바로 그 축
+    // ──────────────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "축⒣ 🔴🔴 **실제 PDF 바이트**의 종이 치수를 읽는다 (프린터로 가는 숫자)")]
+    [InlineData("A4", "portrait", 595, 842)]
+    [InlineData("A4", "landscape", 842, 595)]
+    [InlineData("A5", "portrait", 420, 595)]
+    [InlineData("A5", "landscape", 595, 420)]
+    [InlineData("Letter", "portrait", 612, 792)]
+    [InlineData("Letter", "landscape", 792, 612)]
+    [InlineData("A3", "portrait", 595, 842)]   // 🔴 모르는 값 → A4 세로로 떨어진다
+    public void AxisH_RealPdfBytesCarryPaperSize(string size, string orientation, int wantW, int wantH)
+    {
+        // 🔴 왜 이 축이 또 필요한가 — 위 축⒟⒠ 는 `PageSize` **객체**까지만 쟀다.
+        //   작성기가 그 객체를 받아 **종이 치수로 옮기는지**는 다른 얘기다.
+        //   사장님이 프린터로 보실 숫자는 PDF 안의 `/MediaBox` 다. 그걸 직접 읽는다.
+        //   🔴 그래도 **종이 자체는 못 잰다** — 프린터가 그 치수를 따르는지는 실물이다.
+        var pageSize = ResolveSize(size, orientation);
+
+        var bytes = QuestPDF.Fluent.Document.Create(doc =>
+        {
+            doc.Page(page =>
+            {
+                page.Size(pageSize);
+                page.Content().Text("게이트");
+            });
+        }).GeneratePdf();
+
+        var (w, h) = ReadFirstMediaBox(bytes);
+
+        // 1pt 안에서 맞으면 같은 종이다(소수점 반올림).
+        Assert.True(Math.Abs(w - wantW) <= 1.5,
+            $"{size}·{orientation} 의 종이 폭이 {w}pt 다 — {wantW}pt 를 기대했다.");
+        Assert.True(Math.Abs(h - wantH) <= 1.5,
+            $"{size}·{orientation} 의 종이 높이가 {h}pt 다 — {wantH}pt 를 기대했다.");
+    }
+
+    [Fact(DisplayName = "축⒣음 🔴 음성 대조군 — 치수를 **진짜로 읽고 있다**(늘 A4 라고 답하는 게 아니다)")]
+    public void AxisH_Negative_ReaderActuallyReads()
+    {
+        var a4 = QuestPDF.Fluent.Document.Create(d => d.Page(p =>
+        {
+            p.Size(QuestPDF.Helpers.PageSizes.A4);
+            p.Content().Text("x");
+        })).GeneratePdf();
+
+        var a5 = QuestPDF.Fluent.Document.Create(d => d.Page(p =>
+        {
+            p.Size(QuestPDF.Helpers.PageSizes.A5);
+            p.Content().Text("x");
+        })).GeneratePdf();
+
+        // 🔴 이 둘이 같게 읽히면 읽기 함수가 고장난 것이고, 위 축⒣ 전부가 거짓 통과다.
+        Assert.NotEqual(ReadFirstMediaBox(a4), ReadFirstMediaBox(a5));
+    }
+
+    /// <summary>PDF 첫 쪽의 종이 치수(pt)를 읽는다 — <c>/MediaBox [0 0 W H]</c>.</summary>
+    private static (double W, double H) ReadFirstMediaBox(byte[] pdf)
+    {
+        var text = System.Text.Encoding.Latin1.GetString(pdf);
+        var m = System.Text.RegularExpressions.Regex.Match(
+            text, @"/MediaBox\s*\[\s*([\d.+-]+)\s+([\d.+-]+)\s+([\d.+-]+)\s+([\d.+-]+)\s*\]");
+
+        Assert.True(m.Success, "PDF 안에서 종이 치수를 못 찾았다 — 읽기 자체가 깨졌다.");
+
+        var x1 = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var y1 = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var x2 = double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var y2 = double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+
+        return (Math.Abs(x2 - x1), Math.Abs(y2 - y1));
     }
 
     private static string ReadSource(params string[] parts)
