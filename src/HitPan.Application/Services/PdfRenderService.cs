@@ -2,6 +2,8 @@ using System.Data;
 using System.Data.Common;
 using Dapper;
 using HitPan.Application.Interfaces;
+using HitPan.Application.DTOs.Documents;
+using HitPan.Application.DTOs.Settings;
 using Microsoft.Extensions.Logging;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -27,7 +29,20 @@ public sealed class PdfRenderService : IPdfRenderService
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
-    public async Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType, string documentId, CancellationToken ct = default)
+    public Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType, string documentId, CancellationToken ct = default)
+        => RenderDocumentAsync(tenantId, documentType, documentId, null, ct);
+
+    /// <summary>
+    /// 🔴 20261024 — 미리보기 주입 통로 (사장님 결재 2026-10-21 ㉯ · 오더 2026-10-24).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>조건 1</b> — <paramref name="overrides"/> 가 null 이면 위 4인자 호출과
+    ///   <b>한 글자도 다르지 않게</b> 동작한다. 기존 호출부는 안 고쳤다(#1).
+    /// 🔴 <b>두 벌 금지</b> — 미리보기 전용 작성기를 따로 만들지 않았다. 같은 통로를 타고
+    ///   다른 것은 <b>먹이는 자료</b>뿐이다(20261021작 §11-3).
+    /// </remarks>
+    public async Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType,
+        string documentId, PdfPreviewOverrides? overrides, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
@@ -41,17 +56,29 @@ public sealed class PdfRenderService : IPdfRenderService
             return await RenderPayslipAsync(tenantId, documentId, ct).ConfigureAwait(false);
         }
 
-        var data = await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
+        // 🔴 §11-2 ② — 양식정보설정은 6단계 중 1단계인데 전표는 3~4단계다.
+        //   신규 고객이 자를 대고 mm 를 맞추는 그 시점에 전표가 **0건**이라 아무것도 못 봤다.
+        var data = overrides?.UseSampleData == true
+            ? BuildSampleSnapshot(documentType, overrides)
+            : await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
         var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
 
         // 작지② 양식 분기 (사장님 작업지시 2026-05-31)
         // form_templates에서 paper_mode + 여백 + 토글 로드 → plain·preprint 분기
-        var template = await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+        // 🔴 사장님 §11 *"실제 출력물 양식을 편집하는 대로 보여주는 게 중요함"* —
+        //   저장 전 값이 오면 DB 행 **대신** 그것으로 그린다.
+        //   🔴 음성 대조군(결재 ㉯ 조건 3): 이 세 줄을 빼면 미리보기가 저장값으로 떨어지고
+        //      「편집하는 대로」가 **실패해야** 한다. 조용히 통과하면 게이트가 거짓이다.
+        var template = overrides?.Template is not null
+            ? ToTemplateInfo(overrides.Template)
+            : await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
         var isPreprint = template?.PaperMode == "preprint";
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
         var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
+        // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
+        var bgImage = TryLoadFormBackground(template?.BackgroundImageUrl);
         var showHeader = template?.ShowCompanyLogo ?? true;
         var showBorder = template?.ShowBorder ?? true;
         var marginTop = (float)(template?.MarginTopMm ?? 20);
@@ -94,6 +121,19 @@ public sealed class PdfRenderService : IPdfRenderService
                 }
                 page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(10));
                 page.PageColor(Colors.White);
+
+                // 🔴 20261024 사장님 오더 — 업체 양식지 그림을 종이에 깐다 (§13).
+                //   사장님: *"양식지를 추가할수도 있어야해. 이미 업체에서 쓰는 양식지가 있을수도 있으니."*
+                //   🔴 종전에는 BackgroundImageUrl 이 작성기에 **0건**이었다 — 올려도 안 나왔다.
+                //   🔴 그림은 **맨 밑에** 깔고 내용은 그 위에 그린다. 스캔한 양식지 칸에 값이
+                //      들어가는 모양을 눈으로 맞추는 것이 미리보기의 존재 이유다.
+                //   🔴 그림이 없거나 못 읽으면 **종전과 똑같이** 그린다(#1 — 고객 종이 안 바뀜).
+                //   🔴 이 자리는 **공용 흐름**이다 ⇒ 양식용지(preprint) 경로의 10종 전부에 닿는다.
+                //      세금계산서도 preprint 면 이 흐름으로 온다(위 전용 분기는 !isPreprint).
+                if (bgImage is not null)
+                {
+                    page.Background().Image(bgImage).FitArea();
+                }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
                 if (!isPreprint && showHeader)
@@ -1578,6 +1618,41 @@ public sealed class PdfRenderService : IPdfRenderService
                 text.Span(displayName).FontSize(8).FontColor(Colors.Red.Medium).Bold();
             });
     }
+    /// <summary>
+    /// 🔴 업체 양식지 그림을 읽는다 (20261024 사장님 오더 · §13).
+    /// 고객이 쓰던 종이를 스캔해 올린 그림을 <b>종이 밑에 깔기</b> 위한 것이다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>읽기만 한다</b> — 파일 보관소·업로드 통로는 만들지 않는다(범위 밖 · 직인과 같은 자리).
+    /// 🔴 <b>못 읽으면 종전과 똑같이 그린다.</b> 고객 종이를 못 내는 것보다, 그림 없이라도
+    ///   내는 것이 맞다. 빈 catch 는 쓰지 않는다(#15) — 왜 안 깔렸는지 로그로 남는다.
+    /// 🔴 <c>http(s)</c> 주소는 <b>안 받는다.</b> 작성기가 바깥 그물로 나가면 인쇄가
+    ///   남의 서버 응답 시간에 묶인다(고객 PC 는 끊길 수 있다). 보관소가 생기면 그때 로컬 경로다.
+    /// </remarks>
+    private byte[]? TryLoadFormBackground(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("[PDF] 양식지 그림이 바깥 주소다 — 깔지 않는다. 로컬 경로만 받는다.");
+            return null;
+        }
+
+        try
+        {
+            if (File.Exists(url)) return File.ReadAllBytes(url);
+            _logger.LogWarning("[PDF] 양식지 그림 파일이 없다 — 그림 없이 그린다.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 양식지 그림 읽기 실패 — 그림 없이 그린다.");
+            return null;
+        }
+    }
+
 
     /// <summary>
     /// 인장 그림을 읽는다. 🔴 지금은 보관소가 없어 <c>seal_url</c> 이 늘 비어 있다(설계 §8-2)
@@ -2105,7 +2180,22 @@ public sealed class PdfRenderService : IPdfRenderService
         {
             var dto = await _formTemplateService.GetDefaultAsync(tenantId, formType, ct).ConfigureAwait(false);
             if (dto is null) return null;
-            return new FormTemplateInfo
+            return ToTemplateInfo(dto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "form_templates 조회 실패 - tenant={Tenant} type={Type}, 기본 plain 가도", tenantId, formType);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 양식 DTO → 작성기 입력. 🔴 <b>매핑은 한 벌이다</b> — 미리보기도 이것을 쓴다.
+    /// 두 벌이 되면 미리보기와 인쇄물이 조용히 어긋난다(20261021작 §11-3).
+    /// </summary>
+    private FormTemplateInfo ToTemplateInfo(FormTemplateDto dto)
+    {
+        return new FormTemplateInfo
             {
                 PaperMode = dto.PaperMode,
                 MarginTopMm = dto.MarginTopMm,
@@ -2124,14 +2214,73 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   종전에는 이 값을 **읽어오지도 않았다.** 고객이 양식용지 좌표를 아무리
                 //   맞춰도 인쇄물은 코드에 고정된 위치로만 나왔다.
                 //   ⇒ 시판 양식지 칸과 안 맞아 양식용지 모드가 사실상 못 쓰는 기능이었다.
-                FieldCoords = ParseFieldCoords(dto.FieldCoordsJson)
-            };
-        }
-        catch (Exception ex)
+                FieldCoords = ParseFieldCoords(dto.FieldCoordsJson),
+            // 🔴 20261024 사장님 오더 "인쇄까지 모두 양식지 적용" · §13
+            //   *"이미 업체에서 쓰는 양식지가 있을수도 있으니"* — 종전에는 이 칸을
+            //   **읽어오지도 않았다**(PdfRenderService 안 BackgroundImageUrl 0건).
+            //   고객이 쓰는 양식지를 올려도 종이에 안 나왔다.
+            BackgroundImageUrl = dto.BackgroundImageUrl
+        };
+    }
+
+    /// <summary>
+    /// 예시 자료 — 🔴 <b>전표 없이</b> 양식을 맞춰 볼 수 있게 한다(20261021작 §11-2 ②).
+    /// 양식정보설정은 6단계 중 <b>1단계</b>인데 전표는 3~4단계다. 신규 고객이 자를 대고
+    /// mm 를 맞추는 바로 그 시점에 전표가 <b>0건</b>이라 지금은 아무것도 못 봤다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>품목 줄 수를 바꿔 볼 수 있어야 한다</b>(§11-3) — 「몇 줄부터 두 쪽이 되나」·
+    ///   「몇 줄부터 외 N건이 되나」를 눈으로 보는 것이 이 화면의 목적이다.
+    /// 🔴 종이에 <b>「예시」</b>가 찍힌다 — 진짜 계산서로 오해하면 안 된다.
+    /// </remarks>
+    private static DocumentSnapshot BuildSampleSnapshot(string documentType, PdfPreviewOverrides ov)
+    {
+        var count = Math.Clamp(ov.SampleLineCount, 1, 200);
+        var lines = new List<DocumentLine>(count);
+        for (var i = 1; i <= count; i++)
         {
-            _logger.LogWarning(ex, "form_templates 조회 실패 - tenant={Tenant} type={Type}, 기본 plain 가도", tenantId, formType);
-            return null;
+            // 금액은 decimal 이다 (#4). 줄마다 조금씩 달라야 합계 검산이 눈에 보인다.
+            var qty = (decimal)(i % 5 + 1);
+            var unit = 10000m + (i % 7) * 1500m;
+            var supply = qty * unit;
+            var vat = Math.Round(supply * 0.1m, 0, MidpointRounding.AwayFromZero);
+            lines.Add(new DocumentLine
+            {
+                ItemName = $"예시품목 {i}",
+                Spec = i % 2 == 0 ? "1BOX" : "1EA",
+                Qty = qty,
+                UnitPrice = unit,
+                Supply = supply,
+                Vat = vat,
+                Total = supply + vat
+            });
         }
+
+        var totalSupply = lines.Sum(l => l.Supply);
+        var totalVat = lines.Sum(l => l.Vat);
+
+        return new DocumentSnapshot
+        {
+            DocType = documentType,
+            // 🔴 번호 자리에 「예시」를 적는다 — 어느 양식이든 머리에 반드시 찍히는 칸이다.
+            DocNo = "예시-0000",
+            DocDate = DateTime.Today,
+            PartnerName = "(예시) 거래처명",
+            PartnerBusinessNo = "000-00-00000",
+            PartnerAddress = "(예시) 주소 — 실제 자료가 아닙니다",
+            PartnerContact = "담당자",
+            PartnerCeoName = "(예시) 대표자",
+            PartnerBizType = "(예시) 업태",
+            PartnerBizItem = "(예시) 종목",
+            PartnerPhone = "000-0000-0000",
+            TotalSupply = totalSupply,
+            TotalVat = totalVat,
+            TotalAmount = totalSupply + totalVat,
+            Remark = ov.MarkAsSample
+                ? "🔴 예시 자료입니다 — 실제 거래 내용이 아닙니다. 양식 확인용으로만 쓰십시오."
+                : null,
+            Lines = lines
+        };
     }
 
     private sealed class FormTemplateInfo
@@ -2153,6 +2302,16 @@ public sealed class PdfRenderService : IPdfRenderService
         /// </summary>
         public bool ShowTearLine { get; set; }
 
+
+        /// <summary>
+        /// 🔴 업체 양식지 그림 (20261024 사장님 오더 · §13). 종전에는 이 칸이
+        /// <b>작성기에 아예 없었다</b> — 고객이 올려도 종이에 안 나왔다.
+        /// </summary>
+        /// <remarks>
+        /// 사장님: <i>"양식지를 추가할수도 있어야해. 이미 업체에서 쓰는 양식지가 있을수도 있으니."</i>
+        /// 🔴 스캔한 양식지 위에 내용을 겹쳐 보여줘야 mm 맞추기가 의미를 가진다.
+        /// </remarks>
+        public string? BackgroundImageUrl { get; set; }
         /// <summary>고객이 맞춘 양식용지 필드 위치. 비어 있으면 종전 기본 배치로 인쇄한다.</summary>
         public List<FieldCoord> FieldCoords { get; set; } = new();
     }

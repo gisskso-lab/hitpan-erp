@@ -3,6 +3,7 @@
 @using HitPan.Web.Pages.SettingsUi
 @inject HttpClient Http
 @inject ISnackbar Snackbar
+@inject IJSRuntime JS
 
 <MudDialog>
     <DialogContent>
@@ -179,8 +180,31 @@
                 </MudItem>
             }
         </MudGrid>
+
+        @* 🔴 미리보기 — 사장님 오더 2026-10-21 · 2026-10-24.
+             "미리보기가 되야, 양식조정이 의미가 있지" / "편집하는 대로 보여주는 게 중요함"
+             🔴 종이를 **이 창 안에서** 보여준다. 내려받아 열고 돌아오면 고친 값과
+                종이를 나란히 볼 수 없어 자로 mm 를 맞출 수가 없다. *@
+        @if (_previewUrl is not null)
+        {
+            <MudDivider Class="my-3" />
+            <div class="d-flex align-center mb-2" style="gap:8px;">
+                <MudText Typo="Typo.subtitle2">미리보기 — 예시 자료입니다 (실제 거래 내용이 아닙니다)</MudText>
+                <MudSpacer />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               Title="미리보기 닫기" OnClick="ClosePreviewAsync" />
+            </div>
+            <iframe src="@_previewUrl" style="width:100%;height:560px;border:1px solid #ddd;"
+                    title="양식 미리보기"></iframe>
+        }
     </DialogContent>
     <DialogActions>
+        @* 품목 줄 수 — 🔴 "몇 줄부터 두 쪽이 되나" 를 눈으로 보는 것이 이 화면의 목적이다. *@
+        <MudNumericField T="int" @bind-Value="_previewLines" Label="예시 품목 줄" Min="1" Max="200"
+                         Margin="Margin.Dense" Style="max-width:120px;" />
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility"
+                   Disabled="_previewBusy" OnClick="PreviewAsync">@(_previewBusy ? "그리는 중…" : "미리보기")</MudButton>
+        <MudSpacer />
         <MudButton OnClick="Cancel">취소</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
     </DialogActions>
@@ -391,6 +415,79 @@
             rows.Add(new Dictionary<string, object> { ["key"] = "max_rows", ["x_mm"] = (decimal)_maxRows, ["y_mm"] = 0m });
 
         return System.Text.Json.JsonSerializer.Serialize(rows);
+    }
+
+    // ── 미리보기 (사장님 오더 2026-10-21 · 2026-10-24) ─────────────────
+    private string? _previewUrl;
+    private int _previewLines = 3;
+    private bool _previewBusy;
+
+    /// <summary>
+    /// 🔴 저장하지 않은 지금 화면 값으로 종이를 그린다.
+    /// 사장님: <i>"실제 출력물 양식을 편집하는 대로 보여주는 게 중요함"</i>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>저장하지 않는다.</b> 미리보기가 값을 저장하면 고객이 「확인만 해보려다」
+    ///    양식을 바꿔 버린다. 그려 보고 마음에 안 들면 취소할 수 있어야 한다.
+    /// 🔴 서버는 <b>정본 인쇄 통로</b>를 그대로 탄다 — 미리보기 전용 작성기는 없다.
+    ///    두 벌이 되면 미리보기와 실제 인쇄물이 조용히 어긋난다.
+    /// 🔴 전표 id 를 안 보낸다 — 예시 자료로만 그린다(남의 전표가 나갈 길이 없다).
+    /// </remarks>
+    private async Task PreviewAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.FormType))
+        {
+            Snackbar.Add("양식 유형을 먼저 고르십시오.", Severity.Warning);
+            return;
+        }
+
+        // 화면 표에 적은 좌표도 그려야 한다 — 안 담으면 양식용지 위치가 미리보기에 안 먹는다.
+        _form.FieldCoordsJson = BuildCoordsJson();
+
+        _previewBusy = true;
+        try
+        {
+            await ClosePreviewAsync();   // 앞서 띄운 주소를 먼저 거둔다(메모리 누적 방지)
+
+            var body = new { Template = _form, LineCount = _previewLines };
+            var resp = await Http.PostAsJsonAsync("api/settings/form-templates/preview-pdf", body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 🔴 조용히 실패하지 않는다 — 고객이 "눌렀는데 아무 일도 안 난다" 를 겪으면
+                //    무엇이 틀렸는지 알 길이 없다.
+                Snackbar.Add($"미리보기를 그리지 못했습니다. ({(int)resp.StatusCode})", Severity.Error);
+                return;
+            }
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            var url = await JS.InvokeAsync<string>("hitpanMakeBlobUrl",
+                "application/pdf", Convert.ToBase64String(bytes));
+            if (string.IsNullOrEmpty(url))
+            {
+                Snackbar.Add("미리보기를 띄우지 못했습니다.", Severity.Error);
+                return;
+            }
+            _previewUrl = url;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("미리보기 중 오류가 났습니다.", Severity.Error);
+            Console.Error.WriteLine($"[FormPreview] {ex.Message}");
+        }
+        finally
+        {
+            _previewBusy = false;
+        }
+    }
+
+    /// <summary>blob 주소를 거둔다 — 안 거두면 미리보기를 누를수록 쌓인다.</summary>
+    private async Task ClosePreviewAsync()
+    {
+        if (_previewUrl is null) return;
+        var old = _previewUrl;
+        _previewUrl = null;
+        try { await JS.InvokeVoidAsync("hitpanRevokeBlobUrl", old); }
+        catch (Exception ex) { Console.Error.WriteLine($"[FormPreview] 주소 거두기 실패: {ex.Message}"); }
     }
 
     private async Task SaveAsync()

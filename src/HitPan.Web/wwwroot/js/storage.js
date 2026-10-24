@@ -269,3 +269,28 @@ window.hitpanPrintGrid = (title, subtitle) => {
         setTimeout(cleanup, 1000);
     }
 };
+
+// ── 양식 미리보기 (사장님 오더 2026-10-21 · 2026-10-24) ───────────────
+// 사장님: "미리보기가 되야, 양식조정이 의미가 있지"
+//         "실제 출력물 양식을 편집하는 대로 보여주는 게 중요함"
+//
+// 🔴 왜 내려받기(downloadFileFromBytes)를 안 쓰나 — 자로 mm 를 맞추는 화면이다.
+//    눌러서 파일을 받고 열어 보고 다시 돌아오면, 고친 값과 종이를 **나란히** 볼 수가 없다.
+//    그래서 blob 주소만 만들어 주고, 같은 창 안 틀에 그대로 띄운다.
+// 🔴 blob 주소는 쓰고 나면 반드시 거둔다 — 안 거두면 미리보기를 누를수록 메모리가 쌓인다.
+window.hitpanMakeBlobUrl = (contentType, base64) => {
+    try {
+        const bin = atob(base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return URL.createObjectURL(new Blob([bytes], { type: contentType }));
+    } catch (e) {
+        console.warn('[hitpan] 미리보기 주소를 만들지 못했습니다', e);
+        return '';
+    }
+};
+
+window.hitpanRevokeBlobUrl = (url) => {
+    if (!url) return;
+    try { URL.revokeObjectURL(url); } catch (e) { /* 이미 거둬진 주소 */ }
+};
