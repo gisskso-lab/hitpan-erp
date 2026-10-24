@@ -78,7 +78,16 @@ public sealed class PdfRenderService : IPdfRenderService
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
         var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
-        var bgImage = TryLoadFormBackground(template?.BackgroundImageUrl);
+        // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
+        //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
+        //     → 미리보기 배경으로 깔려 그 위에 필드 위치를 mm 로 맞춘다」 이고,
+        //     §13-10 은 순백지에 업체 그림 찍기를 **「등재만 · 이번에 안 한다」** 로 못박았다.
+        //     그런데 나는 **공용 인쇄 흐름**에 깔아 정반대를 넣었다(검증팀 반려 R-1).
+        //   [그대로 두면] 양식용지 고객은 **이미 인쇄된 종이 위에 그림이 또 찍혀**
+        //     이중 인쇄가 되고(§13-5 합격선 1 위반), 순백지 9종에도 업체 그림이 찍힌다.
+        //   [그래서] 미리보기 경로에서만 그린다. 실인쇄 PDF 에는 **0건** —
+        //     이메일·팩스·전표 인쇄는 전부 종전과 똑같다(#1).
+        var bgImage = ResolveFormBackground(overrides, template);
         var showHeader = template?.ShowCompanyLogo ?? true;
         var showBorder = template?.ShowBorder ?? true;
         var marginTop = (float)(template?.MarginTopMm ?? 20);
@@ -1619,32 +1628,108 @@ public sealed class PdfRenderService : IPdfRenderService
             });
     }
     /// <summary>
-    /// 🔴 업체 양식지 그림을 읽는다 (20261024 사장님 오더 · §13).
-    /// 고객이 쓰던 종이를 스캔해 올린 그림을 <b>종이 밑에 깔기</b> 위한 것이다.
+    /// 🔴 <b>양식지 그림을 깔지 말지 정하는 유일한 자리</b> (반려 R-1·R-3 봉합).
     /// </summary>
     /// <remarks>
-    /// 🔴 <b>읽기만 한다</b> — 파일 보관소·업로드 통로는 만들지 않는다(범위 밖 · 직인과 같은 자리).
-    /// 🔴 <b>못 읽으면 종전과 똑같이 그린다.</b> 고객 종이를 못 내는 것보다, 그림 없이라도
-    ///   내는 것이 맞다. 빈 catch 는 쓰지 않는다(#15) — 왜 안 깔렸는지 로그로 남는다.
-    /// 🔴 <c>http(s)</c> 주소는 <b>안 받는다.</b> 작성기가 바깥 그물로 나가면 인쇄가
-    ///   남의 서버 응답 시간에 묶인다(고객 PC 는 끊길 수 있다). 보관소가 생기면 그때 로컬 경로다.
+    /// 🔴 <b>왜 함수로 뽑았나</b> — 종전에는 이 판단이 <c>RenderDocumentAsync</c> 본문에
+    ///   한 줄로 묻혀 있어 <b>시험이 물 수가 없었다.</b> 검증팀 실측: 그리는 줄과 로더를
+    ///   <b>통째로 빼도 게이트 13/13 이 초록</b>이었다(반려 R-3 · 결재 ㉯ 조건 3 미충족).
+    ///   ⇒ 판단을 <b>부를 수 있는 한 자리</b>로 모아 시험이 직접 재게 한다.
+    /// 🔴 <b>규칙은 하나다</b> — <b>미리보기일 때만</b> 깐다(§13-8).
+    ///   실인쇄 PDF 에는 <b>0건</b>이다. 양식용지는 종이에 이미 인쇄돼 있어 또 찍으면
+    ///   <b>이중 인쇄</b>가 되고, 순백지는 <b>히트판 양식</b>이라 업체 그림이 들어갈 자리가 아니다
+    ///   (§13-7·§13-10 — 그건 <b>등재만</b>).
+    /// </remarks>
+    private byte[]? ResolveFormBackground(PdfPreviewOverrides? overrides, FormTemplateInfo? template)
+    {
+        // 🔴 이 한 줄이 실인쇄를 지킨다. 빼면 고객 종이에 그림이 또 찍힌다.
+        if (overrides is null) return null;
+        return TryLoadFormBackground(template?.BackgroundImageUrl);
+    }
+
+    /// <summary>
+    /// 🔴 업체 양식지 그림을 읽는다 — <b>미리보기 배경 전용</b> (§13-8).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>[2026-10-24 반려 R-2·R-4 봉합]</b> 종전 판은 두 가지가 틀렸다.
+    /// <para>
+    /// <b>R-2 — 「못 읽으면 종전과 똑같이」가 거짓이었다.</b> try/catch 가 <b>파일 읽기만</b>
+    ///   감쌌고, 그림을 실제로 <b>그리는</b> <c>GeneratePdf()</c> 는 try 밖이었다.
+    ///   검증팀 실측: 디코드 안 되는 바이트에 QuestPDF 가 <b>3/3 예외</b>를 던졌다.
+    ///   ⇒ <c>.pdf</c>·<c>.svg</c>·0바이트를 가리키면 그 양식의 <b>인쇄·이메일·팩스가 전부 500</b>
+    ///   이 된다(#20 — 워크플로우 흐름은 절대 안 끊긴다).
+    ///   🔴 그래서 <b>여기서 미리 디코드해 본다.</b> 여기서 터지면 <c>null</c> 을 돌려주고,
+    ///   종이는 <b>그림 없이</b> 나간다. 그리는 자리까지 끌고 가지 않는다.
+    /// </para>
+    /// <para>
+    /// <b>R-4 — 경로가 안 갇혀 있었다.</b> 고객이 본문에 적은 문자열로 서버 파일을
+    ///   아무거나 읽을 수 있었다(UNC·<c>file://</c> 가 http 차단을 비켜 갔다).
+    ///   ⇒ <b>정해진 폴더 밑</b>만 · <b>그림 확장자</b>만 · <b>크기 상한</b>까지 건다
+    ///   (§13-5 합격선 5 — 형식·크기 제한).
+    /// </para>
+    /// 🔴 <b>읽기만 한다</b> — 보관소·업로드 통로는 여전히 만들지 않는다(범위 밖).
     /// </remarks>
     private byte[]? TryLoadFormBackground(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
 
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        // ① 바깥 그물 금지 — 인쇄가 남의 서버 응답 시간에 묶이면 고객 장사가 멈춘다.
+        //    UNC(\호스트\…) 도 같은 이유로 막는다(R-4 — http 차단을 비켜 가던 길).
+        if (url.Contains("://", StringComparison.Ordinal) || url.StartsWith(@"\\", StringComparison.Ordinal))
         {
-            _logger.LogWarning("[PDF] 양식지 그림이 바깥 주소다 — 깔지 않는다. 로컬 경로만 받는다.");
+            _logger.LogWarning("[PDF] 양식지 그림 주소가 바깥·공유 경로다 — 깔지 않는다.");
+            return null;
+        }
+
+        // ② 그림 확장자만. .pdf·.svg·.exe 따위는 여기서 끝낸다.
+        var ext = Path.GetExtension(url);
+        if (!AllowedBackgroundExts.Contains(ext))
+        {
+            _logger.LogWarning("[PDF] 양식지 그림 형식이 아니다({Ext}) — 깔지 않는다.", ext);
             return null;
         }
 
         try
         {
-            if (File.Exists(url)) return File.ReadAllBytes(url);
-            _logger.LogWarning("[PDF] 양식지 그림 파일이 없다 — 그림 없이 그린다.");
-            return null;
+            // ③ 경로 가둠 — 정해진 폴더 밑이 아니면 안 읽는다(R-4).
+            //    `..\..\` 같은 거슬러 오르기는 FullPath 로 펴서 비교하므로 통하지 않는다.
+            var full = Path.GetFullPath(url);
+            var root = Path.GetFullPath(FormBackgroundRoot);
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림이 허용 폴더 밖이다 — 깔지 않는다.");
+                return null;
+            }
+
+            if (!File.Exists(full))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 파일이 없다 — 그림 없이 그린다.");
+                return null;
+            }
+
+            // ④ 크기 상한 — 거대 그림은 종이 한 장 때문에 PC 메모리를 먹는다.
+            var len = new FileInfo(full).Length;
+            if (len <= 0 || len > MaxBackgroundBytes)
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 크기가 범위 밖이다({Len} bytes) — 깔지 않는다.", len);
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(full);
+
+            // ⑤ 🔴 여기서 **미리 그려 본다**(R-2). 작성기가 받아들이지 못하는 바이트면
+            //    지금 터뜨리고 null 로 돌려준다 — 인쇄 한복판에서 터지면 전표가 안 나간다.
+            try
+            {
+                _ = QuestPDF.Infrastructure.Image.FromBinaryData(bytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PDF] 양식지 그림을 작성기가 못 읽는다 — 그림 없이 그린다.");
+                return null;
+            }
+
+            return bytes;
         }
         catch (Exception ex)
         {
@@ -1652,6 +1737,23 @@ public sealed class PdfRenderService : IPdfRenderService
             return null;
         }
     }
+
+    /// <summary>양식지 그림으로 받아 주는 형식. 🔴 이 밖은 작성기까지 가지 않는다(R-2).</summary>
+    private static readonly HashSet<string> AllowedBackgroundExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
+
+    /// <summary>양식지 그림 크기 상한 — 20MB. 종이 한 장이 PC 메모리를 먹으면 안 된다.</summary>
+    private const long MaxBackgroundBytes = 20L * 1024 * 1024;
+
+    /// <summary>
+    /// 🔴 양식지 그림을 읽어 올 수 있는 <b>유일한 폴더</b> (R-4 경로 가둠).
+    /// 보관소·업로드 통로가 생기면 그 통로가 여기에 넣는다 — 그때 <b>이 코드는 안 바뀐다.</b>
+    /// </summary>
+    private static string FormBackgroundRoot =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+
 
 
     /// <summary>
