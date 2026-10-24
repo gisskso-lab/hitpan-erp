@@ -1,6 +1,7 @@
 @* 양식 템플릿 신규/수정 다이얼로그 (사장님 작업지시 작지②·③) *@
 @using System.Net.Http.Json
 @using HitPan.Web.Pages.SettingsUi
+@using HitPan.Contracts.Forms
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
@@ -125,7 +126,7 @@
                         쓰시는 양식용지를 그림으로 올리면, 그 위에 값이 어떻게 찍히는지 바로 보실 수 있습니다.
                     </MudText>
                     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                        <MudFileUpload T="IBrowserFile" Accept=".png,.jpg,.jpeg,.bmp,.webp"
+                        <MudFileUpload T="IBrowserFile" Accept="@FormBackgroundLimits.AcceptAttribute"
                                        FilesChanged="OnBackgroundFileChangedAsync">
                             <ActivatorContent>
                                 <MudButton Variant="Variant.Outlined"
@@ -589,8 +590,13 @@
         }
     }
 
-    /// <summary>양식지 그림 상한 — 🔴 서버(FormBackgroundPaths.MaxBytes)와 같은 값이어야 한다.</summary>
-    private const long MaxBackgroundBytes = 20L * 1024 * 1024;
+    /// <summary>
+    /// 양식지 그림 상한. 🔴 [2026-10-25 [4] 반려 R-1 봉합] 종전에는 여기에
+    /// <c>20L * 1024 * 1024</c> 를 <b>다시 적어 두고</b> 「서버와 같은 값이어야 한다」는
+    /// 주석만 달았다 — 그건 바람이고 보장이 아니다. 서버 값이 바뀌면 여기는 안 바뀌고,
+    /// 게이트는 서버 두 자리만 대조해 **어긋나도 초록**이었다. 이제 같은 자리를 읽는다.
+    /// </summary>
+    private const long MaxBackgroundBytes = FormBackgroundLimits.MaxBytes;
 
     private sealed class UploadedBackground
     {

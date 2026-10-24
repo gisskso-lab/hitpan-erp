@@ -199,7 +199,7 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         finally { Cleanup(tenant); }
     }
 
-    [Fact(DisplayName = "축⒝ 🔴 받아 주는 형식 목록이 **한 자리**다 (두 벌이면 어긋난다)")]
+    [Fact(DisplayName = "축⒝ 🔴 받아 주는 형식·상한이 **한 자리**다 — 🆕 **화면 벌까지** (반려 R-1)")]
     public void AxisB_ExtensionListIsSingleSource()
     {
         var prop = typeof(PdfRenderService).GetProperty("AllowedBackgroundExts",
@@ -208,6 +208,83 @@ public class FormPaperSizeAndBackgroundUploadGateTests
 
         var readerExts = (HashSet<string>)prop!.GetValue(null)!;
         Assert.Same(FormBackgroundPaths.AllowedExts, readerExts);
+
+        // 🔴🔴 [2026-10-25 [4] 반려 R-1 봉합] 종전에는 **서버 두 자리만** 대조했다.
+        //   화면(`HitPan.Web`)은 `HitPan.Application` 을 참조하지 않아 razor 안에
+        //   `20L * 1024 * 1024` 와 `Accept=".png,..."` **두 번째 벌**이 있었고,
+        //   이 축은 그걸 못 봤다 ⇒ 어긋나도 50/50 초록이었다.
+        //   ⇒ 값을 `HitPan.Contracts` 로 내렸고, **화면이 그 자리를 읽는지**를 여기서 본다.
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        Assert.Contains("FormBackgroundLimits.MaxBytes", razor, StringComparison.Ordinal);
+        Assert.Contains("FormBackgroundLimits.AcceptAttribute", razor, StringComparison.Ordinal);
+
+        // 🔴 두 번째 벌이 **다시 생기면** 빨개진다 — 숫자를 손으로 적은 자리가 없어야 한다.
+        Assert.DoesNotContain("20L * 1024 * 1024", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain(".png,.jpg", razor, StringComparison.Ordinal);
+
+        // 🔴 서버 상한도 같은 자리를 읽나.
+        Assert.Equal(HitPan.Contracts.Forms.FormBackgroundLimits.MaxBytes, FormBackgroundPaths.MaxBytes);
+    }
+
+    [Theory(DisplayName = "축⒝ 🔴 대문자·이중 확장자도 **같은 규칙**으로 갈린다 (반려 R-9 미측정 입력)")]
+    [InlineData("양식.PNG", true)]
+    [InlineData("양식.JpEg", true)]
+    [InlineData("양식.png.exe", false)]
+    [InlineData("양식.exe.png", true)]
+    public async Task AxisB_CaseAndDoubleExtension(string name, bool shouldPass)
+    {
+        // 🔴 [4] 가 「못 쟀다」로 적은 입력들이다. 🔴 `a.exe.png` 가 통과하는 것은 **정상**이다
+        //   — 마지막 확장자가 그림이고, 속을 열어 **그려 보기**까지 통과해야 보관된다.
+        //   이름이 아니라 **바이트**가 판정의 바닥이라는 뜻이고, 그게 설계 의도다.
+        var tenant = $"gate-{Guid.NewGuid():N}";
+        try
+        {
+            var (path, why) = await MakeStore().SaveAsync(tenant, name, new MemoryStream(RealPng));
+
+            if (shouldPass)
+            {
+                Assert.Null(why);
+                Assert.NotNull(path);
+            }
+            else
+            {
+                Assert.Null(path);
+                Assert.NotNull(why);
+            }
+        }
+        finally { Cleanup(tenant); }
+    }
+
+    [Theory(DisplayName = "축⒝ 🔴 상한 **경계값** — 정확히 상한은 받고, 한 바이트 넘으면 거절 (반려 R-9)")]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public async Task AxisB_SizeBoundary(int delta, bool shouldPass)
+    {
+        // 🔴 경계는 둘 다 재야 뜻이 있다. 「넘으면 거절」만 재면 상한을 1 로 바꿔도 통과한다.
+        var tenant = $"gate-{Guid.NewGuid():N}";
+        try
+        {
+            var body = new byte[FormBackgroundPaths.MaxBytes + delta];
+            RealPng.CopyTo(body, 0);   // 앞머리는 진짜 PNG — 크기 축만 재려고
+
+            var (path, why) = await MakeStore().SaveAsync(tenant, "a.png", new MemoryStream(body));
+
+            if (shouldPass)
+            {
+                // 🔴 상한과 같은 크기는 **크기 때문에** 거절되지 않는다.
+                //    (뒤가 쓰레기라 「그려 보기」에서 떨어질 수 있다 — 그건 다른 축이다.)
+                Assert.True(why is null || !why.Contains("큽니다", StringComparison.Ordinal),
+                    $"정확히 상한인데 크기로 거절했다: {why}");
+            }
+            else
+            {
+                Assert.Null(path);
+                Assert.NotNull(why);
+                Assert.Contains("큽니다", why!, StringComparison.Ordinal);
+            }
+        }
+        finally { Cleanup(tenant); }
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -352,9 +429,8 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     [Fact(DisplayName = "축⒠ 🔴 양식이 아예 없으면 A4·세로 (신규 고객 자리)")]
     public void AxisE_NullTemplateIsA4Portrait()
     {
-        var svc = MakeRenderService();
-        var got = (QuestPDF.Helpers.PageSize)Private("ResolvePageSize")
-            .Invoke(svc, new object?[] { null })!;
+        // 🔴 인자 개수를 손으로 적지 않는다 — 10/25 에 그 자리에서 108건이 깨졌다.
+        var got = ResolveRaw(template: null);
         var a4 = ResolveSize("A4", "portrait");
 
         Assert.Equal(a4.Width, got.Width, 1);
@@ -393,6 +469,7 @@ public class FormPaperSizeAndBackgroundUploadGateTests
 
         // 🔴 손으로 칸 이름을 적지 않는다 — 작성기의 양식 칸을 **긁어서** 짝을 찾는다.
         var scraped = new List<PropertyInfo>();
+        var skipped = new List<string>();
         foreach (var ip in InfoType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (!dtoProps.TryGetValue(ip.Name, out var dp)) continue;
@@ -401,15 +478,36 @@ public class FormPaperSizeAndBackgroundUploadGateTests
 
             // 기본값과 **다른** 값을 넣는다 — 같은 값이면 배선이 빠져도 통과한다(거짓 초록).
             var probe = DifferentFrom(ip.PropertyType, ip.GetValue(blank));
-            if (probe is null) continue;
+
+            // 🔴🔴 [2026-10-25 [4] 반려 R-8 봉합] 종전에는 여기서 `continue` 로
+            //   **조용히 건너뛰었다.** 모르는 형의 칸이 늘면 배선이 빠져도 통과한다
+            //   — 긁기를 세운 뜻이 그 자리에서 사라진다. 이제 건너뛰지 않고 **적어 둔다.**
+            if (probe is null)
+            {
+                skipped.Add($"{ip.Name}:{ip.PropertyType.Name}");
+                continue;
+            }
 
             dp.SetValue(dto, probe);
             scraped.Add(ip);
         }
 
+        // 🔴 [R-8] 건너뛴 칸은 **아는 것만** 허용한다. 새 형이 들어오면 여기서 빨개지고,
+        //   그때 DifferentFrom 에 그 형을 더하면 된다. 조용히 넘어가지 않는다.
+        var allowedSkips = new[] { "FieldCoords:List`1" };
+        Assert.True(skipped.All(s => allowedSkips.Contains(s)),
+            $"긁기가 모르는 형의 양식 칸을 건너뛰었다: {string.Join(", ", skipped)} "
+            + "— DifferentFrom 에 그 형을 더하고 이 목록을 갱신하라.");
+
         // 🔴 긁은 칸이 적으면 **긁기 자체가 깨진 것**이다 — 0건이면 이 시험은 아무것도 안 본다.
+        //   바닥은 「지금 짝이 맞는 칸 수」로 두되, 건너뛴 칸을 합쳐 **전수를 덮는지** 같이 본다.
         Assert.True(scraped.Count >= 8,
             $"긁은 양식 칸이 {scraped.Count}개뿐이다 — 이름·형이 어긋나 긁기가 깨졌다.");
+
+        var infoFieldCount = InfoType.GetProperties(BindingFlags.Public | BindingFlags.Instance).Length;
+        Assert.True(scraped.Count + skipped.Count + UnpairedByDesign >= infoFieldCount,
+            $"작성기 양식 칸 {infoFieldCount}개 중 {scraped.Count + skipped.Count}개만 긁혔다 "
+            + "— 짝을 못 찾은 칸이 늘었다(이름이 다른 칸이 생겼나).");
 
         var info = Private("ToTemplateInfo").Invoke(svc, new object?[] { dto })!;
 
@@ -478,11 +576,55 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         //   그래서 누가 호출부를 `page.Size(PageSizes.A4)` 로 되돌려도 전부 초록이다.
         //   10/24 G-1 이 정확히 그 모양이었다(분기를 빼도 42/42 초록).
         //   ⇒ 「부른 자리」를 본다. 되돌리면 이 줄이 사라지므로 **빨개진다.**
-        var src = ReadSource("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+        // 🔴 [2026-10-25 [4] 반려 R-2 봉합] **주석을 걷어낸 코드**에서 본다.
+        //   종전에는 원문을 그대로 봐서, 호출부를 되돌리고 같은 글자를 주석 한 줄로
+        //   남기면 초록이었다 — 거짓 통과를 막는 축이 주석을 믿고 있었다.
+        var src = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
 
-        Assert.Contains("page.Size(ResolvePageSize(template))", src, StringComparison.Ordinal);
+        Assert.Contains("page.Size(ResolvePageSize(", src, StringComparison.Ordinal);
         Assert.Contains("_ = ResolveStyleKey(template);", src, StringComparison.Ordinal);
 
+        // 🔴 걷어내기가 정말 돌고 있나 — 고장나면 위 두 줄이 다시 거짓이 된다.
+        var raw = ReadSource("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+        Assert.Contains("내가 뭘 틀렸나", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("내가 뭘 틀렸나", src, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒢ 🔴🔴 **법정 서식은 용지를 안 바꾼다** (반려 R-5 — preprint 세금계산서가 공용 흐름으로 온다)")]
+    public void AxisG_TaxInvoiceNeverChangesPaper()
+    {
+        // 🔴 전용 작성기로 가는 분기는 `&& !isPreprint` 다 ⇒ **양식용지 모드의 세금계산서는
+        //   공용 흐름으로 온다.** 전용 작성기만 A4 로 묶어 두고 「A4 고정 그대로」라고 적은 것이
+        //   절반만 참이었다. 종류로 막는지 **동작으로** 본다.
+        var a4 = QuestPDF.Helpers.PageSizes.A4;
+
+        foreach (var (size, orientation) in new[]
+                 { ("A5", "portrait"), ("Letter", "landscape"), ("A4", "landscape") })
+        {
+            var got = ResolveSize(size, orientation, documentType: "tax_invoice");
+            Assert.Equal(a4.Width, got.Width, 1);
+            Assert.Equal(a4.Height, got.Height, 1);
+        }
+
+        // 🔴 음성 대조군 — 다른 종류는 **바뀌어야 한다**(전부 A4 로 묶어 버린 게 아니다).
+        var other = ResolveSize("A5", "portrait", documentType: "delivery");
+        Assert.NotEqual((a4.Width, a4.Height), (other.Width, other.Height));
+    }
+
+    [Fact(DisplayName = "축⒢ 🔴🔴 **좌표 맞춘 양식용지는 용지를 안 바꾼다** (반려 R-4 — 조용한 빈 종이)")]
+    public void AxisG_CoordFormNeverChangesPaper()
+    {
+        // 🔴 좌표는 종이 왼쪽 위가 원점이고 여백 0 이다. A5 로 줄이면 종이 밖으로 나간 값이
+        //   **그냥 안 그려진다** — 오류도 경고도 없다. 고객은 빈 종이를 받고 이유를 모른다.
+        var a4 = QuestPDF.Helpers.PageSizes.A4;
+
+        var got = ResolveSize("A5", "landscape", useCoords: true);
+        Assert.Equal(a4.Width, got.Width, 1);
+        Assert.Equal(a4.Height, got.Height, 1);
+
+        // 🔴 음성 대조군 — 좌표가 없으면 바뀌어야 한다(막아 둔 게 아니라 가린 것이다).
+        var free = ResolveSize("A5", "landscape", useCoords: false);
+        Assert.NotEqual((a4.Width, a4.Height), (free.Width, free.Height));
     }
 
     [Fact(DisplayName = "축⒢ 🔴 올리는 문이 **실재한다** — 입구가 없으면 그림을 넣을 길이 0이다")]
@@ -525,7 +667,7 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     // 축 ⒣ 🔴 **종이 치수가 PDF 에 실제로 찍히나** — 사장님이 프린터로 보실 바로 그 축
     // ──────────────────────────────────────────────────────────────
 
-    [Theory(DisplayName = "축⒣ 🔴🔴 **실제 PDF 바이트**의 종이 치수를 읽는다 (프린터로 가는 숫자)")]
+    [Theory(DisplayName = "축⒣ 🟡 양식값 → PDF 종이 치수 **매핑**을 PDF 바이트로 잰다 (🔴 전표 작성기는 안 탄다)")]
     [InlineData("A4", "portrait", 595, 842)]
     [InlineData("A4", "landscape", 842, 595)]
     [InlineData("A5", "portrait", 420, 595)]
@@ -536,9 +678,15 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     public void AxisH_RealPdfBytesCarryPaperSize(string size, string orientation, int wantW, int wantH)
     {
         // 🔴 왜 이 축이 또 필요한가 — 위 축⒟⒠ 는 `PageSize` **객체**까지만 쟀다.
-        //   작성기가 그 객체를 받아 **종이 치수로 옮기는지**는 다른 얘기다.
-        //   사장님이 프린터로 보실 숫자는 PDF 안의 `/MediaBox` 다. 그걸 직접 읽는다.
-        //   🔴 그래도 **종이 자체는 못 잰다** — 프린터가 그 치수를 따르는지는 실물이다.
+        //   그 객체가 **PDF 안 `/MediaBox` 숫자로 옮겨지는지**는 다른 얘기고, 사장님이
+        //   프린터로 보실 숫자가 그것이다. 그걸 직접 읽는다.
+        //
+        // 🔴🔴 [2026-10-25 [4] 반려 R-3 — 이 축의 한계를 이름에 적었다]
+        //   이 시험은 **자기 문서를 만들어** 잰다. 실제 전표 작성기(`RenderDocumentAsync`)를
+        //   타지 않으므로 **호출부를 되돌려도 이 축은 초록**이다. 호출부 방어는 축⒢ 가 한다.
+        //   ⇒ 이 축이 지키는 것은 「양식값 → 종이 치수 매핑」이고, 「전표가 그 종이로 나온다」는
+        //     **DB 가 있어야 재는 미측정 축**이다. 그렇게 적어 두고 넘어가지 않는다.
+        //   🔴 종이 자체는 영영 못 잰다 — 프린터가 그 치수를 따르는지는 실물이다.
         var pageSize = ResolveSize(size, orientation);
 
         var bytes = QuestPDF.Fluent.Document.Create(doc =>
@@ -595,6 +743,39 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         return (Math.Abs(x2 - x1), Math.Abs(y2 - y1));
     }
 
+    /// <summary>
+    /// 🔴 소스를 읽되 <b>주석을 걷어낸다</b> — [2026-10-25 [4] 반려 R-2 봉합].
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>무엇이 거짓이었나</b> — 축⒢ 가 `File.ReadAllText` + `Assert.Contains` 였다.
+    ///   그래서 누가 호출부를 `page.Size(PageSizes.A4)` 로 되돌리고
+    ///   `// page.Size(ResolvePageSize(template))` 를 <b>주석 한 줄로 남기면 초록</b>이다.
+    ///   10/24 G-1(거짓 통과) 재발을 막는 유일한 방어선이 이 축인데, 그 축이 주석을 믿었다.
+    /// 🔴 그래서 `//` 줄과 줄 끝 주석을 지운 뒤 본다. **글자가 아니라 코드**를 보는 쪽으로 한 걸음.
+    /// 🔴 여전히 못 보는 것: 문자열 리터럴 안의 같은 글자. 그건 이 축의 한계로 적어 둔다.
+    /// </remarks>
+    private static string ReadCode(params string[] parts)
+    {
+        var raw = ReadSource(parts);
+
+        var lines = raw.Split('\n').Select(line =>
+        {
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("//", StringComparison.Ordinal)
+                || trimmed.StartsWith("///", StringComparison.Ordinal)
+                || trimmed.StartsWith("@*", StringComparison.Ordinal)
+                || trimmed.StartsWith("*", StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            var at = line.IndexOf("//", StringComparison.Ordinal);
+            return at >= 0 ? line[..at] : line;
+        });
+
+        return string.Join("\n", lines);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var dir = AppContext.BaseDirectory;
@@ -611,15 +792,52 @@ public class FormPaperSizeAndBackgroundUploadGateTests
 
     // ──────────────────────────────────────────────────────────────
 
-    private static QuestPDF.Helpers.PageSize ResolveSize(string paperSize, string orientation)
+    private static QuestPDF.Helpers.PageSize ResolveSize(string paperSize, string orientation,
+        string? documentType = null, bool useCoords = false)
     {
-        var svc = MakeRenderService();
         var info = Activator.CreateInstance(InfoType)!;
         InfoType.GetProperty("PaperSize")!.SetValue(info, paperSize);
         InfoType.GetProperty("Orientation")!.SetValue(info, orientation);
 
-        return (QuestPDF.Helpers.PageSize)Private("ResolvePageSize").Invoke(svc, new[] { info })!;
+        return ResolveRaw(info, documentType, useCoords);
     }
+
+    /// <summary>
+    /// 🔴 <c>ResolvePageSize</c> 를 부른다 — <b>인자 개수를 서명에서 긁어</b> 맞춘다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 손으로 개수를 적으면 10/25 의 그 사고(반사 `Invoke` 가 개수를 맞추라고 터지는 자리)를
+    ///   **시험이 또 겪는다.** 실제로 봉합 중에 한 번 겪었다(축⒠ 가 1개를 넘겨 터졌다).
+    /// </remarks>
+    private static QuestPDF.Helpers.PageSize ResolveRaw(object? template,
+        string? documentType = null, bool useCoords = false)
+    {
+        var svc = MakeRenderService();
+        var m = Private("ResolvePageSize");
+
+        var args = m.GetParameters().Select<ParameterInfo, object?>(p => p.Name switch
+        {
+            "template" => template,
+            "documentType" => documentType,
+            "useCoords" => useCoords,
+            _ => p.HasDefaultValue ? p.DefaultValue : null,
+        }).ToArray();
+
+        return (QuestPDF.Helpers.PageSize)m.Invoke(svc, args)!;
+    }
+
+    /// <summary>
+    /// 🔴 DTO 에 <b>이름 짝이 없는</b> 작성기 칸 수 — 지금은 <b>1</b> 이다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>그 한 칸</b> = <c>FormTemplateInfo.FieldCoords</c>(`List&lt;FieldCoord&gt;`) ↔
+    ///   <c>FormTemplateDto.FieldCoordsJson</c>(`string`). 이름도 형도 다르다 —
+    ///   DTO 는 JSON 글자로 들고 오고 작성기는 **파싱한 목록**으로 쓴다(`ParseFieldCoords`).
+    ///   그래서 이 긁기로는 짝을 못 찾는다. 그 칸의 배선은 `PreprintCoordGuardTests` 가 지킨다.
+    /// 🔴 새로 짝 없는 칸을 만들면 이 숫자를 올리고 <b>왜 짝이 없는지 여기 적어라.</b>
+    ///   안 적고 올리면 다음 사람이 「원래 그런가」로 읽는다.
+    /// </remarks>
+    private const int UnpairedByDesign = 1;
 
     /// <summary>기본값과 <b>다른</b> 값을 만든다 — 같은 값으로 재면 거짓 초록이 난다.</summary>
     private static object? DifferentFrom(Type type, object? current) => type switch

@@ -1,3 +1,5 @@
+using HitPan.Contracts.Forms;
+
 namespace HitPan.Application.Services;
 
 /// <summary>
@@ -33,10 +35,14 @@ public static class FormBackgroundPaths
     /// <summary>
     /// 받아 주는 그림 형식. 🔴 이 밖은 <b>보관소에 들어가지도, 작성기로 가지도 않는다</b>.
     /// <c>.pdf</c>·<c>.svg</c>·<c>.exe</c> 따위는 여기서 끝난다.
+    /// 🔴 [2026-10-25 [4] 반려 R-1 봉합] 목록을 <b>여기서 적지 않는다</b> —
+    ///   화면(`HitPan.Web`)이 이 프로젝트를 참조하지 않아 razor 에 두 번째 벌이 생겼고,
+    ///   게이트는 서버 두 자리만 대조해 **Web 벌이 어긋나도 초록**이었다.
+    ///   ⇒ 값은 양쪽이 함께 보는 <see cref="FormBackgroundLimits"/> 에 있다.
     /// </summary>
     public static readonly HashSet<string> AllowedExts =
-        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
+        new(FormBackgroundLimits.AllowedExts, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>그림 한 장 크기 상한 — 20MB. 종이 한 장이 PC 메모리를 먹으면 안 된다.</summary>
-    public const long MaxBytes = 20L * 1024 * 1024;
+    /// <summary>그림 한 장 크기 상한. 🔴 값은 <see cref="FormBackgroundLimits"/> 한 자리에 있다.</summary>
+    public const long MaxBytes = FormBackgroundLimits.MaxBytes;
 }

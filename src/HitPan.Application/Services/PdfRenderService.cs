@@ -150,7 +150,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   종전에는 `PageSizes.A4` 가 못으로 박혀 있어 고객이 A5·가로를 골라도
                 //   종이가 안 바뀌었다(저장은 되는데 아무 일도 안 일어나는 칸이었다).
                 //   🔴 모르는 값이면 **A4·세로로 떨어진다** — 고객 종이가 안 나가는 일은 없다(#20).
-                page.Size(ResolvePageSize(template));
+                page.Size(ResolvePageSize(template, documentType, useCoords));
                 // 🔴 스타일 칸을 **읽는다** — 지금은 늘 basic 이다(배선만 · 4종 디자인 미확정).
                 //   종전에는 저장·조회만 되고 작성기가 이 칸을 아예 몰랐다. 모르는 값이 오면
                 //   ResolveStyleKey 가 적어 둔다 — 조용히 넘어가지 않는다.
@@ -1980,8 +1980,42 @@ public sealed class PdfRenderService : IPdfRenderService
     /// 🔴 <b>세금계산서 전용 작성기는 여기를 타지 않는다</b> — 법정 서식이라 A4 고정이다
     ///   (부가가치세법 시행규칙 · D-5 교훈). 그 쪽을 바꾸려면 법무팀장 결재가 먼저다.
     /// </remarks>
-    private PageSize ResolvePageSize(FormTemplateInfo? template)
+    private PageSize ResolvePageSize(FormTemplateInfo? template,
+        string? documentType = null, bool useCoords = false)
     {
+        // 🔴🔴 [2026-10-25 [4] 반려 R-5 봉합] **법정 서식은 용지를 바꾸지 않는다.**
+        //   [내가 뭘 틀렸나] 세금계산서 전용 작성기로 가는 분기는 `&& !isPreprint` 다.
+        //     그래서 **양식용지 모드의 세금계산서는 이 공용 흐름으로 온다** — 전용 작성기를
+        //     A4 로 묶어 둔 것만 보고 "세금계산서는 A4 고정 그대로" 라고 적었는데, 절반만 참이었다.
+        //     고객이 양식용지 + A5 를 고르면 **법정 서식이 A5 로 나간다**(부가가치세법 시행규칙).
+        //   🔴 그래서 종류로 막는다 — 모드와 무관하게 세금계산서는 A4 세로다.
+        //     바꾸려면 법무팀장 결재가 먼저다(D-5 와 같은 자리).
+        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal))
+        {
+            if (!IsA4Portrait(template))
+            {
+                _logger.LogWarning(
+                    "[PDF] 세금계산서는 법정 서식이라 용지·방향을 바꾸지 않는다 — A4 세로로 그린다.");
+            }
+
+            return PageSizes.A4;
+        }
+
+        // 🔴🔴 [2026-10-25 [4] 반려 R-4 봉합] **좌표를 맞춰 둔 양식용지는 종이를 안 바꾼다.**
+        //   [무엇이 일어났나] 좌표 인쇄는 종이 왼쪽 위가 원점이고 여백이 0 이다. 고객이 A4
+        //     양식용지에 자를 대고 맞춘 mm 좌표가 있는데 용지를 A5 로 줄이면, 종이 밖으로
+        //     나간 값은 **그냥 안 그려진다.** 오류도 안 나고 경고도 없다 ⇒ **조용히 빈 종이.**
+        //     이번 차수에서 가장 위험한 자리였다(고객은 전표가 안 나간 줄도 모른다).
+        //   🔴 좌표는 **어느 종이에 대고 쟀는지**가 전제다. 그 전제를 코드가 혼자 바꾸지 않는다.
+        //     용지를 바꾸려면 고객이 좌표를 다시 맞춰야 하고, 그건 화면이 안내할 일이다(등재).
+        if (useCoords && !IsA4Portrait(template))
+        {
+            _logger.LogWarning(
+                "[PDF] 양식용지 좌표가 맞춰져 있어 용지·방향을 바꾸지 않는다 — A4 세로로 그린다. "
+                + "용지를 바꾸려면 좌표를 다시 맞춰 주십시오.");
+            return PageSizes.A4;
+        }
+
         var size = (template?.PaperSize ?? "A4").Trim();
 
         var baseSize = size.ToUpperInvariant() switch
@@ -1998,6 +2032,22 @@ public sealed class PdfRenderService : IPdfRenderService
             StringComparison.OrdinalIgnoreCase);
 
         return landscape ? baseSize.Landscape() : baseSize;
+    }
+
+    /// <summary>
+    /// 이 양식이 <b>A4 세로</b>를 그대로 쓰고 있나 — 🔴 법정 서식·좌표 양식지 보호 판정에 쓴다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 「기본값 그대로」와 「A4 를 골라 둠」을 <b>같게 본다</b> — 둘 다 종이가 안 바뀐다.
+    ///   그래서 바꾸지 않았을 때는 경고도 남기지 않는다(쓸데없는 경고는 다음 사람이 끈다).
+    /// </remarks>
+    private static bool IsA4Portrait(FormTemplateInfo? template)
+    {
+        var size = (template?.PaperSize ?? "A4").Trim();
+        var orientation = (template?.Orientation ?? "portrait").Trim();
+
+        return size.Equals("A4", StringComparison.OrdinalIgnoreCase)
+            && !orientation.Equals("landscape", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>모르는 용지값이 왔을 때 — 🔴 조용히 넘기지 않고 적어 둔 뒤 A4 로 간다.</summary>

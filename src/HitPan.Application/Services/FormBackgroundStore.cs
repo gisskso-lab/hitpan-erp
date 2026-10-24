@@ -22,7 +22,12 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
 {
     private readonly ILogger<FormBackgroundStore> _logger;
 
-    public FormBackgroundStore(ILogger<FormBackgroundStore> logger) => _logger = logger;
+    public FormBackgroundStore(ILogger<FormBackgroundStore> logger)
+    {
+        _logger = logger;
+        // 🔴 정적 울타리 검사가 조용히 떨어지지 않게 로거를 꽂아 둔다.
+        _staticLogger ??= logger;
+    }
 
     /// <inheritdoc />
     public async Task<(string? StoredPath, string? Rejection)> SaveAsync(
@@ -102,6 +107,14 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
                 return (null, "그림을 보관할 수 없습니다. 관리자에게 알려 주십시오.");
             }
 
+            // 🔴 [2026-10-25 [4] 반려 R-7 봉합] 쓰려는 자리가 **링크를 지나면 쓰지 않는다.**
+            //   테넌트 폴더가 누군가 만든 junction 이면 울타리는 통과하고 파일은 바깥에 떨어진다.
+            if (PassesThroughLink(resolved, root))
+            {
+                _logger.LogWarning("[양식지] 보관 자리가 링크를 지난다 — 받지 않는다.");
+                return (null, "그림을 보관할 수 없습니다. 관리자에게 알려 주십시오.");
+            }
+
             await File.WriteAllBytesAsync(resolved, bytes, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -122,11 +135,62 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
         }
     }
 
+    /// <summary>
+    /// 🔴 경로가 <b>링크(symlink·junction)</b> 를 지나는가 — 지나면 손대지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 쓰기·지우기 쪽에도 필요한가</b> — 2026-10-25 [4] 반려 R-7.
+    ///   읽는 쪽(<c>PdfRenderService.PassesThroughLink</c>)은 10/24 에 이걸 세웠는데
+    ///   내가 만든 보관소에는 <b>0건</b>이었다. 울타리 안에 junction 하나를 만들어 두면
+    ///   앞글자 비교는 통과하고 <b>실제 파일은 디스크 어디든</b> 될 수 있다
+    ///   — 지우기는 고객이 준 경로를 받으므로 그쪽이 특히 위험하다.
+    /// 🔴 <b>울타리 자체(root)는 보지 않는다</b> — 그 자리는 관리자가 정한 곳이다.
+    ///   보는 것은 <b>울타리 안쪽</b>뿐이다.
+    /// 🔴 못 재면 <b>막는 쪽</b>으로 떨어진다 — 그림은 안 올라가도 전표는 산다(#20).
+    /// </remarks>
+    private static bool PassesThroughLink(string fullPath, string root)
+    {
+        var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
+
+        try
+        {
+            var file = new FileInfo(fullPath);
+            if (file.LinkTarget is not null) return true;
+
+            for (var dir = file.Directory;
+                 dir is not null && dir.FullName.Length > rootNoSep.Length;
+                 dir = dir.Parent)
+            {
+                if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
+                if (dir.LinkTarget is not null) return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 못 재면 「지난다」로 본다 — 막는 쪽이 안전측이다(#15 빈 catch 금지).
+            _staticLogger?.LogWarning(ex, "[양식지] 링크 여부를 재지 못했다 — 막는 쪽으로 떨어진다.");
+            return true;
+        }
+    }
+
+    /// <summary>🔴 정적 울타리 검사에서 쓰는 로거 — 첫 인스턴스가 꽂는다(없으면 조용히 막는다).</summary>
+    private static ILogger? _staticLogger;
+
     /// <inheritdoc />
     public string? Delete(string tenantId, string storedPath)
     {
         if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(storedPath))
             return "지울 그림을 찾을 수 없습니다.";
+
+        // 🔴 [R-7 봉합] 지우기에도 테넌트 모양 검사를 둔다 — 올리기에만 있었다.
+        if (tenantId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || tenantId.Contains("..", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("[양식지] 테넌트 값이 폴더 이름으로 쓸 수 없는 모양이다 — 지우지 않는다.");
+            return "이 그림은 지울 수 없습니다.";
+        }
 
         try
         {
@@ -138,6 +202,15 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("[양식지] 허용 폴더 밖을 지우려 했다 — 지우지 않는다.");
+                return "이 그림은 지울 수 없습니다.";
+            }
+
+            // 🔴 [R-7 봉합] 링크를 지나면 지우지 않는다 — 울타리 안 junction 으로
+            //   바깥 파일을 지우는 길을 막는다. 지우기는 고객이 준 경로를 받으므로
+            //   이쪽이 올리기보다 위험하다.
+            if (PassesThroughLink(full, root))
+            {
+                _logger.LogWarning("[양식지] 지울 경로가 링크를 지난다 — 지우지 않는다.");
                 return "이 그림은 지울 수 없습니다.";
             }
 
