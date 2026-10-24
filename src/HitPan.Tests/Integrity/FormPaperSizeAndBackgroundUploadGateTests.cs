@@ -352,6 +352,103 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     }
 
     // ──────────────────────────────────────────────────────────────
+    // 축 ⒤ 🔴🔴 **테넌트 폴더가 링크면** — 검증팀이 실제로 뚫은 길 (재검증 S-1)
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "축⒤ 🔴🔴 **테넌트 폴더가 junction 이면 지우지 않는다** — 밖의 파일이 지워졌던 자리")]
+    public async Task AxisI_TenantFolderJunction_DeleteRejected()
+    {
+        // 🔴🔴 [2026-10-25 재검증 S-1] 1차 봉합은 울타리 뿌리를 **테넌트 폴더**로 넘겼고,
+        //   링크 검사는 **뿌리 자신을 건너뛴다**(뿌리는 관리자가 정한 자리라는 뜻이었다)
+        //   ⇒ 테넌트 폴더가 junction 이면 아무도 안 봤다. 검증팀이 그 길로 **울타리 밖 파일을
+        //   실제로 지웠다.** `%ProgramData%` 는 일반 사용자도 쓸 수 있으니, 직원 계정이
+        //   폴더를 바꿔 두면 관리자의 「그림 지우기」 한 번에 밖이 지워진다.
+        var tenant = $"gate-{Guid.NewGuid():N}";
+        var outside = Path.Combine(Path.GetTempPath(), $"gate-outside-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outside);
+
+        var victim = Path.Combine(outside, "밖의파일.png");
+        File.WriteAllBytes(victim, RealPng);
+
+        var tenantDir = FormBackgroundPaths.TenantRoot(tenant);
+        Directory.CreateDirectory(FormBackgroundPaths.Root);
+
+        try
+        {
+            MakeJunction(tenantDir, outside);
+
+            var store = MakeStore();
+
+            // 🔴 junction 을 지나는 경로로 지우기를 부른다 — 울타리 앞글자 비교는 통과한다.
+            var through = Path.Combine(tenantDir, "밖의파일.png");
+            var why = store.Delete(tenant, through);
+
+            Assert.NotNull(why);   // 거절해야 한다
+            Assert.True(File.Exists(victim), "🔴 울타리 밖 파일이 지워졌다 — S-1 이 되살아났다.");
+
+            // 🔴 올리기도 같은 길로 막히나 — 그림이 밖에 떨어지면 안 된다.
+            var before = Directory.GetFiles(outside).Length;
+            var (path, rejection) = await store
+                .SaveAsync(tenant, "a.png", new MemoryStream(RealPng));
+
+            Assert.Null(path);
+            Assert.NotNull(rejection);
+            Assert.Equal(before, Directory.GetFiles(outside).Length);
+        }
+        finally
+        {
+            // junction 은 폴더로 지운다 — 대상(outside)은 따라 지워지지 않는다.
+            try { if (Directory.Exists(tenantDir)) Directory.Delete(tenantDir); }
+            catch (Exception ex) { Console.Error.WriteLine($"[gate cleanup] {ex.Message}"); }
+
+            try { if (Directory.Exists(outside)) Directory.Delete(outside, recursive: true); }
+            catch (Exception ex) { Console.Error.WriteLine($"[gate cleanup] {ex.Message}"); }
+        }
+    }
+
+    [Fact(DisplayName = "축⒤음 🔴 음성 대조군 — **링크가 아니면** 올리기·지우기가 된다(과잉 차단 아님)")]
+    public async Task AxisI_Negative_NormalFolderStillWorks()
+    {
+        var tenant = $"gate-{Guid.NewGuid():N}";
+        var store = MakeStore();
+        try
+        {
+            var (path, why) = await store
+                .SaveAsync(tenant, "a.png", new MemoryStream(RealPng));
+
+            Assert.Null(why);
+            Assert.NotNull(path);
+            Assert.Null(store.Delete(tenant, path!));
+        }
+        finally { Cleanup(tenant); }
+    }
+
+    /// <summary>
+    /// 🔴 junction 을 만든다 — <c>mklink /J</c>. 관리자 권한이 필요 없다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 못 만들면 <b>시험을 통과시키지 않는다</b> — 「못 쟀다」를 초록으로 적지 않는다.
+    ///   이 축은 검증팀이 실물로 뚫은 자리라, 못 재는 환경이면 그 사실이 빨강으로 보여야 한다.
+    /// </remarks>
+    private static void MakeJunction(string link, string target)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        p.WaitForExit(20_000);
+
+        Assert.True(Directory.Exists(link) && new DirectoryInfo(link).LinkTarget is not null,
+            "junction 을 만들지 못해 이 축을 재지 못했다 — 「못 쟀다」는 통과가 아니다.");
+    }
+
+    // ──────────────────────────────────────────────────────────────
     // 축 ⒟ 용지·방향이 종이에 닿는다
     // ──────────────────────────────────────────────────────────────
 
@@ -509,6 +606,15 @@ public class FormPaperSizeAndBackgroundUploadGateTests
             $"작성기 양식 칸 {infoFieldCount}개 중 {scraped.Count + skipped.Count}개만 긁혔다 "
             + "— 짝을 못 찾은 칸이 늘었다(이름이 다른 칸이 생겼나).");
 
+        // 🔴 [재검증 S-5] 짝 없는 칸을 **이름으로** 확인한다 — 숫자를 올려 가리는 길을 막는다.
+        var paired = scraped.Select(p => p.Name).Concat(skipped.Select(s => s.Split(':')[0])).ToHashSet();
+        var unpaired = InfoType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => p.Name).Where(n => !paired.Contains(n)).ToArray();
+
+        Assert.True(unpaired.All(UnpairedByDesignNames.Contains),
+            $"짝 없는 작성기 칸이 늘었다: {string.Join(", ", unpaired)} "
+            + "— UnpairedByDesignNames 에 더하고 **왜 짝이 없는지** 거기 적어라.");
+
         var info = Private("ToTemplateInfo").Invoke(svc, new object?[] { dto })!;
 
         foreach (var ip in scraped)
@@ -588,6 +694,43 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         var raw = ReadSource("src", "HitPan.Application", "Services", "PdfRenderService.cs");
         Assert.Contains("내가 뭘 틀렸나", raw, StringComparison.Ordinal);
         Assert.DoesNotContain("내가 뭘 틀렸나", src, StringComparison.Ordinal);
+
+        // 🔴🔴 [재검증 S-2] 걷어내기가 **실코드를 손상시키지 않나** — 이게 더 나쁜 쪽이었다.
+        //   종전 판은 `IndexOf("//")` 로 잘라 `url.Contains("://")` 를 반 토막 냈다.
+        //   그 줄은 바깥 주소를 막는 자리다. 걷어내기가 코드를 바꿔 놓고 그 위에서 단언했다.
+        Assert.Contains("\"://\"", src, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒢ 🔴🔴 주석 걷어내기가 **블록 주석·문자열**을 올바로 가른다 (재검증 S-2)")]
+    public void AxisG_StripCommentsIsCorrect()
+    {
+        // 🔴 걷어내기 자체를 시험한다 — 이것이 틀리면 축⒢ 전부가 거짓이다.
+        var m = typeof(FormPaperSizeAndBackgroundUploadGateTests).GetMethod(
+            "StripComments", BindingFlags.NonPublic | BindingFlags.Static)!;
+        string Strip(string s) => (string)m.Invoke(null, new object?[] { s })!;
+
+        // ⒜ 줄 주석은 지운다
+        Assert.DoesNotContain("비밀", Strip("var a = 1; // 비밀"), StringComparison.Ordinal);
+
+        // ⒝ 🔴 블록 주석도 지운다 — 1차 봉합이 못 하던 것
+        Assert.DoesNotContain("숨은글", Strip("var a = 1; /* 숨은글 */ var b = 2;"), StringComparison.Ordinal);
+        Assert.Contains("var b = 2;", Strip("var a = 1; /* 숨은글 */ var b = 2;"), StringComparison.Ordinal);
+
+        // ⒞ 🔴 여러 줄 블록 주석
+        Assert.DoesNotContain("숨은글", Strip("a;\n/* 한 줄\n 숨은글 */\nb;"), StringComparison.Ordinal);
+
+        // ⒟ 🔴 문자열 안은 **건드리지 않는다** — 1차 봉합이 코드를 손상시킨 자리
+        Assert.Contains("\"://\"", Strip("if (url.Contains(\"://\")) { }"), StringComparison.Ordinal);
+        Assert.Contains("\"// 가짜\"", Strip("var s = \"// 가짜\";"), StringComparison.Ordinal);
+        Assert.Contains("\"/* 가짜 */\"", Strip("var s = \"/* 가짜 */\";"), StringComparison.Ordinal);
+
+        // ⒠ 🔴 음성 대조군 — 주석 안에 둔 호출부 글자는 **통과하지 못한다**
+        Assert.DoesNotContain("page.Size(ResolvePageSize(",
+            Strip("// page.Size(ResolvePageSize(template));\npage.Size(PageSizes.A4);"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("page.Size(ResolvePageSize(",
+            Strip("/* page.Size(ResolvePageSize(template)); */\npage.Size(PageSizes.A4);"),
+            StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "축⒢ 🔴🔴 **법정 서식은 용지를 안 바꾼다** (반려 R-5 — preprint 세금계산서가 공용 흐름으로 온다)")]
@@ -609,6 +752,52 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         // 🔴 음성 대조군 — 다른 종류는 **바뀌어야 한다**(전부 A4 로 묶어 버린 게 아니다).
         var other = ResolveSize("A5", "portrait", documentType: "delivery");
         Assert.NotEqual((a4.Width, a4.Height), (other.Width, other.Height));
+    }
+
+    [Theory(DisplayName = "축⒢ 🔴 **전표 종류 전건** — 어느 것이 막히고 어느 것이 안 막히나 (재검증 S-3)")]
+    [InlineData("tax_invoice", true)]      // 세금계산서 — 법정
+    [InlineData("invoice_exempt", true)]   // 면세계산서 — 법정 후보 · 🔴 법무 판정 전까지 막는 쪽
+    [InlineData("payment_receipt", true)]  // 입금표 — 같음
+    [InlineData("quotation", false)]
+    [InlineData("sales_order", false)]
+    [InlineData("delivery", false)]
+    [InlineData("purchase_order", false)]
+    [InlineData("purchase_receipt", false)]
+    [InlineData("purchase_return", false)]
+    [InlineData("sales_return", false)]
+    public void AxisG_EveryDocTypeIsDecided(string documentType, bool shouldPin)
+    {
+        // 🔴 종류 이름은 법적 판단이라 긁을 수 없다. 그래서 **전건을 표로 굳힌다** —
+        //   새 종류가 생기면 이 표에 없어서 누군가 결정을 내려야 한다.
+        var a4 = QuestPDF.Helpers.PageSizes.A4;
+        var got = ResolveSize("A5", "landscape", documentType: documentType);
+        var pinned = Math.Abs(got.Width - a4.Width) < 1.5 && Math.Abs(got.Height - a4.Height) < 1.5;
+
+        Assert.Equal(shouldPin, pinned);
+    }
+
+    [Fact(DisplayName = "축⒢ 🔴 화면 안내와 서버 판정이 **같은 종류**를 본다 (재검증 S-4 — 거짓 안내 방지)")]
+    public void AxisG_EditorNoticeMatchesServer()
+    {
+        // 🔴 화면이 「법으로 정해져 있어 A4 로 나갑니다」라고 적는 종류와 서버가 실제로 묶는 종류가
+        //   어긋나면 **고객이 거짓 안내를 받는다.** 양쪽 목록을 대조한다.
+        var serverField = typeof(PdfRenderService).GetField("LegalFormDocTypes",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(serverField);
+        var server = (HashSet<string>)serverField!.GetValue(null)!;
+
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        // 🔴 서버가 묶는 종류가 화면 목록에도 적혀 있나 (form_type ↔ documentType 이 같은 글자인 종들)
+        foreach (var t in server)
+        {
+            Assert.Contains($"\"{t}\"", razor, StringComparison.Ordinal);
+        }
+
+        // 🔴 안내 글이 실재하나 — 조건만 있고 말이 없으면 고객은 아무것도 못 본다
+        Assert.Contains("PaperChoiceIgnored", razor, StringComparison.Ordinal);
+        Assert.Contains("법으로 모양이 정해져", razor, StringComparison.Ordinal);
+        Assert.Contains("위치를 맞춰 두셨기 때문에", razor, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "축⒢ 🔴🔴 **좌표 맞춘 양식용지는 용지를 안 바꾼다** (반려 R-4 — 조용한 빈 종이)")]
@@ -755,25 +944,82 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     /// 🔴 여전히 못 보는 것: 문자열 리터럴 안의 같은 글자. 그건 이 축의 한계로 적어 둔다.
     /// </remarks>
     private static string ReadCode(params string[] parts)
-    {
-        var raw = ReadSource(parts);
+        => StripComments(ReadSource(parts));
 
-        var lines = raw.Split('\n').Select(line =>
+    /// <summary>
+    /// 🔴 주석을 걷어낸다 — <b>문자열 안은 건드리지 않고</b>, 블록 주석도 지운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴🔴 [2026-10-25 재검증 S-2 봉합] 1차 봉합은 두 가지로 틀렸다.
+    ///   ⒜ <c>//</c>·<c>///</c>·<c>@*</c> 로 <b>시작하는 줄</b>만 지워서
+    ///      <c>/* … */</c> 블록 주석과 <b>문자열 리터럴 안의 같은 글자</b>는 그대로 통과했다.
+    ///   ⒝ 🔴 더 나빴던 것 — 줄 끝 주석을 <c>IndexOf("//")</c> 로 잘라
+    ///      <c>url.Contains("://")</c> 같은 <b>실코드를 손상</b>시켰다
+    ///      (`PdfRenderService.cs` 의 바깥 주소 차단 줄이 그 피해자였다).
+    ///      즉 걷어내기가 코드를 바꿔 놓고 그 위에서 단언하고 있었다.
+    /// ⇒ 글자를 한 자씩 걸으며 <b>문자열·글자 리터럴 안인지</b> 보고, 밖일 때만 주석으로 센다.
+    /// 🔴 여전히 못 하는 것: 축자 문자열(<c>@"…"</c>·<c>"""…"""</c>) 안의 줄바꿈 처리.
+    ///   이 파일들에는 그 모양이 없어 지금은 참이고, 생기면 여기를 늘려야 한다(등재).
+    /// </remarks>
+    private static string StripComments(string raw)
+    {
+        var sb = new System.Text.StringBuilder(raw.Length);
+        var inString = false;
+        var inChar = false;
+        var inBlock = false;
+
+        for (var i = 0; i < raw.Length; i++)
         {
-            var trimmed = line.TrimStart();
-            if (trimmed.StartsWith("//", StringComparison.Ordinal)
-                || trimmed.StartsWith("///", StringComparison.Ordinal)
-                || trimmed.StartsWith("@*", StringComparison.Ordinal)
-                || trimmed.StartsWith("*", StringComparison.Ordinal))
+            var c = raw[i];
+            var next = i + 1 < raw.Length ? raw[i + 1] : '\0';
+
+            if (inBlock)
             {
-                return string.Empty;
+                if (c == '*' && next == '/') { inBlock = false; i++; }
+                else if (c == '\n') sb.Append('\n');   // 줄 수를 지킨다
+                continue;
             }
 
-            var at = line.IndexOf("//", StringComparison.Ordinal);
-            return at >= 0 ? line[..at] : line;
-        });
+            if (inString || inChar)
+            {
+                sb.Append(c);
+                if (c == '\\' && next != '\0') { sb.Append(next); i++; continue; }
+                if (inString && c == '"') inString = false;
+                if (inChar && c == '\'') inChar = false;
+                continue;
+            }
 
-        return string.Join("\n", lines);
+            // 문자열 밖에서만 주석으로 센다.
+            if (c == '/' && next == '/')
+            {
+                while (i < raw.Length && raw[i] != '\n') i++;
+                if (i < raw.Length) sb.Append('\n');
+                continue;
+            }
+
+            if (c == '/' && next == '*') { inBlock = true; i++; continue; }
+
+            // razor 주석 `@* … *@`
+            if (c == '@' && next == '*')
+            {
+                i += 2;
+                while (i + 1 < raw.Length && !(raw[i] == '*' && raw[i + 1] == '@'))
+                {
+                    if (raw[i] == '\n') sb.Append('\n');
+                    i++;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == '"') inString = true;
+            if (c == '\'') inChar = true;
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     private static string ReadSource(params string[] parts)
@@ -827,7 +1073,17 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     }
 
     /// <summary>
-    /// 🔴 DTO 에 <b>이름 짝이 없는</b> 작성기 칸 수 — 지금은 <b>1</b> 이다.
+    /// 🔴 DTO 에 <b>이름 짝이 없는</b> 작성기 칸 — [2026-10-25 재검증 S-5 봉합] <b>이름으로</b> 적는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전에는 숫자(<c>UnpairedByDesign = 1</c>)였다. 숫자는 <b>가리는 손잡이</b>다 —
+    ///   칸이 늘어 빨개졌을 때 다음 사람이 숫자를 올리면 조용히 넘어간다.
+    ///   이름이면 「무엇이 짝이 없나」를 그 자리에서 읽게 되고, 올리려면 까닭을 적어야 한다.
+    /// </remarks>
+    private static readonly string[] UnpairedByDesignNames = { "FieldCoords" };
+
+    /// <summary>
+    /// 🔴 위 목록의 개수 — 전수 대조에 쓴다. <b>손으로 적지 않는다</b>(목록에서 센다).
     /// </summary>
     /// <remarks>
     /// 🔴 <b>그 한 칸</b> = <c>FormTemplateInfo.FieldCoords</c>(`List&lt;FieldCoord&gt;`) ↔
@@ -837,7 +1093,7 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     /// 🔴 새로 짝 없는 칸을 만들면 이 숫자를 올리고 <b>왜 짝이 없는지 여기 적어라.</b>
     ///   안 적고 올리면 다음 사람이 「원래 그런가」로 읽는다.
     /// </remarks>
-    private const int UnpairedByDesign = 1;
+    private static int UnpairedByDesign => UnpairedByDesignNames.Length;
 
     /// <summary>기본값과 <b>다른</b> 값을 만든다 — 같은 값으로 재면 거짓 초록이 난다.</summary>
     private static object? DifferentFrom(Type type, object? current) => type switch

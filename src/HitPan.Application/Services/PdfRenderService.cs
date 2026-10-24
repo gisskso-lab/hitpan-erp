@@ -1990,12 +1990,18 @@ public sealed class PdfRenderService : IPdfRenderService
         //     고객이 양식용지 + A5 를 고르면 **법정 서식이 A5 로 나간다**(부가가치세법 시행규칙).
         //   🔴 그래서 종류로 막는다 — 모드와 무관하게 세금계산서는 A4 세로다.
         //     바꾸려면 법무팀장 결재가 먼저다(D-5 와 같은 자리).
-        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal))
+        //   🔴 [2026-10-25 재검증 S-3 봉합] 1차 봉합은 `tax_invoice` **하나만** 막았다.
+        //     변환표에는 `invoice_exempt`(면세계산서)·`payment_receipt`(입금표)도 있고
+        //     이것들도 계산서류다 ⇒ **법정성 판정은 법무팀장 몫**이고, 그 전까지는
+        //     **막는 쪽**에 둔다. 모르고 풀어 두면 법정 서식이 A5 로 나가는데,
+        //     모르고 막아 두면 고객이 용지를 못 바꾸는 것뿐이다 — 되돌릴 수 있는 쪽을 고른다.
+        if (LegalFormDocTypes.Contains(documentType ?? string.Empty))
         {
             if (!IsA4Portrait(template))
             {
                 _logger.LogWarning(
-                    "[PDF] 세금계산서는 법정 서식이라 용지·방향을 바꾸지 않는다 — A4 세로로 그린다.");
+                    "[PDF] {DocType} 은 법정 서식이라 용지·방향을 바꾸지 않는다 — A4 세로로 그린다.",
+                    documentType);
             }
 
             return PageSizes.A4;
@@ -2033,6 +2039,21 @@ public sealed class PdfRenderService : IPdfRenderService
 
         return landscape ? baseSize.Landscape() : baseSize;
     }
+
+    /// <summary>
+    /// 🔴 <b>용지·방향을 바꾸지 않는 종류</b> — 법정 서식(또는 그 후보).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 목록인가</b> — 2026-10-25 재검증 S-3. 1차 봉합은 세금계산서 하나만 막았는데
+    ///   변환표에는 <c>invoice_exempt</c>(면세계산서)·<c>payment_receipt</c>(입금표)도 있다.
+    /// 🔴 <b>법정성 판정은 법무팀장 몫이다</b>(등재). 판정이 날 때까지는 <b>막는 쪽</b>에 둔다 —
+    ///   틀리게 막으면 고객이 용지를 못 바꾸는 것뿐이고, 틀리게 풀면 <b>법정 서식이 A5 로 나간다.</b>
+    ///   되돌릴 수 있는 쪽을 고른다.
+    /// 🔴 <b>여기서 종류 이름을 손으로 적는다</b> — 긁을 수 있는 자리가 아니다(법적 판단이라서).
+    ///   그래서 게이트가 <b>변환표 전건</b>을 돌며 「막히나 / 안 막히나」를 표로 굳힌다.
+    /// </remarks>
+    private static readonly HashSet<string> LegalFormDocTypes =
+        new(StringComparer.Ordinal) { TaxInvoiceDocType, "invoice_exempt", "payment_receipt" };
 
     /// <summary>
     /// 이 양식이 <b>A4 세로</b>를 그대로 쓰고 있나 — 🔴 법정 서식·좌표 양식지 보호 판정에 쓴다.

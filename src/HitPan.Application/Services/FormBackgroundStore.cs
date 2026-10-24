@@ -22,12 +22,7 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
 {
     private readonly ILogger<FormBackgroundStore> _logger;
 
-    public FormBackgroundStore(ILogger<FormBackgroundStore> logger)
-    {
-        _logger = logger;
-        // 🔴 정적 울타리 검사가 조용히 떨어지지 않게 로거를 꽂아 둔다.
-        _staticLogger ??= logger;
-    }
+    public FormBackgroundStore(ILogger<FormBackgroundStore> logger) => _logger = logger;
 
     /// <inheritdoc />
     public async Task<(string? StoredPath, string? Rejection)> SaveAsync(
@@ -109,7 +104,9 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
 
             // 🔴 [2026-10-25 [4] 반려 R-7 봉합] 쓰려는 자리가 **링크를 지나면 쓰지 않는다.**
             //   테넌트 폴더가 누군가 만든 junction 이면 울타리는 통과하고 파일은 바깥에 떨어진다.
-            if (PassesThroughLink(resolved, root))
+            // 🔴 [2026-10-25 재검증 S-1 봉합] 뿌리를 **읽는 쪽과 같은 값**으로 넘긴다.
+            //   종전에는 테넌트 폴더를 넘겨 그 폴더 자신이 junction 이면 아무도 안 봤다.
+            if (PassesThroughLink(resolved, FenceRoot))
             {
                 _logger.LogWarning("[양식지] 보관 자리가 링크를 지난다 — 받지 않는다.");
                 return (null, "그림을 보관할 수 없습니다. 관리자에게 알려 주십시오.");
@@ -148,7 +145,7 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
     ///   보는 것은 <b>울타리 안쪽</b>뿐이다.
     /// 🔴 못 재면 <b>막는 쪽</b>으로 떨어진다 — 그림은 안 올라가도 전표는 산다(#20).
     /// </remarks>
-    private static bool PassesThroughLink(string fullPath, string root)
+    private bool PassesThroughLink(string fullPath, string root)
     {
         var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
 
@@ -170,13 +167,31 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
         catch (Exception ex)
         {
             // 🔴 못 재면 「지난다」로 본다 — 막는 쪽이 안전측이다(#15 빈 catch 금지).
-            _staticLogger?.LogWarning(ex, "[양식지] 링크 여부를 재지 못했다 — 막는 쪽으로 떨어진다.");
+            // 🔴 [2026-10-25 재검증 S-6 봉합] 종전에는 정적 로거(`_staticLogger`)를 뒀다 —
+            //   정적 가변 상태는 시험끼리 섞일 수 있고 `??=` 는 원자적이지도 않다.
+            //   함수를 인스턴스로 내리니 그 꼼수가 필요 없어졌다.
+            _logger.LogWarning(ex, "[양식지] 링크 여부를 재지 못했다 — 막는 쪽으로 떨어진다.");
             return true;
         }
     }
 
-    /// <summary>🔴 정적 울타리 검사에서 쓰는 로거 — 첫 인스턴스가 꽂는다(없으면 조용히 막는다).</summary>
-    private static ILogger? _staticLogger;
+    /// <summary>
+    /// 🔴🔴 울타리 검사에 넘길 <b>뿌리</b> — [2026-10-25 재검증 S-1 봉합].
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>내가 뭘 틀렸나</b> — 1차 봉합에서 `PassesThroughLink(…, 테넌트폴더)` 를 넘겼다.
+    ///   그 함수는 <c>dir.FullName.Length &gt; rootNoSep.Length</c> 로 <b>뿌리 자신을 검사에서 뺀다</b>
+    ///   (뿌리는 관리자가 정한 자리라는 뜻이었다). 그래서 <b>테넌트 폴더가 junction 이면 아무도 안 봤다.</b>
+    ///   읽는 쪽은 뿌리를 <c>FormBackgroundPaths.Root</c> 로 넘겨 그걸 잡는데, 내 쪽만 한 칸 안이었다
+    ///   ⇒ <b>비대칭을 고친 게 아니라 옮겼다.</b>
+    /// 🔴 <b>검증팀이 실제로 뚫었다</b> — 테넌트 폴더를 junction 으로 바꾸고 「그림 지우기」를 부르니
+    ///   <b>울타리 밖 파일이 지워졌다</b>(`victimAlive=False`). `%ProgramData%` 는 일반 사용자도
+    ///   쓸 수 있으니, 직원 계정이 폴더를 바꿔 두면 관리자의 한 번 누름으로 밖이 지워진다.
+    /// 🔴 그래서 <b>읽는 쪽과 같은 값</b>을 쓴다. 테넌트 폴더도 검사 대상에 들어온다.
+    /// </remarks>
+    private static string FenceRoot =>
+        Path.GetFullPath(FormBackgroundPaths.Root).TrimEnd(Path.DirectorySeparatorChar)
+        + Path.DirectorySeparatorChar;
 
     /// <inheritdoc />
     public string? Delete(string tenantId, string storedPath)
@@ -208,7 +223,8 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
             // 🔴 [R-7 봉합] 링크를 지나면 지우지 않는다 — 울타리 안 junction 으로
             //   바깥 파일을 지우는 길을 막는다. 지우기는 고객이 준 경로를 받으므로
             //   이쪽이 올리기보다 위험하다.
-            if (PassesThroughLink(full, root))
+            // 🔴 [2026-10-25 재검증 S-1 봉합] 같은 까닭 — 검증팀이 이 자리로 **밖의 파일을 지웠다**.
+            if (PassesThroughLink(full, FenceRoot))
             {
                 _logger.LogWarning("[양식지] 지울 경로가 링크를 지난다 — 지우지 않는다.");
                 return "이 그림은 지울 수 없습니다.";

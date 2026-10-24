@@ -90,6 +90,18 @@
                     <MudSelectItem Value="@("landscape")">가로</MudSelectItem>
                 </MudSelect>
             </MudItem>
+            @* 🔴🔴 [2026-10-25 재검증 S-4 봉합] **고른 용지가 안 먹는 경우를 그 자리에서 말한다.**
+                 [무엇이 문제였나] 용지·방향을 못 바꾸는 경우가 둘 있는데(법정 서식 · 좌표를 맞춘
+                   양식용지) 서버는 로그에만 적었다. 고객 화면은 아무 말도 안 했다.
+                 🔴 그러면 「저장은 되는데 아무 일도 안 일어나는 칸」이 된다 — 이 작업이 고치려고
+                   시작한 바로 그 병이다. 같은 병을 다른 자리에 옮겨 놓으면 고친 게 아니다.
+                 🔴 막지는 않는다 — 고객이 고르는 것은 자유고, 우리는 **왜 안 먹는지** 알려 준다. *@
+            @if (PaperChoiceIgnored is { Length: > 0 } ignoredWhy)
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="my-1">@ignoredWhy</MudAlert>
+                </MudItem>
+            }
             <MudItem xs="6" md="3">
                 <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" Min="0" Max="35" />
             </MudItem>
@@ -469,6 +481,49 @@
     ///    두 벌이 되면 미리보기와 실제 인쇄물이 조용히 어긋난다.
     /// 🔴 전표 id 를 안 보낸다 — 예시 자료로만 그린다(남의 전표가 나갈 길이 없다).
     /// </remarks>
+    /// <summary>
+    /// 🔴 지금 고른 용지·방향이 <b>종이에 안 먹는</b> 경우라면 그 까닭. 먹으면 <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-10-25 재검증 S-4 봉합] 서버가 막는 두 경우를 **화면 말로** 옮긴 것이다.
+    ///   서버가 진실원이고 이 글은 안내다 — 판단을 둘로 나누지 않으려고 조건을 똑같이 적었다.
+    /// 🔴 조건이 서버와 어긋나면 고객이 거짓 안내를 받는다. 그래서 게이트가 **양쪽을 대조**한다.
+    /// </remarks>
+    private string? PaperChoiceIgnored
+    {
+        get
+        {
+            var isA4Portrait =
+                string.Equals(_form.PaperSize?.Trim(), "A4", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(_form.Orientation?.Trim(), "landscape", StringComparison.OrdinalIgnoreCase);
+
+            if (isA4Portrait) return null;   // 바꾼 게 없으면 할 말도 없다
+
+            // ① 법정 서식 — 세금계산서·면세계산서·입금표
+            if (LegalFormTypes.Contains(_form.FormType ?? string.Empty))
+            {
+                return "이 서식은 법으로 모양이 정해져 있어 용지와 방향은 A4 세로로 인쇄됩니다. "
+                     + "고르신 값은 저장되지만 종이에는 적용되지 않습니다.";
+            }
+
+            // ② 좌표를 맞춰 둔 양식용지 — 종이가 바뀌면 맞춰 둔 위치가 어긋난다
+            if (_form.PaperMode == "preprint" && _coords.Any(c => !string.IsNullOrWhiteSpace(c.Key)))
+            {
+                return "위치를 맞춰 두셨기 때문에 용지와 방향은 A4 세로로 인쇄됩니다. "
+                     + "위치는 종이 크기를 기준으로 재어 둔 값이라, 용지를 바꾸면 다시 맞추셔야 합니다.";
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 용지·방향을 바꿀 수 없는 <b>법으로 정해진 서식</b>. 서버 <c>LegalFormDocTypes</c> 와 짝이다.
+    /// 🔴 법정성 판정은 법무팀장 몫이고, 그 전까지는 <b>막는 쪽</b>에 둔다(재검증 S-3).
+    /// </summary>
+    private static readonly string[] LegalFormTypes =
+        { "tax_invoice", "invoice_exempt", "payment_receipt" };
+
     // ── 양식용지 그림 올리기 (사장님 오더 2026-10-24) ─────────────────
     private bool _bgBusy;
     private string? _bgFileName;
