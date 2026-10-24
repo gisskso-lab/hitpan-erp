@@ -115,8 +115,43 @@
             </MudItem>
             @if (_form.PaperMode == "preprint")
             {
+                @* 🔴 사장님 오더 2026-10-24 — "이미지파일로 양식지 추가시, PDF편집기로 즉시 반영"
+                     종전에는 아래 주소 칸 하나뿐이었다. 고객이 쓰는 양식지를 스캔해 두고도
+                     **올릴 자리가 없었다** — 주소를 적으라는 건 현장에 웹서버를 요구하는 것이다.
+                     ⇒ 파일을 고르면 그 자리에서 올리고 **바로 아래 미리보기를 다시 그린다.**
+                     🔴 저장은 하지 않는다. 양식 행에 적히는 건 「저장」 단추를 누를 때다. *@
                 <MudItem xs="12">
-                    <MudTextField T="string" @bind-Value="_form.BackgroundImageUrl" Label="배경 이미지 URL (양식용지 미리보기 참조)" Margin="Margin.Dense" />
+                    <MudText Typo="Typo.body2" Class="mb-1">
+                        쓰시는 양식용지를 그림으로 올리면, 그 위에 값이 어떻게 찍히는지 바로 보실 수 있습니다.
+                    </MudText>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudFileUpload T="IBrowserFile" Accept=".png,.jpg,.jpeg,.bmp,.webp"
+                                       FilesChanged="OnBackgroundFileChangedAsync">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Outlined"
+                                           StartIcon="@Icons.Material.Filled.UploadFile"
+                                           Disabled="_bgBusy">
+                                    @(_bgBusy ? "올리는 중…" : "양식용지 그림 올리기")
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                        @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Error"
+                                       StartIcon="@Icons.Material.Filled.Delete"
+                                       Disabled="_bgBusy"
+                                       OnClick="RemoveBackgroundAsync">그림 지우기</MudButton>
+                        }
+                    </MudStack>
+                    @if (!string.IsNullOrWhiteSpace(_bgFileName))
+                    {
+                        <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
+                    }
+                </MudItem>
+                @* 🔴 주소 칸은 지우지 않는다(#1) — 이미 주소로 맞춰 둔 고객이 있을 수 있다.
+                     올리기를 쓰면 이 칸이 자동으로 채워진다. *@
+                <MudItem xs="12">
+                    <MudTextField T="string" @bind-Value="_form.BackgroundImageUrl" Label="배경 이미지 경로 (올리면 자동으로 채워집니다)" Margin="Margin.Dense" />
                 </MudItem>
                 @* 🔴 종전에는 이 자리가 JSON 입력칸이었다 (사장님 지시 2026-08-12 정리).
                      현장 직원이 대괄호·따옴표를 손으로 적어야 했고, 한 글자만 틀려도
@@ -433,6 +468,140 @@
     ///    두 벌이 되면 미리보기와 실제 인쇄물이 조용히 어긋난다.
     /// 🔴 전표 id 를 안 보낸다 — 예시 자료로만 그린다(남의 전표가 나갈 길이 없다).
     /// </remarks>
+    // ── 양식용지 그림 올리기 (사장님 오더 2026-10-24) ─────────────────
+    private bool _bgBusy;
+    private string? _bgFileName;
+
+    /// <summary>
+    /// 🔴 파일을 고르면 <b>그 자리에서 올리고 미리보기를 다시 그린다</b> — 이것이 「즉시 반영」이다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 단추를 두 번 누르게 하지 않는다. 사장님 오더가 *"즉시 반영"* 이고,
+    ///   고르기 → 올리기 → 미리보기를 각각 누르게 만들면 현장에서 아무도 안 쓴다.
+    /// 🔴 <b>저장하지 않는다</b> — 양식 행에 적히는 건 「저장」 단추를 누를 때다.
+    ///   올리고 창을 닫으면 양식은 그대로다(그림 파일만 보관소에 남는다).
+    /// 🔴 「저장했습니다」라고 말하지 않는다 — 인쇄설정 화면에서 저장도 안 하고
+    ///   저장했다고 알려 고객이 값을 잃은 사고가 있었다(2026-08-11 사장님 지시).
+    /// </remarks>
+    private async Task OnBackgroundFileChangedAsync(IBrowserFile? file)
+    {
+        if (file is null) return;
+
+        _bgBusy = true;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            // 🔴 상한은 서버와 같은 값으로 읽는다 — 브라우저에서 먼저 걸러도 서버가 다시 본다.
+            var stream = file.OpenReadStream(MaxBackgroundBytes);
+            var part = new StreamContent(stream);
+            part.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            content.Add(part, "file", file.Name);
+
+            var resp = await Http.PostAsync("api/settings/form-templates/background", content);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 🔴 조용히 실패하지 않는다 — 서버가 적어 준 까닭을 그대로 보여 준다.
+                var why = await ReadServerMessageAsync(resp);
+                Snackbar.Add(why ?? $"그림을 올리지 못했습니다. ({(int)resp.StatusCode})", Severity.Error);
+                return;
+            }
+
+            var saved = await resp.Content.ReadFromJsonAsync<UploadedBackground>();
+            if (string.IsNullOrWhiteSpace(saved?.StoredPath))
+            {
+                Snackbar.Add("그림을 올렸지만 보관 위치를 받지 못했습니다.", Severity.Error);
+                return;
+            }
+
+            _form.BackgroundImageUrl = saved.StoredPath;
+            _bgFileName = file.Name;
+            Snackbar.Add("양식용지 그림을 올렸습니다. 아래 미리보기로 확인하십시오.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("그림을 올리는 중 오류가 났습니다.", Severity.Error);
+            Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+            return;
+        }
+        finally
+        {
+            _bgBusy = false;
+        }
+
+        // 🔴 여기가 「즉시」다 — 올린 그림이 깔린 종이를 바로 그려 보여 준다.
+        await PreviewAsync();
+    }
+
+    /// <summary>올린 그림을 뺀다 — 파일도 지우고 칸도 비우고 미리보기를 다시 그린다.</summary>
+    /// <remarks>🔴 파일 지우기가 실패해도 칸은 비운다 — 고객이 「그림 없이」로 갈 길을 막지 않는다.</remarks>
+    private async Task RemoveBackgroundAsync()
+    {
+        var path = _form.BackgroundImageUrl;
+        _bgBusy = true;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/form-templates/background")
+                {
+                    Content = JsonContent.Create(new { StoredPath = path })
+                };
+                var resp = await Http.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var why = await ReadServerMessageAsync(resp);
+                    // 🔴 알리되 멈추지 않는다 — 칸을 비우는 것이 고객의 뜻이다.
+                    Snackbar.Add(why ?? "그림 파일을 지우지 못했습니다. 칸만 비웁니다.", Severity.Warning);
+                }
+            }
+
+            _form.BackgroundImageUrl = null;
+            _bgFileName = null;
+        }
+        catch (Exception ex)
+        {
+            _form.BackgroundImageUrl = null;
+            _bgFileName = null;
+            Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+        }
+        finally
+        {
+            _bgBusy = false;
+        }
+
+        await PreviewAsync();
+    }
+
+    /// <summary>서버가 돌려준 까닭 한 줄을 꺼낸다. 🔴 못 꺼내면 null — 억지로 만들지 않는다.</summary>
+    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            var body = await resp.Content.ReadFromJsonAsync<ServerMessage>();
+            return string.IsNullOrWhiteSpace(body?.Message) ? null : body!.Message;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지 — 까닭을 적고 null 로 떨어진다(#15).
+            Console.Error.WriteLine($"[FormBackground] 응답을 읽지 못했다: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>양식지 그림 상한 — 🔴 서버(FormBackgroundPaths.MaxBytes)와 같은 값이어야 한다.</summary>
+    private const long MaxBackgroundBytes = 20L * 1024 * 1024;
+
+    private sealed class UploadedBackground
+    {
+        public string? StoredPath { get; set; }
+    }
+
+    private sealed class ServerMessage
+    {
+        public string? Message { get; set; }
+    }
+
     private async Task PreviewAsync()
     {
         if (string.IsNullOrWhiteSpace(_form.FormType))

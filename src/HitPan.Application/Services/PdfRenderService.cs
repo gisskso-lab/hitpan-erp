@@ -121,6 +121,22 @@ public sealed class PdfRenderService : IPdfRenderService
             // 🔴 20261021작 §10-2 ⓑ — 「한 장에 모으기」는 **고객이 켠 경우에만**.
             //   양식 행이 없으면 끔으로 본다(DB-147 기본값과 같다).
             var showTearLine = template?.ShowTearLine ?? false;
+            // 🔴 20261024 사장님 결재 — 이 양식에서 직인을 찍나.
+            //   🔴 **작성기 서명은 건드리지 않는다.** 처음에 인자를 하나 더했더니
+            //     기존 게이트 136건이 통째로 깨졌다 — 그 시험들은 반사(reflection)로
+            //     **인자 8개를 정확히** 넘긴다. 기본값이 있어도 Invoke 는 개수를 맞춘다.
+            //     ⇒ 뜻은 같고 서명은 그대로인 길로 간다: **직인 주소를 비운다.**
+            //   🔴 비우는 것이 왜 안전한가 — company 는 이 인쇄 한 번을 위해 DB 에서
+            //     갓 읽은 객체다(LoadCompanyAsync · 캐시 0건). 고객 DB 값은 안 바뀐다.
+            //   🔴 **배선만이다.** 직인 그림 보관소가 없어 seal_url 이 늘 비어 있다
+            //     ⇒ 지금은 켜도 찍히지 않는다. 보관소가 생기는 날 이 칸이 켬/끔을 가른다.
+            //   🔴 로고·테두리는 전달하지 않는다 — 세금계산서 머리·격자는 **법정 서식**이고
+            //     끄면 서식이 깨진다(D-5 · 법무팀장 결재가 먼저다).
+            if (template is not null && !template.ShowCompanySeal)
+            {
+                company.SealUrl = null;
+            }
+
             var taxBytes = RenderTaxInvoiceDocument(data, company, copyMode, showTearLine,
                 marginTop, marginLeft, marginRight, marginBottom);
             return (taxBytes, $"{KoLabel(documentType)}_{data.DocNo}.pdf");
@@ -130,7 +146,15 @@ public sealed class PdfRenderService : IPdfRenderService
         {
             c.Page(page =>
             {
-                page.Size(PageSizes.A4);
+                // 🔴 20261024 사장님 결재 — 양식의 **용지 크기·방향**을 종이에 닿게 한다.
+                //   종전에는 `PageSizes.A4` 가 못으로 박혀 있어 고객이 A5·가로를 골라도
+                //   종이가 안 바뀌었다(저장은 되는데 아무 일도 안 일어나는 칸이었다).
+                //   🔴 모르는 값이면 **A4·세로로 떨어진다** — 고객 종이가 안 나가는 일은 없다(#20).
+                page.Size(ResolvePageSize(template));
+                // 🔴 스타일 칸을 **읽는다** — 지금은 늘 basic 이다(배선만 · 4종 디자인 미확정).
+                //   종전에는 저장·조회만 되고 작성기가 이 칸을 아예 몰랐다. 모르는 값이 오면
+                //   ResolveStyleKey 가 적어 둔다 — 조용히 넘어가지 않는다.
+                _ = ResolveStyleKey(template);
                 // 좌표 인쇄는 원점이 **종이 왼쪽 위 모서리**다(고객이 자를 대는 기준).
                 //   여백을 주면 좌표가 그만큼 통째로 밀린다 ⇒ 이 경로만 여백 0.
                 if (useCoords)
@@ -1930,21 +1954,94 @@ public sealed class PdfRenderService : IPdfRenderService
         return false;
     }
 
-    /// <summary>양식지 그림으로 받아 주는 형식. 🔴 이 밖은 작성기까지 가지 않는다(R-2).</summary>
-    private static readonly HashSet<string> AllowedBackgroundExts =
-        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
+    /// <summary>
+    /// 양식지 그림으로 받아 주는 형식. 🔴 이 밖은 작성기까지 가지 않는다(R-2).
+    /// 🔴 [2026-10-24 업로드 통로 신설] 목록을 <b>여기서 적지 않는다</b> —
+    ///   올리는 쪽과 읽는 쪽이 어긋나면 고객은 「올라갔는데 안 나온다」를 본다.
+    /// </summary>
+    private static HashSet<string> AllowedBackgroundExts => FormBackgroundPaths.AllowedExts;
 
-    /// <summary>양식지 그림 크기 상한 — 20MB. 종이 한 장이 PC 메모리를 먹으면 안 된다.</summary>
-    private const long MaxBackgroundBytes = 20L * 1024 * 1024;
+    /// <summary>
+    /// 양식지 그림 크기 상한. 🔴 올리는 쪽과 <b>같은 값</b>을 쓴다(FormBackgroundPaths).
+    /// </summary>
+    private const long MaxBackgroundBytes = FormBackgroundPaths.MaxBytes;
+
+    /// <summary>
+    /// 🔴 양식의 <b>용지 크기·방향</b>을 종이에 옮긴다 (20261024 사장님 결재).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 생겼나</b> — 작성기에 <c>PageSizes.A4</c> 가 못으로 박혀 있었다.
+    ///   고객이 편집기에서 A5·가로를 골라 <b>저장까지 되는데</b> 종이는 늘 A4 세로였다.
+    ///   「저장은 되는데 아무 일도 안 일어나는 칸」이 네 개 있었고 그중 둘이 이것이다.
+    ///
+    /// 🔴 <b>모르는 값은 A4·세로로 떨어진다</b> — 오타나 새 값이 와도 종이는 나간다(#20).
+    ///   막는 쪽으로 떨어지면 전표가 안 나가고, 그건 고객 장사가 멈추는 것이다.
+    ///
+    /// 🔴 <b>세금계산서 전용 작성기는 여기를 타지 않는다</b> — 법정 서식이라 A4 고정이다
+    ///   (부가가치세법 시행규칙 · D-5 교훈). 그 쪽을 바꾸려면 법무팀장 결재가 먼저다.
+    /// </remarks>
+    private PageSize ResolvePageSize(FormTemplateInfo? template)
+    {
+        var size = (template?.PaperSize ?? "A4").Trim();
+
+        var baseSize = size.ToUpperInvariant() switch
+        {
+            "A4" => PageSizes.A4,
+            "A5" => PageSizes.A5,
+            "LETTER" => PageSizes.Letter,
+            _ => FallbackPageSize(size),
+        };
+
+        // 가로는 **같은 종이를 눕히는 것**이다 — 다른 종이를 고르는 것이 아니다.
+        var landscape = string.Equals(
+            (template?.Orientation ?? "portrait").Trim(), "landscape",
+            StringComparison.OrdinalIgnoreCase);
+
+        return landscape ? baseSize.Landscape() : baseSize;
+    }
+
+    /// <summary>모르는 용지값이 왔을 때 — 🔴 조용히 넘기지 않고 적어 둔 뒤 A4 로 간다.</summary>
+    private PageSize FallbackPageSize(string size)
+    {
+        _logger.LogWarning(
+            "[PDF] 모르는 용지 크기({Size}) — A4 로 그린다. 양식 설정을 확인해 주십시오.", size);
+        return PageSizes.A4;
+    }
+
+    /// <summary>
+    /// 🔴 디자인 스타일 칸을 <b>읽는다</b> (DB-90 · 20261024 <b>배선만</b>).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>지금은 무엇이 와도 <c>basic</c> 으로 그린다.</b> 출하 DDL 주석이 그렇게 적혀 있다
+    ///   — <i>"4종 확정 전까지 basic 단일"</i>. 스타일 4종은 <b>디자인 미확정</b>이고,
+    ///   그 그림을 여기서 발명하면 결재 없이 디자인을 정하는 것이 된다.
+    /// 🔴 그래서 이 함수가 하는 일은 하나다 — <b>종전에는 아무도 안 읽던 칸을 읽고,
+    ///   모르는 값이면 적어 둔다.</b> 4종이 확정되는 날 이 자리가 갈림길이 된다.
+    /// </remarks>
+    private string ResolveStyleKey(FormTemplateInfo? template)
+    {
+        var key = (template?.StyleKey ?? "basic").Trim();
+        if (key.Length == 0) return "basic";
+
+        if (!string.Equals(key, "basic", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "[PDF] 아직 준비되지 않은 양식 스타일({Key}) — 기본 모양으로 그린다.", key);
+            return "basic";
+        }
+
+        return "basic";
+    }
 
     /// <summary>
     /// 🔴 양식지 그림을 읽어 올 수 있는 <b>유일한 폴더</b> (R-4 경로 가둠).
     /// 보관소·업로드 통로가 생기면 그 통로가 여기에 넣는다 — 그때 <b>이 코드는 안 바뀐다.</b>
     /// </summary>
-    private static string FormBackgroundRoot =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "HitPan", "form-backgrounds");
+    /// <remarks>
+    /// 🔴 [2026-10-24] 업로드 통로가 생겼다 — 그 통로가 <b>이 폴더 밑 테넌트 칸</b>에 넣는다.
+    ///   약속대로 <b>이 울타리 코드는 바뀌지 않았다</b>(테넌트 폴더는 뿌리 안이라 그대로 통과한다).
+    /// </remarks>
+    private static string FormBackgroundRoot => FormBackgroundPaths.Root;
 
 
 
@@ -2513,7 +2610,15 @@ public sealed class PdfRenderService : IPdfRenderService
             //   *"이미 업체에서 쓰는 양식지가 있을수도 있으니"* — 종전에는 이 칸을
             //   **읽어오지도 않았다**(PdfRenderService 안 BackgroundImageUrl 0건).
             //   고객이 쓰는 양식지를 올려도 종이에 안 나왔다.
-            BackgroundImageUrl = dto.BackgroundImageUrl
+            BackgroundImageUrl = dto.BackgroundImageUrl,
+            // 🔴 20261024 사장님 결재 — 종전에는 아래 네 칸이 작성기에 **0건**이었다.
+            //   편집기에서 고르고 저장까지 되는데 **종이만 안 바뀌는** 칸들이었다.
+            //   🔴 PaperSize·Orientation = 실제로 종이가 바뀐다.
+            //   🔴 ShowCompanySeal·StyleKey = **배선만**(아래 각 칸 주석에 까닭을 적었다).
+            PaperSize = dto.PaperSize,
+            Orientation = dto.Orientation,
+            ShowCompanySeal = dto.ShowCompanySeal,
+            StyleKey = dto.StyleKey
         };
     }
 
@@ -2606,6 +2711,33 @@ public sealed class PdfRenderService : IPdfRenderService
         /// 🔴 스캔한 양식지 위에 내용을 겹쳐 보여줘야 mm 맞추기가 의미를 가진다.
         /// </remarks>
         public string? BackgroundImageUrl { get; set; }
+
+        /// <summary>
+        /// 🔴 용지 크기 — <c>A4</c>·<c>A5</c>·<c>Letter</c> (20261024 사장님 결재).
+        /// 종전에는 작성기에 <b>이 칸이 없었다</b> — 고객이 A5 를 골라도 A4 가 나왔다.
+        /// </summary>
+        public string PaperSize { get; set; } = "A4";
+
+        /// <summary>
+        /// 🔴 용지 방향 — <c>portrait</c>·<c>landscape</c> (20261024 사장님 결재).
+        /// 종전 <b>0건</b>. 방향을 지정하는 코드가 작성기에 아예 없었다.
+        /// </summary>
+        public string Orientation { get; set; } = "portrait";
+
+        /// <summary>
+        /// 🔴 이 양식에서 직인을 찍나 (20261024 사장님 결재 · <b>배선만</b>).
+        /// 🔴 <b>「직인이 나온다」는 뜻이 아니다</b> — 직인 그림 보관소가 없어
+        /// <c>seal_url</c> 이 늘 비어 있다. 보관소가 생기는 날 이 칸이 켬/끔을 가른다.
+        /// </summary>
+        public bool ShowCompanySeal { get; set; } = true;
+
+        /// <summary>
+        /// 🔴 디자인 스타일 (DB-90 · <b>배선만</b>). 출하 DDL 주석에 적힌 그대로
+        /// <i>"4종 확정 전까지 basic 단일"</i> ⇒ 🔴 <b>지금은 무엇이 와도 basic 으로 그린다.</b>
+        /// 종전에는 저장·조회만 되고 <b>작성기가 읽지 않았다</b>.
+        /// </summary>
+        public string StyleKey { get; set; } = "basic";
+
         /// <summary>고객이 맞춘 양식용지 필드 위치. 비어 있으면 종전 기본 배치로 인쇄한다.</summary>
         public List<FieldCoord> FieldCoords { get; set; } = new();
     }
