@@ -1117,7 +1117,7 @@
 
         Snackbar.Add("변경사항을 취소했습니다.", Severity.Info);
     }
-    private async Task Print() => await PrintPreview.ShowAsync("delivery", _draft.Id, "거래명세서");
+    private async Task Print() => await PrintPreview.ShowAsync("delivery", _draft?.Id, "거래명세서");
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.

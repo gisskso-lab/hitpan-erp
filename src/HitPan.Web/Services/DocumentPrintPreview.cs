@@ -62,6 +62,10 @@ public sealed class DocumentPrintPreview
             CloseButton = true,
         };
 
-        await _dialog.ShowAsync<DocumentPrintPreviewDialog>($"{title} 인쇄 미리보기", parameters, options);
+        // 🔴 20261024작 R-7-a 봉합 — **창이 닫힐 때까지 기다린다.**
+        //   세금계산서 목록은 여러 장을 골라 for 로 돈다. 기다리지 않으면 창이
+        //   겹쳐 떠서 고객이 무엇을 보고 있는지 모른다.
+        var dialog = await _dialog.ShowAsync<DocumentPrintPreviewDialog>($"{title} 인쇄 미리보기", parameters, options);
+        await dialog.Result;
     }
 }

@@ -44,6 +44,18 @@ public class DocumentPrintPreviewGateTests
         return Path.Combine(d!.FullName, "src", "HitPan.Web");
     }
 
+
+    /// <summary>레포 뿌리 — 작성기 소스를 직접 읽어 「백지인지」를 잰다(축⑥).</summary>
+    private static string AppRoot()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !Directory.Exists(Path.Combine(d.FullName, "src", "HitPan.Application")))
+        {
+            d = d.Parent;
+        }
+        Assert.NotNull(d);
+        return d!.FullName;
+    }
     private static MethodInfo PrivateMethod(string name) =>
         SvcType.GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance
                               | BindingFlags.Static | BindingFlags.FlattenHierarchy)
@@ -72,7 +84,7 @@ public class DocumentPrintPreviewGateTests
     // 축 ① 전표 화면이 화면인쇄로 돌아가지 않는다 (결-1)
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>사장님 반려 ③ 에 이름이 적힌 그 6화면.</summary>
+    /// <summary>사장님 반려 ③ 에 이름이 적힌 화면 — 6종 → **8종**(2차 재검증 R-7-a).</summary>
     public static TheoryData<string> PrintScreens() => new()
     {
         Path.Combine("Pages", "Sales", "QuotationPage.razor.cs"),
@@ -81,6 +93,11 @@ public class DocumentPrintPreviewGateTests
         Path.Combine("Pages", "Purchase", "PurchaseOrderPage.razor.cs"),
         Path.Combine("Pages", "Purchase", "PurchaseReceiptPage.razor.cs"),
         Path.Combine("Pages", "Purchase", "ReturnPage.razor.cs"),
+        // 🔴 20261024 2차 재검증 R-7-a — 세금계산서가 빠져 있었다. 옵션(공급받는자만·
+        //   공급자·모두·절취선)이 **실제로 쓰이는 유일한 종**인데 미리보기를 안 탔다.
+        Path.Combine("Pages", "Sales", "TaxInvoicePage.razor"),
+        // 🔴 매출반품 — 「반품처리」는 매입·매출 둘 다다(2차 재검증 등재 항목).
+        Path.Combine("Pages", "Sales", "SalesReturnPage.razor.cs"),
     };
 
     [Theory(DisplayName = "축① 🔴 전표 화면의 인쇄가 **화면인쇄로 돌아가지 않는다**(사장님 반려 ③ 회귀)")]
@@ -151,5 +168,86 @@ public class DocumentPrintPreviewGateTests
         Assert.Null(PrivateMethod("ApplyPrintOptions").Invoke(null, new object?[] { null, null }));
         Assert.Null(PrivateMethod("ApplyPrintOptions").Invoke(null,
             new object?[] { null, new PrintOptionOverrides() }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ④ 고른 옵션이 그 종이에 들어간다 (2차 재검증 R-9)
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string DialogSource() =>
+        File.ReadAllText(Path.Combine(WebRoot(), "Components", "Common", "DocumentPrintPreviewDialog.razor"));
+
+    [Fact(DisplayName = "축④ 🔴 옵션을 바꾸면 **다시 그린다** — 옛 종이가 인쇄되지 않는다(R-9)")]
+    public void Axis4_OptionChange_Redraws()
+    {
+        var src = DialogSource();
+
+        // 🔴 @bind-Value 로 돌아가면 값만 바뀌고 종이는 옛 blob 이다.
+        //    고객이 「공급받는자만」으로 바꾸고 바로 인쇄하면 두 벌이 찍혀 나갔다.
+        Assert.DoesNotContain("@bind-Value=\"_copyMode\"", src);
+        Assert.DoesNotContain("@bind-Value=\"_tearLine\"", src);
+
+        // 🔴 그리고 바뀔 때 실제로 다시 그려야 한다 — 콜백만 있고 LoadAsync 가 없으면 같은 사고다.
+        Assert.Contains("ValueChanged=\"OnCopyModeChangedAsync\"", src);
+        Assert.Contains("ValueChanged=\"OnTearLineChangedAsync\"", src);
+        foreach (var handler in new[] { "OnCopyModeChangedAsync", "OnTearLineChangedAsync" })
+        {
+            var at = src.IndexOf($"private async Task {handler}", StringComparison.Ordinal);
+            Assert.True(at > 0, $"{handler} 가 없다 — 옵션이 종이에 안 들어간다(R-9).");
+            var body = src.Substring(at, Math.Min(240, src.Length - at));
+            Assert.Contains("await LoadAsync()", body);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ⑤ 인쇄가 조용히 실패하지 않는다 (2차 재검증 R-8)
+    // ═══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "축⑤ 🔴 팝업이 막히면 **안내가 뜬다** — 반환값을 버리지 않는다(R-8)")]
+    public void Axis5_PrintFailure_IsToldToUser()
+    {
+        var src = DialogSource();
+        var at = src.IndexOf("private async Task PrintAsync", StringComparison.Ordinal);
+        Assert.True(at > 0, "대화상자에 PrintAsync 가 없다.");
+        var body = src.Substring(at);
+
+        // 🔴 InvokeVoidAsync 면 JS 의 false 가 버려진다 ⇒ 예외도 없고 catch 도 안 돈다
+        //    ⇒ "눌렀는데 아무 일도 안 난다". 이 한 줄이 돌아오면 그 사고가 돌아온다.
+        Assert.DoesNotContain("InvokeVoidAsync(\"hitpanPrintPreviewFrame\"", body);
+        Assert.Contains("InvokeAsync<bool>(\"hitpanPrintPreviewFrame\"", body);
+
+        // 🔴 받아 놓고 안 쓰면 같은 사고다 — false 일 때 사람에게 말해야 한다.
+        var upToCatch = body.Substring(0, Math.Max(0, body.IndexOf("catch (Exception", StringComparison.Ordinal)));
+        Assert.Contains("if (!ok)", upToCatch);
+        Assert.Contains("Snackbar.Add", upToCatch);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ⑥ 미리보기 창이 띄우는 종이가 **백지가 아니다** (결재 ㉮)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 단추를 단 종은 <b>자료 로더가 있어야</b> 한다. 없으면 <c>LoadDocumentAsync</c> 의
+    ///   fallback 이 <b>빈 종이</b>를 돌려주고, 미리보기가 곧 인쇄물이므로 종이도 백지다.
+    /// </summary>
+    public static TheoryData<string> WiredDocTypes() => new()
+    {
+        "quotation", "sales_order", "delivery", "tax_invoice",
+        "purchase_order", "purchase_receipt", "purchase_return",
+    };
+
+    [Theory(DisplayName = "축⑥ 🔴 인쇄 단추를 단 종은 **자료 로더가 있다** — 백지가 안 나간다(결재 ㉮)")]
+    [MemberData(nameof(WiredDocTypes))]
+    public void Axis6_WiredTypesHaveLoader(string docType)
+    {
+        var src = File.ReadAllText(Path.Combine(AppRoot(), "src", "HitPan.Application",
+            "Services", "PdfRenderService.cs"));
+        var at = src.IndexOf("private async Task<DocumentSnapshot> LoadDocumentAsync", StringComparison.Ordinal);
+        Assert.True(at > 0, "LoadDocumentAsync 가 없다.");
+        var sw = src.Substring(at, Math.Min(2000, src.Length - at));
+        var upToFallback = sw.Substring(0, Math.Max(0, sw.IndexOf("_ => new DocumentSnapshot", StringComparison.Ordinal)));
+
+        // 🔴 fallback 앞에 그 종이 적혀 있어야 한다. 뒤면(=없으면) 백지다.
+        Assert.Contains($"\"{docType}\" =>", upToFallback);
     }
 }

@@ -437,4 +437,72 @@ public class FormPreviewOverrideGuardTests
         }
         finally { try { File.Delete(png); } catch { /* 지워지면 그만 */ } }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ③링크 — 링크로 울타리를 넘지 못한다 (2차 재검증 R-10)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>검증팀 2차 재검증 R-10 가설을 실측으로 바꾼다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>Path.GetFullPath</c> 는 링크를 풀지 않는다. 그래서 허용 폴더 <b>안에</b>
+    ///   링크 폴더 하나를 만들어 두면 경로 가둠은 <b>통과하고</b> 실제 파일은 바깥이 된다.
+    /// 🔴 이 시험은 <b>건너뛰지 않는다</b> — 윈도는 junction(권한 불필요), 그 밖은
+    ///   디렉터리 심볼릭 링크로 <b>같은 축</b>을 잰다. 못 만들면 <b>빨개진다</b>,
+    ///   「못 쟀다」를 초록으로 감추지 않는다(게이트 31번+ 사고).
+    /// </remarks>
+    [Fact(DisplayName = "축③링크 🔴 허용 폴더 안의 **링크**를 지나 바깥 그림을 읽지 못한다(R-10)")]
+    public void Axis3_LinkInsideRoot_CannotEscape()
+    {
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+
+        // 바깥에 **멀쩡한** PNG — 확장자·존재·크기·디코드를 전부 통과한다.
+        //   그래야 빨개지는 이유가 **링크 울타리 하나**로 좁혀진다.
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"hitpan-link-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDir);
+        File.WriteAllBytes(Path.Combine(outsideDir, "form.png"), Convert.FromBase64String(OnePixelPngBase64));
+
+        var link = Path.Combine(root, $"gate-link-{Guid.NewGuid():N}");
+        try
+        {
+            MakeDirectoryLink(link, outsideDir);
+
+            // 울타리 안처럼 보이는 경로지만, 실제 파일은 바깥이다.
+            var sneaky = Path.Combine(link, "form.png");
+            Assert.True(File.Exists(sneaky), "링크가 안 걸렸다 — 이 시험은 아무것도 재지 못한다.");
+
+            var svc = MakeService();
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { sneaky }));
+        }
+        finally
+        {
+            try { Directory.Delete(link); } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
+            try { Directory.Delete(outsideDir, true); } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
+        }
+    }
+
+    /// <summary>윈도는 junction(권한 불필요), 그 밖은 디렉터리 심볼릭 링크.</summary>
+    private static void MakeDirectoryLink(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var err = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        Assert.True(Directory.Exists(link), $"junction 을 만들지 못했다 — {err}");
+    }
 }

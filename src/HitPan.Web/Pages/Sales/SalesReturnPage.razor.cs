@@ -488,7 +488,16 @@ public partial class SalesReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+    /// <summary>
+    /// 🔴 20261024작 — 매출반품도 <b>미리보기 경유</b>로 보낸다(사장님 반려 ③ 「반품처리」).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전에는 화면인쇄(<c>Js "print"</c>)라 양식지·여백·매수가 <b>하나도 안 먹었다</b>.
+    ///   2차 재검증이 「매입반품 6화면은 고쳤는데 매출반품은 남았다」로 짚었다(등재 항목).
+    /// 🔴 이 종은 <b>자료 로더까지 이번에 붙였다</b>(결재 ㉮) — 로더 없이 단추만 달면
+    ///   고객이 <b>빈 종이</b>를 받는다. 단추와 로더는 한 몸이다.
+    /// </remarks>
+    private async Task PrintAsync() => await PrintPreview.ShowAsync("sales-return", _draft?.Id, "반품명세서");
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.

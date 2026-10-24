@@ -309,7 +309,9 @@ public sealed class PdfRenderService : IPdfRenderService
     // ─── DB lookup ─────────────────────────────────────
     private async Task<DocumentSnapshot> LoadDocumentAsync(string tenantId, string docType, string docId, CancellationToken ct)
     {
-        // (문서별 SQL 다름 — 핵심 6종만 분기)
+        // 🔴 문서별 SQL 이 다르다. 6종 → **8종**(결재 ㉮ — 매입·매출반품 로더 추가 20261024작).
+        //   여기 없는 종은 아래 fallback 이 **빈 종이**를 돌려준다. 그래서 화면에
+        //   「인쇄」 단추를 달 때는 **이 표에 있는지 먼저 본다** — 없으면 고객이 백지를 받는다.
         return docType switch
         {
             "quotation" => await LoadQuotationAsync(tenantId, docId, ct).ConfigureAwait(false),
@@ -318,6 +320,8 @@ public sealed class PdfRenderService : IPdfRenderService
             "tax_invoice" => await LoadTaxInvoiceAsync(tenantId, docId, ct).ConfigureAwait(false),
             "purchase_order" => await LoadPurchaseOrderAsync(tenantId, docId, ct).ConfigureAwait(false),
             "purchase_receipt" => await LoadPurchaseReceiptAsync(tenantId, docId, ct).ConfigureAwait(false),
+            "purchase_return" => await LoadPurchaseReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
+            "sales_return" => await LoadSalesReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
             _ => new DocumentSnapshot { DocType = docType, DocNo = docId }
         };
     }
@@ -550,6 +554,72 @@ public sealed class PdfRenderService : IPdfRenderService
             WHERE pri.tenant_id = @TenantId AND pri.receipt_id = @Id ORDER BY pri.receipt_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_receipt", head, lines, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🔴 매입반품 자료 로더 — 결재 ㉮(20261021작 §19-1 · 백지 4종을 로더까지 이번 차수).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 이번에 붙이나</b> — 10/24 차수가 <b>반품처리 화면에 「인쇄」 단추를 달았다.</b>
+    ///   로더가 없으면 그 단추가 <b>빈 종이</b>를 띄운다(미리보기가 곧 인쇄물이므로 종이도 백지).
+    ///   「없는 종」이 아니라 <b>고객이 누를 수 있는 단추</b>가 되는 순간 백지는 사고다.
+    /// 🔴 칸 이름은 출하 DDL <c>installer/hitpan_db_clean.sql</c> 을 보고 썼다(#13·#36).
+    ///   <c>purchase_returns.total_amount</c> 는 <b>공급가</b>다 — 다른 5종과 같은 규약.
+    ///   품목 이름 칸이 없어 <c>items</c> 를 JOIN 한다(나머지 로더와 동일).
+    /// </remarks>
+    private async Task<DocumentSnapshot> LoadPurchaseReturnAsync(string tenantId, string id, CancellationToken ct)
+    {
+        const string head = """
+            SELECT pr.return_no AS DocNo, pr.return_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(pr.total_amount,0) AS TotalSupply, COALESCE(pr.vat_amount,0) AS TotalVat,
+                   COALESCE(pr.total_amount,0) + COALESCE(pr.vat_amount,0) AS TotalAmount,
+                   pr.memo AS Remark
+            FROM purchase_returns pr LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.return_id = @Id
+            """;
+        const string lines = """
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
+                   COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
+                   COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
+            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id
+            WHERE pri.tenant_id = @TenantId AND pri.return_id = @Id ORDER BY pri.return_item_id
+            """;
+        return await LoadByQueriesAsync(tenantId, id, "purchase_return", head, lines, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🔴 매출반품 자료 로더 — 결재 ㉮. 사장님 반려 ③ 의 「반품처리」는 매입·매출 <b>둘 다</b>다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>sales_return_items.unit_price</c> 는 <b>반품 당시 환불 단가</b>이고
+    ///   <c>original_unit_price</c> 는 원거래 단가 복사본이다(DDL 주석). 종이에는
+    ///   <b>환불 단가</b>를 찍는다 — 고객에게 돌려주는 돈이 그것이다.
+    /// 🔴 <c>is_loss</c>(파손 로스)는 재고 반영 축이라 종이에 안 찍는다. 등재만.
+    /// </remarks>
+    private async Task<DocumentSnapshot> LoadSalesReturnAsync(string tenantId, string id, CancellationToken ct)
+    {
+        const string head = """
+            SELECT sr.return_no AS DocNo, sr.return_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(sr.total_amount,0) AS TotalSupply, COALESCE(sr.vat_amount,0) AS TotalVat,
+                   COALESCE(sr.total_amount,0) + COALESCE(sr.vat_amount,0) AS TotalAmount,
+                   sr.memo AS Remark
+            FROM sales_returns sr LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            WHERE sr.tenant_id = @TenantId AND sr.return_id = @Id
+            """;
+        const string lines = """
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(sri.qty,0) AS Qty, COALESCE(sri.unit_price,0) AS UnitPrice,
+                   COALESCE(sri.supply_amount,0) AS Supply, COALESCE(sri.vat_amount,0) AS Vat,
+                   COALESCE(sri.supply_amount,0) + COALESCE(sri.vat_amount,0) AS Total
+            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id
+            WHERE sri.tenant_id = @TenantId AND sri.return_id = @Id ORDER BY sri.return_item_id
+            """;
+        return await LoadByQueriesAsync(tenantId, id, "sales_return", head, lines, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentSnapshot> LoadByQueriesAsync(string tenantId, string id, string docType, string headSql, string lineSql, CancellationToken ct)
@@ -1743,6 +1813,15 @@ public sealed class PdfRenderService : IPdfRenderService
                 return null;
             }
 
+            // ③-2 🔴 [2026-10-24 재검증 R-10 봉합] 링크로 울타리를 넘는 길을 막는다.
+            //   `Path.GetFullPath` 는 **링크를 풀지 않는다.** 폴더 안에 junction 하나를
+            //   만들어 두면 ③ 의 울타리는 통과하고 **실제 파일은 바깥**이 된다.
+            if (PassesThroughLink(full, root))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 경로가 링크를 지난다 — 깔지 않는다.");
+                return null;
+            }
+
             // ④ 크기 상한 — 거대 그림은 종이 한 장 때문에 PC 메모리를 먹는다.
             var len = new FileInfo(full).Length;
             if (len <= 0 || len > MaxBackgroundBytes)
@@ -1772,6 +1851,35 @@ public sealed class PdfRenderService : IPdfRenderService
             _logger.LogWarning(ex, "[PDF] 양식지 그림 읽기 실패 — 그림 없이 그린다.");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 🔴 경로가 <b>링크(symlink·junction)</b> 를 지나는가 — 지나면 읽지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 필요한가</b> — 검증팀 2차 재검증 R-10: <c>Path.GetFullPath</c> 는 링크를
+    ///   풀지 않는다. 그래서 허용 폴더 <b>안에</b> junction 을 하나 만들어 두면
+    ///   앞글자 비교는 통과하고 실제 파일은 디스크 어디든 될 수 있다.
+    /// 🔴 <b>울타리 자체(root)는 보지 않는다</b> — 그 자리는 관리자가 정한 곳이고,
+    ///   거기가 링크여도 그것은 관리자의 뜻이다. 보는 것은 <b>울타리 안쪽</b>뿐이다.
+    /// 🔴 못 재면 <b>막는 쪽</b>으로 떨어진다 — 종이는 그림 없이 나가고 전표는 산다(#20).
+    /// </remarks>
+    private static bool PassesThroughLink(string fullPath, string root)
+    {
+        var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
+
+        var file = new FileInfo(fullPath);
+        if (file.LinkTarget is not null) return true;
+
+        for (var dir = file.Directory;
+             dir is not null && dir.FullName.Length > rootNoSep.Length;
+             dir = dir.Parent)
+        {
+            if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
+            if (dir.LinkTarget is not null) return true;
+        }
+
+        return false;
     }
 
     /// <summary>양식지 그림으로 받아 주는 형식. 🔴 이 밖은 작성기까지 가지 않는다(R-2).</summary>

@@ -662,7 +662,7 @@ public partial class PurchaseReceiptPage : ComponentBase
     /// <summary>브라우저 인쇄 대화상자를 연다.</summary>
     private async Task PrintAsync()
     {
-        await PrintPreview.ShowAsync("purchase-receipt", _draft.Id, "매입명세서");
+        await PrintPreview.ShowAsync("purchase-receipt", _draft?.Id, "매입명세서");
     }
 
     /// <summary>

@@ -15,7 +15,7 @@
         @* 옵션 줄 — 🔴 7종이 같은 모양을 쓴다. 그 종에 안 쓰이는 칸은
              **흐리게 두고 숨기지 않는다**. 고객이 "왜 나는 그 칸이 없지" 를 겪지 않게. *@
         <div class="d-flex align-center flex-wrap mb-3" style="gap:12px;">
-            <MudSelect T="string" @bind-Value="_copyMode" Label="인쇄 매수" Dense="true"
+            <MudSelect T="string" Value="_copyMode" ValueChanged="OnCopyModeChangedAsync" Label="인쇄 매수" Dense="true"
                        Margin="Margin.Dense" Style="min-width:200px;"
                        Disabled="@(!SupportsCopyMode)"
                        HelperText="@(SupportsCopyMode ? null : "이 문서는 한 벌만 인쇄합니다")">
@@ -24,7 +24,7 @@
                 <MudSelectItem Value="@("supplier")">공급자만</MudSelectItem>
             </MudSelect>
 
-            <MudCheckBox T="bool" @bind-Value="_tearLine" Dense="true"
+            <MudCheckBox T="bool" Value="_tearLine" ValueChanged="OnTearLineChangedAsync" Dense="true"
                          Disabled="@(!SupportsTearLine)"
                          Label="한 장에 두 벌 + 가운데 자르는 선" />
 
@@ -132,6 +132,30 @@
         }
     }
 
+
+    /// <summary>
+    /// 🔴 20261024작 R-9 봉합 — 옵션을 바꾸면 <b>그 자리에서 다시 그린다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 종전에는 <c>@bind-Value</c> 라 값만 바뀌고 종이는 <b>옛 blob</b> 이었다.
+    ///   고객이 「공급받는자만」으로 바꾸고 바로 「인쇄」를 누르면 <b>두 벌이 찍혀 나갔다</b>.
+    ///   사장님 합격선 ⑤ <i>"미리보기 화면하고 동일하게 인쇄"</i> 는 참이었지만
+    ///   <b>④ 고른 옵션이 그 종이에 들어간다</b> 가 거짓이었다(검증팀 2차 재검증 R-9).
+    /// 🔴 「다시 그리기」 단추는 남겨 둔다 — 서버가 한 번 삐끗했을 때 사람이 다시 누를 길이다.
+    /// </remarks>
+    private async Task OnCopyModeChangedAsync(string value)
+    {
+        _copyMode = value;
+        await LoadAsync();
+    }
+
+    /// <summary>절취선도 같다 — 바꾸면 바로 다시 그린다(R-9).</summary>
+    private async Task OnTearLineChangedAsync(bool value)
+    {
+        _tearLine = value;
+        await LoadAsync();
+    }
+
     /// <summary>
     /// 🔴 <b>보고 있는 그 종이를 인쇄한다</b> — 다시 그리지 않는다(합격선 ④·⑤).
     /// 사장님 결재 결-3: 브라우저 인쇄창을 띄워 기본 프린터로 보낸다.
@@ -140,7 +164,16 @@
     {
         try
         {
-            await JS.InvokeVoidAsync("hitpanPrintPreviewFrame", _frame);
+            // 🔴 20261024작 R-8 봉합 — **반환값을 받는다.** 종전에는 InvokeVoidAsync 로
+            //   버려서, 팝업이 막힌 브라우저에서 JS 가 false 를 돌려줘도 예외가 없어
+            //   catch 가 안 돌았다 ⇒ 눌렀는데 **아무 일도 안 나고 안내도 안 떴다**.
+            //   "조용히 실패하지 않는다" 가 거짓이었던 자리다(검증팀 2차 재검증 R-8).
+            var ok = await JS.InvokeAsync<bool>("hitpanPrintPreviewFrame", _frame);
+            if (!ok)
+            {
+                Snackbar.Add("브라우저가 인쇄창을 막았습니다. 미리보기 안의 인쇄 아이콘을 눌러 주십시오.",
+                    Severity.Warning);
+            }
         }
         catch (Exception ex)
         {
