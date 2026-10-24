@@ -142,6 +142,9 @@ public class FormTemplateController : ControllerBase
         var overrides = new HitPan.Application.DTOs.Documents.PdfPreviewOverrides
         {
             Template = req.Template,
+            // 🔴 양식정보설정의 미리보기다 — 스캔한 양식지 위에 필드를 mm 로 맞추는 화면이므로
+            //   배경 그림을 깐다(§13-8). 전표 인쇄 미리보기는 이 값이 false 라 안 깔린다.
+            IsFormDesignPreview = true,
             UseSampleData = true,
             SampleLineCount = req.LineCount <= 0 ? 3 : req.LineCount,
             MarkAsSample = true

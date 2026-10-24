@@ -1,0 +1,167 @@
+@* 🔴 전표 인쇄 미리보기 — 7종 공통 한 벌 (사장님 결재 2026-10-24 결-2)
+     사장님 워크플로우:
+       인쇄 클릭 → 미리보기로 넘어가 어떤 양식이 적용되는지 보여준다
+       → 옵션 선택 → 최종 인쇄는 미리보기 화면과 동일
+
+     🔴 종별로 갈라 만들지 않는다. 갈라 만들면 일곱 벌이 되고
+        양식 칸이 늘 때마다 일곱 군데를 고쳐야 한다. *@
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        @* 옵션 줄 — 🔴 7종이 같은 모양을 쓴다. 그 종에 안 쓰이는 칸은
+             **흐리게 두고 숨기지 않는다**. 고객이 "왜 나는 그 칸이 없지" 를 겪지 않게. *@
+        <div class="d-flex align-center flex-wrap mb-3" style="gap:12px;">
+            <MudSelect T="string" @bind-Value="_copyMode" Label="인쇄 매수" Dense="true"
+                       Margin="Margin.Dense" Style="min-width:200px;"
+                       Disabled="@(!SupportsCopyMode)"
+                       HelperText="@(SupportsCopyMode ? null : "이 문서는 한 벌만 인쇄합니다")">
+                <MudSelectItem Value="@("both")">공급자 + 공급받는자</MudSelectItem>
+                <MudSelectItem Value="@("recipient")">공급받는자만</MudSelectItem>
+                <MudSelectItem Value="@("supplier")">공급자만</MudSelectItem>
+            </MudSelect>
+
+            <MudCheckBox T="bool" @bind-Value="_tearLine" Dense="true"
+                         Disabled="@(!SupportsTearLine)"
+                         Label="한 장에 두 벌 + 가운데 자르는 선" />
+
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="_busy" OnClick="LoadAsync">@(_busy ? "그리는 중…" : "다시 그리기")</MudButton>
+        </div>
+
+        @if (!SupportsTearLine)
+        {
+            <MudText Typo="Typo.caption" Class="mb-2">
+                「한 장에 두 벌」은 두 벌을 찍는 문서에만 쓰입니다.
+            </MudText>
+        }
+
+        @if (_previewUrl is not null)
+        {
+            @* 🔴 이 틀에 보이는 것이 곧 인쇄물이다. 인쇄할 때 다시 그리지 않는다. *@
+            <iframe @ref="_frame" src="@_previewUrl" style="width:100%;height:600px;border:1px solid #ddd;"
+                    title="인쇄 미리보기"></iframe>
+        }
+        else if (!_busy)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">미리보기를 불러오지 못했습니다.</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseAsync">닫기</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Print"
+                   Disabled="@(_previewUrl is null || _busy)" OnClick="PrintAsync">인쇄</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>화면이 쓰는 문서 종류(하이픈 꼴) — 서버가 작성기 이름으로 바꾼다.</summary>
+    [Parameter] public string DocType { get; set; } = "";
+    [Parameter] public string DocId { get; set; } = "";
+
+    private string? _previewUrl;
+    private bool _busy;
+    private string _copyMode = "both";
+    private bool _tearLine;
+    private ElementReference _frame;
+
+    /// <summary>
+    /// 🔴 인쇄 매수·절취선은 <b>두 벌을 찍는 문서</b>의 축이다(DB-90·DB-147).
+    /// 나머지 종에서는 <b>흐리게</b> 둔다 — 숨기지 않는다(결-2).
+    /// </summary>
+    private bool SupportsCopyMode =>
+        DocType is "tax-invoice" or "tax_invoice" or "invoice-exempt" or "invoice_exempt";
+
+    private bool SupportsTearLine => SupportsCopyMode && _copyMode == "both";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    /// <summary>
+    /// 지금 고른 옵션으로 <b>정본 통로</b>에 그려 달라고 한다.
+    /// 🔴 옵션은 이번 한 장에만 쓰인다 — <b>저장하지 않는다</b>.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(DocType) || string.IsNullOrWhiteSpace(DocId))
+        {
+            Snackbar.Add("인쇄할 전표를 먼저 고르십시오.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await RevokeAsync();
+
+            var body = new
+            {
+                Options = new
+                {
+                    PrintCopyMode = SupportsCopyMode ? _copyMode : null,
+                    ShowTearLine = SupportsTearLine ? (bool?)_tearLine : null
+                }
+            };
+
+            var resp = await Http.PostAsJsonAsync($"api/documents/{DocType}/{DocId}/preview-pdf", body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 🔴 조용히 실패하지 않는다 — "눌렀는데 아무 일도 안 난다" 를 겪으면
+                //    고객은 무엇이 틀렸는지 알 길이 없다.
+                Snackbar.Add($"미리보기를 그리지 못했습니다. ({(int)resp.StatusCode})", Severity.Error);
+                return;
+            }
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            _previewUrl = await JS.InvokeAsync<string>("hitpanMakeBlobUrl",
+                "application/pdf", Convert.ToBase64String(bytes));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("미리보기 중 오류가 났습니다.", Severity.Error);
+            Console.Error.WriteLine($"[DocPreview] {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 <b>보고 있는 그 종이를 인쇄한다</b> — 다시 그리지 않는다(합격선 ④·⑤).
+    /// 사장님 결재 결-3: 브라우저 인쇄창을 띄워 기본 프린터로 보낸다.
+    /// </summary>
+    private async Task PrintAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("hitpanPrintPreviewFrame", _frame);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("인쇄창을 띄우지 못했습니다. 미리보기 안의 인쇄 아이콘을 눌러 주십시오.", Severity.Warning);
+            Console.Error.WriteLine($"[DocPreview.Print] {ex.Message}");
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        await RevokeAsync();
+        MudDialog.Close();
+    }
+
+    /// <summary>blob 주소를 거둔다 — 안 거두면 누를수록 쌓인다.</summary>
+    private async Task RevokeAsync()
+    {
+        if (_previewUrl is null) return;
+        var old = _previewUrl;
+        _previewUrl = null;
+        try { await JS.InvokeVoidAsync("hitpanRevokeBlobUrl", old); }
+        catch (Exception ex) { Console.Error.WriteLine($"[DocPreview] 주소 거두기 실패: {ex.Message}"); }
+    }
+}

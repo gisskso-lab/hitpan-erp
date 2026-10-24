@@ -194,7 +194,8 @@ public class FormPreviewOverrideGuardTests
         {
             var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] {
                 new FormTemplateDto { FormType = "delivery", BackgroundImageUrl = good } })!;
-            var ov = new PdfPreviewOverrides { UseSampleData = true };
+            // 🔴 [재검증 C-3] 배경은 **양식 설계 미리보기**에서만 깔린다.
+            var ov = new PdfPreviewOverrides { UseSampleData = true, IsFormDesignPreview = true };
 
             // 🔴 이것이 null 이면 「실인쇄에 안 깔린다」가 **아무것도 안 하는 함수**라서 통과한 것이다.
             var preview = PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { ov, info });
@@ -332,5 +333,108 @@ public class FormPreviewOverrideGuardTests
 
             Assert.InRange(list.Count, 1, 200);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 🔴 [재검증 보강] 검증팀 EXP-D 가 뚫은 자리 — 확장자·크기·형제폴더
+    //    "방어는 집행됐는데 보호(게이트)가 0건이었다"
+    // ═══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "축③형제 🔴 **형제 폴더**는 안 읽는다 — 앞글자만 비교하면 뚫린다(재검증 R-4)")]
+    public void Axis3_SiblingFolder_IsBlocked()
+    {
+        // 🔴 검증팀 실측: `…\form-backgrounds-probe\a.png` 가 **70바이트 읽혔다.**
+        //    `StartsWith(root)` 가 구분자 없이 비교해 **형제 폴더가 통째로 통과**했다.
+        var svc = MakeService();
+        var sibling = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds-probe");
+        Directory.CreateDirectory(sibling);
+        var p = Path.Combine(sibling, $"sib-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+        try
+        {
+            // 확장자·존재·디코드를 전부 통과하는 파일이다. 막는 것은 **구분자 비교**뿐이다.
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+        }
+        finally
+        {
+            try { File.Delete(p); Directory.Delete(sibling); } catch { /* 지워지면 그만 */ }
+        }
+    }
+
+    [Fact(DisplayName = "축③형식 🔴 허용 폴더 안이어도 **그림 아닌 확장자**는 안 읽는다(EXP-D)")]
+    public void Axis3_Extension_IsEnforced()
+    {
+        // 🔴 검증팀 EXP-D: 확장자 화이트리스트를 빼도 **16/16 초록**이었다 —
+        //    집행은 돼 있는데 **보호가 없었다**(§13-5 합격선 5 가 글자로 요구한 그것).
+        var svc = MakeService();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+
+        // 속은 멀쩡한 PNG 인데 **이름이 .svg·.pdf** 다. 확장자 검사만이 이것을 막는다.
+        foreach (var ext in new[] { ".svg", ".pdf", ".txt", ".exe" })
+        {
+            var p = Path.Combine(root, $"ext-{Guid.NewGuid():N}{ext}");
+            File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+            try
+            {
+                Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+            }
+            finally { try { File.Delete(p); } catch { /* 지워지면 그만 */ } }
+        }
+    }
+
+    [Fact(DisplayName = "축③크기 🔴 상한을 넘는 그림은 안 읽는다 — 종이 한 장이 PC 메모리를 먹으면 안 된다(EXP-D)")]
+    public void Axis3_SizeCap_IsEnforced()
+    {
+        var svc = MakeService();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+        var p = Path.Combine(root, $"big-{Guid.NewGuid():N}.png");
+
+        // 🔴 상한을 **넘기면서도 디코드는 되는** 파일을 만든다.
+        //   [왜 이렇게까지] 그냥 큰 쓰레기 파일을 주면 **디코드 검사가 대신 막아**
+        //   크기 검사를 빼도 초록이 된다 — 내가 실제로 그 거짓 초록을 한 번 냈다.
+        //   ⇒ 멀쩡한 PNG 뒤에 패딩을 붙여 **크기 검사만이 막는** 모양을 만든다.
+        var cap = (long)SvcType.GetField("MaxBackgroundBytes",
+            BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        var png = Convert.FromBase64String(OnePixelPngBase64);
+        using (var fs = new FileStream(p, FileMode.Create, FileAccess.Write))
+        {
+            fs.Write(png, 0, png.Length);
+            var pad = new byte[64 * 1024];
+            while (fs.Length <= cap) fs.Write(pad, 0, pad.Length);
+        }
+        try
+        {
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+        }
+        finally { try { File.Delete(p); } catch { /* 지워지면 그만 */ } }
+    }
+
+    [Fact(DisplayName = "축③설계 🔴 **전표 인쇄 미리보기**에는 배경이 안 깔린다 — 미리보기=인쇄물(재검증 C-3)")]
+    public void Axis3_DocumentPreview_GetsNoBackground()
+    {
+        // 🔴 전표 인쇄 미리보기도 overrides 를 탄다. 거기에 배경이 깔리면
+        //    미리보기엔 그림이 있고 실제 인쇄물엔 없다 ⇒ 합격선 ⑤ 가 거짓이 된다.
+        var svc = MakeService();
+        var png = WriteValidPng();
+        try
+        {
+            var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] {
+                new FormTemplateDto { FormType = "delivery", BackgroundImageUrl = png } })!;
+
+            // 전표 인쇄 미리보기 = IsFormDesignPreview 가 false 다.
+            var docPreview = new PdfPreviewOverrides { UseSampleData = false };
+            Assert.Null(PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { docPreview, info }));
+
+            // 🟢 대조 — 양식 설계 미리보기에서는 깔린다(막아 둔 게 아니다).
+            var design = new PdfPreviewOverrides { UseSampleData = true, IsFormDesignPreview = true };
+            Assert.NotNull(PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { design, info }));
+        }
+        finally { try { File.Delete(png); } catch { /* 지워지면 그만 */ } }
     }
 }

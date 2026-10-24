@@ -72,6 +72,12 @@ public sealed class PdfRenderService : IPdfRenderService
         var template = overrides?.Template is not null
             ? ToTemplateInfo(overrides.Template)
             : await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+
+        // 🔴 전표 인쇄 미리보기 옵션 (사장님 결재 2026-10-24 결-2 · 7종 공통).
+        //   저장된 양식을 **그대로 쓰고** 그 위에 **이번 한 번만** 바꿀 값을 얹는다.
+        //   🔴 저장하지 않는다 — 고객이 미리보기에서 만진 값이 양식으로 굳으면 안 된다.
+        //   🔴 옵션이 null 이면 아무것도 안 바뀐다 ⇒ **지금 인쇄와 같은 종이**(#1).
+        template = ApplyPrintOptions(template, overrides?.Options);
         var isPreprint = template?.PaperMode == "preprint";
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
@@ -1640,10 +1646,36 @@ public sealed class PdfRenderService : IPdfRenderService
     ///   <b>이중 인쇄</b>가 되고, 순백지는 <b>히트판 양식</b>이라 업체 그림이 들어갈 자리가 아니다
     ///   (§13-7·§13-10 — 그건 <b>등재만</b>).
     /// </remarks>
+    /// <summary>
+    /// 🔴 저장된 양식 위에 <b>이번 인쇄에만</b> 쓸 옵션을 얹는다 (결-2 · 7종 공통).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>옵션이 없으면 받은 그대로 돌려준다</b> — 기존 인쇄 경로는 한 글자도 안 바뀐다(#1).
+    /// 🔴 <b>양식 행이 아예 없을 때도 옵션은 먹어야 한다</b>. 고객이 「기본 양식 만들기」를
+    ///   안 눌렀어도 인쇄 매수는 고를 수 있어야 하기 때문이다([1-V] E-7).
+    /// 🔴 <b>저장하지 않는다</b> — 돌려주는 것은 이번 한 장을 그릴 입력일 뿐이다.
+    /// </remarks>
+    private static FormTemplateInfo? ApplyPrintOptions(FormTemplateInfo? template, PrintOptionOverrides? opt)
+    {
+        if (opt is null) return template;
+        if (opt.PrintCopyMode is null && opt.ShowTearLine is null) return template;
+
+        // 양식 행이 없으면 기본값 한 벌을 만들어 거기에 얹는다(E-7).
+        var t = template ?? new FormTemplateInfo();
+
+        if (!string.IsNullOrWhiteSpace(opt.PrintCopyMode)) t.PrintCopyMode = opt.PrintCopyMode!;
+        if (opt.ShowTearLine is not null) t.ShowTearLine = opt.ShowTearLine.Value;
+        return t;
+    }
+
     private byte[]? ResolveFormBackground(PdfPreviewOverrides? overrides, FormTemplateInfo? template)
     {
         // 🔴 이 한 줄이 실인쇄를 지킨다. 빼면 고객 종이에 그림이 또 찍힌다.
-        if (overrides is null) return null;
+        // 🔴 [재검증 C-3 봉합] 종전에는 `overrides is null` 로 **대리 판정**했다.
+        //   전표 인쇄 미리보기도 overrides 를 타므로, 그 종이에 배경이 깔리면
+        //   **미리보기엔 그림이 있고 인쇄물엔 없다** ⇒ 합격선 ⑤ 가 거짓이 된다.
+        //   ⇒ **양식 설계 미리보기일 때만** 깐다.
+        if (overrides?.IsFormDesignPreview != true) return null;
         return TryLoadFormBackground(template?.BackgroundImageUrl);
     }
 
@@ -1694,7 +1726,11 @@ public sealed class PdfRenderService : IPdfRenderService
             // ③ 경로 가둠 — 정해진 폴더 밑이 아니면 안 읽는다(R-4).
             //    `..\..\` 같은 거슬러 오르기는 FullPath 로 펴서 비교하므로 통하지 않는다.
             var full = Path.GetFullPath(url);
-            var root = Path.GetFullPath(FormBackgroundRoot);
+            // 🔴 [2026-10-24 재검증 R-4 봉합] 종전에는 **구분자 없이** 앞글자만 비교해
+            //   **형제 폴더가 통째로 통과**했다(검증팀 실측: `…\form-backgrounds-probe\a.png`
+            //   가 70바이트 읽혔다). 뒤에 구분자를 붙여 **그 폴더 안인지**를 본다.
+            var root = Path.GetFullPath(FormBackgroundRoot).TrimEnd(Path.DirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("[PDF] 양식지 그림이 허용 폴더 밖이다 — 깔지 않는다.");

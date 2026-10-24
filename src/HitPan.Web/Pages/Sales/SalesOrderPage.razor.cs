@@ -444,7 +444,7 @@ public partial class SalesOrderPage : ComponentBase
     /// <summary>브라우저 인쇄 대화상자를 연다.</summary>
     private async Task PrintAsync()
     {
-        await Js.InvokeVoidAsync("print");
+        await PrintPreview.ShowAsync("sales-order", _draft.Id, "수주서");
     }
 
     /// <summary>

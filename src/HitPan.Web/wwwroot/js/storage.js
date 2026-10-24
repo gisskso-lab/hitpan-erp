@@ -294,3 +294,36 @@ window.hitpanRevokeBlobUrl = (url) => {
     if (!url) return;
     try { URL.revokeObjectURL(url); } catch (e) { /* 이미 거둬진 주소 */ }
 };
+
+// ── 미리보기 틀을 그대로 인쇄 (사장님 결재 2026-10-24 결-3) ──────────
+// 사장님: "브라우져로 미리보기 인쇄창을 띄워서 기본 프린터로 보내는 방식"
+//
+// 🔴 보고 있는 그 종이를 인쇄한다 — 다시 그리지 않는다(합격선 ④·⑤).
+//    새로 그리면 미리보기와 인쇄물이 어긋날 수 있고, 그 순간 사장님 요구
+//    "미리보기 화면하고 동일하게 인쇄" 가 거짓이 된다.
+//
+// 🔴 브라우저가 PDF 를 **내장 뷰어**로 그린다. 그 문서는 우리 것이 아니라서
+//    contentWindow.print() 가 막힐 수 있다(브라우저·버전마다 다르다).
+//    ⇒ 막히면 **조용히 실패하지 않고** 거짓을 돌려준다. 화면이 안내를 띄운다.
+window.hitpanPrintPreviewFrame = (frame) => {
+    if (!frame) return false;
+    try {
+        // 같은 blob 출처면 이 길로 간다 — 인쇄창이 뜨고 기본 프린터로 간다.
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        return true;
+    } catch (e) {
+        console.warn('[hitpan] 미리보기 틀을 직접 인쇄하지 못했습니다', e);
+        try {
+            // 폴백 — 같은 주소를 새 창으로 열어 거기서 인쇄창을 띄운다.
+            //   🔴 같은 blob 주소다. **다시 그리지 않는다** — 종이가 같다는 뜻이다.
+            const w = window.open(frame.src, '_blank');
+            if (!w) return false;
+            w.addEventListener('load', () => { try { w.print(); } catch (e2) { /* 뷰어가 막으면 사람이 누른다 */ } });
+            return true;
+        } catch (e2) {
+            console.warn('[hitpan] 새 창 인쇄도 막혔습니다', e2);
+            return false;
+        }
+    }
+};

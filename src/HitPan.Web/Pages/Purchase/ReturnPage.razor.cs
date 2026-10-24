@@ -374,7 +374,7 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task PrintAsync() { await Js.InvokeVoidAsync("print"); }
+    private async Task PrintAsync() { await PrintPreview.ShowAsync("return", _draft.Id, "반품서"); }
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.
