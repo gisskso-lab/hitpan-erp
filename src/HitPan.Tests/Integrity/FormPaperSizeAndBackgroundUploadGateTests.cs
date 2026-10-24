@@ -731,6 +731,17 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.DoesNotContain("page.Size(ResolvePageSize(",
             Strip("/* page.Size(ResolvePageSize(template)); */\npage.Size(PageSizes.A4);"),
             StringComparison.Ordinal);
+
+        // ⒡ 🔴🔴 [3차 재검증 T-3] **잠복 구멍 2개** — 검증팀이 합성 입력으로 찾아냈다.
+        //   종전 판은 이 두 입력에서 **그 뒤 주석이 전부 누출**됐다 ⇒ 축⒢ 거짓 초록.
+        Assert.DoesNotContain("새어나온글",
+            Strip("var p = @\"\\\";\n// 새어나온글\n"), StringComparison.Ordinal);
+        Assert.DoesNotContain("새어나온글",
+            Strip("<p>don't</p>\n// 새어나온글\n"), StringComparison.Ordinal);
+
+        // 🔴 그리고 축자 문자열 자체는 **보존**돼야 한다(코드를 손상시키면 또 그 사고다)
+        Assert.Contains("@\"\\\"", Strip("var p = @\"\\\";"), StringComparison.Ordinal);
+        Assert.Contains("don't", Strip("<p>don't</p>"), StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "축⒢ 🔴🔴 **법정 서식은 용지를 안 바꾼다** (반려 R-5 — preprint 세금계산서가 공용 흐름으로 온다)")]
@@ -798,6 +809,72 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.Contains("PaperChoiceIgnored", razor, StringComparison.Ordinal);
         Assert.Contains("법으로 모양이 정해져", razor, StringComparison.Ordinal);
         Assert.Contains("위치를 맞춰 두셨기 때문에", razor, StringComparison.Ordinal);
+
+        // 🔴🔴 [2026-10-25 3차 재검증 T-5ⓐ 봉합] **역방향도 본다.**
+        //   종전에는 서버→화면 한 방향만 봤다 ⇒ **화면 목록이 더 넓어져도 안 빨개졌다**
+        //   (화면이 「법정이라 A4 로 나갑니다」라고 하는데 서버는 A5 를 내는 거짓 안내).
+        var razorList = System.Text.RegularExpressions.Regex.Match(
+            razor, @"LegalFormTypes\s*=\s*\{([^}]*)\}");
+        Assert.True(razorList.Success, "화면 법정 목록을 못 찾았다 — 이름이 바뀌었나.");
+
+        var razorTypes = System.Text.RegularExpressions.Regex.Matches(razorList.Groups[1].Value, "\"([^\"]+)\"")
+            .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(razorTypes.SetEquals(server),
+            $"화면 목록({string.Join(",", razorTypes.OrderBy(x => x))})과 "
+            + $"서버 목록({string.Join(",", server.OrderBy(x => x))})이 다르다 — 고객이 거짓 안내를 받는다.");
+
+        // 🔴 [T-5ⓑ] 좌표 판정 규칙도 같은 숫자를 쓰나 — 서버가 종이 밖으로 버리는 경계값.
+        Assert.Contains("IsCoordUsableByServer", razor, StringComparison.Ordinal);
+        Assert.Contains("c.XMm <= 420", razor, StringComparison.Ordinal);
+        Assert.Contains("c.YMm <= 594", razor, StringComparison.Ordinal);
+
+        var pdfSrc = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+        Assert.Contains("x > 420 || y > 594", pdfSrc, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒤ 🔴🔴 **뿌리 폴더 자체가 junction 이어도 막는다** (3차 재검증 T-1)")]
+    public void AxisI_RootItselfJunction_IsBlocked()
+    {
+        // 🔴🔴 [3차 재검증 T-1] 링크 검사가 **뿌리 자신을 면제**했다. 그 면제의 근거는
+        //   「울타리 자리는 관리자가 정한 곳」이었는데, 🔴 **이 뿌리엔 그 전제가 없다** —
+        //   코드 고정값이고 앱이 스스로 만든다. 검증팀 실측 ACL 에서 `C:\ProgramData\HitPan` 은
+        //   일반 사용자에게 **하위 폴더 추가(AD)** 가 열려 있다 ⇒ 갓 설치본에서 직원이
+        //   `form-backgrounds` 를 먼저 junction 으로 만들어 두면 울타리가 통째로 비켜진다.
+        //   🔴 운영 폴더를 건드리지 않으려고 **검사 함수를 직접** 때린다(합성 뿌리).
+        var outside = Path.Combine(Path.GetTempPath(), $"gate-out-{Guid.NewGuid():N}");
+        var fakeRoot = Path.Combine(Path.GetTempPath(), $"gate-root-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outside);
+        File.WriteAllBytes(Path.Combine(outside, "밖의파일.png"), RealPng);
+
+        try
+        {
+            MakeJunction(fakeRoot, outside);
+
+            var store = MakeStore();
+            var m = typeof(FormBackgroundStore).GetMethod("PassesThroughLink",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            var root = fakeRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var through = Path.Combine(fakeRoot, "밖의파일.png");
+
+            var blocked = (bool)m.Invoke(store, new object?[] { through, root })!;
+            Assert.True(blocked, "🔴 뿌리가 junction 인데 통과시켰다 — T-1 이 열려 있다.");
+
+            // 🔴 읽는 쪽도 **같이** 닫혔나 — 한쪽만 고치면 또 비대칭이다.
+            var reader = typeof(PdfRenderService).GetMethod("PassesThroughLink",
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+            Assert.True((bool)reader.Invoke(null, new object?[] { through, root })!,
+                "🔴 읽는 쪽은 뿌리 junction 을 아직 통과시킨다 — 비대칭이 남았다.");
+        }
+        finally
+        {
+            try { if (Directory.Exists(fakeRoot)) Directory.Delete(fakeRoot); }
+            catch (Exception ex) { Console.Error.WriteLine($"[gate cleanup] {ex.Message}"); }
+
+            try { if (Directory.Exists(outside)) Directory.Delete(outside, recursive: true); }
+            catch (Exception ex) { Console.Error.WriteLine($"[gate cleanup] {ex.Message}"); }
+        }
     }
 
     [Fact(DisplayName = "축⒢ 🔴🔴 **좌표 맞춘 양식용지는 용지를 안 바꾼다** (반려 R-4 — 조용한 빈 종이)")]
@@ -961,12 +1038,32 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     /// 🔴 여전히 못 하는 것: 축자 문자열(<c>@"…"</c>·<c>"""…"""</c>) 안의 줄바꿈 처리.
     ///   이 파일들에는 그 모양이 없어 지금은 참이고, 생기면 여기를 늘려야 한다(등재).
     /// </remarks>
+    /// <summary>
+    /// 🔴 이 <c>'</c> 가 <b>문자 리터럴의 시작</b>처럼 보이나 — [T-3] 산문의 아포스트로피 구분.
+    /// </summary>
+    /// <remarks>
+    /// `'x'` · `'\n'` · `'\''` 만 리터럴로 센다. `don't` 의 `'` 는 닫는 짝이 바로 없으니 글이다.
+    /// 🔴 완벽한 판정은 아니다(파서가 아니다). 다만 **누출되는 쪽이 아니라 안 세는 쪽**으로
+    ///   떨어지므로, 틀려도 주석이 더 걷히기만 한다 — 거짓 초록이 아니라 거짓 빨강 쪽이다.
+    /// </remarks>
+    private static bool LooksLikeCharLiteral(string s, int at)
+    {
+        if (at + 2 < s.Length && s[at + 1] == '\\')
+        {
+            // '\n' · '\'' · '\\'
+            return at + 3 < s.Length && s[at + 3] == '\'';
+        }
+
+        return at + 2 < s.Length && s[at + 2] == '\'';
+    }
+
     private static string StripComments(string raw)
     {
         var sb = new System.Text.StringBuilder(raw.Length);
         var inString = false;
         var inChar = false;
         var inBlock = false;
+        var inVerbatim = false;   // 🔴 [T-3] 축자 문자열(@"…") 안인가 — 여기선 `\` 가 보통 글자다
 
         for (var i = 0; i < raw.Length; i++)
         {
@@ -983,8 +1080,15 @@ public class FormPaperSizeAndBackgroundUploadGateTests
             if (inString || inChar)
             {
                 sb.Append(c);
-                if (c == '\\' && next != '\0') { sb.Append(next); i++; continue; }
-                if (inString && c == '"') inString = false;
+
+                // 🔴 [2026-10-25 3차 재검증 T-3 봉합] **축자 문자열에서는 `\` 가 탈출문자가 아니다.**
+                //   종전 판은 `@"\"` 를 만나면 닫는 따옴표를 삼켜 **그 뒤 주석이 전부 누출**됐다.
+                if (!inVerbatim && c == '\\' && next != '\0') { sb.Append(next); i++; continue; }
+
+                // 축자 문자열 안의 `""` 는 따옴표 한 개를 뜻한다 — 닫는 것이 아니다.
+                if (inVerbatim && c == '"' && next == '"') { sb.Append(next); i++; continue; }
+
+                if (inString && c == '"') { inString = false; inVerbatim = false; }
                 if (inChar && c == '\'') inChar = false;
                 continue;
             }
@@ -1013,8 +1117,25 @@ public class FormPaperSizeAndBackgroundUploadGateTests
                 continue;
             }
 
-            if (c == '"') inString = true;
-            if (c == '\'') inChar = true;
+            // 🔴 [T-3] `@"…"` 는 축자 문자열이다 — 여는 자리에서 표시해 둔다.
+            if (c == '@' && next == '"')
+            {
+                sb.Append(c);
+                sb.Append(next);
+                i++;
+                inString = true;
+                inVerbatim = true;
+                continue;
+            }
+
+            if (c == '"') { inString = true; inVerbatim = false; }
+
+            // 🔴🔴 [2026-10-25 3차 재검증 T-3 봉합] **산문의 아포스트로피를 문자 리터럴로 세지 않는다.**
+            //   razor·주석에는 `don't` 같은 글이 있다. 종전 판은 그 `'` 를 리터럴 시작으로 읽어
+            //   **그 뒤 전체가 리터럴**이 됐고, 이후 주석이 전부 누출됐다
+            //   ⇒ 축⒢ 가 거짓 초록이 될 수 있었다.
+            //   ⇒ `'x'`·`'\n'` 처럼 **닫는 따옴표가 바로 뒤에 보일 때만** 리터럴로 센다.
+            if (c == '\'' && LooksLikeCharLiteral(raw, i)) inChar = true;
 
             sb.Append(c);
         }

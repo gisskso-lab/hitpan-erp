@@ -162,6 +162,18 @@ public sealed class FormBackgroundStore : IFormBackgroundStore
                 if (dir.LinkTarget is not null) return true;
             }
 
+            // 🔴🔴 [2026-10-25 3차 재검증 T-1 봉합] **뿌리 자신도 본다.**
+            //   [무엇이 틀린 전제였나] 읽는 쪽 주석은 *"울타리 자체는 관리자가 정한 자리이니
+            //     거기가 링크여도 관리자의 뜻"* 이라고 적었다. 🔴 **이 뿌리엔 그 전제가 없다** —
+            //     경로는 코드 고정값이고 **앱이 스스로 만든다.** 관리자가 고른 자리가 아니다.
+            //   🔴 검증팀 실측 ACL: `C:\ProgramData\HitPan` → `BUILTIN\Users:(I)(CI)(WD,AD,…)`
+            //     ⇒ **`AD`(하위폴더 추가)가 일반 사용자에게 열려 있다.** 갓 설치한 PC 에서
+            //     직원이 `form-backgrounds` 를 **먼저 junction 으로 만들어 두면**,
+            //     올리기는 밖에 떨어지고 지우기는 밖을 지운다.
+            //   🔴 그래서 면제를 없앤다. 뿌리가 링크면 **아무것도 하지 않는다.**
+            var rootDir = new DirectoryInfo(rootNoSep);
+            if (rootDir.LinkTarget is not null) return true;
+
             return false;
         }
         catch (Exception ex)

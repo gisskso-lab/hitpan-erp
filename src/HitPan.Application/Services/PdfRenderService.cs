@@ -1951,6 +1951,16 @@ public sealed class PdfRenderService : IPdfRenderService
             if (dir.LinkTarget is not null) return true;
         }
 
+        // 🔴🔴 [2026-10-25 3차 재검증 T-1 봉합] **뿌리 자신도 본다** — 위 주석의 면제를 거둔다.
+        //   [틀린 전제] *"울타리 자체는 관리자가 정한 곳이니 링크여도 관리자의 뜻"* 이라고 적었다.
+        //     🔴 이 뿌리는 **코드 고정값이고 앱이 스스로 만든다.** 관리자가 고른 자리가 아니다.
+        //   🔴 검증팀 실측 ACL: `C:\ProgramData\HitPan` 에 `BUILTIN\Users:(I)(CI)(WD,AD,…)`
+        //     ⇒ **일반 사용자가 하위 폴더를 만들 수 있다** ⇒ 갓 설치본에서 직원이
+        //     `form-backgrounds` 를 먼저 junction 으로 만들어 두면 울타리가 통째로 비켜진다.
+        //   🔴 올리기·지우기 쪽(FormBackgroundStore)과 **같이** 닫는다 — 한쪽만 고치면 또 비대칭이다.
+        var rootDir = new DirectoryInfo(rootNoSep);
+        if (rootDir.LinkTarget is not null) return true;
+
         return false;
     }
 

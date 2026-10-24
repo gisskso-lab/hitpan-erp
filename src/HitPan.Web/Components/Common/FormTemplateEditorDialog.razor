@@ -507,7 +507,12 @@
             }
 
             // ② 좌표를 맞춰 둔 양식용지 — 종이가 바뀌면 맞춰 둔 위치가 어긋난다
-            if (_form.PaperMode == "preprint" && _coords.Any(c => !string.IsNullOrWhiteSpace(c.Key)))
+            // 🔴🔴 [2026-10-25 3차 재검증 T-5ⓑ 봉합] 종전에는 **칸 이름만** 봤다.
+            //   서버는 이름이 있어도 **위치가 종이 밖이면 그 줄을 버린다.** 그래서
+            //   「이름만 적고 위치는 안 맞춘」 양식에서 화면은 「A4 로 인쇄됩니다」라고
+            //   말하는데 서버는 A5 를 냈다 ⇒ 🔴 **고객이 거짓 안내를 받았다.**
+            //   ⇒ 서버가 받아 주는 줄이 하나라도 있는지로 센다(판정 규칙을 같게).
+            if (_form.PaperMode == "preprint" && _coords.Any(IsCoordUsableByServer))
             {
                 return "위치를 맞춰 두셨기 때문에 용지와 방향은 A4 세로로 인쇄됩니다. "
                      + "위치는 종이 크기를 기준으로 재어 둔 값이라, 용지를 바꾸면 다시 맞추셔야 합니다.";
@@ -516,6 +521,20 @@
             return null;
         }
     }
+
+    /// <summary>
+    /// 🔴 이 좌표 줄을 <b>서버가 실제로 받아 주나</b> — 서버 <c>ParseFieldCoords</c> 와 같은 규칙.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-10-25 3차 재검증 T-5ⓑ] 규칙이 둘로 갈리면 고객이 거짓 안내를 받는다.
+    ///   서버는 ⒜ 칸 이름이 있고 ⒝ 위치가 <b>종이 안</b>일 때만 그 줄을 쓴다.
+    /// 🔴 숫자(420·594)는 서버가 쓰는 값이다. 바꾸려면 <b>양쪽을 같이</b> 바꿔야 하고,
+    ///   게이트가 두 자리를 대조한다.
+    /// </remarks>
+    private static bool IsCoordUsableByServer(CoordRow c)
+        => !string.IsNullOrWhiteSpace(c.Key)
+        && c.XMm >= 0 && c.YMm >= 0
+        && c.XMm <= 420 && c.YMm <= 594;
 
     /// <summary>
     /// 🔴 용지·방향을 바꿀 수 없는 <b>법으로 정해진 서식</b>. 서버 <c>LegalFormDocTypes</c> 와 짝이다.
