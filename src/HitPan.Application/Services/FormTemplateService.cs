@@ -89,6 +89,8 @@ public class FormTemplateService : IFormTemplateService
                 show_border AS ShowBorder,
                 print_copy_mode AS PrintCopyMode,
                 style_key AS StyleKey,
+                -- 🔴 20261021작 §10-4 S-2 (DB-147) — 안 읽으면 고객이 켜도 종이가 안 바뀐다.
+                show_tear_line AS ShowTearLine,
                 is_default AS IsDefault,
                 is_active AS IsActive
             FROM form_templates
@@ -131,7 +133,7 @@ public class FormTemplateService : IFormTemplateService
                  margin_top_mm, margin_left_mm, margin_right_mm, margin_bottom_mm,
                  field_coords_json, background_image_url,
                  show_company_logo, show_company_seal, show_border,
-                 print_copy_mode, style_key,
+                 print_copy_mode, style_key, show_tear_line,
                  is_default, is_active)
               VALUES
                 (@TemplateId, @TenantId, @FormType, @TemplateName, @PaperMode,
@@ -139,7 +141,7 @@ public class FormTemplateService : IFormTemplateService
                  @MarginTopMm, @MarginLeftMm, @MarginRightMm, @MarginBottomMm,
                  @FieldCoordsJson, @BackgroundImageUrl,
                  @ShowCompanyLogo, @ShowCompanySeal, @ShowBorder,
-                 @PrintCopyMode, @StyleKey,
+                 @PrintCopyMode, @StyleKey, @ShowTearLine,
                  @IsDefault, 1)",
             new
             {
@@ -163,6 +165,7 @@ public class FormTemplateService : IFormTemplateService
                 //   세금계산서·계산서를 recipient 로 만들면 법정 2매 요건을 어기게 된다.
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
                 StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                ShowTearLine = request.ShowTearLine ? 1 : 0,
                 IsDefault = request.IsDefault ? 1 : 0
             },
             cancellationToken: ct));
@@ -191,6 +194,7 @@ public class FormTemplateService : IFormTemplateService
             //   여기서 request 값을 그냥 넘기면 화면은 recipient 로 알고 DB 는 both 인 어긋남이 난다.
             PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
             StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+            ShowTearLine = request.ShowTearLine,
             IsDefault = request.IsDefault,
             IsActive = true
         };
@@ -229,6 +233,7 @@ public class FormTemplateService : IFormTemplateService
                 show_border = @ShowBorder,
                 print_copy_mode = @PrintCopyMode,
                 style_key = @StyleKey,
+                show_tear_line = @ShowTearLine,
                 is_default = @IsDefault,
                 is_active = @IsActive
               WHERE tenant_id = @TenantId AND template_id = @TemplateId",
@@ -251,6 +256,7 @@ public class FormTemplateService : IFormTemplateService
                 ShowBorder = request.ShowBorder ? 1 : 0,
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
                 StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                ShowTearLine = request.ShowTearLine ? 1 : 0,
                 IsDefault = request.IsDefault ? 1 : 0,
                 IsActive = request.IsActive ? 1 : 0
             },
@@ -267,6 +273,7 @@ public class FormTemplateService : IFormTemplateService
                      show_company_logo AS ShowCompanyLogo, show_company_seal AS ShowCompanySeal,
                      show_border AS ShowBorder,
                      print_copy_mode AS PrintCopyMode, style_key AS StyleKey,
+                     show_tear_line AS ShowTearLine,
                      is_default AS IsDefault, is_active AS IsActive
               FROM form_templates WHERE template_id = @TemplateId",
             new { TemplateId = templateId }, cancellationToken: ct));

@@ -24,6 +24,12 @@ public class DocumentController : ControllerBase
     private readonly ICompanyService _companyService;
     private readonly IDbConnection _db;
 
+    /// <summary>
+    /// 🔴 20261021작 절 C-2 — 세금계산서 정본 통로. 양식설정·인쇄 매수·DB 를 아는 쪽이다.
+    /// 나머지 9종은 종전 <see cref="PdfExportService"/> 그대로 탄다(#1).
+    /// </summary>
+    private readonly IPdfRenderService _pdfRenderService;
+
     public DocumentController(
         ExcelExportService excelService,
         PdfExportService pdfService,
@@ -31,8 +37,10 @@ public class DocumentController : ControllerBase
         AccessTokenValidator accessTokenValidator,
         IQuotationService quotationService,
         ICompanyService companyService,
-        IDbConnection db)
+        IDbConnection db,
+        IPdfRenderService pdfRenderService)
     {
+        _pdfRenderService = pdfRenderService;
         _excelService = excelService;
         _pdfService = pdfService;
         _importService = importService;
@@ -88,7 +96,8 @@ public class DocumentController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> DownloadExcel(string type, string id, [FromQuery] string? token)
     {
-        var principal = _accessTokenValidator.ValidateDownloadToken(token, id);
+        // 🔴 20261021작 — 문서 종류까지 바인딩한다(거래명세서와 세금계산서가 같은 id 를 쓴다).
+        var principal = _accessTokenValidator.ValidateDownloadToken(token, id, type);
         if (principal is null)
         {
             return Unauthorized();
@@ -133,21 +142,40 @@ public class DocumentController : ControllerBase
 
     [HttpGet("{type}/{id}/pdf")]
     [AllowAnonymous]
-    public async Task<IActionResult> DownloadPdf(string type, string id, [FromQuery] string? token)
+    /// <param name="disposition">
+    /// 🔴 20261021작 절 C-1 — <c>inline</c> 한 값일 때만 브라우저가 바로 열도록 한다.
+    /// <b>기본은 지금 그대로 내려받기(attachment)</b> 다. 받은 글자를 헤더로 흘리지 않는다.
+    /// </param>
+    public async Task<IActionResult> DownloadPdf(string type, string id, [FromQuery] string? token,
+        [FromQuery] string? disposition = null)
     {
-        var principal = _accessTokenValidator.ValidateDownloadToken(token, id);
+        // 🔴 문서 종류까지 바인딩한다 — 거래명세서 토큰으로 세금계산서를 받아 갈 수 없다.
+        var principal = _accessTokenValidator.ValidateDownloadToken(token, id, type);
         if (principal is null)
         {
             return Unauthorized();
         }
 
         var tenantId = principal.FindFirst("tenant_id")?.Value ?? string.Empty;
+
+        byte[] bytes;
+
+        // 🔴 20261021작 절 C-2 — 세금계산서만 정본 통로(PdfRenderService)로 간다.
+        //   양식설정·인쇄 매수·DB 를 아는 쪽이다. 「인쇄」·「PDF」·「이메일」이 같은 곳을 지난다.
+        //   🔴 되돌리기 = 이 블록만 지우면 아래 표의 "tax-invoice" 줄로 되돌아간다(한 줄 복귀).
+        if (string.Equals(type, "tax-invoice", StringComparison.Ordinal))
+        {
+            var rendered = await _pdfRenderService.RenderDocumentAsync(tenantId, "tax_invoice", id);
+            bytes = rendered.Bytes;
+            return PdfResult(bytes, type, id, disposition);
+        }
+
         var data = await LoadDocumentAsync(type, id, tenantId);
 
         // 문서 타입별 PDF 생성 — 제목만 다르게 동일 양식 활용
         //   ⚠️ 위 엑셀 표와 **같은 종류를 다뤄야 한다.** 한쪽만 늘리면
         //     "엑셀은 계산서로 나오는데 PDF 는 거래명세서로 나오는" 어긋남이 생긴다.
-        var bytes = type switch
+        bytes = type switch
         {
             "quotation" => _pdfService.GenerateQuotationPdf(data),
             "sales-order" => _pdfService.GenerateDeliveryPdf(data, "수 주 서"),
@@ -164,11 +192,25 @@ public class DocumentController : ControllerBase
             _ => _pdfService.GenerateDeliveryPdf(data)
         };
 
+        return PdfResult(bytes, type, id, disposition);
+    }
+
+    /// <summary>
+    /// PDF 응답 한 곳 — 🔴 <c>Content-Disposition</c> 을 <b>대입</b>으로 한 번만 세운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>Append</c> 로 붙이면 inline 을 더할 때 <b>헤더가 두 개</b>가 되어 브라우저마다
+    /// 다르게 읽는다. 🔴 들어온 글자는 <c>inline</c> 한 값하고만 견주고, 헤더에는
+    /// 코드 안의 낱말만 들어간다(헤더 주입 차단). 파일이름은 종전처럼 escape 한다.
+    /// </remarks>
+    private IActionResult PdfResult(byte[] bytes, string type, string id, string? disposition)
+    {
         var title = GetTitleByType(type);
         var fileName = $"{title}_{id}_{DateTime.Now:yyyyMMdd}.pdf";
         var encodedName = Uri.EscapeDataString(fileName);
-        Response.Headers.Append("Content-Disposition",
-            $"attachment; filename*=UTF-8''{encodedName}");
+        var dispositionType =
+            string.Equals(disposition, "inline", StringComparison.Ordinal) ? "inline" : "attachment";
+        Response.Headers["Content-Disposition"] = $"{dispositionType}; filename*=UTF-8''{encodedName}";
         return File(bytes, "application/pdf");
     }
 
@@ -247,6 +289,9 @@ public class DocumentController : ControllerBase
             "quotation" => await LoadQuotationDocumentAsync(id, tenantId, tenantInfo),
             "sales-order" => await LoadSalesOrderDocumentAsync(id, tenantId, tenantInfo),
             "delivery" => await LoadDeliveryDocumentAsync(id, tenantId, tenantInfo),
+            // 🔴 20261021작 절 A — 세금계산서. 종전에는 이 표에 없어 default(스텁)로 떨어져
+            //   **거래처·품목·합계가 전부 빈 엑셀**이 나갔다. 열쇠는 거래명세서 번호(delivery_id)다.
+            "tax-invoice" => await LoadTaxInvoiceDocumentAsync(id, tenantId, tenantInfo),
             "purchase-order" => await LoadPurchaseOrderDocumentAsync(id, tenantId, tenantInfo),
             "purchase-receipt" => await LoadPurchaseReceiptDocumentAsync(id, tenantId, tenantInfo),
             "return" => await LoadReturnDocumentAsync(id, tenantId, tenantInfo),
@@ -417,6 +462,50 @@ public class DocumentController : ControllerBase
                 VatAmount = (decimal)i.vat_amount
             }).ToList()
         };
+    }
+
+    /// <summary>
+    /// 세금계산서 데이터를 DB에서 로드하여 DocumentDto로 변환한다 (20261021작 절 A).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 받는 <paramref name="id"/> 는 <b>거래명세서 번호(delivery_id)</b> 다.
+    /// 세금계산서 화면·모바일·이메일이 모두 그 값을 준다(설계 §3-1).
+    ///
+    /// 품목·거래처·합계는 <b>거래명세서가 정본</b>이다. <c>tax_invoice_items</c> 는
+    /// 발행이 채우지 않으므로(설계 §13 D-3) 읽지 않는다 — 읽으면 품목 0줄이 된다.
+    /// 그 위에 발행된 계산서의 머리값(승인번호·작성일자)만 덮는다.
+    /// </remarks>
+    private async Task<DocumentDto> LoadTaxInvoiceDocumentAsync(string id, string tenantId, TenantInfo tenantInfo)
+    {
+        var doc = await LoadDeliveryDocumentAsync(id, tenantId, tenantInfo);
+
+        // 🔴 status='issued' 만 덮는다 — 취소본(canceled)이 종이로 나가면 안 된다(설계 §13 D-6).
+        //   미발행이면 행이 없다 ⇒ 거래명세서 값 그대로 그린다(승인번호 빈칸).
+        const string invoiceSql = """
+            SELECT invoice_no AS InvoiceNo, issued_at AS IssuedAt
+            FROM tax_invoices
+            WHERE delivery_id = @Id AND tenant_id = @TenantId AND status = 'issued'
+            ORDER BY issued_at DESC
+            LIMIT 1
+            """;
+
+        var head = await _db.QueryFirstOrDefaultAsync<TaxInvoiceHead>(invoiceSql,
+            new { Id = id, TenantId = tenantId });
+
+        if (head is not null)
+        {
+            doc.Header.DocNo = head.InvoiceNo;
+            doc.Header.OrderDate = head.IssuedAt;
+        }
+
+        return doc;
+    }
+
+    /// <summary>발행된 세금계산서 머리값 — 엑셀과 PDF 가 같은 값을 쓰게 하는 기준이다(G-A3).</summary>
+    private sealed class TaxInvoiceHead
+    {
+        public string InvoiceNo { get; set; } = string.Empty;
+        public DateTime IssuedAt { get; set; }
     }
 
     /// <summary>

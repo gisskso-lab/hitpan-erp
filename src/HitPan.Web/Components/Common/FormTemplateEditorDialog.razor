@@ -46,6 +46,35 @@
                     </MudText>
                 }
             </MudItem>
+            @* 🔴 20261021작 §10-2 ⓑ (사장님 재결재 2026-10-21):
+                 *"절취선 — 켜고 끄는 것을 고객이 설정한다"*
+
+                 두 장을 찍을 때만 뜻이 있는 칸이라 「거래처 것 + 우리 보관용 (2장)」을
+                 고른 경우에만 보인다. 안 그러면 아무 일도 안 하는 칸이 늘 떠 있게 된다.
+                 🔴 고객이 읽는 말로만 적는다 — 「절취선」·「페이지」 같은 말은 안 쓴다. *@
+            @if (_form.PrintCopyMode == "both")
+            {
+                <MudItem xs="12" md="6">
+                    <MudCheckBox T="bool" @bind-Value="_form.ShowTearLine"
+                                 Label="두 장을 종이 한 장에 위아래로 모아 찍기 (가운데를 자르면 두 장이 됩니다)"
+                                 Dense="true" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @if (_form.ShowTearLine)
+                        {
+                            <text>
+                                종이 한 장에 위아래로 찍고 가운데에 자르는 선을 넣습니다.
+                                품목이 많아 다 안 들어가면 마지막 줄에 「외 ○건」으로 적습니다.
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                                종이 두 장에 한 장씩 따로 찍습니다. 품목은 하나도 빠지지 않습니다.
+                            </text>
+                        }
+                    </MudText>
+                </MudItem>
+            }
             <MudItem xs="6" md="3">
                 <MudSelect T="string" @bind-Value="_form.PaperSize" Label="용지 크기" Margin="Margin.Dense">
                     <MudSelectItem Value="@("A4")">A4</MudSelectItem>
@@ -60,16 +89,16 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginTopMm" Label="여백 상(mm)" Margin="Margin.Dense" Min="0" Max="35" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginLeftMm" Label="여백 좌(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginLeftMm" Label="여백 좌(mm)" Margin="Margin.Dense" Min="0" Max="35" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginRightMm" Label="여백 우(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginRightMm" Label="여백 우(mm)" Margin="Margin.Dense" Min="0" Max="35" />
             </MudItem>
             <MudItem xs="6" md="3">
-                <MudNumericField T="decimal" @bind-Value="_form.MarginBottomMm" Label="여백 하(mm)" Margin="Margin.Dense" />
+                <MudNumericField T="decimal" @bind-Value="_form.MarginBottomMm" Label="여백 하(mm)" Margin="Margin.Dense" Min="0" Max="35" />
             </MudItem>
             <MudItem xs="12" md="4">
                 <MudCheckBox T="bool" @bind-Value="_form.ShowCompanyLogo" Label="회사 로고 표시" Dense="true" />
@@ -251,6 +280,15 @@
                 ShowCompanyLogo = Template.ShowCompanyLogo,
                 ShowCompanySeal = Template.ShowCompanySeal,
                 ShowBorder = Template.ShowBorder,
+                // 🔴 20261021작 §10-4 S-2 — 종전에 이 두 줄이 **빠져 있었다**.
+                //   저장돼 있던 「몇 장 인쇄하나요?」 값을 편집창이 안 가져와서,
+                //   고객이 양식을 열어 아무것도 안 바꾸고 저장만 해도
+                //   print_copy_mode 가 recipient(기본값)로 **조용히 되돌아갔다.**
+                //   ⇒ 이 줄이 없으면 아래 ShowTearLine 도 영영 안 먹는다(both 일 때만 쓰이므로).
+                //   드롭다운 자체는 한 글자도 안 고쳤다(#1 · 20261021작 §5 무접촉).
+                PrintCopyMode = Template.PrintCopyMode,
+                StyleKey = Template.StyleKey,
+                ShowTearLine = Template.ShowTearLine,
                 IsDefault = Template.IsDefault,
                 IsActive = Template.IsActive
             };

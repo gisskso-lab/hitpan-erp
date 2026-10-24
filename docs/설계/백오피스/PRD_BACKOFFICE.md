@@ -120,7 +120,7 @@ POST /backoffice/api/subscriptions
 ```
 GET {erpDomain}/api/sync/employees
   Header: Authorization: Bearer {SYNC_TOKEN}
-  Response: [{ name, email, position, isActive }]
+  Response: [{ employeeId, name, email, position, isActive }]   # 5칸 · employeeId = 같은 사람인지 가리는 열쇠(2026-10-20 사장님 결재 교정)
 
 GET {erpDomain}/api/sync/devices
   Header: Authorization: Bearer {SYNC_TOKEN}

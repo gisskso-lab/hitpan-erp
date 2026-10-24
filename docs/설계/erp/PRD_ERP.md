@@ -182,7 +182,7 @@
 ```
 GET /api/sync/employees
   인증: BACKOFFICE_SYNC_TOKEN (읽기 전용)
-  응답: [{ name, email, position, isActive }]
+  응답: [{ employeeId, name, email, position, isActive }]   # 5칸 · employeeId = 같은 사람인지 가리는 열쇠(2026-10-20 사장님 결재 교정)
 
 GET /api/sync/devices
   인증: BACKOFFICE_SYNC_TOKEN (읽기 전용)

@@ -59,6 +59,21 @@ public sealed class PdfRenderService : IPdfRenderService
         var marginRight = (float)(template?.MarginRightMm ?? 20);
         var marginBottom = (float)(template?.MarginBottomMm ?? 20);
 
+        // 🔴 20261021작 절 B-3 — 세금계산서 전용(법정) 작성기.
+        //   양식용지(preprint)·좌표 경로는 **종전 그대로** 간다(아래 공용 흐름).
+        //   나머지 9종도 아래 공용 흐름 그대로 — 이 분기 안에서만 갈라진다(#1).
+        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint)
+        {
+            // 양식 행이 없으면 법정 2매가 기본이다(FormTemplateService 의 TwoCopyFormTypes).
+            var copyMode = template?.PrintCopyMode ?? "both";
+            // 🔴 20261021작 §10-2 ⓑ — 「한 장에 모으기」는 **고객이 켠 경우에만**.
+            //   양식 행이 없으면 끔으로 본다(DB-147 기본값과 같다).
+            var showTearLine = template?.ShowTearLine ?? false;
+            var taxBytes = RenderTaxInvoiceDocument(data, company, copyMode, showTearLine,
+                marginTop, marginLeft, marginRight, marginBottom);
+            return (taxBytes, $"{KoLabel(documentType)}_{data.DocNo}.pdf");
+        }
+
         var bytes = Document.Create(c =>
         {
             c.Page(page =>
@@ -332,31 +347,104 @@ public sealed class PdfRenderService : IPdfRenderService
 
     private async Task<DocumentSnapshot> LoadTaxInvoiceAsync(string tenantId, string id, CancellationToken ct)
     {
-        // tax_invoices drift 봉합(13차 후순위→봉합): 컬럼명 DDL 정합(헌법 #13·#36).
-        // invoice_date→issued_at, supply_amount→amount_total, vat_amount→vat_total,
-        // total_amount=amount_total+vat_total 계산, remark→remark1, tax_invoice_id→invoice_id.
-        // tax_invoices에 partner_id 없음 → delivery_id 경유 sales_deliveries.partner_id로 거래처 조회.
+        // 🔴 20261021작 절 B-2 — 열쇠 교정.
+        //   종전: WHERE t.invoice_id = @Id. 그런데 화면·모바일·이메일이 주는 값은 모두
+        //   **거래명세서 번호(delivery_id)** 다(설계 §3-1) ⇒ 영영 못 찾아 「(거래처 정보 없음)」
+        //   빈 종이가 메일로 나갔다. 이제 delivery_id 로 찾는다.
+        //   🔴 품목 정본은 거래명세서다. tax_invoice_items 는 발행이 채우지 않는다(설계 §13 D-3).
+        //
+        //   컬럼명 DDL 정합(헌법 #13·#36) — 2026-10-20 information_schema 실측:
+        //   tax_invoices(invoice_no·issued_at·amendment_reason·hometax_approval_no·remark1·status),
+        //   sales_deliveries(delivery_no·delivery_date·total_amount·vat_amount·memo·is_deleted),
+        //   partners(partner_name·biz_no·ceo_name·biz_type·biz_item·tel·address·manager_name).
         const string head = """
-            SELECT t.invoice_no AS DocNo, t.issued_at AS DocDate,
+            SELECT d.delivery_no AS DocNo, d.delivery_date AS DocDate,
                    p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
                    p.address AS PartnerAddress, p.manager_name AS PartnerContact,
-                   COALESCE(t.amount_total,0) AS TotalSupply, COALESCE(t.vat_total,0) AS TotalVat,
-                   COALESCE(t.amount_total,0) + COALESCE(t.vat_total,0) AS TotalAmount,
-                   t.remark1 AS Remark
-            FROM tax_invoices t
-            LEFT JOIN sales_deliveries sd ON sd.delivery_id = t.delivery_id AND sd.tenant_id = t.tenant_id
-            LEFT JOIN partners p ON p.partner_id = sd.partner_id AND p.tenant_id = t.tenant_id
-            WHERE t.tenant_id = @TenantId AND t.invoice_id = @Id
+                   p.ceo_name AS PartnerCeoName, p.biz_type AS PartnerBizType,
+                   p.biz_item AS PartnerBizItem, p.tel AS PartnerPhone,
+                   COALESCE(d.total_amount,0) AS TotalSupply, COALESCE(d.vat_amount,0) AS TotalVat,
+                   COALESCE(d.total_amount,0) + COALESCE(d.vat_amount,0) AS TotalAmount,
+                   d.memo AS Remark
+            FROM sales_deliveries d
+            LEFT JOIN partners p ON p.partner_id = d.partner_id AND p.tenant_id = d.tenant_id
+            WHERE d.tenant_id = @TenantId AND d.delivery_id = @Id AND d.is_deleted = 0
             """;
-        // tax_invoices는 라인 별도 미사용 — 합계만 표시
-        var d = new DocumentSnapshot { DocType = "tax_invoice" };
-        await EnsureOpenAsync(ct).ConfigureAwait(false);
-        var h = await _db.QuerySingleOrDefaultAsync<DocumentSnapshot>(
-            new CommandDefinition(head, new { TenantId = tenantId, Id = id }, cancellationToken: ct))
+        const string lines = """
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(di.qty,0) AS Qty, COALESCE(di.unit_price,0) AS UnitPrice,
+                   COALESCE(di.supply_amount,0) AS Supply, COALESCE(di.vat_amount,0) AS Vat,
+                   COALESCE(di.supply_amount,0) + COALESCE(di.vat_amount,0) AS Total
+            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
+            WHERE di.tenant_id = @TenantId AND di.delivery_id = @Id ORDER BY di.delivery_item_id
+            """;
+
+        var snap = await LoadByQueriesAsync(tenantId, id, "tax_invoice", head, lines, ct)
             .ConfigureAwait(false);
-        if (h is not null) { h.DocType = "tax_invoice"; return h; }
-        d.DocNo = id; d.DocDate = DateTime.Today; d.PartnerName = "(거래처 정보 없음)";
-        return d;
+
+        // 발행된 계산서가 있으면 머리값만 덮는다.
+        //   🔴 status='issued' 만 — 취소본(canceled)이 종이로 나가면 안 된다(설계 §13 D-6).
+        //   🔴 미발행이면 행이 없다 ⇒ 거래명세서 값 그대로 그린다(승인번호 빈칸). 스텁으로 안 빠진다.
+        const string invoiceHead = """
+            SELECT t.invoice_no AS InvoiceNo, t.issued_at AS IssuedAt,
+                   t.amendment_reason AS AmendmentReason,
+                   t.hometax_approval_no AS HometaxApprovalNo,
+                   t.remark1 AS Remark1
+            FROM tax_invoices t
+            WHERE t.tenant_id = @TenantId AND t.delivery_id = @Id AND t.status = 'issued'
+            ORDER BY t.issued_at DESC
+            LIMIT 1
+            """;
+        // 🔴 유일성이 없다 — delivery_id 는 UNIQUE 가 아니라 그냥 KEY 다(출하 DDL).
+        //   더블클릭 한 번으로 issued 2행이 되면 QuerySingleOrDefault 는 그 전표를
+        //   **영구 500** 으로 만든다 ⇒ QueryFirstOrDefault + ORDER BY ... LIMIT 1.
+        try
+        {
+            var inv = await _db.QueryFirstOrDefaultAsync<TaxInvoiceHead>(
+                new CommandDefinition(invoiceHead, new { TenantId = tenantId, Id = id }, cancellationToken: ct))
+                .ConfigureAwait(false);
+            if (inv is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(inv.InvoiceNo)) snap.DocNo = inv.InvoiceNo;
+                snap.DocDate = inv.IssuedAt;
+                snap.AmendmentReason = inv.AmendmentReason;
+                snap.HometaxApprovalNo = inv.HometaxApprovalNo;
+                if (!string.IsNullOrWhiteSpace(inv.Remark1)) snap.Remark = inv.Remark1;
+            }
+            else
+            {
+                // 🔴 발행본이 없는데 취소본이 있으면, 그 전표는 **취소된 계산서**다.
+                //   취소행은 목록에 남아 체크된다 ⇒ 막지 않으면 취소본이 「유효한 법정 서식」
+                //   모양으로 거래처에 나간다. 🔴 인쇄 경로에서만 막는다 —
+                //   발행·취소 로직(TaxInvoiceService)은 한 줄도 안 건드린다.
+                const string canceledSql = """
+                    SELECT 1 FROM tax_invoices
+                    WHERE tenant_id = @TenantId AND delivery_id = @Id AND status = 'canceled'
+                    LIMIT 1
+                    """;
+                var canceled = await _db.QueryFirstOrDefaultAsync<int?>(
+                    new CommandDefinition(canceledSql, new { TenantId = tenantId, Id = id }, cancellationToken: ct))
+                    .ConfigureAwait(false);
+                snap.IsCanceledInvoice = canceled.HasValue;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 빈 catch 금지(#15). 계산서 머리를 못 덮어도 거래명세서 값으로는 그린다.
+            _logger.LogWarning(ex, "[PDF] 세금계산서 머리 조회 실패 — 거래명세서 값으로 그린다. id={Id}", id);
+        }
+
+        return snap;
+    }
+
+    /// <summary>발행된 세금계산서의 머리값 — 거래명세서 위에 덮는다(20261021작 절 B-2).</summary>
+    private sealed class TaxInvoiceHead
+    {
+        public string? InvoiceNo { get; set; }
+        public DateTime IssuedAt { get; set; }
+        public string? AmendmentReason { get; set; }
+        public string? HometaxApprovalNo { get; set; }
+        public string? Remark1 { get; set; }
     }
 
     private async Task<DocumentSnapshot> LoadPurchaseOrderAsync(string tenantId, string id, CancellationToken ct)
@@ -449,7 +537,9 @@ public sealed class PdfRenderService : IPdfRenderService
         await EnsureOpenAsync(ct).ConfigureAwait(false);
         const string sql = """
             SELECT company_name AS CompanyName, biz_no AS BusinessNo,
-                   ceo_name AS RepresentativeName, address AS Address, tel AS Phone
+                   ceo_name AS RepresentativeName, address AS Address, tel AS Phone,
+                   -- 🔴 20261021작 절 B-2 — 세금계산서 법정 서식 칸. 칸 추가만, 삭제 0.
+                   biz_type AS BizType, biz_item AS BizItem, seal_url AS SealUrl
             FROM local_company WHERE tenant_id = @TenantId
             """;
         try
@@ -487,6 +577,23 @@ public sealed class PdfRenderService : IPdfRenderService
         public decimal TotalAmount { get; set; }
         public string? Remark { get; set; }
         public List<DocumentLine> Lines { get; set; } = new();
+
+        // ── 20261021작 절 B-2 — 세금계산서 법정 서식이 요구하는 칸. **더하기만**(#1).
+        //    다른 9종은 이 칸들을 안 읽는다 ⇒ 종이가 안 바뀐다.
+        /// <summary>공급받는 자 대표자명.</summary>
+        public string? PartnerCeoName { get; set; }
+        /// <summary>공급받는 자 업태.</summary>
+        public string? PartnerBizType { get; set; }
+        /// <summary>공급받는 자 종목.</summary>
+        public string? PartnerBizItem { get; set; }
+        /// <summary>공급받는 자 전화번호.</summary>
+        public string? PartnerPhone { get; set; }
+        /// <summary>수정사유 — 수정세금계산서일 때만 값이 있다.</summary>
+        public string? AmendmentReason { get; set; }
+        /// <summary>국세청 승인번호 — 전자발행이 끝난 건에만 값이 있다.</summary>
+        public string? HometaxApprovalNo { get; set; }
+        /// <summary>취소된 계산서인가 — 참이면 법정 서식 대신 안내문 한 장을 낸다.</summary>
+        public bool IsCanceledInvoice { get; set; }
     }
 
     private sealed class DocumentLine
@@ -507,6 +614,991 @@ public sealed class PdfRenderService : IPdfRenderService
         public string? RepresentativeName { get; set; }
         public string? Address { get; set; }
         public string? Phone { get; set; }
+
+        // ── 20261021작 절 B-2 — 공급자 업태·종목. 법정 서식의 칸이다. **더하기만**(#1).
+        /// <summary>공급자 업태.</summary>
+        public string? BizType { get; set; }
+        /// <summary>공급자 종목.</summary>
+        public string? BizItem { get; set; }
+        /// <summary>
+        /// 인장 경로. 🔴 값이 있으면 이미지를 찍고, <b>비어 있으면 지금의 글자 도장</b>을 그린다.
+        /// 지금은 보관소가 없어 항상 비어 있다(설계 §8-2) ⇒ 합격선 ④ 는 이번 차수 <b>미달</b>이다.
+        /// 보관소가 생기는 날 <b>코드 수정 0</b> 으로 켜진다.
+        /// </summary>
+        public string? SealUrl { get; set; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 세금계산서 전용 작성기 (20261021작 절 B-3)
+    //   배치는 PdfExportService.GenerateTaxInvoicePdf 의 법정 배치를 **바탕으로 옮겨 적고**
+    //   6요소(수정사유·서명란·비고란·절취선·결제구분·영수/청구)를 보탰다.
+    //   🔴 PdfExportService 는 한 줄도 안 지웠다(#1). 나머지 9종은 이 코드를 안 탄다.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>세금계산서 문서타입 키.</summary>
+    private const string TaxInvoiceDocType = "tax_invoice";
+
+    /// <summary>격자 머리칸 바탕색.</summary>
+    private const string TaxGridBg = "#F0F0F0";
+
+    /// <summary>
+    /// 세금계산서 한 벌(또는 두 벌)을 그린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <paramref name="copyMode"/> 는 <c>form_templates.print_copy_mode</c> 다 —
+    /// <c>supplier</c>=공급자 보관용 1벌 · <c>recipient</c>=공급받는 자 보관용 1벌 ·
+    /// <c>both</c>=두 벌 + 사이 절취선. 🔴 <b>두 벌은 같은 자료 객체 하나로 그린다</b> —
+    /// 벌마다 따로 계산하면 양쪽 값이 어긋난다.
+    /// 🔴 <b>줄을 자르는 코드는 0건</b>이다. 품목이 넘치면 QuestPDF 가 다음 장으로 이어 찍고,
+    /// 열 제목은 <c>table.Header(</c> 로 2쪽에도 다시 나온다.
+    /// </remarks>
+    private byte[] RenderTaxInvoiceDocument(DocumentSnapshot d, CompanyInfo c, string copyMode,
+        bool showTearLine,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        // 🔴🔴 20261021작 §17 T-7 / §20 — 지원 범위를 넘는 여백을 먼저 조인다.
+        //   까닭·실측표는 TaxInvoiceMaxMarginMm 주석에 있다. 요지: 0~39mm 는 전건 정상,
+        //   첫 고장은 40mm(3모드 전부 `[33,0,7]`), 80mm 이상은 종이가 아예 안 나온다.
+        //   🔴 §20: 「40mm 이상에서 깨진다」는 맞았고, 상한 30mm 는 과했다(1mm 실측 = 39mm 까지 정상).
+        //   🔴 고객이 저장한 값은 안 건드린다 — 여기서만 조인다.
+        marginTop = ClampTaxInvoiceMargin(marginTop, "상", d.DocNo);
+        marginLeft = ClampTaxInvoiceMargin(marginLeft, "좌", d.DocNo);
+        marginRight = ClampTaxInvoiceMargin(marginRight, "우", d.DocNo);
+        marginBottom = ClampTaxInvoiceMargin(marginBottom, "하", d.DocNo);
+
+        var sealImage = TryLoadSealImage(c.SealUrl);
+        var drawSupplier = !string.Equals(copyMode, "recipient", StringComparison.Ordinal);
+        var drawRecipient = !string.Equals(copyMode, "supplier", StringComparison.Ordinal);
+
+        // 🔴 20261021작 §9-1 봉합(R-1) — 쪽 나눔 판정.
+        //   반려 사유: 두 벌을 한 Column 에 그냥 쌓아 두면 QuestPDF 가 **벌 한가운데에서** 쪽을
+        //   끊었다. 1쪽 한가운데 절취선 + 그 아래 미완성 종이 ⇒ 자르면 반 토막 계산서.
+        //   집행: **두 벌이 한 장에 실제로 들어가는지 먼저 재고**(MeasureBothCopiesFitOnePage),
+        //     · 들어가면 → 한 장에 두 벌 + 절취선 (기본 · 사장님 결재)
+        //     · 안 들어가면 → 절취선을 빼고 벌마다 제 쪽에서 시작한다(PageBreak)
+        //   🔴 품목을 줄이는 코드는 여전히 0건이다.
+        //
+        // 🔴 20261021작 §10-2 재결재 — 위 §9-1 의 「재서 저절로 정한다」를 사장님이
+        //   **고객 설정**으로 바꾸셨다. 한 벌을 11mm 줄이고 나니 두 길이 다 열렸다.
+        //     · 켬(ShowTearLine=1) → 한 장에 두 벌 + 자르는 선.
+        //         품목이 다 안 들어가면 **마지막 칸에 「외 N건」**(§10-2 ⓓ · 국세청 서식 관행).
+        //     · 끔(기본)          → 벌마다 제 쪽에서 시작 · **품목 전부**(한 줄도 안 사라진다).
+        //   🔴 재는 코드(MeasureBothCopiesFitOnePage)는 그대로 쓴다 — 줄 수로 눈대중하지 않는다.
+        //
+        var bothCopies = drawSupplier && drawRecipient;
+        var visibleLines = d.Lines.Count;   // 기본은 전부 찍는다.
+        var useTearLine = false;
+
+        if (bothCopies && showTearLine)
+        {
+            var fit = ResolveVisibleLineCount(
+                d, c, sealImage, marginTop, marginLeft, marginRight, marginBottom);
+            if (fit >= 0)
+            {
+                useTearLine = true;
+                visibleLines = fit;
+            }
+            else
+            {
+                // 🔴 품목을 한 줄도 못 넣을 만큼 여백이 크면 **한 장에 모으지 않는다.**
+                //   「외 N건」만 덩그러니 남은 계산서를 내느니 쪽을 나누는 편이 낫다.
+                _logger.LogWarning(
+                    "세금계산서를 한 장에 모으지 못했다 — 쪽을 나눠 품목을 전부 낸다. " +
+                    "여백이 너무 크지 않은지 양식정보설정을 확인하시면 됩니다. 문서번호 {DocNo}", d.DocNo);
+            }
+        }
+
+        // 🔴 안 찍히는 줄 수 — 「외 N건」의 N. 0 이면 「외」 칸 자체가 안 나온다.
+        //   게이트가 이 숫자를 그대로 받아 **종이에 안 찍힌 줄 수와 같은지** 검산한다.
+        var hiddenLines = Math.Max(0, d.Lines.Count - visibleLines);
+        _logger.LogDebug(
+            "세금계산서 품목 담기 — 전체 {Total}줄 중 {Visible}줄 찍고 {Hidden}줄은 「외 N건」 " +
+            "(한장모으기 {Tear}) 문서번호 {DocNo}",
+            d.Lines.Count, visibleLines, hiddenLines, useTearLine, d.DocNo);
+
+        // 🔴🔴 20261021작 §15-6 T-2 — 자르는 선을 안 쓰는 모든 길(끔 · 단일 벌 ·
+        //   켰지만 재서 안 들어간 경우)은 벌마다 **이어쓰기**로 그린다.
+        //   장마다 머리를 다시 붙이고 꼬리는 마지막 장에만 붙인다
+        //   ⇒ 🔴 품목 0줄짜리 꼬리 종이 0건 · 벌 머리 없는 쪽 0건([4] 반려 사유).
+        //   🔴 품목은 한 줄도 안 사라진다 — 이 길에 「외 N건」은 없다(§15-5).
+        //   🔴 두 벌은 자료가 같으므로 **한 번만 재서** 양쪽에 같은 쪽 나눔을 쓴다.
+        //     벌마다 따로 재면 두 벌의 쪽 수가 어긋나 고객이 비교를 못 한다.
+        //     재는 라벨은 둘 중 **긴 쪽**(공급받는 자 보관용)으로 잡아 안전하게 본다.
+        List<(int Skip, int Take, bool IsLast)>? copyChunks = null;
+        if (!useTearLine && !d.IsCanceledInvoice)
+        {
+            copyChunks = ResolveCopyPageChunks(
+                d, c, sealImage, "공급받는 자 보관용",
+                marginTop, marginLeft, marginRight, marginBottom);
+            _logger.LogDebug(
+                "세금계산서 이어쓰기 — 벌 하나를 {Pages}장에 나눠 담는다(품목 {Total}줄) 문서번호 {DocNo}",
+                copyChunks?.Count ?? 0, d.Lines.Count, d.DocNo);
+        }
+
+        return Document.Create(doc =>
+        {
+            doc.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.MarginTop(marginTop, Unit.Millimetre);
+                page.MarginLeft(marginLeft, Unit.Millimetre);
+                page.MarginRight(marginRight, Unit.Millimetre);
+                page.MarginBottom(marginBottom, Unit.Millimetre);
+                page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(9));
+                page.PageColor(Colors.White);
+
+                page.Content().Column(col =>
+                {
+                    // 🔴 취소된 계산서는 법정 서식으로 내지 않는다 — 안내문 한 장만 낸다.
+                    if (d.IsCanceledInvoice)
+                    {
+                        col.Item().Element(ComposeCanceledNotice);
+                        return;
+                    }
+
+                    // 🔴 §15-6 T-2 — 이어쓰기 길. 쪽 나눔을 잰 경우에만 탄다.
+                    if (copyChunks is not null)
+                    {
+                        var labels = new List<string>();
+                        if (drawSupplier) labels.Add("공급자 보관용");
+                        if (drawRecipient) labels.Add("공급받는 자 보관용");
+
+                        var printed = 0;
+                        foreach (var label in labels)
+                        {
+                            foreach (var chunk in copyChunks)
+                            {
+                                // 첫 장 앞에는 쪽 나눔을 넣지 않는다 — 빈 종이가 한 장 는다.
+                                if (printed > 0) col.Item().PageBreak();
+
+                                var copyLabel = label;
+                                var part = chunk;
+                                col.Item().Element(e => ComposeTaxInvoiceCopyPage(
+                                    e, d, c, copyLabel, sealImage, part.Skip, part.Take, part.IsLast));
+                                printed++;
+                            }
+                        }
+                        return;
+                    }
+
+                    if (drawSupplier)
+                    {
+                        col.Item().Element(e => ComposeTaxInvoiceCopy(
+                            e, d, c, "공급자 보관용", sealImage, visibleLines));
+                    }
+                    if (bothCopies)
+                    {
+                        // 🔴 고객이 켠 경우에만 자르는 선. 끄면 자르는 선 0건 + 쪽을 나눈다.
+                        if (useTearLine) col.Item().Element(ComposeTearLine);
+                        else col.Item().PageBreak();
+                    }
+                    if (drawRecipient)
+                    {
+                        col.Item().Element(e => ComposeTaxInvoiceCopy(
+                            e, d, c, "공급받는 자 보관용", sealImage, visibleLines));
+                    }
+                });
+
+                // 한글 꼬리 — 한 장이면 「1 / 1 쪽」.
+                page.Footer().AlignCenter().Text(t =>
+                {
+                    t.CurrentPageNumber().FontSize(8);
+                    t.Span(" / ").FontSize(8);
+                    t.TotalPages().FontSize(8);
+                    t.Span(" 쪽").FontSize(8);
+                });
+            });
+        }).GeneratePdf();
+    }
+
+    /// <summary>취소된 계산서 안내문 — 고객이 읽는 말로만 적는다.</summary>
+    private static void ComposeCanceledNotice(IContainer e)
+    {
+        e.PaddingTop(40).AlignCenter().Column(col =>
+        {
+            col.Item().AlignCenter().Text("취소된 세금계산서입니다").FontSize(16).Bold();
+            col.Item().PaddingTop(10).AlignCenter()
+                .Text("취소된 계산서는 인쇄하거나 보낼 수 없습니다.").FontSize(11);
+            col.Item().PaddingTop(3).AlignCenter()
+                .Text("필요하시면 계산서를 다시 발행한 뒤 인쇄해 주세요.").FontSize(11);
+        });
+    }
+
+    /// <summary>두 벌 사이 절취선.</summary>
+    private static void ComposeTearLine(IContainer e)
+    {
+        e.PaddingVertical(4).Column(col =>
+        {
+            col.Item().LineHorizontal(0.8f).LineColor(Colors.Grey.Darken1);
+            col.Item().PaddingTop(2).AlignCenter().Text("절취선").FontSize(8);
+        });
+    }
+
+    /// <summary>
+    /// 🔴 20261021작 §10-4 S-3 — 한 장에 모을 때 <b>품목을 몇 줄까지 찍을 수 있나</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 전부 들어가면 전부 찍는다(이때 「외 N건」 칸은 아예 안 나온다). 안 들어가면
+    /// <b>「외 N건」 칸 한 줄까지 포함해서</b> 들어가는 가장 큰 줄 수를 찾는다 —
+    /// 그래야 그 칸 때문에 또 넘치는 일이 없다.
+    /// </para>
+    /// <para>
+    /// 🔴 줄 수로 눈대중하지 않는다. 후보마다 <b>실제로 깔아 보고 높이를 받는다</b>.
+    /// 들어가는지 여부는 줄 수에 대해 단조라(줄이 늘면 높이도 는다) 반으로 갈라 찾는다.
+    /// </para>
+    /// <para>🔴 한 줄도 못 넣으면 <b>-1</b> — 부르는 쪽이 쪽을 나눈다.</para>
+    /// </remarks>
+    private int ResolveVisibleLineCount(DocumentSnapshot d, CompanyInfo c, byte[]? sealImage,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        var total = d.Lines.Count;
+        if (MeasureBothCopiesFitOnePage(
+                d, c, sealImage, marginTop, marginLeft, marginRight, marginBottom, total))
+        {
+            return total;
+        }
+
+        var best = -1;
+        var lo = 0;
+        var hi = total - 1;
+        while (lo <= hi)
+        {
+            var mid = lo + ((hi - lo) / 2);
+            if (MeasureBothCopiesFitOnePage(
+                    d, c, sealImage, marginTop, marginLeft, marginRight, marginBottom, mid))
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 🔴 20261021작 §9-1(R-1) — 두 벌 + 절취선이 A4 한 장에 <b>실제로</b> 들어가는지 잰다.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>품목 줄 수로 눈대중하지 않는다.</b> 같은 종이·같은 여백·같은 글꼴로 한 장을 깔게 한 뒤
+    /// QuestPDF 가 <b>그때 잰 높이</b>를 받는다 — 공급자 벌 높이 · 절취선 높이 · 공급받는 자 벌 높이,
+    /// 그리고 머리·꼬리를 뺀 <b>실제 남은 높이</b>. 넷을 견주어 판정한다.
+    /// </para>
+    /// <para>
+    /// 설계 §7 의 「136mm + 7mm + 136mm = 279mm ≤ 297mm」는 설계 당시의 손계산이다.
+    /// 여기서는 그 숫자를 <b>쓰지 않는다</b> — 여백 설정·거래처 주소 길이·품목 줄 수에 따라
+    /// 벌 높이가 달라지므로, 고정 숫자로 판정하면 또 틀린다.
+    /// </para>
+    /// <para>
+    /// 🔴 재다가 실패하면 <b>「안 들어간다」로 본다.</b> 쪽을 나누면 종이가 두 장 나올 뿐이지만,
+    /// 잘못 「들어간다」로 보면 <b>반 토막 계산서</b>가 고객에게 나간다.
+    /// </para>
+    /// </remarks>
+    /// <param name="maxLines">
+    /// 한 벌에 찍을 품목 줄 수 상한. 전체보다 작으면 <b>「외 N건」 칸까지 포함해</b> 잰다.
+    /// 안 주면 전부 찍는 것으로 본다(§9-1 때와 같은 뜻).
+    /// </param>
+    private bool MeasureBothCopiesFitOnePage(DocumentSnapshot d, CompanyInfo c, byte[]? sealImage,
+        float marginTop, float marginLeft, float marginRight, float marginBottom,
+        int maxLines = int.MaxValue)
+    {
+        var probe = new TaxInvoiceFitProbe(d, c, sealImage, maxLines);
+        try
+        {
+            Document.Create(doc =>
+            {
+                doc.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.MarginTop(marginTop, Unit.Millimetre);
+                    page.MarginLeft(marginLeft, Unit.Millimetre);
+                    page.MarginRight(marginRight, Unit.Millimetre);
+                    page.MarginBottom(marginBottom, Unit.Millimetre);
+                    page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(9));
+                    page.PageColor(Colors.White);
+                    page.Content().Dynamic(probe);
+
+                    // 꼬리를 똑같이 달아야 「남은 높이」가 실제와 같아진다.
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.CurrentPageNumber().FontSize(8);
+                        t.Span(" / ").FontSize(8);
+                        t.TotalPages().FontSize(8);
+                        t.Span(" 쪽").FontSize(8);
+                    });
+                });
+            }).GeneratePdf();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "세금계산서 쪽 나눔을 재지 못했다 — 안전하게 두 쪽으로 나눠 낸다. 문서번호 {DocNo}", d.DocNo);
+            return false;
+        }
+
+        if (!probe.Measured)
+        {
+            _logger.LogWarning(
+                "세금계산서 쪽 나눔 높이를 받지 못했다 — 안전하게 두 쪽으로 나눠 낸다. 문서번호 {DocNo}", d.DocNo);
+            return false;
+        }
+
+        var needed = probe.SupplierHeight + probe.TearHeight + probe.RecipientHeight;
+
+        // 판정 근거를 남긴다 — 「왜 두 쪽이 나왔냐」는 문의가 오면 이 줄이 답이다.
+        _logger.LogDebug(
+            "세금계산서 쪽 나눔 판정 — 공급자 {Supplier}pt · 절취선 {Tear}pt · 공급받는자 {Recipient}pt " +
+            "= {Needed}pt / 남은 높이 {Available}pt (문서번호 {DocNo})",
+            probe.SupplierHeight, probe.TearHeight, probe.RecipientHeight,
+            needed, probe.AvailableHeight, d.DocNo);
+
+        return needed <= probe.AvailableHeight;
+    }
+
+    /// <summary>
+    /// 🔴 쪽이 딱 맞는 자리에서 반올림 때문에 한 줄이 다음 장으로 밀리는 것을 막는 여유(pt).
+    /// 밀리면 <b>품목 0줄짜리 꼬리 종이</b>가 다시 난다 — T-2 가 없애려는 바로 그 모양이다.
+    /// </summary>
+    private const float TaxInvoicePageSlackPt = 2f;
+
+    /// <summary>
+    /// 🔴🔴 20261021작 §17 T-7 / §20 — 세금계산서 이어쓰기가 <b>실측으로 버티는 여백 상한(mm)</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>실측 — 여백 24~63mm 를 1mm 간격으로, 모드 셋(<c>both</c>·<c>recipient</c>·<c>supplier</c>) ×
+    /// 품목 40·80·100줄.</b>
+    /// <list type="bullet">
+    /// <item>🟢 <b>0~39mm</b> — 전건 정상. 머리 없는 쪽 0 · 품목 0줄 쪽 0 · 품목 합계 전건 일치.</item>
+    /// <item>🔴 <b>첫 고장은 40mm</b> — <b>세 모드 전부</b> <c>[33,0,7]</c>(가운데 쪽이 머리도 품목도 없다).
+    ///   품목 합계는 맞다 ⇒ <b>줄이 사라지는 것이 아니라 빈 쪽이 끼는</b> 고장이다.
+    ///   재는 쪽은 「33줄 들어간다」는데 깔면 넘쳐 다음 장으로 밀린다.</item>
+    /// <item>🔴 <b>80mm 이상</b> — <c>DocumentLayoutException</c> ⇒ <b>종이가 아예 안 나온다</b>.</item>
+    /// <item>🔴 <b>100mm 이상</b> — 이어쓰기 자체가 폴백(<c>chunks == null</c>)으로 떨어진다.</item>
+    /// </list>
+    /// <para>
+    /// 🔴 <b>상한을 39 가 아니라 35 로 두는 사유</b>: 고장의 뿌리는 <b>재는 쪽과 깔리는 쪽의 어긋남</b>이고,
+    /// 그 어긋남은 <b>내용 높이에 따라</b> 움직인다. 위 실측은 <b>한 가지 자료 모양</b>으로만 쟀으므로
+    /// 경계값(39)에 딱 붙이지 않고 <b>4mm 여유</b>를 둔다. 🔴 이 숫자를 바꿀 일이 생기면
+    /// <b>눈대중으로 바꾸지 말고 1mm 실측을 다시 돌린다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴🔴 <b>§20 — PM 이 이 자리에서 두 번 틀렸다.</b> ① 첫 봉합은 상한을 <b>30mm</b> 로 뒀다.
+    /// 「40mm 이상에서 깨진다」는 맞았지만 <b>31~39mm 는 고장이 없던 구간</b>이라 그 고객의 종이를
+    /// 바꿀 근거가 없었다. ② [4] 3차가 「31~50mm 전건 정상 · 첫 고장 60mm」라 보고해 상한을 50 으로
+    /// 올렸더니 <b>40·50mm 가 전부 빨개졌다</b> ⇒ 그 보고도 틀렸다. 🟢 <b>둘 다 1mm 실측으로 갈랐다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 왜 고객 값을 조이기까지 하나 — 편집창 여백 4칸에 상·하한이 <b>없었고</b> DTO 가
+    /// <c>Range(0, 100)</c> 을 받았다. 화면·DTO 만 조이면 <b>이미 큰 값으로 저장한 고객의 종이는
+    /// 계속 깨진다</b>(고객이 손을 대야 풀린다). 그래서 그리는 쪽에서도 조인다.
+    /// 🔴 <b>고객이 저장한 값은 지우지 않는다</b> — 그릴 때만 조인다. 35mm 이하면 아무 일도 안 한다.
+    /// </para>
+    /// </remarks>
+    internal const float TaxInvoiceMaxMarginMm = 35f;
+
+    /// <summary>🔴 §17 T-7 — 지원 범위를 넘는 여백을 조인다. 조였으면 글로 남긴다.</summary>
+    private float ClampTaxInvoiceMargin(float mm, string which, string? docNo)
+    {
+        if (mm >= 0f && mm <= TaxInvoiceMaxMarginMm)
+        {
+            return mm;
+        }
+
+        var clamped = mm < 0f ? 0f : TaxInvoiceMaxMarginMm;
+        _logger.LogWarning(
+            "세금계산서 여백이 지원 범위를 벗어났다 — {Which} {Given}mm 를 {Clamped}mm 로 보고 그린다. " +
+            "양식정보설정에서 여백을 0~{Max}mm 로 맞추시면 됩니다. 문서번호 {DocNo}",
+            which, mm, clamped, TaxInvoiceMaxMarginMm, docNo);
+        return clamped;
+    }
+
+    /// <summary>
+    /// 🔴🔴 20261021작 §15-6 T-2 — <b>벌 하나를 몇 장에 어떻게 나눠 담나</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 앞에서부터 한 장씩 채운다. 장마다 먼저 <b>「남은 줄을 꼬리까지 붙여 이 한 장에 담을 수
+    /// 있나」</b>를 재고, 담을 수 있으면 그 장을 마지막 장으로 삼아 끝낸다. 못 담으면
+    /// <b>꼬리 없이</b> 담을 수 있는 가장 큰 줄 수를 찾아 그만큼만 담고 다음 장으로 넘긴다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>담을 줄 수는 늘 1 이상</b>이다 — 이어 쓰는 장의 상한을 <c>남은 줄 - 1</c> 로 두어
+    /// 마지막 장에도 품목이 반드시 한 줄 남게 한다. ⇒ <b>품목 0줄짜리 쪽이 날 수 없다.</b>
+    /// </para>
+    /// <para>
+    /// 🔴 줄 수로 눈대중하지 않는다 — 후보마다 <b>실제로 깔아 보고 높이를 받는다</b>
+    /// (<c>MeasureCopyPageFits</c>). 들어가는지는 줄 수에 대해 단조라 반으로 갈라 찾는다.
+    /// </para>
+    /// <para>
+    /// 🔴 한 줄도 못 담거나 품목이 없으면 <b><c>null</c></b> — 부르는 쪽이 종전 길로 간다.
+    /// </para>
+    /// </remarks>
+    /// <returns>장마다 (건너뛸 줄 수 · 담을 줄 수 · 마지막 장이냐). 못 재면 <c>null</c>.</returns>
+    private List<(int Skip, int Take, bool IsLast)>? ResolveCopyPageChunks(
+        DocumentSnapshot d, CompanyInfo c, byte[]? sealImage, string copyLabel,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        var total = d.Lines.Count;
+        if (total <= 0)
+        {
+            return null;   // 품목이 없으면 나눌 것도 없다 — 종전 길 그대로.
+        }
+
+        var chunks = new List<(int Skip, int Take, bool IsLast)>();
+        var skip = 0;
+        while (skip < total)
+        {
+            var remaining = total - skip;
+
+            // ① 남은 줄을 꼬리까지 붙여 한 장에 담을 수 있나 → 되면 여기서 끝난다.
+            if (MeasureCopyPageFits(d, c, sealImage, copyLabel, skip, remaining, true,
+                    marginTop, marginLeft, marginRight, marginBottom))
+            {
+                chunks.Add((skip, remaining, true));
+                return chunks;
+            }
+
+            // ② 못 담는다 → 꼬리 없는 「이어 쓰는 장」으로 담을 수 있는 가장 큰 줄 수.
+            //    상한을 remaining - 1 로 둔다 ⇒ 마지막 장에 품목이 반드시 남는다.
+            var take = ResolveMaxLinesOnOnePage(d, c, sealImage, copyLabel, skip, remaining - 1,
+                marginTop, marginLeft, marginRight, marginBottom);
+            if (take <= 0)
+            {
+                // 🔴 한 줄도 못 담는다 = 여백이 종이를 거의 다 먹었다. 억지로 나누지 않고
+                //   종전 길로 돌려보낸다 — 고객이 여백을 줄이면 바로 풀린다.
+                _logger.LogWarning(
+                    "세금계산서를 이어쓰기로 나누지 못했다 — 한 장에 품목이 한 줄도 안 들어간다. " +
+                    "여백이 너무 크지 않은지 양식정보설정을 확인하시면 됩니다. 문서번호 {DocNo}", d.DocNo);
+                return null;
+            }
+
+            chunks.Add((skip, take, false));
+            skip += take;
+        }
+
+        return chunks.Count > 0 ? chunks : null;
+    }
+
+    /// <summary>
+    /// 🔴 §15-6 T-2 — 이어 쓰는 장 하나에 <b>품목을 몇 줄까지</b> 담을 수 있나(꼬리 없음).
+    /// </summary>
+    /// <param name="maxTake">찾을 줄 수의 상한. 0 이하이면 찾을 것이 없다.</param>
+    /// <returns>담을 수 있는 가장 큰 줄 수. 한 줄도 못 담으면 <b>0</b>.</returns>
+    private int ResolveMaxLinesOnOnePage(DocumentSnapshot d, CompanyInfo c, byte[]? sealImage,
+        string copyLabel, int skip, int maxTake,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        var best = 0;
+        var lo = 1;
+        var hi = maxTake;
+        while (lo <= hi)
+        {
+            var mid = lo + ((hi - lo) / 2);
+            if (MeasureCopyPageFits(d, c, sealImage, copyLabel, skip, mid, false,
+                    marginTop, marginLeft, marginRight, marginBottom))
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 🔴 §15-6 T-2 — 이어 쓰는 장 하나가 A4 한 장에 <b>실제로</b> 들어가는지 잰다.
+    /// </summary>
+    /// <remarks>
+    /// 그릴 때와 <b>같은 종이·같은 여백·같은 글꼴·같은 꼬리</b>로 깔아 보고 높이를 받는다.
+    /// 🔴 재다가 실패하면 <b>「안 들어간다」로 본다</b> — 잘못 「들어간다」로 보면 종이가 밀려
+    /// 다시 꼬리 종이가 난다.
+    /// </remarks>
+    private bool MeasureCopyPageFits(DocumentSnapshot d, CompanyInfo c, byte[]? sealImage,
+        string copyLabel, int skip, int take, bool isLast,
+        float marginTop, float marginLeft, float marginRight, float marginBottom)
+    {
+        var probe = new TaxInvoicePageProbe(
+            x => ComposeTaxInvoiceCopyPage(x, d, c, copyLabel, sealImage, skip, take, isLast));
+        try
+        {
+            Document.Create(doc =>
+            {
+                doc.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.MarginTop(marginTop, Unit.Millimetre);
+                    page.MarginLeft(marginLeft, Unit.Millimetre);
+                    page.MarginRight(marginRight, Unit.Millimetre);
+                    page.MarginBottom(marginBottom, Unit.Millimetre);
+                    page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(9));
+                    page.PageColor(Colors.White);
+                    page.Content().Dynamic(probe);
+
+                    // 꼬리를 똑같이 달아야 「남은 높이」가 실제와 같아진다.
+                    page.Footer().AlignCenter().Text(t =>
+                    {
+                        t.CurrentPageNumber().FontSize(8);
+                        t.Span(" / ").FontSize(8);
+                        t.TotalPages().FontSize(8);
+                        t.Span(" 쪽").FontSize(8);
+                    });
+                });
+            }).GeneratePdf();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "세금계산서 이어쓰기 쪽을 재지 못했다 — 그 줄 수는 안 들어가는 것으로 본다. " +
+                "문서번호 {DocNo}", d.DocNo);
+            return false;
+        }
+
+        if (!probe.Measured)
+        {
+            _logger.LogWarning(
+                "세금계산서 이어쓰기 쪽 높이를 받지 못했다 — 안 들어가는 것으로 본다. 문서번호 {DocNo}",
+                d.DocNo);
+            return false;
+        }
+
+        return probe.Height <= probe.AvailableHeight - TaxInvoicePageSlackPt;
+    }
+
+    /// <summary>
+    /// 🔴 §15-6 T-2 — 이어 쓰는 장 하나의 <b>높이만</b> 받아 오는 자. 종이는 버린다.
+    /// </summary>
+    private sealed class TaxInvoicePageProbe : IDynamicComponent
+    {
+        private readonly Action<IContainer> _compose;
+
+        public TaxInvoicePageProbe(Action<IContainer> compose) => _compose = compose;
+
+        /// <summary>높이를 한 번이라도 받았나.</summary>
+        public bool Measured { get; private set; }
+        public float Height { get; private set; }
+        public float AvailableHeight { get; private set; }
+
+        public DynamicComponentComposeResult Compose(QuestPDF.Elements.DynamicContext context)
+        {
+            if (!Measured)
+            {
+                var element = context.CreateElement(_compose);
+                Height = element.Size.Height;
+                AvailableHeight = context.AvailableSize.Height;
+                Measured = true;
+            }
+
+            return new DynamicComponentComposeResult
+            {
+                Content = context.CreateElement(x => x.Height(0)),
+                HasMoreContent = false
+            };
+        }
+    }
+
+    /// <summary>
+    /// 쪽 나눔 판정을 위한 자 — 종이는 버리고 <b>높이만</b> 가져온다(20261021작 §9-1).
+    /// </summary>
+    private sealed class TaxInvoiceFitProbe : IDynamicComponent
+    {
+        private readonly DocumentSnapshot _d;
+        private readonly CompanyInfo _c;
+        private readonly byte[]? _seal;
+        private readonly int _maxLines;
+
+        public TaxInvoiceFitProbe(DocumentSnapshot d, CompanyInfo c, byte[]? seal, int maxLines)
+        {
+            _d = d;
+            _c = c;
+            _seal = seal;
+            _maxLines = maxLines;
+        }
+
+        /// <summary>높이를 한 번이라도 받았나.</summary>
+        public bool Measured { get; private set; }
+        public float SupplierHeight { get; private set; }
+        public float TearHeight { get; private set; }
+        public float RecipientHeight { get; private set; }
+        public float AvailableHeight { get; private set; }
+
+        public DynamicComponentComposeResult Compose(QuestPDF.Elements.DynamicContext context)
+        {
+            if (!Measured)
+            {
+                var supplier = context.CreateElement(
+                    x => ComposeTaxInvoiceCopy(x, _d, _c, "공급자 보관용", _seal, _maxLines));
+                var tear = context.CreateElement(ComposeTearLine);
+                var recipient = context.CreateElement(
+                    x => ComposeTaxInvoiceCopy(x, _d, _c, "공급받는 자 보관용", _seal, _maxLines));
+
+                SupplierHeight = supplier.Size.Height;
+                TearHeight = tear.Size.Height;
+                RecipientHeight = recipient.Size.Height;
+                AvailableHeight = context.AvailableSize.Height;
+                Measured = true;
+            }
+
+            // 잰 뒤에는 빈 자리만 돌려준다 — 이 종이는 쓰지 않고 버린다.
+            return new DynamicComponentComposeResult
+            {
+                Content = context.CreateElement(x => x.Height(0)),
+                HasMoreContent = false
+            };
+        }
+    }
+
+    /// <summary>세금계산서 한 벌.</summary>
+    /// <param name="maxLines">
+    /// 찍을 품목 줄 수 상한(20261021작 §10-2 ⓓ). 전체보다 작으면 그만큼만 찍고
+    /// <b>마지막 칸에 「외 N건」</b>을 적는다 — 고객이 「한 장에 모으기」를 켠 경우에만
+    /// 부르는 쪽이 이 값을 줄인다. 합계는 <b>늘 전체 기준</b>이라 금액이 어긋나지 않는다.
+    /// </param>
+    private static void ComposeTaxInvoiceCopy(IContainer e, DocumentSnapshot d, CompanyInfo c,
+        string copyLabel, byte[]? sealImage, int maxLines = int.MaxValue)
+    {
+        // 🔴 20261021작 §15-6 T-2 — 속을 셋(머리·품목표·꼬리)으로 나눴다.
+        //   그려 내는 모양은 한 글자도 안 바뀐다. 나눈 까닭은 「자르는 선 끔 + 품목 넘침」에서
+        //   장마다 머리를 다시 붙이고 꼬리는 마지막 장에만 붙이기 위해서다
+        //   (ComposeTaxInvoiceCopyPage).
+        var shownLines = Math.Min(maxLines, d.Lines.Count);
+        e.Column(col =>
+        {
+            ComposeTaxInvoiceCopyHead(col, d, c, copyLabel);
+            ComposeTaxInvoiceLineTable(col, d, 0, shownLines, d.Lines.Count - shownLines, true);
+            ComposeTaxInvoiceCopyTail(col, d, c, sealImage);
+        });
+    }
+
+    /// <summary>
+    /// 🔴 20261021작 §15-6 T-2 — <b>벌 하나를 여러 장에 이어 쓸 때의 한 장</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 장마다 <b>머리</b>(보관용 라벨·작성일자·승인번호·공급자/공급받는 자·합계금액)를 다시
+    /// 붙인다 — 어느 쪽을 집어도 누구 것인지 안다. 품목은 <paramref name="skip"/> 번째부터
+    /// <paramref name="take"/> 줄만 담는다.
+    /// </para>
+    /// <para>
+    /// <b>꼬리</b>(결제구분·영수/청구·비고·직인·서명란)와 품목 <b>합계줄</b>은
+    /// <paramref name="isLast"/> 인 장에만 붙는다 ⇒ 🔴 <b>품목이 한 줄도 없는 꼬리 종이가
+    /// 날 수 없다.</b> 마지막이 아닌 장에는 「다음 쪽에 이어집니다」를 적는다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>줄을 버리는 코드는 0건</b>이다 — 「외 N건」은 이 경로에 <b>없다</b>.
+    /// 그건 자르는 선 <b>켬</b> 전용이다(§15-5 · <c>ResolveVisibleLineCount</c>).
+    /// </para>
+    /// </remarks>
+    private static void ComposeTaxInvoiceCopyPage(IContainer e, DocumentSnapshot d, CompanyInfo c,
+        string copyLabel, byte[]? sealImage, int skip, int take, bool isLast)
+    {
+        e.Column(col =>
+        {
+            ComposeTaxInvoiceCopyHead(col, d, c, copyLabel);
+            ComposeTaxInvoiceLineTable(col, d, skip, take, 0, isLast);
+            if (isLast)
+            {
+                ComposeTaxInvoiceCopyTail(col, d, c, sealImage);
+            }
+            else
+            {
+                col.Item().PaddingTop(2).AlignRight()
+                    .Text("품목이 많아 다음 쪽에 이어집니다").FontSize(8);
+            }
+        });
+    }
+
+    /// <summary>세금계산서 한 벌의 <b>머리</b> — 이어 쓰는 장마다 다시 붙는다(§15-6 T-2).</summary>
+    private static void ComposeTaxInvoiceCopyHead(ColumnDescriptor col,
+        DocumentSnapshot d, CompanyInfo c, string copyLabel)
+    {
+        // 제목줄 — 왼쪽 보관용 라벨 · 가운데 제목 · 오른쪽 전자 표시
+        col.Item().Row(r =>
+        {
+            r.RelativeItem().AlignMiddle().Text(copyLabel).FontSize(9).Bold();
+            r.RelativeItem(2).AlignCenter().Text("세 금 계 산 서").FontSize(14).Bold();
+            r.RelativeItem().AlignMiddle().AlignRight().Text("전자").FontSize(9).Bold();
+        });
+
+        // 작성일자 · 승인번호
+        col.Item().PaddingTop(1).Row(r =>
+        {
+            r.RelativeItem().Text($"작성일자: {d.DocDate:yyyy-MM-dd}").FontSize(9);
+            r.RelativeItem().AlignRight().Text($"승인번호: {d.DocNo}").FontSize(9);
+        });
+        if (!string.IsNullOrWhiteSpace(d.HometaxApprovalNo))
+        {
+            col.Item().AlignRight().Text($"국세청승인번호: {d.HometaxApprovalNo}").FontSize(8);
+        }
+        // 수정사유 — 칸은 늘 그리고, 값이 있으면 채운다.
+        col.Item().PaddingTop(1).Text($"수정사유: {d.AmendmentReason ?? ""}").FontSize(9);
+
+        // 공급자 / 공급받는 자 — 2단 대칭 격자
+        col.Item().PaddingTop(2).Border(1.2f).Table(table =>
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.ConstantColumn(18);
+                columns.RelativeColumn();
+                columns.ConstantColumn(18);
+                columns.RelativeColumn();
+            });
+
+            table.Cell().Border(0.5f).Background(TaxGridBg).AlignCenter().AlignMiddle()
+                .Text("공\n급\n자").FontSize(8).Bold();
+            table.Cell().Border(0.5f).Padding(2).Column(x =>
+            {
+                TaxInfoRow(x, "등록번호", c.BusinessNo);
+                TaxInfoRow(x, "상    호", c.CompanyName);
+                TaxInfoRow(x, "대 표 자", c.RepresentativeName);
+                TaxInfoRow(x, "주    소", c.Address);
+                TaxInfoRow(x, "업    태", c.BizType);
+                TaxInfoRow(x, "종    목", c.BizItem);
+                TaxInfoRow(x, "전    화", c.Phone);
+            });
+
+            table.Cell().Border(0.5f).Background(TaxGridBg).AlignCenter().AlignMiddle()
+                .Text("공\n급\n받\n는\n자").FontSize(8).Bold();
+            table.Cell().Border(0.5f).Padding(2).Column(x =>
+            {
+                TaxInfoRow(x, "등록번호", d.PartnerBusinessNo);
+                TaxInfoRow(x, "상    호", d.PartnerName);
+                TaxInfoRow(x, "대 표 자", d.PartnerCeoName);
+                TaxInfoRow(x, "주    소", d.PartnerAddress);
+                TaxInfoRow(x, "업    태", d.PartnerBizType);
+                TaxInfoRow(x, "종    목", d.PartnerBizItem);
+                TaxInfoRow(x, "전    화", d.PartnerPhone);
+            });
+        });
+
+        // 합계금액 · 공급가액 · 세액
+        col.Item().PaddingTop(2).Border(1.2f).Table(table =>
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+            });
+            table.Cell().Element(TaxHeaderCell).AlignCenter().Text("합계금액").FontSize(9).Bold();
+            table.Cell().Element(TaxHeaderCell).AlignCenter().Text("공급가액").FontSize(9).Bold();
+            table.Cell().Element(TaxHeaderCell).AlignCenter().Text("세액").FontSize(9).Bold();
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.TotalAmount:N0}").FontSize(9).Bold();
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.TotalSupply:N0}").FontSize(9);
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.TotalVat:N0}").FontSize(9);
+        });
+    }
+
+    /// <summary>세금계산서 한 벌의 <b>품목표</b>(§15-6 T-2 로 떼어 냈다).</summary>
+    /// <param name="skip">몇 번째 줄부터 담나 — 이어 쓰는 장의 시작점.</param>
+    /// <param name="take">이 장에 담을 줄 수.</param>
+    /// <param name="hiddenCount">「외 N건」의 N — 자르는 선 <b>켬</b> 경로에서만 0 보다 크다.</param>
+    /// <param name="includeTotalRow">품목 합계줄을 붙이나 — <b>마지막 장에만</b> 붙인다.</param>
+    private static void ComposeTaxInvoiceLineTable(ColumnDescriptor col, DocumentSnapshot d,
+        int skip, int take, int hiddenCount, bool includeTotalRow)
+    {
+        // 품목 — 🔴 자르는 코드 0건. 넘치면 다음 장으로 이어 찍는다.
+        col.Item().PaddingTop(2).Border(1.2f).Table(table =>
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.ConstantColumn(24);     // 월
+                columns.ConstantColumn(24);     // 일
+                columns.RelativeColumn(3);      // 품목
+                columns.RelativeColumn(1.2f);   // 규격
+                columns.RelativeColumn(1);      // 수량
+                columns.RelativeColumn(1.3f);   // 단가
+                columns.RelativeColumn(1.5f);   // 공급가액
+                columns.RelativeColumn(1.3f);   // 세액
+            });
+
+            // 🔴 table.Header( — 2쪽에도 열 제목이 다시 나온다(합격선 ⑤).
+            table.Header(header =>
+            {
+                foreach (var h in new[] { "월", "일", "품목", "규격", "수량", "단가", "공급가액", "세액" })
+                {
+                    header.Cell().Element(TaxHeaderCell).AlignCenter().Text(h).FontSize(8).Bold();
+                }
+            });
+
+            // 🔴 20261021작 §10-2 ⓓ — 「한 장에 모으기」를 켠 경우에만 상한이 걸린다.
+            //   기본(끔)에서는 부르는 쪽이 줄 수를 전부 넘기므로 **전부** 찍힌다(§9-1 그대로).
+            // 🔴 §15-6 T-2 — 이어 쓰는 장은 skip 번째부터 take 줄만 담는다.
+            //   skip·take 는 부르는 쪽이 **실제로 재서** 정한다(ResolveCopyPageChunks).
+            foreach (var line in d.Lines.Skip(skip).Take(take))
+            {
+                table.Cell().Element(TaxDataCell).AlignCenter().Text($"{d.DocDate.Month}").FontSize(8);
+                table.Cell().Element(TaxDataCell).AlignCenter().Text($"{d.DocDate.Day}").FontSize(8);
+                table.Cell().Element(TaxDataCell).Text(line.ItemName).FontSize(8);
+                table.Cell().Element(TaxDataCell).Text(line.Spec ?? "").FontSize(8);
+                table.Cell().Element(TaxDataCell).AlignRight().Text($"{line.Qty:N0}").FontSize(8);
+                table.Cell().Element(TaxDataCell).AlignRight().Text($"{line.UnitPrice:N0}").FontSize(8);
+                table.Cell().Element(TaxDataCell).AlignRight().Text($"{line.Supply:N0}").FontSize(8);
+                table.Cell().Element(TaxDataCell).AlignRight().Text($"{line.Vat:N0}").FontSize(8);
+            }
+
+            // 🔴 안 찍힌 줄은 **숫자로 알려 준다** — 조용히 사라지지 않는다.
+            //   국세청 세금계산서 서식의 품목란이 원래 몇 칸이고, 넘는 분은 「외 ○건」으로
+            //   적는 것이 실제 관행이다(사장님 재결재 §10-2 ⓓ).
+            //   합계 금액·수량은 **전체 기준** 그대로라 세액이 어긋나지 않는다.
+            if (hiddenCount > 0)
+            {
+                table.Cell().ColumnSpan(2).Element(TaxDataCell).Text("").FontSize(8);
+                table.Cell().ColumnSpan(6).Element(TaxDataCell)
+                    .Text($"외 {hiddenCount}건").FontSize(8).Bold();
+            }
+
+            // 🔴 §15-6 T-2 — 합계줄은 **마지막 장에만** 붙는다. 이어 쓰는 장마다 합계를 찍으면
+            //   한 벌에 합계가 여러 번 나와 고객이 금액을 두 번 읽는다.
+            //   합계 금액·수량은 늘 **전체 기준**이라 쪽을 나눠도 세액이 안 어긋난다.
+            if (!includeTotalRow) return;
+
+            table.Cell().ColumnSpan(4).Element(TaxHeaderCell).AlignCenter().Text("합  계").FontSize(9).Bold();
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.Lines.Sum(x => x.Qty):N0}").FontSize(8).Bold();
+            table.Cell().Element(TaxDataCell).Text("").FontSize(8);
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.TotalSupply:N0}").FontSize(8).Bold();
+            table.Cell().Element(TaxDataCell).AlignRight().Text($"{d.TotalVat:N0}").FontSize(8).Bold();
+        });
+    }
+
+    /// <summary>세금계산서 한 벌의 <b>꼬리</b> — 마지막 장에만 붙는다(§15-6 T-2).</summary>
+    private static void ComposeTaxInvoiceCopyTail(ColumnDescriptor col,
+        DocumentSnapshot d, CompanyInfo c, byte[]? sealImage)
+    {
+        // 결제구분 — 🔴 칸만 그린다. 값을 넣을 원천이 어디에도 없다(설계 §8 5번).
+        //   입력 자리 신설은 이번 범위 밖이다 — 고객이 종이에 적는다.
+        col.Item().PaddingTop(2).Border(1.2f).Table(table =>
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+            });
+            foreach (var h in new[] { "현금", "수표", "어음", "외상미수금" })
+            {
+                table.Cell().Element(TaxHeaderCell).AlignCenter().Text(h).FontSize(8).Bold();
+            }
+            for (var i = 0; i < 4; i++)
+            {
+                table.Cell().Element(TaxDataCell).MinHeight(11).Text("").FontSize(8);
+            }
+        });
+
+        // 영수 / 청구 — 🔴 원천이 없다. 두 낱말을 칸으로 그려 고객이 종이에 동그라미를 친다
+        //   (결재 Q-1 ⓒ). 외상미수금으로 추론하지 않는다.
+        col.Item().PaddingTop(3).Row(r =>
+        {
+            r.RelativeItem().Column(left =>
+            {
+                left.Item().Row(rr =>
+                {
+                    rr.AutoItem().AlignMiddle().Text("이 금액을 ").FontSize(9);
+                    rr.AutoItem().Border(0.8f).PaddingHorizontal(6).PaddingVertical(1)
+                        .Text("영수").FontSize(9).Bold();
+                    rr.AutoItem().AlignMiddle().PaddingHorizontal(3).Text("/").FontSize(9);
+                    rr.AutoItem().Border(0.8f).PaddingHorizontal(6).PaddingVertical(1)
+                        .Text("청구").FontSize(9).Bold();
+                    rr.AutoItem().AlignMiddle().Text(" 함").FontSize(9);
+                });
+                left.Item().PaddingTop(2).Text("이 금액을 영수(청구)함").FontSize(9).Bold();
+
+                // 비고란
+                left.Item().PaddingTop(2).Text("비고").FontSize(8).Bold();
+                left.Item().PaddingTop(1).Border(0.5f).MinHeight(16).Padding(2)
+                    .Text(d.Remark ?? "").FontSize(8);
+            });
+            r.ConstantItem(78).PaddingLeft(6).AlignBottom()
+                .Element(x => ComposeTaxSeal(x, c.CompanyName, sealImage));
+        });
+
+        // 서명란
+        col.Item().PaddingTop(3).Border(1.2f).Table(table =>
+        {
+            table.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+                columns.RelativeColumn();
+            });
+            foreach (var h in new[] { "담당자", "확인자", "인수자" })
+            {
+                table.Cell().Element(TaxHeaderCell).AlignCenter().Text(h).FontSize(8).Bold();
+            }
+            for (var i = 0; i < 3; i++)
+            {
+                table.Cell().Element(TaxDataCell).MinHeight(14).Text("").FontSize(8);
+            }
+        });
+    }
+
+    /// <summary>공급자·공급받는 자 칸 한 줄.</summary>
+    private static void TaxInfoRow(ColumnDescriptor col, string label, string? value)
+    {
+        col.Item().Row(r =>
+        {
+            r.ConstantItem(52).Text(label).FontSize(8);
+            r.RelativeItem().Text(value ?? "").FontSize(8);
+        });
+    }
+
+    private static IContainer TaxHeaderCell(IContainer container)
+        => container.Border(0.5f).Background(TaxGridBg).PaddingVertical(1.5f).PaddingHorizontal(3);
+
+    private static IContainer TaxDataCell(IContainer container)
+        => container.Border(0.5f).PaddingVertical(1).PaddingHorizontal(3);
+
+    /// <summary>
+    /// 인장 — 🔴 <c>seal_url</c> 에 값이 있으면 그 이미지를, 비어 있으면 지금의 글자 도장을 그린다.
+    /// </summary>
+    private static void ComposeTaxSeal(IContainer e, string companyName, byte[]? sealImage)
+    {
+        if (sealImage is not null)
+        {
+            e.AlignRight().AlignBottom().Width(56).Height(56).Image(sealImage).FitArea();
+            return;
+        }
+
+        e.AlignRight().AlignBottom().Width(56).Height(56)
+            .Border(1.5f).BorderColor(Colors.Red.Medium)
+            .AlignCenter().AlignMiddle().Padding(3)
+            .Text(text =>
+            {
+                var displayName = companyName.Length > 4
+                    ? companyName[..4] + "\n" + (companyName.Length > 8 ? companyName[4..8] : companyName[4..])
+                    : companyName;
+                text.AlignCenter();
+                text.Span(displayName).FontSize(8).FontColor(Colors.Red.Medium).Bold();
+            });
+    }
+
+    /// <summary>
+    /// 인장 그림을 읽는다. 🔴 지금은 보관소가 없어 <c>seal_url</c> 이 늘 비어 있다(설계 §8-2)
+    /// ⇒ 합격선 ④ 는 이번 차수 <b>미달</b>이다. 보관소가 생기는 날 <b>코드 수정 0</b> 으로 켜진다.
+    /// 🔴 이 함수는 <b>읽기만</b> 한다 — 파일 보관소·업로드 통로를 만들지 않는다(범위 밖).
+    /// </summary>
+    private byte[]? TryLoadSealImage(string? sealUrl)
+    {
+        if (string.IsNullOrWhiteSpace(sealUrl)) return null;
+
+        try
+        {
+            if (File.Exists(sealUrl)) return File.ReadAllBytes(sealUrl);
+            _logger.LogWarning("[PDF] 인장 파일이 없다 — 글자 도장으로 그린다.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 인장 읽기 실패 — 글자 도장으로 그린다.");
+            return null;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -735,6 +1827,26 @@ public sealed class PdfRenderService : IPdfRenderService
         var maxRows = coords.FirstOrDefault(c =>
             c.Key.Equals("max_rows", StringComparison.OrdinalIgnoreCase))?.XMm ?? 0f;
 
+        // 🔴 20261021작 절 D — 넘침 안내 한 줄.
+        //   🔴 자르는 동작(limit)·max_rows·row_pitch 해석은 **한 글자도 안 바꿨다.**
+        //   쪽 이어찍기는 이번 범위 밖(결재 Q-4)이라, 조용히 사라지던 것을 **말해 주기만** 한다.
+        //   조용히 사라지는 것은 세금 사고다 — 적어도 고객이 알아야 한다.
+        //   🔴 20261021작 §9-2 봉합(R-2) — **세금계산서 경로에서만** 나온다.
+        //   반려 사유: 이 메서드는 10종이 **같이 타는** 길이라, 거래명세서·견적서 등에서도
+        //   알림이 찍혔다 ⇒ 결재 Q-4 의 집행 조건 「나머지 9종 종이 무변화」가 깨졌다.
+        //   🔴 자르는 동작·지우는 코드는 여전히 0건이다 — 나오는 **자리**만 좁힌다.
+        var rowLimit = maxRows > 0 ? (int)maxRows : d.Lines.Count;
+        var printedRows = Math.Min(d.Lines.Count, rowLimit);
+        var overflowed = d.Lines.Count > printedRows
+            && string.Equals(d.DocType, TaxInvoiceDocType, StringComparison.Ordinal);
+
+        // 안내를 붙일 자리 = 품목 줄 중 가장 왼쪽 칸의 좌표. 그 아래 한 줄에 적는다.
+        var noticeAnchor = overflowed
+            ? coords.Where(c => c.Key.StartsWith("line.", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(c => c.XMm)
+                    .FirstOrDefault()
+            : null;
+
         e.Layers(layers =>
         {
             // 기준 층 — 좌표 인쇄는 이 위에 얹는다.
@@ -762,6 +1874,20 @@ public sealed class PdfRenderService : IPdfRenderService
                 var val = HeaderValue(d, c.Key);
                 if (string.IsNullOrEmpty(val)) continue;
                 PlaceText(layers, c, c.YMm, val);
+            }
+
+            // 🔴 넘친 줄이 있으면 마지막 줄 아래 한 줄로 알린다 — **더하기만**.
+            if (noticeAnchor is not null)
+            {
+                var notice = new FieldCoord
+                {
+                    Key = "overflow_notice",
+                    XMm = noticeAnchor.XMm,
+                    FontPt = 8f,
+                    WidthMm = 150f
+                };
+                PlaceText(layers, notice, noticeAnchor.YMm + pitch * printedRows,
+                    $"품목 {d.Lines.Count}줄 중 {printedRows}줄만 인쇄되었습니다. 양식용지 줄 수 설정을 확인하세요.");
             }
         });
     }
@@ -988,6 +2114,12 @@ public sealed class PdfRenderService : IPdfRenderService
                 MarginBottomMm = dto.MarginBottomMm,
                 ShowCompanyLogo = dto.ShowCompanyLogo,
                 ShowBorder = dto.ShowBorder,
+                // 🔴 20261021작 절 B-1 — 종전에는 이 값을 읽지 않아 고객이 「인쇄 매수」를
+                //   무엇으로 두든 **같은 종이**가 나왔다. 세금계산서는 법정 2매다.
+                PrintCopyMode = dto.PrintCopyMode,
+                // 🔴 20261021작 §10-4 S-2 (DB-147) — 이 한 줄이 없으면 고객이 설정을
+                //   켜도 끄나 켜나 **같은 종이**가 나온다.
+                ShowTearLine = dto.ShowTearLine,
                 // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
                 //   종전에는 이 값을 **읽어오지도 않았다.** 고객이 양식용지 좌표를 아무리
                 //   맞춰도 인쇄물은 코드에 고정된 위치로만 나왔다.
@@ -1011,6 +2143,15 @@ public sealed class PdfRenderService : IPdfRenderService
         public decimal MarginBottomMm { get; set; } = 20;
         public bool ShowCompanyLogo { get; set; } = true;
         public bool ShowBorder { get; set; } = true;
+
+        /// <summary>인쇄 매수 — both·recipient·supplier (DB-90). 세금계산서 전용 작성기가 읽는다.</summary>
+        public string PrintCopyMode { get; set; } = "recipient";
+
+        /// <summary>
+        /// 두 벌을 한 장에 모으고 가운데 자르는 선을 넣나 (DB-147 · 20261021작 §10-2 ⓑ).
+        /// 기본 false — 양식 행이 없을 때도 「끔」으로 본다(품목이 조용히 빠지면 안 된다).
+        /// </summary>
+        public bool ShowTearLine { get; set; }
 
         /// <summary>고객이 맞춘 양식용지 필드 위치. 비어 있으면 종전 기본 배치로 인쇄한다.</summary>
         public List<FieldCoord> FieldCoords { get; set; } = new();
