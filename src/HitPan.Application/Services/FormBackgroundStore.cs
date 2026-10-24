@@ -1,0 +1,254 @@
+using HitPan.Application.Interfaces;
+using Microsoft.Extensions.Logging;
+
+namespace HitPan.Application.Services;
+
+/// <summary>
+/// 🔴 양식지 그림 보관소 — 고객 PC 안에만 둔다(#22·#30 · 본사로 아무것도 안 보낸다).
+/// </summary>
+/// <remarks>
+/// 🔴 <b>읽기 울타리가 있다고 쓰기가 안전해지는 것이 아니다.</b>
+///   작성기(<c>PdfRenderService</c>)는 폴더 가둠·링크 통과 차단·확장자·크기·미리 그려 보기까지
+///   다섯 겹으로 막아 둔다. 그건 <b>읽을 때</b> 얘기다. 넣을 때 막지 않으면 보관소 안에
+///   못 읽을 파일·남의 테넌트 파일·덮어쓴 파일이 쌓인다. 그래서 같은 울타리를
+///   <b>쓰기 방향으로 한 번 더</b> 세운다.
+///
+/// 🔴 <b>고객이 준 파일 이름을 쓰지 않는다</b> — 이름 하나로 생기는 사고가 넷이다:
+///   거슬러 오르기(<c>..\</c>) · 장치 예약어(<c>CON</c>·<c>PRN</c>) · 한글 깨짐 ·
+///   같은 이름 <b>덮어쓰기</b>(#1 — 고객이 먼저 올린 양식지가 조용히 사라진다).
+///   그래서 <b>서버가 새 이름을 만든다.</b> 확장자만 고객 파일에서 가져온다.
+/// </remarks>
+public sealed class FormBackgroundStore : IFormBackgroundStore
+{
+    private readonly ILogger<FormBackgroundStore> _logger;
+
+    public FormBackgroundStore(ILogger<FormBackgroundStore> logger) => _logger = logger;
+
+    /// <inheritdoc />
+    public async Task<(string? StoredPath, string? Rejection)> SaveAsync(
+        string tenantId, string originalFileName, Stream content, CancellationToken ct = default)
+    {
+        // ① 테넌트 — 🔴 빈 값이면 아무것도 하지 않는다(#2 · 호출부가 JWT 에서만 채운다).
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            _logger.LogWarning("[양식지] 테넌트 없이 올리려 했다 — 받지 않는다.");
+            return (null, "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주십시오.");
+        }
+
+        // 🔴 테넌트 값 자체가 경로를 벗어나는 모양이면 거절한다.
+        //   JWT 에서 오는 값이지만, 폴더 이름으로 쓰는 값은 **한 번 더 본다**.
+        if (tenantId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || tenantId.Contains("..", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("[양식지] 테넌트 값이 폴더 이름으로 쓸 수 없는 모양이다 — 받지 않는다.");
+            return (null, "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주십시오.");
+        }
+
+        // ② 확장자 — 🔴 고객 이름에서 **이것만** 가져온다. 목록은 읽는 쪽과 같은 자리에 있다.
+        var ext = Path.GetExtension(originalFileName ?? string.Empty);
+        if (!FormBackgroundPaths.AllowedExts.Contains(ext))
+        {
+            _logger.LogWarning("[양식지] 그림 형식이 아니다({Ext}) — 받지 않는다.", ext);
+            return (null, "그림 파일만 올릴 수 있습니다. (png · jpg · bmp · webp)");
+        }
+
+        try
+        {
+            // ③ 바이트를 먼저 메모리로 받는다 — 🔴 **검사가 끝나기 전에 디스크에 쓰지 않는다.**
+            //    쓰고 나서 지우는 방식은 중간에 꺼지면 쓰레기가 남는다.
+            using var buffer = new MemoryStream();
+            await content.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            var bytes = buffer.ToArray();
+
+            // ④ 크기 — 0바이트와 상한 초과를 같이 막는다.
+            if (bytes.Length <= 0)
+                return (null, "빈 파일입니다. 다른 파일을 골라 주십시오.");
+
+            if (bytes.Length > FormBackgroundPaths.MaxBytes)
+            {
+                _logger.LogWarning("[양식지] 그림이 너무 크다({Len} bytes) — 받지 않는다.", bytes.Length);
+                return (null, "그림이 너무 큽니다. 20MB 이하로 올려 주십시오.");
+            }
+
+            // ⑤ 🔴 **여기서 미리 그려 본다.** 작성기가 못 읽는 바이트를 보관소에 넣지 않는다.
+            //    확장자만 그림이고 속은 다른 파일일 수 있다(이름은 거짓말을 한다).
+            try
+            {
+                _ = QuestPDF.Infrastructure.Image.FromBinaryData(bytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[양식지] 그림을 열 수 없다 — 받지 않는다.");
+                return (null, "그림 파일을 열 수 없습니다. 파일이 손상되지 않았는지 확인해 주십시오.");
+            }
+
+            // ⑥ 자리를 만든다 — 테넌트마다 갈라 둔다(한 PC 에 사업장이 둘일 수 있다).
+            var dir = FormBackgroundPaths.TenantRoot(tenantId);
+            Directory.CreateDirectory(dir);
+
+            // 🔴 서버가 이름을 만든다 — 고객 이름은 쓰지 않는다(덮어쓰기·예약어·거슬러 오르기 차단).
+            var fileName = $"{DateTime.Now:yyyyMMddHHmmss}_{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
+            var full = Path.Combine(dir, fileName);
+
+            // ⑦ 🔴 마지막으로 **쓰려는 자리가 그 테넌트 폴더 안인지** 다시 본다.
+            //    위에서 이름을 만들었으니 벗어날 수 없지만, 벗어나는 날이 오면
+            //    여기서 멈춰야 한다 — 울타리는 「그럴 리 없다」로 세우지 않는다.
+            var root = Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
+            var resolved = Path.GetFullPath(full);
+            if (!resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("[양식지] 보관 자리가 허용 폴더 밖이다 — 받지 않는다.");
+                return (null, "그림을 보관할 수 없습니다. 관리자에게 알려 주십시오.");
+            }
+
+            // 🔴 [2026-10-25 [4] 반려 R-7 봉합] 쓰려는 자리가 **링크를 지나면 쓰지 않는다.**
+            //   테넌트 폴더가 누군가 만든 junction 이면 울타리는 통과하고 파일은 바깥에 떨어진다.
+            // 🔴 [2026-10-25 재검증 S-1 봉합] 뿌리를 **읽는 쪽과 같은 값**으로 넘긴다.
+            //   종전에는 테넌트 폴더를 넘겨 그 폴더 자신이 junction 이면 아무도 안 봤다.
+            if (PassesThroughLink(resolved, FenceRoot))
+            {
+                _logger.LogWarning("[양식지] 보관 자리가 링크를 지난다 — 받지 않는다.");
+                return (null, "그림을 보관할 수 없습니다. 관리자에게 알려 주십시오.");
+            }
+
+            await File.WriteAllBytesAsync(resolved, bytes, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[양식지] 그림을 보관했다 — 테넌트 {Tenant} · {Len} bytes", tenantId, bytes.Length);
+
+            return (resolved, null);
+        }
+        catch (OperationCanceledException)
+        {
+            // 🔴 고객이 창을 닫았거나 취소했다 — 사고가 아니다. 조용히 끝낸다.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 까닭을 남기고, 고객에게는 사람 말로 돌려준다.
+            _logger.LogWarning(ex, "[양식지] 그림 보관 실패 — 테넌트 {Tenant}", tenantId);
+            return (null, "그림을 보관하지 못했습니다. 잠시 뒤 다시 시도해 주십시오.");
+        }
+    }
+
+    /// <summary>
+    /// 🔴 경로가 <b>링크(symlink·junction)</b> 를 지나는가 — 지나면 손대지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 쓰기·지우기 쪽에도 필요한가</b> — 2026-10-25 [4] 반려 R-7.
+    ///   읽는 쪽(<c>PdfRenderService.PassesThroughLink</c>)은 10/24 에 이걸 세웠는데
+    ///   내가 만든 보관소에는 <b>0건</b>이었다. 울타리 안에 junction 하나를 만들어 두면
+    ///   앞글자 비교는 통과하고 <b>실제 파일은 디스크 어디든</b> 될 수 있다
+    ///   — 지우기는 고객이 준 경로를 받으므로 그쪽이 특히 위험하다.
+    /// 🔴 <b>울타리 자체(root)는 보지 않는다</b> — 그 자리는 관리자가 정한 곳이다.
+    ///   보는 것은 <b>울타리 안쪽</b>뿐이다.
+    /// 🔴 못 재면 <b>막는 쪽</b>으로 떨어진다 — 그림은 안 올라가도 전표는 산다(#20).
+    /// </remarks>
+    private bool PassesThroughLink(string fullPath, string root)
+    {
+        var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
+
+        try
+        {
+            var file = new FileInfo(fullPath);
+            if (file.LinkTarget is not null) return true;
+
+            for (var dir = file.Directory;
+                 dir is not null && dir.FullName.Length > rootNoSep.Length;
+                 dir = dir.Parent)
+            {
+                if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
+                if (dir.LinkTarget is not null) return true;
+            }
+
+            // 🔴🔴 [2026-10-25 3차 재검증 T-1 봉합] **뿌리 자신도 본다.**
+            //   [무엇이 틀린 전제였나] 읽는 쪽 주석은 *"울타리 자체는 관리자가 정한 자리이니
+            //     거기가 링크여도 관리자의 뜻"* 이라고 적었다. 🔴 **이 뿌리엔 그 전제가 없다** —
+            //     경로는 코드 고정값이고 **앱이 스스로 만든다.** 관리자가 고른 자리가 아니다.
+            //   🔴 검증팀 실측 ACL: `C:\ProgramData\HitPan` → `BUILTIN\Users:(I)(CI)(WD,AD,…)`
+            //     ⇒ **`AD`(하위폴더 추가)가 일반 사용자에게 열려 있다.** 갓 설치한 PC 에서
+            //     직원이 `form-backgrounds` 를 **먼저 junction 으로 만들어 두면**,
+            //     올리기는 밖에 떨어지고 지우기는 밖을 지운다.
+            //   🔴 그래서 면제를 없앤다. 뿌리가 링크면 **아무것도 하지 않는다.**
+            var rootDir = new DirectoryInfo(rootNoSep);
+            if (rootDir.LinkTarget is not null) return true;
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 못 재면 「지난다」로 본다 — 막는 쪽이 안전측이다(#15 빈 catch 금지).
+            // 🔴 [2026-10-25 재검증 S-6 봉합] 종전에는 정적 로거(`_staticLogger`)를 뒀다 —
+            //   정적 가변 상태는 시험끼리 섞일 수 있고 `??=` 는 원자적이지도 않다.
+            //   함수를 인스턴스로 내리니 그 꼼수가 필요 없어졌다.
+            _logger.LogWarning(ex, "[양식지] 링크 여부를 재지 못했다 — 막는 쪽으로 떨어진다.");
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 🔴🔴 울타리 검사에 넘길 <b>뿌리</b> — [2026-10-25 재검증 S-1 봉합].
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>내가 뭘 틀렸나</b> — 1차 봉합에서 `PassesThroughLink(…, 테넌트폴더)` 를 넘겼다.
+    ///   그 함수는 <c>dir.FullName.Length &gt; rootNoSep.Length</c> 로 <b>뿌리 자신을 검사에서 뺀다</b>
+    ///   (뿌리는 관리자가 정한 자리라는 뜻이었다). 그래서 <b>테넌트 폴더가 junction 이면 아무도 안 봤다.</b>
+    ///   읽는 쪽은 뿌리를 <c>FormBackgroundPaths.Root</c> 로 넘겨 그걸 잡는데, 내 쪽만 한 칸 안이었다
+    ///   ⇒ <b>비대칭을 고친 게 아니라 옮겼다.</b>
+    /// 🔴 <b>검증팀이 실제로 뚫었다</b> — 테넌트 폴더를 junction 으로 바꾸고 「그림 지우기」를 부르니
+    ///   <b>울타리 밖 파일이 지워졌다</b>(`victimAlive=False`). `%ProgramData%` 는 일반 사용자도
+    ///   쓸 수 있으니, 직원 계정이 폴더를 바꿔 두면 관리자의 한 번 누름으로 밖이 지워진다.
+    /// 🔴 그래서 <b>읽는 쪽과 같은 값</b>을 쓴다. 테넌트 폴더도 검사 대상에 들어온다.
+    /// </remarks>
+    private static string FenceRoot =>
+        Path.GetFullPath(FormBackgroundPaths.Root).TrimEnd(Path.DirectorySeparatorChar)
+        + Path.DirectorySeparatorChar;
+
+    /// <inheritdoc />
+    public string? Delete(string tenantId, string storedPath)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(storedPath))
+            return "지울 그림을 찾을 수 없습니다.";
+
+        // 🔴 [R-7 봉합] 지우기에도 테넌트 모양 검사를 둔다 — 올리기에만 있었다.
+        if (tenantId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || tenantId.Contains("..", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("[양식지] 테넌트 값이 폴더 이름으로 쓸 수 없는 모양이다 — 지우지 않는다.");
+            return "이 그림은 지울 수 없습니다.";
+        }
+
+        try
+        {
+            // 🔴 **이 테넌트 폴더 안**이 아니면 지우지 않는다 — 남의 양식지를 지울 길을 안 만든다.
+            var root = Path.GetFullPath(FormBackgroundPaths.TenantRoot(tenantId))
+                           .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var full = Path.GetFullPath(storedPath);
+
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("[양식지] 허용 폴더 밖을 지우려 했다 — 지우지 않는다.");
+                return "이 그림은 지울 수 없습니다.";
+            }
+
+            // 🔴 [R-7 봉합] 링크를 지나면 지우지 않는다 — 울타리 안 junction 으로
+            //   바깥 파일을 지우는 길을 막는다. 지우기는 고객이 준 경로를 받으므로
+            //   이쪽이 올리기보다 위험하다.
+            // 🔴 [2026-10-25 재검증 S-1 봉합] 같은 까닭 — 검증팀이 이 자리로 **밖의 파일을 지웠다**.
+            if (PassesThroughLink(full, FenceRoot))
+            {
+                _logger.LogWarning("[양식지] 지울 경로가 링크를 지난다 — 지우지 않는다.");
+                return "이 그림은 지울 수 없습니다.";
+            }
+
+            if (File.Exists(full)) File.Delete(full);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[양식지] 그림 지우기 실패 — 테넌트 {Tenant}", tenantId);
+            return "그림을 지우지 못했습니다. 잠시 뒤 다시 시도해 주십시오.";
+        }
+    }
+}
