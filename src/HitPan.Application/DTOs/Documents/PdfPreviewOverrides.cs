@@ -45,4 +45,64 @@ public sealed class PdfPreviewOverrides
     /// 예시 자료를 쓸 때는 끄지 못한다(서비스가 강제한다).
     /// </summary>
     public bool MarkAsSample { get; set; } = true;
+
+    /// <summary>
+    /// 🔴🔴 <b>양식 설계 미리보기인가</b> — 양식지 그림(배경)을 깔지 말지 가른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 따로 두나</b> — 종전에는 「overrides 가 왔으면 미리보기」로 <b>대리 판정</b>했다.
+    ///   그런데 <b>전표 인쇄 미리보기</b>도 같은 overrides 를 탄다. 거기에 배경이 깔리면
+    ///   <b>미리보기에는 그림이 있고 실제 인쇄물에는 없다</b> ⇒ 사장님 합격선
+    ///   <i>"미리보기 화면하고 동일하게 인쇄"</i> 가 <b>거짓</b>이 된다(검증팀 재검증 C-3).
+    /// <para>
+    /// 🟢 <c>true</c>  = 양식정보설정의 미리보기. 스캔한 양식지 위에 필드를 mm 로 맞춘다(§13-8).
+    /// 🟢 <c>false</c> = <b>전표 인쇄 미리보기</b>. 그 종이가 곧 인쇄물이다 — 배경 <b>0건</b>.
+    /// </para>
+    /// </remarks>
+    public bool IsFormDesignPreview { get; set; }
+
+    /// <summary>
+    /// 🔴 이번 인쇄에만 적용할 옵션 (결-2 · 7종 공통). <b>null 이면 저장된 양식 그대로</b>.
+    /// </summary>
+    public PrintOptionOverrides? Options { get; set; }
+
+    /// <summary>
+    /// 🔴🔴 <b>DB 에 없는 전표면 그리지 말고 막는다</b> (3차검증 R-11 봉합).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 생겼나</b> — 저장 안 한 전표의 <c>_draft.Id</c> 는 <b>화면이 만든 GUID</b> 다.
+    ///   DB 에 없다. 창문은 <c>IsNullOrWhiteSpace(docId)</c> 하나뿐이라 GUID 는 통과하고
+    ///   <c>WHERE return_id='&lt;GUID&gt;'</c> 가 0행 ⇒ <b>미리보기도 종이도 백지</b>였다.
+    ///   로더를 붙여 막으려던 사고가 <b>다른 문으로 그대로 들어왔다</b>(검증팀 3차 R-11).
+    /// <para>
+    /// 🔴 <b>왜 화면이 아니라 여기서 막나</b> — 문이 하나가 아니다. 단추 8곳 말고
+    ///   <b>API 직타</b>도 있고, 로더가 없는 종(면세계산서·입금표)도 같은 백지로 떨어진다.
+    ///   <b>한 자리에서 막아야</b> 다음 종이 늘 때 또 안 빈다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>true</c> 는 <b>미리보기 문만</b> 세운다. 「인쇄」·「이메일」·「팩스」는 종전처럼
+    ///   <b>안내문 종이</b>가 나간다 — 그 동작은 한 글자도 안 바꿨다(#1 · #20 P0).
+    /// </para>
+    /// </remarks>
+    public bool RequireExisting { get; set; }
+}
+
+/// <summary>
+/// 🔴 전표 인쇄 미리보기 옵션 — <b>7종 공통 한 벌</b> (사장님 결재 2026-10-24 결-2).
+/// </summary>
+/// <remarks>
+/// 🔴 <b>왜 양식 DTO 를 통째로 안 받나</b> — 전표 인쇄는 <b>저장된 양식을 그대로 쓰고</b>
+///   그 위에 <b>이번 한 번만</b> 바꿀 값을 얹는다. 양식 전체를 받으면 화면이 양식을
+///   들고 다녀야 하고, 고객이 미리보기에서 만진 값이 <b>저장된 것처럼</b> 보인다.
+/// 🔴 <b>전부 null 이면 저장된 양식 그대로</b> — 즉 지금 인쇄와 같은 종이가 나온다(#1).
+/// 🔴 종별로 갈라 만들지 않는다. 갈라 만들면 <b>일곱 벌</b>이 되고 칸이 늘 때마다
+///   일곱 군데를 고쳐야 한다(결-2 — 사장님 <i>"공통"</i>).
+/// </remarks>
+public sealed class PrintOptionOverrides
+{
+    /// <summary>인쇄 매수 — both·recipient·supplier. 세금계산서·계산서 축(DB-90).</summary>
+    public string? PrintCopyMode { get; set; }
+
+    /// <summary>한 장에 두 벌 + 가운데 자르는 선 (DB-147). <c>PrintCopyMode=both</c> 일 때만 쓰인다.</summary>
+    public bool? ShowTearLine { get; set; }
 }

@@ -791,4 +791,97 @@ public class DocumentController : ControllerBase
         "payment-receipt" => "입금표",
         _ => "거래문서"
     };
+
+    /// <summary>
+    /// 🔴 전표 인쇄 <b>미리보기</b> — 7종 전부 <b>정본 통로</b>로 그린다.
+    /// 사장님 오더 2026-10-24 (반려 ③ · 워크플로우 5단계).
+    /// </summary>
+    /// <remarks>
+    /// 사장님: <i>"인쇄버튼 클릭시 미리보기로 넘어가서, 어떤 양식이 적용되는지 보여줘야 함"</i> ·
+    ///   <i>"옵션 선택 후 최종 인쇄시, 미리보기 화면하고 동일하게 인쇄"</i>
+    /// <para>
+    /// 🔴 <b>왜 새 문이 필요했나</b> — 기존 <c>GET {type}/{id}/pdf</c> 는
+    ///   <b>세금계산서만</b> 정본 통로로 가고 나머지 6종은 딴 길로 간다(절 C-2).
+    ///   그 길은 양식설정을 모른다 ⇒ 고객이 mm 를 맞춰도 종이가 안 바뀐다.
+    ///   이 문은 <b>7종 전부</b> <c>RenderDocumentAsync</c> 하나로 보낸다.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>옵션은 이번 한 장에만</b> 적용된다 — <b>저장하지 않는다</b>(결-2).
+    /// 🔴 <b>로그인 세션으로만</b> 연다 — 쿼리 토큰을 쓰지 않는다.
+    ///   <c>GET …/pdf</c> 는 <c>[AllowAnonymous]</c> + 쿼리 토큰이라 축이 다르다([1-V] E-5).
+    /// 🔴 <c>tenant_id</c> 는 <b>JWT 클레임에서만</b>(#2).
+    /// 🔴 급여명세서는 이 문으로 못 나간다 — 본인 확인이 있는 전용 문으로만 간다(W1 사고 자리).
+    /// </para>
+    /// </remarks>
+    [HttpPost("{type}/{id}/preview-pdf")]
+    [Authorize]
+    public async Task<IActionResult> PreviewPdf(string type, string id,
+        [FromBody] DocumentPreviewRequest? req,
+        // 🔴 기록기는 **이 문만** 받는다 — 생성자를 건드리면 다른 문 전부가 영향을 받는다(#1).
+        [FromServices] ILogger<DocumentController> logger, CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var documentType = PrintTypeToDocumentType(type);
+        if (documentType is null)
+        {
+            return BadRequest(new { message = $"미리보기를 지원하지 않는 문서입니다: {type}" });
+        }
+
+        var overrides = new HitPan.Application.DTOs.Documents.PdfPreviewOverrides
+        {
+            // 🔴 전표 미리보기는 **진짜 전표**를 그린다. 예시 자료가 아니다.
+            UseSampleData = false,
+            // 🔴 3차검증 R-11 봉합 — **DB 에 없는 전표면 백지를 띄우지 않는다.**
+            //   저장 안 한 전표의 id 는 화면이 만든 GUID 라 DB 에 없다. 단추 8곳 말고
+            //   **이 문 자체**를 세워야 API 직타·로더 없는 종까지 같이 막힌다.
+            RequireExisting = true,
+            Options = req?.Options
+        };
+
+        byte[] bytes;
+        string fileName;
+        try
+        {
+            (bytes, fileName) = await _pdfRenderService
+                .RenderDocumentAsync(tenantId, documentType, id, overrides, ct).ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            // 🔴 사람 말로 돌려준다 — 「미리보기를 그리지 못했습니다(404)」는 고객에게 뜻이 없다.
+            logger.LogWarning(ex, "[Preview] 저장되지 않은 전표 미리보기 요청. type={Type} id={Id}", type, id);
+            return NotFound(new { message = ex.Message });
+        }
+
+        // 🔴 inline — 틀 안에서 바로 보여야 한다(내려받기면 미리보기가 아니다).
+        Response.Headers["Content-Disposition"] = "inline";
+        return File(bytes, "application/pdf", fileName);
+    }
+
+    /// <summary>
+    /// 화면이 쓰는 문서 종류(하이픈 꼴) → 작성기가 아는 이름(밑줄 꼴).
+    /// 🔴 <c>payslip</c> 은 <b>일부러 없다</b> — 급여명세서는 전용 문으로만 간다.
+    /// </summary>
+    private static string? PrintTypeToDocumentType(string type) => type switch
+    {
+        "quotation" => "quotation",
+        "sales-order" or "sales_order" => "sales_order",
+        "delivery" => "delivery",
+        "tax-invoice" or "tax_invoice" => "tax_invoice",
+        "purchase-order" or "purchase_order" => "purchase_order",
+        "purchase-receipt" or "purchase_receipt" => "purchase_receipt",
+        "purchase-return" or "purchase_return" or "return" => "purchase_return",
+        "sales-return" or "sales_return" => "sales_return",
+        "invoice-exempt" or "invoice_exempt" => "invoice_exempt",
+        "payment-receipt" or "payment_receipt" => "payment_receipt",
+        _ => null
+    };
+}
+
+/// <summary>전표 인쇄 미리보기 요청 — 이번 한 장에만 쓸 옵션.</summary>
+public class DocumentPreviewRequest
+{
+    /// <summary>🔴 null 이면 저장된 양식 그대로 — 지금 인쇄와 같은 종이다.</summary>
+    public HitPan.Application.DTOs.Documents.PrintOptionOverrides? Options { get; set; }
 }

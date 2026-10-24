@@ -376,7 +376,7 @@ public partial class QuotationPage : ComponentBase
     /// </summary>
     private async Task PrintAsync()
     {
-        await Js.InvokeVoidAsync("print");
+        await PrintPreview.ShowAsync("quotation", _draft?.Id, "견적서");
     }
 
     /// <summary>

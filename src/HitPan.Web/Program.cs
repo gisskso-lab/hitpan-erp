@@ -99,6 +99,7 @@ builder.Services.AddScoped<LeaveRequestService>();
 builder.Services.AddScoped<UnifiedCalendarService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<DocumentPrintPreview>();   // 🔴 전표 「인쇄」 → 미리보기 창 (사장님 오더 2026-10-24 반려 ③)
 builder.Services.AddScoped<SpecialPriceService>();
 builder.Services.AddScoped<ApprovalService>();
 builder.Services.AddScoped<TaxInvoiceApiService>();

@@ -46,6 +46,35 @@ public class FormPreviewOverrideGuardTests
         ?? throw new InvalidOperationException(
             $"PdfRenderService.{name}(…) 이 없다 — 미리보기 주입 통로가 사라졌다(20261024 D2).");
 
+    /// <summary>작성기가 실제로 받아들이는 1x1 PNG. 🔴 "진짜 읽히는 그림"이라야 게이트가 문다.</summary>
+    private const string OnePixelPngBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    /// <summary>허용 폴더 <b>안</b>에 유효한 PNG 를 놓는다.</summary>
+    private static string WriteValidPng()
+    {
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+        var p = Path.Combine(root, $"gate-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+        return p;
+    }
+
+    /// <summary>
+    /// 허용 폴더 <b>밖</b>에 유효한 PNG 를 놓는다. 🔴 경로 가둠이 <b>단독으로</b>
+    /// 빨개지려면, 확장자·존재·디코드를 **전부 통과하는** 파일이 밖에 있어야 한다.
+    /// (내가 EXP-C 로 적발: 종전 케이스는 전부 다른 검사에서 걸려 가둠을 안 쟀다.)
+    /// </summary>
+    private static string WriteValidPngOutsideRoot()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "hitpan-gate-outside");
+        Directory.CreateDirectory(dir);
+        var p = Path.Combine(dir, $"outside-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+        return p;
+    }
+
     private static object? Get(object target, string prop) =>
         (target.GetType().GetProperty(prop)
             ?? throw new InvalidOperationException($"{target.GetType().Name}.{prop} 이 없다."))
@@ -126,39 +155,125 @@ public class FormPreviewOverrideGuardTests
     // ═══════════════════════════════════════════════════════════════
     // 축 ③ 양식지 그림이 작성기까지 닿나 — 20261024 사장님 오더의 정면
     // ═══════════════════════════════════════════════════════════════
-
-    [Fact(DisplayName = "축③ 🔴 양식지 그림이 작성기 입력에 닿는다 — 종전 0건이던 자리(§13)")]
-    public void Axis3_FormBackground_ReachesRenderer()
+    [Fact(DisplayName = "축③ 🔴🔴 실인쇄에는 양식지 그림이 **안 깔린다** — 이중 인쇄 금지(반려 R-1 회귀)")]
+    public void Axis3_RealPrint_NeverGetsBackground()
     {
+        // 🔴 **유효한 그림을 허용 폴더에 실제로 놓고** 잰다.
+        //   종전 판은 존재하지 않는 form.png 를 줬다 ⇒ 방어줄을 빼도 **경로·존재 검사에서**
+        //   null 이 나와 **다른 이유로 초록**이었다(내가 EXP-A 로 적발). 거짓 게이트였다.
         var svc = MakeService();
-        const string path = @"C:\forms\partner-form.png";
-        var dto = new FormTemplateDto
+        var png = WriteValidPng();
+        try
         {
-            FormType = "delivery",
-            BackgroundImageUrl = path
-        };
+            var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] {
+                new FormTemplateDto { FormType = "delivery", BackgroundImageUrl = png } })!;
 
-        var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] { dto })!;
-
-        // 🔴 이 한 줄이 없으면 고객이 양식지를 올려도 종이에 안 나온다.
-        //    사장님: 이미 업체에서 쓰는 양식지가 있을수도 있으니.
-        Assert.Equal(path, Get(info, "BackgroundImageUrl"));
+        // 🔴 overrides 가 null = 실인쇄(전표 인쇄·이메일·팩스). 그림은 **절대** 안 간다.
+        //    §13-8: 양식용지는 종이에 이미 인쇄돼 있다 — 또 찍으면 이중 인쇄다.
+        //    §13-10: 순백지에 업체 그림 찍기는 **등재만**이다.
+            // 🔴 이 그림은 **진짜로 읽히는** 파일이다. 방어줄을 빼면 bytes 가 나와 빨개진다.
+            var real = PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { null, info });
+            Assert.Null(real);
+        }
+        finally { try { File.Delete(png); } catch { /* 지워지면 그만 */ } }
     }
 
-    [Fact(DisplayName = "축③음 🔴 음성 대조군 — 바깥 http 주소는 안 깐다(인쇄가 남의 서버에 묶이면 안 된다)")]
-    public void Axis3_Negative_RemoteUrlRejected()
+    [Fact(DisplayName = "축③음 🔴 음성 대조군 — 미리보기 경로는 **그리려고 시도한다**(막아 둔 게 아니다)")]
+    public void Axis3_Negative_PreviewPathDoesAttempt()
+    {
+        var svc = MakeService();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+        var good = Path.Combine(root, $"gate-{Guid.NewGuid():N}.png");
+
+        // 1x1 PNG — 작성기가 실제로 받아들이는 바이트다.
+        File.WriteAllBytes(good, Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="));
+        try
+        {
+            var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] {
+                new FormTemplateDto { FormType = "delivery", BackgroundImageUrl = good } })!;
+            // 🔴 [재검증 C-3] 배경은 **양식 설계 미리보기**에서만 깔린다.
+            var ov = new PdfPreviewOverrides { UseSampleData = true, IsFormDesignPreview = true };
+
+            // 🔴 이것이 null 이면 「실인쇄에 안 깔린다」가 **아무것도 안 하는 함수**라서 통과한 것이다.
+            var preview = PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { ov, info });
+            Assert.NotNull(preview);
+            Assert.NotEmpty((byte[])preview!);
+        }
+        finally { try { File.Delete(good); } catch { /* 지워지면 그만 */ } }
+    }
+
+    [Fact(DisplayName = "축③안 🔴 작성기가 못 읽는 바이트면 **인쇄가 안 죽고** 그림만 빠진다(반려 R-2)")]
+    public void Axis3_BadImage_DoesNotKillPrinting()
+    {
+        var svc = MakeService();
+        var load = PrivateMethod("TryLoadFormBackground");
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+
+        // 🔴 PNG 이름인데 속이 PDF·빈 파일·쓰레기. 종전 판은 이걸 그리는 자리까지 끌고 가
+        //    QuestPDF 가 터졌고 **그 양식의 인쇄·이메일·팩스가 전부 500** 이었다(#20).
+        var cases = new (string Name, byte[] Body)[]
+        {
+            ($"gate-pdf-{Guid.NewGuid():N}.png", System.Text.Encoding.ASCII.GetBytes("%PDF-1.7\n%쓰레기")),
+            ($"gate-empty-{Guid.NewGuid():N}.png", Array.Empty<byte>()),
+            ($"gate-junk-{Guid.NewGuid():N}.jpg", new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }),
+        };
+        foreach (var (name, body) in cases)
+        {
+            var p = Path.Combine(root, name);
+            File.WriteAllBytes(p, body);
+            try
+            {
+                // 🔴 던지지 않고 null 이어야 한다. 던지면 그 자리에서 전표가 안 나간다.
+                var ex = Record.Exception(() => load.Invoke(svc, new object?[] { p }));
+                Assert.Null(ex);
+                Assert.Null(load.Invoke(svc, new object?[] { p }));
+            }
+            finally { try { File.Delete(p); } catch { /* 지워지면 그만 */ } }
+        }
+    }
+
+    [Fact(DisplayName = "축③밖 🔴 허용 폴더 밖·바깥 주소·그림 아닌 형식은 **안 읽는다**(반려 R-4)")]
+    public void Axis3_PathAndFormat_AreFenced()
     {
         var svc = MakeService();
         var load = PrivateMethod("TryLoadFormBackground");
 
-        // 🔴 바깥 주소는 거절 — 고객 PC 는 인터넷이 끊길 수 있다. 인쇄가 멈추면 장사가 멈춘다.
-        Assert.Null(load.Invoke(svc, new object?[] { "https://example.com/form.png" }));
-        Assert.Null(load.Invoke(svc, new object?[] { "http://example.com/form.png" }));
+        // 🔴 고객이 본문에 적는 값이다. 검사 없이 읽으면 서버 파일이 종이에 실려 나간다.
+        foreach (var bad in new string?[]
+        {
+            "https://example.com/f.png",          // 바깥 그물 — 인쇄가 남의 서버에 묶인다
+            "http://example.com/f.png",
+            @"\남의서버\공유\f.png",              // UNC — http 차단을 비켜 가던 길
+            @"file:///C:/Windows/win.ini",
+            @"C:\Windows\win.ini",                 // 허용 폴더 밖 + 그림 아님
+            @"C:\Windows\System32\drivers\etc\hosts",
+            "../../../secret.png",                 // 거슬러 오르기
+            null, "   ",
+        })
+        {
+            var ex = Record.Exception(() => load.Invoke(svc, new object?[] { bad }));
+            Assert.Null(ex);
+            Assert.Null(load.Invoke(svc, new object?[] { bad }));
+        }
+    }
 
-        // 없는 파일·빈 값도 조용히 null — 그림 없이라도 종이는 나와야 한다(#1).
-        Assert.Null(load.Invoke(svc, new object?[] { @"C:\no-such-dir\no-such-file.png" }));
-        Assert.Null(load.Invoke(svc, new object?[] { null }));
-        Assert.Null(load.Invoke(svc, new object?[] { "   " }));
+    [Fact(DisplayName = "축③가둠 🔴 허용 폴더 **밖의 멀쩡한 PNG** 도 안 읽는다 — 가둠 단독 측정(반려 R-4)")]
+    public void Axis3_Fence_BlocksValidImageOutsideRoot()
+    {
+        var svc = MakeService();
+        var outside = WriteValidPngOutsideRoot();
+        try
+        {
+            // 🔴 이 파일은 확장자·존재·디코드를 **전부 통과한다.** 막는 것은 **경로 가둠뿐**이다.
+            //    그래서 가둠을 빼면 이 시험만 빨개진다 — 축이 단독으로 선다.
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { outside }));
+        }
+        finally { try { File.Delete(outside); } catch { /* 지워지면 그만 */ } }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -218,5 +333,176 @@ public class FormPreviewOverrideGuardTests
 
             Assert.InRange(list.Count, 1, 200);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 🔴 [재검증 보강] 검증팀 EXP-D 가 뚫은 자리 — 확장자·크기·형제폴더
+    //    "방어는 집행됐는데 보호(게이트)가 0건이었다"
+    // ═══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "축③형제 🔴 **형제 폴더**는 안 읽는다 — 앞글자만 비교하면 뚫린다(재검증 R-4)")]
+    public void Axis3_SiblingFolder_IsBlocked()
+    {
+        // 🔴 검증팀 실측: `…\form-backgrounds-probe\a.png` 가 **70바이트 읽혔다.**
+        //    `StartsWith(root)` 가 구분자 없이 비교해 **형제 폴더가 통째로 통과**했다.
+        var svc = MakeService();
+        var sibling = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds-probe");
+        Directory.CreateDirectory(sibling);
+        var p = Path.Combine(sibling, $"sib-{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+        try
+        {
+            // 확장자·존재·디코드를 전부 통과하는 파일이다. 막는 것은 **구분자 비교**뿐이다.
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+        }
+        finally
+        {
+            try { File.Delete(p); Directory.Delete(sibling); } catch { /* 지워지면 그만 */ }
+        }
+    }
+
+    [Fact(DisplayName = "축③형식 🔴 허용 폴더 안이어도 **그림 아닌 확장자**는 안 읽는다(EXP-D)")]
+    public void Axis3_Extension_IsEnforced()
+    {
+        // 🔴 검증팀 EXP-D: 확장자 화이트리스트를 빼도 **16/16 초록**이었다 —
+        //    집행은 돼 있는데 **보호가 없었다**(§13-5 합격선 5 가 글자로 요구한 그것).
+        var svc = MakeService();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+
+        // 속은 멀쩡한 PNG 인데 **이름이 .svg·.pdf** 다. 확장자 검사만이 이것을 막는다.
+        foreach (var ext in new[] { ".svg", ".pdf", ".txt", ".exe" })
+        {
+            var p = Path.Combine(root, $"ext-{Guid.NewGuid():N}{ext}");
+            File.WriteAllBytes(p, Convert.FromBase64String(OnePixelPngBase64));
+            try
+            {
+                Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+            }
+            finally { try { File.Delete(p); } catch { /* 지워지면 그만 */ } }
+        }
+    }
+
+    [Fact(DisplayName = "축③크기 🔴 상한을 넘는 그림은 안 읽는다 — 종이 한 장이 PC 메모리를 먹으면 안 된다(EXP-D)")]
+    public void Axis3_SizeCap_IsEnforced()
+    {
+        var svc = MakeService();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+        var p = Path.Combine(root, $"big-{Guid.NewGuid():N}.png");
+
+        // 🔴 상한을 **넘기면서도 디코드는 되는** 파일을 만든다.
+        //   [왜 이렇게까지] 그냥 큰 쓰레기 파일을 주면 **디코드 검사가 대신 막아**
+        //   크기 검사를 빼도 초록이 된다 — 내가 실제로 그 거짓 초록을 한 번 냈다.
+        //   ⇒ 멀쩡한 PNG 뒤에 패딩을 붙여 **크기 검사만이 막는** 모양을 만든다.
+        var cap = (long)SvcType.GetField("MaxBackgroundBytes",
+            BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        var png = Convert.FromBase64String(OnePixelPngBase64);
+        using (var fs = new FileStream(p, FileMode.Create, FileAccess.Write))
+        {
+            fs.Write(png, 0, png.Length);
+            var pad = new byte[64 * 1024];
+            while (fs.Length <= cap) fs.Write(pad, 0, pad.Length);
+        }
+        try
+        {
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { p }));
+        }
+        finally { try { File.Delete(p); } catch { /* 지워지면 그만 */ } }
+    }
+
+    [Fact(DisplayName = "축③설계 🔴 **전표 인쇄 미리보기**에는 배경이 안 깔린다 — 미리보기=인쇄물(재검증 C-3)")]
+    public void Axis3_DocumentPreview_GetsNoBackground()
+    {
+        // 🔴 전표 인쇄 미리보기도 overrides 를 탄다. 거기에 배경이 깔리면
+        //    미리보기엔 그림이 있고 실제 인쇄물엔 없다 ⇒ 합격선 ⑤ 가 거짓이 된다.
+        var svc = MakeService();
+        var png = WriteValidPng();
+        try
+        {
+            var info = PrivateMethod("ToTemplateInfo").Invoke(svc, new object?[] {
+                new FormTemplateDto { FormType = "delivery", BackgroundImageUrl = png } })!;
+
+            // 전표 인쇄 미리보기 = IsFormDesignPreview 가 false 다.
+            var docPreview = new PdfPreviewOverrides { UseSampleData = false };
+            Assert.Null(PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { docPreview, info }));
+
+            // 🟢 대조 — 양식 설계 미리보기에서는 깔린다(막아 둔 게 아니다).
+            var design = new PdfPreviewOverrides { UseSampleData = true, IsFormDesignPreview = true };
+            Assert.NotNull(PrivateMethod("ResolveFormBackground").Invoke(svc, new object?[] { design, info }));
+        }
+        finally { try { File.Delete(png); } catch { /* 지워지면 그만 */ } }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ③링크 — 링크로 울타리를 넘지 못한다 (2차 재검증 R-10)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 <b>검증팀 2차 재검증 R-10 가설을 실측으로 바꾼다.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>Path.GetFullPath</c> 는 링크를 풀지 않는다. 그래서 허용 폴더 <b>안에</b>
+    ///   링크 폴더 하나를 만들어 두면 경로 가둠은 <b>통과하고</b> 실제 파일은 바깥이 된다.
+    /// 🔴 이 시험은 <b>건너뛰지 않는다</b> — 윈도는 junction(권한 불필요), 그 밖은
+    ///   디렉터리 심볼릭 링크로 <b>같은 축</b>을 잰다. 못 만들면 <b>빨개진다</b>,
+    ///   「못 쟀다」를 초록으로 감추지 않는다(게이트 31번+ 사고).
+    /// </remarks>
+    [Fact(DisplayName = "축③링크 🔴 허용 폴더 안의 **링크**를 지나 바깥 그림을 읽지 못한다(R-10)")]
+    public void Axis3_LinkInsideRoot_CannotEscape()
+    {
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+        Directory.CreateDirectory(root);
+
+        // 바깥에 **멀쩡한** PNG — 확장자·존재·크기·디코드를 전부 통과한다.
+        //   그래야 빨개지는 이유가 **링크 울타리 하나**로 좁혀진다.
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"hitpan-link-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDir);
+        File.WriteAllBytes(Path.Combine(outsideDir, "form.png"), Convert.FromBase64String(OnePixelPngBase64));
+
+        var link = Path.Combine(root, $"gate-link-{Guid.NewGuid():N}");
+        try
+        {
+            MakeDirectoryLink(link, outsideDir);
+
+            // 울타리 안처럼 보이는 경로지만, 실제 파일은 바깥이다.
+            var sneaky = Path.Combine(link, "form.png");
+            Assert.True(File.Exists(sneaky), "링크가 안 걸렸다 — 이 시험은 아무것도 재지 못한다.");
+
+            var svc = MakeService();
+            Assert.Null(PrivateMethod("TryLoadFormBackground").Invoke(svc, new object?[] { sneaky }));
+        }
+        finally
+        {
+            try { Directory.Delete(link); } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
+            try { Directory.Delete(outsideDir, true); } catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
+        }
+    }
+
+    /// <summary>윈도는 junction(권한 불필요), 그 밖은 디렉터리 심볼릭 링크.</summary>
+    private static void MakeDirectoryLink(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return;
+        }
+
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe",
+            $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var err = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        Assert.True(Directory.Exists(link), $"junction 을 만들지 못했다 — {err}");
     }
 }

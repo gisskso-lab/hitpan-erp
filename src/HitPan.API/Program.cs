@@ -661,7 +661,26 @@ app.Use(async (ctx, next) =>
             //     ⚠️ `daum.net` 을 지우지 않고 남겨 둔다 — 카카오가 옛 도메인으로도 서비스할 수 있고,
             //       한 줄 더 있다고 손해가 없다. 반대로 지웠다가 옛 경로가 살아 있으면 또 막힌다.
             //   ⚠️ 넓게 열지 마라 — `frame-src https:` 같은 전체 허용은 **보안 후퇴**다.
-            "frame-src 'self' https://t1.daumcdn.net https://postcode.map.kakao.com https://postcode.map.daum.net; " +
+            // 🔴 [2026-10-24 4차 봉합 — `blob:`] 사장님 1.3.61 실측: 양식 미리보기 틀에
+            //   **2026-08-20 과 똑같은 문구**가 떴다 — *"이 콘텐츠는 차단되었습니다."*
+            //   [무엇을 놓쳤나] 미리보기는 서버가 만든 PDF 를 받아 **브라우저 안에서 Blob 으로
+            //     만들고 그 `blob:` 주소를 틀에 넣는다.** 위 목록은 **바깥 도메인만** 적혀 있어
+            //     `default-src 'self'` 가 그대로 적용됐고, `blob:` 은 `'self'` 가 아니라 막혔다.
+            //   [왜 안전한가] `blob:` 은 **우리 문서가 방금 만든 것만** 가리킨다. 바깥에서
+            //     주소를 넣어 보낼 수 없고 출처를 넘지도 않는다.
+            //     ⇒ `frame-src https:` 같은 **전체 허용과 전혀 다르다**(그건 여전히 금지).
+            //   ⚠️ 틀만 열고 끝내지 않았는지 확인할 것 — PDF 는 브라우저 내장 뷰어가 그리므로
+            //     안에서 우리 CSP 를 더 타지 않는다. 그래서 이번엔 `frame-src` 한 축이면 된다.
+            //     (우편번호 창과 다른 점이다 — 거기는 `about:blank` 에 스크립트를 써 넣었다.)
+            "frame-src 'self' blob: https://t1.daumcdn.net https://postcode.map.kakao.com https://postcode.map.daum.net; " +
+            // 🔴 [2026-10-24 같은 봉합의 둘째 축 — `object-src`] 위 주석의 경고
+            //   *"`frame-src` 만 열고 끝내면 이 자리에 또 온다"* 를 이번엔 먼저 막는다.
+            //   [왜] `object-src` 는 **선언이 없었다** ⇒ `default-src 'self'` 가 적용된다.
+            //     브라우저에 따라 PDF 를 `<object>`·`<embed>` 로 폴백해 띄우는데,
+            //     그러면 틀은 열렸는데 **안이 또 빈 채로** 뜬다(사장님이 본 그 화면).
+            //   [범위] `'self' blob:` 만. 바깥 도메인은 **한 곳도 안 연다** —
+            //     플러그인 출처를 넓히는 것은 보안 후퇴다.
+            "object-src 'self' blob:; " +
             "frame-ancestors 'none'";
         h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     }

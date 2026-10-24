@@ -61,6 +61,16 @@ public sealed class PdfRenderService : IPdfRenderService
         var data = overrides?.UseSampleData == true
             ? BuildSampleSnapshot(documentType, overrides)
             : await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
+
+        // 🔴 3차검증 R-11 봉합 — **DB 에 없는 전표면 여기서 끝낸다.**
+        //   저장 안 한 전표의 id 는 화면이 만든 GUID 라 DB 에 없고, 종전에는
+        //   빈 스냅샷이 그대로 그려져 **백지**가 떴다. 미리보기 문만 이 값을 세운다.
+        if (ShouldRejectMissing(overrides, data.Found))
+        {
+            throw new KeyNotFoundException(
+                "저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.");
+        }
+
         var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
 
         // 작지② 양식 분기 (사장님 작업지시 2026-05-31)
@@ -72,13 +82,28 @@ public sealed class PdfRenderService : IPdfRenderService
         var template = overrides?.Template is not null
             ? ToTemplateInfo(overrides.Template)
             : await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+
+        // 🔴 전표 인쇄 미리보기 옵션 (사장님 결재 2026-10-24 결-2 · 7종 공통).
+        //   저장된 양식을 **그대로 쓰고** 그 위에 **이번 한 번만** 바꿀 값을 얹는다.
+        //   🔴 저장하지 않는다 — 고객이 미리보기에서 만진 값이 양식으로 굳으면 안 된다.
+        //   🔴 옵션이 null 이면 아무것도 안 바뀐다 ⇒ **지금 인쇄와 같은 종이**(#1).
+        template = ApplyPrintOptions(template, overrides?.Options);
         var isPreprint = template?.PaperMode == "preprint";
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
         var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
-        var bgImage = TryLoadFormBackground(template?.BackgroundImageUrl);
+        // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
+        //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
+        //     → 미리보기 배경으로 깔려 그 위에 필드 위치를 mm 로 맞춘다」 이고,
+        //     §13-10 은 순백지에 업체 그림 찍기를 **「등재만 · 이번에 안 한다」** 로 못박았다.
+        //     그런데 나는 **공용 인쇄 흐름**에 깔아 정반대를 넣었다(검증팀 반려 R-1).
+        //   [그대로 두면] 양식용지 고객은 **이미 인쇄된 종이 위에 그림이 또 찍혀**
+        //     이중 인쇄가 되고(§13-5 합격선 1 위반), 순백지 9종에도 업체 그림이 찍힌다.
+        //   [그래서] 미리보기 경로에서만 그린다. 실인쇄 PDF 에는 **0건** —
+        //     이메일·팩스·전표 인쇄는 전부 종전과 똑같다(#1).
+        var bgImage = ResolveFormBackground(overrides, template);
         var showHeader = template?.ShowCompanyLogo ?? true;
         var showBorder = template?.ShowBorder ?? true;
         var marginTop = (float)(template?.MarginTopMm ?? 20);
@@ -292,9 +317,33 @@ public sealed class PdfRenderService : IPdfRenderService
     }
 
     // ─── DB lookup ─────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 <b>이 미리보기를 막아야 하나</b> — 3차검증 R-11 의 판정 한 자리.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 함수로 떼어 놨나</b> — 이 판정은 <b>DB 없이도 재야 한다.</b> 안에 박아 두면
+    ///   「DB 가 붙은 환경에서만 잴 수 있다」가 되고, 그러면 게이트가 또 비어 있게 된다.
+    ///   그래서 <b>인자 두 개로 떼어</b> 네 경우를 표로 잰다.
+    /// <para>
+    /// 🟢 <c>RequireExisting=false</c>(「인쇄」·「이메일」·「팩스」) → <b>절대 막지 않는다.</b>
+    ///    종전처럼 안내문 종이가 나간다. 여기서 막으면 전표가 안 나가 P0 다(#20).
+    /// 🟢 <c>RequireExisting=true</c> + 못 찾음 → <b>막는다.</b> 백지를 보여주지 않는다.
+    /// 🟢 예시 자료(<c>UseSampleData</c>)는 애초에 DB 를 안 보므로 <b>항상 통과</b>다 —
+    ///    양식정보설정 미리보기가 이 문에 걸리면 안 된다.
+    /// </para>
+    /// </remarks>
+    internal static bool ShouldRejectMissing(PdfPreviewOverrides? overrides, bool found)
+    {
+        if (overrides?.RequireExisting != true) return false;
+        if (overrides.UseSampleData) return false;
+        return !found;
+    }
     private async Task<DocumentSnapshot> LoadDocumentAsync(string tenantId, string docType, string docId, CancellationToken ct)
     {
-        // (문서별 SQL 다름 — 핵심 6종만 분기)
+        // 🔴 문서별 SQL 이 다르다. 6종 → **8종**(결재 ㉮ — 매입·매출반품 로더 추가 20261024작).
+        //   여기 없는 종은 아래 fallback 이 **빈 종이**를 돌려준다. 그래서 화면에
+        //   「인쇄」 단추를 달 때는 **이 표에 있는지 먼저 본다** — 없으면 고객이 백지를 받는다.
         return docType switch
         {
             "quotation" => await LoadQuotationAsync(tenantId, docId, ct).ConfigureAwait(false),
@@ -303,7 +352,10 @@ public sealed class PdfRenderService : IPdfRenderService
             "tax_invoice" => await LoadTaxInvoiceAsync(tenantId, docId, ct).ConfigureAwait(false),
             "purchase_order" => await LoadPurchaseOrderAsync(tenantId, docId, ct).ConfigureAwait(false),
             "purchase_receipt" => await LoadPurchaseReceiptAsync(tenantId, docId, ct).ConfigureAwait(false),
-            _ => new DocumentSnapshot { DocType = docType, DocNo = docId }
+            "purchase_return" => await LoadPurchaseReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
+            "sales_return" => await LoadSalesReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
+            // 🔴 로더가 없는 종 — 이 종이는 **백지**다. Found = false 로 올려 미리보기가 막는다(R-11).
+            _ => new DocumentSnapshot { DocType = docType, DocNo = docId, Found = false }
         };
     }
 
@@ -537,6 +589,72 @@ public sealed class PdfRenderService : IPdfRenderService
         return await LoadByQueriesAsync(tenantId, id, "purchase_receipt", head, lines, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 🔴 매입반품 자료 로더 — 결재 ㉮(20261021작 §19-1 · 백지 4종을 로더까지 이번 차수).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 이번에 붙이나</b> — 10/24 차수가 <b>반품처리 화면에 「인쇄」 단추를 달았다.</b>
+    ///   로더가 없으면 그 단추가 <b>빈 종이</b>를 띄운다(미리보기가 곧 인쇄물이므로 종이도 백지).
+    ///   「없는 종」이 아니라 <b>고객이 누를 수 있는 단추</b>가 되는 순간 백지는 사고다.
+    /// 🔴 칸 이름은 출하 DDL <c>installer/hitpan_db_clean.sql</c> 을 보고 썼다(#13·#36).
+    ///   <c>purchase_returns.total_amount</c> 는 <b>공급가</b>다 — 다른 5종과 같은 규약.
+    ///   품목 이름 칸이 없어 <c>items</c> 를 JOIN 한다(나머지 로더와 동일).
+    /// </remarks>
+    private async Task<DocumentSnapshot> LoadPurchaseReturnAsync(string tenantId, string id, CancellationToken ct)
+    {
+        const string head = """
+            SELECT pr.return_no AS DocNo, pr.return_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(pr.total_amount,0) AS TotalSupply, COALESCE(pr.vat_amount,0) AS TotalVat,
+                   COALESCE(pr.total_amount,0) + COALESCE(pr.vat_amount,0) AS TotalAmount,
+                   pr.memo AS Remark
+            FROM purchase_returns pr LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
+            WHERE pr.tenant_id = @TenantId AND pr.return_id = @Id
+            """;
+        const string lines = """
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
+                   COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
+                   COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
+            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id
+            WHERE pri.tenant_id = @TenantId AND pri.return_id = @Id ORDER BY pri.return_item_id
+            """;
+        return await LoadByQueriesAsync(tenantId, id, "purchase_return", head, lines, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🔴 매출반품 자료 로더 — 결재 ㉮. 사장님 반려 ③ 의 「반품처리」는 매입·매출 <b>둘 다</b>다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>sales_return_items.unit_price</c> 는 <b>반품 당시 환불 단가</b>이고
+    ///   <c>original_unit_price</c> 는 원거래 단가 복사본이다(DDL 주석). 종이에는
+    ///   <b>환불 단가</b>를 찍는다 — 고객에게 돌려주는 돈이 그것이다.
+    /// 🔴 <c>is_loss</c>(파손 로스)는 재고 반영 축이라 종이에 안 찍는다. 등재만.
+    /// </remarks>
+    private async Task<DocumentSnapshot> LoadSalesReturnAsync(string tenantId, string id, CancellationToken ct)
+    {
+        const string head = """
+            SELECT sr.return_no AS DocNo, sr.return_date AS DocDate,
+                   p.partner_name AS PartnerName, p.biz_no AS PartnerBusinessNo,
+                   p.address AS PartnerAddress, p.manager_name AS PartnerContact,
+                   COALESCE(sr.total_amount,0) AS TotalSupply, COALESCE(sr.vat_amount,0) AS TotalVat,
+                   COALESCE(sr.total_amount,0) + COALESCE(sr.vat_amount,0) AS TotalAmount,
+                   sr.memo AS Remark
+            FROM sales_returns sr LEFT JOIN partners p ON p.partner_id = sr.partner_id AND p.tenant_id = sr.tenant_id
+            WHERE sr.tenant_id = @TenantId AND sr.return_id = @Id
+            """;
+        const string lines = """
+            SELECT i.item_name AS ItemName, i.spec AS Spec,
+                   COALESCE(sri.qty,0) AS Qty, COALESCE(sri.unit_price,0) AS UnitPrice,
+                   COALESCE(sri.supply_amount,0) AS Supply, COALESCE(sri.vat_amount,0) AS Vat,
+                   COALESCE(sri.supply_amount,0) + COALESCE(sri.vat_amount,0) AS Total
+            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id
+            WHERE sri.tenant_id = @TenantId AND sri.return_id = @Id ORDER BY sri.return_item_id
+            """;
+        return await LoadByQueriesAsync(tenantId, id, "sales_return", head, lines, ct).ConfigureAwait(false);
+    }
+
     private async Task<DocumentSnapshot> LoadByQueriesAsync(string tenantId, string id, string docType, string headSql, string lineSql, CancellationToken ct)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -554,7 +672,9 @@ public sealed class PdfRenderService : IPdfRenderService
         }
         if (h is null)
         {
-            return new DocumentSnapshot { DocType = docType, DocNo = id, DocDate = DateTime.Today, PartnerName = "(원본 문서를 찾을 수 없습니다)" };
+            // 🔴 Found = false — 미리보기는 이걸 보고 **백지를 띄우지 않는다**(3차검증 R-11).
+            //   「인쇄」·「이메일」의 안내문 종이 동작은 **한 글자도 안 바뀐다**(#1).
+            return new DocumentSnapshot { DocType = docType, DocNo = id, DocDate = DateTime.Today, PartnerName = "(원본 문서를 찾을 수 없습니다)", Found = false };
         }
         h.DocType = docType;
         try
@@ -605,6 +725,19 @@ public sealed class PdfRenderService : IPdfRenderService
     // ─── 내부 모델 ─────────────────────────────────────
     private sealed class DocumentSnapshot
     {
+
+        /// <summary>
+        /// 🔴 <b>DB 에서 실제로 찾았나</b> — 못 찾았으면 <c>false</c>(2026-10-24 3차검증 R-11).
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b>왜 칸을 더하나</b> — 못 찾으면 종전에도 <b>빈 스냅샷</b>을 돌려줬다.
+        ///   그 종이는 「인쇄」·「이메일」 쪽에서는 <b>안내문 종이</b>로 쓰여 왔으므로 그대로 둔다(#1).
+        ///   그런데 <b>미리보기</b>에서는 그게 <b>백지</b>로 보인다. 저장 안 한 전표의
+        ///   <c>_draft.Id</c> 는 화면이 만든 GUID 라 DB 에 없고, 창문은 「비었나」만 봤다
+        ///   ⇒ GUID 는 통과하고 <b>백지가 떴다</b>. 「찾았나」를 <b>글자로 추측하지 않고</b>
+        ///   이 칸으로 들고 올라간다.
+        /// </remarks>
+        public bool Found { get; set; } = true;
         public string DocType { get; set; } = "";
         public string DocNo { get; set; } = "";
         public DateTime DocDate { get; set; } = DateTime.Today;
@@ -1619,32 +1752,147 @@ public sealed class PdfRenderService : IPdfRenderService
             });
     }
     /// <summary>
-    /// 🔴 업체 양식지 그림을 읽는다 (20261024 사장님 오더 · §13).
-    /// 고객이 쓰던 종이를 스캔해 올린 그림을 <b>종이 밑에 깔기</b> 위한 것이다.
+    /// 🔴 <b>양식지 그림을 깔지 말지 정하는 유일한 자리</b> (반려 R-1·R-3 봉합).
     /// </summary>
     /// <remarks>
-    /// 🔴 <b>읽기만 한다</b> — 파일 보관소·업로드 통로는 만들지 않는다(범위 밖 · 직인과 같은 자리).
-    /// 🔴 <b>못 읽으면 종전과 똑같이 그린다.</b> 고객 종이를 못 내는 것보다, 그림 없이라도
-    ///   내는 것이 맞다. 빈 catch 는 쓰지 않는다(#15) — 왜 안 깔렸는지 로그로 남는다.
-    /// 🔴 <c>http(s)</c> 주소는 <b>안 받는다.</b> 작성기가 바깥 그물로 나가면 인쇄가
-    ///   남의 서버 응답 시간에 묶인다(고객 PC 는 끊길 수 있다). 보관소가 생기면 그때 로컬 경로다.
+    /// 🔴 <b>왜 함수로 뽑았나</b> — 종전에는 이 판단이 <c>RenderDocumentAsync</c> 본문에
+    ///   한 줄로 묻혀 있어 <b>시험이 물 수가 없었다.</b> 검증팀 실측: 그리는 줄과 로더를
+    ///   <b>통째로 빼도 게이트 13/13 이 초록</b>이었다(반려 R-3 · 결재 ㉯ 조건 3 미충족).
+    ///   ⇒ 판단을 <b>부를 수 있는 한 자리</b>로 모아 시험이 직접 재게 한다.
+    /// 🔴 <b>규칙은 하나다</b> — <b>미리보기일 때만</b> 깐다(§13-8).
+    ///   실인쇄 PDF 에는 <b>0건</b>이다. 양식용지는 종이에 이미 인쇄돼 있어 또 찍으면
+    ///   <b>이중 인쇄</b>가 되고, 순백지는 <b>히트판 양식</b>이라 업체 그림이 들어갈 자리가 아니다
+    ///   (§13-7·§13-10 — 그건 <b>등재만</b>).
+    /// </remarks>
+    /// <summary>
+    /// 🔴 저장된 양식 위에 <b>이번 인쇄에만</b> 쓸 옵션을 얹는다 (결-2 · 7종 공통).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>옵션이 없으면 받은 그대로 돌려준다</b> — 기존 인쇄 경로는 한 글자도 안 바뀐다(#1).
+    /// 🔴 <b>양식 행이 아예 없을 때도 옵션은 먹어야 한다</b>. 고객이 「기본 양식 만들기」를
+    ///   안 눌렀어도 인쇄 매수는 고를 수 있어야 하기 때문이다([1-V] E-7).
+    /// 🔴 <b>저장하지 않는다</b> — 돌려주는 것은 이번 한 장을 그릴 입력일 뿐이다.
+    /// </remarks>
+    private static FormTemplateInfo? ApplyPrintOptions(FormTemplateInfo? template, PrintOptionOverrides? opt)
+    {
+        if (opt is null) return template;
+        if (opt.PrintCopyMode is null && opt.ShowTearLine is null) return template;
+
+        // 양식 행이 없으면 기본값 한 벌을 만들어 거기에 얹는다(E-7).
+        var t = template ?? new FormTemplateInfo();
+
+        if (!string.IsNullOrWhiteSpace(opt.PrintCopyMode)) t.PrintCopyMode = opt.PrintCopyMode!;
+        if (opt.ShowTearLine is not null) t.ShowTearLine = opt.ShowTearLine.Value;
+        return t;
+    }
+
+    private byte[]? ResolveFormBackground(PdfPreviewOverrides? overrides, FormTemplateInfo? template)
+    {
+        // 🔴 이 한 줄이 실인쇄를 지킨다. 빼면 고객 종이에 그림이 또 찍힌다.
+        // 🔴 [재검증 C-3 봉합] 종전에는 `overrides is null` 로 **대리 판정**했다.
+        //   전표 인쇄 미리보기도 overrides 를 타므로, 그 종이에 배경이 깔리면
+        //   **미리보기엔 그림이 있고 인쇄물엔 없다** ⇒ 합격선 ⑤ 가 거짓이 된다.
+        //   ⇒ **양식 설계 미리보기일 때만** 깐다.
+        if (overrides?.IsFormDesignPreview != true) return null;
+        return TryLoadFormBackground(template?.BackgroundImageUrl);
+    }
+
+    /// <summary>
+    /// 🔴 업체 양식지 그림을 읽는다 — <b>미리보기 배경 전용</b> (§13-8).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>[2026-10-24 반려 R-2·R-4 봉합]</b> 종전 판은 두 가지가 틀렸다.
+    /// <para>
+    /// <b>R-2 — 「못 읽으면 종전과 똑같이」가 거짓이었다.</b> try/catch 가 <b>파일 읽기만</b>
+    ///   감쌌고, 그림을 실제로 <b>그리는</b> <c>GeneratePdf()</c> 는 try 밖이었다.
+    ///   검증팀 실측: 디코드 안 되는 바이트에 QuestPDF 가 <b>3/3 예외</b>를 던졌다.
+    ///   ⇒ <c>.pdf</c>·<c>.svg</c>·0바이트를 가리키면 그 양식의 <b>인쇄·이메일·팩스가 전부 500</b>
+    ///   이 된다(#20 — 워크플로우 흐름은 절대 안 끊긴다).
+    ///   🔴 그래서 <b>여기서 미리 디코드해 본다.</b> 여기서 터지면 <c>null</c> 을 돌려주고,
+    ///   종이는 <b>그림 없이</b> 나간다. 그리는 자리까지 끌고 가지 않는다.
+    /// </para>
+    /// <para>
+    /// <b>R-4 — 경로가 안 갇혀 있었다.</b> 고객이 본문에 적은 문자열로 서버 파일을
+    ///   아무거나 읽을 수 있었다(UNC·<c>file://</c> 가 http 차단을 비켜 갔다).
+    ///   ⇒ <b>정해진 폴더 밑</b>만 · <b>그림 확장자</b>만 · <b>크기 상한</b>까지 건다
+    ///   (§13-5 합격선 5 — 형식·크기 제한).
+    /// </para>
+    /// 🔴 <b>읽기만 한다</b> — 보관소·업로드 통로는 여전히 만들지 않는다(범위 밖).
     /// </remarks>
     private byte[]? TryLoadFormBackground(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return null;
 
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        // ① 바깥 그물 금지 — 인쇄가 남의 서버 응답 시간에 묶이면 고객 장사가 멈춘다.
+        //    UNC(\호스트\…) 도 같은 이유로 막는다(R-4 — http 차단을 비켜 가던 길).
+        if (url.Contains("://", StringComparison.Ordinal) || url.StartsWith(@"\\", StringComparison.Ordinal))
         {
-            _logger.LogWarning("[PDF] 양식지 그림이 바깥 주소다 — 깔지 않는다. 로컬 경로만 받는다.");
+            _logger.LogWarning("[PDF] 양식지 그림 주소가 바깥·공유 경로다 — 깔지 않는다.");
+            return null;
+        }
+
+        // ② 그림 확장자만. .pdf·.svg·.exe 따위는 여기서 끝낸다.
+        var ext = Path.GetExtension(url);
+        if (!AllowedBackgroundExts.Contains(ext))
+        {
+            _logger.LogWarning("[PDF] 양식지 그림 형식이 아니다({Ext}) — 깔지 않는다.", ext);
             return null;
         }
 
         try
         {
-            if (File.Exists(url)) return File.ReadAllBytes(url);
-            _logger.LogWarning("[PDF] 양식지 그림 파일이 없다 — 그림 없이 그린다.");
-            return null;
+            // ③ 경로 가둠 — 정해진 폴더 밑이 아니면 안 읽는다(R-4).
+            //    `..\..\` 같은 거슬러 오르기는 FullPath 로 펴서 비교하므로 통하지 않는다.
+            var full = Path.GetFullPath(url);
+            // 🔴 [2026-10-24 재검증 R-4 봉합] 종전에는 **구분자 없이** 앞글자만 비교해
+            //   **형제 폴더가 통째로 통과**했다(검증팀 실측: `…\form-backgrounds-probe\a.png`
+            //   가 70바이트 읽혔다). 뒤에 구분자를 붙여 **그 폴더 안인지**를 본다.
+            var root = Path.GetFullPath(FormBackgroundRoot).TrimEnd(Path.DirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림이 허용 폴더 밖이다 — 깔지 않는다.");
+                return null;
+            }
+
+            if (!File.Exists(full))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 파일이 없다 — 그림 없이 그린다.");
+                return null;
+            }
+
+            // ③-2 🔴 [2026-10-24 재검증 R-10 봉합] 링크로 울타리를 넘는 길을 막는다.
+            //   `Path.GetFullPath` 는 **링크를 풀지 않는다.** 폴더 안에 junction 하나를
+            //   만들어 두면 ③ 의 울타리는 통과하고 **실제 파일은 바깥**이 된다.
+            if (PassesThroughLink(full, root))
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 경로가 링크를 지난다 — 깔지 않는다.");
+                return null;
+            }
+
+            // ④ 크기 상한 — 거대 그림은 종이 한 장 때문에 PC 메모리를 먹는다.
+            var len = new FileInfo(full).Length;
+            if (len <= 0 || len > MaxBackgroundBytes)
+            {
+                _logger.LogWarning("[PDF] 양식지 그림 크기가 범위 밖이다({Len} bytes) — 깔지 않는다.", len);
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(full);
+
+            // ⑤ 🔴 여기서 **미리 그려 본다**(R-2). 작성기가 받아들이지 못하는 바이트면
+            //    지금 터뜨리고 null 로 돌려준다 — 인쇄 한복판에서 터지면 전표가 안 나간다.
+            try
+            {
+                _ = QuestPDF.Infrastructure.Image.FromBinaryData(bytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PDF] 양식지 그림을 작성기가 못 읽는다 — 그림 없이 그린다.");
+                return null;
+            }
+
+            return bytes;
         }
         catch (Exception ex)
         {
@@ -1652,6 +1900,52 @@ public sealed class PdfRenderService : IPdfRenderService
             return null;
         }
     }
+
+    /// <summary>
+    /// 🔴 경로가 <b>링크(symlink·junction)</b> 를 지나는가 — 지나면 읽지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 필요한가</b> — 검증팀 2차 재검증 R-10: <c>Path.GetFullPath</c> 는 링크를
+    ///   풀지 않는다. 그래서 허용 폴더 <b>안에</b> junction 을 하나 만들어 두면
+    ///   앞글자 비교는 통과하고 실제 파일은 디스크 어디든 될 수 있다.
+    /// 🔴 <b>울타리 자체(root)는 보지 않는다</b> — 그 자리는 관리자가 정한 곳이고,
+    ///   거기가 링크여도 그것은 관리자의 뜻이다. 보는 것은 <b>울타리 안쪽</b>뿐이다.
+    /// 🔴 못 재면 <b>막는 쪽</b>으로 떨어진다 — 종이는 그림 없이 나가고 전표는 산다(#20).
+    /// </remarks>
+    private static bool PassesThroughLink(string fullPath, string root)
+    {
+        var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
+
+        var file = new FileInfo(fullPath);
+        if (file.LinkTarget is not null) return true;
+
+        for (var dir = file.Directory;
+             dir is not null && dir.FullName.Length > rootNoSep.Length;
+             dir = dir.Parent)
+        {
+            if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
+            if (dir.LinkTarget is not null) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>양식지 그림으로 받아 주는 형식. 🔴 이 밖은 작성기까지 가지 않는다(R-2).</summary>
+    private static readonly HashSet<string> AllowedBackgroundExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".bmp", ".webp" };
+
+    /// <summary>양식지 그림 크기 상한 — 20MB. 종이 한 장이 PC 메모리를 먹으면 안 된다.</summary>
+    private const long MaxBackgroundBytes = 20L * 1024 * 1024;
+
+    /// <summary>
+    /// 🔴 양식지 그림을 읽어 올 수 있는 <b>유일한 폴더</b> (R-4 경로 가둠).
+    /// 보관소·업로드 통로가 생기면 그 통로가 여기에 넣는다 — 그때 <b>이 코드는 안 바뀐다.</b>
+    /// </summary>
+    private static string FormBackgroundRoot =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "HitPan", "form-backgrounds");
+
 
 
     /// <summary>
