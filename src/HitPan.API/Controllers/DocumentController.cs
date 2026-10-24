@@ -816,7 +816,9 @@ public class DocumentController : ControllerBase
     [HttpPost("{type}/{id}/preview-pdf")]
     [Authorize]
     public async Task<IActionResult> PreviewPdf(string type, string id,
-        [FromBody] DocumentPreviewRequest? req, CancellationToken ct = default)
+        [FromBody] DocumentPreviewRequest? req,
+        // 🔴 기록기는 **이 문만** 받는다 — 생성자를 건드리면 다른 문 전부가 영향을 받는다(#1).
+        [FromServices] ILogger<DocumentController> logger, CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
@@ -831,11 +833,26 @@ public class DocumentController : ControllerBase
         {
             // 🔴 전표 미리보기는 **진짜 전표**를 그린다. 예시 자료가 아니다.
             UseSampleData = false,
+            // 🔴 3차검증 R-11 봉합 — **DB 에 없는 전표면 백지를 띄우지 않는다.**
+            //   저장 안 한 전표의 id 는 화면이 만든 GUID 라 DB 에 없다. 단추 8곳 말고
+            //   **이 문 자체**를 세워야 API 직타·로더 없는 종까지 같이 막힌다.
+            RequireExisting = true,
             Options = req?.Options
         };
 
-        var (bytes, fileName) = await _pdfRenderService
-            .RenderDocumentAsync(tenantId, documentType, id, overrides, ct).ConfigureAwait(false);
+        byte[] bytes;
+        string fileName;
+        try
+        {
+            (bytes, fileName) = await _pdfRenderService
+                .RenderDocumentAsync(tenantId, documentType, id, overrides, ct).ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            // 🔴 사람 말로 돌려준다 — 「미리보기를 그리지 못했습니다(404)」는 고객에게 뜻이 없다.
+            logger.LogWarning(ex, "[Preview] 저장되지 않은 전표 미리보기 요청. type={Type} id={Id}", type, id);
+            return NotFound(new { message = ex.Message });
+        }
 
         // 🔴 inline — 틀 안에서 바로 보여야 한다(내려받기면 미리보기가 아니다).
         Response.Headers["Content-Disposition"] = "inline";

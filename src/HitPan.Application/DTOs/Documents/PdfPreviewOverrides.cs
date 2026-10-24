@@ -65,6 +65,26 @@ public sealed class PdfPreviewOverrides
     /// 🔴 이번 인쇄에만 적용할 옵션 (결-2 · 7종 공통). <b>null 이면 저장된 양식 그대로</b>.
     /// </summary>
     public PrintOptionOverrides? Options { get; set; }
+
+    /// <summary>
+    /// 🔴🔴 <b>DB 에 없는 전표면 그리지 말고 막는다</b> (3차검증 R-11 봉합).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 생겼나</b> — 저장 안 한 전표의 <c>_draft.Id</c> 는 <b>화면이 만든 GUID</b> 다.
+    ///   DB 에 없다. 창문은 <c>IsNullOrWhiteSpace(docId)</c> 하나뿐이라 GUID 는 통과하고
+    ///   <c>WHERE return_id='&lt;GUID&gt;'</c> 가 0행 ⇒ <b>미리보기도 종이도 백지</b>였다.
+    ///   로더를 붙여 막으려던 사고가 <b>다른 문으로 그대로 들어왔다</b>(검증팀 3차 R-11).
+    /// <para>
+    /// 🔴 <b>왜 화면이 아니라 여기서 막나</b> — 문이 하나가 아니다. 단추 8곳 말고
+    ///   <b>API 직타</b>도 있고, 로더가 없는 종(면세계산서·입금표)도 같은 백지로 떨어진다.
+    ///   <b>한 자리에서 막아야</b> 다음 종이 늘 때 또 안 빈다.
+    /// </para>
+    /// <para>
+    /// 🔴 <c>true</c> 는 <b>미리보기 문만</b> 세운다. 「인쇄」·「이메일」·「팩스」는 종전처럼
+    ///   <b>안내문 종이</b>가 나간다 — 그 동작은 한 글자도 안 바꿨다(#1 · #20 P0).
+    /// </para>
+    /// </remarks>
+    public bool RequireExisting { get; set; }
 }
 
 /// <summary>

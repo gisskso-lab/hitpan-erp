@@ -113,7 +113,11 @@
             {
                 // 🔴 조용히 실패하지 않는다 — "눌렀는데 아무 일도 안 난다" 를 겪으면
                 //    고객은 무엇이 틀렸는지 알 길이 없다.
-                Snackbar.Add($"미리보기를 그리지 못했습니다. ({(int)resp.StatusCode})", Severity.Error);
+                // 🔴 3차검증 R-11 — 서버가 **사람 말**을 보내면 그 말을 그대로 보여준다.
+                //    「(404)」는 고객에게 뜻이 없다. 「저장된 전표가 아닙니다」가 뜻이다.
+                var said = await ReadServerMessageAsync(resp);
+                Snackbar.Add(said ?? $"미리보기를 그리지 못했습니다. ({(int)resp.StatusCode})",
+                    Severity.Error);
                 return;
             }
 
@@ -182,6 +186,32 @@
         }
     }
 
+
+    /// <summary>
+    /// 🔴 서버가 보낸 <c>message</c> 를 꺼낸다 — 없으면 <c>null</c>(3차검증 R-11).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 못 읽어도 <b>터지지 않는다</b> — 읽기에 실패하면 숫자 안내로 떨어진다.
+    ///   안내문을 꺼내다가 예외가 나면 「미리보기가 안 된다」가 「화면이 죽는다」가 된다.
+    /// </remarks>
+    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            var doc = await resp.Content.ReadFromJsonAsync<ServerSaid>();
+            return string.IsNullOrWhiteSpace(doc?.Message) ? null : doc!.Message;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DocPreview] 서버 안내문을 읽지 못했습니다: {ex.Message}");
+            return null;
+        }
+    }
+
+    private sealed class ServerSaid
+    {
+        public string? Message { get; set; }
+    }
     private async Task CloseAsync()
     {
         await RevokeAsync();

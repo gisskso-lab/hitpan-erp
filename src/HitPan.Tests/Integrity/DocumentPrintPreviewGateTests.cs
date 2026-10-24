@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Reflection;
 using HitPan.Application.DTOs.Documents;
 using HitPan.Application.Services;
@@ -227,27 +228,104 @@ public class DocumentPrintPreviewGateTests
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 🔴 단추를 단 종은 <b>자료 로더가 있어야</b> 한다. 없으면 <c>LoadDocumentAsync</c> 의
-    ///   fallback 이 <b>빈 종이</b>를 돌려주고, 미리보기가 곧 인쇄물이므로 종이도 백지다.
+    /// 🔴 <b>손으로 적지 않는다.</b> 화면의 <c>ShowAsync("…")</c> 호출부를 <b>긁어서</b> 종을 모은다.
     /// </summary>
-    public static TheoryData<string> WiredDocTypes() => new()
+    /// <remarks>
+    /// 🔴 <b>왜 바꿨나</b> — 종전에는 종 이름을 이 파일에 <b>손으로 7개</b> 적어 뒀고,
+    ///   그 차수가 새로 단 <c>sales_return</c> 이 <b>목록에 0건</b>이었다. 그래서 그 분기를
+    ///   빼도 <b>42/42 초록</b>이 나왔다 — <b>거짓 통과</b>(검증팀 3차 G-1 · NC-6).
+    ///   손으로 적는 목록은 <b>다음 종에서 또 빈다.</b> 그래서 호출부에서 긁는다.
+    /// 🔴 한 건도 못 긁으면 <b>빨개진다</b> — 「0건이라 통과」를 만들지 않는다.
+    /// </remarks>
+    public static TheoryData<string> WiredDocTypes()
     {
-        "quotation", "sales_order", "delivery", "tax_invoice",
-        "purchase_order", "purchase_receipt", "purchase_return",
-    };
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(WebRoot(), "Pages"),
+                     "*.razor*", SearchOption.AllDirectories))
+        {
+            foreach (Match m in Regex.Matches(File.ReadAllText(file),
+                         @"PrintPreview\.ShowAsync\(\s*""([a-z0-9\-_]+)"""))
+            {
+                found.Add(m.Groups[1].Value);
+            }
+        }
+
+        var data = new TheoryData<string>();
+        foreach (var t in found) data.Add(t);
+        if (found.Count == 0) data.Add("(호출부를 한 건도 못 긁었다 — 축⑥이 비었다)");
+        return data;
+    }
 
     [Theory(DisplayName = "축⑥ 🔴 인쇄 단추를 단 종은 **자료 로더가 있다** — 백지가 안 나간다(결재 ㉮)")]
     [MemberData(nameof(WiredDocTypes))]
-    public void Axis6_WiredTypesHaveLoader(string docType)
+    public void Axis6_WiredTypesHaveLoader(string screenType)
     {
+        // ① 화면이 쓰는 이름(하이픈 꼴)을 서버가 받아 주나 — 실제 그 함수를 불러 본다.
+        var map = typeof(HitPan.API.Controllers.DocumentController)
+            .GetMethod("PrintTypeToDocumentType", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("DocumentController.PrintTypeToDocumentType 이 없다.");
+        var documentType = map.Invoke(null, new object?[] { screenType }) as string;
+        Assert.False(documentType is null,
+            $"화면은 \"{screenType}\" 로 부르는데 서버 문이 그 이름을 모른다 — 창이 400 으로 막힌다.");
+
+        // ② 그 종에 **자료 로더**가 있나 — 없으면 fallback 이 빈 종이를 돌려준다.
         var src = File.ReadAllText(Path.Combine(AppRoot(), "src", "HitPan.Application",
             "Services", "PdfRenderService.cs"));
         var at = src.IndexOf("private async Task<DocumentSnapshot> LoadDocumentAsync", StringComparison.Ordinal);
         Assert.True(at > 0, "LoadDocumentAsync 가 없다.");
         var sw = src.Substring(at, Math.Min(2000, src.Length - at));
-        var upToFallback = sw.Substring(0, Math.Max(0, sw.IndexOf("_ => new DocumentSnapshot", StringComparison.Ordinal)));
+        var cut = sw.IndexOf("_ => new DocumentSnapshot", StringComparison.Ordinal);
+        Assert.True(cut > 0, "LoadDocumentAsync 의 fallback 을 못 찾았다 — 축이 비었다.");
 
-        // 🔴 fallback 앞에 그 종이 적혀 있어야 한다. 뒤면(=없으면) 백지다.
-        Assert.Contains($"\"{docType}\" =>", upToFallback);
+        // 🔴 fallback **앞**에 적혀 있어야 한다. 뒤면(=없으면) 백지다.
+        Assert.Contains($"\"{documentType}\" =>", sw.Substring(0, cut));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 축 ⑦ 저장 안 한 전표는 **백지를 띄우지 않는다** (3차검증 R-11)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 저장 안 한 전표의 id 는 <b>화면이 만든 GUID</b> 라 DB 에 없다. 창문은
+    ///   「비었나」만 봤으므로 GUID 는 통과하고 <b>백지</b>가 떴다(검증팀 3차 R-11).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 축은 <b>DB 없이도 재야 한다</b> — 그래서 판정이 함수로 떼어져 있고,
+    ///   여기서 <b>네 경우를 표로</b> 잰다. 「DB 가 있어야 잴 수 있다」로 두면 또 빈다.
+    /// </remarks>
+    [Theory(DisplayName = "축⑦ 🔴 저장 안 한 전표는 **막는다** · 「인쇄」·「이메일」은 종전대로(R-11)")]
+    // RequireExisting, UseSampleData, found  →  막아야 하나
+    [InlineData(true,  false, false, true)]   // 🔴 미리보기 + DB 에 없다 → 막는다
+    [InlineData(true,  false, true,  false)]  // 미리보기 + 찾았다 → 그린다
+    [InlineData(false, false, false, false)]  // 🔴 「인쇄」·「이메일」 → **절대 막지 않는다**(#20 P0)
+    [InlineData(true,  true,  false, false)]  // 🔴 양식설정 예시 자료 → DB 를 안 보므로 통과
+    public void Axis7_MissingDocument_IsBlockedOnlyInPreview(
+        bool requireExisting, bool useSample, bool found, bool expectReject)
+    {
+        var ov = new PdfPreviewOverrides { RequireExisting = requireExisting, UseSampleData = useSample };
+        var m = PrivateMethod("ShouldRejectMissing");
+        Assert.Equal(expectReject, (bool)m.Invoke(null, new object?[] { ov, found })!);
+    }
+
+    [Fact(DisplayName = "축⑦없음 🔴 인자를 안 주면 **막지 않는다** — 기존 4인자 호출이 안 바뀐다(#1)")]
+    public void Axis7_NoOverrides_NeverBlocks()
+    {
+        var m = PrivateMethod("ShouldRejectMissing");
+        Assert.False((bool)m.Invoke(null, new object?[] { null, false })!);
+        Assert.False((bool)m.Invoke(null, new object?[] { null, true })!);
+    }
+
+    [Fact(DisplayName = "축⑦문 🔴 **미리보기 문이 실제로 그 값을 세운다** — 서비스만 고치면 안 먹는다")]
+    public void Axis7_PreviewEndpoint_SetsRequireExisting()
+    {
+        var src = File.ReadAllText(Path.Combine(AppRoot(), "src", "HitPan.API",
+            "Controllers", "DocumentController.cs"));
+        var at = src.IndexOf("public async Task<IActionResult> PreviewPdf", StringComparison.Ordinal);
+        Assert.True(at > 0, "전표 미리보기 문이 없다.");
+        var body = src.Substring(at, Math.Min(2000, src.Length - at));
+
+        Assert.Contains("RequireExisting = true", body);
+        // 🔴 그리고 **사람 말**로 돌려줘야 한다 — 「(404)」는 고객에게 뜻이 없다.
+        Assert.Contains("KeyNotFoundException", body);
     }
 }

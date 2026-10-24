@@ -61,6 +61,16 @@ public sealed class PdfRenderService : IPdfRenderService
         var data = overrides?.UseSampleData == true
             ? BuildSampleSnapshot(documentType, overrides)
             : await LoadDocumentAsync(tenantId, documentType, documentId, ct).ConfigureAwait(false);
+
+        // 🔴 3차검증 R-11 봉합 — **DB 에 없는 전표면 여기서 끝낸다.**
+        //   저장 안 한 전표의 id 는 화면이 만든 GUID 라 DB 에 없고, 종전에는
+        //   빈 스냅샷이 그대로 그려져 **백지**가 떴다. 미리보기 문만 이 값을 세운다.
+        if (ShouldRejectMissing(overrides, data.Found))
+        {
+            throw new KeyNotFoundException(
+                "저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.");
+        }
+
         var company = await LoadCompanyAsync(tenantId, ct).ConfigureAwait(false);
 
         // 작지② 양식 분기 (사장님 작업지시 2026-05-31)
@@ -307,6 +317,28 @@ public sealed class PdfRenderService : IPdfRenderService
     }
 
     // ─── DB lookup ─────────────────────────────────────
+
+    /// <summary>
+    /// 🔴 <b>이 미리보기를 막아야 하나</b> — 3차검증 R-11 의 판정 한 자리.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 함수로 떼어 놨나</b> — 이 판정은 <b>DB 없이도 재야 한다.</b> 안에 박아 두면
+    ///   「DB 가 붙은 환경에서만 잴 수 있다」가 되고, 그러면 게이트가 또 비어 있게 된다.
+    ///   그래서 <b>인자 두 개로 떼어</b> 네 경우를 표로 잰다.
+    /// <para>
+    /// 🟢 <c>RequireExisting=false</c>(「인쇄」·「이메일」·「팩스」) → <b>절대 막지 않는다.</b>
+    ///    종전처럼 안내문 종이가 나간다. 여기서 막으면 전표가 안 나가 P0 다(#20).
+    /// 🟢 <c>RequireExisting=true</c> + 못 찾음 → <b>막는다.</b> 백지를 보여주지 않는다.
+    /// 🟢 예시 자료(<c>UseSampleData</c>)는 애초에 DB 를 안 보므로 <b>항상 통과</b>다 —
+    ///    양식정보설정 미리보기가 이 문에 걸리면 안 된다.
+    /// </para>
+    /// </remarks>
+    internal static bool ShouldRejectMissing(PdfPreviewOverrides? overrides, bool found)
+    {
+        if (overrides?.RequireExisting != true) return false;
+        if (overrides.UseSampleData) return false;
+        return !found;
+    }
     private async Task<DocumentSnapshot> LoadDocumentAsync(string tenantId, string docType, string docId, CancellationToken ct)
     {
         // 🔴 문서별 SQL 이 다르다. 6종 → **8종**(결재 ㉮ — 매입·매출반품 로더 추가 20261024작).
@@ -322,7 +354,8 @@ public sealed class PdfRenderService : IPdfRenderService
             "purchase_receipt" => await LoadPurchaseReceiptAsync(tenantId, docId, ct).ConfigureAwait(false),
             "purchase_return" => await LoadPurchaseReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
             "sales_return" => await LoadSalesReturnAsync(tenantId, docId, ct).ConfigureAwait(false),
-            _ => new DocumentSnapshot { DocType = docType, DocNo = docId }
+            // 🔴 로더가 없는 종 — 이 종이는 **백지**다. Found = false 로 올려 미리보기가 막는다(R-11).
+            _ => new DocumentSnapshot { DocType = docType, DocNo = docId, Found = false }
         };
     }
 
@@ -639,7 +672,9 @@ public sealed class PdfRenderService : IPdfRenderService
         }
         if (h is null)
         {
-            return new DocumentSnapshot { DocType = docType, DocNo = id, DocDate = DateTime.Today, PartnerName = "(원본 문서를 찾을 수 없습니다)" };
+            // 🔴 Found = false — 미리보기는 이걸 보고 **백지를 띄우지 않는다**(3차검증 R-11).
+            //   「인쇄」·「이메일」의 안내문 종이 동작은 **한 글자도 안 바뀐다**(#1).
+            return new DocumentSnapshot { DocType = docType, DocNo = id, DocDate = DateTime.Today, PartnerName = "(원본 문서를 찾을 수 없습니다)", Found = false };
         }
         h.DocType = docType;
         try
@@ -690,6 +725,19 @@ public sealed class PdfRenderService : IPdfRenderService
     // ─── 내부 모델 ─────────────────────────────────────
     private sealed class DocumentSnapshot
     {
+
+        /// <summary>
+        /// 🔴 <b>DB 에서 실제로 찾았나</b> — 못 찾았으면 <c>false</c>(2026-10-24 3차검증 R-11).
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b>왜 칸을 더하나</b> — 못 찾으면 종전에도 <b>빈 스냅샷</b>을 돌려줬다.
+        ///   그 종이는 「인쇄」·「이메일」 쪽에서는 <b>안내문 종이</b>로 쓰여 왔으므로 그대로 둔다(#1).
+        ///   그런데 <b>미리보기</b>에서는 그게 <b>백지</b>로 보인다. 저장 안 한 전표의
+        ///   <c>_draft.Id</c> 는 화면이 만든 GUID 라 DB 에 없고, 창문은 「비었나」만 봤다
+        ///   ⇒ GUID 는 통과하고 <b>백지가 떴다</b>. 「찾았나」를 <b>글자로 추측하지 않고</b>
+        ///   이 칸으로 들고 올라간다.
+        /// </remarks>
+        public bool Found { get; set; } = true;
         public string DocType { get; set; } = "";
         public string DocNo { get; set; } = "";
         public DateTime DocDate { get; set; } = DateTime.Today;
