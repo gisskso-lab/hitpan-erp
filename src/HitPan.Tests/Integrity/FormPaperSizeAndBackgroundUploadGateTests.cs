@@ -1239,4 +1239,359 @@ public class FormPaperSizeAndBackgroundUploadGateTests
             Console.Error.WriteLine($"[gate cleanup] {ex.Message}");
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 20261025작3 절 가-3 — 축⒥·⒦·⒧·⒨   🔴 [4] 반려 R-2·R-3 봉합판
+    //
+    // 🔴 1차 판은 글자 **순서**를 쟀다. 검증팀이 실제로 뚫었다:
+    //   ⒜ 업로드 묶음을 새 `@if (_form.PaperMode == "preprint")` 로 **다시 감싸면**
+    //      (= 10/24 에 실제로 있었던 「한 칸 옮기기」) **82/82 초록인데 고객은 다시 칸을 못 본다.**
+    //   ⒝ 주소칸·좌표표는 가-1 이 울타리를 하나 더 만든 탓에 **밖으로 통째로 꺼내도 초록**이었고,
+    //      그 축의 음성 대조군은 **실제 파일에서 생길 수 없는 모양**을 합성한 거짓 대조군이었다.
+    // ⇒ 재야 할 것은 순서가 아니라 **「빈 A4 일 때 이 자리가 그려지나」**,
+    //   곧 그 자리를 **감싸는 모든 `@if` 의 합**이다. 그래서 중괄호를 걸어 울타리를 쌓는다.
+    // 🔴 자를 믿지 말고 **자부터 잰다** — 축⒨ 가 이 자를 손으로 만든 모양에 대어 본다.
+    // ══════════════════════════════════════════════════════════════════════
+
+    private const string UploadBlockMarker = "쓰시는 양식용지를 그림으로 올리면";
+    private const string PlainSwitchMarker = "양식용지로 바꾸기";
+    private const string AddressFieldMarker = "배경 이미지 경로";
+    private const string CoordTableMarker = "@foreach (var c in _coords)";
+    private const string PreprintCond = "_form.PaperMode == \"preprint\"";
+
+    /// <summary>이 자리를 감싸고 있는 <c>@if</c> 울타리를 돌려준다 — <c>IsElse</c> 는 반대 갈래.</summary>
+    /// <remarks>
+    /// 🔴 파서가 아니다. 중괄호를 세며 <c>@if (…)</c> 로 열린 블록을 쌓고 <c>}</c> 에서 내린다.
+    ///   문자열 안은 통째로 건너뛴다(안의 중괄호는 코드가 아니다).
+    /// 🔴 못 하는 것: <c>@code</c> 안의 C# <c>if</c> 는 울타리로 세지 않는다(중괄호 깊이만 센다).
+    ///   이 축이 보는 자리는 모두 markup 쪽이라 지금은 참이고, 아니게 되면 여기를 늘려야 한다.
+    /// </remarks>
+    private static List<(string Cond, bool IsElse)> EnclosingGuards(string razor, int target)
+    {
+        var open = new List<(string Cond, bool IsElse, int Depth)>();
+        var depth = 0;
+        string? pending = null;
+        var pendingElse = false;
+        var lastClosed = (Cond: string.Empty, IsElse: false);
+
+        for (var i = 0; i < razor.Length && i < target; i++)
+        {
+            var c = razor[i];
+
+            if (c == '"')
+            {
+                i++;
+                while (i < razor.Length && razor[i] != '"')
+                {
+                    if (razor[i] == '\\') i++;
+                    i++;
+                }
+                continue;
+            }
+
+            if (c == '{')
+            {
+                depth++;
+                if (pending is not null)
+                {
+                    open.Add((pending, pendingElse, depth));
+                    pending = null;
+                    pendingElse = false;
+                }
+                continue;
+            }
+
+            if (c == '}')
+            {
+                for (var k = open.Count - 1; k >= 0; k--)
+                {
+                    if (open[k].Depth != depth) continue;
+                    lastClosed = (open[k].Cond, open[k].IsElse);
+                    open.RemoveAt(k);
+                }
+
+                depth--;
+                continue;
+            }
+
+            if (c == '@' && WordAt(razor, i, "@if"))
+            {
+                var p = razor.IndexOf('(', i);
+                var q = p < 0 ? -1 : RazorMatchParen(razor, p);
+                if (q > 0)
+                {
+                    pending = razor[(p + 1)..q].Trim();
+                    pendingElse = false;
+                    i = q;
+                }
+
+                continue;
+            }
+
+            if (c == 'e' && WordAt(razor, i, "else"))
+            {
+                // 🔴 else 는 직전에 닫힌 울타리의 **반대 갈래**다.
+                pending = lastClosed.Cond;
+                pendingElse = true;
+                i += 3;
+            }
+        }
+
+        var result = new List<(string Cond, bool IsElse)>();
+        foreach (var e in open) result.Add((e.Cond, e.IsElse));
+        return result;
+    }
+
+    /// <summary>🔴 「빈 A4(plain)」일 때 이 자리가 <b>그려지나</b>.</summary>
+    private static bool RendersWhenPlain(string razor, string marker)
+    {
+        var at = razor.IndexOf(marker, StringComparison.Ordinal);
+        if (at < 0) return false;   // 자리가 아예 없으면 그려지지 않는다
+
+        foreach (var g in EnclosingGuards(razor, at))
+        {
+            if (!g.Cond.Contains(PreprintCond, StringComparison.Ordinal)) continue;
+            if (!g.IsElse) return false;   // 「양식용지일 때만」 울타리 안이다
+        }
+
+        return true;
+    }
+
+    /// <summary>업로드 묶음 안의 「빈 A4」 갈래 글자. <c>else</c> 가 없으면 <c>null</c>.</summary>
+    private static string? PlainBranch(string razor)
+    {
+        var at = razor.IndexOf(UploadBlockMarker, StringComparison.Ordinal);
+        if (at < 0) return null;
+        var itemStart = razor.LastIndexOf("<MudItem", at, StringComparison.Ordinal);
+        var end = razor.IndexOf("</MudItem>", at, StringComparison.Ordinal);
+        if (itemStart < 0 || end < 0) return null;
+
+        var block = razor.Substring(itemStart, end - itemStart);
+        var g = block.IndexOf(PreprintCond, StringComparison.Ordinal);
+        if (g < 0) return null;
+        var e = block.IndexOf("else", g, StringComparison.Ordinal);
+        return e < 0 ? null : block[e..];
+    }
+
+    private static int RazorMatchParen(string s, int open)
+    {
+        var d = 0;
+        for (var i = open; i < s.Length; i++)
+        {
+            if (s[i] == '"')
+            {
+                i++;
+                while (i < s.Length && s[i] != '"')
+                {
+                    if (s[i] == '\\') i++;
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (s[i] == '(') d++;
+            else if (s[i] == ')' && --d == 0) return i;
+        }
+
+        return -1;
+    }
+
+    private static bool WordAt(string s, int at, string word)
+    {
+        if (at + word.Length > s.Length) return false;
+        if (string.CompareOrdinal(s, at, word, 0, word.Length) != 0) return false;
+        var after = at + word.Length;
+        return after >= s.Length || (!char.IsLetterOrDigit(s[after]) && s[after] != '_');
+    }
+
+    /// <summary>작3 <b>이전</b>의 실제 모양 — 업로드 묶음이 울타리 안이고 else 가 없다.</summary>
+    private static string ShapeBeforeWork3() =>
+        "<MudGrid>\n  @if (" + PreprintCond + ")\n  {\n" +
+        "    <MudItem xs=\"12\"><MudText>" + UploadBlockMarker + "</MudText>\n" +
+        "      <MudFileUpload T=\"IBrowserFile\" /></MudItem>\n" +
+        "    <MudItem xs=\"12\"><MudTextField Label=\"" + AddressFieldMarker + "\" /></MudItem>\n" +
+        "    " + CoordTableMarker + "\n    {\n    }\n  }\n</MudGrid>\n";
+
+    /// <summary>🔴 검증팀이 뚫은 모양 — 묶음을 울타리로 <b>다시 감싼다</b>(한 칸 옮기기).</summary>
+    private static string ShapeRewrapped(string razor)
+    {
+        var at = razor.IndexOf(UploadBlockMarker, StringComparison.Ordinal);
+        var itemStart = razor.LastIndexOf("<MudItem", at, StringComparison.Ordinal);
+        var end = razor.IndexOf("</MudItem>", at, StringComparison.Ordinal) + "</MudItem>".Length;
+
+        return razor[..itemStart]
+             + "@if (" + PreprintCond + ")\n{\n"
+             + razor[itemStart..end]
+             + "\n}\n"
+             + razor[end..];
+    }
+
+    [Fact(DisplayName = "축⒨ 🔴 자부터 잰다 — 울타리 쌓기가 then·else·겹침을 옳게 가른다")]
+    public void AxisM_GuardRulerIsCorrect()
+    {
+        const string then = "@if (" + PreprintCond + ")\n{\n  HERE\n}\n";
+        const string els = "@if (" + PreprintCond + ")\n{\n}\nelse\n{\n  HERE\n}\n";
+        const string outside = "BEFORE\n@if (" + PreprintCond + ")\n{\n}\n";
+        const string nested = "@if (x == 1)\n{\n  @if (" + PreprintCond + ")\n  {\n    HERE\n  }\n}\n";
+        const string other = "@if (_form.FormType == \"tax_invoice\")\n{\n  HERE\n}\n";
+
+        Assert.False(RendersWhenPlain(then, "HERE"));      // 양식용지일 때만 그려진다
+        Assert.True(RendersWhenPlain(els, "HERE"));        // 반대 갈래 — 빈 A4 에서 그려진다
+        Assert.True(RendersWhenPlain(outside, "BEFORE"));  // 울타리 밖
+        Assert.False(RendersWhenPlain(nested, "HERE"));    // 겹친 울타리 안쪽
+        Assert.True(RendersWhenPlain(other, "HERE"));      // 종이 종류와 무관한 울타리
+        Assert.False(RendersWhenPlain(then, "없는글자"));    // 자리가 없으면 안 그려진다
+    }
+
+    [Fact(DisplayName = "축⒥-1 🔴 「빈 A4」에서도 업로드 칸이 그려진다 (작3 가-1 · 울타리의 합으로 잰다)")]
+    public void AxisJ1_UploadBlockRendersWhenPlain()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        Assert.True(RendersWhenPlain(razor, UploadBlockMarker),
+            "「빈 A4」 고객에게 업로드 칸이 안 그려진다 — 사장님이 「올릴 데가 없다」를 다시 겪는다.");
+    }
+
+    [Fact(DisplayName = "축⒥-1 음성대조군 🔴 옛 모양과 **다시 감싼** 모양 둘 다 빨개진다 ([4] R-3)")]
+    public void AxisJ1_NegativeControl_OldAndRewrappedBothFail()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        // ⒜ 작3 이전 모양
+        Assert.False(RendersWhenPlain(ShapeBeforeWork3(), UploadBlockMarker));
+        Assert.Null(PlainBranch(ShapeBeforeWork3()));
+
+        // ⒝ 🔴 검증팀이 실제로 뚫은 모양 — 1차 판의 자는 여기서 초록이었다
+        Assert.False(RendersWhenPlain(ShapeRewrapped(razor), UploadBlockMarker),
+            "묶음을 울타리로 다시 감쌌는데 자가 초록을 냈다 — 「한 칸 옮기기」를 못 잡는다.");
+    }
+
+    [Fact(DisplayName = "축⒥-2 🔴 「빈 A4」에 안내와 「양식용지로 바꾸기」가 그려진다")]
+    public void AxisJ2_PlainBranchHasNoticeAndSwitch()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+        var plain = PlainBranch(razor);
+
+        Assert.True(RendersWhenPlain(razor, PlainSwitchMarker));
+        Assert.NotNull(plain);
+        Assert.Contains("SwitchToPreprint", plain!, StringComparison.Ordinal);
+        Assert.Contains("미리 인쇄된 양식용지", plain!, StringComparison.Ordinal);
+        Assert.Matches(@"private void SwitchToPreprint\(\)", razor);
+        // 🔴 몰래 바꾸지 않는다 — 바꾼 뒤 고객에게 알린다.
+        Assert.Contains("아직 저장되지 않았습니다", razor, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒥-3 🔴 「빈 A4」에서 단추는 보이되 눌리지 않고, 올리는 통로가 없다")]
+    public void AxisJ3_PlainBranchButtonIsDisabled()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+        var plain = PlainBranch(razor);
+
+        Assert.NotNull(plain);
+        Assert.Contains("양식용지 그림 올리기", plain!, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"true\"", plain!, StringComparison.Ordinal);
+        // 🔴 「빈 A4」에서 올리는 통로 자체가 그려지면 안 된다 — 울타리의 합으로 잰다.
+        Assert.False(RendersWhenPlain(razor, "MudFileUpload"));
+    }
+
+    [Fact(DisplayName = "축⒥-4 🔴 「빈 A4」에 남은 옛 그림을 고객이 지울 수 있다 ([1-V] ⒟ 비대칭)")]
+    public void AxisJ4_PlainBranchLetsCustomerRemoveLeftoverImage()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+        var plain = PlainBranch(razor);
+
+        Assert.NotNull(plain);
+        Assert.Contains("BackgroundImageUrl", plain!, StringComparison.Ordinal);
+        Assert.Contains("RemoveBackgroundAsync", plain!, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒥-5 🔴 남은 그림 안내가 **두 갈래로 갈려** 각각 참을 말한다 ([4] 반려 R-1 봉합)")]
+    public void AxisJ5_LeftoverNoticeSplitsForLegalComposer()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+        var plain = PlainBranch(razor);
+
+        Assert.NotNull(plain);
+        // 🔴 1차 판은 「미리보기에만 보입니다」 한 벌이었다 — 세금계산서에서는 **거짓**이다.
+        Assert.Contains("IsLegalOnlyComposer", plain!, StringComparison.Ordinal);
+        Assert.Contains("종이에도, 미리보기에도 나오지 않습니다", plain!, StringComparison.Ordinal);
+        Assert.Contains("종이에 찍히지 않고", plain!, StringComparison.Ordinal);
+
+        // 🔴 화면이 가르는 조건과 **서버가 실제로 가르는 조건**이 같은지 본다.
+        //   서버는 세금계산서 1종만 전용 작성기로 보낸다(면세·입금표는 공용 흐름).
+        Assert.Matches(@"IsLegalOnlyComposer\s*=>\s*_form\.PaperMode != ""preprint""\s*&&\s*string\.Equals\(_form\.FormType, ""tax_invoice""", razor);
+
+        var server = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+        Assert.Matches(@"documentType, TaxInvoiceDocType, StringComparison\.Ordinal\)\s*&&\s*!isPreprint", server);
+    }
+
+    [Fact(DisplayName = "축⒥-5 음성대조군 🔴 한 벌 문구만 있으면 빨개진다")]
+    public void AxisJ5_NegativeControl_SingleNoticeFails()
+    {
+        const string oneSided =
+            "<MudItem><MudText>" + UploadBlockMarker + "</MudText>\n" +
+            "@if (" + PreprintCond + ")\n{\n}\nelse\n{\n" +
+            "  <MudAlert>「빈 A4 용지」에서는 종이에 찍히지 않고 아래 미리보기에만 보입니다.</MudAlert>\n" +
+            "}\n</MudItem>\n";
+
+        var plain = PlainBranch(oneSided);
+        Assert.NotNull(plain);
+        Assert.DoesNotContain("IsLegalOnlyComposer", plain!, StringComparison.Ordinal);
+        Assert.DoesNotContain("종이에도, 미리보기에도 나오지 않습니다", plain!, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒦-1 🔴 창이 「새로 만드는 중」인지 「고치는 중」인지 스스로 말한다 (작3 가-2)")]
+    public void AxisK1_DialogSaysCreateOrEdit()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        Assert.Contains("새 양식 만들기", razor, StringComparison.Ordinal);
+        Assert.Contains("양식 수정", razor, StringComparison.Ordinal);
+        Assert.Contains("Template is null", razor, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "축⒦-2 🔴 이름 칸에 「신규 양식」을 미리 적지 않는다 (수정 화면으로 읽혔다)")]
+    public void AxisK2_NoPrefilledTemplateName()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        Assert.DoesNotMatch(@"_form\.TemplateName\s*=\s*""신규 양식""", razor);
+        Assert.Matches(@"_form\.TemplateName\s*=\s*""신규 양식""",
+            "_form.FormType = \"estimate\";\n_form.TemplateName = \"신규 양식\";\n");
+    }
+
+    [Fact(DisplayName = "축⒧-1 🔴 주소 칸·좌표표는 「빈 A4」에서 **안 그려진다** (죽은 칸 방지 · [4] R-2 봉합)")]
+    public void AxisL1_AddressAndCoordsDoNotRenderWhenPlain()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        // 🔴 1차 판은 「앞에 울타리 글자가 있나」만 봐서 **밖으로 꺼내도 초록**이었다.
+        Assert.False(RendersWhenPlain(razor, AddressFieldMarker));
+        Assert.False(RendersWhenPlain(razor, CoordTableMarker));
+    }
+
+    [Fact(DisplayName = "축⒧-1 음성대조군 🔴 밖으로 꺼낸 모양은 빨개진다")]
+    public void AxisL1_NegativeControl_PulledOutFails()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        // 실제 파일에서 울타리를 통째로 지운 모양 — 주소칸·좌표표가 모든 울타리 밖으로 나온다.
+        var pulledOut = razor.Replace("@if (" + PreprintCond + ")", "@if (true)", StringComparison.Ordinal);
+
+        Assert.True(RendersWhenPlain(pulledOut, AddressFieldMarker),
+            "울타리를 지웠는데 자가 「안 그려진다」고 했다 — 죽은 칸 10개를 못 잡는다.");
+        Assert.True(RendersWhenPlain(pulledOut, CoordTableMarker));
+    }
+
+    [Fact(DisplayName = "축⒧-2 🔴 실인쇄에 그림이 안 깔리는 한 줄이 그대로다 (결재 결-2 · 봉합 못)")]
+    public void AxisL2_RealPrintBackgroundSealIntact()
+    {
+        // 🔴 [1-V] P5 — 그림은 **양식 설계 미리보기에만** 깔린다. 실인쇄·이메일·팩스는 0건이다.
+        //   양식용지는 이미 종이에 양식이 인쇄돼 있어 스캔을 또 찍으면 **이중 인쇄**가 된다
+        //   (2026-10-24 검증팀 반려 R-1). 사장님 결재(결-2)로 이 모양을 **유지**한다.
+        var code = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+
+        Assert.Matches(@"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*\)\s*return null;", code);
+    }
 }
