@@ -1,5 +1,6 @@
 using HitPan.Application.DTOs.Settings;
 using HitPan.Application.Interfaces;
+using HitPan.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -153,8 +154,76 @@ public class FormTemplateController : ControllerBase
         var (bytes, _) = await pdf.RenderDocumentAsync(tenantId, documentType, string.Empty, overrides, ct)
             .ConfigureAwait(false);
 
-        // 🔴 파일 이름에 「예시」를 박는다 — 받아 두고 진짜로 쓰면 안 된다.
+        // 🔴 파일 이름에 「예시」를 넣는다 — 받아 두고 진짜로 쓰면 안 된다.
         return File(bytes, "application/pdf", "양식미리보기_예시.pdf");
+    }
+
+    /// <summary>
+    /// 🔴 <b>양식지 그림 올리기</b> — 고객이 쓰는 양식용지를 그림 파일로 받는다.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 2026-10-24: <i>"이미지파일로 양식지 추가시, PDF편집기로 즉시 반영될 수 있도록 설계, 구현해"</i>
+    ///
+    /// 🔴 <b>왜 이 문이 없었나</b> — 10/24 에 작성기가 양식지 그림을 종이에 깔 수 있게 됐는데
+    ///   <b>그림을 넣을 입구가 없었다.</b> 편집기에는 주소를 손으로 적는 글자 칸뿐이고
+    ///   바깥 주소는 작성기가 거절한다(인쇄가 남의 서버에 묶이면 고객 장사가 멈춘다).
+    ///   ⇒ 고객이 쓸 수 있는 길이 사실상 0 이었다. 이 문이 그 입구다.
+    ///
+    /// 🔴 <b>저장하지 않는다</b> — 그림만 보관하고 돌려준다. 양식 행에 적는 것은
+    ///   고객이 저장 단추를 누를 때다. 올리기만 하고 창을 닫으면 양식은 그대로다.
+    /// 🔴 <c>tenant_id</c> 는 <b>JWT 클레임에서만</b>(#2) · 양식을 고치는 역할과 같은 문.
+    /// </remarks>
+    [HttpPost("background")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
+    [RequestSizeLimit(FormBackgroundPaths.MaxBytes + 1024 * 1024)]
+    public async Task<IActionResult> UploadBackground(IFormFile? file,
+        [FromServices] IFormBackgroundStore store, CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        if (file is null || file.Length <= 0)
+            return BadRequest(new { message = "올릴 그림을 골라 주십시오." });
+
+        await using var stream = file.OpenReadStream();
+        var (storedPath, rejection) = await store
+            .SaveAsync(tenantId, file.FileName, stream, ct).ConfigureAwait(false);
+
+        if (rejection is not null)
+        {
+            // 🔴 거절은 사고가 아니다 — 까닭을 **사람 말로** 돌려준다.
+            _logger.LogWarning("양식지 그림 거절: tenant={Tenant} 까닭={Why}", tenantId, rejection);
+            return BadRequest(new { message = rejection });
+        }
+
+        return Ok(new { storedPath });
+    }
+
+    /// <summary>
+    /// 올린 양식지 그림을 지운다. 🔴 <b>이 테넌트 폴더 안</b>이 아니면 지우지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 양식 행의 칸을 비우는 것은 <b>고객이 저장할 때</b>다 — 여기서는 파일만 지운다.
+    /// </remarks>
+    [HttpDelete("background")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
+    public IActionResult DeleteBackground([FromBody] DeleteFormBackgroundRequest req,
+        [FromServices] IFormBackgroundStore store)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        if (string.IsNullOrWhiteSpace(req?.StoredPath))
+            return BadRequest(new { message = "지울 그림을 찾을 수 없습니다." });
+
+        var rejection = store.Delete(tenantId, req.StoredPath);
+        if (rejection is not null)
+        {
+            _logger.LogWarning("양식지 그림 지우기 거절: tenant={Tenant} 까닭={Why}", tenantId, rejection);
+            return BadRequest(new { message = rejection });
+        }
+
+        return NoContent();
     }
 
     /// <summary>
@@ -188,4 +257,11 @@ public class FormTemplatePreviewRequest
     /// 이 화면의 목적이다(§11-3).
     /// </summary>
     public int LineCount { get; set; } = 3;
+}
+
+/// <summary>올린 양식지 그림을 지우는 요청.</summary>
+public class DeleteFormBackgroundRequest
+{
+    /// <summary>올릴 때 돌려받은 보관 경로. 🔴 테넌트 폴더 밖이면 서버가 거절한다.</summary>
+    public string? StoredPath { get; set; }
 }
