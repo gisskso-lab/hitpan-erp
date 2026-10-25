@@ -1584,12 +1584,15 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.True(RendersWhenPlain(pulledOut, CoordTableMarker));
     }
 
-    [Fact(DisplayName = "축⒧-2 🔴 실인쇄에 그림이 안 깔리는 한 줄이 그대로다 (결재 결-2 · 봉합 못)")]
+    [Fact(DisplayName = "축⒧-2 🔴 실인쇄에 그림이 안 깔리는 한 줄이 그대로다 (🔴 작3 범위 밖 보호못 — ~~결-2~~ 아님 · 작4 에서 「옵션이 꺼져 있으면 안 찍힌다」로 **바꿔야 하는 축**)")]
     public void AxisL2_RealPrintBackgroundSealIntact()
     {
         // 🔴 [1-V] P5 — 그림은 **양식 설계 미리보기에만** 깔린다. 실인쇄·이메일·팩스는 0건이다.
         //   양식용지는 이미 종이에 양식이 인쇄돼 있어 스캔을 또 찍으면 **이중 인쇄**가 된다
-        //   (2026-10-24 검증팀 반려 R-1). 사장님 결재(결-2)로 이 모양을 **유지**한다.
+        //   (2026-10-24 검증팀 반려 R-1). 🔴 이 축은 **작3 이 실인쇄 경로를 0줄도 안 건드렸다**는 보호못일 뿐이다.
+        //   ~~사장님 결재(결-2)~~ 가 아니다 — 그 기록은 PM 이 선택지를 잘못 짜서 받은 것이고 폐기됐다.
+        //   🔴 사장님 입장은 처음부터 「고객사가 선택하는 옵션」이다(2026-10-25 교정).
+        //   ⇒ **작4 에서 이 축은 「옵션이 꺼져 있으면 안 찍힌다」로 바뀐다.** 지우는 것이 아니라 조건을 받는다.
         var code = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
 
         Assert.Matches(@"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*\)\s*return null;", code);
