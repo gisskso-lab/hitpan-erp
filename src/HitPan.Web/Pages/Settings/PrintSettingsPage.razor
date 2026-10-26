@@ -102,7 +102,14 @@
                 위 「회사 로고」를 먼저 올려 주셔야 종이에 나옵니다.
             </MudAlert>
         }
-        else if (_logoUsable == false)
+        else if (_logoState == "unknown")
+        {
+            @* 🔴 [재검증 V-4] 「모른다」도 말한다 — 삼키지 않는다. *@
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                로고가 인쇄에 쓸 수 있는 상태인지 지금 확인하지 못했습니다.
+            </MudText>
+        }
+        else if (_logoState == "unusable")
         {
             @* 🔴🔴 [2026-10-26 [4] 중 R-6 봉합] **등록돼 보이는데 안 쓰이는 길**이 있었다 —
                  예전부터 쓰던 로고 경로가 히트판 보관소 밖이면 작성기가 울타리에서 막는다.
@@ -334,10 +341,13 @@
 
             // 🔴 [[4] R-6] 「쓸 수 있나」는 **서버가 판정한다** — 울타리가 어디인지 화면은 모른다.
             //   못 읽으면 `null` 로 남겨 **아무 말도 하지 않는다**(모르는 것을 단정하지 않는다).
+            // 🔴🔴 [2026-10-26 재검증 V-4 봉합] 서버가 돌려주는 낱말은 **네 개**다
+            //   (present · missing · unusable · unknown). 종전에는 `unknown` 을 `missing` 과
+            //   한 칸에 뭉개 담아 **「모른다」를 말없이 삼켰다.** 낱말을 그대로 들고 온다.
             var state = await Http.GetFromJsonAsync<Dictionary<string, string>>("api/settings/company-image-state");
-            _logoUsable = state is not null && state.TryGetValue("logo", out var logoState)
-                ? logoState switch { "present" => true, "missing" => null, "unusable" => false, _ => (bool?)null }
-                : null;
+            _logoState = state is not null && state.TryGetValue("logo", out var logoState)
+                ? logoState
+                : "unknown";
         }
         catch (Exception ex)
         {
@@ -348,10 +358,14 @@
     }
 
     /// <summary>
-    /// 로고가 <b>인쇄에 쓰일 수 있나</b> — <c>true</c> 쓸 수 있다 · <c>false</c> 못 쓴다 ·
-    /// <c>null</c> 모른다(안 올렸거나 못 읽었다). 🔴 모를 때는 화면이 아무 말도 하지 않는다.
+    /// 로고가 <b>인쇄에 쓰일 수 있나</b> — 서버가 준 낱말 그대로:
+    /// <c>present</c> · <c>missing</c> · <c>unusable</c> · <c>unknown</c>.
     /// </summary>
-    private bool? _logoUsable;
+    /// <remarks>
+    /// 🔴 [재검증 V-4] 네 낱말을 <b>뭉개지 않는다.</b> 「모른다」와 「안 올렸다」는 고객에게
+    ///   할 말이 다르다. 못 읽으면 <c>unknown</c> 이고, 화면은 그때도 <b>말을 한다</b>.
+    /// </remarks>
+    private string? _logoState;
 
     /// <summary>회사 정보에서 그림 경로만 받아 보는 그릇.</summary>
     private sealed class CompanyImageState
@@ -407,7 +421,11 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"워터마크 설정을 저장하지 못했습니다: {ex.Message}", Severity.Error);
+            // 🔴🔴 [2026-10-26 재검증 V-5 봉합] 이 줄도 **고객 화면에 .NET 예외 원문**을 쏟았다.
+            //   같은 차수에서 위 두 자리(올리기·지우기)만 고치고 **이 자리를 놓쳤다** —
+            //   이 줄을 넣은 것도 이 차수였다. 「세 자리 중 두 자리」는 봉합이 아니다.
+            Console.Error.WriteLine($"[PrintSettings] 공통 설정 저장 실패: {ex.Message}");
+            Snackbar.Add("워터마크 설정을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주십시오.", Severity.Error);
         }
         finally
         {

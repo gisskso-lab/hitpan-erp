@@ -265,8 +265,14 @@ public sealed class SettingsController : ControllerBase
     ///   ① 로고를 안 올렸다 ② 올린 로고가 <b>보관소 밖 옛 경로</b>다(기존 고객의 <c>logo_url</c>).
     ///   ②는 화면에 「등록됨」으로 보이는데 작성기는 울타리에서 막아 영영 안 쓴다.
     /// 🔴 <b>판정은 서버가 한다</b> — 울타리가 어디인지는 화면이 모른다(알아서도 안 된다).
-    ///   돌려주는 것은 <c>present</c> · <c>missing</c> · <c>unusable</c> 세 낱말뿐이고
     ///   <b>경로는 내보내지 않는다.</b>
+    ///
+    /// 🔴🔴 돌려주는 낱말은 <b>네 개</b>다 — <c>present</c>(쓸 수 있다) · <c>missing</c>(칸이 비었다) ·
+    ///   <c>unusable</c>(칸은 있는데 못 쓴다) · <c>unknown</c>(<b>재지 못했다</b>).
+    ///   [2026-10-26 재검증 V-4 봉합] 종전 주석은 *"세 낱말뿐"* 이라 적었는데
+    ///   아래 <c>catch</c> 가 <c>unknown</c> 을 돌려준다 ⇒ <b>주석이 거짓</b>이었고,
+    ///   두 화면도 그 낱말을 <b>말없이 삼켜</b> 고객은 아무 말도 못 들었다.
+    ///   🔴 <c>unknown</c> 은 「괜찮다」가 아니다 — <b>모른다</b>는 뜻이고 화면이 그렇게 말해야 한다.
     /// </remarks>
     [HttpGet("company-image-state")]
     [Authorize(Policy = "TenantAdminOnly")]

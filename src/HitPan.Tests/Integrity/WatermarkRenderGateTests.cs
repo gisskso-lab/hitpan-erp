@@ -434,24 +434,11 @@ public sealed class WatermarkRenderGateTests
     [InlineData(210f, 148f, 100)]
     public void GW16_WatermarkSurvivesOnLandscapePaper(float widthMm, float heightMm, int scalePct)
     {
-        // 🔴 길이는 **제품 코드가 계산한다** — 시험이 제 몫으로 곱하면 실코드가 틀려도 초록이다.
-        var sideMm = WatermarkSideMm(widthMm, heightMm, scalePct);
-
-        Assert.True(sideMm <= Math.Min(widthMm, heightMm) + 0.01f,
-            $"한 변 {sideMm}mm 가 종이 짧은 변({Math.Min(widthMm, heightMm)}mm)을 넘는다 — "
-            + "QuestPDF 는 넘치는 그림을 말없이 뺀다.");
-
-        var svg = BuildSvg(RedPixelPng(), ".png", 0.12m, 0.15m);
-        Assert.NotNull(svg);
-
-        var png = RenderSizedPage(widthMm, heightMm, page =>
-            page.Background().Layers(l =>
-            {
-                l.PrimaryLayer().Extend();
-                l.Layer().AlignCenter().AlignMiddle()
-                 .MaxWidth(widthMm, Unit.Millimetre).MaxHeight(heightMm, Unit.Millimetre)
-                 .Width(sideMm, Unit.Millimetre).Svg(svg!);
-            }));
+        // 🔴🔴 [2026-10-26 재검증 V-1 봉합] **제품의 조립을 불러서** 그린다.
+        //   종전 이 축은 `Layers`·`MaxWidth`·`MaxHeight` 를 **시험 안에서 복제**하고
+        //   제품에서 가져오는 것은 길이 한 줄뿐이었다 ⇒ 검증팀이 실코드에 R-1 버그를
+        //   되살려 놓고 돌렸는데 **10/10 초록**이었다. 자가 엉뚱한 것을 재고 있었다.
+        var png = RenderWithProductBackground(widthMm, heightMm, scalePct);
 
         var px = PngPixels.Decode(png);
         var c = px.At(px.Width / 2, px.Height / 2);
@@ -461,11 +448,12 @@ public sealed class WatermarkRenderGateTests
             $"{widthMm}×{heightMm}mm · {scalePct}% 에서 중앙픽셀이 {c} 다 — 워터마크가 종이에 없다.");
     }
 
-    [Fact(DisplayName = "G-W16음 🔴 음성 대조군 — **짧은 변을 안 보면** 가로 용지에서 그림이 사라진다(종전 판 재현)")]
+    [Fact(DisplayName = "G-W16음 🔴🔴 음성 대조군 — **폭만 보는 종전 조립**은 가로 용지에서 백지를 낸다(자가 제 몫을 하는 증거)")]
     public void GW16_Negative_WidthOnlyLosesTheImageOnLandscape()
     {
-        // 🔴 종전 계산(폭 × %)을 그대로 되살려 **같은 조립으로** 그려 본다.
-        //   이 축이 없으면 위 G-W16 은 「원래 되던 것」을 재는 축으로 오해된다.
+        // 🔴 이 축은 **자를 재는 축**이다. 종전 조립(폭 × % · 상한 없음)을 그려서
+        //   「정말 그림이 사라지나」를 보여 준다. 이것이 흰 종이를 못 내면
+        //   위 G-W16 의 양성 단언은 「원래 되던 것」을 재는 셈이 되므로 그때는 둘 다 못 믿는다.
         const float w = 297f, h = 210f;
         var oldSide = w * 100 / 100f;      // 종전: 폭의 100% = 297mm (종이 높이 210mm 를 넘는다)
 
@@ -482,6 +470,26 @@ public sealed class WatermarkRenderGateTests
 
         Assert.True(c.R > 250 && c.G > 250 && c.B > 250,
             $"종전 계산이 백지를 내지 않았다({c}) — 이 음성 대조군의 전제가 바뀌었다. 다시 재라.");
+
+        // 🔴🔴 그리고 **제품 조립은 같은 종이에서 그림을 남긴다** — 같은 용지·같은 100% 로 대조한다.
+        //   둘을 한 축에 둔 까닭: 「종전 조립은 사라지고 제품 조립은 남는다」가 한 번에 읽혀야
+        //   다음 사람이 이 축을 지우지 않는다.
+        var good = PngPixels.Decode(RenderWithProductBackground(w, h, 100));
+        var gc = good.At(good.Width / 2, good.Height / 2);
+        Assert.True(gc.R > 200 && gc.G < 252 && gc.B < 252,
+            $"제품 조립이 같은 종이에서 백지를 냈다({gc}) — R-1 이 재발했다.");
+    }
+
+    [Fact(DisplayName = "G-W16자 🔴 자 검사 — 이 축은 **제품의 조립 함수**를 부른다(복제본을 재지 않는다)")]
+    public void GW16_SelfCheck_UsesProductAssembly()
+    {
+        // 🔴 V-1 의 재발 방지 — 제품에 조립 함수가 있고, 작성기가 **그 함수를 부르는지** 본다.
+        //   함수가 사라지면 아래 반사가 빨개지고, 호출이 사라지면 글자 검사가 빨개진다.
+        Assert.NotNull(typeof(PdfRenderService).GetMethod("ComposeDocumentBackground",
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public));
+
+        var code = ReadCodeNoComments("src", "HitPan.Application", "Services", "PdfRenderService.cs");
+        Assert.Matches(@"ComposeDocumentBackground\(\s*\r?\n?\s*page,", code);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -709,6 +717,37 @@ public sealed class WatermarkRenderGateTests
             BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
         Assert.NotNull(m);
         return (float)m!.Invoke(null, new object?[] { widthMm, heightMm, scalePct })!;
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>제품의 배경 조립 함수를 불러</b> 그 종이를 그린다 — 재검증 V-1 봉합의 핵심.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 시험은 <b>종이 크기와 로고만</b> 준다. 겹을 어떻게 쌓는지 · 상한을 어디에 거는지 ·
+    ///   길이를 무엇으로 곱하는지는 <b>전부 제품 코드</b>가 정한다.
+    ///   ⇒ 제품이 R-1 로 되돌아가면 이 축이 <b>빨개진다</b>(종전 판은 초록이었다).
+    /// </remarks>
+    private static byte[] RenderWithProductBackground(float widthMm, float heightMm, int scalePct)
+    {
+        var svgText = BuildSvg(RedPixelPng(), ".png", 0.12m, 0.15m);
+        Assert.NotNull(svgText);
+
+        // 🔴 SVG 를 여는 것도 제품 코드로 한다(P1-1 의 그 함수).
+        var decode = typeof(PdfRenderService).GetMethod("TryDecodeWatermarkSvg",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(decode);
+        var svgImage = decode!.Invoke(MakeRenderService(), new object?[] { svgText });
+        Assert.NotNull(svgImage);
+
+        var compose = typeof(PdfRenderService).GetMethod("ComposeDocumentBackground",
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(compose);
+
+        // 🔴 PageSize 는 point 다 — 제품이 쓰는 단위 그대로 넘긴다.
+        var size = new PageSize(widthMm * 72f / 25.4f, heightMm * 72f / 25.4f);
+
+        return RenderSizedPage(widthMm, heightMm, page =>
+            compose!.Invoke(null, new object?[] { page, size, null, svgImage, scalePct }));
     }
 
     /// <summary>원하는 크기의 흰 종이 한 장을 그려 PNG 로 뽑는다.</summary>

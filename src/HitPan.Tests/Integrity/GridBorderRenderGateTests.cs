@@ -124,9 +124,13 @@ public sealed class GridBorderRenderGateTests
             for (var x = 0; x < px.Width; x++)
             {
                 var c = px.At(x, y);
-                var grey = Math.Abs(c.R - c.G) < 8 && Math.Abs(c.G - c.B) < 8
-                           && c.R is >= 150 and <= 245;
-                if (grey) { run++; if (run > longest) longest = run; }
+
+                // 🔴🔴 [2026-10-26 재검증 V-7 봉합] 종전에는 **회색(150~245)만** 셌다.
+                //   그래서 누가 선 색을 검정·남색으로 바꾸면 **끈 쪽에서 선을 못 봤다**
+                //   — 자가 색맹이었다. 지금은 **흰색이 아닌 모든 잉크**를 센다.
+                //   글자는 종이 폭의 절반을 잇지 못하므로 아래 길이 조건이 가른다.
+                var ink = c.R < 250 || c.G < 250 || c.B < 250;
+                if (ink) { run++; if (run > longest) longest = run; }
                 else run = 0;
             }
 
@@ -135,6 +139,38 @@ public sealed class GridBorderRenderGateTests
         }
 
         return lines;
+    }
+
+    /// <summary>
+    /// 🔴 <b>잉크가 있는 가로 띠</b>의 개수 — 표의 「줄 수」를 세는 자.
+    /// </summary>
+    /// <remarks>
+    /// 🔴🔴 [2026-10-26 재검증 V-6 봉합] 종전 G-W13 은 <b>쪽 수만</b> 셌다.
+    ///   쪽 수가 같아도 <b>한 줄이 조용히 빠지는</b> 길은 그대로 미측정이었다(#20).
+    ///   ⇒ 글자든 선이든 <b>잉크가 있는 줄</b>을 띠로 묶어 센다. 품목이 한 줄 빠지면
+    ///   띠가 하나 줄어들고 이 자가 그것을 본다.
+    /// 🔴 켠 판과 끈 판은 글자 내용이 같으므로 <b>띠 수도 같아야</b> 한다.
+    /// </remarks>
+    private static int CountInkBands(byte[] png)
+    {
+        var px = PngPixels.Decode(png);
+        var bands = 0;
+        var inBand = false;
+
+        for (var y = 0; y < px.Height; y++)
+        {
+            var hasInk = false;
+            for (var x = 0; x < px.Width && !hasInk; x++)
+            {
+                var c = px.At(x, y);
+                if (c.R < 200 || c.G < 200 || c.B < 200) hasInk = true;
+            }
+
+            if (hasInk && !inBand) bands++;
+            inBand = hasInk;
+        }
+
+        return bands;
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -185,6 +221,38 @@ public sealed class GridBorderRenderGateTests
         // 🔴 그리고 두 판 **모두** 종이가 나온다 — 끈 판이 아예 안 그려지면 그것도 사고다(#20).
         Assert.NotEmpty(on);
         Assert.NotEmpty(off);
+
+        // 🔴🔴 [2026-10-26 재검증 V-6 봉합] **쪽 수만 세는 것은 「줄이 안 빠졌다」가 아니다.**
+        //   쪽 수가 같아도 한 줄이 조용히 사라질 수 있다 ⇒ **잉크 띠**(글자든 선이든 잉크가
+        //   있는 가로 구간)를 센다. 품목 한 줄이 빠지면 띠가 줄어든다.
+        //
+        // 🔴🪤 **켠 판과 끈 판의 띠 수를 직접 비교하면 안 된다** — 처음에 그렇게 짰다가
+        //   35줄에서 「켠 44 · 끈 42」로 빨개졌다. 줄이 빠진 게 아니라 **켠 판에만 있는
+        //   선 띠**(표 머리·테두리)가 더 세어진 것이었다. 또 자가 틀렸다.
+        //   ⇒ 비교는 **같은 판 안에서 품목을 하나 늘려** 한다. 늘린 만큼 띠가 늘어야 한다.
+        var bandsOff = off.Sum(CountInkBands);
+        Assert.True(bandsOff >= lineCount,
+            $"품목 {lineCount} 줄인데 끈 판의 잉크 띠가 {bandsOff} 개뿐이다 — 줄이 종이에 없다.");
+
+        var bandsOn = on.Sum(CountInkBands);
+        Assert.True(bandsOn >= lineCount,
+            $"품목 {lineCount} 줄인데 켠 판의 잉크 띠가 {bandsOn} 개뿐이다 — 줄이 종이에 없다.");
+
+        // 🔴 품목을 하나 더하면 **띠도 하나 더 늘어난다** — 끈 판에서 잰다(패딩이 바뀐 쪽).
+        //   쪽이 넘어가면 머리줄이 다시 그려질 수 있어 **1 이상**으로 둔다. 0 이면 줄이 먹혔다.
+        var offPlusOne = RenderBody(lineCount + 1, showBorder: false);
+        var bandsPlusOne = offPlusOne.Sum(CountInkBands);
+        var grew = bandsPlusOne - bandsOff;
+
+        if (offPlusOne.Count == off.Count)
+        {
+            Assert.Equal(1, grew);
+        }
+        else
+        {
+            Assert.True(grew >= 1,
+                $"품목을 {lineCount}→{lineCount + 1} 로 늘렸는데 띠가 {grew} 만큼 늘었다(쪽 {off.Count}→{offPlusOne.Count}).");
+        }
     }
 
     [Fact(DisplayName = "G-W13자 🔴 자 검사 — 켠 판과 끈 판이 **정말 다른 종이**다(둘이 같으면 위 축들이 무의미하다)")]

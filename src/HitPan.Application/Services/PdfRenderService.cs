@@ -218,45 +218,13 @@ public sealed class PdfRenderService : IPdfRenderService
                 //      종전과 글자 하나 다르지 않다(#1).
                 if (bgImage is not null || watermark is not null)
                 {
-                    // 🔴 QuestPDF 의 크기는 point 다(1pt = 1/72 inch) — mm 로 바꾼다.
-                    var pageWidthMm = pageSize.Width * 25.4f / 72f;
-                    var pageHeightMm = pageSize.Height * 25.4f / 72f;
-
-                    // 🔴🔴 [2026-10-26 [4] 반려 R-1 봉합] **짧은 변**을 기준으로 잡는다.
-                    //   종전에는 `pageWidthMm` 만 봤다. 워터마크 SVG 는 1000×1000 **정사각**이라
-                    //   폭을 정하면 **높이도 그만큼**이 된다 ⇒ 가로 용지(297×210)에서 폭 80% 는
-                    //   높이 237mm 가 되어 종이(210mm)를 넘고, QuestPDF 는 **예외도 로그도 없이
-                    //   그림을 아예 빼 버린다**(검증팀 실측: PDF 7.3KB · 래스터 완전 백지).
-                    //   🔴 고객이 「크게」 하려고 숫자를 올리는 **바로 그 동작**이 기능을 없앴다.
-                    //   ⇒ 짧은 변 기준이면 100% 가 「종이에 꽉 차는 가장 큰 정사각」이 된다.
-                    page.Background().Layers(layers =>
-                    {
-                        // 1겹 — 양식지 그림. 종이 전체에 맞춘다.
-                        if (bgImage is not null)
-                        {
-                            layers.Layer().Image(bgImage).FitArea();
-                        }
-
-                        // 🔴 주 겹 — 배경 자리는 그릴 내용이 없으니 **비워서 늘린다.**
-                        //   이것이 없으면 위 주석의 예외가 난다.
-                        layers.PrimaryLayer().Extend();
-
-                        // 2겹 — 워터마크. **정중앙** · 용지 짧은 변의 N%(사장님: "정중앙 크게").
-                        if (watermark is not null)
-                        {
-                            var sideMm = ResolveWatermarkSideMm(
-                                pageWidthMm, pageHeightMm, watermark.ScalePct);
-                            layers.Layer()
-                                  .AlignCenter().AlignMiddle()
-                                  // 🔴 [R-1 봉합] 짧은 변 기준으로 잡고, **넘치면 줄어들게** 상한을
-                                  //   둘 다 건다. 다음 사람이 SVG 를 정사각이 아니게 바꾸는 날에도
-                                  //   「조용히 사라지는」 길로 돌아가지 않는다.
-                                  .MaxWidth(pageWidthMm, Unit.Millimetre)
-                                  .MaxHeight(pageHeightMm, Unit.Millimetre)
-                                  .Width(sideMm, Unit.Millimetre)
-                                  .Svg(watermark.Svg);
-                        }
-                    });
+                    // 🔴🔴 [2026-10-26 재검증 V-1 봉합] 조립을 **떼어내 한 자리로** 옮겼다 —
+                    //   게이트가 **제품의 이 조립을 그대로 불러** 그릴 수 있어야 하기 때문이다.
+                    //   종전에는 게이트가 `Layers`·`MaxWidth`·`MaxHeight` 를 **시험 안에서 복제**하고
+                    //   제품에서 가져오는 것은 길이 한 줄뿐이었다 ⇒ 재검증이 R-1 버그를 실코드에
+                    //   되살려 놓고 돌렸는데 **G-W16 이 10/10 초록**이었다. 거짓 초록이다.
+                    ComposeDocumentBackground(
+                        page, pageSize, bgImage, watermark?.Svg, watermark?.ScalePct ?? 0);
                 }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
@@ -2481,19 +2449,53 @@ public sealed class PdfRenderService : IPdfRenderService
     }
 
     /// <summary>
-    /// 🔴🔴 이 종이에 워터마크를 <b>깔 것인가</b> — 판정이 사는 <b>한 자리</b>.
+    /// 🔴🔴 종이의 <b>배경 세 겹</b>을 조립한다 — 양식지 그림 · 주 겹 · 워터마크.
     /// </summary>
-    /// <param name="documentType">문서종. 🔴 <c>tax_invoice</c> 는 결-K 로 <b>무조건 안 깐다</b>.</param>
-    /// <param name="formSays"><c>null</c> 공통을 따른다 · <c>true</c> 이 양식만 켬 · <c>false</c> 이 양식만 끔.</param>
-    /// <param name="commonEnabled">공통 설정의 켬/끔.</param>
     /// <remarks>
-    /// 🔴 <b>왜 떼어 놨나</b> — 판정이 DB 조회와 뒤섞여 있어 <b>재 볼 수가 없었다</b>.
-    ///   [4] 반려 R-2 와 [3-V] P1-2 가 모두 이 판정의 구멍이었는데, 그 구멍을 재는
-    ///   시험이 0건이었다(「공통 켬 + 양식 행 있음」 조합을 아무도 안 그려 봤다).
-    ///   ⇒ 순수 함수로 내려 **여섯 조합을 전수로** 잰다(게이트 G-W17).
-    /// 🔴 조회를 아끼는 쪽(위 호출부의 두 번 호출)도 <b>이 함수로</b> 판정한다 —
-    ///   조건을 두 번 적지 않는다.
+    /// 🔴🔴 [2026-10-26 재검증 V-1 봉합] <b>왜 떼어냈나</b> — 게이트가 이 조립을
+    ///   <b>시험 안에서 복제</b>하고 있었다. 그래서 제품의 조립이 R-1 버그(폭만 보기)로
+    ///   되돌아가도 게이트는 <b>초록이었다</b>(재검증이 실제로 되살려 확인했다: 10/10 초록).
+    ///   ⇒ 게이트가 <b>이 함수를 불러서</b> 그린다. 여기가 바뀌면 게이트가 바뀐 것을 잰다.
+    ///
+    /// 🔴🪤 <b><c>PrimaryLayer</c> 가 정확히 하나 있어야 한다</b> — 빠지면
+    ///   <c>DocumentComposeException</c> 으로 그 양식의 인쇄가 <b>전부 500</b> 이다(G-W15 가 실증).
+    /// 🔴 <b>짧은 변</b>이 기준이다(<see cref="ResolveWatermarkSideMm"/>) — 까닭은 그 함수에 적었다.
+    ///   넘치면 줄어들도록 상한을 <b>가로·세로 둘 다</b> 건다.
+    /// 🔴 둘 다 없으면 이 함수를 <b>부르지 않는다</b> — 끈 고객의 종이는 종전과 글자 하나 다르지 않다(#1).
     /// </remarks>
+    internal static void ComposeDocumentBackground(
+        PageDescriptor page, PageSize pageSize,
+        byte[]? bgImage, SvgImage? watermarkSvg, int watermarkScalePct)
+    {
+        // 🔴 QuestPDF 의 크기는 point 다(1pt = 1/72 inch) — mm 로 바꾼다.
+        var pageWidthMm = pageSize.Width * 25.4f / 72f;
+        var pageHeightMm = pageSize.Height * 25.4f / 72f;
+
+        page.Background().Layers(layers =>
+        {
+            // 1겹 — 양식지 그림. 종이 전체에 맞춘다.
+            if (bgImage is not null)
+            {
+                layers.Layer().Image(bgImage).FitArea();
+            }
+
+            // 🔴 주 겹 — 배경 자리는 그릴 내용이 없으니 **비워서 늘린다.**
+            layers.PrimaryLayer().Extend();
+
+            // 2겹 — 워터마크. **정중앙** · 용지 짧은 변의 N%(사장님: "정중앙 크게").
+            if (watermarkSvg is not null)
+            {
+                var sideMm = ResolveWatermarkSideMm(pageWidthMm, pageHeightMm, watermarkScalePct);
+                layers.Layer()
+                      .AlignCenter().AlignMiddle()
+                      .MaxWidth(pageWidthMm, Unit.Millimetre)
+                      .MaxHeight(pageHeightMm, Unit.Millimetre)
+                      .Width(sideMm, Unit.Millimetre)
+                      .Svg(watermarkSvg);
+            }
+        });
+    }
+
     /// <summary>
     /// 🔴🔴 워터마크 정사각 한 변의 길이(mm) — <b>계산이 사는 한 자리</b>.
     /// </summary>
@@ -2515,6 +2517,24 @@ public sealed class PdfRenderService : IPdfRenderService
         return Math.Min(side, shorter);
     }
 
+    /// <summary>
+    /// 🔴🔴 이 종이에 워터마크를 <b>깔 것인가</b> — 판정이 사는 <b>한 자리</b>.
+    /// </summary>
+    /// <param name="documentType">문서종. 🔴 <c>tax_invoice</c> 는 결-K 로 <b>무조건 안 깐다</b>.</param>
+    /// <param name="formSays"><c>null</c> 공통을 따른다 · <c>true</c> 이 양식만 켬 · <c>false</c> 이 양식만 끔.</param>
+    /// <param name="commonEnabled">공통 설정의 켬/끔.</param>
+    /// <remarks>
+    /// 🔴 <b>왜 떼어 놨나</b> — 판정이 DB 조회와 뒤섞여 있어 <b>재 볼 수가 없었다</b>.
+    ///   [4] 반려 R-2 와 [3-V] P1-2 가 모두 이 판정의 구멍이었는데, 그 구멍을 재는
+    ///   시험이 0건이었다(「공통 켬 + 양식 행 있음」 조합을 아무도 안 그려 봤다).
+    ///   ⇒ 순수 함수로 내려 <b>아홉 조합을 전수로</b> 잰다(게이트 G-W17).
+    /// 🔴 조회를 아끼는 쪽(위 호출부의 두 번 호출)도 <b>이 함수로</b> 판정한다 —
+    ///   조건을 두 번 적지 않는다.
+    /// 🔴 [2026-10-26 재검증 V-8 봉합] 이 설명이 <b>옆 메서드에 붙어 있었다</b> —
+    ///   새 메서드를 설명과 메서드 **사이에** 끼워 넣어 <c>&lt;summary&gt;</c> 가 둘이 되고
+    ///   <c>&lt;param&gt;</c> 셋이 없는 인자를 가리켰다. 내가 같은 날 봉합한
+    ///   「주석이 코드와 다르다」와 <b>같은 사고</b>다.
+    /// </remarks>
     internal static bool ShouldLayWatermark(string documentType, bool? formSays, bool commonEnabled)
     {
         // 🔴 결-K — 법무 물음 6건이 안 닫혔다. 법정 서식에 우리가 임의로 그림을 얹지 않는다.

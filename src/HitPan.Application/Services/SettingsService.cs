@@ -588,13 +588,32 @@ public sealed class SettingsService : ISettingsService
 
         // 🔴 칸 길이는 varchar(200) 이다 — 넘치면 DB 가 거절하거나 조용히 자른다.
         //   보관소가 만드는 경로는 짧지만, 자르는 자리를 여기 둔다(TruncateNullable 과 같은 뜻).
-        await _db.ExecuteAsync(new CommandDefinition(sql, new
+        var rows = await _db.ExecuteAsync(new CommandDefinition(sql, new
         {
             TenantId = tenantId,
             Path = TruncateNullable(storedPath, 200)
         }, cancellationToken: ct)).ConfigureAwait(false);
 
-        return true;
+        // 🔴🔴 [2026-10-26 재검증 V-2 봉합] 종전에는 **무조건 `true`** 였다.
+        //   그래서 올리기의 `if (!written)` 과 지우기의 `if (!cleared)` 울타리가
+        //   **둘 다 도달 불가**였다 — 글자만 있고 서는 자리가 없었다.
+        //   「회사 정보 행이 아직 없는 테넌트」면 UPDATE 가 0행이고, 그때 화면은
+        //   「등록되었습니다」를 말하지만 칸에는 아무것도 안 적힌다(10/25 사고의 모양).
+        if (rows > 0) return true;
+
+        // 🔴 0행이 **둘 중 어느 쪽인지** 가린다 —
+        //   ⒜ 행이 없다(진짜 실패) ⒝ 이미 같은 값이라 바뀐 것이 없다(성공).
+        //   MariaDB 는 값이 같으면 affected rows 를 0 으로 준다 ⇒ 이 확인 없이 false 를
+        //   돌려주면 **같은 그림을 두 번 올린 고객에게 거짓 실패**를 보여 준다(#20).
+        var exists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM local_company WHERE tenant_id = @TenantId",
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🔴 행이 없다 — 적을 자리가 없으니 **실패다.** 까닭은 부르는 쪽이 적는다
+        //   (`SettingsController` 가 로거를 들고 있고 거기서 고객에게 돌려줄 말도 만든다).
+        //   🔴 이 클래스에 로거를 **더하지 않는다** — 생성자 인자를 늘리면 반사로 만드는
+        //     자리들이 깨진다(10/25 실측: 인자 하나가 게이트 108건을 깨뜨렸다).
+        return exists > 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════
