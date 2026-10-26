@@ -5,6 +5,7 @@
      메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
 @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @using HitPan.Web.Models
+@using HitPan.Contracts.Forms
 
 <PageTitle>사용자정보설정</PageTitle>
 
@@ -208,7 +209,8 @@ else
                 <MudStack Spacing="2">
                     <label class="hitpan-file-pick">
                         <span>로고 등록</span>
-                        <InputFile OnChange="OnLogoChanged" accept=".png,.jpg,.jpeg,.svg" />
+                        @* 🔴 [[3-V] P2-6] 형식 목록을 손으로 적지 않는다 — 보관소와 **같은 자리**를 읽는다. *@
+                        <InputFile OnChange="OnLogoChanged" accept="@CompanyImageLimits.AcceptAttribute" />
                     </label>
                     @if (!string.IsNullOrWhiteSpace(_model.LogoPreviewUrl))
                     {
@@ -220,7 +222,7 @@ else
 
                     <label class="hitpan-file-pick">
                         <span>인장 등록</span>
-                        <InputFile OnChange="OnSealChanged" accept=".png,.jpg,.jpeg" />
+                        <InputFile OnChange="OnSealChanged" accept="@CompanyImageLimits.AcceptAttribute" />
                     </label>
                     @if (!string.IsNullOrWhiteSpace(_model.SealPreviewUrl))
                     {
@@ -232,7 +234,7 @@ else
 
                     <label class="hitpan-file-pick">
                         <span>헤더 등록</span>
-                        <InputFile OnChange="OnHeaderChanged" accept=".png,.jpg,.jpeg" />
+                        <InputFile OnChange="OnHeaderChanged" accept="@CompanyImageLimits.AcceptAttribute" />
                     </label>
                     @if (!string.IsNullOrWhiteSpace(_model.HeaderPreviewUrl))
                     {

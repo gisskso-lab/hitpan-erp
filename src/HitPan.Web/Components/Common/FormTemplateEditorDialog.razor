@@ -140,10 +140,147 @@
                 <MudCheckBox T="bool" @bind-Value="_form.ShowCompanySeal" Label="회사 도장 표시" Dense="true" />
             </MudItem>
             <MudItem xs="12" md="4">
-                <MudCheckBox T="bool" @bind-Value="_form.ShowBorder" Label="테두리 표시" Dense="true" />
+                @* 🔴 [20261026작1 §C-4 · 결-G] 사장님 10/25: "테두리, 격자, 로고 켜고 끄는것 =
+                     양식만 가져오고, 테두리, 격자, 로고는 끄는것 동의"
+                   🔴 종전 이름은 「테두리 표시」였는데 이 칸은 **품목표 격자까지** 끈다.
+                     이름이 실제보다 좁으면 고객이 끄기를 망설인다. *@
+                <MudCheckBox T="bool" @bind-Value="_form.ShowBorder" Label="테두리·칸 선 그리기" Dense="true" />
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    끄면 거래처 상자와 품목표의 선·회색 바탕이 모두 빠집니다.
+                </MudText>
             </MudItem>
             <MudItem xs="12">
                 <MudCheckBox T="bool" @bind-Value="_form.IsDefault" Label="기본 양식으로 설정 (1 form_type 당 1개)" Dense="true" />
+            </MudItem>
+
+            @* ══════════════════════════════════════════════════════════════
+               🔴 [20261026작1 §D-1] 로고 워터마크 — 사장님 오더 2026-10-25:
+                 "모든 양식지에 고객사 로고 워터마크 넣기 옵션 추가. 위치 = 정중앙 크게.
+                  문서의 내용을 해치지 않을정도의 명도채도. 대학교들 졸업증이나 재학증명서 느낌으로"
+               🔴 결재 2026-10-26(결-I): 공통 + 양식마다 — 단 **고객 선택 옵션**
+                 ⇒ 수치는 「공통값 따름」이 **기본으로 선택**돼 있고, 「이 양식만 따로」를
+                   고르면 입력칸이 열린다. 값만 늘어놓으면 「공통을 따른다」가 사라진다.
+               🔴 결재 2026-10-26(결-J): "응 당연히 미리보기에서 미리 보기반영되도록"
+                 ⇒ 고친 값은 저장하기 전에 미리보기로 간다.
+               🔴 결재 2026-10-26(결-K): 세금계산서는 이번 차수에서 켜는 길을 열지 않는다.
+               ══════════════════════════════════════════════════════════════ *@
+            <MudItem xs="12">
+                <MudDivider Class="my-2" />
+                @if (_isTaxInvoiceForm)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        세금계산서는 법으로 정해진 서식이라, 로고를 종이 가운데에 깔지 않습니다.
+                    </MudText>
+                }
+                else
+                {
+                    @* 🔴🔴 [2026-10-26 [4] 반려 R-2 봉합] 켬/끔을 **세 갈래**로 바꿨다.
+                         종전에는 체크박스 하나(켬/끔)였다. 그래서 공통만 켠 고객이 이 창을 열어
+                         **여백만 고쳐 저장해도** 체크박스가 꺼진 채 저장돼 워터마크가 조용히 사라졌다.
+                         고객은 워터마크를 건드린 적이 없다. ⇒ 「공통을 따릅니다」가 **화면에 있어야** 한다. *@
+                    <MudText Typo="Typo.body2"><b>회사 로고를 종이 가운데에 연하게 깔기</b></MudText>
+                    <MudRadioGroup T="string" @bind-Value="_wmMode" Class="mt-1">
+                        <MudRadio T="string" Value="@WmModeCommon" Dense="true">
+                            공통 설정을 따릅니다@(_commonStateText)
+                        </MudRadio>
+                        <MudRadio T="string" Value="@WmModeOn" Dense="true">이 양식만 켜기</MudRadio>
+                        <MudRadio T="string" Value="@WmModeOff" Dense="true">이 양식만 끄기</MudRadio>
+                    </MudRadioGroup>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        졸업증명서처럼 로고가 글씨 뒤에 연하게 깔립니다.
+                        공통 설정은 설정 → 인쇄 설정에서 바꿉니다.
+                    </MudText>
+
+                    @* 🔴 [[4] 중 R-6 봉합] 「켰는데 안 보인다」의 까닭을 **고객에게 말한다.**
+                         종전에는 일곱 갈래 전부가 서버 로그 한 줄로 끝나고 화면은 평소처럼 나왔다. *@
+                    @if (_wmMode != WmModeOff && _logoState == LogoState.Missing)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                            아직 회사 로고가 등록돼 있지 않아 지금은 아무것도 깔리지 않습니다.
+                            설정 → 회사 정보에서 로고를 먼저 올려 주십시오.
+                        </MudAlert>
+                    }
+                    @if (_wmMode != WmModeOff && _logoState == LogoState.Outside)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                            등록된 로고가 히트판이 보관하는 자리에 없어 인쇄에 쓰이지 않습니다.
+                            설정 → 회사 정보에서 로고를 <b>다시 올려</b> 주십시오.
+                        </MudAlert>
+                    }
+                    @* 🔴🔴 [2026-10-26 재검증 V-4 봉합] 「모른다」를 **삼키지 않는다.**
+                         서버가 상태를 재지 못하면 `unknown` 이 온다. 종전에는 그 낱말을
+                         말없이 넘겨 고객이 아무 말도 못 들었다 — 모르는 것은 모른다고 말한다. *@
+                    @if (_wmMode != WmModeOff && _logoState == LogoState.Unknown)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            로고가 등록돼 있는지 지금 확인하지 못했습니다. 설정 → 회사 정보에서 확인해 주십시오.
+                        </MudText>
+                    }
+                    @* 🔴 [[4] 경 R-8 봉합] 양식용지 + 워터마크 = 사다 쓰는 종이 위에 로고가 겹친다.
+                         「양식지 그림을 종이에도 인쇄」에는 이 안내가 있었는데 워터마크에는 없었다. *@
+                    @if (_wmMode == WmModeOn && _form.PaperMode == "preprint")
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                            양식용지(미리 인쇄된 종이)에 뽑으면 그 종이 위에 로고가 겹쳐 찍힙니다.
+                        </MudAlert>
+                    }
+
+                    @if (_wmMode != WmModeOff)
+                    {
+                        <MudRadioGroup T="bool" @bind-Value="_watermarkCustom" Class="mt-2">
+                            <MudRadio T="bool" Value="false" Dense="true">진하기·색감·크기는 공통값 그대로 쓰기</MudRadio>
+                            <MudRadio T="bool" Value="true" Dense="true">이 양식만 따로 정하기</MudRadio>
+                        </MudRadioGroup>
+                        @* 🔴 [[4] R-2 ⓒ 봉합] 넣어 둔 값이 지워지는 것을 **말없이** 하지 않는다(#1). *@
+                        @if (_hadCustomNumbers && !_watermarkCustom)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">
+                                이대로 저장하면 이 양식에 넣어 두신 진하기·색감·크기가 지워지고 공통값을 따릅니다.
+                            </MudText>
+                        }
+
+                        @if (_watermarkCustom)
+                        {
+                            <MudGrid Class="mt-1">
+                                <MudItem xs="12" md="4">
+                                    <MudNumericField T="decimal" @bind-Value="_wmOpacity"
+                                                     Label="진하기" Margin="Margin.Dense"
+                                                     Min="0" Max="1" Step="0.01M" />
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        0 에 가까울수록 연합니다. 글씨가 읽히는 자리는 0.12 쯤입니다.
+                                    </MudText>
+                                    @* 🔴 [[4] 중 R-6 봉합 · 길 4] 0 은 「완전히 투명」이다 — 넣을 수 있으니 말해 준다. *@
+                                    @if (_wmOpacity <= 0)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Warning">
+                                            진하기가 0 이면 완전히 투명해서 종이에 아무것도 안 보입니다.
+                                        </MudText>
+                                    }
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    <MudNumericField T="decimal" @bind-Value="_wmSaturate"
+                                                     Label="색감" Margin="Margin.Dense"
+                                                     Min="0" Max="1" Step="0.01M" />
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        0 이면 흑백에 가깝습니다. 본문과 덜 다투게 0.15 쯤을 권합니다.
+                                    </MudText>
+                                </MudItem>
+                                <MudItem xs="12" md="4">
+                                    @* 🔴🔴 [2026-10-26 [4] 반려 R-1] 종전 이름은 「종이 너비의 %」였고
+                                         그게 **거짓이자 사고**였다. 로고는 정사각으로 깔리므로 너비를 정하면
+                                         높이도 그만큼이 된다 ⇒ 가로 양식에서 71% 만 넘어도 종이 높이를 넘어
+                                         **그림이 통째로 빠졌다**(예외도 로그도 없이). 짧은 쪽 기준으로 바꿨다. *@
+                                    <MudNumericField T="int" @bind-Value="_wmScalePct"
+                                                     Label="크기 (종이 짧은 쪽의 %)" Margin="Margin.Dense"
+                                                     Min="10" Max="100" />
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        100 이면 종이 짧은 쪽에 꽉 찹니다. 가로 양식에서도 종이를 벗어나지 않습니다.
+                                    </MudText>
+                                </MudItem>
+                            </MudGrid>
+                        }
+                    }
+                }
             </MudItem>
             @* 🔴🔴 [20261025작3 절 가-1] 사장님 오더 — "양식 이미지파일 업로드 할데가 없는데?"
                  작2 에서 올리는 입구를 만들었는데 **이 묶음이 `preprint` 조건문 안에 있었다.**
@@ -153,84 +290,89 @@
                🔴 그래서 칸을 **항상** 그린다. plain 에서는 **보여 주되 눌리지 않게** 하고
                  「양식용지로 바꾸기」 한 단추와 **참을 말하는 안내**를 같이 둔다(결-1).
                🔴 preprint 갈래는 **글자 하나 안 바뀐다**(#1). *@
+            @* 🔴🔴 [20261026작1 §D-1] 사장님 오더 2026-10-25 로 **이 묶음이 열렸다**:
+                 *"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"*
+               🔴 10/25(작3) 까지 이 칸은 `preprint`(양식용지를 사다 쓰는 고객)에서만
+                 눌릴 수 있었다. 그때는 그림이 **미리보기 전용**이었으니 맞는 판단이었다.
+               🔴 그런데 오더 ① 이 요구하는 것이 바로 **「빈 A4(plain) 에 양식지 그림을
+                 깔아서 인쇄」**다. plain 에서 못 올리면 그 오더가 반쪽이 된다.
+                 ⇒ 두 모드 모두 올릴 수 있게 열고, **종이에 찍을지는 고객이 고른다**
+                   (`print_background` · 기본 끔).
+               🔴 「양식용지로 바꾸기」 단추는 **지우지 않는다**(#1) — 좌표를 맞추려면
+                 여전히 그 모드가 필요하다. *@
             <MudItem xs="12">
                 <MudText Typo="Typo.body2" Class="mb-1">
                     쓰시는 양식용지를 그림으로 올리면, 그 위에 값이 어떻게 찍히는지 바로 보실 수 있습니다.
                 </MudText>
-                @if (_form.PaperMode == "preprint")
-                {
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                        <MudFileUpload T="IBrowserFile" Accept="@FormBackgroundLimits.AcceptAttribute"
-                                       FilesChanged="OnBackgroundFileChangedAsync">
-                            <ActivatorContent>
-                                <MudButton Variant="Variant.Outlined"
-                                           StartIcon="@Icons.Material.Filled.UploadFile"
-                                           Disabled="_bgBusy">
-                                    @(_bgBusy ? "올리는 중…" : "양식용지 그림 올리기")
-                                </MudButton>
-                            </ActivatorContent>
-                        </MudFileUpload>
-                        @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
-                        {
-                            <MudButton Variant="Variant.Text" Color="Color.Error"
-                                       StartIcon="@Icons.Material.Filled.Delete"
-                                       Disabled="_bgBusy"
-                                       OnClick="RemoveBackgroundAsync">그림 지우기</MudButton>
-                        }
-                    </MudStack>
-                    @if (!string.IsNullOrWhiteSpace(_bgFileName))
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudFileUpload T="IBrowserFile" Accept="@FormBackgroundLimits.AcceptAttribute"
+                                   FilesChanged="OnBackgroundFileChangedAsync">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.UploadFile"
+                                       Disabled="_bgBusy">
+                                @(_bgBusy ? "올리는 중…" : "양식용지 그림 올리기")
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
                     {
-                        <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
+                        <MudButton Variant="Variant.Text" Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.Delete"
+                                   Disabled="_bgBusy"
+                                   OnClick="RemoveBackgroundAsync">그림 지우기</MudButton>
                     }
-                }
-                else
-                {
-                    @* 🔴 단추를 **없애지 않는다** — 없으면 고객은 기능이 없다고 읽는다.
-                         보이되 눌리지 않게 두고, 바꾸는 길을 바로 옆에 둔다. *@
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                        <MudButton Variant="Variant.Outlined"
-                                   StartIcon="@Icons.Material.Filled.UploadFile"
-                                   Disabled="true">양식용지 그림 올리기</MudButton>
+                    @if (_form.PaperMode != "preprint")
+                    {
                         <MudButton Variant="Variant.Text" Color="Color.Primary"
                                    StartIcon="@Icons.Material.Filled.SwapHoriz"
                                    OnClick="SwitchToPreprint">양식용지로 바꾸기</MudButton>
-                    </MudStack>
-                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1">
-                        이 양식은 「빈 A4 용지」로 되어 있어 그림을 올릴 수 없습니다.
-                        위 「어떤 종이에 인쇄하나요?」를 「미리 인쇄된 양식용지」로 바꾸시면 올릴 수 있습니다.
-                    </MudAlert>
-                    @* 🔴 [1-V] ⒟ — 좌표는 모드가 바뀌면 버리는데 **그림만 안 버린다**(기존 비대칭).
-                         그 그림은 「빈 A4」에서도 **미리보기에는 깔린다**(PdfRenderService 는 paper_mode 를 안 본다).
-                         서버는 안 건드리고(작3 범위 = 화면 글자·보이기만), 고객이 **보고 지울 수 있게만** 만든다. *@
-                    @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
+                    }
+                </MudStack>
+                @if (!string.IsNullOrWhiteSpace(_bgFileName))
+                {
+                    <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
+                {
+                    @* 🔴🔴 [2026-10-25 [4] 반려 R-1 봉합을 **유지**] 판정을 갈라 각각 참을 말한다.
+                         부사를 다듬어 받지 않는다. 이제 축이 하나 늘었다(종이에 찍나). *@
+                    @if (IsLegalOnlyComposer)
                     {
-                        @* 🔴🔴 [2026-10-25 [4] 반려 R-1 봉합] — 「미리보기에만 보입니다」가
-                             **세금계산서에서 거짓**이었다. [1-V] ⒞ 가 이미 적어 둔 사실인데
-                             나는 그 반대를 고객 화면에 적었다:
-                             `PdfRenderService.cs:117` 이 `tax_invoice && !isPreprint` 를
-                             **법정 전용 작성기**로 갈라 보내고, 그 분기는 `:106` 의 배경 그림을
-                             **쓰지 않는다** ⇒ 「빈 A4」 세금계산서는 **미리보기에도 안 깔린다.**
-                           🔴 부사를 다듬어 받지 않는다 — **판정을 갈라** 각각 참을 말한다. *@
                         <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1">
-                            @if (IsLegalOnlyComposer)
+                            이 서식은 법으로 모양이 정해져 있어 올린 그림이
+                            <b>종이에도, 미리보기에도 나오지 않습니다.</b>
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudCheckBox T="bool" @bind-Value="_form.PrintBackground" Class="mt-1"
+                                     Label="이 그림을 종이에도 함께 인쇄하기" Dense="true" />
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @if (_form.PrintBackground && _form.PaperMode == "preprint")
                             {
                                 <text>
-                                    예전에 올린 그림이 남아 있습니다. 이 서식은 법으로 모양이 정해져 있어
-                                    <b>종이에도, 미리보기에도 나오지 않습니다.</b>
+                                    <b>양식용지에는 양식이 이미 인쇄되어 있습니다.</b> 켜 두시면 그 위에
+                                    같은 모양이 한 번 더 찍혀 두 겹으로 보입니다 — 보통은 꺼 두십니다.
+                                </text>
+                            }
+                            else if (_form.PrintBackground)
+                            {
+                                <text>빈 종이에 이 그림을 함께 인쇄합니다. 양식용지를 따로 사실 필요가 없습니다.</text>
+                            }
+                            else if (_form.PaperMode == "preprint")
+                            {
+                                <text>
+                                    양식용지에 이미 인쇄된 모양이 있으니 종이에는 찍지 않습니다.
+                                    이 그림은 아래 미리보기에서 <b>자리를 맞추는 데만</b> 쓰입니다.
                                 </text>
                             }
                             else
                             {
-                                <text>
-                                    예전에 올린 그림이 남아 있습니다. 「빈 A4 용지」에서는
-                                    <b>종이에 찍히지 않고</b> 아래 미리보기에만 보입니다.
-                                </text>
+                                <text>지금은 아래 미리보기에만 보이고 <b>종이에는 찍히지 않습니다.</b></text>
                             }
-                        </MudAlert>
-                        <MudButton Variant="Variant.Text" Color="Color.Error" Class="mt-1"
-                                   StartIcon="@Icons.Material.Filled.Delete"
-                                   Disabled="_bgBusy"
-                                   OnClick="RemoveBackgroundAsync">그림 지우기</MudButton>
+                        </MudText>
                     }
                 }
             </MudItem>
@@ -412,6 +554,72 @@
     private decimal _rowPitchMm = 6m;
     private int _maxRows;
 
+    // ── 🔴 [20261026작1 §D-1] 로고 워터마크 (DB-148 · 결-I·결-J·결-K) ──
+    //
+    // 🔴 **왜 「공통값 따름 / 이 양식만 따로」를 먼저 묻나** — 결재 결-I 가
+    //   *"공통 + 양식마다 — 단 고객 선택 옵션"* 이다. 수치 칸만 늘어놓으면
+    //   「공통을 따른다」는 답이 화면에서 사라진다(10/25 함정 2 와 같은 모양).
+    // 🔴 DB 에서 null = 「공통을 따르겠다」다. 0.00 과 다른 뜻이므로
+    //   「따로 정하기」를 끈 채 저장하면 **null 을 넣어야** 한다.
+
+    /// <summary>이 양식만 따로 정하나 — 끄면 수치를 <c>null</c> 로 저장해 공통을 따른다.</summary>
+    private bool _watermarkCustom;
+
+    // ── 🔴🔴 [2026-10-26 [4] 반려 R-2 봉합] 켬/끔도 **세 값**이다 ──
+    //
+    // 🔴 **무엇이 사고였나** — 종전에는 체크박스 하나였고 DB 칸도 `NOT NULL DEFAULT 0` 이었다.
+    //   공통만 켠 고객이 양식을 열어 **여백만 고쳐 저장**하면, 편집창은 공통을 읽을 자리가
+    //   없으니 꺼진 채였고 저장이 `0` 을 적었다 ⇒ **워터마크가 조용히 사라졌다.**
+    //   고객은 워터마크를 건드린 적이 없다. 반대로 공통을 켜도 **양식 행이 있는 고객에게는
+    //   영영 안 닿았다**(행이 있으면 0 이 적혀 있으므로).
+    // 🔴 그래서 「정하지 않았다」를 화면과 DB 양쪽에 둔다 — 수치 셋과 **같은 규칙**이다.
+
+    private const string WmModeCommon = "common";
+    private const string WmModeOn = "on";
+    private const string WmModeOff = "off";
+
+    /// <summary>켬/끔 갈래 — <c>common</c>(공통 따름 · 기본) · <c>on</c> · <c>off</c>.</summary>
+    private string _wmMode = WmModeCommon;
+
+    /// <summary>창을 열 때 이 양식에 **따로 넣어 둔 수치**가 있었나 — 지워짐을 미리 말해 주려고.</summary>
+    private bool _hadCustomNumbers;
+
+    /// <summary>공통 설정을 읽었나 · 켜져 있나 — 화면이 「공통은 지금 켜져 있습니다」를 말하려면 알아야 한다.</summary>
+    private bool _commonLoaded;
+
+    private bool _commonEnabled;
+
+    /// <summary>라디오 옆에 붙는 참말 — 못 읽었으면 <b>아무 말도 하지 않는다</b>(모르는 것을 단정하지 않는다).</summary>
+    private string _commonStateText =>
+        !_commonLoaded ? string.Empty
+        : _commonEnabled ? " (지금 공통은 켜져 있습니다)"
+        : " (지금 공통은 꺼져 있습니다)";
+
+    /// <summary>로고가 쓸 수 있는 상태인가 — 「켰는데 안 보인다」의 가장 흔한 두 까닭.</summary>
+    private enum LogoState { Unknown, Present, Missing, Outside }
+
+    private LogoState _logoState = LogoState.Unknown;
+
+    /// <summary>화면에서 만지는 진하기. 🔴 저장은 <see cref="_watermarkCustom"/> 일 때만 한다.</summary>
+    private decimal _wmOpacity = WatermarkDefaults.Opacity;
+
+    /// <summary>화면에서 만지는 색감.</summary>
+    private decimal _wmSaturate = WatermarkDefaults.Saturate;
+
+    /// <summary>화면에서 만지는 크기(종이 너비 대비 %).</summary>
+    private int _wmScalePct = WatermarkDefaults.ScalePct;
+
+    /// <summary>
+    /// 🔴 이 양식이 세금계산서인가 — 결재 결-K 로 <b>워터마크를 켜는 길을 열지 않는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 법무팀장 물음 6건(전자세금계산서에 공급자 로고를 정중앙에 허용? · 가독성 법적 기준? 등)이
+    /// 답을 못 받았다. 🔴 <b>법정 서식에 우리가 임의로 그림을 얹지 않는다.</b>
+    /// 서버도 같은 판정을 한 번 더 한다 — 화면만 믿지 않는다.
+    /// </remarks>
+    private bool _isTaxInvoiceForm =>
+        string.Equals(_form.FormType, "tax_invoice", StringComparison.Ordinal);
+
     private void AddCoord() => _coords.Add(new CoordRow());
 
     protected override void OnInitialized()
@@ -444,10 +652,36 @@
                 PrintCopyMode = Template.PrintCopyMode,
                 StyleKey = Template.StyleKey,
                 ShowTearLine = Template.ShowTearLine,
+                // 🔴 [20261026작1 §D-1] 이 다섯 줄이 빠지면 10/21 S-2 와 **똑같은 사고**가 난다 —
+                //   고객이 양식을 열어 아무것도 안 바꾸고 저장만 해도 워터마크 설정이
+                //   **조용히 기본값으로 되돌아간다.** 편집창이 값을 안 가져오면 저장이 지운다.
+                PrintBackground = Template.PrintBackground,
+                ShowWatermark = Template.ShowWatermark,
+                WatermarkOpacity = Template.WatermarkOpacity,
+                WatermarkSaturate = Template.WatermarkSaturate,
+                WatermarkScalePct = Template.WatermarkScalePct,
                 IsDefault = Template.IsDefault,
                 IsActive = Template.IsActive
             };
             LoadCoords(Template.FieldCoordsJson);
+            // 🔴 수치가 하나라도 들어 있으면 「이 양식만 따로」로 열어 준다 —
+            //   그렇게 저장해 둔 고객이 창을 열었을 때 「공통값 따름」으로 보이면
+            //   아무것도 안 바꾸고 저장만 해도 그 값이 지워진다.
+            _watermarkCustom = Template.WatermarkOpacity is not null
+                               || Template.WatermarkSaturate is not null
+                               || Template.WatermarkScalePct is not null;
+            _hadCustomNumbers = _watermarkCustom;
+            _wmOpacity = Template.WatermarkOpacity ?? WatermarkDefaults.Opacity;
+            _wmSaturate = Template.WatermarkSaturate ?? WatermarkDefaults.Saturate;
+            _wmScalePct = Template.WatermarkScalePct ?? WatermarkDefaults.ScalePct;
+
+            // 🔴 [R-2 봉합] 저장돼 있던 **세 값**을 그대로 되살린다 — null 은 「공통 따름」이다.
+            _wmMode = Template.ShowWatermark switch
+            {
+                true => WmModeOn,
+                false => WmModeOff,
+                null => WmModeCommon
+            };
         }
         else
         {
@@ -456,6 +690,57 @@
             //   사장님이 **수정 화면으로 읽으셨다.** 빈 칸 + 흐린 안내글(Placeholder)로 바꿨다.
             //   비운 채 저장하면 SaveAsync 가 막는다(이미 있는 문).
         }
+    }
+
+    /// <summary>
+    /// 🔴 공통 설정과 로고 상태를 읽어 온다 — [2026-10-26 [4] 반려 R-2·R-6 봉합.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 편집창이 공통을 읽나</b> — 「공통을 따릅니다」를 고르게 해 놓고 그 공통이
+    ///   켜졌는지 꺼졌는지 안 보여 주면, 고객은 자기 종이가 어떻게 나올지 모른 채 저장한다.
+    /// 🔴 <b>못 읽으면 아무 말도 하지 않는다</b> — 모르는 것을 단정하지 않는다.
+    ///   값이 안 와도 창은 열리고 저장도 된다(#20).
+    /// </remarks>
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var common = await Http.GetFromJsonAsync<PrintCommonPeek>("api/settings/print-common");
+            if (common is not null)
+            {
+                _commonEnabled = common.WatermarkEnabled;
+                _commonLoaded = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 못 읽었으면 라디오 옆 글자를 **비운 채** 둔다.
+            Console.Error.WriteLine($"[FormWatermark] 공통 설정을 읽지 못했다: {ex.Message}");
+        }
+
+        try
+        {
+            var state = await Http.GetFromJsonAsync<Dictionary<string, string>>("api/settings/company-image-state");
+            _logoState = state is not null && state.TryGetValue("logo", out var s)
+                ? s switch
+                {
+                    "present" => LogoState.Present,
+                    "missing" => LogoState.Missing,
+                    "unusable" => LogoState.Outside,
+                    _ => LogoState.Unknown
+                }
+                : LogoState.Unknown;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[FormWatermark] 로고 상태를 읽지 못했다: {ex.Message}");
+        }
+    }
+
+    /// <summary>공통 설정에서 <b>켬/끔만</b> 본다 — 수치는 서버가 알아서 떨어뜨린다.</summary>
+    private sealed class PrintCommonPeek
+    {
+        public bool WatermarkEnabled { get; set; }
     }
 
     /// <summary>저장돼 있던 좌표를 표로 되돌린다.</summary>
@@ -803,6 +1088,58 @@
         public string? Message { get; set; }
     }
 
+    /// <summary>
+    /// 🔴 화면에서 만진 워터마크 수치를 <c>_form</c> 에 담는다 — <b>저장과 미리보기가 같이 쓴다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>「따로 정하기」를 끈 채라면 <c>null</c> 을 넣는다.</b> null 이 「공통을 따르겠다」다.
+    ///   0 을 넣으면 「완전히 투명하게」가 되어 고객은 <b>「켰는데 안 보인다」</b>를 본다
+    ///   — 두 뜻이 한 칸에서 섞이면 안 된다(DB-148 머리글).
+    /// 🔴 <b>세금계산서는 켜지 않는다</b>(결-K) — 화면에 칸이 없으니 값도 보내지 않는다.
+    ///   서버가 같은 판정을 한 번 더 한다. 화면만 믿지 않는다.
+    /// </remarks>
+    private void ApplyWatermarkToForm()
+    {
+        if (_isTaxInvoiceForm)
+        {
+            // 🔴 세금계산서는 **정하지 않은 채로 둔다**(null) — 「이 양식만 끔」으로 적어 두면
+            //   법무 답이 와서 공통으로 켜는 날 그 양식만 까닭 없이 빠진 채 남는다.
+            //   지금 안 깔리는 것은 서버가 결-K 로 **한 번 더 막기** 때문이다(화면만 믿지 않는다).
+            // 🔴 [재검증 V-3 과 같은 까닭] 수치도 **건드리지 않는다** — 이 화면은 세금계산서에
+            //   수치 칸을 아예 열지 않으므로, 적혀 있던 값은 고객이 아니라 **다른 길로 들어온 값**이다.
+            //   우리가 안 보여 주는 값을 우리가 지우지 않는다(#1).
+            _form.ShowWatermark = null;
+            return;
+        }
+
+        // 🔴 [R-2 봉합] 세 값을 그대로 적는다 — null 이 「공통을 따른다」다.
+        _form.ShowWatermark = _wmMode switch
+        {
+            WmModeOn => true,
+            WmModeOff => false,
+            _ => null
+        };
+
+        // 🔴🔴 [2026-10-26 재검증 V-3 봉합] **「이 양식만 끄기」에서 수치를 지우지 않는다.**
+        //   종전에는 끄기를 고르면 아래 else 가 수치 3개를 null 로 덮었고, 경고문은
+        //   「끄기」 갈래에서는 아예 그려지지 않았다 ⇒ R-2 ⓒ(넣어 둔 값이 말없이 사라진다)가
+        //   **다른 갈래로 그대로 재발**했다. 껐다 다시 켜면 돌아와야 한다(#1 — 덮어쓰기 금지).
+        if (_wmMode == WmModeOff) return;
+
+        if (_watermarkCustom)
+        {
+            _form.WatermarkOpacity = _wmOpacity;
+            _form.WatermarkSaturate = _wmSaturate;
+            _form.WatermarkScalePct = _wmScalePct;
+        }
+        else
+        {
+            _form.WatermarkOpacity = null;
+            _form.WatermarkSaturate = null;
+            _form.WatermarkScalePct = null;
+        }
+    }
+
     private async Task PreviewAsync()
     {
         if (string.IsNullOrWhiteSpace(_form.FormType))
@@ -819,6 +1156,15 @@
         {
             await ClosePreviewAsync();   // 앞서 띄운 주소를 먼저 거둔다(메모리 누적 방지)
 
+            // 🔴🔴 [20261026작1 §D-1 · 결-J] **이 한 줄이 없으면 결-J 가 거짓이 된다.**
+            //   사장님: *"응 당연히 미리보기에서 미리 보기반영되도록"*
+            //   [무슨 일이 나나] 화면에서 만지는 수치는 `_wmOpacity` 같은 **따로 둔 변수**다
+            //     (「공통값 따름」을 null 로 지키려고 그렇게 뒀다). 그 값을 `_form` 에 담는 일을
+            //     저장 때만 했으면, 미리보기는 **옛 값으로 그려진다** — 칸은 있고 숫자를 고쳐도
+            //     종이가 안 바뀐다. 고객은 보지 않고 숫자를 골라야 한다.
+            //   🔴 그래서 **저장과 미리보기가 같은 한 벌**(ApplyWatermarkToForm)을 쓴다.
+            //     두 벌이 되면 언젠가 어긋나고, 어긋난 쪽은 늘 미리보기다.
+            ApplyWatermarkToForm();
             var body = new { Template = _form, LineCount = _previewLines };
             var resp = await Http.PostAsJsonAsync("api/settings/form-templates/preview-pdf", body);
             if (!resp.IsSuccessStatusCode)
@@ -870,6 +1216,9 @@
 
         // 표에 적은 위치를 서버가 읽는 형태로 바꿔 담는다 (사장님 지시 2026-08-12).
         _form.FieldCoordsJson = BuildCoordsJson();
+
+        // 🔴 [20261026작1 §D-1] 워터마크 수치를 담는다 — **미리보기와 같은 한 벌**을 쓴다.
+        ApplyWatermarkToForm();
 
         _busy = true;
         try

@@ -3,6 +3,7 @@ using System.Data.Common;
 using Dapper;
 using HitPan.Application.DTOs.Settings;
 using HitPan.Application.Interfaces;
+using HitPan.Contracts.Forms;
 
 namespace HitPan.Application.Services;
 
@@ -545,6 +546,149 @@ public sealed class SettingsService : ISettingsService
 
         var t = value.Trim();
         return t.Length <= maxLen ? t : t[..maxLen];
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetCompanyImagePathAsync(
+        string tenantId, string kind, CancellationToken ct = default)
+    {
+        // 🔴 컬럼 이름을 바깥 글자로 만들지 않는다 — 적는 쪽과 **같은 모양**으로 가른다.
+        var sql = kind switch
+        {
+            "logo" => "SELECT logo_url FROM local_company WHERE tenant_id = @TenantId",
+            "seal" => "SELECT seal_url FROM local_company WHERE tenant_id = @TenantId",
+            "header" => "SELECT header_url FROM local_company WHERE tenant_id = @TenantId",
+            _ => null
+        };
+        if (sql is null) return null;
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        return await _db.QuerySingleOrDefaultAsync<string?>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> SaveCompanyImagePathAsync(
+        string tenantId, string kind, string? storedPath, CancellationToken ct = default)
+    {
+        // 🔴 컬럼 이름을 바깥에서 온 글자로 만들지 않는다 — 세 종류를 코드가 직접 가른다.
+        //   모르는 종류면 **아무것도 하지 않고** false 를 돌려준다(조용히 성공처럼 보이면 안 된다).
+        var sql = kind switch
+        {
+            "logo" => "UPDATE local_company SET logo_url = @Path WHERE tenant_id = @TenantId",
+            "seal" => "UPDATE local_company SET seal_url = @Path WHERE tenant_id = @TenantId",
+            "header" => "UPDATE local_company SET header_url = @Path WHERE tenant_id = @TenantId",
+            _ => null
+        };
+        if (sql is null) return false;
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 🔴 칸 길이는 varchar(200) 이다 — 넘치면 DB 가 거절하거나 조용히 자른다.
+        //   보관소가 만드는 경로는 짧지만, 자르는 자리를 여기 둔다(TruncateNullable 과 같은 뜻).
+        var rows = await _db.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            TenantId = tenantId,
+            Path = TruncateNullable(storedPath, 200)
+        }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🔴🔴 [2026-10-26 재검증 V-2 봉합] 종전에는 **무조건 `true`** 였다.
+        //   그래서 올리기의 `if (!written)` 과 지우기의 `if (!cleared)` 울타리가
+        //   **둘 다 도달 불가**였다 — 글자만 있고 서는 자리가 없었다.
+        //   「회사 정보 행이 아직 없는 테넌트」면 UPDATE 가 0행이고, 그때 화면은
+        //   「등록되었습니다」를 말하지만 칸에는 아무것도 안 적힌다(10/25 사고의 모양).
+        if (rows > 0) return true;
+
+        // 🔴 0행이 **둘 중 어느 쪽인지** 가린다 —
+        //   ⒜ 행이 없다(진짜 실패) ⒝ 이미 같은 값이라 바뀐 것이 없다(성공).
+        //   MariaDB 는 값이 같으면 affected rows 를 0 으로 준다 ⇒ 이 확인 없이 false 를
+        //   돌려주면 **같은 그림을 두 번 올린 고객에게 거짓 실패**를 보여 준다(#20).
+        var exists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM local_company WHERE tenant_id = @TenantId",
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🔴 행이 없다 — 적을 자리가 없으니 **실패다.** 까닭은 부르는 쪽이 적는다
+        //   (`SettingsController` 가 로거를 들고 있고 거기서 고객에게 돌려줄 말도 만든다).
+        //   🔴 이 클래스에 로거를 **더하지 않는다** — 생성자 인자를 늘리면 반사로 만드는
+        //     자리들이 깨진다(10/25 실측: 인자 하나가 게이트 108건을 깨뜨렸다).
+        return exists > 0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 인쇄 공통 설정 (print_common_settings · DB-148 · 20261026작1 §D-2)
+    //
+    // 🔴 사장님 결재 2026-10-25(결-I): "공통 + 양식마다 — 단 고객 선택 옵션"
+    //   이 한 벌이 모든 양식의 기본이고, 양식마다 수치를 비워 두면 이 값을 따른다.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <inheritdoc />
+    public async Task<PrintCommonSettingsDto> GetPrintCommonAsync(
+        string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT watermark_enabled AS WatermarkEnabled,
+                   watermark_opacity AS WatermarkOpacity,
+                   watermark_saturate AS WatermarkSaturate,
+                   watermark_scale_pct AS WatermarkScalePct
+            FROM print_common_settings WHERE tenant_id = @TenantId
+            """;
+
+        var row = await _db.QuerySingleOrDefaultAsync<PrintCommonSettingsDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        // 🔴 행이 없는 것이 **정상 경로**다 — 한 번도 안 건드린 고객이다.
+        //   그때 빈 칸·0 을 돌려주면 화면이 「진하기 0」을 보여 주고, 고객이 그대로 저장하면
+        //   워터마크가 **투명해져 「켰는데 안 보인다」**가 된다. 제안값으로 떨어진다.
+        return row ?? new PrintCommonSettingsDto();
+    }
+
+    /// <inheritdoc />
+    public async Task SavePrintCommonAsync(
+        string tenantId, PrintCommonSettingsDto dto, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 🔴 범위로 조인다 — **두 겹이다.**
+        //   ① 입구(`SettingsController` · `[ApiController]` + DTO 의 `[Range]`)가 범위 밖 요청을
+        //      **400 으로 거절**한다. 그래서 API 를 직접 부르는 길에서는 이 조이기가 안 돈다.
+        //   ② 그래도 여기서 한 번 더 조인다 — 다른 입구(배치·이관·다음 차수의 화면)가 생기는 날
+        //      이 자리가 마지막 그물이다. 인쇄 한복판에서 종이를 멈추지 않는다(#20).
+        //   🔴 [2026-10-26 [3-V] P2-8 ③ 봉합] 종전 주석은 *"화면이 먼저 막지만 API 를 직접
+        //      부를 수도 있다"* 라고 적어, **엔드포인트가 조인다**는 거짓을 남겼다.
+        var opacity = WatermarkDefaults.ClampRatio(dto.WatermarkOpacity);
+        var saturate = WatermarkDefaults.ClampRatio(dto.WatermarkSaturate);
+        var scalePct = WatermarkDefaults.ClampScalePct(dto.WatermarkScalePct);
+
+        // 🔴 행이 없으면 만들고 있으면 고친다 — 고객이 설정을 두 번 저장해도 행은 하나다.
+        // 🔴 [P1-4 봉합] `print_background_default` 는 **적지 않는다** — 화면이 안 묶는 칸을
+        //   저장할 때마다 0 으로 덮고 있었다(#1). 쓰는 차수에 화면과 함께 배선한다.
+        const string sql = """
+            INSERT INTO print_common_settings
+              (tenant_id, watermark_enabled, watermark_opacity, watermark_saturate,
+               watermark_scale_pct)
+            VALUES
+              (@TenantId, @WatermarkEnabled, @WatermarkOpacity, @WatermarkSaturate,
+               @WatermarkScalePct)
+            ON DUPLICATE KEY UPDATE
+              watermark_enabled = @WatermarkEnabled,
+              watermark_opacity = @WatermarkOpacity,
+              watermark_saturate = @WatermarkSaturate,
+              watermark_scale_pct = @WatermarkScalePct
+            """;
+
+        await _db.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            TenantId = tenantId,
+            WatermarkEnabled = dto.WatermarkEnabled ? 1 : 0,
+            WatermarkOpacity = opacity,
+            WatermarkSaturate = saturate,
+            WatermarkScalePct = scalePct
+        }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
     public async Task<UnitPriceValidationDto> ValidateUnitPriceAsync(

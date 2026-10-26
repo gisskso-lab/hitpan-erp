@@ -3,7 +3,10 @@
 @* 🔴 2026-08-11 (사장님 지시): 설정관리는 **부모계정(대표)만**.
      메뉴에서 감추는 것만으로는 주소를 직접 치면 그대로 들어온다 — 화면에서도 막는다. *@
 @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
+@using System.Net.Http.Json
+@using HitPan.Contracts.Forms
 @inject ISnackbar Snackbar
+@inject HttpClient Http
 
 <PageTitle>양식(인쇄)정보 설정</PageTitle>
 
@@ -28,13 +31,15 @@
                     </MudButton>
                 </ActivatorContent>
             </MudFileUpload>
+            @* 🔴 [20261026작1 §B-4] 올리는 중에는 다시 못 누르게 한다 —
+                 두 번 누르면 같은 그림이 두 장 쌓이고 칸은 뒤에 끝난 쪽을 가리킨다. *@
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.CloudUpload"
-                       Disabled="@(_sealFile is null)"
-                       OnClick="UploadSeal">업로드</MudButton>
+                       Disabled="@(_sealFile is null || _sealBusy)"
+                       OnClick="UploadSeal">@(_sealBusy ? "올리는 중…" : "업로드")</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error"
                        StartIcon="@Icons.Material.Filled.Delete"
-                       Disabled="@(_sealFileName is null)"
+                       Disabled="@(string.IsNullOrWhiteSpace(_sealPath) || _sealBusy)"
                        OnClick="DeleteSeal">삭제</MudButton>
         </MudStack>
     </MudPaper>
@@ -59,13 +64,112 @@
             </MudFileUpload>
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.CloudUpload"
-                       Disabled="@(_logoFile is null)"
-                       OnClick="UploadLogo">업로드</MudButton>
+                       Disabled="@(_logoFile is null || _logoBusy)"
+                       OnClick="UploadLogo">@(_logoBusy ? "올리는 중…" : "업로드")</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Error"
                        StartIcon="@Icons.Material.Filled.Delete"
-                       Disabled="@(_logoFileName is null)"
+                       Disabled="@(string.IsNullOrWhiteSpace(_logoPath) || _logoBusy)"
                        OnClick="DeleteLogo">삭제</MudButton>
         </MudStack>
+    </MudPaper>
+
+    @* ══════════════════════════════════════════════════════════════════
+       🔴 [20261026작1 §D-2] 로고 워터마크 공통 설정 (DB-148 · 결-I)
+         사장님 결재 2026-10-25: "공통 + 양식마다 — 단 고객 선택 옵션"
+         ⇒ 여기 값이 **모든 양식의 기본**이고, 양식마다 따로 정할 수도 있다.
+       🔴 수치는 **제안값**이다 — 개발팀이 정한 값이 아니다. 고객이 바꾼다.
+       ══════════════════════════════════════════════════════════════════ *@
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Opacity" Size="Size.Small" Class="mr-1" />
+            로고 워터마크 (모든 양식 공통)
+        </MudText>
+        @* 🔴🔴 [2026-10-26 [4] 반려 R-2] 종전 이 글은 **거짓이었다.**
+             「여기 값이 모든 양식의 기본」이라 적었는데, 양식 칸이 `NOT NULL DEFAULT 0` 이라
+             양식을 한 번이라도 저장한 고객에게는 이 켜기가 **영영 안 닿았다.**
+             이제 양식 쪽 기본이 「공통을 따릅니다」이고, 그래서 이 글이 참이 됐다. *@
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">
+            졸업증명서처럼 회사 로고를 종이 가운데에 연하게 깔아 인쇄합니다.
+            양식마다 「공통을 따릅니다 / 이 양식만 켜기 / 이 양식만 끄기」를 고를 수 있고,
+            따로 고르지 않은 양식은 <b>여기 값을 그대로</b> 씁니다.
+        </MudText>
+
+        @if (string.IsNullOrWhiteSpace(_logoPath))
+        {
+            @* 🔴 로고가 없으면 워터마크는 켜도 아무 일이 안 일어난다 —
+                 「켰는데 안 보인다」를 겪게 하지 않고 **미리 말해 준다.** *@
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                위 「회사 로고」를 먼저 올려 주셔야 종이에 나옵니다.
+            </MudAlert>
+        }
+        else if (_logoState == "unknown")
+        {
+            @* 🔴 [재검증 V-4] 「모른다」도 말한다 — 삼키지 않는다. *@
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                로고가 인쇄에 쓸 수 있는 상태인지 지금 확인하지 못했습니다.
+            </MudText>
+        }
+        else if (_logoState == "unusable")
+        {
+            @* 🔴🔴 [2026-10-26 [4] 중 R-6 봉합] **등록돼 보이는데 안 쓰이는 길**이 있었다 —
+                 예전부터 쓰던 로고 경로가 히트판 보관소 밖이면 작성기가 울타리에서 막는다.
+                 화면은 「등록됨」으로 보이고 종이에는 안 나오며, 고객에게 가는 글자는 0 이었다. *@
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                등록된 로고가 히트판이 보관하는 자리에 없어 인쇄에 쓰이지 않습니다.
+                위 「회사 로고」를 <b>다시 올려</b> 주십시오.
+            </MudAlert>
+        }
+
+        <MudCheckBox T="bool" @bind-Value="_common.WatermarkEnabled"
+                     Label="로고 워터마크 쓰기" Dense="true" />
+
+        @if (_common.WatermarkEnabled)
+        {
+            <MudGrid Class="mt-1">
+                <MudItem xs="12" md="4">
+                    <MudNumericField T="decimal" @bind-Value="_common.WatermarkOpacity"
+                                     Label="진하기" Margin="Margin.Dense"
+                                     Min="0" Max="1" Step="0.01M" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        0 에 가까울수록 연합니다. 글씨가 읽히는 자리는 0.12 쯤입니다.
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudNumericField T="decimal" @bind-Value="_common.WatermarkSaturate"
+                                     Label="색감" Margin="Margin.Dense"
+                                     Min="0" Max="1" Step="0.01M" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        0 이면 흑백에 가깝습니다. 본문과 덜 다투게 0.15 쯤을 권합니다.
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    @* 🔴 [[4] 반려 R-1] 「종이 너비」가 거짓이자 사고였다 — 가로 양식에서
+                         71% 만 넘어도 로고가 통째로 빠졌다. 짧은 쪽 기준으로 바꿨다. *@
+                    <MudNumericField T="int" @bind-Value="_common.WatermarkScalePct"
+                                     Label="크기 (종이 짧은 쪽의 %)" Margin="Margin.Dense"
+                                     Min="10" Max="100" />
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        100 이면 종이 짧은 쪽에 꽉 찹니다. 가로 양식에서도 종이를 벗어나지 않습니다.
+                    </MudText>
+                </MudItem>
+            </MudGrid>
+        }
+
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
+            🔴 세금계산서는 법으로 모양이 정해져 있어 워터마크를 넣지 않습니다.
+        </MudText>
+
+        <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Disabled="_commonBusy"
+                       OnClick="SavePrintCommonAsync">
+                @(_commonBusy ? "저장 중…" : "워터마크 설정 저장")
+            </MudButton>
+        </MudStack>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+            설정한 모양은 양식정보설정의 각 양식에서 「미리보기」로 바로 확인하실 수 있습니다.
+        </MudText>
     </MudPaper>
 
     @* ── 문서별 설정 테이블 ── *@
@@ -180,8 +284,15 @@
     /// <summary>
     /// 초기화 시 문서별 기본 하단 문구를 세팅한다.
     /// </summary>
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        // 🔴 [20261026작1 §B-4] 지금 등록된 직인·로고를 먼저 읽는다 —
+        //   그러지 않으면 올려 둔 고객에게도 「미등록」으로 보인다.
+        await LoadCompanyImagesAsync();
+        // 🔴 [§D-2] 인쇄 공통 설정도 같이 읽는다 — 제안값이 칸에 들어가 있어야
+        //   고객이 무엇을 적어야 할지 안다(히트판 정신 — 쉬움으로 이겼다).
+        await LoadPrintCommonAsync();
+
         _documentSettings = new List<DocumentPrintSetting>
         {
             new() { DocumentType = "견적서",    FooterText = "위 금액을 견적합니다",    ShowRemarks = true },
@@ -193,27 +304,162 @@
         };
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // 🔴🔴 [20261026작1 §B-4] 직인·로고를 **실제로 올린다** (결-H)
+    //
+    // 🔴 종전에는 단추를 누르면 **파일 이름만 화면에 적고** 끝났다:
+    //      "직인 이미지 'x.png'가 선택되었습니다. (서버 업로드는 Phase 2)"
+    //    「삭제」도 화면 변수만 비웠다 — 서버에는 처음부터 아무것도 없었으니
+    //    「삭제되었습니다」는 **빈 말**이었다.
+    // 🔴 사장님 지시 2026-08-11: *"거짓문구는 모두 삭제"* — 그 지시가 이 자리에도 적용된다.
+    //    이제 서버로 보내고, **회사 정보 칸까지 적힌 뒤에** 등록되었다고 말한다.
+    // 🔴 그리고 **로고는 워터마크의 재료**다 — 이 통로가 없으면 워터마크는
+    //    켜도 아무 일이 안 일어나는 칸이 된다(사장님 오더 10/25 ④).
+    // ══════════════════════════════════════════════════════════════════
+
+    private bool _sealBusy;
+    private bool _logoBusy;
+    private string? _sealPath;
+    private string? _logoPath;
+
+    /// <summary>
+    /// 지금 등록돼 있는 직인·로고를 읽어 온다 — 🔴 <b>화면이 사실을 말하게</b> 한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이것이 없으면 화면을 다시 열 때마다 「미등록」으로 보인다. 올려 둔 고객이
+    ///   또 올리고, 「삭제」를 눌러도 아무 일이 안 일어난다.
+    /// </remarks>
+    private async Task LoadCompanyImagesAsync()
+    {
+        try
+        {
+            var company = await Http.GetFromJsonAsync<CompanyImageState>("api/settings/company");
+            _sealPath = company?.SealUrl;
+            _logoPath = company?.LogoUrl;
+            _sealFileName = string.IsNullOrWhiteSpace(_sealPath) ? null : System.IO.Path.GetFileName(_sealPath);
+            _logoFileName = string.IsNullOrWhiteSpace(_logoPath) ? null : System.IO.Path.GetFileName(_logoPath);
+
+            // 🔴 [[4] R-6] 「쓸 수 있나」는 **서버가 판정한다** — 울타리가 어디인지 화면은 모른다.
+            //   못 읽으면 `null` 로 남겨 **아무 말도 하지 않는다**(모르는 것을 단정하지 않는다).
+            // 🔴🔴 [2026-10-26 재검증 V-4 봉합] 서버가 돌려주는 낱말은 **네 개**다
+            //   (present · missing · unusable · unknown). 종전에는 `unknown` 을 `missing` 과
+            //   한 칸에 뭉개 담아 **「모른다」를 말없이 삼켰다.** 낱말을 그대로 들고 온다.
+            var state = await Http.GetFromJsonAsync<Dictionary<string, string>>("api/settings/company-image-state");
+            _logoState = state is not null && state.TryGetValue("logo", out var logoState)
+                ? logoState
+                : "unknown";
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 못 읽어도 화면은 열린다 — 다만 사실을 모른다고 말한다.
+            Console.Error.WriteLine($"[PrintSettings] 회사 그림 상태를 못 읽었다: {ex.Message}");
+            Snackbar.Add("지금 등록된 직인·로고를 불러오지 못했습니다. 화면을 다시 열어 주십시오.", Severity.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 로고가 <b>인쇄에 쓰일 수 있나</b> — 서버가 준 낱말 그대로:
+    /// <c>present</c> · <c>missing</c> · <c>unusable</c> · <c>unknown</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [재검증 V-4] 네 낱말을 <b>뭉개지 않는다.</b> 「모른다」와 「안 올렸다」는 고객에게
+    ///   할 말이 다르다. 못 읽으면 <c>unknown</c> 이고, 화면은 그때도 <b>말을 한다</b>.
+    /// </remarks>
+    private string? _logoState;
+
+    /// <summary>회사 정보에서 그림 경로만 받아 보는 그릇.</summary>
+    private sealed class CompanyImageState
+    {
+        public string? LogoUrl { get; set; }
+        public string? SealUrl { get; set; }
+    }
+
+    // ── 🔴 [§D-2] 로고 워터마크 공통 설정 (DB-148 · 결-I) ──
+
+    private PrintCommonModel _common = new();
+    private bool _commonBusy;
+
+    /// <summary>
+    /// 인쇄 공통 설정을 읽는다 — 🔴 행이 없으면 서버가 <b>제안값</b>을 돌려준다.
+    /// </summary>
+    private async Task LoadPrintCommonAsync()
+    {
+        try
+        {
+            var dto = await Http.GetFromJsonAsync<PrintCommonModel>("api/settings/print-common");
+            if (dto is not null) _common = dto;
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 못 읽어도 화면은 제안값으로 열린다.
+            Console.Error.WriteLine($"[PrintSettings] 공통 설정을 못 읽었다: {ex.Message}");
+            Snackbar.Add("워터마크 설정을 불러오지 못했습니다. 화면을 다시 열어 주십시오.", Severity.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 공통 설정을 저장한다 — 🔴 <b>성공한 뒤에만</b> 저장되었다고 말한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 화면의 다른 묶음(여백·하단 문구)은 아직 저장되지 않는다. 그래서 **같이 묶지 않고**
+    ///   이 묶음만의 저장 단추를 둔다 — 하나를 눌러 둘 다 저장된 것처럼 보이면 거짓이 된다.
+    /// </remarks>
+    private async Task SavePrintCommonAsync()
+    {
+        _commonBusy = true;
+        try
+        {
+            var resp = await Http.PutAsJsonAsync("api/settings/print-common", _common);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("워터마크 설정을 저장했습니다.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(await ReadMessageAsync(resp), Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴🔴 [2026-10-26 재검증 V-5 봉합] 이 줄도 **고객 화면에 .NET 예외 원문**을 쏟았다.
+            //   같은 차수에서 위 두 자리(올리기·지우기)만 고치고 **이 자리를 놓쳤다** —
+            //   이 줄을 넣은 것도 이 차수였다. 「세 자리 중 두 자리」는 봉합이 아니다.
+            Console.Error.WriteLine($"[PrintSettings] 공통 설정 저장 실패: {ex.Message}");
+            Snackbar.Add("워터마크 설정을 저장하지 못했습니다. 잠시 뒤 다시 시도해 주십시오.", Severity.Error);
+        }
+        finally
+        {
+            _commonBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// 공통 설정 그릇 — ⚠️ 서버 DTO(<c>PrintCommonSettingsDto</c>)와 <b>이름이 같아야</b>
+    /// JSON 이 매핑된다. 다르면 값이 조용히 기본값으로 떨어진다.
+    /// </summary>
+    private sealed class PrintCommonModel
+    {
+        public bool WatermarkEnabled { get; set; }
+        public decimal WatermarkOpacity { get; set; } = WatermarkDefaults.Opacity;
+        public decimal WatermarkSaturate { get; set; } = WatermarkDefaults.Saturate;
+        public int WatermarkScalePct { get; set; } = WatermarkDefaults.ScalePct;
+
+        // 🔴 [2026-10-26 [3-V] P1-4 봉합] `PrintBackgroundDefault` 를 **뺐다.**
+        //   화면이 이 칸을 묶지 않은 채 보내고 있었고, 서버는 저장마다 0 으로 덮었다(#1).
+        //   서버 DTO 에서도 같이 빠졌다 — 쓰는 차수에 화면·서버를 함께 배선한다.
+    }
+
     // ── 직인 파일 선택 ──
     private void OnSealFileChanged(IBrowserFile file)
     {
         _sealFile = file;
     }
 
-    // ── 직인 업로드 (현재 UI 전용 — 백엔드 API 미연동) ──
-    private void UploadSeal()
-    {
-        if (_sealFile is null) return;
-        _sealFileName = _sealFile.Name;
-        Snackbar.Add($"직인 이미지 '{_sealFileName}'가 선택되었습니다. (서버 업로드는 Phase 2)", Severity.Info);
-    }
+    // ── 직인 업로드 ──
+    private async Task UploadSeal() => await UploadImageAsync("seal", _sealFile);
 
     // ── 직인 삭제 ──
-    private void DeleteSeal()
-    {
-        _sealFile = null;
-        _sealFileName = null;
-        Snackbar.Add("직인 이미지가 삭제되었습니다.", Severity.Info);
-    }
+    private async Task DeleteSeal() => await DeleteImageAsync("seal", _sealPath);
 
     // ── 로고 파일 선택 ──
     private void OnLogoFileChanged(IBrowserFile file)
@@ -221,20 +467,131 @@
         _logoFile = file;
     }
 
-    // ── 로고 업로드 (현재 UI 전용 — 백엔드 API 미연동) ──
-    private void UploadLogo()
-    {
-        if (_logoFile is null) return;
-        _logoFileName = _logoFile.Name;
-        Snackbar.Add($"로고 이미지 '{_logoFileName}'가 선택되었습니다. (서버 업로드는 Phase 2)", Severity.Info);
-    }
+    // ── 로고 업로드 ──
+    private async Task UploadLogo() => await UploadImageAsync("logo", _logoFile);
 
     // ── 로고 삭제 ──
-    private void DeleteLogo()
+    private async Task DeleteLogo() => await DeleteImageAsync("logo", _logoPath);
+
+    /// <summary>
+    /// 그림을 서버로 보낸다 — 🔴 <b>성공한 뒤에만</b> 등록되었다고 말한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 서버가 거절하면 그 까닭을 <b>그대로</b> 보여 준다(상한 초과·그림 아님·열 수 없음).
+    ///   「실패했습니다」만 띄우면 고객은 무엇을 고쳐야 할지 모른다.
+    /// </remarks>
+    private async Task UploadImageAsync(string kind, IBrowserFile? file)
     {
-        _logoFile = null;
-        _logoFileName = null;
-        Snackbar.Add("로고 이미지가 삭제되었습니다.", Severity.Info);
+        if (file is null) return;
+
+        // 🔴🔴 [2026-10-26 [3-V] P1-3 봉합] **상한을 먼저 본다.**
+        //   종전에는 아래 `OpenReadStream(상한)` 이 터지면서 Blazor 의 **영어 IOException**
+        //   (*"Supplied file with size … exceeds the maximum of …"*) 이 catch 로 떨어져
+        //   고객 화면에 그대로 떴다. 서버가 준비해 둔 참말(「2MB 이하로 올려 주십시오」)은
+        //   왕복을 안 하므로 **영영 안 보였다.** 고객은 같은 파일을 다시 올린다.
+        if (file.Size > CompanyImageLimits.MaxBytes)
+        {
+            Snackbar.Add(
+                $"그림이 너무 큽니다. {CompanyImageLimits.MaxBytesLabel} 이하로 올려 주십시오.",
+                Severity.Warning);
+            return;
+        }
+
+        var busy = kind == "seal";
+        if (busy) _sealBusy = true; else _logoBusy = true;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            // 🔴 상한을 화면에서도 한 번 본다 — 큰 파일을 올렸다가 서버에서 거절당하는
+            //   왕복을 줄인다. 🔴 그래도 **서버가 다시 본다**(화면 검사는 편의일 뿐이다).
+            var stream = file.OpenReadStream(CompanyImageLimits.MaxBytes);
+            var fileContent = new StreamContent(stream);
+            content.Add(fileContent, "file", file.Name);
+            content.Add(new StringContent(kind), "kind");
+
+            var resp = await Http.PostAsync("api/settings/company-image", content);
+            if (resp.IsSuccessStatusCode)
+            {
+                await LoadCompanyImagesAsync();
+                if (kind == "seal") _sealFile = null; else _logoFile = null;
+                Snackbar.Add(kind == "seal" ? "직인이 등록되었습니다." : "로고가 등록되었습니다.",
+                    Severity.Success);
+            }
+            else
+            {
+                var why = await ReadMessageAsync(resp);
+                Snackbar.Add(why, Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴 [P1-3] 예외 원문을 **고객에게 보여 주지 않는다** — 로그로만 남긴다(#23 계열).
+            Console.Error.WriteLine($"[PrintSettings] 그림 올리기 실패({kind}): {ex.Message}");
+            Snackbar.Add("그림을 올리지 못했습니다. 잠시 뒤 다시 시도해 주십시오.", Severity.Error);
+        }
+        finally
+        {
+            if (busy) _sealBusy = false; else _logoBusy = false;
+        }
+    }
+
+    /// <summary>그림을 지운다 — 🔴 <b>파일과 칸을 같이</b> 비운다.</summary>
+    private async Task DeleteImageAsync(string kind, string? storedPath)
+    {
+        if (string.IsNullOrWhiteSpace(storedPath)) return;
+
+        var busy = kind == "seal";
+        if (busy) _sealBusy = true; else _logoBusy = true;
+        try
+        {
+            var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/company-image")
+            {
+                Content = JsonContent.Create(new { StoredPath = storedPath, Kind = kind })
+            };
+            var resp = await Http.SendAsync(req);
+            if (resp.IsSuccessStatusCode)
+            {
+                await LoadCompanyImagesAsync();
+                Snackbar.Add(kind == "seal" ? "직인을 지웠습니다." : "로고를 지웠습니다.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(await ReadMessageAsync(resp), Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴 [P1-3] 예외 원문을 고객 화면에 쏟지 않는다 — 로그로만 남긴다.
+            Console.Error.WriteLine($"[PrintSettings] 그림 지우기 실패({kind}): {ex.Message}");
+            Snackbar.Add("그림을 지우지 못했습니다. 잠시 뒤 다시 시도해 주십시오.", Severity.Error);
+        }
+        finally
+        {
+            if (busy) _sealBusy = false; else _logoBusy = false;
+        }
+    }
+
+    /// <summary>서버가 돌려준 까닭을 사람 말로 꺼낸다.</summary>
+    private static async Task<string> ReadMessageAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            var body = await resp.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(body)) return "그림을 처리하지 못했습니다.";
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+            {
+                var text = m.GetString();
+                if (!string.IsNullOrWhiteSpace(text)) return text!;
+            }
+            return "그림을 처리하지 못했습니다.";
+        }
+        catch (Exception ex)
+        {
+            // 🔴 까닭을 못 읽어도 고객에게는 사람 말로 돌려준다(#15).
+            Console.Error.WriteLine($"[PrintSettings] 응답을 읽지 못했다: {ex.Message}");
+            return "그림을 처리하지 못했습니다.";
+        }
     }
 
     /// <summary>

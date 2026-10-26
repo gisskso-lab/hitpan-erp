@@ -241,6 +241,32 @@ else
         /// </remarks>
         public bool ShowTearLine { get; set; }
 
+        /// <summary>
+        /// 양식지 그림을 <b>실제 종이에도</b> 찍나 (DB-148 · 사장님 오더 2026-10-25).
+        /// </summary>
+        /// <remarks>
+        /// ⚠️ 서버 DTO 와 이름이 같아야 JSON 이 매핑된다 — 다르면 값이 조용히 기본값으로 떨어진다.
+        /// 🔴 <c>PaperMode</c> 와 축이 다르다. 양식용지를 사다 쓰는 고객이 이걸 켜면 이중 인쇄다.
+        /// </remarks>
+        public bool PrintBackground { get; set; }
+
+        /// <summary>회사 로고를 종이 가운데에 연하게 깔까 (DB-148).</summary>
+        /// <remarks>⚠️ 서버 DTO 와 이름이 같아야 JSON 이 매핑된다.</remarks>
+        public bool? ShowWatermark { get; set; }
+
+        /// <summary>워터마크 진하기 0.00~1.00 — <c>null</c> 이면 공통 설정을 따른다 (DB-148).</summary>
+        /// <remarks>
+        /// 🔴 <b>0.00 과 null 은 다른 뜻이다</b> — 0.00 = 「완전히 투명하게」,
+        /// null = 「나는 정하지 않았다, 공통을 따르겠다」. 그래서 nullable 이다.
+        /// </remarks>
+        public decimal? WatermarkOpacity { get; set; }
+
+        /// <summary>워터마크 색감 0.00~1.00 (0=흑백) — null 이면 공통 설정을 따른다 (DB-148).</summary>
+        public decimal? WatermarkSaturate { get; set; }
+
+        /// <summary>워터마크 크기 — 종이 너비 대비 %. null 이면 공통 설정을 따른다 (DB-148).</summary>
+        public int? WatermarkScalePct { get; set; }
+
         public bool IsDefault { get; set; }
         public bool IsActive { get; set; } = true;
     }

@@ -1,9 +1,11 @@
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
 using Dapper;
 using HitPan.Application.Interfaces;
 using HitPan.Application.DTOs.Documents;
 using HitPan.Application.DTOs.Settings;
+using HitPan.Contracts.Forms;
 using Microsoft.Extensions.Logging;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -103,7 +105,28 @@ public sealed class PdfRenderService : IPdfRenderService
         //     이중 인쇄가 되고(§13-5 합격선 1 위반), 순백지 9종에도 업체 그림이 찍힌다.
         //   [그래서] 미리보기 경로에서만 그린다. 실인쇄 PDF 에는 **0건** —
         //     이메일·팩스·전표 인쇄는 전부 종전과 똑같다(#1).
+        //
+        // 🔴🔴 [2026-10-26작1] **위 두 줄은 이제 조건부다.** 사장님 오더 10/25 로
+        //   「양식지 인쇄 / 순백지 인쇄」가 **고객 옵션**이 됐다(결-D·§C-3).
+        //   ⇒ 실인쇄에 깔리는 경우가 생겼다: **고객이 그 양식에서 켠 경우에만**
+        //     (`print_background=1`). 끈 고객은 여전히 **0건**이고 종전과 똑같다.
+        //   🔴 「등재만 · 이번에 안 한다」였던 §13-10 이 **사장님 오더로 열렸다** —
+        //     내가 임의로 넓힌 것이 아니다. 근거는 20261026작1 작업지시서 §C-3.
         var bgImage = ResolveFormBackground(overrides, template);
+
+        // 🔴 로고 워터마크 (20261026작1 §C-2 · DB-148 · 사장님 오더 10/25 ④).
+        //   사장님: *"모든 양식지에 고객사 로고 워터마크 넣기 옵션 추가. 위치 = 정중앙 크게.
+        //            문서의 내용을 해치지 않을정도의 명도채도. 대학교들 졸업증이나 재학증명서 느낌으로"*
+        //
+        // 🔴 수치는 **양식별 → 공통 → 제안값** 순으로 떨어진다(결-I: 공통 + 양식마다).
+        //   양식별 값이 null 이면 「나는 정하지 않았다, 공통을 따르겠다」는 뜻이다.
+        //   🔴 공통 설정 행이 **없는 것이 정상 경로**다 — 그때 제안값으로 떨어진다.
+        //
+        // 🔴 켜졌는지 판정도 같은 순서다 — 양식에서 켜면 켠다. 양식이 안 정했으면
+        //   공통의 켬/끔을 따른다. 🔴 양식 행 자체가 없으면(신규 고객) **끔**이다.
+        var watermark = await BuildWatermarkLayerAsync(tenantId, documentType, template, company, ct)
+            .ConfigureAwait(false);
+
         var showHeader = template?.ShowCompanyLogo ?? true;
         var showBorder = template?.ShowBorder ?? true;
         var marginTop = (float)(template?.MarginTopMm ?? 20);
@@ -150,7 +173,11 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   종전에는 `PageSizes.A4` 가 못으로 박혀 있어 고객이 A5·가로를 골라도
                 //   종이가 안 바뀌었다(저장은 되는데 아무 일도 안 일어나는 칸이었다).
                 //   🔴 모르는 값이면 **A4·세로로 떨어진다** — 고객 종이가 안 나가는 일은 없다(#20).
-                page.Size(ResolvePageSize(template, documentType, useCoords));
+                // 🔴 [2026-10-26작1] 값을 **변수로 받는다** — 워터마크 크기가 용지 폭의 %라
+                //   폭을 다시 알아야 한다. 🔴 두 번 부르면 이 안의 경고 로그가 **두 줄** 찍혀
+                //   다음 사람이 「두 번 그렸나」로 읽는다. 한 번만 부른다.
+                var pageSize = ResolvePageSize(template, documentType, useCoords);
+                page.Size(pageSize);
                 // 🔴 스타일 칸을 **읽는다** — 지금은 늘 basic 이다(배선만 · 4종 디자인 미확정).
                 //   종전에는 저장·조회만 되고 작성기가 이 칸을 아예 몰랐다. 모르는 값이 오면
                 //   ResolveStyleKey 가 적어 둔다 — 조용히 넘어가지 않는다.
@@ -179,9 +206,25 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   🔴 그림이 없거나 못 읽으면 **종전과 똑같이** 그린다(#1 — 고객 종이 안 바뀜).
                 //   🔴 이 자리는 **공용 흐름**이다 ⇒ 양식용지(preprint) 경로의 10종 전부에 닿는다.
                 //      세금계산서도 preprint 면 이 흐름으로 온다(위 전용 분기는 !isPreprint).
-                if (bgImage is not null)
+                // 🔴🔴 [2026-10-26작1 §C-1] 배경 자리에 **두 겹**이 들어올 수 있게 바꿨다 —
+                //   양식지 그림과 워터마크다. 종전에는 그림 한 장만 깔았다.
+                //   🔴 둘 다 **본문 아래**다(배경 자리) — 글자가 워터마크 위에 보인다.
+                //      사장님 오더 *"문서의 내용을 해치지 않을정도"* 가 이 순서를 가리킨다.
+                //   🔴🪤 **`Layers` 에는 `PrimaryLayer` 가 정확히 하나 있어야 한다** —
+                //      빠뜨리면 `DocumentComposeException`:
+                //      *"The Layers component needs to have exactly one primary layer. It has none."*
+                //      ⇒ 그 양식의 인쇄가 **전부 500** 이 된다(2026-10-26 실측으로 확인).
+                //   🔴 둘 다 없으면 **Layers 를 아예 만들지 않는다** — 끈 고객의 종이는
+                //      종전과 글자 하나 다르지 않다(#1).
+                if (bgImage is not null || watermark is not null)
                 {
-                    page.Background().Image(bgImage).FitArea();
+                    // 🔴🔴 [2026-10-26 재검증 V-1 봉합] 조립을 **떼어내 한 자리로** 옮겼다 —
+                    //   게이트가 **제품의 이 조립을 그대로 불러** 그릴 수 있어야 하기 때문이다.
+                    //   종전에는 게이트가 `Layers`·`MaxWidth`·`MaxHeight` 를 **시험 안에서 복제**하고
+                    //   제품에서 가져오는 것은 길이 한 줄뿐이었다 ⇒ 재검증이 R-1 버그를 실코드에
+                    //   되살려 놓고 돌렸는데 **G-W16 이 10/10 초록**이었다. 거짓 초록이다.
+                    ComposeDocumentBackground(
+                        page, pageSize, bgImage, watermark?.Svg, watermark?.ScalePct ?? 0);
                 }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
@@ -257,6 +300,10 @@ public sealed class PdfRenderService : IPdfRenderService
             return;
         }
         var borderWidth = showBorder ? 0.5f : 0f;
+        // 🔴 [2026-10-26작1 §C-4] 격자를 끄면 칸이 좁아 보인다 — 패딩으로 보정한다.
+        //   🔴 showBorder=1 일 때는 4 그대로다 — 기존 고객의 종이가 한 픽셀도 안 바뀐다.
+        //   🔴 지역함수(CellHead·CellBody)가 이 값을 캡처하므로 **쓰이는 자리보다 앞에서** 정한다.
+        var cellPad = showBorder ? 4 : 5;
         e.PaddingTop(10).Column(col =>
         {
             // 거래처 박스
@@ -336,8 +383,27 @@ public sealed class PdfRenderService : IPdfRenderService
             }
         });
 
-        static IContainer CellHead(IContainer x) => x.Background(Colors.Grey.Lighten3).Border(0.5f).BorderColor(Colors.Grey.Lighten1).Padding(4);
-        static IContainer CellBody(IContainer x) => x.Border(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(4);
+        // 🔴🔴 [2026-10-26작1 §C-4 · 결-G] 품목표 격자를 **`show_border` 에 묶었다.**
+        //   사장님 10/25: *"테두리, 격자, 로고 켜고 끄는것 = 양식만 가져오고,
+        //                   테두리, 격자, 로고는 끄는것 동의"*
+        //
+        // 🔴 **왜 안 꺼졌나** — 이 두 함수가 `static` 지역함수였다. `static` 이면
+        //   바깥 변수를 **캡처할 수 없어** `showBorder` 를 아예 볼 수 없었다.
+        //   그래서 `0.5f` 가 고정이었고, 바로 위 `:320` 에 `borderWidth` 가
+        //   **이미 계산돼 있는데 쓰이지 않았다.** 고객이 「테두리 끄기」를 켜면
+        //   거래처 박스는 꺼지고 **품목표 격자만 남는** 반쪽 종이가 나왔다.
+        //   ⇒ `static` 을 떼고 그 `borderWidth` 를 쓴다. 급여명세서의
+        //      `PayslipCell(c, showBorder)` 가 처음부터 올바른 본이었다.
+        //
+        // 🔴 테두리를 0 으로 만들면 칸이 좁아 보인다 ⇒ **패딩으로 보정한다.**
+        //   사장님 결재: *"묶은 뒤 실 문서 크기는 용지에 맞춰 임의 조정"*.
+        //   🔴 `showBorder=1` 일 때의 종이는 **한 픽셀도 달라지지 않아야 한다**(기존 고객 보호).
+        IContainer CellHead(IContainer x)
+        {
+            var box = showBorder ? x.Background(Colors.Grey.Lighten3) : x;
+            return box.Border(borderWidth).BorderColor(Colors.Grey.Lighten1).Padding(cellPad);
+        }
+        IContainer CellBody(IContainer x) => x.Border(borderWidth).BorderColor(Colors.Grey.Lighten2).Padding(cellPad);
     }
 
     // ─── DB lookup ─────────────────────────────────────
@@ -723,7 +789,10 @@ public sealed class PdfRenderService : IPdfRenderService
             SELECT company_name AS CompanyName, biz_no AS BusinessNo,
                    ceo_name AS RepresentativeName, address AS Address, tel AS Phone,
                    -- 🔴 20261021작 절 B-2 — 세금계산서 법정 서식 칸. 칸 추가만, 삭제 0.
-                   biz_type AS BizType, biz_item AS BizItem, seal_url AS SealUrl
+                   biz_type AS BizType, biz_item AS BizItem, seal_url AS SealUrl,
+                   -- 🔴 20261026작1 (DB-148) — 워터마크의 재료다. 안 읽으면 고객이 로고를
+                   --   올리고 워터마크를 켜도 **종이에 아무 일이 안 일어난다.**
+                   logo_url AS LogoUrl
             FROM local_company WHERE tenant_id = @TenantId
             """;
         try
@@ -823,6 +892,15 @@ public sealed class PdfRenderService : IPdfRenderService
         /// 보관소가 생기는 날 <b>코드 수정 0</b> 으로 켜진다.
         /// </summary>
         public string? SealUrl { get; set; }
+
+        /// <summary>
+        /// 🔴 회사 로고 경로 — <b>워터마크의 재료</b>다 (DB-148 · 20261026작1).
+        /// </summary>
+        /// <remarks>
+        /// 🔴 비어 있으면 워터마크는 <b>아무 일도 하지 않는다</b> — 켜도 종이가 안 바뀐다.
+        ///   고객에게 「로고를 먼저 올려 주십시오」를 화면에서 알려 줘야 한다(갈래 D).
+        /// </remarks>
+        public string? LogoUrl { get; set; }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1800,24 +1878,54 @@ public sealed class PdfRenderService : IPdfRenderService
     private static FormTemplateInfo? ApplyPrintOptions(FormTemplateInfo? template, PrintOptionOverrides? opt)
     {
         if (opt is null) return template;
-        if (opt.PrintCopyMode is null && opt.ShowTearLine is null) return template;
+
+        // 🔴🔴 [2026-10-26작1 §C-6 · 결-J] 이 조기 반환을 **넓혔다.**
+        //   [그대로 두면 무슨 일이 나나] 종전에는 `PrintCopyMode`·`ShowTearLine` 둘만 봤다.
+        //     ⇒ 워터마크 칸을 덮개에 더해도 **여기서 조용히 버려진다.** 칸은 있고
+        //     화면은 값을 보내는데 미리보기만 안 바뀐다 — 「갔다 ≠ 보인다」의 또 다른 모양이다.
+        //   🔴 그래서 칸을 더할 때 **이 줄을 같이 고친다.** 다음 칸을 더하는 사람도 여기를 보라.
+        if (opt.PrintCopyMode is null && opt.ShowTearLine is null
+            && opt.PrintBackground is null && opt.ShowWatermark is null
+            && opt.WatermarkOpacity is null && opt.WatermarkSaturate is null
+            && opt.WatermarkScalePct is null)
+        {
+            return template;
+        }
 
         // 양식 행이 없으면 기본값 한 벌을 만들어 거기에 얹는다(E-7).
         var t = template ?? new FormTemplateInfo();
 
         if (!string.IsNullOrWhiteSpace(opt.PrintCopyMode)) t.PrintCopyMode = opt.PrintCopyMode!;
         if (opt.ShowTearLine is not null) t.ShowTearLine = opt.ShowTearLine.Value;
+
+        // 🔴 DB-148 — 미리보기에서 고른 값을 **이번 한 번만** 얹는다. 저장하지 않는다.
+        //   🔴 수치는 null 을 **덮지 않는다** — null 로 보내 온 칸은 「안 건드렸다」는 뜻이고,
+        //   그러면 저장된 양식값(또는 공통값)이 그대로 쓰여야 한다.
+        if (opt.PrintBackground is not null) t.PrintBackground = opt.PrintBackground.Value;
+        if (opt.ShowWatermark is not null) t.ShowWatermark = opt.ShowWatermark;
+        if (opt.WatermarkOpacity is not null) t.WatermarkOpacity = opt.WatermarkOpacity;
+        if (opt.WatermarkSaturate is not null) t.WatermarkSaturate = opt.WatermarkSaturate;
+        if (opt.WatermarkScalePct is not null) t.WatermarkScalePct = opt.WatermarkScalePct;
         return t;
     }
 
     private byte[]? ResolveFormBackground(PdfPreviewOverrides? overrides, FormTemplateInfo? template)
     {
-        // 🔴 이 한 줄이 실인쇄를 지킨다. 빼면 고객 종이에 그림이 또 찍힌다.
+        // 🔴 이 한 줄이 실인쇄를 지킨다. 빼면 **끈 고객의** 종이에 그림이 또 찍힌다.
         // 🔴 [재검증 C-3 봉합] 종전에는 `overrides is null` 로 **대리 판정**했다.
         //   전표 인쇄 미리보기도 overrides 를 타므로, 그 종이에 배경이 깔리면
         //   **미리보기엔 그림이 있고 인쇄물엔 없다** ⇒ 합격선 ⑤ 가 거짓이 된다.
-        //   ⇒ **양식 설계 미리보기일 때만** 깐다.
-        if (overrides?.IsFormDesignPreview != true) return null;
+        //
+        // 🔴🔴 [2026-10-26작1 §C-3] 사장님 오더로 **조건을 넓혔다 — 지운 것이 아니다.**
+        //   사장님 10/25: *"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"*
+        //   ⇒ 종전: 양식 설계 미리보기일 때만 깐다.
+        //     이제: **그것 + 고객이 「종이에도 찍기」를 켠 양식**(print_background=1).
+        //   🔴 **끈 고객에게는 종전과 글자 하나 다르지 않다** — 기본값이 0 이다.
+        //     끈 고객의 종이에 그림이 새면 그게 사고다(#1 · #20).
+        //   🔴 양식용지를 **사다 쓰는** 고객(preprint)이 이걸 켜면 이중 인쇄가 된다 —
+        //     그 판정은 화면이 먼저 말려 주고(갈래 D), 여기서는 고객이 고른 대로 그린다.
+        //     「우리가 몰래 끈다」는 길은 안 만든다(반자동 원칙 · 고객이 정한다).
+        if (overrides?.IsFormDesignPreview != true && template?.PrintBackground != true) return null;
         return TryLoadFormBackground(template?.BackgroundImageUrl);
     }
 
@@ -2131,19 +2239,443 @@ public sealed class PdfRenderService : IPdfRenderService
     /// ⇒ 합격선 ④ 는 이번 차수 <b>미달</b>이다. 보관소가 생기는 날 <b>코드 수정 0</b> 으로 켜진다.
     /// 🔴 이 함수는 <b>읽기만</b> 한다 — 파일 보관소·업로드 통로를 만들지 않는다(범위 밖).
     /// </summary>
+    /// <summary>
+    /// 🔴🔴 <b>[2026-10-26작1 §B-3 P0 봉합]</b> 인장 그림을 읽는다 — 울타리를 지나서.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>종전 판은 <c>File.Exists</c> → <c>File.ReadAllBytes</c> 가 전부였다.</b>
+    ///   울타리 0개 · 사전 디코드 0건. 그때는 <c>seal_url</c> 이 <b>늘 비어</b> 있어
+    ///   한 번도 안 터졌다 — <b>보관소가 없다는 것이 유일한 방어였다.</b>
+    ///   🔴 그런데 오늘 보관소를 만들었다(결-H). 그 순간 10/24 의 P0 가
+    ///   <b>글자 하나 안 다르게 재현</b>된다: 못 읽는 바이트를 작성기까지 끌고 가면
+    ///   <c>GeneratePdf()</c> 가 예외를 던지고 <b>그 양식의 인쇄·이메일·팩스가 전부 500</b> 이 된다
+    ///   (#20 — 워크플로우 흐름은 절대 안 끊긴다).
+    /// 🔴 <b>시그니처는 건드리지 않았다</b> — 인자를 더하면 반사로 부르는 시험들이 깨진다
+    ///   (10/25 작2 가 기본값 있는 인자 하나로 회귀를 157→265 로 깼다).
+    /// 🔴 못 읽으면 <c>null</c> 을 돌려주고 종이는 <b>글자 도장</b>으로 나간다 — 종전과 같다.
+    /// </remarks>
     private byte[]? TryLoadSealImage(string? sealUrl)
+        => TryLoadCompanyImage(sealUrl, "인장", "글자 도장으로 그린다");
+
+    /// <summary>
+    /// 🔴 회사 로고 그림을 읽는다 — <b>워터마크의 재료</b> (20261026작1 · DB-148).
+    /// </summary>
+    /// <remarks>못 읽으면 <c>null</c> 이고, 워터마크는 <b>그냥 안 깔린다</b>. 종이는 나간다(#20).</remarks>
+    private byte[]? TryLoadLogoImage(string? logoUrl)
+        => TryLoadCompanyImage(logoUrl, "로고", "워터마크를 깔지 않는다");
+
+    /// <summary>
+    /// 🔴 워터마크 한 겹을 <b>SVG 글자</b>로 만든다 — 20261026작1 §C-2 (DB-148).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 SVG 인가</b> — QuestPDF 2026.2.4 에 <c>.Opacity()</c> 가 <b>없다</b>
+    ///   (2026-10-26 실측: 컴파일 CS1061 · <c>QuestPDF.xml</c> 에 심볼 0건).
+    ///   SVG 를 거치면 <b>새 꾸러미 0건</b>으로 명도·채도를 둘 다 줄 수 있다
+    ///   (<c>opacity</c> + <c>feColorMatrix saturate</c>).
+    ///
+    /// 🔴🪤 <b><c>opacity</c> 는 반드시 <c>&lt;g&gt;</c> 에 건다.</b> 2026-10-26 실측:
+    ///   <c>&lt;image opacity='0.12'&gt;</c> 는 <b>아무 경고 없이 무시된다</b>
+    ///   (중앙픽셀 <c>R=255 G=0 B=0</c> — 대조군과 똑같았다).
+    ///   <c>&lt;g opacity='0.12'&gt;</c> 로 감싸면 <c>R=255 G=223 B=223</c> 로 연해진다.
+    ///   ⇒ 이 자리를 고치는 사람은 <b>낱말이 아니라 픽셀로</b> 다시 재라.
+    ///
+    /// 🔴 <b>SVG 글자가 깨지면 작성기가 예외를 던진다</b>(실측: <i>Cannot decode the provided
+    ///   SVG image.</i>) ⇒ 글자는 <b>전부 우리가 만들고</b>, 고객 문자열은 <b>base64 말고는
+    ///   아무것도 넣지 않는다</b>(파일 이름·경로 0건). 숫자는 범위로 조인 뒤
+    ///   <b><c>InvariantCulture</c> 로 찍는다</b> — 서버 로캘이 유럽으로 잡힌 PC 에서
+    ///   소수점이 <c>,</c> 로 찍히면 <b>모든 양식이 500</b> 이 된다.
+    ///   (한국 로캘은 소수점이 <c>.</c> 라 ko-KR 에서는 안 터진다 — 실측 확인.
+    ///    그래도 막아 둔다. 「우리 PC 에서는 된다」는 검증이 아니다.)
+    ///
+    /// 🔴 못 만들면 <c>null</c> — 워터마크만 빠지고 <b>종이는 나간다</b>(#20).
+    /// </remarks>
+    private string? TryBuildWatermarkSvg(byte[]? logoBytes, string? logoUrl, decimal opacity, decimal saturate)
     {
-        if (string.IsNullOrWhiteSpace(sealUrl)) return null;
+        if (logoBytes is null || logoBytes.Length == 0) return null;
 
         try
         {
-            if (File.Exists(sealUrl)) return File.ReadAllBytes(sealUrl);
-            _logger.LogWarning("[PDF] 인장 파일이 없다 — 글자 도장으로 그린다.");
-            return null;
+            var mime = ResolveImageMime(logoUrl);
+            if (mime is null)
+            {
+                _logger.LogWarning("[PDF] 로고 형식을 알 수 없다 — 워터마크를 깔지 않는다.");
+                return null;
+            }
+
+            // 🔴 범위로 조인다 — 여기까지 온 값은 거절하지 않는다(#20).
+            var op = WatermarkDefaults.ClampRatio(opacity);
+            var sat = WatermarkDefaults.ClampRatio(saturate);
+
+            // 🔴 InvariantCulture — 로캘이 바뀌어도 소수점은 '.' 다.
+            var opText = op.ToString("0.##", CultureInfo.InvariantCulture);
+            var satText = sat.ToString("0.##", CultureInfo.InvariantCulture);
+            var b64 = Convert.ToBase64String(logoBytes);
+
+            // 🔴 viewBox 를 1000x1000 으로 두고 그림을 그 안에 꽉 채운다 —
+            //   실제 크기는 그리는 쪽에서 Width(mm) 로 정한다(용지 폭 대비 %).
+            //   preserveAspectRatio 로 비율을 지킨다 — 로고가 찌그러지면 안 된다.
+            return
+                "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' "
+                + "width='1000' height='1000' viewBox='0 0 1000 1000'>"
+                + $"<defs><filter id='hpwm'><feColorMatrix type='saturate' values='{satText}'/></filter></defs>"
+                // 🔴 opacity 는 <g> 에. <image> 에 걸면 무시된다(위 주석의 실측).
+                + $"<g opacity='{opText}' filter='url(#hpwm)'>"
+                + $"<image x='0' y='0' width='1000' height='1000' preserveAspectRatio='xMidYMid meet' "
+                + $"xlink:href='data:{mime};base64,{b64}'/>"
+                + "</g></svg>";
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[PDF] 인장 읽기 실패 — 글자 도장으로 그린다.");
+            _logger.LogWarning(ex, "[PDF] 워터마크를 만들지 못했다 — 워터마크 없이 그린다.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 그림 경로에서 <c>data:</c> 주소에 적을 형식을 고른다 — 🔴 <b>허용 목록 안에서만</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 확장자를 그대로 <c>data:image/{ext}</c> 로 이어 붙이지 않는다 — 그러면 고객이 준
+    ///   글자가 SVG 안으로 들어간다. <b>우리가 아는 값으로만</b> 바꿔 적는다.
+    /// </remarks>
+    private static string? ResolveImageMime(string? url) =>
+        Path.GetExtension(url ?? string.Empty).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".bmp" => "image/bmp",
+            ".webp" => "image/webp",
+            _ => null
+        };
+
+    /// <summary>그릴 워터마크 한 겹 — <b>이미 열어 본</b> SVG 와 용지 짧은 변 대비 크기(%).</summary>
+    /// <remarks>
+    /// 🔴🔴 [2026-10-26 [3-V] P1-1 봉합] 종전에는 <b>SVG 글자</b>를 담아 그리는 자리로 넘겼다.
+    ///   그리는 자리(<c>page.Background()</c> 안의 람다)는 <c>GeneratePdf()</c> 가 돌 때
+    ///   실행되고, 그 호출에는 <c>try/catch</c> 가 <b>없다</b> ⇒ SVG 를 그때 못 열면
+    ///   그 양식의 인쇄가 <b>전부 500</b> 이 된다(#20 — 흐름은 절대 안 끊긴다).
+    ///   ⇒ 글자가 아니라 <see cref="SvgImage"/> 를 담는다. <b>여는 일을 미리</b> 해 두고,
+    ///   못 열면 워터마크만 빠진 채 <b>종이는 나간다</b>.
+    /// </remarks>
+    private sealed record WatermarkLayer(SvgImage Svg, int ScalePct);
+
+    /// <summary>
+    /// 🔴 SVG 글자를 <b>미리 열어 본다</b> — 못 열면 <c>null</c>(워터마크만 빠진다).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 미리 여나</b> — 그리는 자리는 <c>GeneratePdf()</c> 안이고 그 자리에는
+    ///   울타리가 없다. 보관소가 바이트를 미리 열어 보는 것(<c>Image.FromBinaryData</c>)과
+    ///   <b>같은 까닭</b>이다. 10/24 P0 가 그 모양이었다.
+    /// 🔴 2026-10-26 실측 — <c>.png</c>·<c>.jpg</c>·<c>.webp</c>·<c>.bmp</c> 네 형식 모두
+    ///   중앙픽셀 <c>R=242 G=237 B=237</c> 로 <b>그려졌고</b>, 바이트가 그림이 아니면
+    ///   <b>예외 없이 빈 자리</b>로 그려졌다(흰 종이). ⇒ 형식 때문에 터지는 길은 못 찾았다.
+    ///   그래도 울타리를 둔다 — <b>「우리 PC 에서는 된다」는 검증이 아니다.</b>
+    /// </remarks>
+    private SvgImage? TryDecodeWatermarkSvg(string svg)
+    {
+        try
+        {
+            return SvgImage.FromText(svg);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 워터마크 SVG 를 열지 못했다 — 워터마크 없이 그린다.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 이 종이에 워터마크를 깔 것인가, 깔면 어떤 모양인가 — 20261026작1 §C-2.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>판정 순서는 양식별 → 공통 → 제안값</b>이다(결-I: <i>공통 + 양식마다 — 단 고객 선택 옵션</i>).
+    ///   켬/끔도 <b>세 값</b>이다 — <c>null</c>(공통을 따른다) · <c>1</c>(이 양식만 켠다) ·
+    ///   <c>0</c>(이 양식만 끈다). 수치도 같은 뜻으로 <c>null</c> 이면 공통으로 떨어진다.
+    ///
+    /// 🔴🔴 [2026-10-26 [4] 반려 R-2 · [3-V] P1-2 봉합] 종전에는 이 칸이 <b>비널러블 bool</b>
+    ///   이고 DDL 이 <c>NOT NULL DEFAULT 0</c> 이었다 ⇒ 「나는 정하지 않았다」를 적을 칸이
+    ///   없었다. 그래서 <b>양식 행이 있는 고객에게 공통 켜기가 영영 안 닿았고</b>,
+    ///   공통만 켠 고객이 양식에서 <b>여백만 고쳐 저장해도 워터마크가 조용히 사라졌다.</b>
+    ///   ⇒ 칸을 지우지 않고 <c>NULL</c> 허용으로 <b>넓혔다</b>(#1·#37).
+    ///
+    /// 🔴 <b>이 양식이 명시적으로 껐으면</b> 공통 설정을 읽지도 않는다 — 그만큼 조회가 준다.
+    ///   🔴 다만 <b>정하지 않은(<c>null</c>) 양식과 양식 행이 없는 문서종은 공통을 읽는다</b> —
+    ///   전표 한 장마다 조회 1회다(테넌트 한 행 · PK 조회). 「조회를 아예 안 한다」가 아니다.
+    ///
+    /// 🔴🔴 <b>세금계산서는 이번 차수에서 깔지 않는다</b> — 사장님 결재 2026-10-26(결-K):
+    ///   <i>"응 그렇게 해"</i>. 법무팀장 물음 6건(전자세금계산서에 공급자 로고를 정중앙에
+    ///   허용? · 가독성 법적 기준? 등)이 **답을 못 받았다.** 법정 서식에 우리가 임의로
+    ///   그림을 얹지 않는다. 🔴 <c>plain</c> 세금계산서는 전용 작성기로 가서 이 코드를
+    ///   아예 안 타지만, <c>preprint</c> 세금계산서는 <b>공용 흐름으로 온다</b> —
+    ///   그래서 여기서 한 번 더 막는다. 울타리는 「그럴 리 없다」로 세우지 않는다.
+    ///
+    /// 🔴 <b>로고가 없으면 아무 일도 하지 않는다</b> — 고객이 워터마크를 켜 두고 로고를
+    ///   안 올렸을 수 있다. 그때 터지지 않고, 종이는 그냥 워터마크 없이 나간다(#20).
+    ///   화면이 「로고를 먼저 올려 주십시오」를 말해 줘야 한다(갈래 D).
+    /// </remarks>
+    private async Task<WatermarkLayer?> BuildWatermarkLayerAsync(
+        string tenantId, string documentType,
+        FormTemplateInfo? template, CompanyInfo company, CancellationToken ct)
+    {
+        // 🔴 세 값이다 — null(공통 따름) · true(이 양식만 켬) · false(이 양식만 끔).
+        var formSays = template?.ShowWatermark;
+
+        // 🔴🔴 판정은 <see cref="ShouldLayWatermark"/> **한 자리**에서만 한다.
+        //   여기서 같은 조건을 한 번 더 적으면 두 자리가 언젠가 어긋나고,
+        //   어긋난 쪽은 늘 「고객이 겪는 쪽」이다.
+        //   🔴 공통이 켜졌든 꺼졌든 안 깔릴 경우(세금계산서 · 이 양식만 끔)는
+        //     **DB 를 읽지 않고** 끝낸다 — 전표 한 장마다 쓸데없는 조회를 안 한다.
+        if (!ShouldLayWatermark(documentType, formSays, commonEnabled: false)
+            && !ShouldLayWatermark(documentType, formSays, commonEnabled: true))
+            return null;
+
+        var common = await LoadPrintCommonAsync(tenantId, ct).ConfigureAwait(false);
+        if (!ShouldLayWatermark(documentType, formSays, common.WatermarkEnabled)) return null;
+
+        var logo = TryLoadLogoImage(company.LogoUrl);
+        if (logo is null) return null;
+
+        var opacity = template?.WatermarkOpacity ?? common.WatermarkOpacity;
+        var saturate = template?.WatermarkSaturate ?? common.WatermarkSaturate;
+        var scalePct = WatermarkDefaults.ClampScalePct(
+            template?.WatermarkScalePct ?? common.WatermarkScalePct);
+
+        var svg = TryBuildWatermarkSvg(logo, company.LogoUrl, opacity, saturate);
+        if (svg is null) return null;
+
+        // 🔴 [P1-1 봉합] **여기서 열어 본다** — 그리는 자리에는 울타리가 없다.
+        var image = TryDecodeWatermarkSvg(svg);
+        return image is null ? null : new WatermarkLayer(image, scalePct);
+    }
+
+    /// <summary>
+    /// 🔴🔴 종이의 <b>배경 세 겹</b>을 조립한다 — 양식지 그림 · 주 겹 · 워터마크.
+    /// </summary>
+    /// <remarks>
+    /// 🔴🔴 [2026-10-26 재검증 V-1 봉합] <b>왜 떼어냈나</b> — 게이트가 이 조립을
+    ///   <b>시험 안에서 복제</b>하고 있었다. 그래서 제품의 조립이 R-1 버그(폭만 보기)로
+    ///   되돌아가도 게이트는 <b>초록이었다</b>(재검증이 실제로 되살려 확인했다: 10/10 초록).
+    ///   ⇒ 게이트가 <b>이 함수를 불러서</b> 그린다. 여기가 바뀌면 게이트가 바뀐 것을 잰다.
+    ///
+    /// 🔴🪤 <b><c>PrimaryLayer</c> 가 정확히 하나 있어야 한다</b> — 빠지면
+    ///   <c>DocumentComposeException</c> 으로 그 양식의 인쇄가 <b>전부 500</b> 이다(G-W15 가 실증).
+    /// 🔴 <b>짧은 변</b>이 기준이다(<see cref="ResolveWatermarkSideMm"/>) — 까닭은 그 함수에 적었다.
+    ///   넘치면 줄어들도록 상한을 <b>가로·세로 둘 다</b> 건다.
+    /// 🔴 둘 다 없으면 이 함수를 <b>부르지 않는다</b> — 끈 고객의 종이는 종전과 글자 하나 다르지 않다(#1).
+    /// </remarks>
+    internal static void ComposeDocumentBackground(
+        PageDescriptor page, PageSize pageSize,
+        byte[]? bgImage, SvgImage? watermarkSvg, int watermarkScalePct)
+    {
+        // 🔴 QuestPDF 의 크기는 point 다(1pt = 1/72 inch) — mm 로 바꾼다.
+        var pageWidthMm = pageSize.Width * 25.4f / 72f;
+        var pageHeightMm = pageSize.Height * 25.4f / 72f;
+
+        page.Background().Layers(layers =>
+        {
+            // 1겹 — 양식지 그림. 종이 전체에 맞춘다.
+            if (bgImage is not null)
+            {
+                layers.Layer().Image(bgImage).FitArea();
+            }
+
+            // 🔴 주 겹 — 배경 자리는 그릴 내용이 없으니 **비워서 늘린다.**
+            layers.PrimaryLayer().Extend();
+
+            // 2겹 — 워터마크. **정중앙** · 용지 짧은 변의 N%(사장님: "정중앙 크게").
+            if (watermarkSvg is not null)
+            {
+                var sideMm = ResolveWatermarkSideMm(pageWidthMm, pageHeightMm, watermarkScalePct);
+                layers.Layer()
+                      .AlignCenter().AlignMiddle()
+                      .MaxWidth(pageWidthMm, Unit.Millimetre)
+                      .MaxHeight(pageHeightMm, Unit.Millimetre)
+                      .Width(sideMm, Unit.Millimetre)
+                      .Svg(watermarkSvg);
+            }
+        });
+    }
+
+    /// <summary>
+    /// 🔴🔴 워터마크 정사각 한 변의 길이(mm) — <b>계산이 사는 한 자리</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-10-26 [4] 반려 R-1 봉합] 종전에는 그리는 자리에서 <c>폭 × %</c> 로 바로 곱했다.
+    ///   워터마크 SVG 는 <b>1000×1000 정사각</b>이라 폭을 정하면 높이도 그만큼이 된다 ⇒
+    ///   가로 용지(297×210)에서 80% 는 237mm 가 되어 종이 높이를 넘고, QuestPDF 는
+    ///   <b>예외도 로그도 없이 그림을 아예 뺀다</b>(검증팀 실측: PDF 7.3KB · 래스터 백지).
+    ///   ⇒ <b>짧은 변</b>을 기준으로 잡는다. 100% = 「종이에 꽉 차는 가장 큰 정사각」.
+    /// 🔴 떼어 놓은 까닭은 <b>재기 위해서</b>다 — 그리는 자리는 DB 없이 못 부르지만
+    ///   이 함수는 부를 수 있다(게이트 G-W16 이 가로·세로 × 60/80/100 을 전수로 잰다).
+    /// </remarks>
+    internal static float ResolveWatermarkSideMm(float pageWidthMm, float pageHeightMm, int scalePct)
+    {
+        var shorter = Math.Min(pageWidthMm, pageHeightMm);
+        var side = shorter * WatermarkDefaults.ClampScalePct(scalePct) / 100f;
+
+        // 🔴 마지막 그물 — 어떤 값이 와도 종이를 넘기지 않는다(넘으면 그림이 사라진다).
+        return Math.Min(side, shorter);
+    }
+
+    /// <summary>
+    /// 🔴🔴 이 종이에 워터마크를 <b>깔 것인가</b> — 판정이 사는 <b>한 자리</b>.
+    /// </summary>
+    /// <param name="documentType">문서종. 🔴 <c>tax_invoice</c> 는 결-K 로 <b>무조건 안 깐다</b>.</param>
+    /// <param name="formSays"><c>null</c> 공통을 따른다 · <c>true</c> 이 양식만 켬 · <c>false</c> 이 양식만 끔.</param>
+    /// <param name="commonEnabled">공통 설정의 켬/끔.</param>
+    /// <remarks>
+    /// 🔴 <b>왜 떼어 놨나</b> — 판정이 DB 조회와 뒤섞여 있어 <b>재 볼 수가 없었다</b>.
+    ///   [4] 반려 R-2 와 [3-V] P1-2 가 모두 이 판정의 구멍이었는데, 그 구멍을 재는
+    ///   시험이 0건이었다(「공통 켬 + 양식 행 있음」 조합을 아무도 안 그려 봤다).
+    ///   ⇒ 순수 함수로 내려 <b>아홉 조합을 전수로</b> 잰다(게이트 G-W17).
+    /// 🔴 조회를 아끼는 쪽(위 호출부의 두 번 호출)도 <b>이 함수로</b> 판정한다 —
+    ///   조건을 두 번 적지 않는다.
+    /// 🔴 [2026-10-26 재검증 V-8 봉합] 이 설명이 <b>옆 메서드에 붙어 있었다</b> —
+    ///   새 메서드를 설명과 메서드 **사이에** 끼워 넣어 <c>&lt;summary&gt;</c> 가 둘이 되고
+    ///   <c>&lt;param&gt;</c> 셋이 없는 인자를 가리켰다. 내가 같은 날 봉합한
+    ///   「주석이 코드와 다르다」와 <b>같은 사고</b>다.
+    /// </remarks>
+    internal static bool ShouldLayWatermark(string documentType, bool? formSays, bool commonEnabled)
+    {
+        // 🔴 결-K — 법무 물음 6건이 안 닫혔다. 법정 서식에 우리가 임의로 그림을 얹지 않는다.
+        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal)) return false;
+
+        // 🔴 양식이 **정했으면** 그 말을 따른다 — 공통보다 양식이 가깝다.
+        if (formSays is not null) return formSays.Value;
+
+        // 🔴 안 정했으면(기본) 공통을 따른다 — 이 한 줄이 R-2 의 봉합이다.
+        return commonEnabled;
+    }
+
+    /// <summary>테넌트 공통 인쇄 설정 (<c>print_common_settings</c> · DB-148).</summary>
+    private sealed class PrintCommonSettings
+    {
+        public bool WatermarkEnabled { get; set; }
+        public decimal WatermarkOpacity { get; set; } = WatermarkDefaults.Opacity;
+        public decimal WatermarkSaturate { get; set; } = WatermarkDefaults.Saturate;
+        public int WatermarkScalePct { get; set; } = WatermarkDefaults.ScalePct;
+
+        // 🔴 [2026-10-26 [3-V] P1-4 · [4] R-7 봉합] `print_background_default` 는 **안 읽는다.**
+        //   이번 차수에 쓰는 자리가 없는 칸을 담아 두면, 다음 사람이 「되는 기능」으로 읽는다.
+        //   칸은 DDL 에 **예약으로 남겨 두되**(#37 — 칸은 지우지 않는다) 코드는 안 건드린다.
+    }
+
+    /// <summary>
+    /// 🔴 공통 인쇄 설정을 읽는다 — 행이 <b>없으면 제안값</b>으로 떨어진다 (DB-148 · 결-I).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>행이 없는 것이 정상 경로다</b> — 고객이 공통 설정을 한 번도 안 건드리면 행이 없다.
+    ///   그때 터지거나 0 으로 떨어지면 「켰는데 안 보인다」가 된다.
+    ///   ⇒ 없으면 <see cref="WatermarkDefaults"/> 를 쓴다(그 값은 DDL DEFAULT 와 같다).
+    /// 🔴 못 읽어도 종이는 나간다 — 제안값으로 그린다(#20 · #15 까닭은 남긴다).
+    /// </remarks>
+    private async Task<PrintCommonSettings> LoadPrintCommonAsync(string tenantId, CancellationToken ct)
+    {
+        try
+        {
+            await EnsureOpenAsync(ct).ConfigureAwait(false);
+            const string sql = """
+                SELECT watermark_enabled AS WatermarkEnabled,
+                       watermark_opacity AS WatermarkOpacity,
+                       watermark_saturate AS WatermarkSaturate,
+                       watermark_scale_pct AS WatermarkScalePct
+                FROM print_common_settings WHERE tenant_id = @TenantId
+                """;
+            var s = await _db.QuerySingleOrDefaultAsync<PrintCommonSettings>(
+                new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+                .ConfigureAwait(false);
+            return s ?? new PrintCommonSettings();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 공통 인쇄 설정을 못 읽었다 — 제안값으로 그린다.");
+            return new PrintCommonSettings();
+        }
+    }
+
+    /// <summary>
+    /// 🔴 회사 그림(로고·인장)을 <b>울타리를 지나</b> 읽는다 — 20261026작1 §B-3.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>울타리를 양식지 쪽(<c>TryLoadFormBackground</c>)과 같은 모양으로 세운다.</b>
+    ///   그 다섯 겹은 검증팀이 2026-10-24~25 에 <b>실제로 뚫어 본</b> 자리들이다.
+    ///   <b>새 보관소에서 같은 구멍을 다시 열지 않는다.</b>
+    /// 🔴 <b>어느 겹에서 막혀도 종이는 나간다</b> — 그림만 빠지고 전표는 산다(#20).
+    /// </remarks>
+    private byte[]? TryLoadCompanyImage(string? url, string what, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+
+        // ① 바깥 그물 금지 — 인쇄가 남의 서버 응답 시간에 묶이면 고객 장사가 멈춘다.
+        //    UNC(\\호스트\…) 도 같은 이유로 막는다(http 차단을 비켜 가던 길이었다).
+        if (url.Contains("://", StringComparison.Ordinal) || url.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            _logger.LogWarning("[PDF] {What} 주소가 바깥·공유 경로다 — {Fallback}.", what, fallback);
+            return null;
+        }
+
+        // ② 그림 확장자만. .pdf·.svg·.exe 따위는 여기서 끝낸다.
+        var ext = Path.GetExtension(url);
+        if (!CompanyImagePaths.AllowedExts.Contains(ext))
+        {
+            _logger.LogWarning("[PDF] {What} 형식이 그림이 아니다({Ext}) — {Fallback}.", what, ext, fallback);
+            return null;
+        }
+
+        try
+        {
+            // ③ 경로 가둠 — 정해진 폴더 밑이 아니면 안 읽는다.
+            //    🔴 뒤에 구분자를 붙여 **그 폴더 안인지**를 본다 — 구분자 없이 앞글자만
+            //    비교하면 **형제 폴더가 통째로 통과**한다(10/24 R-4 실측).
+            var full = Path.GetFullPath(url);
+            var root = Path.GetFullPath(CompanyImagePaths.Root).TrimEnd(Path.DirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("[PDF] {What} 그림이 허용 폴더 밖이다 — {Fallback}.", what, fallback);
+                return null;
+            }
+
+            if (!File.Exists(full))
+            {
+                _logger.LogWarning("[PDF] {What} 파일이 없다 — {Fallback}.", what, fallback);
+                return null;
+            }
+
+            // ③-2 🔴 링크로 울타리를 넘는 길을 막는다. `Path.GetFullPath` 는 링크를 풀지 않는다.
+            if (PassesThroughLink(full, root))
+            {
+                _logger.LogWarning("[PDF] {What} 경로가 링크를 지난다 — {Fallback}.", what, fallback);
+                return null;
+            }
+
+            // ④ 크기 상한 — 🔴 로고는 워터마크로 base64 로 1.33배 늘어 모든 장에 들어간다.
+            var len = new FileInfo(full).Length;
+            if (len <= 0 || len > CompanyImagePaths.MaxBytes)
+            {
+                _logger.LogWarning("[PDF] {What} 크기가 범위 밖이다({Len} bytes) — {Fallback}.", what, len, fallback);
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(full);
+
+            // ⑤ 🔴 여기서 **미리 그려 본다.** 작성기가 못 받는 바이트면 지금 끝낸다 —
+            //    인쇄 한복판에서 터지면 전표가 안 나간다(10/24 P0).
+            try
+            {
+                _ = QuestPDF.Infrastructure.Image.FromBinaryData(bytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PDF] {What} 그림을 작성기가 못 읽는다 — {Fallback}.", what, fallback);
+                return null;
+            }
+
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] {What} 읽기 실패 — {Fallback}.", what, fallback);
             return null;
         }
     }
@@ -2699,7 +3231,16 @@ public sealed class PdfRenderService : IPdfRenderService
             PaperSize = dto.PaperSize,
             Orientation = dto.Orientation,
             ShowCompanySeal = dto.ShowCompanySeal,
-            StyleKey = dto.StyleKey
+            StyleKey = dto.StyleKey,
+            // 🔴 20261026작1 §A-3 (DB-148) — 이 다섯 줄이 없으면 고객이 양식정보설정에서
+            //   켜도 **종이만 안 바뀌는** 칸이 또 생긴다. 10/24·10/25 와 같은 사고다.
+            //   🔴 수치 셋은 **null 을 그대로** 들고 간다 — 여기서 기본값을 채우면
+            //   「공통값을 따른다」가 사라지고 그 양식은 공통 설정을 영영 안 따라온다.
+            PrintBackground = dto.PrintBackground,
+            ShowWatermark = dto.ShowWatermark,
+            WatermarkOpacity = dto.WatermarkOpacity,
+            WatermarkSaturate = dto.WatermarkSaturate,
+            WatermarkScalePct = dto.WatermarkScalePct
         };
     }
 
@@ -2782,6 +3323,44 @@ public sealed class PdfRenderService : IPdfRenderService
         /// </summary>
         public bool ShowTearLine { get; set; }
 
+        /// <summary>
+        /// 🔴 양식지 그림을 <b>실제 종이에도</b> 찍나 (DB-148 · 20261026작1 · 사장님 오더 10/25).
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b><c>PaperMode</c> 와 축이 다르고 곱해진다.</b>
+        /// <c>preprint</c>(양식용지를 사다 쓴다) + 이 칸이 켜짐 = <b>이중 인쇄</b>다.
+        /// <c>plain</c>(순백지) + 켜짐 = 우리가 가진 양식지 그림을 깔아서 뽑는다.
+        /// 🔴 기본 false — 끈 고객의 종이에 그림이 새면 그게 사고다.
+        /// </remarks>
+        public bool PrintBackground { get; set; }
+
+        /// <summary>
+        /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 (DB-148 · 사장님 오더
+        /// <i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
+        /// </summary>
+        /// <remarks>
+        /// 재료는 회사 정보의 로고 그림이다. 그 자리가 비면 아무 일도 하지 않는다.
+        /// 🔴🔴 <b>세 값이다</b> — <c>null</c>(공통을 따른다) · <c>true</c>(이 양식만 켬) ·
+        ///   <c>false</c>(이 양식만 끔). [2026-10-26 [4] 반려 R-2 봉합] 종전에는 비널러블
+        ///   <c>bool</c> 이어서 「정하지 않았다」가 없었고, 공통 켜기가 양식 행이 있는
+        ///   고객에게 영영 안 닿았다.
+        /// </remarks>
+        public bool? ShowWatermark { get; set; }
+
+        /// <summary>
+        /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통 설정을 따른다.</b>
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b>0.00 과 null 은 다른 뜻이다</b> — 0.00 = <i>"완전히 투명하게"</i>,
+        /// null = <i>"나는 정하지 않았다"</i>. 작성기는 null 을 만나면 공통값을 찾아간다.
+        /// </remarks>
+        public decimal? WatermarkOpacity { get; set; }
+
+        /// <summary>워터마크 채도 0.00~1.00 (0=흑백) — null 이면 공통 설정을 따른다. DB-148.</summary>
+        public decimal? WatermarkSaturate { get; set; }
+
+        /// <summary>워터마크 크기 — 용지 폭 대비 %. null 이면 공통 설정을 따른다. DB-148.</summary>
+        public int? WatermarkScalePct { get; set; }
 
         /// <summary>
         /// 🔴 업체 양식지 그림 (20261024 사장님 오더 · §13). 종전에는 이 칸이

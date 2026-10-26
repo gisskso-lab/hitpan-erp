@@ -45,6 +45,53 @@ public class FormTemplateDto
     /// </remarks>
     public bool ShowTearLine { get; set; }
 
+    /// <summary>
+    /// 🔴 양식지 그림을 <b>실제 종이에도</b> 찍나 — DB-148.
+    /// 사장님 오더 2026-10-25 (<i>"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"</i>).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>paper_mode 와 축이 다르고 곱해진다.</b> 양식용지를 <b>사다 쓰는</b> 고객(preprint)은
+    /// 종이에 양식이 이미 인쇄돼 있으니 또 찍으면 <b>이중 인쇄</b>가 된다 ⇒ 끈다.
+    /// 양식지를 <b>그림으로 받아</b> 순백지에 뽑는 고객(plain)은 켠다. 한 칸으로는 이 둘을 못 가른다.
+    /// 기본 false — 오늘까지 실인쇄에는 그림이 <b>설계상</b> 안 깔렸다(양식 편집기 미리보기만 깔았다).
+    /// 켜는 것은 고객이 한 번 고른다.
+    /// </remarks>
+    public bool PrintBackground { get; set; }
+
+    /// <summary>
+    /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 — DB-148.
+    /// 사장님 오더 (<i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
+    /// </summary>
+    /// <remarks>
+    /// 재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.
+    /// 🔴🔴 <b>세 값이다</b> — <c>null</c>(공통 설정을 따른다 · 기본) · <c>true</c>(이 양식만 켠다) ·
+    ///   <c>false</c>(이 양식만 끈다). [2026-10-26 [4] 반려 R-2 봉합] 종전에는 비널러블
+    ///   <c>bool</c> 이라 「나는 정하지 않았다」를 적을 칸이 없었다 ⇒ 공통 켜기가
+    ///   <b>양식 행이 있는 고객에게 영영 안 닿았고</b>, 여백만 고쳐 저장해도 워터마크가
+    ///   조용히 꺼졌다. 수치 셋과 <b>같은 규칙</b>을 쓴다 — 한 화면에 두 규칙을 두지 않는다.
+    /// </remarks>
+    public bool? ShowWatermark { get; set; }
+
+    /// <summary>
+    /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통값</b>(<c>print_common_settings</c>)을 따른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>0.00 과 null 은 다른 뜻이다</b> — 0.00 = <i>"완전히 투명하게 해 달라"</i>,
+    /// null = <i>"나는 정하지 않았다, 공통을 따르겠다"</i>. 그래서 nullable 이다.
+    /// 한 칸에 두 뜻을 담으면 다음 사람이 가를 수 없다.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public decimal? WatermarkOpacity { get; set; }
+
+    /// <summary>워터마크 채도 0.00~1.00 (0=흑백) — null 이면 공통값을 따른다. DB-148.</summary>
+    [Range(0.0, 1.0)]
+    public decimal? WatermarkSaturate { get; set; }
+
+    /// <summary>워터마크 크기 — 용지 폭 대비 %. null 이면 공통값을 따른다. DB-148.</summary>
+    /// <remarks>100 을 넘으면 종이를 벗어난다 — 위에서 조인다.</remarks>
+    [Range(10, 100)]
+    public int? WatermarkScalePct { get; set; }
+
 
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
@@ -104,6 +151,53 @@ public class CreateFormTemplateRequest
     /// 기본 false 인 까닭은 DB-147 머리글에 적었다(지금 동작과 같게 · 품목 줄이 조용히 빠지면 안 된다).
     /// </remarks>
     public bool ShowTearLine { get; set; }
+
+    /// <summary>
+    /// 🔴 양식지 그림을 <b>실제 종이에도</b> 찍나 — DB-148.
+    /// 사장님 오더 2026-10-25 (<i>"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"</i>).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>paper_mode 와 축이 다르고 곱해진다.</b> 양식용지를 <b>사다 쓰는</b> 고객(preprint)은
+    /// 종이에 양식이 이미 인쇄돼 있으니 또 찍으면 <b>이중 인쇄</b>가 된다 ⇒ 끈다.
+    /// 양식지를 <b>그림으로 받아</b> 순백지에 뽑는 고객(plain)은 켠다. 한 칸으로는 이 둘을 못 가른다.
+    /// 기본 false — 오늘까지 실인쇄에는 그림이 <b>설계상</b> 안 깔렸다(양식 편집기 미리보기만 깔았다).
+    /// 켜는 것은 고객이 한 번 고른다.
+    /// </remarks>
+    public bool PrintBackground { get; set; }
+
+    /// <summary>
+    /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 — DB-148.
+    /// 사장님 오더 (<i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
+    /// </summary>
+    /// <remarks>
+    /// 재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.
+    /// 🔴🔴 <b>세 값이다</b> — <c>null</c>(공통 설정을 따른다 · 기본) · <c>true</c>(이 양식만 켠다) ·
+    ///   <c>false</c>(이 양식만 끈다). [2026-10-26 [4] 반려 R-2 봉합] 종전에는 비널러블
+    ///   <c>bool</c> 이라 「나는 정하지 않았다」를 적을 칸이 없었다 ⇒ 공통 켜기가
+    ///   <b>양식 행이 있는 고객에게 영영 안 닿았고</b>, 여백만 고쳐 저장해도 워터마크가
+    ///   조용히 꺼졌다. 수치 셋과 <b>같은 규칙</b>을 쓴다 — 한 화면에 두 규칙을 두지 않는다.
+    /// </remarks>
+    public bool? ShowWatermark { get; set; }
+
+    /// <summary>
+    /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통값</b>(<c>print_common_settings</c>)을 따른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>0.00 과 null 은 다른 뜻이다</b> — 0.00 = <i>"완전히 투명하게 해 달라"</i>,
+    /// null = <i>"나는 정하지 않았다, 공통을 따르겠다"</i>. 그래서 nullable 이다.
+    /// 한 칸에 두 뜻을 담으면 다음 사람이 가를 수 없다.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public decimal? WatermarkOpacity { get; set; }
+
+    /// <summary>워터마크 채도 0.00~1.00 (0=흑백) — null 이면 공통값을 따른다. DB-148.</summary>
+    [Range(0.0, 1.0)]
+    public decimal? WatermarkSaturate { get; set; }
+
+    /// <summary>워터마크 크기 — 용지 폭 대비 %. null 이면 공통값을 따른다. DB-148.</summary>
+    /// <remarks>100 을 넘으면 종이를 벗어난다 — 위에서 조인다.</remarks>
+    [Range(10, 100)]
+    public int? WatermarkScalePct { get; set; }
 
 
     public bool IsDefault { get; set; }
