@@ -549,6 +549,27 @@ public sealed class SettingsService : ISettingsService
     }
 
     /// <inheritdoc />
+    public async Task<string?> GetCompanyImagePathAsync(
+        string tenantId, string kind, CancellationToken ct = default)
+    {
+        // 🔴 컬럼 이름을 바깥 글자로 만들지 않는다 — 적는 쪽과 **같은 모양**으로 가른다.
+        var sql = kind switch
+        {
+            "logo" => "SELECT logo_url FROM local_company WHERE tenant_id = @TenantId",
+            "seal" => "SELECT seal_url FROM local_company WHERE tenant_id = @TenantId",
+            "header" => "SELECT header_url FROM local_company WHERE tenant_id = @TenantId",
+            _ => null
+        };
+        if (sql is null) return null;
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        return await _db.QuerySingleOrDefaultAsync<string?>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> SaveCompanyImagePathAsync(
         string tenantId, string kind, string? storedPath, CancellationToken ct = default)
     {
@@ -593,8 +614,7 @@ public sealed class SettingsService : ISettingsService
             SELECT watermark_enabled AS WatermarkEnabled,
                    watermark_opacity AS WatermarkOpacity,
                    watermark_saturate AS WatermarkSaturate,
-                   watermark_scale_pct AS WatermarkScalePct,
-                   print_background_default AS PrintBackgroundDefault
+                   watermark_scale_pct AS WatermarkScalePct
             FROM print_common_settings WHERE tenant_id = @TenantId
             """;
 
@@ -614,26 +634,32 @@ public sealed class SettingsService : ISettingsService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // 🔴 범위로 조인다 — 화면이 먼저 막지만 API 를 직접 부를 수도 있다.
-        //   거절하지 않고 조이는 까닭은 WatermarkDefaults 머리글에 적었다(#20).
+        // 🔴 범위로 조인다 — **두 겹이다.**
+        //   ① 입구(`SettingsController` · `[ApiController]` + DTO 의 `[Range]`)가 범위 밖 요청을
+        //      **400 으로 거절**한다. 그래서 API 를 직접 부르는 길에서는 이 조이기가 안 돈다.
+        //   ② 그래도 여기서 한 번 더 조인다 — 다른 입구(배치·이관·다음 차수의 화면)가 생기는 날
+        //      이 자리가 마지막 그물이다. 인쇄 한복판에서 종이를 멈추지 않는다(#20).
+        //   🔴 [2026-10-26 [3-V] P2-8 ③ 봉합] 종전 주석은 *"화면이 먼저 막지만 API 를 직접
+        //      부를 수도 있다"* 라고 적어, **엔드포인트가 조인다**는 거짓을 남겼다.
         var opacity = WatermarkDefaults.ClampRatio(dto.WatermarkOpacity);
         var saturate = WatermarkDefaults.ClampRatio(dto.WatermarkSaturate);
         var scalePct = WatermarkDefaults.ClampScalePct(dto.WatermarkScalePct);
 
         // 🔴 행이 없으면 만들고 있으면 고친다 — 고객이 설정을 두 번 저장해도 행은 하나다.
+        // 🔴 [P1-4 봉합] `print_background_default` 는 **적지 않는다** — 화면이 안 묶는 칸을
+        //   저장할 때마다 0 으로 덮고 있었다(#1). 쓰는 차수에 화면과 함께 배선한다.
         const string sql = """
             INSERT INTO print_common_settings
               (tenant_id, watermark_enabled, watermark_opacity, watermark_saturate,
-               watermark_scale_pct, print_background_default)
+               watermark_scale_pct)
             VALUES
               (@TenantId, @WatermarkEnabled, @WatermarkOpacity, @WatermarkSaturate,
-               @WatermarkScalePct, @PrintBackgroundDefault)
+               @WatermarkScalePct)
             ON DUPLICATE KEY UPDATE
               watermark_enabled = @WatermarkEnabled,
               watermark_opacity = @WatermarkOpacity,
               watermark_saturate = @WatermarkSaturate,
-              watermark_scale_pct = @WatermarkScalePct,
-              print_background_default = @PrintBackgroundDefault
+              watermark_scale_pct = @WatermarkScalePct
             """;
 
         await _db.ExecuteAsync(new CommandDefinition(sql, new
@@ -642,8 +668,7 @@ public sealed class SettingsService : ISettingsService
             WatermarkEnabled = dto.WatermarkEnabled ? 1 : 0,
             WatermarkOpacity = opacity,
             WatermarkSaturate = saturate,
-            WatermarkScalePct = scalePct,
-            PrintBackgroundDefault = dto.PrintBackgroundDefault ? 1 : 0
+            WatermarkScalePct = scalePct
         }, cancellationToken: ct)).ConfigureAwait(false);
     }
 

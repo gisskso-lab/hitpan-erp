@@ -174,20 +174,61 @@
                 }
                 else
                 {
-                    <MudCheckBox T="bool" @bind-Value="_form.ShowWatermark"
-                                 Label="회사 로고를 종이 가운데에 연하게 깔기"
-                                 Dense="true" />
+                    @* 🔴🔴 [2026-10-26 [4] 반려 R-2 봉합] 켬/끔을 **세 갈래**로 바꿨다.
+                         종전에는 체크박스 하나(켬/끔)였다. 그래서 공통만 켠 고객이 이 창을 열어
+                         **여백만 고쳐 저장해도** 체크박스가 꺼진 채 저장돼 워터마크가 조용히 사라졌다.
+                         고객은 워터마크를 건드린 적이 없다. ⇒ 「공통을 따릅니다」가 **화면에 있어야** 한다. *@
+                    <MudText Typo="Typo.body2"><b>회사 로고를 종이 가운데에 연하게 깔기</b></MudText>
+                    <MudRadioGroup T="string" @bind-Value="_wmMode" Class="mt-1">
+                        <MudRadio T="string" Value="@WmModeCommon" Dense="true">
+                            공통 설정을 따릅니다@(_commonStateText)
+                        </MudRadio>
+                        <MudRadio T="string" Value="@WmModeOn" Dense="true">이 양식만 켜기</MudRadio>
+                        <MudRadio T="string" Value="@WmModeOff" Dense="true">이 양식만 끄기</MudRadio>
+                    </MudRadioGroup>
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         졸업증명서처럼 로고가 글씨 뒤에 연하게 깔립니다.
-                        설정 → 회사 정보에서 로고를 먼저 올려 주셔야 보입니다.
+                        공통 설정은 설정 → 인쇄 설정에서 바꿉니다.
                     </MudText>
 
-                    @if (_form.ShowWatermark)
+                    @* 🔴 [[4] 중 R-6 봉합] 「켰는데 안 보인다」의 까닭을 **고객에게 말한다.**
+                         종전에는 일곱 갈래 전부가 서버 로그 한 줄로 끝나고 화면은 평소처럼 나왔다. *@
+                    @if (_wmMode != WmModeOff && _logoState == LogoState.Missing)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                            아직 회사 로고가 등록돼 있지 않아 지금은 아무것도 깔리지 않습니다.
+                            설정 → 회사 정보에서 로고를 먼저 올려 주십시오.
+                        </MudAlert>
+                    }
+                    @if (_wmMode != WmModeOff && _logoState == LogoState.Outside)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                            등록된 로고가 히트판이 보관하는 자리에 없어 인쇄에 쓰이지 않습니다.
+                            설정 → 회사 정보에서 로고를 <b>다시 올려</b> 주십시오.
+                        </MudAlert>
+                    }
+                    @* 🔴 [[4] 경 R-8 봉합] 양식용지 + 워터마크 = 사다 쓰는 종이 위에 로고가 겹친다.
+                         「양식지 그림을 종이에도 인쇄」에는 이 안내가 있었는데 워터마크에는 없었다. *@
+                    @if (_wmMode == WmModeOn && _form.PaperMode == "preprint")
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                            양식용지(미리 인쇄된 종이)에 뽑으면 그 종이 위에 로고가 겹쳐 찍힙니다.
+                        </MudAlert>
+                    }
+
+                    @if (_wmMode != WmModeOff)
                     {
                         <MudRadioGroup T="bool" @bind-Value="_watermarkCustom" Class="mt-2">
-                            <MudRadio T="bool" Value="false" Dense="true">공통 설정값 그대로 쓰기</MudRadio>
+                            <MudRadio T="bool" Value="false" Dense="true">진하기·색감·크기는 공통값 그대로 쓰기</MudRadio>
                             <MudRadio T="bool" Value="true" Dense="true">이 양식만 따로 정하기</MudRadio>
                         </MudRadioGroup>
+                        @* 🔴 [[4] R-2 ⓒ 봉합] 넣어 둔 값이 지워지는 것을 **말없이** 하지 않는다(#1). *@
+                        @if (_hadCustomNumbers && !_watermarkCustom)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Warning">
+                                이대로 저장하면 이 양식에 넣어 두신 진하기·색감·크기가 지워지고 공통값을 따릅니다.
+                            </MudText>
+                        }
 
                         @if (_watermarkCustom)
                         {
@@ -199,6 +240,13 @@
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                                         0 에 가까울수록 연합니다. 글씨가 읽히는 자리는 0.12 쯤입니다.
                                     </MudText>
+                                    @* 🔴 [[4] 중 R-6 봉합 · 길 4] 0 은 「완전히 투명」이다 — 넣을 수 있으니 말해 준다. *@
+                                    @if (_wmOpacity <= 0)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Warning">
+                                            진하기가 0 이면 완전히 투명해서 종이에 아무것도 안 보입니다.
+                                        </MudText>
+                                    }
                                 </MudItem>
                                 <MudItem xs="12" md="4">
                                     <MudNumericField T="decimal" @bind-Value="_wmSaturate"
@@ -209,11 +257,15 @@
                                     </MudText>
                                 </MudItem>
                                 <MudItem xs="12" md="4">
+                                    @* 🔴🔴 [2026-10-26 [4] 반려 R-1] 종전 이름은 「종이 너비의 %」였고
+                                         그게 **거짓이자 사고**였다. 로고는 정사각으로 깔리므로 너비를 정하면
+                                         높이도 그만큼이 된다 ⇒ 가로 양식에서 71% 만 넘어도 종이 높이를 넘어
+                                         **그림이 통째로 빠졌다**(예외도 로그도 없이). 짧은 쪽 기준으로 바꿨다. *@
                                     <MudNumericField T="int" @bind-Value="_wmScalePct"
-                                                     Label="크기 (종이 너비의 %)" Margin="Margin.Dense"
+                                                     Label="크기 (종이 짧은 쪽의 %)" Margin="Margin.Dense"
                                                      Min="10" Max="100" />
                                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        60 이면 종이 너비의 절반을 조금 넘는 크기입니다.
+                                        100 이면 종이 짧은 쪽에 꽉 찹니다. 가로 양식에서도 종이를 벗어나지 않습니다.
                                     </MudText>
                                 </MudItem>
                             </MudGrid>
@@ -504,6 +556,41 @@
     /// <summary>이 양식만 따로 정하나 — 끄면 수치를 <c>null</c> 로 저장해 공통을 따른다.</summary>
     private bool _watermarkCustom;
 
+    // ── 🔴🔴 [2026-10-26 [4] 반려 R-2 봉합] 켬/끔도 **세 값**이다 ──
+    //
+    // 🔴 **무엇이 사고였나** — 종전에는 체크박스 하나였고 DB 칸도 `NOT NULL DEFAULT 0` 이었다.
+    //   공통만 켠 고객이 양식을 열어 **여백만 고쳐 저장**하면, 편집창은 공통을 읽을 자리가
+    //   없으니 꺼진 채였고 저장이 `0` 을 적었다 ⇒ **워터마크가 조용히 사라졌다.**
+    //   고객은 워터마크를 건드린 적이 없다. 반대로 공통을 켜도 **양식 행이 있는 고객에게는
+    //   영영 안 닿았다**(행이 있으면 0 이 적혀 있으므로).
+    // 🔴 그래서 「정하지 않았다」를 화면과 DB 양쪽에 둔다 — 수치 셋과 **같은 규칙**이다.
+
+    private const string WmModeCommon = "common";
+    private const string WmModeOn = "on";
+    private const string WmModeOff = "off";
+
+    /// <summary>켬/끔 갈래 — <c>common</c>(공통 따름 · 기본) · <c>on</c> · <c>off</c>.</summary>
+    private string _wmMode = WmModeCommon;
+
+    /// <summary>창을 열 때 이 양식에 **따로 넣어 둔 수치**가 있었나 — 지워짐을 미리 말해 주려고.</summary>
+    private bool _hadCustomNumbers;
+
+    /// <summary>공통 설정을 읽었나 · 켜져 있나 — 화면이 「공통은 지금 켜져 있습니다」를 말하려면 알아야 한다.</summary>
+    private bool _commonLoaded;
+
+    private bool _commonEnabled;
+
+    /// <summary>라디오 옆에 붙는 참말 — 못 읽었으면 <b>아무 말도 하지 않는다</b>(모르는 것을 단정하지 않는다).</summary>
+    private string _commonStateText =>
+        !_commonLoaded ? string.Empty
+        : _commonEnabled ? " (지금 공통은 켜져 있습니다)"
+        : " (지금 공통은 꺼져 있습니다)";
+
+    /// <summary>로고가 쓸 수 있는 상태인가 — 「켰는데 안 보인다」의 가장 흔한 두 까닭.</summary>
+    private enum LogoState { Unknown, Present, Missing, Outside }
+
+    private LogoState _logoState = LogoState.Unknown;
+
     /// <summary>화면에서 만지는 진하기. 🔴 저장은 <see cref="_watermarkCustom"/> 일 때만 한다.</summary>
     private decimal _wmOpacity = WatermarkDefaults.Opacity;
 
@@ -574,9 +661,18 @@
             _watermarkCustom = Template.WatermarkOpacity is not null
                                || Template.WatermarkSaturate is not null
                                || Template.WatermarkScalePct is not null;
+            _hadCustomNumbers = _watermarkCustom;
             _wmOpacity = Template.WatermarkOpacity ?? WatermarkDefaults.Opacity;
             _wmSaturate = Template.WatermarkSaturate ?? WatermarkDefaults.Saturate;
             _wmScalePct = Template.WatermarkScalePct ?? WatermarkDefaults.ScalePct;
+
+            // 🔴 [R-2 봉합] 저장돼 있던 **세 값**을 그대로 되살린다 — null 은 「공통 따름」이다.
+            _wmMode = Template.ShowWatermark switch
+            {
+                true => WmModeOn,
+                false => WmModeOff,
+                null => WmModeCommon
+            };
         }
         else
         {
@@ -585,6 +681,57 @@
             //   사장님이 **수정 화면으로 읽으셨다.** 빈 칸 + 흐린 안내글(Placeholder)로 바꿨다.
             //   비운 채 저장하면 SaveAsync 가 막는다(이미 있는 문).
         }
+    }
+
+    /// <summary>
+    /// 🔴 공통 설정과 로고 상태를 읽어 온다 — [2026-10-26 [4] 반려 R-2·R-6 봉합.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 편집창이 공통을 읽나</b> — 「공통을 따릅니다」를 고르게 해 놓고 그 공통이
+    ///   켜졌는지 꺼졌는지 안 보여 주면, 고객은 자기 종이가 어떻게 나올지 모른 채 저장한다.
+    /// 🔴 <b>못 읽으면 아무 말도 하지 않는다</b> — 모르는 것을 단정하지 않는다.
+    ///   값이 안 와도 창은 열리고 저장도 된다(#20).
+    /// </remarks>
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var common = await Http.GetFromJsonAsync<PrintCommonPeek>("api/settings/print-common");
+            if (common is not null)
+            {
+                _commonEnabled = common.WatermarkEnabled;
+                _commonLoaded = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 못 읽었으면 라디오 옆 글자를 **비운 채** 둔다.
+            Console.Error.WriteLine($"[FormWatermark] 공통 설정을 읽지 못했다: {ex.Message}");
+        }
+
+        try
+        {
+            var state = await Http.GetFromJsonAsync<Dictionary<string, string>>("api/settings/company-image-state");
+            _logoState = state is not null && state.TryGetValue("logo", out var s)
+                ? s switch
+                {
+                    "present" => LogoState.Present,
+                    "missing" => LogoState.Missing,
+                    "unusable" => LogoState.Outside,
+                    _ => LogoState.Unknown
+                }
+                : LogoState.Unknown;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[FormWatermark] 로고 상태를 읽지 못했다: {ex.Message}");
+        }
+    }
+
+    /// <summary>공통 설정에서 <b>켬/끔만</b> 본다 — 수치는 서버가 알아서 떨어뜨린다.</summary>
+    private sealed class PrintCommonPeek
+    {
+        public bool WatermarkEnabled { get; set; }
     }
 
     /// <summary>저장돼 있던 좌표를 표로 되돌린다.</summary>
@@ -946,14 +1093,25 @@
     {
         if (_isTaxInvoiceForm)
         {
-            _form.ShowWatermark = false;
+            // 🔴 세금계산서는 **정하지 않은 채로 둔다**(null) — 「이 양식만 끔」으로 적어 두면
+            //   법무 답이 와서 공통으로 켜는 날 그 양식만 까닭 없이 빠진 채 남는다.
+            //   지금 안 깔리는 것은 서버가 결-K 로 **한 번 더 막기** 때문이다(화면만 믿지 않는다).
+            _form.ShowWatermark = null;
             _form.WatermarkOpacity = null;
             _form.WatermarkSaturate = null;
             _form.WatermarkScalePct = null;
             return;
         }
 
-        if (_form.ShowWatermark && _watermarkCustom)
+        // 🔴 [R-2 봉합] 세 값을 그대로 적는다 — null 이 「공통을 따른다」다.
+        _form.ShowWatermark = _wmMode switch
+        {
+            WmModeOn => true,
+            WmModeOff => false,
+            _ => null
+        };
+
+        if (_wmMode != WmModeOff && _watermarkCustom)
         {
             _form.WatermarkOpacity = _wmOpacity;
             _form.WatermarkSaturate = _wmSaturate;

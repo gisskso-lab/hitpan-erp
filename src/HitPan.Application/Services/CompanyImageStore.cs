@@ -216,25 +216,41 @@ public sealed class CompanyImageStore : ICompanyImageStore
     ///   만들 수 있어, 갓 설치본에서 직원이 <c>company-images</c> 를 먼저 junction 으로
     ///   만들어 두면 울타리가 통째로 비켜진다(2026-10-25 T-1 과 같은 구멍).
     /// 🔴 <b>못 재면 막는 쪽</b>으로 떨어진다 — 그림은 안 올라가도 전표는 산다(#20).
+    ///
+    /// 🔴🔴 [2026-10-26 [3-V] P2-7 봉합] 종전에는 이 함수가 <c>static</c> 이고
+    ///   <b>안에 <c>try/catch</c> 가 없었다.</b> 본(<c>FormBackgroundStore</c>)에는 둘 다 있다.
+    ///   지금은 두 호출부가 모두 바깥 <c>try</c> 안이라 <b>뚫리지는 않았지만</b>,
+    ///   ① 거절 까닭이 「링크를 지난다」가 아니라 일반 실패로 뭉개져 사고 분석이 안 되고,
+    ///   ② 뒤에 누가 이 함수를 <c>try</c> 밖에서 부르면 <b>그날 울타리가 열린다.</b>
+    ///   ⇒ 「승인된 중복」의 전제는 <b>모양이 같다</b>는 것이었다. 모양을 되돌렸다.
     /// </remarks>
-    private static bool PassesThroughLink(string fullPath, string root)
+    private bool PassesThroughLink(string fullPath, string root)
     {
         var rootNoSep = root.TrimEnd(Path.DirectorySeparatorChar);
 
-        var file = new FileInfo(fullPath);
-        if (file.LinkTarget is not null) return true;
-
-        for (var dir = file.Directory;
-             dir is not null && dir.FullName.Length > rootNoSep.Length;
-             dir = dir.Parent)
+        try
         {
-            if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
-            if (dir.LinkTarget is not null) return true;
+            var file = new FileInfo(fullPath);
+            if (file.LinkTarget is not null) return true;
+
+            for (var dir = file.Directory;
+                 dir is not null && dir.FullName.Length > rootNoSep.Length;
+                 dir = dir.Parent)
+            {
+                if (!dir.FullName.StartsWith(rootNoSep, StringComparison.OrdinalIgnoreCase)) break;
+                if (dir.LinkTarget is not null) return true;
+            }
+
+            var rootDir = new DirectoryInfo(rootNoSep);
+            if (rootDir.LinkTarget is not null) return true;
+
+            return false;
         }
-
-        var rootDir = new DirectoryInfo(rootNoSep);
-        if (rootDir.LinkTarget is not null) return true;
-
-        return false;
+        catch (Exception ex)
+        {
+            // 🔴 못 재면 「지난다」로 본다 — 막는 쪽이 안전측이다(#15 빈 catch 금지).
+            _logger.LogWarning(ex, "[회사그림] 링크 여부를 재지 못했다 — 막는 쪽으로 떨어진다.");
+            return true;
+        }
     }
 }

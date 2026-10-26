@@ -372,8 +372,11 @@ public sealed class WatermarkRenderGateTests
     public void GW15_LayersMustHaveExactlyOnePrimaryLayer()
     {
         // ① 우리 코드에 있나
-        var code = File.ReadAllText(Path.Combine(
-            RepoRoot(), "src", "HitPan.Application", "Services", "PdfRenderService.cs"));
+        // 🔴🔴 [2026-10-26 [4] 중 R-5 봉합] 종전에는 `File.ReadAllText` 로 **날 텍스트**를 봤다.
+        //   그래서 누가 `// layers.PrimaryLayer().Extend();` 로 **주석 처리만 해도 초록**이었다.
+        //   같은 레포에 주석을 걷어내는 자(`ReadCode = StripComments(ReadSource(...))`)가
+        //   **이미 있었는데** 새 게이트가 그걸 안 썼다. 이제 그 자를 **그대로** 쓴다(두 벌 금지).
+        var code = ReadCodeNoComments("src", "HitPan.Application", "Services", "PdfRenderService.cs");
         Assert.Matches(@"page\.Background\(\)\.Layers\(", code);
         Assert.Matches(@"layers\.PrimaryLayer\(\)\.Extend\(\);", code);
 
@@ -386,6 +389,346 @@ public sealed class WatermarkRenderGateTests
 
         Assert.NotNull(ex);
         Assert.Contains("primary layer", ex!.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 🔴 주석을 걷어낸 코드를 읽는다 — [2026-10-26 [4] R-5 봉합].
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>걷어내기를 새로 쓰지 않는다.</b> 같은 레포의
+    ///   <c>FormPaperSizeAndBackgroundUploadGateTests.ReadCode</c> 를 반사로 부른다 —
+    ///   그 함수에는 <b>정확성을 재는 축</b>(축⒢ <c>AxisG_StripCommentsIsCorrect</c>)이 붙어 있다.
+    ///   두 벌을 만들면 한쪽만 고쳐지는 날이 온다(이 차수의 §B-4 교훈과 같은 모양).
+    /// </remarks>
+    private static string ReadCodeNoComments(params string[] parts)
+    {
+        var m = typeof(FormPaperSizeAndBackgroundUploadGateTests).GetMethod(
+            "ReadCode", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(m);
+        return (string)m!.Invoke(null, new object?[] { parts })!;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // G-W16 · 🔴 가로 용지에서도 워터마크가 **종이에 남는다** ([4] 반려 R-1)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴🔴 이 축이 왜 생겼나 — 2026-10-26 [4] 검증팀 실측:
+    /// <b>가로 양식 + 크기 80% 이상이면 워터마크가 통째로 사라졌다</b>
+    /// (A4가로·A5가로에서 PDF 7.3KB · 래스터 완전 백지 · 예외 0 · 로그 0).
+    /// 고객이 사장님 오더의 <i>"정중앙 크게"</i> 를 따르려고 숫자를 올리는 <b>바로 그 동작</b>이
+    /// 기능을 없앴다. ⇒ 가로·세로 × 60·80·100 을 <b>전수로 픽셀을 읽는다.</b>
+    /// </summary>
+    [Theory(DisplayName = "G-W16 🔴 세로·가로 용지 × 60·80·100% — 아홉 조합 **전부** 종이에 로고가 남는다")]
+    // 세로 — 종전에도 되던 쪽(양성 대조군)
+    [InlineData(210f, 297f, 60)]
+    [InlineData(210f, 297f, 80)]
+    [InlineData(210f, 297f, 100)]
+    // 🔴 가로 — 종전에 **사라졌던 쪽**
+    [InlineData(297f, 210f, 60)]
+    [InlineData(297f, 210f, 80)]
+    [InlineData(297f, 210f, 100)]
+    // 🔴 A5 가로 — 더 짧은 쪽
+    [InlineData(210f, 148f, 60)]
+    [InlineData(210f, 148f, 80)]
+    [InlineData(210f, 148f, 100)]
+    public void GW16_WatermarkSurvivesOnLandscapePaper(float widthMm, float heightMm, int scalePct)
+    {
+        // 🔴 길이는 **제품 코드가 계산한다** — 시험이 제 몫으로 곱하면 실코드가 틀려도 초록이다.
+        var sideMm = WatermarkSideMm(widthMm, heightMm, scalePct);
+
+        Assert.True(sideMm <= Math.Min(widthMm, heightMm) + 0.01f,
+            $"한 변 {sideMm}mm 가 종이 짧은 변({Math.Min(widthMm, heightMm)}mm)을 넘는다 — "
+            + "QuestPDF 는 넘치는 그림을 말없이 뺀다.");
+
+        var svg = BuildSvg(RedPixelPng(), ".png", 0.12m, 0.15m);
+        Assert.NotNull(svg);
+
+        var png = RenderSizedPage(widthMm, heightMm, page =>
+            page.Background().Layers(l =>
+            {
+                l.PrimaryLayer().Extend();
+                l.Layer().AlignCenter().AlignMiddle()
+                 .MaxWidth(widthMm, Unit.Millimetre).MaxHeight(heightMm, Unit.Millimetre)
+                 .Width(sideMm, Unit.Millimetre).Svg(svg!);
+            }));
+
+        var px = PngPixels.Decode(png);
+        var c = px.At(px.Width / 2, px.Height / 2);
+
+        // 🔴 흰 종이면 **그림이 안 들어간 것**이다 — 종전 사고의 모양이 바로 이것이었다.
+        Assert.True(c.R > 200 && c.G < 252 && c.B < 252,
+            $"{widthMm}×{heightMm}mm · {scalePct}% 에서 중앙픽셀이 {c} 다 — 워터마크가 종이에 없다.");
+    }
+
+    [Fact(DisplayName = "G-W16음 🔴 음성 대조군 — **짧은 변을 안 보면** 가로 용지에서 그림이 사라진다(종전 판 재현)")]
+    public void GW16_Negative_WidthOnlyLosesTheImageOnLandscape()
+    {
+        // 🔴 종전 계산(폭 × %)을 그대로 되살려 **같은 조립으로** 그려 본다.
+        //   이 축이 없으면 위 G-W16 은 「원래 되던 것」을 재는 축으로 오해된다.
+        const float w = 297f, h = 210f;
+        var oldSide = w * 100 / 100f;      // 종전: 폭의 100% = 297mm (종이 높이 210mm 를 넘는다)
+
+        var svg = BuildSvg(RedPixelPng(), ".png", 0.12m, 0.15m);
+        var png = RenderSizedPage(w, h, page =>
+            page.Background().Layers(l =>
+            {
+                l.PrimaryLayer().Extend();
+                l.Layer().AlignCenter().AlignMiddle().Width(oldSide, Unit.Millimetre).Svg(svg!);
+            }));
+
+        var px = PngPixels.Decode(png);
+        var c = px.At(px.Width / 2, px.Height / 2);
+
+        Assert.True(c.R > 250 && c.G > 250 && c.B > 250,
+            $"종전 계산이 백지를 내지 않았다({c}) — 이 음성 대조군의 전제가 바뀌었다. 다시 재라.");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // G-W17 · 🔴 「공통 + 양식마다」 판정 전수 ([4] 반려 R-2 · [3-V] P1-2)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴🔴 이 축이 왜 생겼나 — 종전에는 <c>show_watermark</c> 가 <c>NOT NULL DEFAULT 0</c> 이고
+    /// 코드가 비널러블 <c>bool</c> 이어서 <b>「나는 정하지 않았다」가 없었다.</b>
+    /// 그래서 ① 공통 켜기가 <b>양식 행이 있는 고객에게 영영 안 닿고</b>,
+    /// ② 공통만 켠 고객이 양식에서 <b>여백만 고쳐 저장해도 워터마크가 조용히 사라졌다.</b>
+    /// 🔴 그 조합(「공통 켬 + 양식 행 있음」)을 재는 시험이 <b>0건</b>이었다.
+    /// </summary>
+    [Theory(DisplayName = "G-W17 🔴 양식별→공통 판정 전수 — 「안 정했다(null)」가 공통을 따른다")]
+    // 안 정한 양식(기본) — 공통을 그대로 따른다. 🔴 이 두 줄이 R-2 의 봉합이다.
+    [InlineData("quotation", null, true, true)]
+    [InlineData("quotation", null, false, false)]
+    // 이 양식만 켬 — 공통이 꺼져 있어도 깐다.
+    [InlineData("quotation", true, false, true)]
+    [InlineData("quotation", true, true, true)]
+    // 이 양식만 끔 — 공통이 켜져 있어도 안 깐다.
+    [InlineData("quotation", false, true, false)]
+    [InlineData("quotation", false, false, false)]
+    // 🔴 세금계산서(결-K) — 무엇을 켜도 안 깐다.
+    [InlineData("tax_invoice", null, true, false)]
+    [InlineData("tax_invoice", true, true, false)]
+    [InlineData("tax_invoice", true, false, false)]
+    public void GW17_WatermarkDecisionTable(string docType, bool? formSays, bool commonOn, bool expected)
+    {
+        var m = typeof(PdfRenderService).GetMethod("ShouldLayWatermark",
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(m);
+
+        var actual = (bool)m!.Invoke(null, new object?[] { docType, formSays, commonOn })!;
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact(DisplayName = "G-W17자 🔴 자 검사 — 켬/끔 칸이 **세 값**이다(비널러블로 되돌리면 빨개진다)")]
+    public void GW17_ShowWatermarkMustBeThreeValued()
+    {
+        // 🔴 여기가 비널러블로 되돌아가면 위 표의 `null` 줄은 **표현 자체가 불가능**해진다.
+        //   그러면 R-2 가 그대로 재발한다 ⇒ 칸의 모양을 못으로 박는다.
+        var info = typeof(PdfRenderService).GetNestedType("FormTemplateInfo", BindingFlags.NonPublic);
+        Assert.NotNull(info);
+        var prop = info!.GetProperty("ShowWatermark");
+        Assert.NotNull(prop);
+        Assert.Equal(typeof(bool?), prop!.PropertyType);
+
+        var dto = typeof(HitPan.Application.DTOs.Settings.FormTemplateDto).GetProperty("ShowWatermark");
+        Assert.NotNull(dto);
+        Assert.Equal(typeof(bool?), dto!.PropertyType);
+
+        // 🔴 DDL 두 자리(마이그·출하본)도 NOT NULL 이 아니어야 한다 — 칸이 두 값이면 코드가 무의미하다.
+        foreach (var path in new[]
+                 {
+                     Path.Combine(RepoRoot(), "src", "HitPan.API", "Migrations", "SQL",
+                         "DB-148_form_watermark_print_background.sql"),
+                     Path.Combine(RepoRoot(), "installer", "hitpan_db_clean.sql")
+                 })
+        {
+            var sql = File.ReadAllText(path);
+            var m = Regex.Match(sql, @"`show_watermark`[^\r\n]*");
+            Assert.True(m.Success, $"show_watermark 칸이 없다: {path}");
+            Assert.DoesNotContain("NOT NULL", m.Value, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // G-W20 · 🔴 네 형식 전부 그려지고, 깨진 바이트로도 **안 터진다** ([3-V] P1-1)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🔴 [3-V] P1-1 — 게이트가 <c>.png</c> <b>하나만</b> 먹였는데 보관소는 네 형식을 받는다.
+    /// ⇒ 「형식 때문에 인쇄가 500 이 되는 길」이 <b>미측정</b>이었다. 네 형식을 전부 그린다.
+    /// </summary>
+    [Theory(DisplayName = "G-W20 🔴 보관소가 받는 네 형식 모두 **종이에 그려진다**")]
+    [InlineData(".png")]
+    [InlineData(".jpg")]
+    [InlineData(".webp")]
+    [InlineData(".bmp")]
+    public void GW20_AllAllowedFormatsRender(string ext)
+    {
+        var bytes = ext switch
+        {
+            ".jpg" => SolidImage("#FF0000", QuestPDF.Infrastructure.ImageFormat.Jpeg),
+            ".webp" => SolidImage("#FF0000", QuestPDF.Infrastructure.ImageFormat.Webp),
+            ".bmp" => Bmp24Red(),
+            _ => RedPixelPng()
+        };
+
+        var svg = BuildSvg(bytes, ext, 0.12m, 0.15m);
+        Assert.NotNull(svg);
+
+        var px = PngPixels.Decode(RenderWatermarkOnly(svg!));
+        var c = px.At(px.Width / 2, px.Height / 2);
+
+        Assert.True(c.R > 200 && c.G < 252 && c.B < 252,
+            $"{ext} 로고가 종이에 안 그려졌다(중앙픽셀 {c}).");
+    }
+
+    [Fact(DisplayName = "G-W20음 🔴 음성 대조군 — 그림이 아닌 바이트가 와도 **종이는 나간다**(500 아님)")]
+    public void GW20_Negative_JunkBytesNeverThrow()
+    {
+        // 🔴 보관소가 미리 열어 보므로 여기까지 올 일은 거의 없다. 그래도 **인쇄는 멈추면 안 된다**(#20).
+        var junk = System.Text.Encoding.UTF8.GetBytes("이건 그림이 아니다");
+        var svg = BuildSvg(junk, ".png", 0.12m, 0.15m);
+        Assert.NotNull(svg);
+
+        var ex = Record.Exception(() =>
+        {
+            var px = PngPixels.Decode(RenderWatermarkOnly(svg!));
+            var c = px.At(px.Width / 2, px.Height / 2);
+            // 아무것도 안 그려진다 — 흰 종이다. 그것이 옳은 결과다.
+            Assert.True(c.R > 250 && c.G > 250 && c.B > 250, $"깨진 바이트가 뭔가를 그렸다({c}).");
+        });
+        Assert.Null(ex);
+    }
+
+    [Fact(DisplayName = "G-W20전 🔴 SVG 를 **미리 열어 본다** — 못 열면 null 이고 그리는 자리로 안 넘어간다")]
+    public void GW20_SvgIsDecodedBeforeDrawing()
+    {
+        // 🔴 [3-V] P1-1 — 그리는 자리(`GeneratePdf()` 안)에는 try/catch 가 없다.
+        //   ⇒ 여는 일을 **미리** 해야 한다. 깨진 글자를 주면 열기가 거절되는지 실제로 본다.
+        var svc = MakeRenderService();
+        var m = typeof(PdfRenderService).GetMethod("TryDecodeWatermarkSvg",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(m);
+
+        var good = m!.Invoke(svc, new object?[] { BuildSvg(RedPixelPng(), ".png", 0.12m, 0.15m) });
+        Assert.NotNull(good);
+
+        // 🔴 음성 대조군 — SVG 가 아니면 **예외를 던지지 않고 null** 로 떨어져야 한다.
+        var bad = m.Invoke(svc, new object?[] { "<svg this is not xml" });
+        Assert.Null(bad);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // G-W5 · 🔴 양식지 그림은 **켠 양식에만** 종이에 깔린다 (설계 §7 G-W5)
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-W5 🔴 `print_background` 켬/끔이 **실제로 그림을 읽고/안 읽고**를 가른다(대조군 두 판)")]
+    public void GW5_PrintBackgroundGatesTheImage()
+    {
+        var tenant = $"gate-{Guid.NewGuid():N}";
+        var dir = HitPan.Application.Services.FormBackgroundPaths.TenantRoot(tenant);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "bg.png");
+        File.WriteAllBytes(file, BluePixelPng());
+
+        try
+        {
+            var infoType = typeof(PdfRenderService).GetNestedType("FormTemplateInfo", BindingFlags.NonPublic)!;
+            var resolve = typeof(PdfRenderService).GetMethod("ResolveFormBackground",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var svc = MakeRenderService();
+
+            // ① 끈 양식(기본) — 🔴 그림을 **읽지 않는다**. 끈 고객의 종이는 종전과 같다(#1).
+            var off = Activator.CreateInstance(infoType)!;
+            infoType.GetProperty("BackgroundImageUrl")!.SetValue(off, file);
+            infoType.GetProperty("PrintBackground")!.SetValue(off, false);
+            Assert.Null(resolve.Invoke(svc, new object?[] { null, off }));
+
+            // ② 켠 양식 — 🔴 **읽는다**. 이 대조군이 없으면 ① 은 「울타리가 아니라 고장」일 수 있다.
+            var on = Activator.CreateInstance(infoType)!;
+            infoType.GetProperty("BackgroundImageUrl")!.SetValue(on, file);
+            infoType.GetProperty("PrintBackground")!.SetValue(on, true);
+            var bytes = (byte[]?)resolve.Invoke(svc, new object?[] { null, on });
+            Assert.NotNull(bytes);
+            Assert.True(bytes!.Length > 0, "켠 양식인데 그림이 비었다.");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (IOException) { /* 지우지 못해도 시험 결과는 바뀌지 않는다 */ }
+        }
+    }
+
+    /// <summary>그 형식으로 단색 그림 한 장을 만든다 — 🔴 바이트를 손으로 적지 않는다.</summary>
+    private static byte[] SolidImage(string hex, QuestPDF.Infrastructure.ImageFormat fmt)
+    {
+        QuestPDF.Settings.License = LicenseType.Community;
+        return Document.Create(doc =>
+        {
+            doc.Page(p =>
+            {
+                p.Size(20, 20, Unit.Millimetre);
+                p.Margin(0);
+                p.PageColor(Color.FromHex(hex));
+                p.Content().Text(string.Empty);
+            });
+        }).GenerateImages(new ImageGenerationSettings { ImageFormat = fmt, RasterDpi = 72 }).First();
+    }
+
+    /// <summary>
+    /// 24비트 BMP 한 장(2×2 빨강) — 🔴 작성기가 BMP 를 안 만들어 주므로 <b>헤더를 직접</b> 쓴다.
+    /// </summary>
+    /// <remarks>BMP 헤더는 단순해서 손으로 적어도 유효하다. 유효한지는 G-W20 이 픽셀로 증명한다.</remarks>
+    private static byte[] Bmp24Red()
+    {
+        int w = 2, h = 2, rowRaw = w * 3, pad = (4 - rowRaw % 4) % 4, row = rowRaw + pad;
+        int pixels = row * h, off = 14 + 40, size = off + pixels;
+        var b = new byte[size];
+        b[0] = (byte)'B'; b[1] = (byte)'M';
+        BitConverter.GetBytes(size).CopyTo(b, 2);
+        BitConverter.GetBytes(off).CopyTo(b, 10);
+        BitConverter.GetBytes(40).CopyTo(b, 14);
+        BitConverter.GetBytes(w).CopyTo(b, 18);
+        BitConverter.GetBytes(h).CopyTo(b, 22);
+        BitConverter.GetBytes((short)1).CopyTo(b, 26);
+        BitConverter.GetBytes((short)24).CopyTo(b, 28);
+        BitConverter.GetBytes(pixels).CopyTo(b, 34);
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                var i = off + y * row + x * 3;
+                b[i] = 0; b[i + 1] = 0; b[i + 2] = 255;   // BGR = 빨강
+            }
+        return b;
+    }
+
+    /// <summary>워터마크 한 변을 **제품 코드로** 계산한다 — 시험이 제 몫으로 곱하지 않는다.</summary>
+    private static float WatermarkSideMm(float widthMm, float heightMm, int scalePct)
+    {
+        var m = typeof(PdfRenderService).GetMethod("ResolveWatermarkSideMm",
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(m);
+        return (float)m!.Invoke(null, new object?[] { widthMm, heightMm, scalePct })!;
+    }
+
+    /// <summary>원하는 크기의 흰 종이 한 장을 그려 PNG 로 뽑는다.</summary>
+    private static byte[] RenderSizedPage(float widthMm, float heightMm, Action<PageDescriptor> body)
+    {
+        QuestPDF.Settings.License = LicenseType.Community;
+        return Document.Create(doc =>
+        {
+            doc.Page(p =>
+            {
+                p.Size(widthMm, heightMm, Unit.Millimetre);
+                p.Margin(0);
+                p.PageColor(Colors.White);
+                body(p);
+            });
+        }).GenerateImages(new ImageGenerationSettings
+        {
+            ImageFormat = QuestPDF.Infrastructure.ImageFormat.Png,
+            RasterDpi = 72
+        }).First();
     }
 
     private static string RepoRoot()

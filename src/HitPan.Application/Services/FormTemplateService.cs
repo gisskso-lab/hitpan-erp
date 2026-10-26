@@ -181,7 +181,10 @@ public class FormTemplateService : IFormTemplateService
                 //   null = 「공통값을 따른다」이므로 여기서 기본값을 채워 넣으면
                 //   그 양식은 공통 설정을 바꿔도 영영 안 따라온다 (0.00 과 null 은 다른 뜻).
                 PrintBackground = request.PrintBackground ? 1 : 0,
-                ShowWatermark = request.ShowWatermark ? 1 : 0,
+                // 🔴 [R-2 봉합] 켬/끔도 세 값이다 — null(공통 따름) 을 null 그대로 넣는다.
+                //   종전에는 `? 1 : 0` 으로 **null 을 0 으로 바꿔** 넣어서,
+                //   양식을 한 번 저장한 고객에게 공통 켜기가 영영 안 닿았다.
+                request.ShowWatermark,
                 request.WatermarkOpacity,
                 request.WatermarkSaturate,
                 request.WatermarkScalePct,
@@ -289,7 +292,10 @@ public class FormTemplateService : IFormTemplateService
                 ShowTearLine = request.ShowTearLine ? 1 : 0,
                 // 🔴 DB-148 — 수치 셋은 null 을 null 그대로 넘긴다(「공통값을 따른다」를 지키려면).
                 PrintBackground = request.PrintBackground ? 1 : 0,
-                ShowWatermark = request.ShowWatermark ? 1 : 0,
+                // 🔴 [R-2 봉합] 켬/끔도 세 값이다 — null(공통 따름) 을 null 그대로 넣는다.
+                //   종전에는 `? 1 : 0` 으로 **null 을 0 으로 바꿔** 넣어서,
+                //   양식을 한 번 저장한 고객에게 공통 켜기가 영영 안 닿았다.
+                request.ShowWatermark,
                 request.WatermarkOpacity,
                 request.WatermarkSaturate,
                 request.WatermarkScalePct,

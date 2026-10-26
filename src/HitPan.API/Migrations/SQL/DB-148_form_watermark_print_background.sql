@@ -64,8 +64,8 @@ SET @col_exists := (
 
 SET @sql := IF(@col_exists = 0,
   'ALTER TABLE `form_templates`
-     ADD COLUMN `show_watermark` tinyint(1) NOT NULL DEFAULT 0
-       COMMENT ''1=회사 로고를 종이 정중앙에 연하게 깐다 / 0=안 깐다(기본, DB-148). 재료는 local_company.logo_url''',
+     ADD COLUMN `show_watermark` tinyint(1) DEFAULT NULL
+       COMMENT ''1=이 양식만 켠다 / 0=이 양식만 끈다 / NULL=공통(print_common_settings)을 따른다(기본, DB-148). 재료는 local_company.logo_url''',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -128,9 +128,9 @@ CREATE TABLE IF NOT EXISTS `print_common_settings` (
   `watermark_saturate` decimal(3,2) NOT NULL DEFAULT 0.15
     COMMENT '채도 제안값 0.15 — 색이 옅은 회색에 가까워져 본문과 안 다툰다. 고객이 바꾼다',
   `watermark_scale_pct` smallint(5) unsigned NOT NULL DEFAULT 60
-    COMMENT '크기 제안값 60% (용지 폭 대비) — 「정중앙 크게」. 고객이 바꾼다',
+    COMMENT '크기 제안값 60% (용지 짧은 변 대비) — 「정중앙 크게」. 고객이 바꾼다',
   `print_background_default` tinyint(1) NOT NULL DEFAULT 0
-    COMMENT '새 양식을 만들 때 print_background 의 초기값. 0=안 찍는다',
+    COMMENT '[예약 — 2026-10-26 기준 읽는 코드 0건] 새 양식의 print_background 초기값으로 쓸 자리. 쓰는 차수에 배선한다',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
   PRIMARY KEY (`tenant_id`)

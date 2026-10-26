@@ -252,7 +252,7 @@ else
 
         /// <summary>회사 로고를 종이 가운데에 연하게 깔까 (DB-148).</summary>
         /// <remarks>⚠️ 서버 DTO 와 이름이 같아야 JSON 이 매핑된다.</remarks>
-        public bool ShowWatermark { get; set; }
+        public bool? ShowWatermark { get; set; }
 
         /// <summary>워터마크 진하기 0.00~1.00 — <c>null</c> 이면 공통 설정을 따른다 (DB-148).</summary>
         /// <remarks>

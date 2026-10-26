@@ -30,16 +30,19 @@ public sealed class PrintCommonSettingsDto
     [Range(0.0, 1.0)]
     public decimal WatermarkSaturate { get; set; } = WatermarkDefaults.Saturate;
 
-    /// <summary>워터마크 크기 — 종이 너비 대비 %.</summary>
+    /// <summary>워터마크 크기 — 종이 <b>짧은 변</b> 대비 %.</summary>
+    /// <remarks>
+    /// 🔴 [2026-10-26 [4] 반려 R-1 봉합] 종전에는 「종이 너비 대비」였다. 워터마크는 정사각이라
+    ///   <b>가로 용지에서 71% 만 넘어도 종이 높이를 넘어 그림이 통째로 빠졌다</b>(예외·로그 0).
+    ///   짧은 변 기준이면 100% 가 「종이에 꽉 차는 가장 큰 정사각」이다.
+    /// </remarks>
     [Range(10, 100)]
     public int WatermarkScalePct { get; set; } = WatermarkDefaults.ScalePct;
 
-    /// <summary>
-    /// 새 양식을 만들 때 「양식지 그림을 종이에도 인쇄」의 초기값.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>이미 만들어 둔 양식은 바꾸지 않는다</b> — 이 값을 켜도 기존 양식의 종이는 그대로다.
-    ///   한 칸을 켜서 고객의 모든 종이가 한꺼번에 바뀌는 길은 만들지 않는다(#1).
-    /// </remarks>
-    public bool PrintBackgroundDefault { get; set; }
+    // 🔴🔴 [2026-10-26 [3-V] P1-4 · [4] R-7 봉합] `print_background_default` 칸을 **여기서 뺐다.**
+    //   종전에는 이 칸이 *"새 양식을 만들 때 print_background 의 초기값"* 이라고 **약속**했는데
+    //   그 값을 **쓰는 자리가 0건**이었다. 더 나쁜 것은 화면이 이 칸을 묶지 않아
+    //   공통 설정을 한 번 저장할 때마다 **0 으로 조용히 덮었다**(#1 덮어쓰기 금지).
+    //   ⇒ DB 칸은 **예약으로 남기고**(#37 — 칸은 지우지 않는다) 약속만 걷어냈다.
+    //     쓰는 차수에 화면·`CreateAsync` 와 함께 배선한다.
 }

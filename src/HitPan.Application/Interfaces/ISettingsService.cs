@@ -36,6 +36,18 @@ public interface ISettingsService
     ///   올리는 그 걸음에 칸까지 적어야 「등록되었습니다」가 참이 된다.
     /// 🔴 <b>컬럼 이름을 바깥 글자로 만들지 않는다</b> — 허용한 세 종류를 코드가 직접 가른다.
     /// </remarks>
+    /// <summary>
+    /// 🔴 회사 그림 경로 한 칸을 <b>읽는다</b> — 지울 때 <b>DB 가 가리키는 그 파일만</b> 지우려고.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-10-26 [3-V] P2-5 봉합] 종전 지우기는 <b>요청에 적힌 경로</b>를 지웠다.
+    ///   그래서 종류와 경로를 엇갈리게 보내면 <b>로고 파일이 지워지고 직인 칸이 비는</b>
+    ///   길이 있었다(화면은 「지웠습니다」). ⇒ 지울 대상은 <b>DB 에서 읽는다.</b>
+    /// </remarks>
+    /// <returns>그 칸에 적힌 경로. 칸이 비었거나 모르는 종류면 <c>null</c>.</returns>
+    Task<string?> GetCompanyImagePathAsync(
+        string tenantId, string kind, CancellationToken ct = default);
+
     Task<bool> SaveCompanyImagePathAsync(
         string tenantId, string kind, string? storedPath, CancellationToken ct = default);
 

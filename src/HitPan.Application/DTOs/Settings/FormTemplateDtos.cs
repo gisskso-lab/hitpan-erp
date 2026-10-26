@@ -62,8 +62,15 @@ public class FormTemplateDto
     /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 — DB-148.
     /// 사장님 오더 (<i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
     /// </summary>
-    /// <remarks>재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.</remarks>
-    public bool ShowWatermark { get; set; }
+    /// <remarks>
+    /// 재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.
+    /// 🔴🔴 <b>세 값이다</b> — <c>null</c>(공통 설정을 따른다 · 기본) · <c>true</c>(이 양식만 켠다) ·
+    ///   <c>false</c>(이 양식만 끈다). [2026-10-26 [4] 반려 R-2 봉합] 종전에는 비널러블
+    ///   <c>bool</c> 이라 「나는 정하지 않았다」를 적을 칸이 없었다 ⇒ 공통 켜기가
+    ///   <b>양식 행이 있는 고객에게 영영 안 닿았고</b>, 여백만 고쳐 저장해도 워터마크가
+    ///   조용히 꺼졌다. 수치 셋과 <b>같은 규칙</b>을 쓴다 — 한 화면에 두 규칙을 두지 않는다.
+    /// </remarks>
+    public bool? ShowWatermark { get; set; }
 
     /// <summary>
     /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통값</b>(<c>print_common_settings</c>)을 따른다.
@@ -162,8 +169,15 @@ public class CreateFormTemplateRequest
     /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 — DB-148.
     /// 사장님 오더 (<i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
     /// </summary>
-    /// <remarks>재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.</remarks>
-    public bool ShowWatermark { get; set; }
+    /// <remarks>
+    /// 재료는 <c>local_company.logo_url</c> 이다. 그 자리가 비면 아무 일도 하지 않는다.
+    /// 🔴🔴 <b>세 값이다</b> — <c>null</c>(공통 설정을 따른다 · 기본) · <c>true</c>(이 양식만 켠다) ·
+    ///   <c>false</c>(이 양식만 끈다). [2026-10-26 [4] 반려 R-2 봉합] 종전에는 비널러블
+    ///   <c>bool</c> 이라 「나는 정하지 않았다」를 적을 칸이 없었다 ⇒ 공통 켜기가
+    ///   <b>양식 행이 있는 고객에게 영영 안 닿았고</b>, 여백만 고쳐 저장해도 워터마크가
+    ///   조용히 꺼졌다. 수치 셋과 <b>같은 규칙</b>을 쓴다 — 한 화면에 두 규칙을 두지 않는다.
+    /// </remarks>
+    public bool? ShowWatermark { get; set; }
 
     /// <summary>
     /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통값</b>(<c>print_common_settings</c>)을 따른다.

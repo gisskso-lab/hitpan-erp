@@ -402,19 +402,35 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             Snackbar.Add("파일을 선택해주세요.", Severity.Warning);
             return null;
         }
-        const long maxSize = 2 * 1024 * 1024;
+        // 🔴🔴 [2026-10-26 [3-V] P2-6 봉합] 상한과 형식 목록을 **손으로 적지 않는다.**
+        //   종전에는 이 화면이 `2 * 1024 * 1024` 와 `".png" or ".jpg" or ".jpeg"` 를
+        //   **세 번째 벌**로 적어 두었다 ⇒ 보관소는 `.bmp`·`.webp` 를 받는데 이 화면만
+        //   거절했다. 작업지시서 §B-4 가 못박은 *"둘 다 같은 보관소를 쓴다"* 가
+        //   **형식 축에서 깨져 있었다**(10/25 반려 R-1 과 같은 사고 모양).
+        const long maxSize = CompanyImageLimits.MaxBytes;
         if (file.Size > maxSize)
         {
-            Snackbar.Add("파일 크기는 2MB 이하여야 합니다.", Severity.Warning);
+            Snackbar.Add($"파일 크기는 {CompanyImageLimits.MaxBytesLabel} 이하여야 합니다.", Severity.Warning);
             return null;
         }
         var ext = Path.GetExtension(file.Name).ToLowerInvariant();
-        var allowed = allowSvg
-            ? ext is ".png" or ".jpg" or ".jpeg" or ".svg"
-            : ext is ".png" or ".jpg" or ".jpeg";
+        var allowed = CompanyImageLimits.AllowedExts.Contains(ext, StringComparer.OrdinalIgnoreCase);
+
+        // 🔴 [[4] 경 R-9] <c>.svg</c> 는 **이 화면의 미리보기 전용 예외**다 — 보관소는 거절한다.
+        //   고를 수 있게 열어 두고 말없이 거절하지 않는다. 참을 말하고 돌려보낸다.
+        if (!allowed && allowSvg && ext == ".svg")
+        {
+            Snackbar.Add(
+                "SVG 그림은 화면 미리보기만 되고 종이에는 나오지 않습니다. png · jpg · bmp · webp 로 올려 주십시오.",
+                Severity.Warning);
+            return null;
+        }
+
         if (!allowed)
         {
-            Snackbar.Add("허용되지 않는 파일 형식입니다.", Severity.Warning);
+            Snackbar.Add(
+                $"그림 파일만 올릴 수 있습니다. ({string.Join(" · ", CompanyImageLimits.AllowedExts)})",
+                Severity.Warning);
             return null;
         }
         await using var stream = file.OpenReadStream(maxAllowedSize: maxSize);
