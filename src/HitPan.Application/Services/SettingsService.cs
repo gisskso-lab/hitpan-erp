@@ -3,6 +3,7 @@ using System.Data.Common;
 using Dapper;
 using HitPan.Application.DTOs.Settings;
 using HitPan.Application.Interfaces;
+using HitPan.Contracts.Forms;
 
 namespace HitPan.Application.Services;
 
@@ -545,6 +546,105 @@ public sealed class SettingsService : ISettingsService
 
         var t = value.Trim();
         return t.Length <= maxLen ? t : t[..maxLen];
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> SaveCompanyImagePathAsync(
+        string tenantId, string kind, string? storedPath, CancellationToken ct = default)
+    {
+        // 🔴 컬럼 이름을 바깥에서 온 글자로 만들지 않는다 — 세 종류를 코드가 직접 가른다.
+        //   모르는 종류면 **아무것도 하지 않고** false 를 돌려준다(조용히 성공처럼 보이면 안 된다).
+        var sql = kind switch
+        {
+            "logo" => "UPDATE local_company SET logo_url = @Path WHERE tenant_id = @TenantId",
+            "seal" => "UPDATE local_company SET seal_url = @Path WHERE tenant_id = @TenantId",
+            "header" => "UPDATE local_company SET header_url = @Path WHERE tenant_id = @TenantId",
+            _ => null
+        };
+        if (sql is null) return false;
+
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 🔴 칸 길이는 varchar(200) 이다 — 넘치면 DB 가 거절하거나 조용히 자른다.
+        //   보관소가 만드는 경로는 짧지만, 자르는 자리를 여기 둔다(TruncateNullable 과 같은 뜻).
+        await _db.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            TenantId = tenantId,
+            Path = TruncateNullable(storedPath, 200)
+        }, cancellationToken: ct)).ConfigureAwait(false);
+
+        return true;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 인쇄 공통 설정 (print_common_settings · DB-148 · 20261026작1 §D-2)
+    //
+    // 🔴 사장님 결재 2026-10-25(결-I): "공통 + 양식마다 — 단 고객 선택 옵션"
+    //   이 한 벌이 모든 양식의 기본이고, 양식마다 수치를 비워 두면 이 값을 따른다.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <inheritdoc />
+    public async Task<PrintCommonSettingsDto> GetPrintCommonAsync(
+        string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT watermark_enabled AS WatermarkEnabled,
+                   watermark_opacity AS WatermarkOpacity,
+                   watermark_saturate AS WatermarkSaturate,
+                   watermark_scale_pct AS WatermarkScalePct,
+                   print_background_default AS PrintBackgroundDefault
+            FROM print_common_settings WHERE tenant_id = @TenantId
+            """;
+
+        var row = await _db.QuerySingleOrDefaultAsync<PrintCommonSettingsDto>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        // 🔴 행이 없는 것이 **정상 경로**다 — 한 번도 안 건드린 고객이다.
+        //   그때 빈 칸·0 을 돌려주면 화면이 「진하기 0」을 보여 주고, 고객이 그대로 저장하면
+        //   워터마크가 **투명해져 「켰는데 안 보인다」**가 된다. 제안값으로 떨어진다.
+        return row ?? new PrintCommonSettingsDto();
+    }
+
+    /// <inheritdoc />
+    public async Task SavePrintCommonAsync(
+        string tenantId, PrintCommonSettingsDto dto, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 🔴 범위로 조인다 — 화면이 먼저 막지만 API 를 직접 부를 수도 있다.
+        //   거절하지 않고 조이는 까닭은 WatermarkDefaults 머리글에 적었다(#20).
+        var opacity = WatermarkDefaults.ClampRatio(dto.WatermarkOpacity);
+        var saturate = WatermarkDefaults.ClampRatio(dto.WatermarkSaturate);
+        var scalePct = WatermarkDefaults.ClampScalePct(dto.WatermarkScalePct);
+
+        // 🔴 행이 없으면 만들고 있으면 고친다 — 고객이 설정을 두 번 저장해도 행은 하나다.
+        const string sql = """
+            INSERT INTO print_common_settings
+              (tenant_id, watermark_enabled, watermark_opacity, watermark_saturate,
+               watermark_scale_pct, print_background_default)
+            VALUES
+              (@TenantId, @WatermarkEnabled, @WatermarkOpacity, @WatermarkSaturate,
+               @WatermarkScalePct, @PrintBackgroundDefault)
+            ON DUPLICATE KEY UPDATE
+              watermark_enabled = @WatermarkEnabled,
+              watermark_opacity = @WatermarkOpacity,
+              watermark_saturate = @WatermarkSaturate,
+              watermark_scale_pct = @WatermarkScalePct,
+              print_background_default = @PrintBackgroundDefault
+            """;
+
+        await _db.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            TenantId = tenantId,
+            WatermarkEnabled = dto.WatermarkEnabled ? 1 : 0,
+            WatermarkOpacity = opacity,
+            WatermarkSaturate = saturate,
+            WatermarkScalePct = scalePct,
+            PrintBackgroundDefault = dto.PrintBackgroundDefault ? 1 : 0
+        }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
     public async Task<UnitPriceValidationDto> ValidateUnitPriceAsync(

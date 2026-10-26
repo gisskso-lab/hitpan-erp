@@ -117,6 +117,72 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
         }
     }
 
+    /// <summary>
+    /// 🔴 회사 그림(로고·인장·머리)을 보관소로 올린다 — 20261026작1 §B-4 (결-H).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 이 메서드가 생겼나</b> — 10/25 실측: 화면은 「등록되었습니다」라 말하고
+    ///   서버에는 아무것도 가지 않았다. 올리는 통로가 <b>0건</b>이었다.
+    /// 🔴 서버가 올린 뒤 <b>회사 정보 칸까지 적는다</b> — 이 화면에는 그림만 위한
+    ///   저장 단추가 없으니 올리는 걸음에 끝나야 「등록되었습니다」가 참이 된다.
+    /// </remarks>
+    /// <returns>성공하면 <c>(경로, null)</c>, 실패하면 <c>(null, 고객에게 보일 까닭)</c>.</returns>
+    public async Task<(string? StoredPath, string? Rejection)> UploadCompanyImageAsync(
+        string kind, Stream content, string fileName, CancellationToken ct = default)
+    {
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            form.Add(new StreamContent(content), "file", fileName);
+            form.Add(new StringContent(kind), "kind");
+
+            using var res = await http.PostAsync("api/settings/company-image", form, ct)
+                .ConfigureAwait(false);
+
+            if (res.IsSuccessStatusCode)
+            {
+                var ok = await res.Content
+                    .ReadFromJsonAsync<UploadedCompanyImage>(JsonOptions, ct).ConfigureAwait(false);
+                return (ok?.StoredPath, null);
+            }
+
+            var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return (null, ExtractMessage(body));
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15). 고객에게는 사람 말로 돌려준다.
+            logger.LogWarning(ex, "회사 그림 올리기 실패 — 종류 {Kind}", kind);
+            return (null, "그림을 올리지 못했습니다. 잠시 뒤 다시 시도해 주십시오.");
+        }
+    }
+
+    /// <summary>보관소가 돌려준 경로.</summary>
+    private sealed class UploadedCompanyImage
+    {
+        public string? StoredPath { get; set; }
+    }
+
+    /// <summary>서버가 돌려준 까닭을 사람 말로 꺼낸다.</summary>
+    private static string ExtractMessage(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return "그림을 올리지 못했습니다.";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+            {
+                var text = m.GetString();
+                if (!string.IsNullOrWhiteSpace(text)) return text!;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // 🔴 JSON 이 아니면 일반 안내로 떨어진다 — 고객 화면에 날 문자열을 쏟지 않는다.
+        }
+        return "그림을 올리지 못했습니다.";
+    }
+
     public async Task<bool> VerifyForcePasswordAsync(string password, CancellationToken ct = default)
     {
         try

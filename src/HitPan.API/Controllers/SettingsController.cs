@@ -152,6 +152,41 @@ public sealed class SettingsController : ControllerBase
         return Ok(new { valid = ok });
     }
 
+    /// <summary>
+    /// 인쇄 공통 설정을 읽는다 (DB-148 · 결-I).
+    /// </summary>
+    /// <remarks>🔴 행이 없으면 <b>제안값</b>이 온다 — 화면이 빈 칸을 보여 주지 않게 한다.</remarks>
+    [HttpGet("print-common")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> GetPrintCommon(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var dto = await _settingsService.GetPrintCommonAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// 인쇄 공통 설정을 저장한다 (DB-148 · 결-I).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 이 값은 <b>양식마다의 기본</b>이다. 이미 만들어 둔 양식의 종이는 바꾸지 않는다
+    ///   — 한 칸을 켜서 고객의 모든 종이가 한꺼번에 바뀌는 길은 만들지 않는다(#1).
+    /// </remarks>
+    [HttpPut("print-common")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> SavePrintCommon(
+        [FromBody] PrintCommonSettingsDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        await _settingsService.SavePrintCommonAsync(tenantId, dto, ct).ConfigureAwait(false);
+        _logger.LogInformation("인쇄 공통 설정 저장: tenant={Tenant}", tenantId);
+        return NoContent();
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 회사 그림 보관소 — 로고 · 직인 · 출력 머리 (20261026작1 §B-2 · 결-H)
     //
@@ -201,6 +236,18 @@ public sealed class SettingsController : ControllerBase
             return BadRequest(new { message = rejection });
         }
 
+        // 🔴🔴 [§B-4] **보관만 하고 끝내지 않는다 — 회사 정보 칸에 경로까지 적는다.**
+        //   이 화면에는 「저장」 단추가 없다. 올리는 걸음에 칸까지 적어야
+        //   「등록되었습니다」가 참이 된다. 10/25 사고가 바로 이 자리였다:
+        //   화면은 「등록되었습니다」라 말하고 서버는 null 을 저장했다.
+        var written = await _settingsService
+            .SaveCompanyImagePathAsync(tenantId, kind, storedPath, ct).ConfigureAwait(false);
+        if (!written)
+        {
+            _logger.LogWarning("회사 그림 종류를 알 수 없어 칸에 적지 않았다: {Kind}", kind);
+            return BadRequest(new { message = "그림 종류를 확인할 수 없습니다." });
+        }
+
         return Ok(new { storedPath });
     }
 
@@ -212,14 +259,14 @@ public sealed class SettingsController : ControllerBase
     /// </remarks>
     [HttpDelete("company-image")]
     [Authorize(Policy = "TenantAdminOnly")]
-    public IActionResult DeleteCompanyImage(
+    public async Task<IActionResult> DeleteCompanyImage(
         [FromBody] DeleteCompanyImageRequest req,
-        [FromServices] ICompanyImageStore store)
+        [FromServices] ICompanyImageStore store, CancellationToken ct = default)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         if (string.IsNullOrEmpty(tenantId)) return Forbid();
 
-        if (string.IsNullOrWhiteSpace(req?.StoredPath))
+        if (string.IsNullOrWhiteSpace(req?.StoredPath) || string.IsNullOrWhiteSpace(req.Kind))
             return BadRequest(new { message = "지울 그림을 찾을 수 없습니다." });
 
         var rejection = store.Delete(tenantId, req.StoredPath);
@@ -228,6 +275,11 @@ public sealed class SettingsController : ControllerBase
             _logger.LogWarning("회사 그림 지우기 거절: tenant={Tenant} 까닭={Why}", tenantId, rejection);
             return BadRequest(new { message = rejection });
         }
+
+        // 🔴 파일을 지웠으면 **칸도 비운다** — 안 비우면 작성기가 없는 파일을 가리켜
+        //   로그에 「파일이 없다」가 쌓인다. 화면도 「등록됨」으로 남아 거짓이 된다.
+        await _settingsService
+            .SaveCompanyImagePathAsync(tenantId, req.Kind, null, ct).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -238,4 +290,7 @@ public sealed class DeleteCompanyImageRequest
 {
     /// <summary>지울 그림의 보관 경로.</summary>
     public string? StoredPath { get; set; }
+
+    /// <summary>그림 종류 — <c>logo</c>·<c>seal</c>·<c>header</c>. 🔴 칸을 비울 때 어느 칸인지 알아야 한다.</summary>
+    public string? Kind { get; set; }
 }

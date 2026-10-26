@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using HitPan.Contracts.Forms;
 using HitPan.Web.Models;
 using HitPan.Web.Services;
 using Microsoft.AspNetCore.Components;
@@ -318,11 +319,26 @@ public partial class UserInfoPage : ComponentBase, IDisposable
         await InvokeAsync(StateHasChanged);
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // 🔴🔴 [20261026작1 §B-4] 로고·인장·머리를 **실제로 서버에 올린다** (결-H)
+    //
+    // 🔴 종전에는 미리보기만 만들고 「등록되었습니다」라고 말했다. 그런데 저장할 때
+    //   `KeepPathOnly` 가 `data:` 를 만나 **null 을 넣었다** — 아무것도 저장되지 않았다.
+    //   주석도 그렇게 자백해 두었다: *"파일을 보관할 자리가 **마련되면** …"*.
+    //   🔴 오늘 그 자리를 만들었다(결-H). 그래서 이제 **올리고 나서** 말한다.
+    // 🔴 실패하면 「등록되었습니다」라고 말하지 않는다 — 사장님 지시 *"거짓문구는 모두 삭제"*.
+    // ══════════════════════════════════════════════════════════════════
+
     private async Task OnLogoChanged(InputFileChangeEventArgs e)
     {
         var preview = await BuildPreviewAsync(e.File, allowSvg: true).ConfigureAwait(false);
         if (preview is null) return;
+
+        var stored = await UploadCompanyImageAsync("logo", e.File).ConfigureAwait(false);
+        if (stored is null) return;   // 까닭은 UploadCompanyImageAsync 가 이미 말했다.
+
         _model.LogoPreviewUrl = preview;
+        _model.LogoStoredPath = stored;
         Snackbar.Add("로고가 등록되었습니다.", Severity.Success);
     }
 
@@ -330,7 +346,12 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     {
         var preview = await BuildPreviewAsync(e.File, allowSvg: false).ConfigureAwait(false);
         if (preview is null) return;
+
+        var stored = await UploadCompanyImageAsync("seal", e.File).ConfigureAwait(false);
+        if (stored is null) return;
+
         _model.SealPreviewUrl = preview;
+        _model.SealStoredPath = stored;
         Snackbar.Add("인장이 등록되었습니다.", Severity.Success);
     }
 
@@ -338,8 +359,40 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     {
         var preview = await BuildPreviewAsync(e.File, allowSvg: false).ConfigureAwait(false);
         if (preview is null) return;
+
+        var stored = await UploadCompanyImageAsync("header", e.File).ConfigureAwait(false);
+        if (stored is null) return;
+
         _model.HeaderPreviewUrl = preview;
+        _model.HeaderStoredPath = stored;
         Snackbar.Add("헤더 이미지가 등록되었습니다.", Severity.Success);
+    }
+
+    /// <summary>
+    /// 🔴 그림을 보관소로 올리고 경로를 돌려준다 — 못 올리면 <c>null</c> 이고 까닭을 말한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>SVG 는 보관소가 받지 않는다</b> — 작성기가 못 읽는 형식이다. 로고 칸은
+    ///   화면 미리보기용으로 SVG 를 허용해 왔는데(allowSvg), 그 그림은 <b>종이에 못 나간다.</b>
+    ///   그래서 거절 까닭을 서버 말 그대로 보여 준다 — 고객이 png 로 다시 올릴 수 있게.
+    /// </remarks>
+    private async Task<string?> UploadCompanyImageAsync(string kind, IBrowserFile? file)
+    {
+        if (file is null) return null;
+
+        // 🔴 ERP API 로 가는 통로는 이 화면이 이미 쓰는 SettingsSvc 한 벌이다 —
+        //   여기서 HttpClient 를 따로 만들면 주소·헤더 설정이 두 벌이 된다.
+        var stream = file.OpenReadStream(CompanyImageLimits.MaxBytes);
+        var (storedPath, rejection) = await SettingsSvc
+            .UploadCompanyImageAsync(kind, stream, file.Name).ConfigureAwait(false);
+
+        if (rejection is not null)
+        {
+            Snackbar.Add(rejection, Severity.Error);
+            return null;
+        }
+
+        return storedPath;
     }
 
     private async Task<string?> BuildPreviewAsync(IBrowserFile? file, bool allowSvg)
@@ -389,9 +442,12 @@ public partial class UserInfoPage : ComponentBase, IDisposable
             // 출력 이미지 경로. 미리보기가 data: 로 시작하는 그림 데이터일 때는 보내지 않는다.
             // 저장 컬럼이 200자라 그림 데이터를 넣으면 앞 200자만 잘려 들어가 깨진 값이 남는다.
             // 파일을 보관할 자리가 생기기 전까지는 이미 저장돼 있던 경로만 지켜준다.
-            LogoUrl = KeepPathOnly(_model.LogoPreviewUrl),
-            SealUrl = KeepPathOnly(_model.SealPreviewUrl),
-            HeaderUrl = KeepPathOnly(_model.HeaderPreviewUrl),
+            // 🔴 [20261026작1 §B-4] **올라간 경로를 먼저 쓴다.** 이번에 새로 올린 것이
+            //   없으면(null) 종전처럼 미리보기에서 경로만 추려 쓴다 — 예전에 주소를
+            //   적어 둔 고객의 값이 지워지면 안 된다(#1).
+            LogoUrl = _model.LogoStoredPath ?? KeepPathOnly(_model.LogoPreviewUrl),
+            SealUrl = _model.SealStoredPath ?? KeepPathOnly(_model.SealPreviewUrl),
+            HeaderUrl = _model.HeaderStoredPath ?? KeepPathOnly(_model.HeaderPreviewUrl),
             CompanyName = _model.CompanyName,
             CeoName = _model.CeoName,
             BizNo = _model.BusinessNo,
@@ -493,6 +549,25 @@ public sealed class UserInfoViewModel
     public string? LogoPreviewUrl { get; set; }
     public string? SealPreviewUrl { get; set; }
     public string? HeaderPreviewUrl { get; set; }
+
+    // ───────────────────────────────────────────────────────────────
+    // 🔴 [20261026작1 §B-4] 보관소에 **실제로 올라간** 그림의 경로 (DB-148 · 결-H)
+    //
+    // 🔴 미리보기(`*PreviewUrl`)와 **다른 칸이다.** 미리보기는 브라우저가 화면에
+    //   띄우는 `data:` 글자이고, 이쪽은 서버가 보관한 파일의 경로다.
+    //   종전에는 미리보기 하나로 두 일을 하려 해서 `KeepPathOnly` 가
+    //   `data:` 를 만나면 **null 을 저장**했다 — 그런데 화면은
+    //   「로고가 등록되었습니다」라고 말했다. **고객 화면에 거짓이 있었다.**
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>보관소에 올라간 로고 경로. <c>null</c> 이면 이번에 새로 올린 것이 없다.</summary>
+    public string? LogoStoredPath { get; set; }
+
+    /// <summary>보관소에 올라간 인장 경로.</summary>
+    public string? SealStoredPath { get; set; }
+
+    /// <summary>보관소에 올라간 출력 머리 경로.</summary>
+    public string? HeaderStoredPath { get; set; }
 
     // 헌법 #35 (사장님 결재 2026-06-04) — 랜딩 가입 자동 반영 잠금 플래그
     // 1이면 회사명·사업자번호·대표자명 핵심 3필드 변경 불가
