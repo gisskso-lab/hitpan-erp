@@ -69,6 +69,36 @@ SET @sql := IF(@col_exists = 0,
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- ─── ②-2 🔴🔴 이미 **두 값으로 생긴** 칸을 세 값으로 넓힌다 ───────
+--
+-- 🔴 왜 이 칸이 또 필요한가 — 위 ② 는 「칸이 없을 때만」 돈다.
+--   이 마이그는 **2026-10-26 같은 날 안에서 두 번 바뀌었다**:
+--     아침 판 = `tinyint(1) NOT NULL DEFAULT 0` · 봉합 판 = `tinyint(1) DEFAULT NULL`.
+--   아침 판을 이미 돌린 DB(내 시험 DB · 누군가의 시험 DB)는 `schema_migrations` 에
+--   「DB-148 적용됨」이 적혀 있어 **이 파일이 다시 돌지 않는다**(마이그 적용기는 번호로 센다).
+--   ⇒ 그 DB 는 영영 두 값으로 남고, 화면이 「공통 따름(NULL)」을 저장하면
+--      **NOT NULL 위반으로 저장이 실패**한다. 「우리 DB 에서는 안 나는 사고」가 바로 이 모양이다.
+--
+-- 🔴 고객 DB 에는 이 칸이 아직 **없다**(DB-148 은 아직 출하되지 않았다 — 1.3.66 에 없다).
+--   그러니 이 블록은 **내부 시험 DB 를 위한 그물**이고, 갓 만든 DB 에서는 `SELECT 1` 로 지나간다.
+--
+-- 🔴 값은 건드리지 않는다 — 이미 들어 있는 `0` 을 NULL 로 바꾸지 않는다.
+--   그 `0` 이 「이 양식만 끔」으로 읽히는 것은 **종이가 안 바뀌는 쪽**이다(#1).
+--   공통을 켠 뒤 「왜 이 양식만 안 깔리나」를 겪으면 고객이 그 양식에서 「공통 따름」을 고르면 된다.
+SET @is_nullable := (
+  SELECT IFNULL(MAX(is_nullable), 'YES') FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'form_templates'
+    AND column_name = 'show_watermark'
+);
+
+SET @sql := IF(@is_nullable = 'NO',
+  'ALTER TABLE `form_templates`
+     MODIFY COLUMN `show_watermark` tinyint(1) DEFAULT NULL
+       COMMENT ''1=이 양식만 켠다 / 0=이 양식만 끈다 / NULL=공통(print_common_settings)을 따른다(기본, DB-148). 재료는 local_company.logo_url''',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- ─── ③ form_templates.watermark_opacity ──────────────────────
 SET @col_exists := (
   SELECT COUNT(*) FROM information_schema.columns
