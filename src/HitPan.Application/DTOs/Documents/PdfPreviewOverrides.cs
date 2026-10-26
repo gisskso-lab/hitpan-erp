@@ -105,4 +105,28 @@ public sealed class PrintOptionOverrides
 
     /// <summary>한 장에 두 벌 + 가운데 자르는 선 (DB-147). <c>PrintCopyMode=both</c> 일 때만 쓰인다.</summary>
     public bool? ShowTearLine { get; set; }
+
+    /// <summary>
+    /// 🔴 양식지 그림을 종이에도 찍나 (DB-148) — 🔴 <b>미리보기로 확인하고 고르게</b> 한다.
+    /// </summary>
+    /// <remarks>
+    /// 사장님 결재 2026-10-26(결-J): <i>"응 당연히 미리보기에서 미리 보기반영되도록"</i>.
+    /// 🔴 이 칸이 없으면 고객은 <b>저장한 뒤 실제로 뽑아 봐야</b> 결과를 알 수 있다.
+    /// </remarks>
+    public bool? PrintBackground { get; set; }
+
+    /// <summary>로고 워터마크를 깔까 (DB-148) — 미리보기에서 켜 보고 고른다.</summary>
+    public bool? ShowWatermark { get; set; }
+
+    /// <summary>
+    /// 워터마크 명도 0.00~1.00 (DB-148).
+    /// 🔴 <b>저장하지 않은 값으로 미리보기가 나와야 한다</b> — 그래야 고객이 숫자를 고를 수 있다.
+    /// </summary>
+    public decimal? WatermarkOpacity { get; set; }
+
+    /// <summary>워터마크 채도 0.00~1.00 (DB-148).</summary>
+    public decimal? WatermarkSaturate { get; set; }
+
+    /// <summary>워터마크 크기 — 용지 폭 대비 % (DB-148).</summary>
+    public int? WatermarkScalePct { get; set; }
 }
