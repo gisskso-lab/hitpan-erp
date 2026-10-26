@@ -854,6 +854,23 @@ public class DocumentController : ControllerBase
             return NotFound(new { message = ex.Message });
         }
 
+        // 🔴🔴 [2026-10-26작2 §9-R 5 · 관문 사유 최소판] **왜 안 깔렸나를 값 하나로 돌려준다.**
+        //   [왜 필요한가] [1-V] §5-2 [실측] — 설치본 `api` 폴더가 ACL 거부라 이벤트로그에
+        //     `[PDF]` 가 **0건**이었다. ⇒ 「로그 한 줄은 남는다」를 봉합 근거로 쓸 수 없다.
+        //     로그는 **지우지 않고**(#1·#15) 화면으로 되돌리는 통로를 **더한다.**
+        //   🔴 값은 `PrintGateReasons` 여섯뿐이다 — **사람 말은 안 싣는다.** 개발 용어·파일
+        //     경로·예외 원문 **0건**이고, 고객이 읽을 한 줄은 화면이 고른다(#23).
+        //   🔴 **짐작으로 쓰지 않는다** — 작성기 구현을 못 집으면 헤더를 **아예 안 붙인다.**
+        //     붙지 않은 헤더는 화면에서 「모름」이고, 화면은 모르는 것을 단언하지 않는다.
+        //   🔴 헤더가 못 붙어도 **미리보기는 그대로 나간다**(#20 — 흐름은 안 끊긴다).
+        //   🔴🔴 브라우저가 이 헤더를 읽으려면 CORS 가 `WithExposedHeaders` 로 내보내야 한다 —
+        //     `Program.cs` 는 갈래 W-C 의 파일이라 **여기서 손대지 않았다**(개발명세서에 넘겼다).
+        if (_pdfRenderService is HitPan.Application.Services.PdfRenderService renderer)
+        {
+            Response.Headers[HitPan.Application.Services.PrintGateReasons.HeaderName]
+                = renderer.LastPrintGate;
+        }
+
         // 🔴 inline — 틀 안에서 바로 보여야 한다(내려받기면 미리보기가 아니다).
         Response.Headers["Content-Disposition"] = "inline";
         return File(bytes, "application/pdf", fileName);

@@ -31,6 +31,25 @@ public sealed class PdfRenderService : IPdfRenderService
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
+    /// <summary>
+    /// 🔴 <b>이번에 그린 종이에 워터마크가 왜 안 깔렸나</b> — 20261026작2 §9-R 5 (최소판).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 값은 <see cref="PrintGateReasons"/> 의 <b>여섯 가지뿐</b>이다. 화면은 이 값만 보고
+    ///   사람 말 한 줄을 고른다 — <b>서버가 사람 말을 만들어 보내지 않는다</b>(#23).
+    /// 🔴 <b>왜 속성인가</b> — <see cref="IPdfRenderService"/> 와 작성기 서명을 넓히지 않기
+    ///   위해서다. 반사로 인자 개수를 맞추는 게이트가 있고(10/24 136건 · 10/25 108건 전례),
+    ///   인터페이스를 넓히면 구현체 전수 점검(#12)이 따라온다.
+    /// 🔴 <b>섞이지 않는 까닭</b> — 이 서비스는 <b>요청 하나당 한 벌</b>이고
+    ///   (<c>Program.cs</c>: <c>AddScoped&lt;IPdfRenderService, PdfRenderService&gt;</c>)
+    ///   미리보기 문은 전표 <b>한 장</b>을 그린다.
+    ///   🔴 한 요청에서 여러 장을 <b>병행으로</b> 그리는 문을 만드는 사람은 이 줄을 보고
+    ///   통로를 따로 내라 — 그대로 두면 마지막 한 장의 까닭만 남는다.
+    /// 🔴 아직 그린 것이 없으면 <see cref="PrintGateReasons.Unknown"/> 이다 —
+    ///   그때 화면은 <b>아무 말도 하지 않는다</b>(모르는 것을 단언하지 않는다).
+    /// </remarks>
+    public string LastPrintGate { get; private set; } = PrintGateReasons.Unknown;
+
     public Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType, string documentId, CancellationToken ct = default)
         => RenderDocumentAsync(tenantId, documentType, documentId, null, ct);
 
@@ -94,7 +113,22 @@ public sealed class PdfRenderService : IPdfRenderService
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
-        var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
+        //
+        // 🔴🔴 [2026-10-26작2 §9-R 1 · 사장님 결재 A-1] **`isPreprint &&` 제약을 풀었다.**
+        //   [그대로 두면 무슨 일이 나나] 순백지(`plain`) 고객이 좌표를 한 칸씩 맞춰 **저장해도**
+        //     이 한 줄이 그 좌표를 통째로 버렸다 ⇒ 값은 늘 히트판 표준 표(`ComposeBody`)로 가고
+        //     고객 눈에는 **「내 양식에 데이터가 안 붙었다 · 기본 폼이 나온다」**(오더 ②③)가 됐다.
+        //   🔴 **좌표를 안 맞춘 고객은 한 글자도 안 바뀐다** — 좌표가 **0개**면 이 값은 여전히
+        //     `false` 이고 그 종이는 종전과 똑같다(#1). 바뀌는 고객은 **좌표를 저장한 고객**뿐이다.
+        //   🔴 좌표를 **일부만** 적은 고객은 나머지 값이 종이에서 사라진다(설계 §2 A-1 의 대가).
+        //     그 경고는 **화면이 먼저** 말한다(갈래 W-B). 서버는 고객이 저장한 대로 그린다 —
+        //     우리가 몰래 되돌리는 길은 안 만든다(반자동 원칙).
+        //   🔴 세금계산서는 이 변화가 **안 닿는다** — `plain` 세금계산서는 아래 전용 작성기
+        //     분기(`&& !isPreprint`)로 먼저 빠진다(법정 서식 · 결-K).
+        //   🔴 좌표가 있으면 용지·방향이 **A4 세로로 묶인다**(`ResolvePageSize` R-4 울타리) —
+        //     좌표는 어느 종이에 대고 쟀는지가 전제이기 때문이다. 이제 `plain` 도 그 울타리
+        //     안으로 들어온다. 용지를 바꾸려면 좌표를 다시 맞춰야 한다(화면 안내는 등재).
+        var useCoords = (template?.FieldCoords.Count ?? 0) > 0;
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
         // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
         //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
@@ -124,8 +158,17 @@ public sealed class PdfRenderService : IPdfRenderService
         //
         // 🔴 켜졌는지 판정도 같은 순서다 — 양식에서 켜면 켠다. 양식이 안 정했으면
         //   공통의 켬/끔을 따른다. 🔴 양식 행 자체가 없으면(신규 고객) **끔**이다.
-        var watermark = await BuildWatermarkLayerAsync(tenantId, documentType, template, company, ct)
+        // 🔴🔴 [2026-10-26작2 §9-R 5 · 관문 사유 최소판] 왜 **안 깔렸나**를 값 하나로 받는다.
+        //   [1-V] §5-2 [실측]: 설치본에 `[PDF]` 로그가 **0건**이었다(폴더 ACL 거부)
+        //   ⇒ 「로그 한 줄은 남는다」를 봉합 근거로 쓸 수 없다. 그래서 로그는 **지우지 않고**
+        //     (#1·#15) 화면으로 되돌리는 통로를 **더한다.** 값은 `PrintGateReasons` 여섯뿐이다.
+        var (watermark, printGate) = await BuildWatermarkLayerAsync(
+                tenantId, documentType, template, company, ct)
             .ConfigureAwait(false);
+        // 🔴 작성기 서명(`RenderDocumentAsync`)·인터페이스는 **건드리지 않았다** — 반사로 인자
+        //   개수를 맞추는 게이트가 있고(10/24 136건 · 10/25 108건 전례) 인터페이스를 넓히면
+        //   구현체 전수 점검(#12)이 따라온다. 뜻은 같고 서명은 그대로인 길로 간다.
+        LastPrintGate = printGate;
 
         var showHeader = template?.ShowCompanyLogo ?? true;
         var showBorder = template?.ShowBorder ?? true;
@@ -228,7 +271,14 @@ public sealed class PdfRenderService : IPdfRenderService
                 }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
-                if (!isPreprint && showHeader)
+                // 🔴🔴 [2026-10-26작2 · 결재 A-1] **좌표 경로는 머리글을 안 그린다.**
+                //   [그대로 두면 무슨 일이 나나] 좌표 경로는 여백이 **0** 이다(위 `useCoords`
+                //     분기). 그 종이에 표준 머리글을 또 그리면 고객이 올린 양식지 그림의 맨
+                //     윗칸 위에 「견적서 / 문서번호 / 회사이름」이 **겹쳐 찍힌다** ⇒ 사장님이
+                //     보신 「기본 폼이 나온다」(오더 ③)가 `plain` 좌표 고객에게 그대로 재발한다.
+                //   🔴 `preprint` 는 **종전에도 안 그렸다** — 그 고객의 종이는 안 바뀐다(#1).
+                //   🔴 좌표가 0개인 `plain` 고객도 안 바뀐다 — `useCoords` 가 `false` 다.
+                if (!isPreprint && !useCoords && showHeader)
                 {
                     page.Header().Element(e => ComposeHeader(e, data, company));
                 }
@@ -236,7 +286,9 @@ public sealed class PdfRenderService : IPdfRenderService
                     page.Content().Element(e => ComposeBodyCoords(e, data, template!.FieldCoords));
                 else
                     page.Content().Element(e => ComposeBody(e, data, isPreprint, showBorder));
-                if (!isPreprint)
+                // 🔴 [2026-10-26작2 · 결재 A-1] 쪽번호도 좌표 경로에서는 안 찍는다 —
+                //   여백 0 이라 고객 양식지의 맨 아랫칸을 덮는다(머리글과 같은 까닭).
+                if (!isPreprint && !useCoords)
                 {
                     page.Footer().AlignCenter().Text(t =>
                     {
@@ -2412,8 +2464,15 @@ public sealed class PdfRenderService : IPdfRenderService
     /// 🔴 <b>로고가 없으면 아무 일도 하지 않는다</b> — 고객이 워터마크를 켜 두고 로고를
     ///   안 올렸을 수 있다. 그때 터지지 않고, 종이는 그냥 워터마크 없이 나간다(#20).
     ///   화면이 「로고를 먼저 올려 주십시오」를 말해 줘야 한다(갈래 D).
+    ///
+    /// 🔴🔴 [2026-10-26작2 §9-R 5] <b>돌려주는 것이 두 값이 됐다</b> — 겹과 <b>까닭</b>이다.
+    ///   종전에는 안 깔릴 때 <c>null</c> 하나였다. 그래서 고객은 「켰는데 왜 안 나오나」를
+    ///   알 길이 없었고(설치본 로그는 [1-V] §5-2 실측에서 <b>0건</b>이었다), 화면도 무슨
+    ///   말을 해야 할지 몰랐다. ⇒ <b>까닭을 같이 돌려준다.</b>
+    ///   🔴 까닭은 안 깔린 <b>네 자리</b>와 하나씩 맞는다 — 아래 네 <c>return</c> 이 그 자리다.
+    ///   🔴 <b>깔지 말지의 판정은 한 글자도 안 바꿨다</b> — 더한 것은 돌려주는 까닭뿐이다(#1).
     /// </remarks>
-    private async Task<WatermarkLayer?> BuildWatermarkLayerAsync(
+    private async Task<(WatermarkLayer? Layer, string Gate)> BuildWatermarkLayerAsync(
         string tenantId, string documentType,
         FormTemplateInfo? template, CompanyInfo company, CancellationToken ct)
     {
@@ -2427,13 +2486,16 @@ public sealed class PdfRenderService : IPdfRenderService
         //     **DB 를 읽지 않고** 끝낸다 — 전표 한 장마다 쓸데없는 조회를 안 한다.
         if (!ShouldLayWatermark(documentType, formSays, commonEnabled: false)
             && !ShouldLayWatermark(documentType, formSays, commonEnabled: true))
-            return null;
+            return (null, ResolveClosedGate(documentType));
 
         var common = await LoadPrintCommonAsync(tenantId, ct).ConfigureAwait(false);
-        if (!ShouldLayWatermark(documentType, formSays, common.WatermarkEnabled)) return null;
+        if (!ShouldLayWatermark(documentType, formSays, common.WatermarkEnabled))
+            return (null, ResolveClosedGate(documentType));
 
         var logo = TryLoadLogoImage(company.LogoUrl);
-        if (logo is null) return null;
+        // 🔴 재료가 없다 — 켜 두고 로고를 안 올렸거나, 올린 그림이 울타리 밖이다.
+        //   터지지 않고 종이는 나간다(#20). 사람 말은 화면이 한다(#23).
+        if (logo is null) return (null, PrintGateReasons.NoLogo);
 
         var opacity = template?.WatermarkOpacity ?? common.WatermarkOpacity;
         var saturate = template?.WatermarkSaturate ?? common.WatermarkSaturate;
@@ -2441,12 +2503,30 @@ public sealed class PdfRenderService : IPdfRenderService
             template?.WatermarkScalePct ?? common.WatermarkScalePct);
 
         var svg = TryBuildWatermarkSvg(logo, company.LogoUrl, opacity, saturate);
-        if (svg is null) return null;
+        // 🔴 재료는 있는데 **못 열었다** — 형식을 모르거나 글자를 못 만들었다.
+        if (svg is null) return (null, PrintGateReasons.ImageUnreadable);
 
         // 🔴 [P1-1 봉합] **여기서 열어 본다** — 그리는 자리에는 울타리가 없다.
         var image = TryDecodeWatermarkSvg(svg);
-        return image is null ? null : new WatermarkLayer(image, scalePct);
+        return image is null
+            ? (null, PrintGateReasons.ImageUnreadable)
+            : (new WatermarkLayer(image, scalePct), PrintGateReasons.Applied);
     }
+
+    /// <summary>
+    /// 🔴 <b>안 깔린 까닭이 「법정 서식」인가 「꺼짐」인가</b> — 20261026작2 §9-R 5.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜 갈라야 하나</b> — 고객이 할 수 있는 일이 정반대다. 「꺼짐」은 켜면 되고,
+    ///   「법정 서식」은 켜도 안 된다(결-K · 법무 물음 6건이 안 닫혔다). 한 값으로 뭉치면
+    ///   세금계산서 고객이 설정 화면을 뒤지다 못 찾는다.
+    /// 🔴 판정 기준은 <see cref="ShouldLayWatermark"/> 가 <c>false</c> 로 떨어지는 두 까닭과
+    ///   같다 — 종류가 세금계산서면 법정 서식, 그 밖은 켬/끔이다.
+    /// </remarks>
+    internal static string ResolveClosedGate(string documentType)
+        => string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal)
+            ? PrintGateReasons.LegalForm
+            : PrintGateReasons.Off;
 
     /// <summary>
     /// 🔴🔴 종이의 <b>배경 세 겹</b>을 조립한다 — 양식지 그림 · 주 겹 · 워터마크.
@@ -3420,4 +3500,59 @@ public sealed class PdfRenderService : IPdfRenderService
         /// <summary>칸 너비(mm). 오른쪽·가운데 정렬일 때 기준이 된다. 0 이면 30mm 로 본다.</summary>
         public float WidthMm { get; set; }
     }
+}
+
+/// <summary>
+/// 🔴🔴 <b>미리보기 관문 사유 — 값 계약</b> (20261026작2 §9-R 5 · 최소판 · 갈래 W-A 가 못박는다).
+/// </summary>
+/// <remarks>
+/// <b>무엇인가</b> — 「워터마크가 왜 안 깔렸나」를 <b>값 하나</b>로 돌려주는 계약이다.
+///   서버는 <b>값만</b> 돌려주고, 사람 말 한 줄은 화면(W-B·W-C)이 고른다.
+///
+/// 🔴 <b>왜 글자 상수인가</b> — 이 값은 응답 헤더를 타고 화면까지 간다(전선 위의 값).
+///   열거형은 전선 위에서 숫자가 되고, 숫자는 다음 사람이 뜻을 못 읽는다.
+/// 🔴 <b>이미 있는 글자를 고치지 마라</b> — 고치면 화면이 못 읽는다. <b>더하는 것만</b> 된다(#1).
+/// 🔴 <b>사람 말·개발 용어·파일 경로·예외 원문은 이 값에도 헤더에도 0건이다</b>(#23).
+///
+/// 🔴🔴 <b>브라우저가 헤더를 읽으려면 CORS 가 내보내 줘야 한다</b> — 2026-10-26 확인:
+///   <c>src/HitPan.API/Program.cs</c> 의 CORS 에 <c>WithExposedHeaders</c> 가 <b>0건</b>이다.
+///   그 파일은 갈래 W-C 의 것이라 <b>여기서 손대지 않았다.</b> 그 한 줄이 들어오기 전까지
+///   화면은 이 헤더를 <b>못 읽는다</b>(Web↔API 는 포트가 달라 늘 교차 출처다).
+///   ⇒ 개발명세서 「W-C 에 넘기는 것」에 적어 두었다.
+/// </remarks>
+public static class PrintGateReasons
+{
+    /// <summary>응답 헤더 이름 — 화면은 이 이름 하나만 본다.</summary>
+    public const string HeaderName = "X-HitPan-Print-Gate";
+
+    /// <summary>아직 그린 것이 없다(판정 전) — 화면은 <b>아무 말도 하지 않는다</b>.</summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>깔렸다 — 사유가 없다. 화면은 꼬리표를 띄우지 않는다.</summary>
+    public const string Applied = "applied";
+
+    /// <summary>
+    /// 🔴 사유① <b>법정 서식이라 깔지 않았다</b> — 세금계산서(결-K 2026-10-26).
+    /// 고객이 켜도 안 깔린다 ⇒ 화면은 「켜 주십시오」를 말해선 안 된다.
+    /// </summary>
+    public const string LegalForm = "legal-form";
+
+    /// <summary>
+    /// 🔴 사유② <b>꺼져 있다</b> — 이 양식이 껐거나, 양식이 안 정했고 공통도 꺼져 있다.
+    /// 고객이 켜면 된다 ⇒ 화면은 켜는 자리를 가리킨다.
+    /// </summary>
+    public const string Off = "off";
+
+    /// <summary>
+    /// 🔴 사유③ <b>재료가 없다</b> — 회사 로고를 못 읽었다(안 올렸거나 울타리 밖이다).
+    /// 🔴 켜기 <b>전에</b> 말해야 하는 자리다(설계 §4) ⇒ 화면은 <b>큰 경고</b>를 띄운다.
+    /// </summary>
+    public const string NoLogo = "no-logo";
+
+    /// <summary>
+    /// 🔴 사유④ <b>재료를 못 열었다</b> — 로고 바이트나 SVG 를 작성기가 받아들이지 않았다.
+    /// 고객이 할 일은 <b>다른 그림으로 바꾸기</b>다 ⇒ 화면은 그것만 말한다.
+    /// 🔴 예외 원문·형식 이름을 고객에게 그대로 보여 주지 마라(#23).
+    /// </summary>
+    public const string ImageUnreadable = "image-unreadable";
 }

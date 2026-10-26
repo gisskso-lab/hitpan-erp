@@ -466,6 +466,17 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(_ => true)
             .AllowAnyHeader()
             .AllowAnyMethod()
+            // 🔴🔴 [20261026작2 갈래 W-C] 인쇄 관문 사유 헤더를 **브라우저가 읽게** 내보낸다.
+            //   Web(5234)↔API(5257) 는 포트가 다르고 터널에서도 호스트가 달라 **늘 교차 출처**다.
+            //   CORS 가 내보내 주지 않으면 JS 는 응답에 붙어 온 이 헤더를 **못 본다**
+            //   ⇒ 미리보기 꼬리표가 영영 `unknown` 으로 남는다(W-A 가 값을 넣어도 화면에 안 닿는다).
+            // 🔴 왜 이 정책인가 — CORS 정책은 이 파일에 **이 하나뿐**이고
+            //   `app.UseCors("BlazorWasmDev")` 가 모든 경로에 그 하나를 쓴다(아래 UseCors 줄).
+            //   374~407 의 `AddPolicy` 는 **권한(Authorization) 정책**이라 CORS 와 무관하다.
+            // 🔴 이름은 W-A 가 못박은 `PrintGateReasons.HeaderName` 과 **글자가 같아야** 한다.
+            //   여기서 상수를 참조하지 않고 글자로 적은 까닭 — 기동 설정은 Application 층의
+            //   인쇄 구현에 의존하지 않는다(내보낼 헤더 이름은 전선 계약이다).
+            .WithExposedHeaders("X-HitPan-Print-Gate")
             // 정공법 CODE-01 (2026-05-14): SignalR WebSocket/LongPolling은 자격증명 필요 → AllowCredentials.
             .AllowCredentials();
     });

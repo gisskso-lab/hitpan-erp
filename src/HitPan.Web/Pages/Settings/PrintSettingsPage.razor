@@ -94,29 +94,58 @@
             따로 고르지 않은 양식은 <b>여기 값을 그대로</b> 씁니다.
         </MudText>
 
-        @if (string.IsNullOrWhiteSpace(_logoPath))
+        @* ══════════════════════════════════════════════════════════════
+           🔴🔴 [20261026작2 갈래 W-C] 로고 상태 안내를 **큰 경고**로 올린다.
+             종전 사고 — ① 「모른다(unknown)」가 **작은 흐린 글씨 한 줄**이라 아무도 못 봤고,
+             ② 켜 놓고 저장한 뒤 종이에서 처음 알아챘다(=이번 반려의 모양).
+             ⇒ 상태 **네 낱말 전부**에 갈래를 세우고, 쓸 수 없는 세 낱말은
+               **켜는 칸 바로 위에서 큰 경고**로 말한다. 쓸 수 있으면 **조용히** 있는다.
+             🔴 주 갈래는 `missing` 이다 — 이 PC 실측에서 로고 보관소가 **비어 있었다**.
+             🔴 고객 글에 경로·파일명·예외 원문·개발 용어 0건(#23) ·
+               「관리자에게 문의」로 떠넘기지 않고 **지금 할 수 있는 행동**을 적는다.
+           ══════════════════════════════════════════════════════════════ *@
+        @if (_imagesLoaded && LogoGate == "missing")
         {
             @* 🔴 로고가 없으면 워터마크는 켜도 아무 일이 안 일어난다 —
-                 「켰는데 안 보인다」를 겪게 하지 않고 **미리 말해 준다.** *@
-            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
-                위 「회사 로고」를 먼저 올려 주셔야 종이에 나옵니다.
+                 「켰는데 안 보인다」를 겪게 하지 않고 **켜기 전에** 말해 준다. *@
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
+                <MudText Typo="Typo.subtitle2">
+                    <b>회사 로고를 먼저 올려 주셔야 종이에 나옵니다.</b>
+                </MudText>
+                <MudText Typo="Typo.body2">
+                    지금은 올려 두신 회사 로고가 없어, 워터마크를 켜도 종이에는 아무것도 찍히지 않습니다.
+                    이 화면 맨 위 「회사 로고」에서 그림을 올리시면 바로 찍힙니다.
+                </MudText>
             </MudAlert>
         }
-        else if (_logoState == "unknown")
+        else if (_imagesLoaded && LogoGate == "unusable")
         {
-            @* 🔴 [재검증 V-4] 「모른다」도 말한다 — 삼키지 않는다. *@
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                로고가 인쇄에 쓸 수 있는 상태인지 지금 확인하지 못했습니다.
-            </MudText>
+            @* 🔴🔴 [2026-10-26 [4] 중 R-6] **등록돼 보이는데 안 쓰이는 길**이 있었다.
+                 화면은 「등록됨」으로 보이고 종이에는 안 나오며, 고객에게 가는 글자는 0 이었다.
+                 🔴 까닭(보관 자리·울타리)은 고객 말이 아니다 — **할 일만** 적는다. *@
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
+                <MudText Typo="Typo.subtitle2">
+                    <b>올려 두신 회사 로고를 지금 인쇄에 쓸 수 없습니다.</b>
+                </MudText>
+                <MudText Typo="Typo.body2">
+                    이대로 두시면 워터마크를 켜도 종이에 찍히지 않습니다.
+                    이 화면 맨 위 「회사 로고」에서 <b>다시 올려</b> 주시면 바로 찍힙니다.
+                </MudText>
+            </MudAlert>
         }
-        else if (_logoState == "unusable")
+        else if (_imagesLoaded && LogoGate == "unknown")
         {
-            @* 🔴🔴 [2026-10-26 [4] 중 R-6 봉합] **등록돼 보이는데 안 쓰이는 길**이 있었다 —
-                 예전부터 쓰던 로고 경로가 히트판 보관소 밖이면 작성기가 울타리에서 막는다.
-                 화면은 「등록됨」으로 보이고 종이에는 안 나오며, 고객에게 가는 글자는 0 이었다. *@
-            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
-                등록된 로고가 히트판이 보관하는 자리에 없어 인쇄에 쓰이지 않습니다.
-                위 「회사 로고」를 <b>다시 올려</b> 주십시오.
+            @* 🔴 [재검증 V-4] 「모른다」도 말한다 — 삼키지 않는다.
+                 🔴 다만 「없다」로 단정하지 않는다. 모르는 것은 모른다고 적고,
+                   고객이 먼저 해 볼 일(다시 열기) → 그래도 같으면 할 일(다시 올리기)을 준다. *@
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-3">
+                <MudText Typo="Typo.subtitle2">
+                    <b>회사 로고가 인쇄에 쓸 수 있는 상태인지 지금 확인하지 못했습니다.</b>
+                </MudText>
+                <MudText Typo="Typo.body2">
+                    이 화면을 닫고 다시 열어 주십시오.
+                    그래도 같으면 이 화면 맨 위 「회사 로고」에서 로고를 다시 올려 주시면 됩니다.
+                </MudText>
             </MudAlert>
         }
 
@@ -348,12 +377,56 @@
             _logoState = state is not null && state.TryGetValue("logo", out var logoState)
                 ? logoState
                 : "unknown";
+
+            // 🔴 [20261026작2 W-C] **두 왕복이 다 끝난 뒤에만** 「읽었다」고 적는다 —
+            //   앞의 회사 정보만 읽고 상태를 못 읽었으면 우리는 아직 모르는 것이다.
+            _imagesReadOk = true;
         }
         catch (Exception ex)
         {
             // 🔴 빈 catch 금지(#15). 못 읽어도 화면은 열린다 — 다만 사실을 모른다고 말한다.
             Console.Error.WriteLine($"[PrintSettings] 회사 그림 상태를 못 읽었다: {ex.Message}");
             Snackbar.Add("지금 등록된 직인·로고를 불러오지 못했습니다. 화면을 다시 열어 주십시오.", Severity.Warning);
+            // 🔴 [W-C] 못 읽었으면 **「없다」가 아니라 「모른다」**다 — 화면이 단정하지 않게.
+            _imagesReadOk = false;
+        }
+        finally
+        {
+            // 🔴 [W-C] 읽기를 **시도해 보기 전에는** 아무 경고도 띄우지 않는다 —
+            //   첫 그림(await 전 렌더)에서 「모른다」 경고가 번쩍이면 그것도 거짓이다.
+            _imagesLoaded = true;
+        }
+    }
+
+    /// <summary>읽기를 한 번이라도 <b>마쳤나</b> (성공·실패 모두). 그 전에는 화면이 아무 말도 하지 않는다.</summary>
+    private bool _imagesLoaded;
+
+    /// <summary>직인·로고 상태 읽기가 <b>성공했나</b>. 실패면 상태는 <c>unknown</c> 으로 본다.</summary>
+    private bool _imagesReadOk;
+
+    /// <summary>
+    /// 로고가 인쇄에 쓰일 수 있나를 <b>낱말 하나</b>로 모은다 —
+    /// <c>present</c> · <c>missing</c> · <c>unusable</c> · <c>unknown</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [20261026작2 W-C] 종전 화면은 <c>_logoPath</c> 가 비었나부터 보고 <c>unknown</c> 을
+    ///   뒤로 밀어, <b>둘 다 못 읽은 때</b>에도 「안 올리셨습니다」로 단정했다(모르는 것을 단정).
+    ///   ⇒ 읽기에 실패했으면 <b>무조건</b> <c>unknown</c>, 읽었는데 칸이 비었으면 <c>missing</c>,
+    ///     그 밖에는 서버 낱말을 그대로 쓰고, 모르는 낱말이 와도 <c>unknown</c> 으로 떨어뜨린다.
+    /// </remarks>
+    private string LogoGate
+    {
+        get
+        {
+            if (!_imagesReadOk) return "unknown";
+            if (string.IsNullOrWhiteSpace(_logoPath)) return "missing";
+            return _logoState switch
+            {
+                "present" => "present",
+                "missing" => "missing",
+                "unusable" => "unusable",
+                _ => "unknown",
+            };
         }
     }
 

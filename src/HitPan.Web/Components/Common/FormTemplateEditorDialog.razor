@@ -5,6 +5,9 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@* 🔴 [20261026작2 W-B · D-2] 저장 안 한 그림이 있는 채로 닫으려 하면 **되묻는다**.
+     스낵바는 지나가 버리므로 「닫으면 전표에 안 나온다」를 멈춰 세워 말할 자리가 필요하다. *@
+@inject IDialogService Dialogs
 
 <MudDialog>
     <DialogContent>
@@ -193,28 +196,46 @@
 
                     @* 🔴 [[4] 중 R-6 봉합] 「켰는데 안 보인다」의 까닭을 **고객에게 말한다.**
                          종전에는 일곱 갈래 전부가 서버 로그 한 줄로 끝나고 화면은 평소처럼 나왔다. *@
+                    @* 🔴🔴 [20261026작2 W-B · 결재 4] **작은 캡션이 아니라 큰 경고**다.
+                         [무엇이 문제였나] 같은 뜻을 이미 말하고 있었는데 `Dense` 한 줄 알림이라
+                           사장님이 **못 보셨다**(10/26 반려). 글자가 있는 것과 보이는 것은 다르다.
+                         ⇒ 채운 색 + 제목 한 줄 + 보통 크기 본문으로 키운다. 문구 뜻은 그대로다(#1). *@
                     @if (_wmMode != WmModeOff && _logoState == LogoState.Missing)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                            아직 회사 로고가 등록돼 있지 않아 지금은 아무것도 깔리지 않습니다.
-                            설정 → 회사 정보에서 로고를 먼저 올려 주십시오.
+                        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-2">
+                            <MudText Typo="Typo.subtitle1"><b>회사 로고가 등록돼 있지 않습니다</b></MudText>
+                            <MudText Typo="Typo.body2">
+                                지금 이대로 켜 두셔도 종이에는 아무것도 깔리지 않습니다.
+                                설정 → 회사 정보에서 로고를 먼저 올려 주십시오.
+                            </MudText>
                         </MudAlert>
                     }
                     @if (_wmMode != WmModeOff && _logoState == LogoState.Outside)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
-                            등록된 로고가 히트판이 보관하는 자리에 없어 인쇄에 쓰이지 않습니다.
-                            설정 → 회사 정보에서 로고를 <b>다시 올려</b> 주십시오.
+                        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mt-2">
+                            <MudText Typo="Typo.subtitle1"><b>등록된 로고를 인쇄에 쓸 수 없습니다</b></MudText>
+                            <MudText Typo="Typo.body2">
+                                로고가 히트판이 보관하는 자리에 없어 종이에 깔리지 않습니다.
+                                설정 → 회사 정보에서 로고를 <b>다시 올려</b> 주십시오.
+                            </MudText>
                         </MudAlert>
                     }
                     @* 🔴🔴 [2026-10-26 재검증 V-4 봉합] 「모른다」를 **삼키지 않는다.**
                          서버가 상태를 재지 못하면 `unknown` 이 온다. 종전에는 그 낱말을
                          말없이 넘겨 고객이 아무 말도 못 들었다 — 모르는 것은 모른다고 말한다. *@
+                    @* 🔴🔴 [20261026작2 W-B · 결재 4] 「모름」도 **큰 경고**로 올린다 —
+                         사장님 지시: 로고 상태를 못 쟀을 때도 작은 글씨로 넘기지 않는다.
+                         ⚠️ 상태를 묻는 **문의 권한 축은 W-C 소관**이다. 여기서는 이미 받아 둔
+                           `_logoState` 값만 쓰고, 값이 `unknown` 이면 모른다고 크게 말한다. *@
                     @if (_wmMode != WmModeOff && _logoState == LogoState.Unknown)
                     {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            로고가 등록돼 있는지 지금 확인하지 못했습니다. 설정 → 회사 정보에서 확인해 주십시오.
-                        </MudText>
+                        <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-2">
+                            <MudText Typo="Typo.subtitle1"><b>로고가 등록돼 있는지 확인하지 못했습니다</b></MudText>
+                            <MudText Typo="Typo.body2">
+                                로고가 없으면 켜 두셔도 종이에는 아무것도 깔리지 않습니다.
+                                설정 → 회사 정보에서 로고를 확인해 주십시오.
+                            </MudText>
+                        </MudAlert>
                     }
                     @* 🔴 [[4] 경 R-8 봉합] 양식용지 + 워터마크 = 사다 쓰는 종이 위에 로고가 겹친다.
                          「양식지 그림을 종이에도 인쇄」에는 이 안내가 있었는데 워터마크에는 없었다. *@
@@ -333,6 +354,19 @@
                 {
                     <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
                 }
+                @* 🔴🔴 [20261026작2 W-B · 결재 D-2] 「올렸습니다」가 거짓이 되지 않게 —
+                     올리기는 **파일만 받는** 것이고 양식에 적히는 것은 「저장」을 누를 때다.
+                     스낵바 한 줄은 지나가 버리므로 **화면에 남는 꼬리표**로 한 번 더 말한다.
+                     🔴 즉시 양식 행에 적는 길(D-1)은 열지 않는다 — 「취소」가 취소가 아니게 된다. *@
+                @if (_bgUnsaved)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-1">
+                        <MudText Typo="Typo.subtitle1"><b>아직 양식에 반영되지 않았습니다</b></MudText>
+                        <MudText Typo="Typo.body2">
+                            그림을 받았습니다. 「저장」을 누르셔야 전표에 나옵니다.
+                        </MudText>
+                    </MudAlert>
+                }
 
                 @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
                 {
@@ -373,6 +407,55 @@
                                 <text>지금은 아래 미리보기에만 보이고 <b>종이에는 찍히지 않습니다.</b></text>
                             }
                         </MudText>
+                        @* 🔴🔴 [20261026작2 W-B · 결재 B-3] 제안값은 **화면이** 민다.
+                             🔴 DB 기본값(0)과 **이미 저장된 고객 행은 한 줄도 안 바꾼다**(#1·#37) —
+                               아직 저장 안 한 **새 양식**에서만, 그것도 **한 번만** 제안한다.
+                             🔴 반자동 원칙 — 제안했다는 사실을 숨기지 않고, 고객이 끄면 다시 안 민다. *@
+                        @* 🔴🔴 [20261026작2 W-B · PM 판정] `preprint` + 고객이 **직접 켠** 「종이에도
+                             인쇄」는 **막지 않는다**(좁히면 작1 결-D·#1 을 깬다 · 종전 동작 유지).
+                             ⇒ 막는 대신 **켜는 자리에서 겹침 위험을 말한다.**
+                             🔴 바로 아래 캡션이 이미 같은 뜻을 말하고 있었지만 **작은 글씨**였다 —
+                               10/26 반려가 「작은 글씨는 안 보인다」였으므로 **눈에 들어오게** 올린다.
+                               캡션은 지우지 않는다(#1). *@
+                        @if (_form.PrintBackground && _form.PaperMode == "preprint")
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-1">
+                                <MudText Typo="Typo.subtitle1"><b>겹쳐 보일 수 있습니다</b></MudText>
+                                <MudText Typo="Typo.body2">
+                                    이미 양식이 인쇄된 용지에 이 그림을 한 번 더 찍으면 두 겹으로 겹쳐 보일 수 있습니다.
+                                    그래도 켜 두실 수 있습니다 — 보통은 꺼 두십니다.
+                                </MudText>
+                            </MudAlert>
+                        }
+                        @if (_printBgSuggested)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Info">
+                                빈 종이에 그림을 올리셨기에 히트판이 <b>켜 두기를 제안</b>했습니다 — 끄실 수 있습니다.
+                            </MudText>
+                        }
+                        @* 🔴🔴 [20261026작2 W-B · 결재 A-1] 빈 A4 에서도 **칸 위치를 쓸 수 있게** 풀렸다.
+                             🔴 칸 위치를 적으면 **히트판 기본 표는 함께 나오지 않는다** —
+                               서버가 좌표가 있으면 좌표 칸만 찍는다(`PdfRenderService.cs:236`↔`:238` 갈래).
+                               ⇒ 일부만 적으면 나머지 값이 종이에서 사라지므로 **먼저** 말해 준다.
+                             ⚠️ 이 안내가 참이 되는 조건 = 서버가 빈 A4 에서도 좌표를 읽는 것(W-A `:97`).
+                               합류 때 그 한 줄을 PM 이 확인한다 — 개발명세서에 적어 두었다. *@
+                        @if (_plainCoordsOpen)
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Filled" Class="mt-2">
+                                <MudText Typo="Typo.subtitle1"><b>칸 위치를 한 번 맞춰 주셔야 합니다</b></MudText>
+                                <MudText Typo="Typo.body2">
+                                    값이 그림 위 제자리에 찍히게 하려면 아래 <b>「양식용지 위치 맞추기」</b>에서
+                                    칸 위치를 적어 주십시오. 칸 위치를 적으시면 히트판 기본 표는 함께 나오지 않으니,
+                                    종이에 나와야 하는 칸은 <b>빠뜨리지 말고</b> 적어 주십시오.
+                                </MudText>
+                                @if (_coords.Count == 0)
+                                {
+                                    <MudText Typo="Typo.body2">
+                                        <b>지금은 적어 두신 칸이 없습니다</b> — 이대로 저장하시면 히트판 기본 배치로 인쇄됩니다.
+                                    </MudText>
+                                }
+                            </MudAlert>
+                        }
                     }
                 }
             </MudItem>
@@ -391,6 +474,16 @@
                 <MudItem xs="12">
                     <MudTextField T="string" @bind-Value="_form.BackgroundImageUrl" Label="배경 이미지 경로 (올리면 자동으로 채워집니다)" Margin="Margin.Dense" />
                 </MudItem>
+            }
+            @* 🔴🔴 [20261026작2 W-B · 결재 A-1] **위치 맞추기 표가 빈 A4 에도 열린다.**
+                 [무엇이 바뀌었나] 10/25(작3)까지 이 표는 `preprint` 에서만 보였다. 그때는 빈 A4 에서
+                   좌표를 적어도 서버가 읽지 않았으니 **죽은 칸 10개**였다([1-V] ⑺) — 그래서 가려 뒀다.
+                 🔴 사장님 결재 A-1 로 서버가 빈 A4 에서도 좌표를 읽는다(W-A) ⇒ 이제 죽은 칸이 아니다.
+                 🔴 그래도 **그림을 올린 고객에게만** 연다 — 그림도 없이 표가 열리면 자로 잴 종이가
+                   없는 고객에게 칸 10개가 또 죽는다. 「주소 칸」은 여전히 양식용지 쪽에만 둔다(#1).
+                 🔴 `preprint` 갈래는 **글자 하나 안 바뀐다** — 조건에 `||` 로 더하기만 했다(#1). *@
+            @if (_form.PaperMode == "preprint" || _plainCoordsOpen)
+            {
                 @* 🔴 종전에는 이 자리가 JSON 입력칸이었다 (사장님 지시 2026-08-12 정리).
                      현장 직원이 대괄호·따옴표를 손으로 적어야 했고, 한 글자만 틀려도
                      좌표가 통째로 무시됐다 — 그런데 오류도 안 났다.
@@ -402,6 +495,16 @@
                         양식용지 <b>왼쪽 위 모서리</b>에서 자로 재어 적으세요. 단위는 mm 입니다.
                         비워 두면 히트판 기본 배치로 인쇄합니다.
                     </MudText>
+                    @* 🔴 [20261026작2 W-B · A-1] 빈 A4 고객은 손에 양식용지가 없다 —
+                         기준을 **인쇄될 종이**로 말해 준다. 올린 그림은 종이에 맞춰 깔린다
+                         (서버가 한 장 전체에 맞춰 그린다 · `PdfRenderService.cs:2479` FitArea). *@
+                    @if (_plainCoordsOpen)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            빈 A4 를 쓰시는 경우에는 <b>인쇄될 종이의 왼쪽 위 모서리</b>를 기준으로 적으십시오.
+                            올리신 그림은 종이 한 장에 맞춰 깔립니다.
+                        </MudText>
+                    }
                 </MudItem>
 
                 @foreach (var c in _coords)
@@ -463,10 +566,23 @@
             <MudDivider Class="my-3" />
             <div class="d-flex align-center mb-2" style="gap:8px;">
                 <MudText Typo="Typo.subtitle2">미리보기 — 예시 자료입니다 (실제 거래 내용이 아닙니다)</MudText>
+                @* 🔴 [20261026작2 W-B · D-2] 미리보기에 **「저장 안 됨」 꼬리표** —
+                     미리보기에 그림이 보이는 것과 전표에 나오는 것은 다르다. 그 차이를 이름으로 부른다. *@
+                @if (_bgUnsaved)
+                {
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled">저장 안 됨</MudChip>
+                }
                 <MudSpacer />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                Title="미리보기 닫기" OnClick="ClosePreviewAsync" />
             </div>
+            @* 🔴🔴 [20261026작2 W-B · 결재 5 최소판] 미리보기가 **왜 안 깔렸나** 한 줄.
+                 서버가 머리글로 보낸 낱말(W-A 계약)을 **고객 말**로 바꿔 종이 바로 위에 올린다.
+                 🔴 「조용히 실패」를 고객 눈에 한 줄로 올리는 것이 이 묶음의 전부다 —
+                   값을 **못 읽은 경우**(머리글 노출 설정 전)도 같은 자리에서 말한다. *@
+            <MudAlert Severity="@GateSeverity" Variant="Variant.Filled" Dense="true" Class="mb-2">
+                @GateMessage
+            </MudAlert>
             <iframe src="@_previewUrl" style="width:100%;height:560px;border:1px solid #ddd;"
                     title="양식 미리보기"></iframe>
         }
@@ -478,7 +594,8 @@
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility"
                    Disabled="_previewBusy" OnClick="PreviewAsync">@(_previewBusy ? "그리는 중…" : "미리보기")</MudButton>
         <MudSpacer />
-        <MudButton OnClick="Cancel">취소</MudButton>
+        @* 🔴 [20261026작2 W-B · D-2] 저장 안 한 그림이 있으면 **되묻는다**(§5-2 합격선 4). *@
+        <MudButton OnClick="CancelAsync">취소</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
     </DialogActions>
 </MudDialog>
@@ -933,6 +1050,38 @@
     private bool _bgBusy;
     private string? _bgFileName;
 
+    // ── 🔴🔴 [20261026작2 W-B] 결재 D-2 · B-3 · A-1 ────────────────────
+    //
+    // 🔴 D-2 — 「올렸습니다」가 거짓이 되지 않게. 올리기는 **파일만 받는 것**이고
+    //   양식 행에 적히는 것은 「저장」을 누를 때다. 그 사이 상태를 **이름으로 부른다.**
+    //   (즉시 행에 적는 길 D-1 은 열지 않는다 — 「취소」가 취소가 아니게 된다.)
+
+    /// <summary>올렸지만 아직 저장하지 않은 그림이 있나 — 꼬리표·닫기 되묻기의 근거.</summary>
+    private bool _bgUnsaved;
+
+    /// <summary>
+    /// 🔴 B-3 — 「종이에도 함께 인쇄하기」를 <b>제안값으로</b> 켠 적이 있나.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>DB 기본값·이미 저장된 고객 행은 건드리지 않는다</b>(#1·#37 · PM 결재 조건 2).
+    ///   제안은 ⒜ 아직 저장 안 한 <b>새 양식</b>에서 ⒝ <b>한 번만</b> 민다.
+    ///   고객이 끄면 이 값이 이미 <c>true</c> 라 <b>다시 밀지 않는다</b> — 고객 뜻이 이긴다.
+    /// 🔴 <c>preprint</c>(양식용지를 사다 쓰는 고객)에는 <b>제안하지 않는다</b> — 이중 인쇄가 된다.
+    /// </remarks>
+    private bool _printBgSuggested;
+
+    /// <summary>
+    /// 🔴 A-1 — 빈 A4 에서 <b>칸 위치 맞추기</b>를 열 자리인가.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 그림을 올린 고객에게만 연다 — 그림이 없으면 자로 잴 종이가 없어 칸 10개가 죽는다.
+    /// 🔴 세금계산서(빈 A4)는 전용 작성기로 가서 그림·좌표가 안 쓰이므로 열지 않는다.
+    /// </remarks>
+    private bool _plainCoordsOpen
+        => _form.PaperMode != "preprint"
+        && !string.IsNullOrWhiteSpace(_form.BackgroundImageUrl)
+        && !IsLegalOnlyComposer;
+
     /// <summary>
     /// 🔴 [20261025작3 절 가-1] 「빈 A4 용지」에서 <b>양식용지로 바꿔 주는 한 단추</b>.
     /// </summary>
@@ -997,7 +1146,28 @@
 
             _form.BackgroundImageUrl = saved.StoredPath;
             _bgFileName = file.Name;
-            Snackbar.Add("양식용지 그림을 올렸습니다. 아래 미리보기로 확인하십시오.", Severity.Success);
+            // 🔴🔴 [20261026작2 W-B · 결재 D-2] 종전 문구는 「올렸습니다」로 끝났다.
+            //   고객은 그것을 「양식에 들어갔다」로 읽고 창을 닫았고, 전표에는 아무것도 없었다.
+            //   ⇒ 같은 창 `SwitchToPreprint`(아래)가 이미 쓰는 **규율 그대로** 말한다.
+            _bgUnsaved = true;
+            Snackbar.Add("그림을 받았습니다. 아직 양식에 반영되지 않았습니다 — "
+                       + "「저장」을 누르셔야 전표에 나옵니다.", Severity.Info);
+
+            // 🔴🔴 [20261026작2 W-B · 결재 B-3] 제안값은 **화면이** 민다 — DB 는 안 건드린다.
+            //   빈 A4 + 그림을 올린 고객은 그 그림이 **종이에 찍혀야** 양식이 완성된다.
+            //   🔴 새 양식(저장 전)에서만 · 한 번만 · 켜 두기를 **제안**하고 고객이 확정한다.
+            //   🔴 `preprint` 고객에게는 밀지 않는다(이중 인쇄) · 이미 저장된 양식도 안 건드린다.
+            if (string.IsNullOrEmpty(_form.TemplateId)
+                && _form.PaperMode != "preprint"
+                && !IsLegalOnlyComposer
+                && !_printBgSuggested
+                && !_form.PrintBackground)
+            {
+                _form.PrintBackground = true;
+                _printBgSuggested = true;
+                Snackbar.Add("빈 종이에 쓰시는 양식이라 「이 그림을 종이에도 함께 인쇄하기」를 "
+                           + "켜 두기로 제안했습니다. 원하지 않으시면 끄시면 됩니다.", Severity.Info);
+            }
         }
         catch (Exception ex)
         {
@@ -1039,11 +1209,15 @@
 
             _form.BackgroundImageUrl = null;
             _bgFileName = null;
+            // 🔴 [20261026작2 W-B · D-2] 올려 둔 그림을 뺐으니 **기다리는 그림이 없다** —
+            //   꼬리표도 닫기 되묻기도 함께 내린다(없는 것을 있다고 말하지 않는다).
+            _bgUnsaved = false;
         }
         catch (Exception ex)
         {
             _form.BackgroundImageUrl = null;
             _bgFileName = null;
+            _bgUnsaved = false;
             Console.Error.WriteLine($"[FormBackground] {ex.Message}");
         }
         finally
@@ -1175,6 +1349,12 @@
                 return;
             }
 
+            // 🔴🔴 [20261026작2 W-B · 결재 5 최소판] **관문 사유 한 줄** — W-A 계약 확정분.
+            //   서버가 응답 머리글 `X-HitPan-Print-Gate` 로 **낱말 하나**만 보낸다.
+            //   🔴 경로·파일명·예외 원문은 서버가 **안 준다** — 고객 문구는 화면이 만든다(#23).
+            //   ⚠️ 머리글을 브라우저가 읽으려면 노출 설정이 필요하다(W-C) — 그 줄이 들어가기
+            //     전에는 값이 **안 읽힌다** ⇒ 그때는 `unknown` 과 같은 길로 떨어진다.
+            _printGate = ReadPrintGate(resp);
             var bytes = await resp.Content.ReadAsByteArrayAsync();
             var url = await JS.InvokeAsync<string>("hitpanMakeBlobUrl",
                 "application/pdf", Convert.ToBase64String(bytes));
@@ -1196,12 +1376,84 @@
         }
     }
 
+    // ── 🔴🔴 [20261026작2 W-B · 결재 5 최소판] 관문 사유 한 줄 (W-A 계약 확정) ──
+    //
+    // 🔴 **무엇이 사고였나** — 미리보기가 조용히 「안 깔린 종이」를 돌려줬다. 까닭은 서버
+    //   로그 한 줄로 끝났고(실물 기계에서 흔적 0건) 고객 화면은 평소처럼 나왔다.
+    //   ⇒ 서버가 보내는 **낱말 하나**를 받아 **고객 말 한 줄**로 올린다.
+    // 🔴 낱말은 **서버가 정한 것만** 쓴다 — 내가 지어내지 않는다(W-A 계약).
+
+    private const string GateHeaderName = "X-HitPan-Print-Gate";
+    private const string GateApplied = "applied";
+    private const string GateNoLogo = "no-logo";
+    private const string GateOff = "off";
+    private const string GateLegalForm = "legal-form";
+    private const string GateImageUnreadable = "image-unreadable";
+    private const string GateUnknown = "unknown";
+
+    /// <summary>이번 미리보기에서 서버가 돌려준 관문 사유 — 못 받았으면 <c>null</c>.</summary>
+    private string? _printGate;
+
+    /// <summary>
+    /// 응답 머리글에서 관문 사유 낱말을 꺼낸다. 🔴 못 꺼내면 <c>null</c> — 억지로 만들지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 머리글 노출 설정(W-C)이 들어가기 전에는 브라우저가 이 머리글을 **못 읽는다** ⇒ <c>null</c>.
+    ///   그때 화면은 <see cref="GateUnknown"/> 과 **같은 말**을 한다 — 모르는 것은 모른다고 말하되,
+    ///   고객이 **할 수 있는 행동**까지 적어 준다.
+    /// </remarks>
+    private static string? ReadPrintGate(HttpResponseMessage resp)
+    {
+        if (resp.Headers.TryGetValues(GateHeaderName, out var values))
+        {
+            var v = values.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+        }
+        // 🔴 본문(Content) 쪽 머리글에 실려 오는 경우도 있다 — 둘 다 본다.
+        if (resp.Content.Headers.TryGetValues(GateHeaderName, out var cv))
+        {
+            var v = cv.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+        }
+        return null;
+    }
+
+    /// <summary>관문 사유 ⇒ 고객이 읽는 한 줄. 🔴 경로·파일명·개발 용어를 쓰지 않는다(#23).</summary>
+    private string GateMessage => _printGate switch
+    {
+        GateApplied => "올리신 양식 그림과 로고가 이 종이에 깔렸습니다.",
+        GateNoLogo => "회사 로고가 없어 가운데 로고는 깔리지 않았습니다. "
+                    + "설정 → 회사 정보에서 로고를 올리신 뒤 미리보기를 다시 눌러 주십시오.",
+        GateOff => "이 양식은 가운데 로고 깔기가 꺼져 있어 깔리지 않았습니다. "
+                 + "위에서 켜시면 이 종이에 나옵니다.",
+        GateLegalForm => "세금계산서는 법으로 모양이 정해져 있어 가운데에 로고를 깔지 않습니다.",
+        GateImageUnreadable => "올리신 그림을 열지 못해 종이에 깔리지 않았습니다. "
+                             + "그림을 다시 올려 주시거나 다른 그림으로 바꿔 주십시오.",
+        // 🔴 「확인할 수 없습니다」로 끝내지 않는다 — 고객이 할 수 있는 행동을 적는다.
+        _ => "이 종이에 양식 그림과 로고가 깔렸는지 히트판이 확인하지 못했습니다. "
+           + "미리보기 종이를 눈으로 확인해 주시고, 보이지 않으면 설정 → 회사 정보에서 "
+           + "로고가 올라가 있는지 확인해 주십시오."
+    };
+
+    /// <summary>사유에 맞는 알림 세기 — 재료가 없거나 모르면 경고, 고객이 고른 결과면 안내.</summary>
+    private Severity GateSeverity => _printGate switch
+    {
+        GateApplied => Severity.Success,
+        GateOff => Severity.Info,
+        GateLegalForm => Severity.Info,
+        GateNoLogo => Severity.Warning,
+        GateImageUnreadable => Severity.Warning,
+        _ => Severity.Warning
+    };
+
     /// <summary>blob 주소를 거둔다 — 안 거두면 미리보기를 누를수록 쌓인다.</summary>
     private async Task ClosePreviewAsync()
     {
         if (_previewUrl is null) return;
         var old = _previewUrl;
         _previewUrl = null;
+        // 🔴 종이를 거두면 그 종이의 사유도 거둔다 — 지난 종이의 말을 남겨 두지 않는다.
+        _printGate = null;
         try { await JS.InvokeVoidAsync("hitpanRevokeBlobUrl", old); }
         catch (Exception ex) { Console.Error.WriteLine($"[FormPreview] 주소 거두기 실패: {ex.Message}"); }
     }
@@ -1235,6 +1487,8 @@
 
             if (resp.IsSuccessStatusCode)
             {
+                // 🔴 [20261026작2 W-B · D-2] 이제 **참으로** 양식에 들어갔다 — 꼬리표를 내린다.
+                _bgUnsaved = false;
                 Snackbar.Add("저장되었습니다.", Severity.Success);
                 MudDialog.Close(DialogResult.Ok(true));
             }
@@ -1255,4 +1509,34 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>
+    /// 🔴🔴 [20261026작2 W-B · 결재 D-2] 올려 두고 <b>저장 안 한 그림</b>이 있으면 <b>되묻는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [무엇이 사고였나] 올리기는 「올렸습니다」로 끝났고 고객은 창을 닫았다. 양식 행에는
+    ///   아무것도 안 적혔고 전표는 종전과 같았다 — <b>화면이 한 말과 서버가 한 일이 달랐다.</b>
+    /// 🔴 <b>닫는 길을 막지 않는다</b> — 되묻고, 고객이 「닫기」를 고르면 그대로 닫는다.
+    ///   (올려 둔 그림 파일은 보관소에 남는다 · 청소는 별건 등재 · 설계 §8.)
+    /// 🔴 즉시 양식 행에 적는 길(D-1)은 <b>열지 않는다</b> — 「취소」가 취소가 아니게 된다.
+    /// </remarks>
+    private async Task CancelAsync()
+    {
+        if (!_bgUnsaved)
+        {
+            Cancel();
+            return;
+        }
+
+        var go = await Dialogs.ShowMessageBoxAsync(
+            "저장하지 않고 닫습니다",
+            "올리신 양식용지 그림이 아직 양식에 반영되지 않았습니다.\n"
+            + "지금 닫으면 전표에 나오지 않습니다.\n\n"
+            + "반영하시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오.",
+            yesText: "그래도 닫기",
+            cancelText: "계속 편집");
+        if (go != true) return;
+
+        Cancel();
+    }
 }

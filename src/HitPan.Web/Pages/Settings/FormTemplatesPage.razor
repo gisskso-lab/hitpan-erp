@@ -61,6 +61,23 @@ else
                 {
                     <MudChip T="string" Color="Color.Default" Size="Size.Small">빈 A4</MudChip>
                 }
+                @* 🔴🔴 [20261026작2 W-B · 결재 B-3] 제안값은 **새 양식에서만** 민다 ⇒
+                     🔴 **이미 저장해 둔 양식의 값은 한 줄도 안 바꾼다**(#1·#37 · 마이그 소급 없음).
+                     그러면 그림을 올려 두고 「종이에도 찍기」가 꺼진 양식이 남는다 —
+                     고객은 그것을 **「양식을 올렸는데 전표에 안 나온다」**로 겪는다.
+                     ⇒ 목록에서 **상태로 보여 준다.** 고치는 길은 양식을 열어 켜고 저장하는 것뿐이다.
+                     🔴 빈 A4 에서만 말한다 — 양식용지 고객은 꺼 두는 것이 **정상**이다(이중 인쇄). *@
+                @if (context.PaperMode != "preprint"
+                     && !string.IsNullOrWhiteSpace(context.BackgroundImageUrl)
+                     && !context.PrintBackground)
+                {
+                    <MudChip T="string" Color="Color.Error" Size="Size.Small" Variant="Variant.Filled">
+                        올린 그림이 종이에 안 찍힘
+                    </MudChip>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        [수정] 에서 「이 그림을 종이에도 함께 인쇄하기」를 켜고 저장하시면 나옵니다.
+                    </MudText>
+                }
             </MudTd>
             <MudTd>
                 @* 법정 2매(세금계산서·계산서)는 눈에 띄어야 한다 — 1장으로 바뀌면 위법이다. *@
