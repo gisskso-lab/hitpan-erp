@@ -1245,6 +1245,15 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         _ when type == typeof(decimal?) => (decimal?)((current as decimal?) ?? 0m) + 7.5m,
         _ when type == typeof(int?) => (int?)(((current as int?) ?? 0) + 7),
 
+        // 🔴🔴 [2026-10-26 [4] 반려 R-2 봉합] 켬/끔 칸이 **세 값**이 되며 이 자가 또 몰랐다.
+        //   🔴 **그리고 이 자는 설계한 대로 동작했다** — `ShowWatermark:Nullable`1` 을 만나
+        //     *"DifferentFrom 에 그 형을 더하고 이 목록을 갱신하라"* 로 **스스로 빨개졌다.**
+        //     건너뛰지 않는 자가 봉합의 구멍을 잡아 준 것이다(같은 날 두 번째).
+        //   🔴 여기서도 **null 을 넣지 않는다** — null 은 「공통을 따른다」는 뜻이라
+        //     배선이 빠져도 null 끼리 같아 보여 거짓 초록이 된다.
+        //     `true`/`false` 를 뒤집어 넣어 **값이 끝까지 가는지**를 본다.
+        _ when type == typeof(bool?) => (bool?)!((current as bool?) ?? false),
+
         _ => null,
     };
 

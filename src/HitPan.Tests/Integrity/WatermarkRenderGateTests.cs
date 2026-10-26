@@ -731,10 +731,23 @@ public sealed class WatermarkRenderGateTests
         }).First();
     }
 
+    /// <summary>
+    /// 레포 뿌리를 찾는다 — 🔴 <b>격리 worktree 에서도</b> 찾아야 한다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴🔴 [2026-10-26 대조실험 중 발견] 종전에는 <c>Directory.Exists(".git")</c> 만 봤다.
+    ///   <b>격리 worktree 에서는 <c>.git</c> 이 폴더가 아니라 파일</b>이다(안에 gitdir 경로가 적혀 있다)
+    ///   ⇒ 뿌리를 못 찾아 이 파일의 게이트가 <b>코드와 무관하게 빨개졌다.</b>
+    ///   봉합 전 나무를 worktree 로 떠서 대조실험을 하다가 G-W14·G-W15 가 빨개져 드러났다.
+    ///   🔴 이 레포는 <b>갈래 작업을 worktree 로</b> 한다(10/15 교훈) — 거짓 빨강은 그날의
+    ///   판단을 흐린다. 폴더든 파일이든 <c>.git</c> 이 있으면 뿌리다.
+    /// </remarks>
     private static string RepoRoot()
     {
         var dir = AppContext.BaseDirectory;
-        while (dir is not null && !Directory.Exists(Path.Combine(dir, ".git")))
+        while (dir is not null
+               && !Directory.Exists(Path.Combine(dir, ".git"))
+               && !File.Exists(Path.Combine(dir, ".git")))
         {
             dir = Directory.GetParent(dir)?.FullName;
         }
