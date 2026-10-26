@@ -2699,7 +2699,16 @@ public sealed class PdfRenderService : IPdfRenderService
             PaperSize = dto.PaperSize,
             Orientation = dto.Orientation,
             ShowCompanySeal = dto.ShowCompanySeal,
-            StyleKey = dto.StyleKey
+            StyleKey = dto.StyleKey,
+            // 🔴 20261026작1 §A-3 (DB-148) — 이 다섯 줄이 없으면 고객이 양식정보설정에서
+            //   켜도 **종이만 안 바뀌는** 칸이 또 생긴다. 10/24·10/25 와 같은 사고다.
+            //   🔴 수치 셋은 **null 을 그대로** 들고 간다 — 여기서 기본값을 채우면
+            //   「공통값을 따른다」가 사라지고 그 양식은 공통 설정을 영영 안 따라온다.
+            PrintBackground = dto.PrintBackground,
+            ShowWatermark = dto.ShowWatermark,
+            WatermarkOpacity = dto.WatermarkOpacity,
+            WatermarkSaturate = dto.WatermarkSaturate,
+            WatermarkScalePct = dto.WatermarkScalePct
         };
     }
 
@@ -2782,6 +2791,38 @@ public sealed class PdfRenderService : IPdfRenderService
         /// </summary>
         public bool ShowTearLine { get; set; }
 
+        /// <summary>
+        /// 🔴 양식지 그림을 <b>실제 종이에도</b> 찍나 (DB-148 · 20261026작1 · 사장님 오더 10/25).
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b><c>PaperMode</c> 와 축이 다르고 곱해진다.</b>
+        /// <c>preprint</c>(양식용지를 사다 쓴다) + 이 칸이 켜짐 = <b>이중 인쇄</b>다.
+        /// <c>plain</c>(순백지) + 켜짐 = 우리가 가진 양식지 그림을 깔아서 뽑는다.
+        /// 🔴 기본 false — 끈 고객의 종이에 그림이 새면 그게 사고다.
+        /// </remarks>
+        public bool PrintBackground { get; set; }
+
+        /// <summary>
+        /// 회사 로고를 종이 <b>정중앙에 연하게</b> 깔까 (DB-148 · 사장님 오더
+        /// <i>"대학교들 졸업증이나 재학증명서 느낌으로"</i>).
+        /// </summary>
+        /// <remarks>재료는 회사 정보의 로고 그림이다. 그 자리가 비면 아무 일도 하지 않는다.</remarks>
+        public bool ShowWatermark { get; set; }
+
+        /// <summary>
+        /// 워터마크 명도 0.00~1.00 — 🔴 <b>null 이면 공통 설정을 따른다.</b>
+        /// </summary>
+        /// <remarks>
+        /// 🔴 <b>0.00 과 null 은 다른 뜻이다</b> — 0.00 = <i>"완전히 투명하게"</i>,
+        /// null = <i>"나는 정하지 않았다"</i>. 작성기는 null 을 만나면 공통값을 찾아간다.
+        /// </remarks>
+        public decimal? WatermarkOpacity { get; set; }
+
+        /// <summary>워터마크 채도 0.00~1.00 (0=흑백) — null 이면 공통 설정을 따른다. DB-148.</summary>
+        public decimal? WatermarkSaturate { get; set; }
+
+        /// <summary>워터마크 크기 — 용지 폭 대비 %. null 이면 공통 설정을 따른다. DB-148.</summary>
+        public int? WatermarkScalePct { get; set; }
 
         /// <summary>
         /// 🔴 업체 양식지 그림 (20261024 사장님 오더 · §13). 종전에는 이 칸이

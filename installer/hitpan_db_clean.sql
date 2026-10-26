@@ -1433,6 +1433,11 @@ CREATE TABLE `form_templates` (
   `print_copy_mode` varchar(10) NOT NULL DEFAULT 'recipient' COMMENT 'both=공급자+공급받는자 2장 / recipient=공급받는자만 / supplier=공급자만 (DB-90)',
   `style_key` varchar(20) NOT NULL DEFAULT 'basic' COMMENT '디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일',
   `show_tear_line` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=한 장에 두 벌+가운데 자르는 선 / 0=벌마다 한 쪽씩 (DB-147). print_copy_mode=both 일 때만 쓰인다',
+  `print_background` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=양식지 그림을 실제 종이에도 찍는다 / 0=안 찍는다(기본, DB-148). paper_mode 와 다른 축 — 곱해진다',
+  `show_watermark` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=회사 로고를 종이 정중앙에 연하게 깐다 / 0=안 깐다(기본, DB-148). 재료는 local_company.logo_url',
+  `watermark_opacity` decimal(3,2) DEFAULT NULL COMMENT '워터마크 명도 0.00~1.00. NULL=공통값(print_common_settings)을 따른다 (DB-148)',
+  `watermark_saturate` decimal(3,2) DEFAULT NULL COMMENT '워터마크 채도 0.00~1.00 (0=흑백). NULL=공통값을 따른다 (DB-148)',
+  `watermark_scale_pct` smallint(5) unsigned DEFAULT NULL COMMENT '워터마크 크기 — 용지 폭 대비 %. NULL=공통값을 따른다 (DB-148)',
   `is_default` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=신규 발행 시 기본 적용',
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
@@ -1441,6 +1446,22 @@ CREATE TABLE `form_templates` (
   UNIQUE KEY `uk_form_templates_default` (`tenant_id`,`form_type`,`is_default`,`is_active`),
   KEY `idx_form_templates_type` (`tenant_id`,`form_type`,`is_active`,`is_default`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='양식정보설정 — paper_mode 분기 박제 (사장님 헌법 2026-05-31)';
+
+--
+-- 인쇄 공통 설정 (DB-148) — 양식마다의 NULL 이 이 값을 따른다
+--
+DROP TABLE IF EXISTS `print_common_settings`;
+CREATE TABLE `print_common_settings` (
+  `tenant_id` char(36) NOT NULL COMMENT 'tenants.tenant_id — JWT 클레임에서만 채운다 (#2)',
+  `watermark_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=기본으로 워터마크를 깐다. 양식마다 끌 수 있다',
+  `watermark_opacity` decimal(3,2) NOT NULL DEFAULT 0.12 COMMENT '명도 제안값 0.12 — 2026-10-26 실측(중앙픽셀 R=255 G=223 B=223). 고객이 바꾼다',
+  `watermark_saturate` decimal(3,2) NOT NULL DEFAULT 0.15 COMMENT '채도 제안값 0.15 — 색이 옅은 회색에 가까워져 본문과 안 다툰다. 고객이 바꾼다',
+  `watermark_scale_pct` smallint(5) unsigned NOT NULL DEFAULT 60 COMMENT '크기 제안값 60% (용지 폭 대비) — 「정중앙 크게」. 고객이 바꾼다',
+  `print_background_default` tinyint(1) NOT NULL DEFAULT 0 COMMENT '새 양식을 만들 때 print_background 의 초기값. 0=안 찍는다',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='인쇄 공통 설정 (DB-148)';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

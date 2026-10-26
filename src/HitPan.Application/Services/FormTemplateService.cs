@@ -91,6 +91,13 @@ public class FormTemplateService : IFormTemplateService
                 style_key AS StyleKey,
                 -- 🔴 20261021작 §10-4 S-2 (DB-147) — 안 읽으면 고객이 켜도 종이가 안 바뀐다.
                 show_tear_line AS ShowTearLine,
+                -- 🔴 20261026작1 §A-3 (DB-148) — 같은 까닭. 안 읽으면 켜도 종이가 안 바뀐다.
+                --   수치 셋은 NULL 을 그대로 들고 온다 — NULL = 「공통값을 따른다」.
+                print_background AS PrintBackground,
+                show_watermark AS ShowWatermark,
+                watermark_opacity AS WatermarkOpacity,
+                watermark_saturate AS WatermarkSaturate,
+                watermark_scale_pct AS WatermarkScalePct,
                 is_default AS IsDefault,
                 is_active AS IsActive
             FROM form_templates
@@ -134,6 +141,8 @@ public class FormTemplateService : IFormTemplateService
                  field_coords_json, background_image_url,
                  show_company_logo, show_company_seal, show_border,
                  print_copy_mode, style_key, show_tear_line,
+                 print_background, show_watermark,
+                 watermark_opacity, watermark_saturate, watermark_scale_pct,
                  is_default, is_active)
               VALUES
                 (@TemplateId, @TenantId, @FormType, @TemplateName, @PaperMode,
@@ -142,6 +151,8 @@ public class FormTemplateService : IFormTemplateService
                  @FieldCoordsJson, @BackgroundImageUrl,
                  @ShowCompanyLogo, @ShowCompanySeal, @ShowBorder,
                  @PrintCopyMode, @StyleKey, @ShowTearLine,
+                 @PrintBackground, @ShowWatermark,
+                 @WatermarkOpacity, @WatermarkSaturate, @WatermarkScalePct,
                  @IsDefault, 1)",
             new
             {
@@ -166,6 +177,14 @@ public class FormTemplateService : IFormTemplateService
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
                 StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
                 ShowTearLine = request.ShowTearLine ? 1 : 0,
+                // 🔴 DB-148 — 수치 셋은 null 을 **null 그대로** 넣는다.
+                //   null = 「공통값을 따른다」이므로 여기서 기본값을 채워 넣으면
+                //   그 양식은 공통 설정을 바꿔도 영영 안 따라온다 (0.00 과 null 은 다른 뜻).
+                PrintBackground = request.PrintBackground ? 1 : 0,
+                ShowWatermark = request.ShowWatermark ? 1 : 0,
+                request.WatermarkOpacity,
+                request.WatermarkSaturate,
+                request.WatermarkScalePct,
                 IsDefault = request.IsDefault ? 1 : 0
             },
             cancellationToken: ct));
@@ -195,6 +214,12 @@ public class FormTemplateService : IFormTemplateService
             PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
             StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
             ShowTearLine = request.ShowTearLine,
+            // DB-148 — 위 INSERT 에 넣은 값과 같아야 한다(요청값을 그대로 돌려준다).
+            PrintBackground = request.PrintBackground,
+            ShowWatermark = request.ShowWatermark,
+            WatermarkOpacity = request.WatermarkOpacity,
+            WatermarkSaturate = request.WatermarkSaturate,
+            WatermarkScalePct = request.WatermarkScalePct,
             IsDefault = request.IsDefault,
             IsActive = true
         };
@@ -234,6 +259,11 @@ public class FormTemplateService : IFormTemplateService
                 print_copy_mode = @PrintCopyMode,
                 style_key = @StyleKey,
                 show_tear_line = @ShowTearLine,
+                print_background = @PrintBackground,
+                show_watermark = @ShowWatermark,
+                watermark_opacity = @WatermarkOpacity,
+                watermark_saturate = @WatermarkSaturate,
+                watermark_scale_pct = @WatermarkScalePct,
                 is_default = @IsDefault,
                 is_active = @IsActive
               WHERE tenant_id = @TenantId AND template_id = @TemplateId",
@@ -257,6 +287,12 @@ public class FormTemplateService : IFormTemplateService
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
                 StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
                 ShowTearLine = request.ShowTearLine ? 1 : 0,
+                // 🔴 DB-148 — 수치 셋은 null 을 null 그대로 넘긴다(「공통값을 따른다」를 지키려면).
+                PrintBackground = request.PrintBackground ? 1 : 0,
+                ShowWatermark = request.ShowWatermark ? 1 : 0,
+                request.WatermarkOpacity,
+                request.WatermarkSaturate,
+                request.WatermarkScalePct,
                 IsDefault = request.IsDefault ? 1 : 0,
                 IsActive = request.IsActive ? 1 : 0
             },
@@ -274,6 +310,9 @@ public class FormTemplateService : IFormTemplateService
                      show_border AS ShowBorder,
                      print_copy_mode AS PrintCopyMode, style_key AS StyleKey,
                      show_tear_line AS ShowTearLine,
+                     print_background AS PrintBackground, show_watermark AS ShowWatermark,
+                     watermark_opacity AS WatermarkOpacity, watermark_saturate AS WatermarkSaturate,
+                     watermark_scale_pct AS WatermarkScalePct,
                      is_default AS IsDefault, is_active AS IsActive
               FROM form_templates WHERE template_id = @TemplateId",
             new { TemplateId = templateId }, cancellationToken: ct));
