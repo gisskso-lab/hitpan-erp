@@ -253,6 +253,49 @@ public sealed class GridBorderRenderGateTests
             Assert.True(grew >= 1,
                 $"품목을 {lineCount}→{lineCount + 1} 로 늘렸는데 띠가 {grew} 만큼 늘었다(쪽 {off.Count}→{offPlusOne.Count}).");
         }
+
+        // 🔴🔴 [2026-10-26 3차 검증 W-1 봉합] **늘어나는 양만 재면 한 줄이 통째로 먹혀도 초록이다.**
+        //   검증팀이 제품의 품목 루프를 `d.Lines.Take(Count-1)` 로 바꿔 **모든 종이에서
+        //   마지막 품목을 조용히 빼고** 돌렸는데 이 묶음이 **6/6 초록**이었다 —
+        //   한 줄이 빠지면 늘어나는 양도 그대로 1 이기 때문이다(상수만 밀린다).
+        //   ⇒ **절대 개수를 못으로 박는다.** 띠 = 품목 수 + 구조 상수(K).
+        AssertAbsoluteBandCount(lineCount, showBorder: false, off.Count, bandsOff);
+        AssertAbsoluteBandCount(lineCount, showBorder: true, on.Count, bandsOn);
+    }
+
+    /// <summary>
+    /// 🔴🔴 <b>종이의 지문</b> — 잉크 띠 = 품목 수 + 구조 상수. 한 줄이 먹히면 여기서 걸린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>구조 상수는 실측값이다</b>(2026-10-26 · A4 · 여백 10mm · 글자 10pt):
+    ///   한 쪽이면 켠 판 <b>+7</b> · 끈 판 <b>+6</b>, 두 쪽이면 켠 판 <b>+9</b> · 끈 판 <b>+7</b>
+    ///   (거래처 상자 · 표 머리 · 합계 세 줄 · 쪽이 넘어가며 다시 그려지는 줄).
+    ///
+    /// 🔴 <b>이 숫자가 틀리면 종이가 바뀐 것이다.</b> 다음 사람은 둘 중 하나를 하라:
+    ///   ⒜ <b>의도한 변경</b>이면 여기 숫자를 <b>다시 재서</b> 고친다(그리고 왜 바뀌었는지 적는다).
+    ///   ⒝ <b>의도하지 않았으면 그것이 사고다</b> — 품목 한 줄이 조용히 빠지는 길이 #20 이다.
+    ///   🔴 숫자가 안 맞는다고 이 축을 <b>지우거나 느슨하게 고치지 마라.</b> 그게 10/20 의
+    ///     「반려를 문구 수정으로 받는다」와 같은 모양이다.
+    /// </remarks>
+    private static void AssertAbsoluteBandCount(int lineCount, bool showBorder, int pages, int bands)
+    {
+        var k = (pages, showBorder) switch
+        {
+            (1, true) => 7,
+            (1, false) => 6,
+            (2, true) => 9,
+            (2, false) => 7,
+            _ => -1
+        };
+
+        Assert.True(k >= 0,
+            $"쪽 수 {pages}(테두리 {showBorder}) 의 구조 상수를 아직 재지 않았다 — "
+            + "재서 이 표에 더하라. 모르는 조합을 **초록으로 지나가게 두지 않는다**.");
+
+        Assert.True(bands == lineCount + k,
+            $"품목 {lineCount} 줄(테두리 {showBorder} · 쪽 {pages}): 잉크 띠가 {bands} 다. "
+            + $"기대값은 {lineCount + k}(= 품목 {lineCount} + 구조 {k}). "
+            + "🔴 품목 줄이 빠졌거나 종이 구조가 바뀌었다 — 이 축의 설명을 먼저 읽어라.");
     }
 
     [Fact(DisplayName = "G-W13자 🔴 자 검사 — 켠 판과 끈 판이 **정말 다른 종이**다(둘이 같으면 위 축들이 무의미하다)")]
