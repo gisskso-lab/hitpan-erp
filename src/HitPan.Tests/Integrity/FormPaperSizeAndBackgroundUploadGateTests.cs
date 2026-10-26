@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Reflection;
 using HitPan.Application.DTOs.Settings;
 using HitPan.Application.Services;
@@ -687,7 +688,16 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         //   남기면 초록이었다 — 거짓 통과를 막는 축이 주석을 믿고 있었다.
         var src = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
 
-        Assert.Contains("page.Size(ResolvePageSize(", src, StringComparison.Ordinal);
+        // 🔴🔴 [2026-10-26작1 §E-2] 호출 모양이 **한 줄에서 두 줄로** 바뀌었다.
+        //   [왜 바뀌었나] 워터마크 크기가 **용지 폭 대비 %** 라 폭을 다시 알아야 한다.
+        //     `ResolvePageSize` 를 두 번 부르면 그 안의 경고 로그가 두 줄 찍혀
+        //     다음 사람이 「두 번 그렸나」로 읽는다 ⇒ 값을 변수로 받아 **한 번만** 부른다.
+        //   🔴 그래서 이 축이 재는 것도 **두 자리**가 된다: ①값을 받는 자리가 있나
+        //     ②그 값을 `page.Size(...)` 에 실제로 넘기나.
+        //     🔴 ② 만 재면 `page.Size(pageSize)` 를 두고 위에서 `PageSizes.A4` 를
+        //     넣어도 초록이 된다 — 그래서 ① 을 같이 본다.
+        Assert.Contains("var pageSize = ResolvePageSize(", src, StringComparison.Ordinal);
+        Assert.Contains("page.Size(pageSize);", src, StringComparison.Ordinal);
         Assert.Contains("_ = ResolveStyleKey(template);", src, StringComparison.Ordinal);
 
         // 🔴 걷어내기가 정말 돌고 있나 — 고장나면 위 두 줄이 다시 거짓이 된다.
@@ -1223,6 +1233,18 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         _ when type == typeof(string) => (current as string) == "GATE-A" ? "GATE-B" : "GATE-A",
         _ when type == typeof(decimal) => (decimal)(current ?? 0m) + 7.5m,
         _ when type == typeof(int) => (int)(current ?? 0) + 7,
+
+        // 🔴🔴 [2026-10-26작1 §E-2] **자를 넓힌다 — 가리지 않는다.**
+        //   DB-148 이 nullable 수치 칸 셋을 더했다(WatermarkOpacity·Saturate·ScalePct).
+        //   그 형을 이 자가 몰라 R-8 울타리가 **스스로 빨개졌다** — 설계한 대로 동작했다.
+        //   🔴 그때 손쉬운 길은 `allowedSkips` 에 이름을 더해 **건너뛰게 만드는 것**이다.
+        //     그러면 그 세 칸은 배선이 빠져도 영영 초록이 된다 — 가리는 것이다.
+        //   ⇒ 형을 **알게 만들어** 배선까지 긁어서 본다.
+        //   🔴 null 을 넣지 않는다 — null 은 「공통값을 따른다」는 뜻이라
+        //     배선이 빠져도 null 끼리 같아 보여 **거짓 초록**이 된다. 값을 넣고 비교한다.
+        _ when type == typeof(decimal?) => (decimal?)((current as decimal?) ?? 0m) + 7.5m,
+        _ when type == typeof(int?) => (int?)(((current as int?) ?? 0) + 7),
+
         _ => null,
     };
 
@@ -1467,59 +1489,104 @@ public class FormPaperSizeAndBackgroundUploadGateTests
             "묶음을 울타리로 다시 감쌌는데 자가 초록을 냈다 — 「한 칸 옮기기」를 못 잡는다.");
     }
 
-    [Fact(DisplayName = "축⒥-2 🔴 「빈 A4」에 안내와 「양식용지로 바꾸기」가 그려진다")]
-    public void AxisJ2_PlainBranchHasNoticeAndSwitch()
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴🔴 [2026-10-26작1 §E-1] 축⒥-2 ~ ⒥-5 는 **전제가 바뀌어 다시 썼다 — 지운 것이 아니다.**
+    //
+    // [종전 전제] 양식지 그림은 **미리보기 전용**이었다. 그래서 「빈 A4」에서 올리는 통로는
+    //   있어도 쓸 데가 없었고, 네 축은 *"plain 에서는 보이되 눌리지 않는다"* 를 쟀다.
+    //
+    // [무엇이 바뀌었나] 사장님 오더 2026-10-25 ①:
+    //   *"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"*
+    //   ⇒ 오더가 요구하는 것이 바로 **「빈 A4 에 양식지 그림을 깔아 인쇄」**다.
+    //     plain 에서 못 올리면 그 오더가 반쪽이 된다.
+    //
+    // 🔴 그래서 축이 **뒤집힌다**: 「눌리지 않나」 → 「두 모드 모두 눌리나」.
+    //   🔴 뒤집힌 축에는 **음성 대조군이 더 필요하다** — 열어 두기만 하면
+    //     「아무 조건도 없다」와 구별이 안 된다. 각 축에 대조군을 붙였다.
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "축⒥-2 🔴 「양식용지로 바꾸기」와 그 안내가 **남아 있다** (좌표 맞추기에 여전히 필요 · #1 지우지 않았다)")]
+    public void AxisJ2_SwitchToPreprintStillExists()
     {
         var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
-        var plain = PlainBranch(razor);
 
-        Assert.True(RendersWhenPlain(razor, PlainSwitchMarker));
-        Assert.NotNull(plain);
-        Assert.Contains("SwitchToPreprint", plain!, StringComparison.Ordinal);
-        Assert.Contains("미리 인쇄된 양식용지", plain!, StringComparison.Ordinal);
+        // 🔴 오더로 올리기를 열었다고 이 길을 **지우지 않는다** — 양식용지 좌표를 맞추려면
+        //   여전히 preprint 모드가 필요하다(#1 추가만 · 삭제 금지).
+        Assert.Contains("SwitchToPreprint", razor, StringComparison.Ordinal);
         Assert.Matches(@"private void SwitchToPreprint\(\)", razor);
+
+        // 🔴 「빈 A4」일 때만 권한다 — preprint 고객에게 「양식용지로 바꾸기」는 뜻이 없다.
+        Assert.Matches(@"_form\.PaperMode != ""preprint""[\s\S]{0,400}SwitchToPreprint", razor);
+
         // 🔴 몰래 바꾸지 않는다 — 바꾼 뒤 고객에게 알린다.
         Assert.Contains("아직 저장되지 않았습니다", razor, StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "축⒥-3 🔴 「빈 A4」에서 단추는 보이되 눌리지 않고, 올리는 통로가 없다")]
-    public void AxisJ3_PlainBranchButtonIsDisabled()
+    [Fact(DisplayName = "축⒥-3 🔴🔴 올리는 통로가 **두 모드 모두** 그려진다 (사장님 오더 ① — plain 에서 못 올리면 「순백지 인쇄」가 반쪽이다)")]
+    public void AxisJ3_UploadPathOpenInBothModes()
     {
         var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
-        var plain = PlainBranch(razor);
 
-        Assert.NotNull(plain);
-        Assert.Contains("양식용지 그림 올리기", plain!, StringComparison.Ordinal);
-        Assert.Contains("Disabled=\"true\"", plain!, StringComparison.Ordinal);
-        // 🔴 「빈 A4」에서 올리는 통로 자체가 그려지면 안 된다 — 울타리의 합으로 잰다.
-        Assert.False(RendersWhenPlain(razor, "MudFileUpload"));
+        // 🔴 통로가 **울타리 밖**에 있나 — `plain` 에서도 그려지는지 울타리의 합으로 잰다.
+        Assert.True(RendersWhenPlain(razor, "MudFileUpload"),
+            "「빈 A4」에서 올리는 통로가 안 그려진다 — 사장님 오더 ①(순백지 인쇄)이 반쪽이 된다.");
+        Assert.True(RendersWhenPlain(razor, "양식용지 그림 올리기"));
+
+        // 🔴 눌릴 수 있나 — 막는 조건이 **올리는 중**(_bgBusy) 하나뿐이어야 한다.
+        //   `Disabled="true"` 가 남아 있으면 열어 둔 척만 한 것이다.
+        var uploadButton = Regex.Match(razor,
+            @"MudFileUpload[\s\S]{0,600}?양식용지 그림 올리기").Value;
+        Assert.DoesNotContain("Disabled=\"true\"", uploadButton);
+        Assert.Contains("Disabled=\"_bgBusy\"", uploadButton);
     }
 
-    [Fact(DisplayName = "축⒥-4 🔴 「빈 A4」에 남은 옛 그림을 고객이 지울 수 있다 ([1-V] ⒟ 비대칭)")]
-    public void AxisJ4_PlainBranchLetsCustomerRemoveLeftoverImage()
+    [Fact(DisplayName = "축⒥-3 음성대조군 🔴 옛 모양(plain 에서 눌리지 않음)으로 되돌리면 빨개진다")]
+    public void AxisJ3_NegativeControl_OldDisabledShapeFails()
     {
-        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
-        var plain = PlainBranch(razor);
+        // 🔴 뒤집힌 축은 대조군이 없으면 「열려 있다」와 「조건이 아예 없다」를 못 가른다.
+        const string oldShape =
+            "@if (" + PreprintCond + ")\n{\n  <MudFileUpload T=\"IBrowserFile\">x</MudFileUpload>\n}\n"
+            + "else\n{\n  <MudButton Disabled=\"true\">양식용지 그림 올리기</MudButton>\n}\n";
 
-        Assert.NotNull(plain);
-        Assert.Contains("BackgroundImageUrl", plain!, StringComparison.Ordinal);
-        Assert.Contains("RemoveBackgroundAsync", plain!, StringComparison.Ordinal);
+        Assert.False(RendersWhenPlain(oldShape, "MudFileUpload"),
+            "자가 고장났다 — 옛 모양에서도 통로가 그려진다고 읽는다.");
     }
 
-    [Fact(DisplayName = "축⒥-5 🔴 남은 그림 안내가 **두 갈래로 갈려** 각각 참을 말한다 ([4] 반려 R-1 봉합)")]
-    public void AxisJ5_LeftoverNoticeSplitsForLegalComposer()
+    [Fact(DisplayName = "축⒥-4 🔴 올린 그림을 고객이 **지울 수 있다** (모드와 무관 · [1-V] ⒟ 비대칭 봉합 유지)")]
+    public void AxisJ4_CustomerCanRemoveImageInBothModes()
     {
         var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
-        var plain = PlainBranch(razor);
 
-        Assert.NotNull(plain);
-        // 🔴 1차 판은 「미리보기에만 보입니다」 한 벌이었다 — 세금계산서에서는 **거짓**이다.
-        Assert.Contains("IsLegalOnlyComposer", plain!, StringComparison.Ordinal);
-        Assert.Contains("종이에도, 미리보기에도 나오지 않습니다", plain!, StringComparison.Ordinal);
-        Assert.Contains("종이에 찍히지 않고", plain!, StringComparison.Ordinal);
+        Assert.True(RendersWhenPlain(razor, "RemoveBackgroundAsync"),
+            "「빈 A4」에서 그림을 지울 길이 없다 — 올릴 수는 있고 지울 수는 없는 비대칭이 된다.");
+        Assert.Contains("BackgroundImageUrl", razor, StringComparison.Ordinal);
+    }
 
-        // 🔴 화면이 가르는 조건과 **서버가 실제로 가르는 조건**이 같은지 본다.
-        //   서버는 세금계산서 1종만 전용 작성기로 보낸다(면세·입금표는 공용 흐름).
+    [Fact(DisplayName = "축⒥-5 🔴🔴 그림 안내가 **네 갈래 + 법정서식**으로 갈려 각각 참을 말한다 (축이 하나 늘었다: 종이에 찍나)")]
+    public void AxisJ5_NoticeSplitsAcrossModeAndPrintFlag()
+    {
+        var razor = ReadCode("src", "HitPan.Web", "Components", "Common", "FormTemplateEditorDialog.razor");
+
+        // 🔴 [10/25 R-1 봉합 유지] 법정 서식 갈래는 여전히 따로 말해야 한다.
+        Assert.Contains("IsLegalOnlyComposer", razor, StringComparison.Ordinal);
+        Assert.Contains("종이에도, 미리보기에도 나오지 않습니다", razor, StringComparison.Ordinal);
+
+        // 🔴🔴 [2026-10-26] 축이 하나 늘었다 — **종이에 찍나**(print_background).
+        //   네 갈래가 각각 참을 말하는지 본다. 한 벌로 뭉치면 그 중 셋이 거짓이 된다.
+        //   ① preprint + 켬  = 이미 인쇄된 위에 또 찍힌다(두 겹)
+        //   ② plain   + 켬  = 빈 종이에 함께 인쇄한다
+        //   ③ preprint + 끔 = 자리 맞추는 데만 쓴다
+        //   ④ plain   + 끔 = 미리보기에만 보인다
+        Assert.Contains("양식용지에는 양식이 이미 인쇄되어 있습니다", razor, StringComparison.Ordinal);
+        Assert.Contains("빈 종이에 이 그림을 함께 인쇄합니다", razor, StringComparison.Ordinal);
+        Assert.Contains("자리를 맞추는 데만", razor, StringComparison.Ordinal);
+        Assert.Contains("종이에는 찍히지 않습니다", razor, StringComparison.Ordinal);
+
+        // 🔴 네 갈래가 **정말 갈라져 있나** — `_form.PrintBackground` 와 `PaperMode` 를
+        //   둘 다 보는 조건이 있어야 한다. 한 축만 보면 네 갈래가 될 수 없다.
+        Assert.Matches(@"_form\.PrintBackground\s*&&\s*_form\.PaperMode == ""preprint""", razor);
+
+        // 🔴 화면이 가르는 법정 조건과 **서버가 실제로 가르는 조건**이 같은지 본다.
         Assert.Matches(@"IsLegalOnlyComposer\s*=>\s*_form\.PaperMode != ""preprint""\s*&&\s*string\.Equals\(_form\.FormType, ""tax_invoice""", razor);
 
         var server = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
@@ -1531,14 +1598,13 @@ public class FormPaperSizeAndBackgroundUploadGateTests
     {
         const string oneSided =
             "<MudItem><MudText>" + UploadBlockMarker + "</MudText>\n" +
-            "@if (" + PreprintCond + ")\n{\n}\nelse\n{\n" +
             "  <MudAlert>「빈 A4 용지」에서는 종이에 찍히지 않고 아래 미리보기에만 보입니다.</MudAlert>\n" +
-            "}\n</MudItem>\n";
+            "</MudItem>\n";
 
-        var plain = PlainBranch(oneSided);
-        Assert.NotNull(plain);
-        Assert.DoesNotContain("IsLegalOnlyComposer", plain!, StringComparison.Ordinal);
-        Assert.DoesNotContain("종이에도, 미리보기에도 나오지 않습니다", plain!, StringComparison.Ordinal);
+        // 🔴 한 벌 문구에는 네 갈래의 표식이 **하나도** 없어야 한다 — 있으면 자가 고장났다.
+        Assert.DoesNotContain("IsLegalOnlyComposer", oneSided, StringComparison.Ordinal);
+        Assert.DoesNotContain("빈 종이에 이 그림을 함께 인쇄합니다", oneSided, StringComparison.Ordinal);
+        Assert.DoesNotContain("양식용지에는 양식이 이미 인쇄되어 있습니다", oneSided, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "축⒦-1 🔴 창이 「새로 만드는 중」인지 「고치는 중」인지 스스로 말한다 (작3 가-2)")]
@@ -1584,17 +1650,55 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.True(RendersWhenPlain(pulledOut, CoordTableMarker));
     }
 
-    [Fact(DisplayName = "축⒧-2 🔴 실인쇄에 그림이 안 깔리는 한 줄이 그대로다 (🔴 작3 범위 밖 보호못 — ~~결-2~~ 아님 · 작4 에서 「옵션이 꺼져 있으면 안 찍힌다」로 **바꿔야 하는 축**)")]
-    public void AxisL2_RealPrintBackgroundSealIntact()
+    [Fact(DisplayName = "축⒧-2 🔴🔴 **고객이 꺼 두면 실인쇄에 그림이 안 깔린다** (20261026작1 §E-1 — 조건을 받았다 · 지운 것이 아니다)")]
+    public void AxisL2_RealPrintBackgroundRequiresCustomerOptIn()
     {
-        // 🔴 [1-V] P5 — 그림은 **양식 설계 미리보기에만** 깔린다. 실인쇄·이메일·팩스는 0건이다.
+        // 🔴 [10/24~25 종전 뜻] 그림은 **양식 설계 미리보기에만** 깔렸다. 실인쇄는 0건이었다.
         //   양식용지는 이미 종이에 양식이 인쇄돼 있어 스캔을 또 찍으면 **이중 인쇄**가 된다
-        //   (2026-10-24 검증팀 반려 R-1). 🔴 이 축은 **작3 이 실인쇄 경로를 0줄도 안 건드렸다**는 보호못일 뿐이다.
-        //   ~~사장님 결재(결-2)~~ 가 아니다 — 그 기록은 PM 이 선택지를 잘못 짜서 받은 것이고 폐기됐다.
-        //   🔴 사장님 입장은 처음부터 「고객사가 선택하는 옵션」이다(2026-10-25 교정).
-        //   ⇒ **작4 에서 이 축은 「옵션이 꺼져 있으면 안 찍힌다」로 바뀐다.** 지우는 것이 아니라 조건을 받는다.
+        //   (2026-10-24 검증팀 반려 R-1).
+        //
+        // 🔴🔴 [2026-10-26 바뀐 뜻] 사장님 오더 2026-10-25 ①:
+        //   *"양식지 인쇄 / 순백지 인쇄 — 고객사의 옵션이 필요함"*
+        //   ⇒ 실인쇄에 깔리는 길이 **생겼다.** 그러나 **고객이 그 양식에서 켠 경우에만**이다.
+        //   🔴 [1-V] 가 이 축에 남긴 지시: *"「고객이 옵션을 꺼 두면 안 찍힌다」로 조건을 받는다.
+        //     지우는 것이 아니다 — 끈 고객의 종이에 그림이 새면 그게 사고다."*
+        //
+        // 🔴 그래서 이 축은 이제 **두 가지**를 본다:
+        //   ① 울타리가 **여전히 있다** — 아무 조건 없이 깔리는 판으로 되돌아가지 않았나
+        //   ② 그 울타리가 **고객 설정(`PrintBackground`)으로만** 열린다
         var code = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
 
-        Assert.Matches(@"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*\)\s*return null;", code);
+        // ① + ② — 두 조건이 **모두 거짓일 때만** null 을 돌려준다(즉 하나라도 참이면 깐다).
+        Assert.Matches(
+            @"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*&&\s*template\?\.PrintBackground\s*!=\s*true\s*\)\s*return null;",
+            code);
+
+        // 🔴 기본값이 **끔**인지 같이 본다 — 조건을 받아도 기본이 켬이면
+        //   기존 고객의 종이가 하루아침에 바뀐다(#1). 칸의 기본값은 DTO 가 정한다.
+        var dto = ReadCode("src", "HitPan.Application", "DTOs", "Settings", "FormTemplateDtos.cs");
+        Assert.Matches(@"public bool PrintBackground \{ get; set; \}(?!\s*=)", dto);
+    }
+
+    [Fact(DisplayName = "축⒧-2 음성대조군 🔴 울타리를 지우면 **빨개진다** (아무 조건 없이 깔리는 판)")]
+    public void AxisL2_NegativeControl_RemovedFenceFails()
+    {
+        // 🔴 대조군이 없으면 이 축은 「울타리가 있다」와 「정규식이 아무거나 맞는다」를 못 가른다.
+        const string removed = "        return TryLoadFormBackground(template?.BackgroundImageUrl);\n";
+
+        Assert.DoesNotMatch(
+            @"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*&&\s*template\?\.PrintBackground\s*!=\s*true\s*\)\s*return null;",
+            removed);
+    }
+
+    [Fact(DisplayName = "축⒧-3 🔴 옛 판(미리보기 전용)으로 **되돌리면 빨개진다** — 사장님 오더 ① 이 닫힌 채로 남지 않는다")]
+    public void AxisL3_NegativeControl_PreviewOnlyShapeFails()
+    {
+        // 🔴 10/25 까지의 판이다. 이 모양으로 돌아가면 고객은 옵션을 켜도 종이가 안 바뀐다
+        //   — 「갔다 ≠ 보인다」의 또 다른 모양이고, 사장님이 ③ 「양식지로 출력」에서 겪은 실패다.
+        const string previewOnly = "        if (overrides?.IsFormDesignPreview != true) return null;\n";
+
+        Assert.DoesNotMatch(
+            @"overrides\?\.IsFormDesignPreview\s*!=\s*true\s*&&\s*template\?\.PrintBackground\s*!=\s*true",
+            previewOnly);
     }
 }
