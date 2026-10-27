@@ -24,7 +24,14 @@ namespace HitPan.Tests.Integrity;
 ///
 /// <para>DB 불필요 ⇒ CI <c>build</c> 잡 <c>Test (Unit + Integration)</c> 전량 실행에 자동으로 포함되고,
 /// 이름 등록(<c>BackofficeSignupTokenLogGate</c>)으로 한 번 더 물린다.</para>
+///
+/// <para>🔴 20261027작G0S — 결제확인 입구 비활성(<c>[NonAction]</c> · 결재문 §7 ①) 뒤의 의미로 고쳤다(지우지 않음 · #1).
+/// 입구는 HTTP 로 두드리면 <b>404</b> — B-6·B-7 에 HTTP 단언을 더했다(표 변화 0 은
+/// <c>BackofficeAnonymousEntrySealGateTests</c> G0S-N-A 가 격리 DB 로 잰다).
+/// 본문은 보존되므로 직접 호출 시 마스킹 축은 그대로 잰다(PM 결재 Q1). 호스트를 띄우며 프로세스 전역
+/// <c>HITPAN_BO_JWT_SECRET</c> 을 세우므로 같은 전역을 쓰는 Collection 에 넣었다.</para>
 /// </summary>
+[Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class BackofficeSignupTokenLogGateTests
 {
     // 🔴 토큰 「모양」을 실물에서 베끼지 않는다(조건4). 런타임 Guid 로 그 자리에서 만든다.
@@ -35,11 +42,14 @@ public sealed class BackofficeSignupTokenLogGateTests
     // G-B1-B-6 — 실물 컨트롤러 로그에 토큰 원문이 없다 (동작)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-B1-B-6 실물 ConfirmPayment 가 남긴 로그에 토큰 원문이 0건 · 해시 표식은 남는다")]
-    public async Task G_B1_B_6_실물로그에_원문이_없다()
+    [Fact(DisplayName = "G-B1-B-6 (입구 비활성 뒤) 결제확인 입구 HTTP 404 · 메일 0 · 보존 본문 직접 호출 로그에 토큰 원문 0건 · 해시 표식은 남는다")]
+    public async Task G_B1_B_6_입구는_404_보존본문_로그에_원문이_없다()
     {
         const string gate = "G-B1-B-6 토큰 원문 로그";
         var token = NewProbeToken();
+
+        // 🔴 20261027작G0S — 반전: 입구는 서버에 없다. 이 토큰으로 HTTP 를 두드리면 404 · 메일 0.
+        await AssertEntryUnregisteredAsync(token, gate);
 
         var logger = new CapturingLogger<LandingSignupController>();
         var controller = NewController(logger);
@@ -67,12 +77,16 @@ public sealed class BackofficeSignupTokenLogGateTests
     // G-B1-B-7 — 마스킹은 단방향이고, 서로 다른 토큰을 구별한다 (동작)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-B1-B-7 같은 토큰 = 같은 표식 · 다른 토큰 = 다른 표식 · 원문 조각 0건")]
-    public async Task G_B1_B_7_표식이_대조에_쓸_수_있다()
+    [Fact(DisplayName = "G-B1-B-7 (입구 비활성 뒤) 결제확인 입구 HTTP 404 · 보존 본문 표식: 같은 토큰 = 같은 표식 · 다른 토큰 = 다른 표식 · 원문 조각 0건")]
+    public async Task G_B1_B_7_입구는_404_보존본문_표식이_대조에_쓸_수_있다()
     {
         const string gate = "G-B1-B-7 표식 품질";
         var a = NewProbeToken();
         var b = NewProbeToken();
+
+        // 🔴 20261027작G0S — 반전: 두 토큰 모두 HTTP 로는 404(입구 미등록).
+        await AssertEntryUnregisteredAsync(a, gate);
+        await AssertEntryUnregisteredAsync(b, gate);
 
         var markA1 = await MarkOf(a);
         var markA2 = await MarkOf(a);
@@ -90,10 +104,17 @@ public sealed class BackofficeSignupTokenLogGateTests
     // G-B1-B-8 — 토큰을 로그 인자로 **직접** 넘기는 자리 0건 (회귀 자물쇠)
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "G-B1-B-8 LandingSignupController 의 로그 호출에 토큰 원문 플레이스홀더 0건 (grep 숫자)")]
-    public void G_B1_B_8_원문_인자가_0건이다()
+    [Fact(DisplayName = "G-B1-B-8 (입구 비활성 뒤) ConfirmPayment 에 [NonAction] · LandingSignupController 의 로그 호출에 토큰 원문 플레이스홀더 0건 (grep 숫자)")]
+    public void G_B1_B_8_입구비활성_원문_인자가_0건이다()
     {
         const string gate = "G-B1-B-8 원문 인자 0건";
+
+        // 🔴 20261027작G0S (PM 결재 Q1) — 판독은 남기고 「입구 비활성」 단언을 더한다.
+        //   컴파일된 메타데이터를 읽는다(글자 아님). 실제 404 는 B-6·B-7 과 G0S-N-A 가 HTTP 로 잰다.
+        var confirm = typeof(LandingSignupController).GetMethod(nameof(LandingSignupController.ConfirmPayment));
+        Assert.NotNull(confirm);
+        Assert.True(confirm!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.NonActionAttribute), false).Length == 1,
+            $"{gate} ConfirmPayment 에 [NonAction] 이 없다 — 결제확인 입구가 서버 라우트에 다시 등록된다.");
         var src = ReadSource("src/HitPan.Backoffice.API/Controllers/LandingSignupController.cs");
 
         // 🔴 2026-10-15 [4] 적발 (조건2): 원문을 세면 **주석·로그 메시지 문구**에 든 같은 글자까지 세어
@@ -136,6 +157,23 @@ public sealed class BackofficeSignupTokenLogGateTests
     // ══════════════════════════════════════════════════════════════
     // 도구
     // ══════════════════════════════════════════════════════════════
+
+    /// <summary>🔴 20261027작G0S — 실물 백오피스 파이프라인(닫힌 포트 DB)에 결제확인 입구를 HTTP 로 보낸다 → 404 · 메일 0.</summary>
+    private static async Task AssertEntryUnregisteredAsync(string token, string gate)
+    {
+        await using var host = new EntryGateFactory(
+            "Server=127.0.0.1;Port=1;Database=hitpan_token_gate_nodb;ConnectionTimeout=2;DefaultCommandTimeout=5;");
+        using var http = host.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        using var res = await http.PostAsync("/api/landing/confirm-payment", new StringContent(
+            System.Text.Json.JsonSerializer.Serialize(new { signupToken = token }),
+            System.Text.Encoding.UTF8, "application/json"));
+        Assert.True(res.StatusCode == System.Net.HttpStatusCode.NotFound,
+            $"{gate} 결제확인 입구 기대 404 · 실제 {(int)res.StatusCode} — 입구가 서버에 등록돼 있다.");
+        Assert.Equal(0, host.Mail.Count);
+    }
 
     /// <summary>실물 컨트롤러를 한 번 돌려 로그에 남은 토큰 표식(`sha256:xxxxxxxxxxxx`)을 꺼낸다.</summary>
     private static async Task<string> MarkOf(string token)
