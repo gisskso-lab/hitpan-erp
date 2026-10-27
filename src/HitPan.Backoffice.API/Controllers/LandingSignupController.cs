@@ -229,30 +229,8 @@ public class LandingSignupController : ControllerBase
                 "DELETE FROM landing_signups WHERE biz_no_hash = @Hash AND status NOT IN ('approved','active')",
                 new { Hash = bizNoHash });
 
-            // 봉합 v1.2.5 (2026-06-11): 옛 영역 도메인 별칭 영역 Cloudflare DNS 정리
-            //  사장님 의중: "삭제된 테넌트 코드에 서브도매인 주소와 DNS가 정리되지 않으면 안되.
-            //               추후 중복되서 오류날수 있으니"
-            //  진범: 옛 가입 영역에 저장된 DNS 영역 있으면 신규 가입 영역 저장할 때 81053 사고
-            //  봉합: 가입 영역 저장된 도메인 별칭 영역 + DB tenants 영역 0건이면 옛 DNS 영역 자동 정리
-            if (!string.IsNullOrWhiteSpace(desiredDomain) && _cfDomain.IsConfigured)
-            {
-                var existingTenant = await db.QueryFirstOrDefaultAsync<long?>(
-                    "SELECT COUNT(*) FROM tenants WHERE domain_alias = @Alias",
-                    new { Alias = desiredDomain });
-                if (!existingTenant.HasValue || existingTenant.Value == 0)
-                {
-                    try
-                    {
-                        var revoked = await _cfDomain.RevokeByDomainAsync(desiredDomain, ct);
-                        if (revoked)
-                            _logger.LogInformation("[LandingSignup] orphan DNS 정리 sub={Sub}", desiredDomain);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "[LandingSignup] orphan DNS 정리 사고 sub={Sub}", desiredDomain);
-                    }
-                }
-            }
+            // 가입 경로의 DNS 정리 호출은 뺐다 (결재 2026-10-27 · 같은 결재문 §7 (B) 「가입에서 DNS 삭제 제거」).
+            //   남은 레코드 정리는 본사가 손으로 한다(#29) — 승인 때 오류로 드러난다.
 
             var signupToken = $"sgn-{Guid.NewGuid():N}";
 
@@ -375,6 +353,10 @@ public class LandingSignupController : ControllerBase
         }
     }
 
+    // 입구 비활성 (결재 2026-10-27 · docs/운영기록/20261027_결재_베타로드맵_사장님최종_기준선_G0착수.md §7 ①).
+    //   [NonAction] — 서버 라우트에 등록하지 않는다. 활성·시리얼은 본사 승인(SignupsAdminController) 경로에서만 나간다.
+    //   아래 속성·본문은 보존한다(#1 · 되돌림 1줄).
+    [NonAction]
     [HttpPost("confirm-payment")]
     [AllowAnonymous]
     public async Task<IActionResult> ConfirmPayment([FromBody] ConfirmPaymentRequest req, CancellationToken ct)
