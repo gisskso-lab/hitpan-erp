@@ -25,6 +25,11 @@
 //   🟡 4차(10/29 · 대표 결재 「약관 결함은 별건 · 장치는 분리」): 자리=main + 로그인 응답 requiresTermsConsent=true 면
 //     H-OBS-TERMS(kind OBS · 빨강 아님)에 관찰(문서 이동 순서·약관 상태 응답·인증 API 상태·알림 글자)을 남기고
 //     화면과 같은 동의 API → 로그아웃 → 다시 화면 로그인 → 본 화면 → H-D2c 200 으로 닫는다. 끝 상태 = H-NA-END 한 줄.
+//   🔴 5차(10/29 · 런6 40750810674 — H-T2 클릭이 일일 브리핑 덮개 `div.hp-brief-backdrop` 에 막혀 TimeoutError →
+//     프로세스가 죽어 결과표 0 줄 · 콘솔엔 PASS 7 줄 · judge 「돈 시험 0건」):
+//     ① 결과표는 줄마다 바로 파일에(lib bindAutosave) + 흐름이 어디서 끊겨도 `H-DX` [장치] 한 줄(단계·예외 이름·메시지 앞 200자 · 값·토큰 0).
+//     ② 본 화면 진입 직후 브리핑 팝업을 사람처럼 [닫기](단추 줄) → 덮개가 사라질 때까지 · 안 뜨면 지나감 · `H-BRIEF` 한 줄.
+//     ③ 결재 길 클릭 직전에 같은 함수로 한 번 더(늦게 뜬 몫).
 //   🔴 3차 Q-2: 녹음기 기록을 sessionStorage 에 둔다(전체 새로고침에 살아남는다) + 이동 전 표지를 적고 이동 뒤 그대로인지
 //     단언(아니면 [시험] 빨강 「녹음기 끊김」) + 이동이 전체 새로고침이었는지 got 에 사실로 남긴다.
 'use strict';
@@ -191,6 +196,64 @@ async function closeDeviceNotice(page, note) {
     console.log(`기기 등록 안내 창 닫기 실패 (${e.name}) — 다음 회차에 다시 본다`);
     return false;
   }
+}
+
+// 🔴 5차(10/29 · 런6 40750810674) — 일일 브리핑 팝업(DailyBriefingModal.razor · Dashboard.razor:219·296~308).
+//   대시보드(`/`·`/dashboard`) 첫 그리기 뒤 localStorage `hitpan_briefing_dismissed_YYYYMMDD` 가 비어 있으면 뜬다(CI 브라우저는 매번 빈 저장소 → 매번 뜬다).
+//   덮개 = `div.hp-brief-backdrop`(:27 · position:fixed inset:0 z-index:9100 :173~178) → 아래 화면의 모든 클릭을 가로챈다(런6 H-T2 TimeoutError).
+//   사람처럼 닫는다: 아래 단추 줄 `.hp-brief-footer` 의 [닫기](:158 · Close → OnClosed 만 · 저장소 안 건드림).
+//     · 머리 X 단추(:36 aria-label 「닫기」)와 이름이 같아서 단추 줄 안으로 좁힌다.
+//     · 「오늘 그만 보기」(:157 DismissForToday)는 저장소에 날짜 키를 써서 다음 상태를 바꾸므로 **안 누른다**.
+//     · 강제 클릭·덮개 지우기 같은 우회 없음 — [닫기] 를 누르고 덮개가 사라질 때까지 기다린다(@if (IsOpen) → 사라짐 :25).
+//   안 뜨면 그냥 지나간다(없음 ≠ 실패). 닫으려 했는데 못 닫으면 [장치] 빨강.
+const BRIEF_BACKDROP = '.hp-brief-backdrop';
+const BRIEF_FOOTER = '.hp-brief-footer';
+const BRIEF_CLOSE_TEXT = '닫기';
+// 본 화면 진입 직후 팝업이 늦게 뜨는 몫까지 기다리는 시간(뜨면 바로 닫는다 · 안 뜨면 이 시간 뒤 지나간다).
+const BRIEF_APPEAR_MS = 3000;
+
+// br = { seen, closed, errs, lastErr } — 이 브라우저에서 본 팝업 수 · 닫은 수 · 못 닫은 수(값·토큰 0).
+async function closeBriefing(page, br, appearMs = 0) {
+  const backdrop = page.locator(BRIEF_BACKDROP);
+  const end = Date.now() + appearMs;
+  try {
+    let n = await backdrop.count();
+    while (n === 0 && Date.now() < end) {
+      await new Promise((ok) => setTimeout(ok, 250));
+      n = await backdrop.count();
+    }
+    if (n === 0) return true; // 안 뜸 → 지나간다
+    br.seen += 1;
+    await page.locator(BRIEF_FOOTER).getByRole('button', { name: BRIEF_CLOSE_TEXT, exact: true }).click({ timeout: 15000 });
+    await backdrop.first().waitFor({ state: 'hidden', timeout: 15000 });
+    const left = await backdrop.count();
+    if (left > 0) {
+      br.errs += 1;
+      br.lastErr = `닫기 뒤 덮개 ${left}개 남음`;
+      return false;
+    }
+    br.closed += 1;
+    return true;
+  } catch (e) {
+    br.errs += 1;
+    br.lastErr = L.describeError(e, 120);
+    console.log(`브리핑 팝업 닫기 실패 (${e.name})`);
+    return false;
+  }
+}
+
+function briefText(br) {
+  if (br.seen === 0) return '브리핑 팝업 안 뜸(지나감)';
+  return `브리핑 팝업 뜸 ${br.seen}회 → 단추 줄 [닫기] 누름 · 덮개 사라짐 ${br.closed}회 · 못 닫음 ${br.errs}회${br.lastErr ? `(${br.lastErr})` : ''} · 「오늘 그만 보기」 안 누름`;
+}
+
+// 🔴 5차 ③ — 본 화면 진입 직후 공통 처리 한 곳. 이 뒤의 모든 클릭(결재 길 등)은 덮개 없는 화면에서 한다.
+//   약관 화면(EmptyLayout)·로그인 화면에는 대시보드가 없어 팝업이 안 뜬다 — 약관 동의 클릭·로그인 클릭은 해당 없음(개발명세서 §10).
+async function enterMainScreen(page, r, tag, step, br) {
+  step.now = '본 화면 진입(브리핑 팝업 확인)';
+  const ok = await closeBriefing(page, br, BRIEF_APPEAR_MS);
+  L.rec(r, { ...tag, id: 'H-BRIEF', what: '본 화면 진입 직후 일일 브리핑 팝업: 뜨면 [닫기] 로 닫고 덮개가 사라짐 · 안 뜨면 지나감', got: `${briefText(br)} · 주소 ${new URL(page.url()).pathname}`, pass: ok, kind: 'DEVICE' });
+  return ok;
 }
 
 // ⬛ [낡은 머리 · 1~2차] async function screenLogin(page, loginId, password) {
@@ -510,6 +573,10 @@ async function runBrowser(pw, browserName, r, flags, full) {
   const tag = { browser: browserName, scope: 'H' };
   // ⬛ [낡은 줄 · 2차] const tok = { access: null, deviceId: null, masked: 0 };
   const tok = { access: null, deviceId: null, masked: 0, loginTerms: '응답 못 봄' }; // 3차 Q-1 loginTerms = 사실 기록용
+  // 🔴 5차 ① — 끊긴 자리 기록용: 단계(step)·화면(page)을 try 밖에 둔다(catch 가 읽는다) · br = 브리핑 팝업 셈(5차 ②)
+  const step = { now: '브라우저 문맥 준비' };
+  const br = { seen: 0, closed: 0, errs: 0, lastErr: null };
+  let page = null;
   try {
     browser = await pw[browserName].launch();
     context = await browser.newContext({ baseURL: BASE });
@@ -523,11 +590,13 @@ async function runBrowser(pw, browserName, r, flags, full) {
     await blockExternal(context, r);
     await watchTokens(context, tok);
     await context.addInitScript(RECORDER);
-    const page = await context.newPage();
+    // ⬛ [낡은 줄 · 1~4차] const page = await context.newPage();
+    page = await context.newPage();
 
     // ⬛ [낡은 줄 · 1~2차] how = await screenLogin(...) → H-D2 「화면 로그인(나) · 약관 화면 그대로」 got=`${how} → 주소` pass:true
     //   — 약관 문을 재기 전에 지나쳐 「나」 미동의인데 no-terms PASS(리뷰서 Q-1 🔴). 3차: termsGate 가 H-D2·H-D2a·b·c 를 기록.
-    const step = { now: '화면 로그인' };
+    // ⬛ [낡은 줄 · 1~4차] const step = { now: '화면 로그인' }; — 5차: try 밖으로(위)
+    step.now = '화면 로그인';
     // ⬛ [낡은 줄 · 3차] const note = { closed: 0, errs: 0 }; // 3차 — 기기 등록 안내 창 닫은 수
     // 4차 ② — + nav(로그인부터 자리 잡을 때까지 문서 이동·약관 상태 응답 관찰 기록기)
     const note = { closed: 0, errs: 0, nav: watchNav(page, context) };
@@ -547,6 +616,14 @@ async function runBrowser(pw, browserName, r, flags, full) {
     }
 
     // 2차 ⑤ (H3V-2) — 화면 로그인 통과 + 가린 브라우저 토큰 0건 = 런 중 값이 S10 검색 대상에 안 들어갔다 → [장치] 빨강.
+    // 🔴 5차 ②③ — 본 화면 진입 직후 브리핑 팝업 공통 처리(뜨면 [닫기] · 안 뜨면 지나감 · H-BRIEF 한 줄).
+    if (!(await enterMainScreen(page, r, tag, step, br))) {
+      failed = true;
+      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+      return false;
+    }
+
+    step.now = '토큰 가림 확인(H-D3)';
     const masked = await waitMasked(tok);
     const maskedOk = masked > 0 && tok.access !== null;
     L.rec(r, { ...tag, id: 'H-D3', what: '화면 로그인 뒤 브라우저 접속 토큰을 가리고 S10 검색 대상에 넣음', got: `가린 토큰 ${masked}건`, pass: maskedOk, kind: 'DEVICE' });
@@ -558,6 +635,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
 
     // H-T1 녹음기 대조 — 직접 1회 부르면 1건 · 이름 hitpanChat 이어야 한다.
     // ⬛ [낡은 줄 · 1~2차] window.__k35opens.length = 0 … return window.__k35opens.slice() — 3차 Q-2 sessionStorage 녹음기로.
+    step.now = '녹음기 대조(H-T1)';
     const t1 = await page.evaluate(() => {
       if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
       window.__k35.clear();
@@ -570,6 +648,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
     L.rec(r, { ...tag, id: 'H-T1', what: '녹음기: window.open 직접 1회 → 기록 1 · 이름 hitpanChat', got: t1, pass: t1pass, kind: 'TEST' });
 
     if (full) {
+      step.now = '결재 길 흉내 준비(H-T2)';
       // 결재 길 흉내 — 본 창 링크 클릭(Blazor 길잡이가 본 창에서 이동시킨다).
       const before = context.pages().length;
       // ⬛ [낡은 줄 · 1~2차] window.__k35opens.length = 0 (문서 메모리) → 이동 뒤 window.__k35opens.length — 3차 Q-2.
@@ -586,7 +665,18 @@ async function runBrowser(pw, browserName, r, flags, full) {
         document.body.appendChild(a);
         return { doc: window.__k35.doc };
       }, mark);
+      // 🔴 5차 ③ — 클릭 직전에 한 번 더(팝업이 진입 확인 뒤 늦게 떴을 몫 · 같은 함수 · 기다림 0).
+      const seenBefore = br.seen;
+      if (!(await closeBriefing(page, br, 0))) {
+        failed = true;
+        L.rec(r, { ...tag, id: 'H-BRIEF', what: '결재 길 클릭 직전 일일 브리핑 팝업을 [닫기] 로 닫음', got: briefText(br), pass: false, kind: 'DEVICE' });
+        await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+        return false;
+      }
+      if (br.seen > seenBefore) L.rec(r, { ...tag, id: 'H-BRIEF', what: '결재 길 클릭 직전 일일 브리핑 팝업(늦게 뜸)을 [닫기] 로 닫음', got: briefText(br), pass: true, kind: 'DEVICE' });
+      step.now = '결재 길 링크 클릭(H-T2)';
       await page.click('#ci-approval-probe');
+      step.now = '결재 길 이동 뒤 읽기(H-T2)';
       await page.waitForURL((u) => u.pathname.startsWith('/approval/pending'), { timeout: 30000 }).catch((we) => console.log(`결재 길 이동 대기 끝 (${we.name})`));
       await page.waitForLoadState('load', { timeout: 30000 }).catch((le) => console.log(`결재 길 문서 적재 대기 끝 (${le.name})`));
       const post = await page.evaluate(() => {
@@ -596,7 +686,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
       const alive = !pre.err && !post.err && post.mark === mark;
       const opens = alive ? post.opens : null;
       // reload = 이동이 전체 새로고침이었나(문서 번호가 바뀌었나) — 사실 기록 · 판정에는 안 쓴다(어느 쪽이든 기록은 이어진다).
-      const got = { opens, recorder: alive ? '이어짐' : `끊김 ${pre.err || post.err || '표지 다름'}`, reload: alive ? post.doc !== pre.doc : null, path: new URL(page.url()).pathname, pages: context.pages().length - before };
+      const got = { brief: br.seen === 0 ? '안 뜸' : `닫음 ${br.closed}/${br.seen}`, opens, recorder: alive ? '이어짐' : `끊김 ${pre.err || post.err || '표지 다름'}`, reload: alive ? post.doc !== pre.doc : null, path: new URL(page.url()).pathname, pages: context.pages().length - before };
       L.rec(r, { ...tag, id: 'H-T2r', what: '녹음기 이어짐: 이동 전 표지가 이동 뒤 그대로(끊기면 window.open 0회 단언이 아무것도 안 잰다)', got, pass: alive, kind: 'TEST' });
       if (!alive) failed = true;
       if (flags.has('red')) {
@@ -612,6 +702,14 @@ async function runBrowser(pw, browserName, r, flags, full) {
     }
     await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
     return !failed;
+  } catch (e) {
+    // 🔴 5차 ① — 어떤 예외로 흐름이 끊겨도: 앞 줄들은 이미 파일에 있다(lib bindAutosave) + 끊긴 자리를 [장치] 한 줄로.
+    //   런6: H-T2 클릭이 브리핑 덮개에 막혀 TimeoutError → 프로세스가 죽어 결과표 0 줄(콘솔엔 PASS 7).
+    failed = true;
+    const at = page ? new URL(page.url()).pathname : '화면 없음';
+    L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `${L.describeError(e)} @ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE' });
+    if (page) await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+    return false;
   } finally {
     // ⬛ [낡은 갈래 · 1차] 실패면 context.tracing.stop({ path: trace/H-device-<브라우저>.zip }) · 아니면 stop() — 2차 ① 제거.
     // 🔴 2차 ② — 이 브라우저의 로그인을 로그아웃한다(성공·실패 무관 · 토큰을 받았을 때만).
@@ -626,8 +724,25 @@ async function runBrowser(pw, browserName, r, flags, full) {
   }
 }
 
+// 🔴 5차 ① — 프로세스 밖으로 새는 예외(처리기 없는 Promise 거절 등)도 결과표에 [장치] 한 줄을 남기고 빨강으로 끝낸다.
+//   런6 은 처리기 없는 거절(triggerUncaughtException)로 죽었다 — 그때 결과표는 저장 전이라 0 줄이었다.
+function onFatal(r, where) {
+  return (e) => {
+    try {
+      L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: L.describeError(e), pass: false, kind: 'DEVICE' });
+    } catch (e2) {
+      console.log(`⚫ FAIL [장치] 끊긴 자리 기록 실패 (${e2.name})`);
+    }
+    process.exit(1);
+  };
+}
+
 async function main() {
   const r = L.loadResult();
+  // 🔴 5차 ① — 줄마다 바로 파일에(이 뒤 rec 는 넣는 즉시 저장 · 콘솔 = 결과표).
+  L.bindAutosave(r);
+  process.on('unhandledRejection', onFatal(r, 'unhandledRejection'));
+  process.on('uncaughtException', onFatal(r, 'uncaughtException'));
   const flags = plantFlags();
   if (flags.size > 0) {
     console.log(`::warning::측정 커밋 — plant.flags = [${[...flags].join(',')}] · 머지 금지`);
@@ -643,8 +758,19 @@ async function main() {
   }
   // Chromium 전부 · WebKit 1회(§4-1) — WebKit 은 기동·로그인·녹음기만.
   // 2차 ②: Chromium 의 finally 가 로그아웃을 끝낸 **뒤**에 WebKit 이 같은 「나」로 들어간다(순차 await).
-  const okC = await runBrowser(pw, 'chromium', r, flags, true);
-  const okW = await runBrowser(pw, 'webkit', r, flags, false);
+  // ⬛ [낡은 줄 · 1~4차] const okC = await runBrowser(pw, 'chromium', r, flags, true);
+  // ⬛ [낡은 줄 · 1~4차] const okW = await runBrowser(pw, 'webkit', r, flags, false);
+  // 🔴 5차 ① — runBrowser 안 catch 가 못 잡은 것(finally 안 예외 등)도 [장치] 한 줄로 남기고 다음 브라우저로 간다.
+  const safeRun = async (name, full) => {
+    try {
+      return await runBrowser(pw, name, r, flags, full);
+    } catch (e) {
+      L.rec(r, { browser: name, scope: 'H', id: 'H-DX', what: '[장치] 브라우저 흐름 끊김 — 단계=브라우저 정리(finally)', got: L.describeError(e), pass: false, kind: 'DEVICE' });
+      return false;
+    }
+  };
+  const okC = await safeRun('chromium', true);
+  const okW = await safeRun('webkit', false);
   // 🟡 4차 ③ — 끝 상태 한 줄: 「나 = 동의 완료 · 본 화면 · 인증 API 200」(마지막 브라우저가 증명) → 다음 갈래 K 가 「나」를 브라우저로 쓴다.
   //   각 브라우저는 끝에 로그아웃(H-D4)하므로 K 는 화면 로그인부터 시작한다(약관 문 없이 본 화면이어야 한다).
   const endOk = !!(naEnd && naEnd.agreed && naEnd.api === 200);
@@ -659,4 +785,5 @@ if (require.main === module) main();
 // ⬛ [낡은 줄 · 2차] module.exports = { plantFlags, TERMS_REQUIRED_LABELS };
 // 3차 — 로컬 확인(가짜 화면 단독 실행)에서 같은 녹음기·자리 표지를 쓰도록 함께 꺼낸다(CI 동작 무관).
 // ⬛ [낡은 줄 · 3차] module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen };
-module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen, OBS_TERMS_ID };
+// ⬛ [낡은 줄 · 4차] module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen, OBS_TERMS_ID };
+module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen, OBS_TERMS_ID, closeBriefing, BRIEF_BACKDROP };

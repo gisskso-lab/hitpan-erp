@@ -94,10 +94,36 @@ function loadResult() {
   }
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
+// ⬛ [낡은 몸통 · 1~4차] fs.writeFileSync(p, JSON.stringify(r, null, 2)); — 쓰는 도중 프로세스가 죽으면 반쪽 파일이 남는다.
+// 🔴 5차(10/29 · 런6 40750810674 「콘솔 PASS 7 · 결과표 0」) — 임시 파일에 다 쓴 뒤 이름을 바꾼다(반쪽 결과표 0).
 function saveResult(r) {
   const p = resultPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(r, null, 2));
+  const tmp = `${p}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(r, null, 2));
+  fs.renameSync(tmp, p);
+}
+
+// 🔴 5차 ① — 줄마다 바로 쓰기. bindAutosave(r) 를 부른 결과표는 rec 가 줄을 넣을 때마다 파일에 쓴다
+//   → 브라우저 흐름이 어떤 예외로 끊겨도(프로세스가 죽어도) 그때까지 콘솔에 찍힌 줄은 결과표에도 있다(콘솔 = 결과표).
+const autosaved = new WeakSet();
+function bindAutosave(r) {
+  autosaved.add(r);
+  saveResult(r);
+}
+
+// 🔴 5차 ① — 끊긴 자리 한 줄용 예외 설명: 「이름: 메시지 앞 200자」. 값·토큰 0 —
+//   알고 있는 생성값(sanitize) · 인증 머리글 꼴 · 점 셋 토큰 꼴을 **자르기 전에** 지운다(잘린 반쪽 값이 남지 않게).
+function describeError(e, cap = 200) {
+  const name = e && e.name ? String(e.name) : typeof e;
+  let msg = e && e.message !== undefined ? String(e.message) : String(e);
+  msg = sanitize(msg, Number.MAX_SAFE_INTEGER)
+    .replace(/\u001b\[[0-9;]*m/g, '') // 색 제어 글자(Playwright 호출 기록)
+    .replace(/Bearer\s+\S+/gi, 'Bearer ***')
+    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '***')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${name}: ${msg.length > cap ? `${msg.slice(0, cap)}…` : msg}`;
 }
 // 한 줄 기록 — 기존 audit 스크립트의 rec(id, what, got, pass) 꼴 + kind·scope.
 // 4차(10/29) — kind `OBS`(제품 관찰) 추가. 기록만 허용하고 **허용 id 판정은 judge.js 한 곳**(OBS_ALLOWED)이 한다
@@ -108,6 +134,7 @@ function rec(r, { id, what, got, pass, kind, scope = 'H', browser = null, path: 
   const cap = kind === 'OBS' ? 1200 : 300;
   const row = { id, g, path: way, browser, what, got: sanitize(typeof got === 'string' ? got : JSON.stringify(got), cap), pass: !!pass, kind, scope };
   r.rows.push(row);
+  if (autosaved.has(r)) saveResult(r); // 5차 ① — 콘솔에 찍기 전에 파일에 먼저(찍혔는데 표에 없는 줄 0)
   if (kind === 'OBS') {
     console.log(`🟡 OBS ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}`);
     return row;
@@ -121,4 +148,5 @@ module.exports = {
   S0_NAMES, SECRET_PREFIX,
   mask, maskAndRegister, exportPlain, collectSecrets, sanitize,
   outDir, resultPath, loadResult, saveResult, rec,
+  bindAutosave, describeError, // 5차 ①
 };
