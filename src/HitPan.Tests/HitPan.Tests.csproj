@@ -108,6 +108,10 @@
     <!-- 🔴 20261005작2 — 되돌리기 [예] 뒤 감시 판정·루프(순수 C#) — 가짜 시계·응답으로 실제 루프를 돌린다(G-W1~W9). -->
     <Compile Include="..\HitPan.Web\Services\RollbackWatch.cs"
              Link="Linked\RollbackWatch.cs" />
+    <!-- 🔴 20261028작G1-1 (K35) G0 — 알림 → 메신저 팝업 판정(순수 C#)을 **실제로 불러** 잰다.
+         HitPan.Tests 는 HitPan.Web 을 ProjectReference 하지 않는다 ⇒ CS0436 위험 0 (위 RefreshGate·RollbackWatch 와 같은 방식). -->
+    <Compile Include="..\HitPan.Web\Services\ChatNotificationRoute.cs"
+             Link="Linked\ChatNotificationRoute.cs" />
 
     <!-- 🔴 20261013작1 갈래③ (G-W7-6) — 「히트판공지 전송」 화면이 읽는 **그 형**을 게이트가 본다.
          베낀 모양으로 재면 화면이 바뀌어도 게이트는 초록이다(2026-10-12 사고: 게이트는 사전으로 읽어

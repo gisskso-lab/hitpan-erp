@@ -4,6 +4,7 @@
 @inject NotificationClient Notify
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IJSRuntime JS
 
 @* 작(2026-08-13) 그룹웨어 단계2 — 앱 내 알림.
 
@@ -99,6 +100,13 @@
                     config.OnClick = _ =>
                     {
                         n.IsRead = true;
+
+                        // 🔴 20261028작G1-1 (K35) — 새 메시지 알림만 팝업창 (토스트 길)
+                        if (ChatNotificationRoute.TryGetPopupRoomId(n.Type, n.Link, out var toastRoomId))
+                        {
+                            return OpenChatPopupFromToastAsync(toastRoomId, n.Link);
+                        }
+
                         Nav.NavigateTo(n.Link);
                         return Task.CompletedTask;
                     };
@@ -115,7 +123,59 @@
 
         if (!string.IsNullOrWhiteSpace(n.Link))
         {
+            // 🔴 20261028작G1-1 (K35) — 새 메시지 알림만 팝업창 (종 목록 길)
+            if (ChatNotificationRoute.TryGetPopupRoomId(n.Type, n.Link, out var roomId))
+            {
+                _ = OpenChatPopupAsync(roomId, n.Link);
+                return;
+            }
+
             Nav.NavigateTo(n.Link);
+        }
+    }
+
+    /// <summary>
+    /// 🔴 20261028작G1-1 (K35) [3-V] C3 — 토스트 클릭 길. MudBlazor 는 OnClick 결과를 기다리지 않는다
+    /// ⇒ 여기서 기다리고 여기서 받는다. 터지면 한 줄 + 안내 + 본 창 대체(#15). 안내에 동작 버튼은 달지 않는다(C4).
+    /// </summary>
+    private async Task OpenChatPopupFromToastAsync(string roomId, string link)
+    {
+        try
+        {
+            await OpenChatPopupAsync(roomId, link);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[NotificationBell] 토스트에서 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("메신저 창을 열지 못해 히트판 화면 안에서 대화방을 엽니다.", Severity.Warning);
+            Nav.NavigateTo(link);
+        }
+    }
+
+    /// <summary>
+    /// 🔴 20261028작G1-1 (K35) — 새 메시지 알림을 상단바 메신저와 <b>같은 팝업창</b>(hitpanChat)에서 그 방으로 연다.
+    /// 막히거나(false) 터지면 안내 + 지금처럼 본 창 대화방(<paramref name="link"/>)으로 간다 — 조용한 실패 금지.
+    /// 예외를 여기서 다 받는다(종 목록 길은 기다리지 않고 부르므로 밖으로 새면 아무도 못 잡는다).
+    /// </summary>
+    private async Task OpenChatPopupAsync(string roomId, string link)
+    {
+        try
+        {
+            var opened = await JS.InvokeAsync<bool>("hitpanChat.openRoom", ChatNotificationRoute.PopupUrl(roomId));
+
+            if (!opened)
+            {
+                Snackbar.Add("브라우저가 팝업을 막아 히트판 화면 안에서 대화방을 엽니다. "
+                    + "주소창 오른쪽의 팝업 차단 아이콘에서 허용해 주세요.", Severity.Warning);
+                Nav.NavigateTo(link);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 헌법 #15 — 빈 catch 금지. 못 열었다고 화면을 죽이지 않는다(TopHeader 와 같은 꼴).
+            Console.Error.WriteLine($"[NotificationBell] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Snackbar.Add("메신저 창을 열지 못해 히트판 화면 안에서 대화방을 엽니다.", Severity.Warning);
+            Nav.NavigateTo(link);
         }
     }
 
