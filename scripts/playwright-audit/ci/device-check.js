@@ -662,6 +662,9 @@ async function runBrowser(pw, browserName, r, flags, full) {
         a.href = '/approval/pending';
         a.id = 'ci-approval-probe';
         a.textContent = 'ci';
+        // 런7(40754109103) H-DX: body 끝에 붙인 이 시험용 링크가 본 화면 아래쪽 고정 띠 밑에 깔려 클릭 30초 시간초과.
+        //   시험이 만든 링크 자신만 화면 위쪽 보이는 자리에 둔다(제품 요소·덮개는 무접촉 · 강제 클릭 0) — PM 장치 고침 · [4] 확인 대상(SoD).
+        a.style.cssText = 'position:fixed;top:8px;left:50%;z-index:2147483647;padding:2px 6px;background:#fff;';
         document.body.appendChild(a);
         return { doc: window.__k35.doc };
       }, mark);
