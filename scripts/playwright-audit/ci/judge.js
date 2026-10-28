@@ -13,12 +13,25 @@
 //      `pass` 를 truthy 로 봐서 글자 "false" 가 통과였다.)
 //   ⑥ K 본문(`k35-*.js`, 이 폴더)이 하나라도 있으면 **G 로 시작하는 시험**(id 또는 g 칸 · scope H 제외)이
 //      1건 이상이어야 한다 — H 자체 점검 단언(H-T1·H-T2)이 「돈 시험 0건」 규칙을 채우지 못하게.
+//
+// 🟡 4차(10/29 · 대표 결재 「약관 결함은 별건 작업 · 장치는 분리」) — kind `OBS`(제품 관찰)
+//   ⑦ OBS 는 **허용 목록(OBS_ALLOWED) 안의 id 만** 쓸 수 있다. 목록 밖 id 의 OBS · 소문자 `obs` · 모르는 kind 는
+//      종전대로 ⑤ 줄 꼴 이상 ⚫ [장치] 빨강. OBS 는 PASS/FAIL 수 · 「돈 시험」 수에 안 세고 `🟡 OBS` 로 따로 찍는다.
+//      OBS 줄의 pass 는 참거짓 꼴만 본다(판정에 안 씀 · device-check 는 「원래 게이트였다면 빨강」 = false 로 적는다).
 'use strict';
 
 const fs = require('fs');
 const L = require('./lib');
 
 const KINDS = new Set(['TEST', 'DEVICE']);
+// 4차 ⑦ — OBS 허용 id. 근거 docs/검증/선행/20261029_1V_약관미동의_본화면진입_원인.md (약관 미동의자가 본 화면에 자리 잡음 · 제품 결함 유력).
+const OBS_ALLOWED = new Set([
+  'H-OBS-TERMS', // 약관 결함 별건이 고쳐지면 이 줄을 지우고 H-D2 를 다시 [장치] 빨강으로
+]);
+
+function isObsRow(x) {
+  return x.kind === 'OBS' && OBS_ALLOWED.has(x.id);
+}
 
 // 이 폴더의 K 본문 파일 수 — 워크플로 S8 의 `scripts/playwright-audit/ci/k35-*.js` 와 같은 뜻.
 function kBodyFiles(dir = __dirname) {
@@ -45,8 +58,11 @@ function main() {
   }
   const rows = r && Array.isArray(r.rows) ? r.rows : [];
   // 2차 ⑤ — 꼴이 맞는 줄만 센다. 꼴이 틀린 줄은 따로 모아 빨강.
-  const bad = rows.filter((x) => !x || typeof x !== 'object' || !KINDS.has(x.kind) || typeof x.pass !== 'boolean');
+  // ⬛ [낡은 줄 · 2~3차] const bad = rows.filter((x) => !x || typeof x !== 'object' || !KINDS.has(x.kind) || typeof x.pass !== 'boolean');
+  // 4차 ⑦ — OBS 는 허용 id 일 때만 꼴이 맞다.
+  const bad = rows.filter((x) => !x || typeof x !== 'object' || !(KINDS.has(x.kind) || isObsRow(x)) || typeof x.pass !== 'boolean');
   const good = rows.filter((x) => !bad.includes(x));
+  const obs = good.filter((x) => x.kind === 'OBS');
   const tests = good.filter((x) => x.kind === 'TEST');
   const failT = tests.filter((x) => x.pass !== true);
   const failD = good.filter((x) => x.kind === 'DEVICE' && x.pass !== true);
@@ -55,6 +71,10 @@ function main() {
 
   console.log('── 판정표 ──');
   for (const x of good) {
+    if (x.kind === 'OBS') {
+      console.log(`🟡 OBS ${x.scope || '-'} ${x.id}${x.browser ? ` (${x.browser})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${L.sanitize(x.got, 1200)}`);
+      continue;
+    }
     const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
     console.log(`${mark} ${x.scope || '-'} ${x.id}${x.g ? ` ${x.g}` : ''}${x.path ? ` ${x.path}` : ''}${x.browser ? ` (${x.browser})` : ''}`);
   }
@@ -62,10 +82,12 @@ function main() {
     const id = x && typeof x === 'object' ? String(x.id ?? '-') : '-';
     const kind = x && typeof x === 'object' ? JSON.stringify(x.kind ?? null) : '-';
     const pass = x && typeof x === 'object' ? `${typeof x.pass}` : '-';
-    console.log(`⚫ FAIL [장치] 줄 꼴 이상 ${L.sanitize(id)} · kind=${L.sanitize(kind)} · pass 형=${pass}`);
+    const why = x && typeof x === 'object' && x.kind === 'OBS' && !OBS_ALLOWED.has(x.id) ? ' · OBS 허용 목록 밖 id' : '';
+    console.log(`⚫ FAIL [장치] 줄 꼴 이상 ${L.sanitize(id)} · kind=${L.sanitize(kind)} · pass 형=${pass}${why}`);
   }
   console.log(`시드: ${r && r.seed ? `${r.seed.mode} · ${r.seed.path}` : '기록 없음'}`);
-  console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length}`);
+  // ⬛ [낡은 줄 · 2~3차] 끝에 「· 꼴 이상 ${bad.length}」 까지 — 4차: + 관찰 수(빨강 아님)
+  console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length} · 🟡 관찰 ${obs.length}(빨강 아님)`);
   if (r && r.external_blocked > 0) {
     console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${(r.external_hosts || []).join(', ')}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
   } else {
@@ -81,7 +103,7 @@ function main() {
     process.exit(1);
   }
   if (bad.length > 0) {
-    console.log('⚫ FAIL [장치] 결과표 줄 꼴 이상 — kind 는 TEST/DEVICE · pass 는 참거짓만(2차 ⑤)');
+    console.log('⚫ FAIL [장치] 결과표 줄 꼴 이상 — kind 는 TEST/DEVICE(OBS 는 허용 id 만 · 4차 ⑦) · pass 는 참거짓만(2차 ⑤)');
     process.exit(1);
   }
   if (tests.length === 0) {
@@ -100,4 +122,5 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { kBodyFiles, isGTest };
+// ⬛ [낡은 줄 · 2~3차] module.exports = { kBodyFiles, isGTest };
+module.exports = { kBodyFiles, isGTest, OBS_ALLOWED, isObsRow };

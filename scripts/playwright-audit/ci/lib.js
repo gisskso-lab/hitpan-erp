@@ -70,12 +70,13 @@ function collectSecrets(env = process.env) {
 }
 
 // 출력 전 소독 — 알고 있는 생성값이 섞였으면 *** 로 바꾼다(가림 위에 한 겹 더).
-function sanitize(text) {
+// 4차(10/29) — 길이 상한을 고를 수 있게(기본 300 그대로). OBS 줄은 관찰 항목이 여럿이라 더 길게 남긴다.
+function sanitize(text, cap = 300) {
   let s = String(text ?? '');
   for (const { value } of collectSecrets()) {
     if (value && value.length >= 4) s = s.split(value).join('***');
   }
-  return s.length > 300 ? `${s.slice(0, 300)}…(이하 생략)` : s;
+  return s.length > cap ? `${s.slice(0, cap)}…(이하 생략)` : s;
 }
 
 // ── 결과표 ui-k35-result.json (§4-2 · kind TEST / DEVICE) ─────────────────────────
@@ -99,10 +100,18 @@ function saveResult(r) {
   fs.writeFileSync(p, JSON.stringify(r, null, 2));
 }
 // 한 줄 기록 — 기존 audit 스크립트의 rec(id, what, got, pass) 꼴 + kind·scope.
+// 4차(10/29) — kind `OBS`(제품 관찰) 추가. 기록만 허용하고 **허용 id 판정은 judge.js 한 곳**(OBS_ALLOWED)이 한다
+//   — 목록 밖 id 의 OBS 줄은 judge 가 「줄 꼴 이상」 ⚫[장치] 빨강으로 세운다.
 function rec(r, { id, what, got, pass, kind, scope = 'H', browser = null, path: way = null, g = null }) {
-  if (kind !== 'TEST' && kind !== 'DEVICE') throw new Error(`rec: kind 는 TEST/DEVICE 뿐 (${kind})`);
-  const row = { id, g, path: way, browser, what, got: sanitize(typeof got === 'string' ? got : JSON.stringify(got)), pass: !!pass, kind, scope };
+  // ⬛ [낡은 줄 · 1~3차] if (kind !== 'TEST' && kind !== 'DEVICE') throw new Error(`rec: kind 는 TEST/DEVICE 뿐 (${kind})`);
+  if (kind !== 'TEST' && kind !== 'DEVICE' && kind !== 'OBS') throw new Error(`rec: kind 는 TEST/DEVICE/OBS 뿐 (${kind})`);
+  const cap = kind === 'OBS' ? 1200 : 300;
+  const row = { id, g, path: way, browser, what, got: sanitize(typeof got === 'string' ? got : JSON.stringify(got), cap), pass: !!pass, kind, scope };
   r.rows.push(row);
+  if (kind === 'OBS') {
+    console.log(`🟡 OBS ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}`);
+    return row;
+  }
   const mark = row.pass ? '🟢 PASS' : (kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
   console.log(`${mark} ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}`);
   return row;

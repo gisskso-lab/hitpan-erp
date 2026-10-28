@@ -22,6 +22,9 @@
 //     「나」는 시드에서 약관 미동의(seed-children.js 는 부모·가만 동의) → 이 런 첫 브라우저는 약관 문이 **서야** 한다.
 //     약관 문 대조(동작): 동의 전 인증 API 403 forbidden_terms_consent · 동의 뒤 같은 API 200 — 브라우저 문맥 fetch.
 //     약관 문이 안 서거나 동의 전에 200 이면 [장치] 빨강(약관 미들웨어가 CI 에서 안 도는 것 = 보고 대상).
+//   🟡 4차(10/29 · 대표 결재 「약관 결함은 별건 · 장치는 분리」): 자리=main + 로그인 응답 requiresTermsConsent=true 면
+//     H-OBS-TERMS(kind OBS · 빨강 아님)에 관찰(문서 이동 순서·약관 상태 응답·인증 API 상태·알림 글자)을 남기고
+//     화면과 같은 동의 API → 로그아웃 → 다시 화면 로그인 → 본 화면 → H-D2c 200 으로 닫는다. 끝 상태 = H-NA-END 한 줄.
 //   🔴 3차 Q-2: 녹음기 기록을 sessionStorage 에 둔다(전체 새로고침에 살아남는다) + 이동 전 표지를 적고 이동 뒤 그대로인지
 //     단언(아니면 [시험] 빨강 「녹음기 끊김」) + 이동이 전체 새로고침이었는지 got 에 사실로 남긴다.
 'use strict';
@@ -44,6 +47,19 @@ const MAIN_MARK = 'aside.hitpan-sidebar-aside';
 // 약관 문 대조에 쓰는 인증 API — 읽기 전용 GET · 시드②가 같은 길로 200 을 받았다(seed-children.js:97) ·
 //   TermsConsentMiddleware.cs:14~25 우회 목록 밖 → 미동의면 403 forbidden_terms_consent(:97~103).
 const TERMS_PROBE_API = '/api/chat/employees';
+// 🟡 4차(10/29 · 대표 결재 「약관 결함은 별건 작업 · 장치는 분리」 · [1-V] 20261029_1V_약관미동의_본화면진입_원인.md)
+//   자리=main 인데 로그인 응답 requiresTermsConsent=true 면(약관 미동의자가 본 화면에 자리 잡음 = 제품 결함 유력)
+//   H-D2 빨강 대신 H-OBS-TERMS(kind OBS · judge.js OBS_ALLOWED) 한 줄에 관찰을 남기고, **화면과 같은 동의 API** 로 동의를 마친 뒤
+//   다시 화면 로그인 → 본 화면 · 인증 API 200(H-D2c) 으로 장치를 닫는다. 동의 API·재로그인 실패는 [장치] 빨강(H-D2b).
+//   결함이 고쳐지면 judge.js 의 허용 줄을 지운다 → 이 줄이 「꼴 이상」 빨강이 되고 H-D2 를 다시 빨강 게이트로 켠다.
+const OBS_TERMS_ID = 'H-OBS-TERMS';
+// 화면 동의 단추와 같은 끝점·같은 본문(Terms.razor:117~125 · 판 = Terms.razor:68 · 선택 마케팅은 화면에서도 안 누름 = false).
+const TERMS_AGREE_API = '/api/auth/terms/agree';
+const TERMS_VERSION = 'v2.0.0';
+// 화면 로그아웃이 지우는 저장소 칸(Web AuthService.cs:279~281 · AuthModels.cs:7~9) — 제품 함수 hitpanStorage_remove(storage.js:87)로 지운다.
+const AUTH_STORAGE_KEYS = ['hitpan_access_token', 'hitpan_refresh_token', 'hitpan_user_name'];
+// 4차 ③ — 끝 상태(다음 갈래 K 가 「나」를 브라우저로 쓸 수 있나). 마지막으로 H-D2c 를 통과한 브라우저가 적는다.
+let naEnd = null;
 
 function plantFlags() {
   const p = path.join(__dirname, 'plant.flags');
@@ -186,6 +202,8 @@ async function screenLogin(page, loginId, password, note) {
   await page.getByLabel('비밀번호', { exact: true }).fill(password);
   // MudTextField 는 기본이 change(칸을 떠날 때) 반영 — 단추 Disabled(:95) 가 풀리게 칸을 떠난다(⚠️ 미측정 · 첫 런에서 확인).
   await page.getByLabel('비밀번호', { exact: true }).press('Tab');
+  // 4차 ② — 관찰 기록기를 로그인 클릭 직전에 켠다(로그인부터 자리 잡을 때까지 · termsGate 가 끈다).
+  if (note && note.nav) note.nav.arm();
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   // ⬛ [낡은 줄 · 1~2차] await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 60000 });
   // 🔴 3차 — 약관이 없는 로그인(이 런의 두 번째 브라우저 · 1~4런 미실행 길)은 새 기기면 Login.razor:427~443 「기기 등록 안내」 창을
@@ -263,16 +281,174 @@ async function apiInPage(page, tok) {
   }
 }
 
+// 4차 ② — 로그인 클릭부터 자리 잡을 때까지의 관찰 기록기(켜진 동안만 쌓는다 · 값·토큰 0).
+//   doc  = 주 프레임 문서 이동 요청의 **경로만**(쿼리·조각 버림) + 끝(완료 상태 코드 / 실패 사유 = 취소 여부)
+//   st   = `api/auth/terms/status` 응답(상태 코드 · hasAgreed 값만)
+function watchNav(page, context) {
+  const nav = { armed: false, doc: [], st: [], noFrame: 0, noFrameErr: null };
+  const pathOf = (u) => {
+    try { return new URL(u).pathname; } catch (e) { return `(주소 해석 실패 ${e.name})`; }
+  };
+  const find = (req) => nav.doc.find((x) => x.req === req);
+  page.on('request', (req) => {
+    if (!nav.armed) return;
+    let mainDoc = false;
+    try {
+      mainDoc = req.isNavigationRequest() && req.frame() === page.mainFrame();
+    } catch (e) {
+      // 서비스 워커 요청은 frame() 이 던진다(프레임 없음) — 문서 이동이 아니므로 세기만 한다.
+      nav.noFrame += 1;
+      nav.noFrameErr = e.name;
+      return;
+    }
+    if (mainDoc) nav.doc.push({ req, path: pathOf(req.url()), end: '대기' });
+  });
+  page.on('requestfinished', (req) => {
+    const x = find(req);
+    if (!x) return;
+    x.end = '완료';
+    req.response().then((res) => { if (res) x.end = `완료 ${res.status()}`; }).catch((e) => console.log(`문서 이동 응답 읽기 실패 (${e.name})`));
+  });
+  page.on('requestfailed', (req) => {
+    const x = find(req);
+    if (!x) return;
+    const f = req.failure();
+    x.end = `실패 ${f && f.errorText ? f.errorText : '사유 없음'}`;
+  });
+  context.on('response', async (res) => {
+    if (!nav.armed || !/\/api\/auth\/terms\/status(\?|$)/i.test(res.url())) return;
+    const one = { status: res.status(), hasAgreed: '못 읽음' };
+    nav.st.push(one);
+    try {
+      const j = await res.json();
+      const v = j && (j.hasAgreed ?? j.HasAgreed);
+      one.hasAgreed = v === undefined ? '칸 없음' : String(v);
+    } catch (e) {
+      one.hasAgreed = `본문 못 읽음 ${e.name}`;
+    }
+  });
+  nav.arm = () => { nav.doc = []; nav.st = []; nav.noFrame = 0; nav.armed = true; };
+  nav.stop = () => { nav.armed = false; };
+  nav.docText = () => (nav.doc.length ? nav.doc.map((x) => `${x.path}(${x.end})`).join(' → ') : '기록 0');
+  nav.stText = () => `${nav.st.length}회${nav.st.length ? ` [${nav.st.map((x) => `${x.status}:hasAgreed=${x.hasAgreed}`).join(', ')}]` : ''}`;
+  return nav;
+}
+
+// 4차 ② — 화면 위 알림 띠(MudAlert)·토스트(MudSnackbar) 글자. 하나당 앞 120자 · 최대 6개(값·토큰 아님 · 기록 전 sanitize).
+async function noticeTexts(page) {
+  try {
+    return await page.evaluate(() => {
+      const pick = (sel) => [...document.querySelectorAll(sel)]
+        .map((e) => String(e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      return [...pick('.mud-alert').map((s) => `띠:${s}`), ...pick('.mud-snackbar').map((s) => `토스트:${s}`)]
+        .slice(0, 6).map((s) => s.slice(0, 120));
+    });
+  } catch (e) {
+    return [`읽기 실패 ${e.name}`];
+  }
+}
+
+// 4차 ② — 화면 동의 단추와 같은 API 로 필수 4 동의(브라우저 문맥 · 화면이 쓰는 같은 머리글 · 응답 본문은 밖으로 안 낸다).
+async function agreeViaApi(page, tok) {
+  if (!tok.access) return { status: null, err: '토큰 없음' };
+  try {
+    return await page.evaluate(async ({ api, access, dev, ver }) => {
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${access}` };
+      if (dev) headers['X-HitPan-Device-Id'] = dev;
+      const body = { agreeService: true, agreePrivacy: true, agreeSubscription: true, agreeDataOwnership: true, agreeMarketing: false, termsVersion: ver };
+      const res = await fetch(api, { method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store' });
+      return { status: res.status };
+    }, { api: TERMS_AGREE_API, access: tok.access, dev: tok.deviceId, ver: TERMS_VERSION });
+  } catch (e) {
+    return { status: null, err: `요청 실패 ${e.name}` };
+  }
+}
+
+// 4차 ② — 화면 로그아웃과 같은 두 가지: 서버 로그아웃(logoutViaApi) + 이 브라우저 저장소의 로그인 칸 지움(제품 함수).
+async function forgetBrowserLogin(page) {
+  try {
+    return await page.evaluate((keys) => {
+      if (typeof window.hitpanStorage_remove !== 'function') return { ok: false, got: 'hitpanStorage_remove 없음' };
+      for (const k of keys) window.hitpanStorage_remove(k);
+      return { ok: true, got: `저장소 칸 ${keys.length}개 지움` };
+    }, AUTH_STORAGE_KEYS);
+  } catch (e) {
+    return { ok: false, got: `저장소 지우기 실패 ${e.name}` };
+  }
+}
+
+// 4차 ② — 자리=main + requiresTermsConsent=true: 관찰(OBS) 기록 → API 동의 → 로그아웃 → 다시 화면 로그인 → 본 화면.
+//   돌려주는 값 = 동의·재로그인이 끝났나(실패 = H-D2b [장치] 빨강 · 그 뒤 H-D2c 는 termsGate 가 잰다).
+async function observeTermsThenAgree(page, r, tag, tok, step, note, s1, d2got) {
+  step.now = '약관 관찰(자리=main · 동의 요구)';
+  const probe = await apiInPage(page, tok);
+  const texts = await noticeTexts(page);
+  const obsGot = {
+    사실: d2got,
+    문서이동: note.nav ? note.nav.docText() : '기록기 없음',
+    약관상태: note.nav ? note.nav.stText() : '기록기 없음',
+    인증API: `${TERMS_PROBE_API} status=${probe.status}${probe.err ? ` ${probe.err}` : ''} forbidden_terms_consent=${probe.termsBlock === true} (403 기대 ${probe.status === 403 && probe.termsBlock === true ? '맞음' : '어긋남'})`,
+    알림: texts.length ? texts : ['없음'],
+  };
+  // pass=false = 「원래 게이트였다면 빨강」(judge 는 OBS 의 pass 를 판정에 안 쓴다 · 꼴만 본다).
+  L.rec(r, { ...tag, id: OBS_TERMS_ID, what: '[제품 관찰 · 빨강 아님] 약관 미동의(로그인 응답 requiresTermsConsent=true)인데 화면이 본 화면에 자리 잡음 — 별건 약관 결함([1-V] 20261029)', got: obsGot, pass: false, kind: 'OBS' });
+
+  // 🔴 4차 PM 결정 ⑤ — 관찰로 돌린 것은 화면 이동 결함뿐. 서버가 미동의자 API 를 막는 것은 헌법상 필수 → 403 아니면 H-D2a 와 같은 [장치] 빨강.
+  if (!(probe.status === 403 && probe.termsBlock === true)) {
+    L.rec(r, { ...tag, id: 'H-D2a', what: `약관 문 대조: 동의 전 인증 API ${TERMS_PROBE_API} = 403 forbidden_terms_consent (브라우저 문맥)`, got: `관찰 갈래 · 동의 전 API=${probe.status}${probe.err ? ` ${probe.err}` : ''} · forbidden_terms_consent=${probe.termsBlock === true}`, pass: false, kind: 'DEVICE' });
+    return false;
+  }
+  step.now = '약관 동의(화면과 같은 API)';
+  const ag = await agreeViaApi(page, tok);
+  const agOk = typeof ag.status === 'number' && ag.status >= 200 && ag.status < 300;
+  if (!agOk) {
+    L.rec(r, { ...tag, id: 'H-D2b', what: `약관 필수 4개 동의(화면과 같은 API ${TERMS_AGREE_API}) → 다시 로그인 → 본 화면`, got: `동의 API status=${ag.status}${ag.err ? ` ${ag.err}` : ''}`, pass: false, kind: 'DEVICE' });
+    return false;
+  }
+  step.now = '로그아웃(동의 뒤 다시 로그인하려고)';
+  const lo = await logoutViaApi(tok);
+  const fg = await forgetBrowserLogin(page);
+  if (!lo.ok || !fg.ok) {
+    L.rec(r, { ...tag, id: 'H-D2b', what: `약관 필수 4개 동의(화면과 같은 API ${TERMS_AGREE_API}) → 다시 로그인 → 본 화면`, got: `동의 API status=${ag.status} · 로그아웃 ${lo.got} · ${fg.got}`, pass: false, kind: 'DEVICE' });
+    if (!lo.ok) logoutFailures += 1;
+    return false;
+  }
+  // 옛 토큰은 서버에서 끝났다 — 새 로그인 응답을 다시 기다리게 비운다(H-D4 는 새 토큰을 로그아웃한다).
+  tok.access = null;
+  tok.loginTerms = '응답 못 봄';
+  step.now = '다시 화면 로그인(동의 뒤)';
+  await screenLogin(page, process.env.UI_LOGIN_NA || 'ci-na', process.env.UI_PW_NA || '', note);
+  const s2 = await settleScreen(page, 90000, note);
+  if (note.nav) note.nav.stop();
+  await waitMasked(tok);
+  const s2pass = s2.where === 'main' && tok.loginTerms === 'false';
+  L.rec(r, { ...tag, id: 'H-D2b', what: `약관 필수 4개 동의(화면과 같은 API ${TERMS_AGREE_API}) → 로그아웃 → 다시 화면 로그인 → 본 화면 · 로그인 응답 requiresTermsConsent=false`, got: `동의 API status=${ag.status} · 로그아웃 ${lo.got} · ${fg.got} · 재로그인 requiresTermsConsent=${tok.loginTerms} · 자리=${s2.where}@${s2.path}${s2.where ? '' : ` · 시간초과(마지막 ${s2.last} · ${s2.lastErr})`} · 문서 이동 ${note.nav ? note.nav.docText() : '-'}`, pass: s2pass, kind: 'DEVICE' });
+  return s2pass;
+}
+
 // 3차 Q-1 — 약관 문 판정 + 동의 + 동작 확인. 기록하고 성공 여부를 돌려준다(실패 = [장치] 빨강).
 //   기대: 이 런에서 아직 아무도 「나」를 동의시키지 않았으면 약관 화면 · 앞 브라우저가 동의했으면 본 화면.
 async function termsGate(page, r, tag, tok, step, note) {
   const expect = naAgreedThisRun ? 'main' : 'terms';
+  naEnd = null; // 4차 ③ — 끝 상태는 **마지막 브라우저**가 다시 증명해야 한다(앞 브라우저 기록을 물려받지 않음)
   step.now = '화면 자리 잡기(로그인 뒤)';
   const s1 = await settleScreen(page, 90000, note);
+  if (note.nav) note.nav.stop(); // 4차 ② — 관찰은 「자리 잡을 때까지」
   await waitMasked(tok); // 응답 처리기가 늦게 끝날 수 있다 — API 대조에 토큰이 필요하다
   const d2got = `${SEED_FACT_NA} · 앞 브라우저 동의=${naAgreedThisRun} · 기대=${expect} · 로그인 응답 requiresTermsConsent=${tok.loginTerms} · 자리=${s1.where}@${s1.path} · 이동 중 재시도 ${s1.navErrors} · 기기 등록 안내 닫음 ${note.closed}(실패 ${note.errs})`;
-  const d2pass = s1.where === expect;
-  L.rec(r, { ...tag, id: 'H-D2', what: '화면 로그인(나) → 화면 자리 잡음 · 약관 문이 기대대로(시드상 미동의면 선다)', got: s1.where ? d2got : `${d2got} · 시간초과(마지막 ${s1.last} · ${s1.lastErr})`, pass: d2pass, kind: 'DEVICE' });
+  // 🟡 4차 ② — 자리=main 이면서 로그인 응답이 약관 동의를 요구 = 제품 관찰(H-OBS-TERMS) → API 동의 → 재로그인 → 아래 H-D2c.
+  //   (H-D2 는 이 갈래에서 안 적는다 — 결함이 고쳐지면 judge.js 허용 줄을 지워 H-OBS-TERMS 가 빨강이 되고, 이 갈래도 함께 걷는다)
+  const obsCase = s1.where === 'main' && tok.loginTerms === 'true';
+  if (obsCase) {
+    const agreed = await observeTermsThenAgree(page, r, tag, tok, step, note, s1, d2got);
+    if (!agreed) return false;
+    naAgreedThisRun = true;
+  }
+  // ⬛ [낡은 줄 · 3차] const d2pass = s1.where === expect;
+  const d2pass = obsCase || s1.where === expect;
+  // 4차 — 끝에 문서 이동 기록을 덧붙인다([1-V] §5 대조군: 동의 끝난 로그인이면 `/` 한 번뿐이어야).
+  if (!obsCase) L.rec(r, { ...tag, id: 'H-D2', what: '화면 로그인(나) → 화면 자리 잡음 · 약관 문이 기대대로(시드상 미동의면 선다)', got: `문서 이동 ${note.nav ? note.nav.docText() : '-'} · ${s1.where ? d2got : `${d2got} · 시간초과(마지막 ${s1.last} · ${s1.lastErr})`}`, pass: d2pass, kind: 'DEVICE' });
   if (!d2pass) return false;
 
   if (s1.where === 'terms') {
@@ -319,6 +495,8 @@ async function termsGate(page, r, tag, tok, step, note) {
   const post = await apiInPage(page, tok);
   const postPass = post.status === 200;
   L.rec(r, { ...tag, id: 'H-D2c', what: `인증 API ${TERMS_PROBE_API} = 200 (브라우저 문맥 · 약관 미들웨어 통과)`, got: post, pass: postPass, kind: 'DEVICE' });
+  // 4차 ③ — 끝 상태 후보(동의 완료 = 이 런에서 동의를 마쳤거나 로그인 응답이 동의를 요구하지 않음).
+  if (postPass) naEnd = { browser: tag.browser, agreed: naAgreedThisRun || tok.loginTerms === 'false', loginTerms: tok.loginTerms, api: post.status, via: obsCase ? 'API 동의(관찰 갈래)' : (s1.where === 'terms' ? '화면 동의' : '이미 동의') };
   return postPass;
 }
 
@@ -350,7 +528,9 @@ async function runBrowser(pw, browserName, r, flags, full) {
     // ⬛ [낡은 줄 · 1~2차] how = await screenLogin(...) → H-D2 「화면 로그인(나) · 약관 화면 그대로」 got=`${how} → 주소` pass:true
     //   — 약관 문을 재기 전에 지나쳐 「나」 미동의인데 no-terms PASS(리뷰서 Q-1 🔴). 3차: termsGate 가 H-D2·H-D2a·b·c 를 기록.
     const step = { now: '화면 로그인' };
-    const note = { closed: 0, errs: 0 }; // 3차 — 기기 등록 안내 창 닫은 수
+    // ⬛ [낡은 줄 · 3차] const note = { closed: 0, errs: 0 }; // 3차 — 기기 등록 안내 창 닫은 수
+    // 4차 ② — + nav(로그인부터 자리 잡을 때까지 문서 이동·약관 상태 응답 관찰 기록기)
+    const note = { closed: 0, errs: 0, nav: watchNav(page, context) };
     try {
       await screenLogin(page, process.env.UI_LOGIN_NA || 'ci-na', process.env.UI_PW_NA || '', note);
       const gateOk = await termsGate(page, r, tag, tok, step, note);
@@ -465,12 +645,18 @@ async function main() {
   // 2차 ②: Chromium 의 finally 가 로그아웃을 끝낸 **뒤**에 WebKit 이 같은 「나」로 들어간다(순차 await).
   const okC = await runBrowser(pw, 'chromium', r, flags, true);
   const okW = await runBrowser(pw, 'webkit', r, flags, false);
+  // 🟡 4차 ③ — 끝 상태 한 줄: 「나 = 동의 완료 · 본 화면 · 인증 API 200」(마지막 브라우저가 증명) → 다음 갈래 K 가 「나」를 브라우저로 쓴다.
+  //   각 브라우저는 끝에 로그아웃(H-D4)하므로 K 는 화면 로그인부터 시작한다(약관 문 없이 본 화면이어야 한다).
+  const endOk = !!(naEnd && naEnd.agreed && naEnd.api === 200);
+  L.rec(r, { id: 'H-NA-END', what: '끝 상태: 나 = 약관 동의 완료 · 본 화면 · 인증 API 200 (다음 갈래 K 가 브라우저로 쓸 수 있다 · 끝에 로그아웃함)', got: naEnd ? `동의 완료=${naEnd.agreed}(${naEnd.via}) · 마지막 로그인 응답 requiresTermsConsent=${naEnd.loginTerms} · 본 화면 · ${TERMS_PROBE_API} ${naEnd.api} · 증명 브라우저 ${naEnd.browser} · 로그아웃 실패 ${logoutFailures}` : '마지막 브라우저가 H-D2c 까지 못 감', pass: endOk, kind: 'DEVICE' });
   L.saveResult(r);
-  process.exit(okC && okW && logoutFailures === 0 ? 0 : 1);
+  // ⬛ [낡은 줄 · 2~3차] process.exit(okC && okW && logoutFailures === 0 ? 0 : 1);
+  process.exit(okC && okW && logoutFailures === 0 && endOk ? 0 : 1);
 }
 
 // 2차 ⑧ — 로컬 확인(plant.flags 해석)용으로 함수만 꺼내 쓸 수 있게 한다. CI 는 `node device-check.js` 직접 실행.
 if (require.main === module) main();
 // ⬛ [낡은 줄 · 2차] module.exports = { plantFlags, TERMS_REQUIRED_LABELS };
 // 3차 — 로컬 확인(가짜 화면 단독 실행)에서 같은 녹음기·자리 표지를 쓰도록 함께 꺼낸다(CI 동작 무관).
-module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen };
+// ⬛ [낡은 줄 · 3차] module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen };
+module.exports = { plantFlags, TERMS_REQUIRED_LABELS, RECORDER, TERMS_MARK, MAIN_MARK, settleScreen, OBS_TERMS_ID };
