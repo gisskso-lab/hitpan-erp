@@ -46,8 +46,18 @@ public class TaxInvoicePdfRenderGuardTests
     /// </summary>
     private readonly Xunit.Abstractions.ITestOutputHelper _out;
 
-    /// <summary>증거 Base64 상한 — 넘으면 SHA-256·크기·쪽별 앞 300자만 싣는다.</summary>
+    /// <summary>증거 Base64 상한 — <b>실제로 싣는 Base64 글자 수</b>(ASCII 라 글자 = 바이트)로 잰다. 넘으면 SHA-256·크기·쪽별 앞 300자만 싣는다.</summary>
+    /// <remarks>
+    /// ⬛ [1차 · 20261028] PDF 원본 바이트(<c>pdf.Length</c>)와 비교했다 — 이름과 달리 실제 출력은 최대 약 5.6 MB 였다([4] V-5).
+    /// 🔴 G1-2 2차 — 판정은 <see cref="EvidenceFitsBase64"/> 하나(DB 없는 단언 <c>T7_증거_Base64_상한은_실제_싣는_길이로_잰다</c>).
+    /// </remarks>
     private const int EvidenceBase64MaxBytes = 4 * 1024 * 1024;
+
+    /// <summary>원본 <paramref name="byteCount"/> 바이트를 Base64 로 풀었을 때의 글자 수(= 4·⌈n/3⌉, 줄바꿈 없음).</summary>
+    private static long Base64Length(int byteCount) => ((byteCount + 2L) / 3L) * 4L;
+
+    /// <summary>실제로 싣는 Base64 가 상한 안인가.</summary>
+    private static bool EvidenceFitsBase64(int pdfBytes) => Base64Length(pdfBytes) <= EvidenceBase64MaxBytes;
 
     public TaxInvoicePdfRenderGuardTests(Xunit.Abstractions.ITestOutputHelper output)
     {
@@ -679,9 +689,10 @@ public class TaxInvoicePdfRenderGuardTests
 
         try
         {
-            if (pdf.Length <= EvidenceBase64MaxBytes)
+            // ⬛ [1차] `if (pdf.Length <= EvidenceBase64MaxBytes)` — 원본 바이트로 쟀다(V-5). 이제 싣는 Base64 길이로.
+            if (EvidenceFitsBase64(pdf.Length))
             {
-                _out.WriteLine($"[T7 증거] {fileName} · {pdf.Length} bytes · Base64 ↓");
+                _out.WriteLine($"[T7 증거] {fileName} · {pdf.Length} bytes · Base64 {Base64Length(pdf.Length)}자 ↓");
                 _out.WriteLine(Convert.ToBase64String(pdf));
                 sb.Append(" · 출력=Base64 ").Append(pdf.Length).Append(" bytes");
             }
@@ -702,6 +713,24 @@ public class TaxInvoicePdfRenderGuardTests
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 🔴 G1-2 2차 ([4] V-5) — 증거 상한은 <b>실제로 싣는 Base64 길이</b>로 잰다(PDF·DB 없음).
+    /// 음성 대조: 판정을 원본 바이트 비교(<c>pdfBytes &lt;= 상한</c>)로 되돌리면 경계 바로 위(3,145,729 bytes → Base64 4,194,308자)가
+    /// 「싣는다」가 되어 FAIL.
+    /// </summary>
+    [Fact]
+    public void T7_증거_Base64_상한은_실제_싣는_길이로_잰다()
+    {
+        foreach (var n in new[] { 0, 1, 2, 3, 4, 62_277, 100_000 })
+        {
+            Assert.Equal(Convert.ToBase64String(new byte[n]).Length, Base64Length(n));   // 길이 식 = 실제 Base64
+        }
+
+        Assert.True(EvidenceFitsBase64(3 * 1024 * 1024));           // Base64 4,194,304자 = 상한 그대로 → 싣는다
+        Assert.False(EvidenceFitsBase64(3 * 1024 * 1024 + 1));      // Base64 4,194,308자 → 상한 초과
+        Assert.False(EvidenceFitsBase64(4 * 1024 * 1024));          // 원본이 상한과 같아도 Base64 는 약 5.6 MB → 초과
     }
 
     /// <summary>

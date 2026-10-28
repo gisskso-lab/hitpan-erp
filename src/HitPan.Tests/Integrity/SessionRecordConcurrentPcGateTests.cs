@@ -2435,14 +2435,41 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     private const string HeldProbePredicateOld_ForContrast =
         "(INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";
 
-    /// <summary><c>G_B31b</c> 탐침 — 잡으면 그 순간의 <c>STATE</c>·<c>INFO</c> 앞 200자를 한 행으로 돌려준다(같은 시점 기록).</summary>
+    /// <summary>
+    /// 🔴 G1-2 2차 (20261029 · [3-V] C-1) — <b>로그에 찍는</b> INFO 식. <c>VALUES</c>(대소문자 무시) <b>앞</b>까지만 · 그중 최대 200자.
+    /// 판정 술어(<see cref="HeldProbePredicate"/>)는 원래 INFO 를 그대로 본다 — 이 식은 기록에만 쓴다.
+    /// </summary>
+    /// <remarks>
+    /// ⬛ [1차 · 20261028] 기록 식은 <c>LEFT(INFO, 200)</c> 였다 — refresh INSERT 의 해시가 약 203자째에서 시작해
+    /// 「안 닿는다」가 제품 SQL 의 줄바꿈·들여쓰기 19글자에 기대고 있었다(문장을 한 줄로 펴면 해시 앞부분이 CI 로그에 찍힌다).
+    /// 이제는 <c>VALUES</c> 뒤(매개변수 값이 글자로 풀려 들어가는 자리)를 구조적으로 못 본다.
+    /// <c>UPPER</c> 는 자를 길이를 찾는 데만 쓰고, 찍는 글자는 원래 INFO 다.
+    /// C# 짝 = <see cref="InfoForLog"/> (DB 없는 단언 <c>G_B31b_기록식_…</c> 이 둘을 함께 잰다).
+    /// </remarks>
+    private const string InfoForLogSql =
+        "LEFT(INFO, LEAST(200, CHAR_LENGTH(SUBSTRING_INDEX(UPPER(INFO), 'VALUES', 1))))";
+
+    /// <summary>
+    /// <see cref="InfoForLogSql"/> 의 C# 짝 — <c>VALUES</c>(대소문자 무시) 앞까지 · 최대 200자. 없으면 200자.
+    /// </summary>
+    private static string? InfoForLog(string? info)
+    {
+        if (info is null) return null;
+        var at = info.IndexOf("VALUES", StringComparison.OrdinalIgnoreCase);
+        var cut = at < 0 ? info.Length : at;
+        return info[..Math.Min(200, cut)];
+    }
+
+    /// <summary><c>G_B31b</c> 탐침 — 잡으면 그 순간의 <c>STATE</c>·<c>INFO</c> 앞(<c>VALUES</c> 전 · 최대 200자)을 한 행으로 돌려준다(같은 시점 기록).</summary>
+    /// <remarks>⬛ [1차] 기록 칸이 <c>LEFT(INFO, 200)</c> 였다 → C-1 로 <see cref="InfoForLogSql"/>. WHERE 의 판정 술어는 그대로.</remarks>
     private const string HeldProbeSql =
-        "SELECT STATE AS State, LEFT(INFO, 200) AS Info FROM information_schema.PROCESSLIST "
+        "SELECT STATE AS State, " + InfoForLogSql + " AS Info FROM information_schema.PROCESSLIST "
         + "WHERE ID = @Tid AND " + HeldProbePredicate;
 
     /// <summary>대조군 — 로그인 연결 한 행을 <b>한 시점에</b> 옛·새 조건과 항목별로 함께 잰다(PROCESSLIST 는 문장 하나에 한 번 찍힌다).</summary>
+    /// <remarks>⬛ [1차] 기록 칸이 <c>LEFT(INFO, 200)</c> 였다 → C-1 로 <see cref="InfoForLogSql"/>. CASE 안 판정 술어는 원래 INFO 그대로.</remarks>
     private const string HeldProbeSnapshotSql =
-        "SELECT STATE AS State, LEFT(INFO, 200) AS Info, "
+        "SELECT STATE AS State, " + InfoForLogSql + " AS Info, "
         + "CASE WHEN " + HeldProbePredicateOld_ForContrast + " THEN 1 ELSE 0 END AS Old, "
         + "CASE WHEN " + HeldProbePredicate + " THEN 1 ELSE 0 END AS New, "
         + "CASE WHEN INFO LIKE '%INSERT INTO refresh_tokens%' THEN 1 ELSE 0 END AS TermInsert, "
@@ -2468,11 +2495,86 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
 
         public override string ToString() =>
             $"옛={Old} · 새={New} · [INSERT INTO refresh_tokens]={TermInsert} · [gate_b31b_slept]={TermSlept} · "
-            + $"[User sleep]={TermSleepState} · STATE={State ?? "(null)"} · INFO 앞 200자={Info ?? "(null)"}";
+            + $"[User sleep]={TermSleepState} · STATE={State ?? "(null)"} · INFO 앞(VALUES 전·최대 200자)={Info ?? "(null)"}";
+
+        /// <summary>
+        /// 🔴 G1-2 2차 (V-2) — 판정 술어 <c>New</c> 가 따로 잰 세 항의 OR 과 같은가. 술어에서 항 하나를 지우면
+        /// 그 항만 참인 순간에 어긋난다(실물 스냅숏용 · 결정적 점검은 항별 가짜 행 단언이 한다).
+        /// </summary>
+        public bool NewMatchesTerms => New == (TermInsert + TermSlept + TermSleepState > 0 ? 1 : 0);
     }
 
     private static HeldProbeSnapshot? ProbeSnapshot(IDbConnection db, long threadId) =>
         db.QueryFirstOrDefault<HeldProbeSnapshot>(HeldProbeSnapshotSql, new { Tid = threadId });
+
+    /// <summary>
+    /// 🔴 G1-2 2차 ([3-V] C-3 · [4] V-3) — finally 정리 한 동작. 실패해도 <b>다음 정리가 돌고</b> try 의 원래 실패 원인을 덮지 않게
+    /// 여기서 받아 기록만 한다(#15). 기록은 예외 종류·DB 오류 번호뿐 — 값·연결 문자열은 안 찍는다.
+    /// </summary>
+    private static void CleanupStep(string gate, string what, Action step)
+    {
+        try
+        {
+            step();
+        }
+        catch (Exception ex)
+        {
+            var number = ex is MySqlException my ? $" · 오류 번호 {my.Number}" : string.Empty;
+            Console.Error.WriteLine($"[{gate}] 정리 실패 — {what}: {ex.GetType().Name}{number} (다음 정리는 계속한다)");
+        }
+    }
+
+    /// <summary>
+    /// 🔴 G1-2 2차 ([3-V] C-3) — <b>DB 없이</b>: 정리 한 동작이 던져도 밖으로 안 나가고 다음 정리가 돈다.
+    /// 음성 대조: <see cref="CleanupStep"/> 의 받기를 빼면 첫 동작의 예외가 새어 FAIL.
+    /// </summary>
+    [Fact]
+    public void G_B31b_정리_한동작이_실패해도_다음_정리는_돈다_DB없음()
+    {
+        var ran = new List<string>();
+        var leaked = Record.Exception(() =>
+        {
+            CleanupStep("정리 단언", "첫 동작(일부러 실패)", () => throw new InvalidOperationException("일부러"));
+            CleanupStep("정리 단언", "둘째 동작", () => ran.Add("둘째"));
+        });
+        Assert.Null(leaked);
+        Assert.Equal(new[] { "둘째" }, ran);
+    }
+
+    /// <summary>
+    /// 🔴 G1-2 2차 ([3-V] C-2) — <b>DB 없이</b> 도는 기록 식 반증. 들여쓰기 없는 한 줄 refresh INSERT 꼴 가짜 문장에서
+    /// 해시 자리 글자가 기록에 0 남는가 · 두 탐침 SQL 이 기록 칸에 그 식을 쓰는가(옛 <c>LEFT(INFO, 200)</c> 가 남아 있지 않은가).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 음성 대조 — <see cref="InfoForLog"/> 를 「앞 200자」로 되돌리면 한 줄 문장에서 <c>hash자리</c> 가 찍혀 FAIL ·
+    /// 탐침 SQL 의 기록 칸을 <c>LEFT(INFO, 200)</c> 로 되돌리면 글자 단언이 FAIL. 같은 식의 DB 실물 판정은 대조군 안 가짜 행이 한다.
+    /// </remarks>
+    [Fact]
+    public void G_B31b_기록식_VALUES_뒤는_찍지_않는다_DB없음()
+    {
+        const string oneLine =
+            "INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked, session_id) "
+            + "VALUES ('tokenid자리', 'userid자리', 'hash자리', 'expires자리', 0, 'sessionid자리')";
+        var lowerCase = oneLine.Replace("VALUES", "values", StringComparison.Ordinal);
+
+        foreach (var info in new[] { oneLine, lowerCase })
+        {
+            var logged = InfoForLog(info)!;
+            Assert.True(!logged.Contains("hash자리", StringComparison.Ordinal),
+                $"기록 식이 VALUES 뒤 해시 자리를 찍는다(C-1) — 기록 길이 {logged.Length}");
+            Assert.True(!logged.Contains("자리", StringComparison.Ordinal),
+                $"기록 식이 VALUES 뒤 값 자리를 찍는다(C-1) — 기록 길이 {logged.Length}");
+            Assert.StartsWith("INSERT INTO refresh_tokens (", logged, StringComparison.Ordinal);   // 문장 종류는 읽힌다
+        }
+
+        Assert.Null(InfoForLog(null));
+        Assert.Equal(200, InfoForLog(new string('x', 500))!.Length);   // VALUES 없는 긴 문장 = 앞 200자(1차와 같음)
+
+        Assert.Contains(InfoForLogSql, HeldProbeSql, StringComparison.Ordinal);
+        Assert.Contains(InfoForLogSql, HeldProbeSnapshotSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("LEFT(INFO, 200)", HeldProbeSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("LEFT(INFO, 200)", HeldProbeSnapshotSql, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// 🔴🔴 <b>G-B31b</b> ([4] N-3) — refresh 저장 중에 <b>원인 연결을 실제로 죽인다</b>(<c>KILL CONNECTION</c>) ⇒
@@ -2533,7 +2635,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
                 if (hit is not null)
                 {
                     Console.Error.WriteLine(
-                        $"[G-B31b] 붙잡은 순간 — STATE={hit.State ?? "(null)"} · INFO 앞 200자={hit.Info ?? "(null)"}");
+                        $"[G-B31b] 붙잡은 순간 — STATE={hit.State ?? "(null)"} · INFO 앞(VALUES 전·최대 200자)={hit.Info ?? "(null)"}");
                 }
                 if (!held) await Task.Delay(100);
             }
@@ -2550,11 +2652,17 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             {
                 Console.Error.WriteLine($"[G-B31b] 로그인 연결 종료 실패(이미 끝났을 수 있다): {ex.Message}");
             }
-            loginFailure = await login;
-            System.Diagnostics.Trace.Listeners.Remove(traces);
-            DropTrigger(admin, "gate_b31b_hold_refresh");
-            DropSessionInsertMarker(admin);
-            db.Dispose();
+            catch (Exception ex)
+            {
+                // 🔴 G1-2 2차 (C-3) — DB 오류가 아닌 끝(연결 상태 등)도 받아 다음 정리로 넘어간다.
+                Console.Error.WriteLine($"[G-B31b] 로그인 연결 종료 실패 — {ex.GetType().Name} (다음 정리는 계속한다)");
+            }
+            loginFailure = await login;   // CaptureAsync 가 예외를 값으로 받는다 — 여기서 안 던진다
+            // ⬛ [1차] 아래 네 동작을 맨몸으로 불렀다 — 하나가 던지면 뒤 정리가 건너뛰고 try 의 원래 실패 원인이 덮였다(C-3).
+            CleanupStep("G-B31b", "추적 수신기 떼기", () => System.Diagnostics.Trace.Listeners.Remove(traces));
+            CleanupStep("G-B31b", "붙잡는 트리거 DROP", () => DropTrigger(admin, "gate_b31b_hold_refresh"));
+            CleanupStep("G-B31b", "세션 표지 트리거 DROP", () => DropSessionInsertMarker(admin));
+            CleanupStep("G-B31b", "로그인 연결 닫기", () => db.Dispose());
         }
 
         Assert.True(held && killed, "로그인 연결이 refresh INSERT 에 닿기 전·후를 못 가렸다 — 준비가 성립하지 않는다.");
@@ -2602,6 +2710,26 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             + HeldProbePredicate,
             new { Tid = 1, Info = "SET @gate_b31b_slept = SLEEP(20)", State = "User sleep" });
 
+        // 🔴 G1-2 2차 ([4] V-2) — 항별 가짜 행: 각 행은 세 항 중 <b>하나만</b> 참이다 ⇒ 술어에서 어느 항 하나를 지워도 그 행이 0 이 된다.
+        //   (위 S-2 모양 행은 두 표지가 함께 참이라 하나만 지우면 못 잡았다.)
+        int FakeRowHit(string info, string state) => admin.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM (SELECT @Tid AS ID, @Info AS INFO, @State AS STATE) p WHERE ID = @Tid AND "
+            + HeldProbePredicate,
+            new { Tid = 1, Info = info, State = state });
+        var termSleptOnly = FakeRowHit("SET @gate_b31b_slept = SLEEP(20)", "Sending data");
+        var termSleepStateOnly = FakeRowHit("DO SLEEP(20)", "User sleep");
+        var termInsertOnly = FakeRowHit(
+            "INSERT INTO refresh_tokens (token_id, user_id, token_hash) VALUES (...)", "Update");
+
+        // 🔴 G1-2 2차 ([3-V] C-2) — 기록 식을 DB 실물로: 들여쓰기 없는 한 줄 INSERT 꼴 가짜 문장에서 해시 자리 글자가 0 인가.
+        var loggedOneLine = admin.ExecuteScalar<string?>(
+            "SELECT " + InfoForLogSql + " FROM (SELECT @Info AS INFO) p",
+            new
+            {
+                Info = "INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked, session_id) "
+                    + "VALUES ('tokenid자리', 'userid자리', 'hash자리', 'expires자리', 0, 'sessionid자리')",
+            }) ?? "(null)";
+
         var (svc, db) = NewAuthService();
         var threadId = db.ServerThread;
         admin.Execute(
@@ -2610,7 +2738,8 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         MarkSessionInsert(admin);
 
         using var locker = new MySqlConnection(DbConnString());
-        locker.Open();
+        // ⬛ [1차] 여기서 `locker.Open()` 을 try 밖에서 불렀다 — 터지면 위에서 만든 트리거 2개가 이 시험에서 안 지워졌다(V-3).
+        //   이제 try 첫 줄에서 연다(실패해도 finally 가 트리거를 지운다).
         Task<Exception?>? login = null;
         HeldProbeSnapshot? last = null;
         HeldProbeSnapshot? atJudge = null;
@@ -2621,6 +2750,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         try
         {
             // ① 판정 단계에서 멈추게 — refresh_tokens 를 잠그고 로그인을 시작한다.
+            locker.Open();
             locker.Execute("LOCK TABLES refresh_tokens WRITE");
             login = Task.Run(() => CaptureAsync(() => svc.LoginAsync(NewLoginRequest("pc", WindowsUa))));
 
@@ -2671,6 +2801,11 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             {
                 Console.Error.WriteLine($"[G-B31b 대조군] 잠금 풀기 실패(연결을 닫으면 풀린다): {ex.Message}");
             }
+            catch (Exception ex)
+            {
+                // 🔴 G1-2 2차 (V-3) — DB 오류가 아닌 끝(예: 잠금 연결이 안 열림)도 받아 KILL·DROP 으로 넘어간다.
+                Console.Error.WriteLine($"[G-B31b 대조군] 잠금 풀기 실패 — {ex.GetType().Name} (다음 정리는 계속한다)");
+            }
             try
             {
                 admin.Execute($"KILL CONNECTION {threadId}");
@@ -2679,10 +2814,15 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             {
                 Console.Error.WriteLine($"[G-B31b 대조군] 로그인 연결 종료 실패(이미 끝났을 수 있다): {ex.Message}");
             }
-            if (login is not null) await login;
-            DropTrigger(admin, "gate_b31b_hold_refresh");
-            DropSessionInsertMarker(admin);
-            db.Dispose();
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[G-B31b 대조군] 로그인 연결 종료 실패 — {ex.GetType().Name} (다음 정리는 계속한다)");
+            }
+            if (login is not null) await login;   // CaptureAsync 가 예외를 값으로 받는다 — 여기서 안 던진다
+            // ⬛ [1차] 아래 세 동작을 맨몸으로 불렀다 — 하나가 던지면 뒤 정리가 건너뛰고 try 의 원래 실패 원인이 덮였다(C-3).
+            CleanupStep("G-B31b 대조군", "붙잡는 트리거 DROP", () => DropTrigger(admin, "gate_b31b_hold_refresh"));
+            CleanupStep("G-B31b 대조군", "세션 표지 트리거 DROP", () => DropSessionInsertMarker(admin));
+            CleanupStep("G-B31b 대조군", "로그인 연결 닫기", () => db.Dispose());
         }
 
         Assert.True(s2Shape == 1,
@@ -2697,6 +2837,23 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         Assert.True(atMarker is not null && atMarker.New == 1,
             $"refresh INSERT 안에서 트리거 표지(gate_b31b_slept · User sleep)가 둘 다 거짓이거나 새 탐침이 거짓. "
             + $"잡은 순간 {atInsert} / 마지막 {last}");
+
+        // 🔴 G1-2 2차 ([4] V-2) — 바로 위 단언의 `atMarker.New == 1` 은 표지 항이 술어 안에 있는 한 늘 참이라
+        //   표지 하나만 지운 술어를 못 잡았다. 아래 항별 가짜 행이 결정적으로 잡고 · 실물 스냅숏은 「술어 = 세 항의 OR」 일치를 잰다.
+        Assert.True(termSleptOnly == 1,
+            $"새 탐침이 `gate_b31b_slept` 항만 참인 행을 못 잡는다 — 술어에서 그 표지가 빠졌다. 잰 값={termSleptOnly}");
+        Assert.True(termSleepStateOnly == 1,
+            $"새 탐침이 `User sleep` 항만 참인 행을 못 잡는다 — 술어에서 그 표지가 빠졌다. 잰 값={termSleepStateOnly}");
+        Assert.True(termInsertOnly == 1,
+            $"새 탐침이 `INSERT INTO refresh_tokens` 항만 참인 행을 못 잡는다 — 술어에서 그 항이 빠졌다. 잰 값={termInsertOnly}");
+        Assert.True(atJudge.NewMatchesTerms, $"판정 단계 — 새 탐침 값이 따로 잰 세 항의 OR 과 다르다. {atJudge}");
+        Assert.True(atInsert!.NewMatchesTerms, $"refresh INSERT 안 — 새 탐침 값이 따로 잰 세 항의 OR 과 다르다. {atInsert}");
+        Assert.True(atMarker!.NewMatchesTerms, $"트리거 표지 순간 — 새 탐침 값이 따로 잰 세 항의 OR 과 다르다. {atMarker}");
+
+        // 🔴 G1-2 2차 ([3-V] C-2) — 기록 식(DB 실물)이 한 줄 INSERT 의 VALUES 뒤를 안 찍는다.
+        Assert.True(!loggedOneLine.Contains("자리", StringComparison.Ordinal),
+            $"기록 식이 한 줄 INSERT 의 VALUES 뒤 값 자리를 찍는다(C-1) — 기록 길이 {loggedOneLine.Length}");
+        Assert.StartsWith("INSERT INTO refresh_tokens (", loggedOneLine, StringComparison.Ordinal);
     }
 
     /// <summary>
