@@ -13,6 +13,7 @@
 #
 # 실패 구분(§5): 단계 이름 머리 [장치] / [시험]. 🔴 [시험] 빨강 → 재실행 금지. [장치] 빨강 → 같은 커밋 재실행 1회까지.
 # 측정 커밋: scripts/playwright-audit/ci/plant.flags 에 `red`(심은 빨강 §4-3 ⓒ) · `leak`(누출 검사 3꼴 §0-9 ⑪). 머지 금지.
+#   2차(10/29): 두 낱말은 **한 측정 커밋에 함께**(`red leak`) — S8·S9 는 H-PLANT 로 빨강 · S10 은 꼴 3개 잡음으로 빨강(따로 읽힌다).
 name: UI Browser (K35)
 
 on:
@@ -61,7 +62,8 @@ jobs:
             echo "UI_LOGIN_NA=ci-na"
             echo "HITPAN_LOG_DIR=$RUNNER_TEMP/ui-out/main/api-logs"
           } >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/ui-out/main" "$RUNNER_TEMP/ui-out/trace"
+          # 2차(10/29) ①: trace 는 기록·업로드 안 함 → trace 폴더를 만들지 않는다.
+          mkdir -p "$RUNNER_TEMP/ui-out/main"
           node scripts/playwright-audit/ci/mask-probe.js
 
       - name: "[장치] S0 API 설정값 (환경변수 폴백 · appsettings 무접촉 #21)"
@@ -211,7 +213,7 @@ jobs:
           c=$(grep -r -c -I "hitpan.kr" "$UI_OUT/main" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
           echo "API·화면 로그 안 hitpan.kr 언급 ${c}줄 (기록용 · 요청 증거 아님 · §3-4)"
 
-      - name: "[장치] S10 누출 검사 (3꼴 · trace 풀어서)"
+      - name: "[장치] S10 누출 검사 (3꼴 · zip 풀어서)"
         id: leak
         if: always()
         run: node scripts/playwright-audit/ci/leak-scan.js "$UI_OUT"
@@ -225,13 +227,7 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      - name: "[장치] S11 업로드 — 실패 시 trace (S10 통과분만 · 포크 PR 런 제외 · 7일)"
-        if: >-
-          always() && steps.leak.outcome == 'success' &&
-          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: actions/upload-artifact@v5
-        with:
-          name: ui-k35-trace
-          path: ${{ env.UI_OUT }}/trace
-          retention-days: 7
-          if-no-files-found: ignore
+      # ⬛ [뺀 단계 · 1차] "[장치] S11 업로드 — 실패 시 trace (S10 통과분만 · 포크 PR 런 제외 · 7일)" (ui-k35-trace)
+      # 🔴 2차(10/29 · 작업지시서 §0-9 항목 5 · 보안상무 안 ⓐ): trace 는 기록도 업로드도 안 한다.
+      #   로그인 칸 입력(비번 원문)·인증 헤더가 trace 에 남아 실패 런마다 S10 빨강 → main/ 까지 업로드 0 이 되기 때문.
+      #   실패 증거 = 결과표 · 스크린샷 · API 로그 · 단언 메시지(위 ui-k35-main · 모두 S10 통과분).
