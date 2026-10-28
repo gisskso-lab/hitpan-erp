@@ -157,16 +157,21 @@ jobs:
       - name: "[장치] S6 API 기동 (Production · 본사 길 닫힌 포트)"
         run: |
           set -uo pipefail
+          # H 런 1(40722840211) 장치 빨강: API 는 떴으나 Content root = 체크아웃 폴더 · 「WebRootPath was not found」 → index.html 이 200 이 안 됐다.
+          # 고객 PC 는 서비스가 설치 폴더를 Content root 로 쓴다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0 · [4] 확인 대상).
+          ls -la "$UI_API_DIR/wwwroot" | head -5
+          cd "$UI_API_DIR"
           nohup "$UI_API_EXE" > "$UI_OUT/main/api-stdout.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/ui-api.pid"
           pid=$(cat "$RUNNER_TEMP/ui-api.pid")
+          code=000
           for i in $(seq 1 90); do
             if ! kill -0 "$pid" 2>/dev/null; then echo "::error::[장치] API 프로세스가 기동 중 끝났다"; exit 1; fi
             code=$(curl -s -o /dev/null -w '%{http_code}' "$UI_BASE/index.html" || echo 000)
             if [ "$code" = "200" ]; then echo "API·화면 ready (${i}s)"; exit 0; fi
             sleep 1
           done
-          echo "::error::[장치] API 기동 90초 시간초과"; exit 1
+          echo "::error::[장치] API 기동 90초 시간초과 · 마지막 index.html 응답=$code"; exit 1
 
       - name: "[장치] S5 시드 ② 자식 2 · 대화방 2 (API 기동 뒤)"
         run: node scripts/playwright-audit/ci/seed-children.js
