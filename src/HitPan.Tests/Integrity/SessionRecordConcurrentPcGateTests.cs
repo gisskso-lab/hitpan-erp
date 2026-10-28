@@ -2422,7 +2422,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// 대조군 <c>G_B31b_대조군_…</c> 이 「판정 단계 = 거짓 · refresh INSERT 안 = 참 · S-2 모양 = 참」을 잰다.
     /// </remarks>
     private const string HeldProbePredicate =
-        "(INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";   // ⚠️ R-3 측정 전용(옛 조건) — 머지 금지
+        "(INFO LIKE '%INSERT INTO refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";
 
     /// <summary>
     /// ⬛ <b>낡은 조건 · 대조군 전용</b> — 운영 판정(<c>G_B31b</c>)에는 쓰지 않는다.
