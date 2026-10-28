@@ -2422,7 +2422,7 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     /// 대조군 <c>G_B31b_대조군_…</c> 이 「판정 단계 = 거짓 · refresh INSERT 안 = 참 · S-2 모양 = 참」을 잰다.
     /// </remarks>
     private const string HeldProbePredicate =
-        "(INFO LIKE '%INSERT INTO refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";
+        "(INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";   // ⚠️ R-3 측정 전용(옛 조건) — 머지 금지
 
     /// <summary>
     /// ⬛ <b>낡은 조건 · 대조군 전용</b> — 운영 판정(<c>G_B31b</c>)에는 쓰지 않는다.
@@ -2854,6 +2854,28 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
         Assert.True(!loggedOneLine.Contains("자리", StringComparison.Ordinal),
             $"기록 식이 한 줄 INSERT 의 VALUES 뒤 값 자리를 찍는다(C-1) — 기록 길이 {loggedOneLine.Length}");
         Assert.StartsWith("INSERT INTO refresh_tokens (", loggedOneLine, StringComparison.Ordinal);
+    }
+
+    /// <summary>⚠️ 측정 가지 전용 — 머지 금지(G1-2 R-3·R-4). G_B31b 본문을 50번 돌려 FAIL 수를 센다.</summary>
+    [Fact]
+    public async Task G_B31b_측정전용_50회_반복()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B31b 측정 반복")) return;
+        var fails = new List<string>();
+        for (var k = 1; k <= 50; k++)
+        {
+            try
+            {
+                await G_B31b_원인_연결이_죽어도_보상은_새_연결로_세션_행을_지운다();
+            }
+            catch (Exception ex)
+            {
+                fails.Add($"#{k}: {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
+                Console.Error.WriteLine($"[G-B31b 반복] #{k} FAIL — {ex.Message}");
+            }
+        }
+        Console.Error.WriteLine($"[G-B31b 반복] FAIL {fails.Count}/50");
+        Assert.True(fails.Count == 0, $"G-B31b 반복 FAIL {fails.Count}/50 — " + string.Join(" | ", fails));
     }
 
     /// <summary>
