@@ -2413,6 +2413,68 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
     }
 
     /// <summary>
+    /// 🔴 G1-2 (20261028) — 「로그인 연결이 <b>refresh INSERT(트리거 SLEEP) 안</b>에 붙잡혔다」 탐침 조건 <b>한 곳</b>.
+    /// <c>G_B31b</c> 와 대조군이 같은 글자를 쓴다.
+    /// </summary>
+    /// <remarks>
+    /// <c>INSERT INTO refresh_tokens</c> 문장 + 트리거 표지 2개(<c>gate_b31b_slept</c> · <c>User sleep</c>).
+    /// 트리거 표지는 지우지 않는다 — 트리거 안에서는 INFO 가 <c>SET … SLEEP</c> 으로 보여 문장 조건만으로는 못 잡았다(run 36387241626).
+    /// 대조군 <c>G_B31b_대조군_…</c> 이 「판정 단계 = 거짓 · refresh INSERT 안 = 참 · S-2 모양 = 참」을 잰다.
+    /// </remarks>
+    private const string HeldProbePredicate =
+        "(INFO LIKE '%INSERT INTO refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";
+
+    /// <summary>
+    /// ⬛ <b>낡은 조건 · 대조군 전용</b> — 운영 판정(<c>G_B31b</c>)에는 쓰지 않는다.
+    /// </summary>
+    /// <remarks>
+    /// ⬛ 낡은 조건 · 판정 SELECT(<c>FROM refresh_tokens rt</c>)·만료 refresh 폐기 UPDATE 까지 잡았다 · run 40666254688 —
+    /// 둘 다 세션 INSERT <b>앞</b> 문장이라, 그 순간에 연결을 죽이면 <c>gate_b13c_session_inserted</c> 가 0 이 됐다.
+    /// 대조군이 「판정 단계에서 이 조건은 참」을 재기 위해 글자 그대로 남긴다(#1).
+    /// </remarks>
+    private const string HeldProbePredicateOld_ForContrast =
+        "(INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')";
+
+    /// <summary><c>G_B31b</c> 탐침 — 잡으면 그 순간의 <c>STATE</c>·<c>INFO</c> 앞 200자를 한 행으로 돌려준다(같은 시점 기록).</summary>
+    private const string HeldProbeSql =
+        "SELECT STATE AS State, LEFT(INFO, 200) AS Info FROM information_schema.PROCESSLIST "
+        + "WHERE ID = @Tid AND " + HeldProbePredicate;
+
+    /// <summary>대조군 — 로그인 연결 한 행을 <b>한 시점에</b> 옛·새 조건과 항목별로 함께 잰다(PROCESSLIST 는 문장 하나에 한 번 찍힌다).</summary>
+    private const string HeldProbeSnapshotSql =
+        "SELECT STATE AS State, LEFT(INFO, 200) AS Info, "
+        + "CASE WHEN " + HeldProbePredicateOld_ForContrast + " THEN 1 ELSE 0 END AS Old, "
+        + "CASE WHEN " + HeldProbePredicate + " THEN 1 ELSE 0 END AS New, "
+        + "CASE WHEN INFO LIKE '%INSERT INTO refresh_tokens%' THEN 1 ELSE 0 END AS TermInsert, "
+        + "CASE WHEN INFO LIKE '%gate_b31b_slept%' THEN 1 ELSE 0 END AS TermSlept, "
+        + "CASE WHEN STATE = 'User sleep' THEN 1 ELSE 0 END AS TermSleepState "
+        + "FROM information_schema.PROCESSLIST WHERE ID = @Tid";
+
+    private sealed class HeldProbeHit
+    {
+        public string? State { get; set; }
+        public string? Info { get; set; }
+    }
+
+    private sealed class HeldProbeSnapshot
+    {
+        public string? State { get; set; }
+        public string? Info { get; set; }
+        public long Old { get; set; }
+        public long New { get; set; }
+        public long TermInsert { get; set; }
+        public long TermSlept { get; set; }
+        public long TermSleepState { get; set; }
+
+        public override string ToString() =>
+            $"옛={Old} · 새={New} · [INSERT INTO refresh_tokens]={TermInsert} · [gate_b31b_slept]={TermSlept} · "
+            + $"[User sleep]={TermSleepState} · STATE={State ?? "(null)"} · INFO 앞 200자={Info ?? "(null)"}";
+    }
+
+    private static HeldProbeSnapshot? ProbeSnapshot(IDbConnection db, long threadId) =>
+        db.QueryFirstOrDefault<HeldProbeSnapshot>(HeldProbeSnapshotSql, new { Tid = threadId });
+
+    /// <summary>
     /// 🔴🔴 <b>G-B31b</b> ([4] N-3) — refresh 저장 중에 <b>원인 연결을 실제로 죽인다</b>(<c>KILL CONNECTION</c>) ⇒
     /// 보상이 <b>복제한 새 연결</b>로 세션 행을 지운다(잔여 0 · 「새 연결로 못 했다」 경고 0) · 재로그인 성공.
     /// </summary>
@@ -2458,13 +2520,21 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             // ⬛ [낡은 조건 · run 36387241626 FAIL] `INFO LIKE '%refresh_tokens%'` 만 봤다 — 트리거 안에서는 INFO 가
             //   트리거의 문장(SET … SLEEP)으로 보일 수 있어 못 잡았고, 죽이지 못한 연결이 계정 잠금(GET_LOCK)을 쥔 채
             //   풀에 돌아가 뒤 게이트 20여 건이 「잠시 후 다시 시도해 주세요」로 연쇄 FAIL 했다.
+            // ⬛ [낡은 조건 · run 40666254688 FAIL] `INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep'`
+            //   — 세션 INSERT **앞** 문장(판정 SELECT 의 `FROM refresh_tokens rt` · 만료 refresh 폐기 UPDATE)까지 잡아,
+            //   그 순간 연결을 죽이면 세션 INSERT 가 안 돌아 아래 `gate_b13c_session_inserted` 가 0 이 됐다(약 1%).
+            //   옛 글자는 `HeldProbePredicateOld_ForContrast` 에 대조군 전용으로 남겼다.
+            // 🔴 G1-2 (20261028) — 탐침은 클래스 상수 `HeldProbeSql` 하나(`INSERT INTO refresh_tokens` + 트리거 표지 2개).
+            //   잡은 순간의 STATE·INFO 앞 200자를 남긴다 — 다음 실패 때 「무엇을 잡았나」를 가른다.
             for (var i = 0; i < 150 && !held; i++)
             {
-                held = admin.ExecuteScalar<int>(
-                    @"SELECT COUNT(*) FROM information_schema.PROCESSLIST
-                       WHERE ID = @Tid
-                         AND (INFO LIKE '%refresh_tokens%' OR INFO LIKE '%gate_b31b_slept%' OR STATE = 'User sleep')",
-                    new { Tid = threadId }) > 0;
+                var hit = admin.QueryFirstOrDefault<HeldProbeHit>(HeldProbeSql, new { Tid = threadId });
+                held = hit is not null;
+                if (hit is not null)
+                {
+                    Console.Error.WriteLine(
+                        $"[G-B31b] 붙잡은 순간 — STATE={hit.State ?? "(null)"} · INFO 앞 200자={hit.Info ?? "(null)"}");
+                }
                 if (!held) await Task.Delay(100);
             }
         }
@@ -2502,6 +2572,131 @@ public sealed class SessionRecordConcurrentPcGateTests : IDisposable
             var again = await svc2.LoginAsync(NewLoginRequest("pc", WindowsUa));   // 🔴 409 가 아니다
             Assert.Equal("pc", SessionKind(db2, SidOf(again)!));
         }
+    }
+
+    /// <summary>
+    /// 🔴 <b>G-B31b 대조군</b> (G1-2 · 20261028) — 로그인 연결을 <b>판정 단계</b>(세션 INSERT 앞)에서 표 잠금으로 붙잡으면
+    /// 옛 탐침은 「잡았다」(= 거짓 양성) · 새 탐침은 「안 잡았다」. 풀어 주면 refresh INSERT(트리거 SLEEP) 안에서 새 탐침이 잡는다.
+    /// </summary>
+    /// <remarks>
+    /// <para>[무엇을 재나] <c>G_B31b</c> 가 가끔 세션 INSERT 전에 연결을 죽이던 원인 1순위(옛 탐침의 <c>%refresh_tokens%</c> 가
+    /// 판정 SELECT·폐기 UPDATE 까지 잡는다)를 <b>결정적으로</b> 재현한다 — 운에 맡기는 반복이 아니다.</para>
+    /// <para>🔴 음성 대조 ① 새 상수를 옛 조건으로 되돌리면 「판정 단계 · 새 = 0」 이 FAIL ② 새 상수에서 트리거 표지 2개를 지우면
+    /// 「S-2 모양 = 1」 이 FAIL.</para>
+    /// <para>⚠️ 잠금 연결은 따로(<c>locker</c>) · 어떤 끝에서도 <c>UNLOCK TABLES</c> → 로그인 연결 <c>KILL</c> → 트리거 DROP 순으로 푼다
+    /// (잠금을 남기면 뒤 게이트가 연쇄로 막힌다 — S-2 와 같은 사고).</para>
+    /// </remarks>
+    [Fact]
+    public async Task G_B31b_대조군_판정단계를_붙잡으면_옛탐침은_잡고_새탐침은_안잡는다()
+    {
+        if (!ServerAvailable() && DbGateEnvironment.SkipOrFail("G-B31b 대조군 탐침 범위")) return;
+        SetUpFreshInstall();
+
+        using var admin = new MySqlConnection(DbConnString());
+        admin.Open();
+        SetKillSwitch(admin, 1);
+
+        // S-2 모양 — 트리거 안에서 INFO 가 트리거 문장으로 보이는 순간도 새 조건이 잡아야 한다(트리거 표지 2개를 지우면 0).
+        var s2Shape = admin.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM (SELECT @Tid AS ID, @Info AS INFO, @State AS STATE) p WHERE ID = @Tid AND "
+            + HeldProbePredicate,
+            new { Tid = 1, Info = "SET @gate_b31b_slept = SLEEP(20)", State = "User sleep" });
+
+        var (svc, db) = NewAuthService();
+        var threadId = db.ServerThread;
+        admin.Execute(
+            "CREATE TRIGGER gate_b31b_hold_refresh BEFORE INSERT ON refresh_tokens FOR EACH ROW "
+            + "SET @gate_b31b_slept = SLEEP(20)");
+        MarkSessionInsert(admin);
+
+        using var locker = new MySqlConnection(DbConnString());
+        locker.Open();
+        Task<Exception?>? login = null;
+        HeldProbeSnapshot? last = null;
+        HeldProbeSnapshot? atJudge = null;
+        HeldProbeSnapshot? atInsert = null;
+        HeldProbeSnapshot? atMarker = null;
+        var marksAtJudge = -1;
+        var marksAtInsert = -1;
+        try
+        {
+            // ① 판정 단계에서 멈추게 — refresh_tokens 를 잠그고 로그인을 시작한다.
+            locker.Execute("LOCK TABLES refresh_tokens WRITE");
+            login = Task.Run(() => CaptureAsync(() => svc.LoginAsync(NewLoginRequest("pc", WindowsUa))));
+
+            // ② 로그인 연결이 문장을 든 채 표 잠금을 기다리는 순간 — 그 한 시점에 옛·새를 함께 잰다.
+            for (var i = 0; i < 150 && atJudge is null; i++)
+            {
+                last = ProbeSnapshot(admin, threadId);
+                if (last is { Info: not null } && last.State is not null
+                    && last.State.StartsWith("Waiting for table", StringComparison.Ordinal))
+                {
+                    atJudge = last;
+                }
+                else await Task.Delay(100);
+            }
+            marksAtJudge = AlertCount(admin, "gate_b13c_session_inserted");
+            Console.Error.WriteLine($"[G-B31b 대조군] 판정 단계 — {atJudge?.ToString() ?? "(못 붙잡음) 마지막 " + last}");
+
+            // ③ 풀어 준다 → refresh INSERT(트리거 SLEEP) 안에서 새 탐침이 참이 될 때까지(G_B31b 와 같은 예산).
+            locker.Execute("UNLOCK TABLES");
+            for (var i = 0; i < 150 && atInsert is null; i++)
+            {
+                last = ProbeSnapshot(admin, threadId);
+                if (last is { New: 1 }) atInsert = last;
+                else await Task.Delay(100);
+            }
+            if (atInsert is not null)
+            {
+                marksAtInsert = AlertCount(admin, "gate_b13c_session_inserted");
+                atMarker = atInsert.TermSlept + atInsert.TermSleepState > 0 ? atInsert : null;
+                for (var i = 0; i < 150 && atMarker is null; i++)
+                {
+                    await Task.Delay(100);
+                    last = ProbeSnapshot(admin, threadId);
+                    if (last is not null && last.TermSlept + last.TermSleepState > 0) atMarker = last;
+                }
+            }
+            Console.Error.WriteLine($"[G-B31b 대조군] refresh INSERT 안 — {atInsert?.ToString() ?? "(못 잡음) 마지막 " + last}");
+            Console.Error.WriteLine($"[G-B31b 대조군] 트리거 표지 — {atMarker?.ToString() ?? "(못 잡음) 마지막 " + last}");
+        }
+        finally
+        {
+            // 🔴 어떤 끝에서도 잠금 → 로그인 연결 → 트리거 순으로 푼다(잠금을 남기면 뒤 게이트가 막힌다).
+            try
+            {
+                locker.Execute("UNLOCK TABLES");
+            }
+            catch (MySqlException ex)
+            {
+                Console.Error.WriteLine($"[G-B31b 대조군] 잠금 풀기 실패(연결을 닫으면 풀린다): {ex.Message}");
+            }
+            try
+            {
+                admin.Execute($"KILL CONNECTION {threadId}");
+            }
+            catch (MySqlException ex)
+            {
+                Console.Error.WriteLine($"[G-B31b 대조군] 로그인 연결 종료 실패(이미 끝났을 수 있다): {ex.Message}");
+            }
+            if (login is not null) await login;
+            DropTrigger(admin, "gate_b31b_hold_refresh");
+            DropSessionInsertMarker(admin);
+            db.Dispose();
+        }
+
+        Assert.True(s2Shape == 1,
+            $"새 탐침이 S-2 모양(INFO = 트리거 문장 · STATE = User sleep)을 못 잡는다 — 트리거 표지 2개가 빠졌다. 잰 값={s2Shape}");
+        Assert.True(atJudge is not null,
+            $"로그인 연결이 판정 단계(표 잠금 대기)에서 멈추지 않았다 — 준비가 성립하지 않는다. 마지막 {last}");
+        Assert.True(atJudge!.Old == 1, $"판정 단계 한 시점 — 옛 탐침이 안 잡았다(기대 1). {atJudge}");
+        Assert.True(atJudge.New == 0, $"판정 단계 한 시점 — 새 탐침이 세션 INSERT 앞 문장을 잡았다(기대 0). {atJudge}");
+        Assert.True(marksAtJudge == 0, $"판정 단계인데 세션 표지가 {marksAtJudge} — 아직 세션 INSERT 전이어야 한다. {atJudge}");
+        Assert.True(atInsert is not null, $"잠금을 풀었는데 새 탐침이 refresh INSERT 안을 못 잡았다. 마지막 {last}");
+        Assert.True(marksAtInsert == 1, $"새 탐침이 잡은 순간 세션 표지가 {marksAtInsert}(기대 1) — 세션 INSERT 뒤여야 한다. {atInsert}");
+        Assert.True(atMarker is not null && atMarker.New == 1,
+            $"refresh INSERT 안에서 트리거 표지(gate_b31b_slept · User sleep)가 둘 다 거짓이거나 새 탐침이 거짓. "
+            + $"잡은 순간 {atInsert} / 마지막 {last}");
     }
 
     /// <summary>
