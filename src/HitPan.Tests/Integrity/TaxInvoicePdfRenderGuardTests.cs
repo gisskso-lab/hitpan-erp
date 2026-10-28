@@ -40,6 +40,30 @@ public class TaxInvoicePdfRenderGuardTests
     private static readonly string DumpDir =
         Path.Combine(Path.GetTempPath(), "hitpan-taxinvoice-gate");
 
+    /// <summary>
+    /// 🔴 G1-2 (20261028) — T7 이 <b>틀렸을 때만</b> 증거(PDF Base64 등)를 싣는 통로. 실패 시험의 출력은 trx 에 실린다(가정 · R-2 로 잰다).
+    /// 통과하면 한 글자도 안 쓴다.
+    /// </summary>
+    private readonly Xunit.Abstractions.ITestOutputHelper _out;
+
+    /// <summary>증거 Base64 상한 — <b>실제로 싣는 Base64 글자 수</b>(ASCII 라 글자 = 바이트)로 잰다. 넘으면 SHA-256·크기·쪽별 앞 300자만 싣는다.</summary>
+    /// <remarks>
+    /// ⬛ [1차 · 20261028] PDF 원본 바이트(<c>pdf.Length</c>)와 비교했다 — 이름과 달리 실제 출력은 최대 약 5.6 MB 였다([4] V-5).
+    /// 🔴 G1-2 2차 — 판정은 <see cref="EvidenceFitsBase64"/> 하나(DB 없는 단언 <c>T7_증거_Base64_상한은_실제_싣는_길이로_잰다</c>).
+    /// </remarks>
+    private const int EvidenceBase64MaxBytes = 4 * 1024 * 1024;
+
+    /// <summary>원본 <paramref name="byteCount"/> 바이트를 Base64 로 풀었을 때의 글자 수(= 4·⌈n/3⌉, 줄바꿈 없음).</summary>
+    private static long Base64Length(int byteCount) => ((byteCount + 2L) / 3L) * 4L;
+
+    /// <summary>실제로 싣는 Base64 가 상한 안인가.</summary>
+    private static bool EvidenceFitsBase64(int pdfBytes) => Base64Length(pdfBytes) <= EvidenceBase64MaxBytes;
+
+    public TaxInvoicePdfRenderGuardTests(Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _out = output;
+    }
+
     // ── reflection 도우미 ───────────────────────────────────────────────
 
     private static Type Nested(string name) =>
@@ -605,6 +629,7 @@ public class TaxInvoicePdfRenderGuardTests
     public void T7_여백을_어떻게_줘도_조각이_안_나고_종이가_나온다(float margin, int lineCount)
     {
         var svc = MakeService();
+        var passedModes = new List<string>();
         foreach (var copyMode in new[] { "both", "recipient", "supplier" })
         {
             var where = $"{copyMode} · 품목 {lineCount}줄 · 여백 {margin}mm";
@@ -614,10 +639,98 @@ public class TaxInvoicePdfRenderGuardTests
             Assert.True(pages.Length > 0, $"종이가 한 장도 안 나왔다. {where}");
 
             var copies = copyMode == "both" ? 2 : 1;
-            Assert.Equal(lineCount * copies, Occurrences(string.Concat(pages), LineMarker));
+            // ⬛ [G1-2 이전] `Assert.Equal(lineCount * copies, Occurrences(string.Concat(pages), LineMarker));`
+            //   — 틀려도 copyMode·쪽 수가 안 남아 CI 간헐 실패(F-1) 원인을 가를 수 없었다.
+            // 🔴 G1-2 (20261028) — 같은 술어(found == expected) · 넓히기 0. 틀렸을 때만 증거를 만든다(통과 시 파일·출력 0).
+            var expected = lineCount * copies;
+            var found = Occurrences(string.Concat(pages), LineMarker);
+            var failMessage = found == expected
+                ? string.Empty
+                : T7FailureEvidence(copyMode, margin, lineCount, pdf, pages, expected, found, passedModes);
+            Assert.True(found == expected, failMessage);
+            passedModes.Add($"{copyMode}={found}");
 
             AssertNoCopyFragment(pages, where);
         }
+    }
+
+    /// <summary>
+    /// 🔴 G1-2 (20261028) — T7 낱말 수가 <b>틀렸을 때만</b> 부른다. PDF 를 떨구고(<c>Dump</c>) · 출력(trx)에 Base64 를 싣고 ·
+    /// 판정 메시지를 돌려준다. 증거 남기기가 실패해도 그 사실을 메시지에 덧붙일 뿐 판정(FAIL)은 그대로다.
+    /// </summary>
+    private string T7FailureEvidence(
+        string copyMode, float margin, int lineCount, byte[] pdf, string[] pages,
+        int expected, int found, IReadOnlyList<string> passedModes)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var perPage = ItemLinesPerPage(pages);
+        var sb = new StringBuilder();
+        sb.Append("T7 품목 줄 표지(").Append(LineMarker).Append(") 수 불일치 — ")
+          .Append("copyMode=").Append(copyMode)
+          .Append(" · 여백=").Append(margin.ToString(inv)).Append("mm")
+          .Append(" · 줄 수=").Append(lineCount)
+          .Append(" · 쪽 수=").Append(pages.Length)
+          .Append(" · 기대=").Append(expected)
+          .Append(" · 찾은 수=").Append(found)
+          .Append(" · 쪽별 찾은 수=[").Append(string.Join(",", perPage)).Append("](합 ").Append(perPage.Sum()).Append(')')
+          .Append(" · 쪽별 글자 수=[").Append(string.Join(",", pages.Select(p => p.Length))).Append(']')
+          .Append(" · 같은 반복에서 앞서 지난 벌=[").Append(string.Join(",", passedModes)).Append(']');
+
+        var fileName = string.Create(inv,
+            $"t7-fail-{copyMode}-{margin}mm-{lineCount}lines-{DateTime.UtcNow:yyyyMMdd'T'HHmmssfff'Z'}.pdf");
+        try
+        {
+            sb.Append(" · PDF=").Append(Dump(fileName, pdf));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            sb.Append(" · ⚠️PDF 떨구기 실패(").Append(ex.GetType().Name).Append(": ").Append(ex.Message).Append(')');
+        }
+
+        try
+        {
+            // ⬛ [1차] `if (pdf.Length <= EvidenceBase64MaxBytes)` — 원본 바이트로 쟀다(V-5). 이제 싣는 Base64 길이로.
+            if (EvidenceFitsBase64(pdf.Length))
+            {
+                _out.WriteLine($"[T7 증거] {fileName} · {pdf.Length} bytes · Base64 {Base64Length(pdf.Length)}자 ↓");
+                _out.WriteLine(Convert.ToBase64String(pdf));
+                sb.Append(" · 출력=Base64 ").Append(pdf.Length).Append(" bytes");
+            }
+            else
+            {
+                var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(pdf));
+                _out.WriteLine($"[T7 증거] {fileName} · {pdf.Length} bytes(상한 초과) · SHA-256={sha}");
+                for (var i = 0; i < pages.Length; i++)
+                {
+                    _out.WriteLine($"[T7 증거] {i + 1}쪽 앞 300자: {pages[i][..Math.Min(300, pages[i].Length)]}");
+                }
+                sb.Append(" · 출력=SHA-256 ").Append(sha).Append(" · ").Append(pdf.Length).Append(" bytes(Base64 상한 초과)");
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            sb.Append(" · ⚠️출력 싣기 실패(").Append(ex.Message).Append(')');
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 🔴 G1-2 2차 ([4] V-5) — 증거 상한은 <b>실제로 싣는 Base64 길이</b>로 잰다(PDF·DB 없음).
+    /// 음성 대조: 판정을 원본 바이트 비교(<c>pdfBytes &lt;= 상한</c>)로 되돌리면 경계 바로 위(3,145,729 bytes → Base64 4,194,308자)가
+    /// 「싣는다」가 되어 FAIL.
+    /// </summary>
+    [Fact]
+    public void T7_증거_Base64_상한은_실제_싣는_길이로_잰다()
+    {
+        foreach (var n in new[] { 0, 1, 2, 3, 4, 62_277, 100_000 })
+        {
+            Assert.Equal(Convert.ToBase64String(new byte[n]).Length, Base64Length(n));   // 길이 식 = 실제 Base64
+        }
+
+        Assert.True(EvidenceFitsBase64(3 * 1024 * 1024));           // Base64 4,194,304자 = 상한 그대로 → 싣는다
+        Assert.False(EvidenceFitsBase64(3 * 1024 * 1024 + 1));      // Base64 4,194,308자 → 상한 초과
+        Assert.False(EvidenceFitsBase64(4 * 1024 * 1024));          // 원본이 상한과 같아도 Base64 는 약 5.6 MB → 초과
     }
 
     /// <summary>
