@@ -158,7 +158,8 @@ jobs:
         run: |
           set -uo pipefail
           # H 런 1(40722840211) 장치 빨강: API 는 떴으나 Content root = 체크아웃 폴더 · 「WebRootPath was not found」 → index.html 이 200 이 안 됐다.
-          # 고객 PC 는 서비스가 설치 폴더를 Content root 로 쓴다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0 · [4] 확인 대상).
+          # ⬛ [낡은 줄 · 사실과 다름 — 리뷰서 §재확인 Q-5] 고객 PC 는 서비스가 설치 폴더를 Content root 로 쓴다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0 · [4] 확인 대상).
+          # 고객 PC 는 작업 스케줄러(HitPan-Universal.iss:2990)·폴백 배치(hitpan-start.bat:78)가 api 폴더에서 띄운다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0).
           ls -la "$UI_API_DIR/wwwroot" | head -5
           cd "$UI_API_DIR"
           nohup "$UI_API_EXE" > "$UI_OUT/main/api-stdout.log" 2>&1 &

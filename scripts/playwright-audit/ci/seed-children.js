@@ -60,9 +60,25 @@ async function agreeTerms(who, s) {
   if (res.status < 200 || res.status >= 300) throw new SeedError(`${who} 약관 동의 status=${res.status}`);
 }
 
+// 🔴 3차 Q-3(리뷰서 §재확인 R-①) — 시드가 연 부모·가 API 로그인을 끝에 닫는다.
+//   화면과 같은 길 `POST api/auth/logout`(Web AuthService.cs:243 · AuthController.cs:353 [Authorize]) — 서버가 그 세션을
+//   지운다(AuthController.cs:409~426) → K 본문이 부모·가로 화면 로그인할 때 한 PC 규칙 409(AuthService.cs:418~464)에 안 걸린다.
+//   device-check.js 의 logoutViaApi 와 같은 요청(런2~4 H-D4 status=200).
+async function logout(who, s) {
+  try {
+    const res = await call('POST', '/api/auth/logout', { token: s.token, deviceId: s.deviceId, body: {} });
+    return { who, ok: res.status === 200, got: `${who} status=${res.status}` };
+  } catch (e) {
+    return { who, ok: false, got: `${who} 요청 실패 ${e.name}` };
+  }
+}
+
 async function main() {
   const r = L.loadResult();
   const stage = { now: '준비' };
+  const opened = []; // 3차 Q-3 — [이름, 세션] 연 순서대로
+  let code = 0;
+  // ⬛ [낡은 흐름 · 1~2차] catch 안에서 바로 process.exit(1) — 3차: 로그아웃(finally)을 거친 뒤 끝낸다.
   try {
     const ids = {
       parent: process.env.UI_LOGIN_PARENT || 'ci-parent',
@@ -71,6 +87,7 @@ async function main() {
     };
     stage.now = '부모 로그인';
     const p = await login('PARENT', ids.parent, process.env.UI_PW_PARENT);
+    opened.push(['부모', p]);
     if (p.awaiting) throw new SeedError('부모 기기 승인 대기 — §8 ③ (첫 런 실측 대상)');
     if (p.terms) { stage.now = '부모 약관'; await agreeTerms('PARENT', p); }
 
@@ -90,6 +107,7 @@ async function main() {
 
     stage.now = '가 로그인';
     const ga = await login('GA', ids.ga, process.env.UI_PW_GA);
+    opened.push(['가', ga]);
     if (ga.awaiting) throw new SeedError('가 기기 승인 대기 — §8 ③ (첫 런 실측 대상 · 부모 승인 길 필요)');
     if (ga.terms) { stage.now = '가 약관'; await agreeTerms('GA', ga); }
 
@@ -115,13 +133,26 @@ async function main() {
     L.exportPlain('UI_LOGIN_GA', ids.ga);
     L.exportPlain('UI_LOGIN_NA', ids.na);
     L.rec(r, { id: 'H-S5b', what: '시드② 자식 2(가·나) + 방 2(A·B)', got: 'ok', pass: true, kind: 'DEVICE' });
-    L.saveResult(r);
+    // ⬛ [낡은 줄 · 1~2차] L.saveResult(r); — 3차: finally 에서 로그아웃 줄까지 적은 뒤 한 번 저장.
   } catch (e) {
     const got = e instanceof SeedError ? e.message : `예외 ${e.name} (원문 생략)`;
     L.rec(r, { id: 'H-S5b', what: `시드② 단계=${stage.now}`, got, pass: false, kind: 'DEVICE' });
+    // ⬛ [낡은 줄 · 1~2차] L.saveResult(r); process.exit(1);
+    code = 1;
+  } finally {
+    // 3차 Q-3 — 연 세션을 모두 닫는다(성공·실패 무관). 결과 줄 하나 · 하나라도 200 이 아니면 [장치] 빨강.
+    const outs = [];
+    for (const [who, s] of opened) outs.push(await logout(who, s));
+    //   시드가 끝까지 갔으면 연 세션은 반드시 2(부모·가) — 0·1 이면 빈 통과라 빨강. 앞에서 섰으면 연 만큼만 닫는다.
+    const ok = outs.every((o) => o.ok) && (code === 1 || outs.length === 2);
+    L.rec(r, { id: 'H-S5c', what: '시드② 가 연 부모·가 API 로그인 로그아웃(K 화면 로그인이 한 PC 규칙 409 에 안 걸리게)', got: outs.length ? outs.map((o) => o.got).join(' · ') : '연 세션 0', pass: ok, kind: 'DEVICE' });
+    if (!ok) code = 1;
     L.saveResult(r);
-    process.exit(1);
   }
+  process.exit(code);
 }
 
-main();
+// 3차 — 로컬 확인(가짜 서버 단독 실행)에서 require 로 불러 쓸 수 있게. CI 는 `node seed-children.js` 직접 실행.
+// ⬛ [낡은 줄 · 1~2차] main();
+if (require.main === module) main();
+module.exports = { logout };
