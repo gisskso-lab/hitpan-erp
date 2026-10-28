@@ -680,7 +680,9 @@ async function runBrowser(pw, browserName, r, flags, full) {
       step.now = '결재 길 링크 클릭(H-T2)';
       await page.click('#ci-approval-probe');
       step.now = '결재 길 이동 뒤 읽기(H-T2)';
-      await page.waitForURL((u) => u.pathname.startsWith('/approval/pending'), { timeout: 30000 }).catch((we) => console.log(`결재 길 이동 대기 끝 (${we.name})`));
+      // 런8(40755189494) H-T2: 제품은 /approval/pending 을 ApprovalRedirectPage 가 받아 결재관리 /approval 로 넘긴다
+      //   (ApprovalRedirectPage.razor:1 · ApprovalPendingPage.razor:4 설명) — 본 창이 결재 화면에 닿았는지는 /approval 머리로 본다. PM 고침 · [4] 확인 대상(SoD).
+      await page.waitForURL((u) => u.pathname.startsWith('/approval'), { timeout: 30000 }).catch((we) => console.log(`결재 길 이동 대기 끝 (${we.name})`));
       await page.waitForLoadState('load', { timeout: 30000 }).catch((le) => console.log(`결재 길 문서 적재 대기 끝 (${le.name})`));
       const post = await page.evaluate(() => {
         if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
@@ -698,9 +700,10 @@ async function runBrowser(pw, browserName, r, flags, full) {
         if (!pass) failed = true;
         L.rec(r, { ...tag, id: 'H-PLANT', what: '[심은 빨강] 결재 알림 클릭 시 window.open 1회 (거짓 기대)', got, pass, kind: 'TEST' });
       } else {
-        const pass = opens === 0 && got.path.startsWith('/approval/pending');
+        // ⬛ [낡은 줄 · 런8 빨강] const pass = opens === 0 && got.path.startsWith('/approval/pending');
+        const pass = opens === 0 && got.path.startsWith('/approval') && got.pages === 0;
         if (!pass) failed = true;
-        L.rec(r, { ...tag, id: 'H-T2', what: '본 창 이동(결재 길 흉내) → window.open 0회 · 본 창 /approval/pending', got, pass, kind: 'TEST' });
+        L.rec(r, { ...tag, id: 'H-T2', what: '본 창 이동(결재 길 흉내 · /approval/pending → 제품이 /approval 로 넘김) → window.open 0회 · 새 창 0 · 본 창 결재 화면', got, pass, kind: 'TEST' });
       }
     }
     await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
