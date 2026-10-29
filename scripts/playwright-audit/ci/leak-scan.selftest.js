@@ -25,7 +25,9 @@
 //   C12  M1 maskProbeLines — 꼴 글자를 시험이 따로 계산해 대조(맨 글자 줄 정확히 한 줄씩 · url 대·소문자 둘 · 원문은 [원문] 줄에만 · 대조 값 그대로 · 문맥 줄 4)
 //   C13a M3 자식 프로세스 CI 밖 L.mask → 고정 문구 1줄 · 값 0
 //   C13b M3 자식 프로세스 GITHUB_ACTIONS=true → `::add-mask::<값>\n` 바이트 그대로 = 대조 줄(빨강이면 시험이 틀렸다)
-//   C14a M4 심은 워크플로 글(비밀값·입력 칸·주소 각 1 + 미끼 통째 주석) → 잡힘 정확히 3 · 줄 번호 맞음 · 출력에 심은 글자 0
+// ⬛ 7차 원문: //   C14a M4 심은 워크플로 글(비밀값·입력 칸·주소 각 1 + 미끼 통째 주석) → 잡힘 정확히 3 · 줄 번호 맞음 · 출력에 심은 글자 0
+//   C14a M4 심은 워크플로 글(비밀값·입력 칸·주소 각 1 + `$(…)` 주소 1 + 미끼 통째 주석 + 맨 변수 `$이름` 1) → 잡힘 정확히 4 · 줄 번호 맞음 · 출력에 심은 글자 0
+//       └ V7-F1(10/29 [3-V]): 「`$` 로 시작하면 건너뜀」이 `$(…)`·`${X:-…}` 까지 놓쳤다 → 맨 변수만 건너뜀. 고치기 전 lib 에 붙이면 C14a 빨강(대조군)
 //   C14b M4 레포 .github/workflows 지금 그대로 → 대상 1(ui-browser.yml) · 잡힘 0(「항상 빨강」 아님)
 //   C14c M4 장치 경로 없는 워크플로만 → 대상 0 = 빨강
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
@@ -346,12 +348,16 @@ const hasIntake = typeof L.intakeScan === 'function';
     '      - run: node scripts/playwright-audit/ci/mask-probe.js',
     '      - run: echo "${{ secrets.FAKE_M4_PLANT_' + plantHex + ' }}"',
     '      - run: echo "UI_BASE=http://plant.invalid"',
+    // V7-F1 대조 2줄 — `$(` 는 실행 중에 이어 붙인다(원문에 그 꼴 0). 빨강 기대 1 · 건너뜀 기대 1(맨 변수)
+    '      - run: echo "ALT_BASE=' + '$' + '(cat FAKE_M4_SUB_' + plantHex + '.invalid)"',
+    '      - run: echo "VAR_BASE=$FAKE_M4_VAR_' + plantHex + '"',
   ];
   fs.writeFileSync(path.join(d, 'm4-plant.yml'), yml.join('\n'));
   const want = [
     `m4-plant.yml:${yml.indexOf('    inputs:') + 1}:입력 칸`,
     `m4-plant.yml:${yml.findIndex((l) => l.includes('secrets.FAKE_M4_PLANT_')) + 1}:비밀값`,
     `m4-plant.yml:${yml.findIndex((l) => l.includes('UI_BASE=')) + 1}:주소`,
+    `m4-plant.yml:${yml.findIndex((l) => l.includes('ALT_BASE=')) + 1}:주소`,
   ].sort();
   let ok = false;
   let why = '함수 없음';
@@ -359,12 +365,16 @@ const hasIntake = typeof L.intakeScan === 'function';
     const r = L.intakeScan(d);
     const got = r.hits.map((h) => `${h.file}:${h.line}:${h.kind}`).sort();
     const out = r.lines.join('\n');
-    const noLeak = !out.includes('plant.invalid') && !out.includes('FAKE_M4_PLANT');
+    // ⬛ 7차: const noLeak = !out.includes('plant.invalid') && !out.includes('FAKE_M4_PLANT');
+    const noLeak = !out.includes('plant.invalid') && !out.includes('FAKE_M4_PLANT')
+      && !out.includes('FAKE_M4_SUB') && !out.includes('FAKE_M4_VAR') && !out.includes(plantHex);
+    // ⬛ 7차: ok = … && r.lines.filter(…).length === 3;
     ok = !r.ok && r.targets.length === 1 && got.join('|') === want.join('|') && noLeak
-      && r.lines.filter((l) => l.startsWith('⚫ FAIL [장치] M4 실값 유입 — m4-plant.yml:')).length === 3;
+      && r.lines.filter((l) => l.startsWith('⚫ FAIL [장치] M4 실값 유입 — m4-plant.yml:')).length === 4;
     why = `잡힘 ${r.hits.length} · 기대와 같음=${got.join('|') === want.join('|')} · 출력에 심은 글자 0=${noLeak}`;
   }
-  check('C14a M4 심은 비밀값·입력 칸·주소 정확히 3 · 미끼 주석 0 · 출력에 심은 글자 0', ok, why);
+  // ⬛ 7차: check('C14a M4 심은 비밀값·입력 칸·주소 정확히 3 · 미끼 주석 0 · 출력에 심은 글자 0', ok, why);
+  check('C14a M4 심은 비밀값·입력 칸·주소(+`$(…)`) 정확히 4 · 미끼 주석·맨 변수 0 · 출력에 심은 글자 0', ok, why);
 }
 { // C14b M4 레포 워크플로 지금 그대로
   let ok = false;

@@ -193,7 +193,10 @@ function intakeAddressBad(line) {
     const v = m[1].replace(/^["']+/, '').replace(/["',;]+$/, '');
     if (v === '') continue; // 값 없음(YAML 칸 머리 등)
     if (v.startsWith('${{')) return true; // 밖에서 정해지는 주소
-    if (v.startsWith('$')) continue; // 셸 변수 — 원 값이 따로 검사된다
+    // ⬛ 7차: if (v.startsWith('$')) continue; // 셸 변수 — 원 값이 따로 검사된다
+    //   └ V7-F1(10/29 [3-V]): `$(…)`·`${X:-원격}` 까지 건너뛰었다 → 값 전체가 맨 변수(`$이름`·`${이름}`)일 때만 건너뜀.
+    //     그 밖(`$(…)`·`${이름:-…}`·`${이름}뒤글자`·`$이름뒤글자`)은 주소로 검사 — 호스트를 못 뽑으면 빨강 쪽(누락보다 오탐이 싸다).
+    if (/^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$/.test(v)) continue; // 맨 변수 — 원 값이 따로 검사된다
     if (!INTAKE_LOCAL_HOSTS.has(intakeHostOf(v))) return true;
   }
   return false;
