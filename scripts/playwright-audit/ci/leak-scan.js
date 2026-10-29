@@ -9,7 +9,9 @@
 // 빨강(종료 1)
 //   ⑩ S0 값이 하나라도 비었다(빈 검색 = 거짓 통과) · 값이 8자 미만
 //   한 꼴이라도 잡혔다 → 잡힌 폴더(main 또는 trace)를 **지우고** 빨강(업로드 전)
-//   plant.flags 에 `leak` (측정 커밋): 서로 부분 문자열이 아닌 가짜 값 3개를 꼴마다 심는다 —
+//   ⬛ [낡은 줄 · 1~5차] plant.flags 에 `leak` (측정 커밋): 서로 부분 문자열이 아닌 가짜 값 3개를 꼴마다 심는다 —
+//   plant.flags 에 `leak` (측정 커밋): 서로 부분 문자열이 아닌 가짜 값 4개를 꼴마다(+ 6차 ⑤ 파일 이름에 하나) 심는다 —
+//   🔴 6차 ⑤ 파일·폴더·zip 항목 **이름**도 3꼴로 찾는다(잡힘 줄에 자리=이름/내용).
 //     꼴마다 「잡음」이 찍혀야 장치 정상(그래도 누출이 있으므로 빨강 · 업로드 0). 하나라도 못 잡으면 [장치] 고장.
 // 출력에는 값이 아니라 **표지·꼴·파일 경로만** 찍는다.
 // 🔴 2차(10/29 · 작업지시서 §0-9 항목 5): 브라우저 trace 는 기록·업로드 안 한다 — `trace/` 는 이제 `leak` 측정의
@@ -22,41 +24,52 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const L = require('./lib');
 
-const MIN_LEN = 8;
+// ⬛ [낡은 줄 · 1~5차] const MIN_LEN = 8;
+// 🔴 6차(10/29 · §0-11-3 ①) — 3꼴 한 벌은 lib.js 에 있다(값 8 그대로 · lib → leak-scan require 0).
+const MIN_LEN = L.NEEDLE_MIN_LEN;
 
 // ── 검색 꼴 ────────────────────────────────────────────────────────────────
-// base64 는 앞에 0·1·2 바이트가 붙은 경우의 「값 바이트로만 정해지는 가운데 글자」를 찾는다.
-function base64Needles(value) {
-  const src = Buffer.from(value, 'utf8');
-  const out = new Set();
-  for (let k = 0; k < 3; k += 1) {
-    const enc = Buffer.concat([Buffer.alloc(k), src]).toString('base64').replace(/=+$/, '');
-    const start = Math.ceil((k * 8) / 6);
-    const end = Math.floor(((k + src.length) * 8) / 6);
-    const mid = enc.slice(start, end);
-    if (mid.length >= MIN_LEN) {
-      out.add(mid);
-      out.add(mid.replace(/\+/g, '-').replace(/\//g, '_'));
-    }
-  }
-  return [...out];
-}
-function urlNeedles(value) {
-  const enc = encodeURIComponent(value);
-  const out = new Set();
-  if (enc !== value) {
-    out.add(enc);
-    out.add(enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
-    out.add(enc.replace(/%20/g, '+'));
-  }
-  return [...out];
-}
+// ⬛ [낡은 몸통 · 1~5차 · 6차 ① 로 lib.js 로 옮김(본문 그대로)]
+// // base64 는 앞에 0·1·2 바이트가 붙은 경우의 「값 바이트로만 정해지는 가운데 글자」를 찾는다.
+// function base64Needles(value) {
+//   const src = Buffer.from(value, 'utf8');
+//   const out = new Set();
+//   for (let k = 0; k < 3; k += 1) {
+//     const enc = Buffer.concat([Buffer.alloc(k), src]).toString('base64').replace(/=+$/, '');
+//     const start = Math.ceil((k * 8) / 6);
+//     const end = Math.floor(((k + src.length) * 8) / 6);
+//     const mid = enc.slice(start, end);
+//     if (mid.length >= MIN_LEN) {
+//       out.add(mid);
+//       out.add(mid.replace(/\+/g, '-').replace(/\//g, '_'));
+//     }
+//   }
+//   return [...out];
+// }
+// function urlNeedles(value) {
+//   const enc = encodeURIComponent(value);
+//   const out = new Set();
+//   if (enc !== value) {
+//     out.add(enc);
+//     out.add(enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()));
+//     out.add(enc.replace(/%20/g, '+'));
+//   }
+//   return [...out];
+// }
+// function needlesFor(value) {
+//   return [
+//     { form: 'raw', bufs: [Buffer.from(value, 'utf8')] },
+//     { form: 'base64', bufs: base64Needles(value).map((s) => Buffer.from(s, 'latin1')) },
+//     { form: 'url', bufs: urlNeedles(value).map((s) => Buffer.from(s, 'latin1')) },
+//   ];
+// }
+// 🔴 6차 ① — lib 의 꼴 목록을 지금과 같은 바이트(raw = utf8 · 나머지 = latin1)로 바꾸기만 한다. 내보내기 이름은 그대로.
+const { base64Needles, urlNeedles } = L;
 function needlesFor(value) {
-  return [
-    { form: 'raw', bufs: [Buffer.from(value, 'utf8')] },
-    { form: 'base64', bufs: base64Needles(value).map((s) => Buffer.from(s, 'latin1')) },
-    { form: 'url', bufs: urlNeedles(value).map((s) => Buffer.from(s, 'latin1')) },
-  ];
+  return L.needleForms(value).map(({ form, strs }) => ({
+    form,
+    bufs: strs.map((s) => Buffer.from(s, form === 'raw' ? 'utf8' : 'latin1')),
+  }));
 }
 
 // ── zip 풀기 (외부 도구 없이 · stored/deflate) ─────────────────────────────────
@@ -118,14 +131,22 @@ function collectBlobs(root) {
   return { blobs, errors };
 }
 
-function scanFolder(folder, secrets) {
+// ⬛ [낡은 줄 · 1~5차] function scanFolder(folder, secrets) {
+// 🔴 6차 ⑤ — 내용(b.buf)과 따로 **이름**(`<sub>/<b.label>` = 업로드 폴더명 main·trace + 하위 폴더 + 파일명 + zip 항목명)도
+//   utf8 바이트로 같은 꼴 목록으로 찾는다. 잡힘마다 자리(이름/내용)를 단다. 러너 절대경로는 넣지 않는다(업로드물에 안 실림).
+function scanFolder(folder, secrets, sub = path.basename(folder)) {
   const { blobs, errors } = collectBlobs(folder);
   const hits = [];
   for (const s of secrets) {
     for (const { form, bufs } of needlesFor(s.value)) {
       for (const b of blobs) {
         if (bufs.some((nb) => nb.length > 0 && b.buf.indexOf(nb) >= 0)) {
-          hits.push({ label: s.label, form, file: b.label });
+          // ⬛ [낡은 줄 · 1~5차] hits.push({ label: s.label, form, file: b.label });
+          hits.push({ label: s.label, form, file: b.label, where: '내용' });
+        }
+        const nameBuf = Buffer.from(`${sub}/${b.label.split(path.sep).join('/')}`, 'utf8');
+        if (bufs.some((nb) => nb.length > 0 && nameBuf.indexOf(nb) >= 0)) {
+          hits.push({ label: s.label, form, file: b.label, where: '이름' });
         }
       }
     }
@@ -180,6 +201,7 @@ function plantValues() {
     PLANT_RAW: `FAKE_LEAK_A_${h()}`,
     PLANT_B64: `FAKE_LEAK_B_${h()}`,
     PLANT_URL: `FAKE LEAK/C+${h()}`,
+    PLANT_NAME: `FAKE_LEAK_D_${h()}`, // 🔴 6차 ⑤ — 내용 깨끗한 파일의 **이름**에 심는다(기대 꼴 raw · 자리 이름)
   };
   const vals = Object.values(v);
   for (const a of vals) for (const b of vals) {
@@ -194,6 +216,8 @@ function plant(root, v) {
   fs.mkdirSync(trace, { recursive: true });
   fs.writeFileSync(path.join(main, 'plant-raw.txt'), `note ${v.PLANT_RAW} end`);
   fs.writeFileSync(path.join(main, 'plant-url.txt'), `GET /x?q=${encodeURIComponent(v.PLANT_URL)}&z=1`);
+  // 🔴 6차 ⑤ — 내용은 깨끗 · 이름에만 값(이름을 안 보면 못 잡는다).
+  fs.writeFileSync(path.join(main, `plant-name-${v.PLANT_NAME}.txt`), 'clean');
   // base64 는 trace 꼴 그대로 zip 안 resources/ 에, 시작 자리를 1바이트 밀어서 심는다(가운데 글자 검색 확인).
   const body = Buffer.from(`x${v.PLANT_B64}y`, 'utf8').toString('base64');
   fs.writeFileSync(path.join(trace, 'plant-trace.zip'), makeZip([
@@ -223,7 +247,8 @@ function main() {
     plants = plantValues();
     for (const [label, value] of Object.entries(plants)) L.mask(value);
     plant(root, plants);
-    console.log('측정 커밋 — 가짜 값 3개(서로 부분 문자열 아님)를 원문·base64(trace zip 안)·URL 인코딩으로 심음');
+    // ⬛ [낡은 줄 · 1~5차] console.log('측정 커밋 — 가짜 값 3개(서로 부분 문자열 아님)를 원문·base64(trace zip 안)·URL 인코딩으로 심음');
+    console.log('측정 커밋 — 가짜 값 4개(서로 부분 문자열 아님)를 원문·base64(trace zip 안)·URL 인코딩·파일 이름(원문)으로 심음');
   }
   const secrets = L.collectSecrets();
   if (plants) for (const [label, value] of Object.entries(plants)) secrets.push({ label, value });
@@ -241,8 +266,11 @@ function main() {
     if (!fs.existsSync(folder)) { console.log(`${sub}/ 없음 — 건너뜀(올릴 것도 없음)`); continue; }
     const { hits, errors, files } = scanFolder(folder, secrets);
     console.log(`${sub}/ 파일 ${files}개(풀어 낸 것 포함) · 잡힘 ${hits.length} · 못 푼 zip ${errors.length}`);
-    for (const e of errors) console.log(`  못 푼 zip: ${e}`);
-    for (const h of hits) console.log(`  잡힘: ${h.label} · 꼴=${h.form} · ${sub}/${h.file}`);
+    // ⬛ [낡은 줄 · 1~5차] for (const e of errors) console.log(`  못 푼 zip: ${e}`);
+    // ⬛ [낡은 줄 · 1~5차] for (const h of hits) console.log(`  잡힘: ${h.label} · 꼴=${h.form} · ${sub}/${h.file}`);
+    // 🔴 6차 ⑤ — 경로·글자는 L.sanitize 를 거쳐 찍는다(이름이 곧 값일 수 있다 · 3꼴 소독).
+    for (const e of errors) console.log(`  못 푼 zip: ${L.sanitize(e)}`);
+    for (const h of hits) console.log(`  잡힘: ${h.label} · 꼴=${h.form} · 자리=${h.where} · ${L.sanitize(`${sub}/${h.file}`)}`);
     if (hits.length > 0 || errors.length > 0) {
       red = true;
       fs.rmSync(folder, { recursive: true, force: true });
@@ -252,18 +280,26 @@ function main() {
   }
 
   if (plants) {
-    const expect = { PLANT_RAW: 'raw', PLANT_B64: 'base64', PLANT_URL: 'url' };
+    // ⬛ [낡은 줄 · 1~5차] const expect = { PLANT_RAW: 'raw', PLANT_B64: 'base64', PLANT_URL: 'url' };
+    // 🔴 6차 ⑤ — 심은 값 4개 · 꼴과 자리(이름/내용)를 같이 본다.
+    const expect = {
+      PLANT_RAW: ['raw', '내용'], PLANT_B64: ['base64', '내용'], PLANT_URL: ['url', '내용'], PLANT_NAME: ['raw', '이름'],
+    };
     let deviceOk = true;
-    for (const [label, form] of Object.entries(expect)) {
-      const caught = allHits.some((h) => h.label === label && h.form === form);
-      console.log(`심은 값 ${label}: 꼴 ${form} ${caught ? '잡음' : '못 잡음'}`);
+    // ⬛ [낡은 줄 · 1~5차] for (const [label, form] of Object.entries(expect)) {
+    // ⬛ [낡은 줄 · 1~5차]   const caught = allHits.some((h) => h.label === label && h.form === form);
+    // ⬛ [낡은 줄 · 1~5차]   console.log(`심은 값 ${label}: 꼴 ${form} ${caught ? '잡음' : '못 잡음'}`);
+    for (const [label, [form, where]] of Object.entries(expect)) {
+      const caught = allHits.some((h) => h.label === label && h.form === form && h.where === where);
+      console.log(`심은 값 ${label}: 꼴 ${form} ${caught ? '잡음' : '못 잡음'} · 자리=${where}`);
       if (!caught) deviceOk = false;
     }
     if (!deviceOk) {
       console.log('⚫ FAIL [장치] 누출 검사가 심은 꼴을 놓쳤다 — 장치 고장');
       process.exit(1);
     }
-    console.log('🔴 FAIL (의도된 심은 빨강) — 꼴 3개 다 잡음 · 잡힌 폴더 지움 · 업로드 0 이어야 한다');
+    // ⬛ [낡은 줄 · 1~5차] console.log('🔴 FAIL (의도된 심은 빨강) — 꼴 3개 다 잡음 · 잡힌 폴더 지움 · 업로드 0 이어야 한다');
+    console.log('🔴 FAIL (의도된 심은 빨강) — 심은 값 4개 다 잡음(이름 포함) · 잡힌 폴더 지움 · 업로드 0 이어야 한다');
     process.exit(1);
   }
   if (red) {

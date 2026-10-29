@@ -236,7 +236,10 @@ async function closeBriefing(page, br, appearMs = 0) {
     return true;
   } catch (e) {
     br.errs += 1;
-    br.lastErr = L.describeError(e, 120);
+    // ⬛ [낡은 줄 · 5차] br.lastErr = L.describeError(e, 120);
+    // 🔴 6차 ② — 콘솔용은 이름만(briefText 가 찍는다) · 예외 글자는 br.lastExc 로 따로 두고 rec 의 err 칸(결과표)으로만 넘긴다.
+    br.lastErr = L.errorName(e);
+    br.lastExc = e;
     console.log(`브리핑 팝업 닫기 실패 (${e.name})`);
     return false;
   }
@@ -252,7 +255,9 @@ function briefText(br) {
 async function enterMainScreen(page, r, tag, step, br) {
   step.now = '본 화면 진입(브리핑 팝업 확인)';
   const ok = await closeBriefing(page, br, BRIEF_APPEAR_MS);
-  L.rec(r, { ...tag, id: 'H-BRIEF', what: '본 화면 진입 직후 일일 브리핑 팝업: 뜨면 [닫기] 로 닫고 덮개가 사라짐 · 안 뜨면 지나감', got: `${briefText(br)} · 주소 ${new URL(page.url()).pathname}`, pass: ok, kind: 'DEVICE' });
+  // ⬛ [낡은 줄 · 5차] L.rec(r, { ...tag, id: 'H-BRIEF', what: '본 화면 진입 직후 일일 브리핑 팝업: 뜨면 [닫기] 로 닫고 덮개가 사라짐 · 안 뜨면 지나감', got: `${briefText(br)} · 주소 ${new URL(page.url()).pathname}`, pass: ok, kind: 'DEVICE' });
+  // 🔴 6차 ② — br 의 예외는 err 칸(결과표)으로만.
+  L.rec(r, { ...tag, id: 'H-BRIEF', what: '본 화면 진입 직후 일일 브리핑 팝업: 뜨면 [닫기] 로 닫고 덮개가 사라짐 · 안 뜨면 지나감', got: `${briefText(br)} · 주소 ${new URL(page.url()).pathname}`, pass: ok, kind: 'DEVICE', err: br.lastExc });
   return ok;
 }
 
@@ -713,7 +718,9 @@ async function runBrowser(pw, browserName, r, flags, full) {
     //   런6: H-T2 클릭이 브리핑 덮개에 막혀 TimeoutError → 프로세스가 죽어 결과표 0 줄(콘솔엔 PASS 7).
     failed = true;
     const at = page ? new URL(page.url()).pathname : '화면 없음';
-    L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `${L.describeError(e)} @ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE' });
+    // ⬛ [낡은 줄 · 5차] L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `${L.describeError(e)} @ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE' });
+    // 🔴 6차 ② — got 에서 예외 글자를 뺀다 · 이 예외와 br 의 예외를 err 칸(결과표)으로만(콘솔 = 「예외=<이름>」).
+    L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `@ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE', err: [e, br.lastExc] });
     if (page) await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
     return false;
   } finally {
@@ -735,7 +742,8 @@ async function runBrowser(pw, browserName, r, flags, full) {
 function onFatal(r, where) {
   return (e) => {
     try {
-      L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: L.describeError(e), pass: false, kind: 'DEVICE' });
+      // ⬛ [낡은 줄 · 5차] L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: L.describeError(e), pass: false, kind: 'DEVICE' });
+      L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: '예외 글자는 결과표 err 칸', pass: false, kind: 'DEVICE', err: e }); // 🔴 6차 ②
     } catch (e2) {
       console.log(`⚫ FAIL [장치] 끊긴 자리 기록 실패 (${e2.name})`);
     }
@@ -771,7 +779,8 @@ async function main() {
     try {
       return await runBrowser(pw, name, r, flags, full);
     } catch (e) {
-      L.rec(r, { browser: name, scope: 'H', id: 'H-DX', what: '[장치] 브라우저 흐름 끊김 — 단계=브라우저 정리(finally)', got: L.describeError(e), pass: false, kind: 'DEVICE' });
+      // ⬛ [낡은 줄 · 5차] L.rec(r, { browser: name, scope: 'H', id: 'H-DX', what: '[장치] 브라우저 흐름 끊김 — 단계=브라우저 정리(finally)', got: L.describeError(e), pass: false, kind: 'DEVICE' });
+      L.rec(r, { browser: name, scope: 'H', id: 'H-DX', what: '[장치] 브라우저 흐름 끊김 — 단계=브라우저 정리(finally)', got: '예외 글자는 결과표 err 칸', pass: false, kind: 'DEVICE', err: e }); // 🔴 6차 ②
       return false;
     }
   };
