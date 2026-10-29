@@ -347,6 +347,74 @@ function rec(r, { id, what, got, pass, kind, scope = 'H', browser = null, path: 
   return row;
 }
 
+// 🔴 8차(10/29 · 작업지시서 §0-12-3 ① · K-1 ㉢) — 외부 차단 처리기가 돌려주는 route.continue/abort 거절 중
+//   「닫힌 창에 날던 요청 처리 거절」 하나만 가려낸다. 참 = 조건 둘 다:
+//   ㉮ Error 이고 메시지 **첫 줄**(`\n` 앞)이 정확히 아래 문구(앞뒤 고정 · 다른 API 이름·고쳐 쓴 문구·덧붙은 글자는 거짓)
+//      — 문구 근거 = 런 40818528074 결과표 err 칸(CI 고정 Playwright 1.60.0 실물) 의 따옴표 속 문장.
+//      첫 줄만 보는 까닭 = Playwright 오류 뒤에 `Call log:` 등 여러 줄이 붙을 수 있다(PM 조건 ② · 꼬리 때문에 정상 닫힘이 빨강으로 새지 않게).
+//   ㉯ pageClosed === true(엄격 비교 · 창 충돌은 닫힘 false 라 거짓 = 빨강 쪽).
+const CLOSED_ROUTE_REJECT = /^route\.(continue|abort): Target page, context or browser has been closed$/;
+function isClosedRouteReject(err, pageClosed) {
+  if (!(err instanceof Error) || pageClosed !== true) return false;
+  const first = String(err.message).split('\n')[0];
+  return CLOSED_ROUTE_REJECT.test(first);
+}
+// 🔴 8차 — 이미 결정된 Promise 하나만 받는다(route 객체 0 → 허용·차단 결정을 바꿀 길 0).
+//   readPageClosed 는 **거절된 그때** 한 번만 부른다(결정 때 아님). 참이면 tally[kind] 를 올리고 끝 · 거짓이면 같은 객체를 다시 던진다.
+function guardRoute(promise, readPageClosed, tally, kind) {
+  return promise.catch((e) => {
+    if (isClosedRouteReject(e, readPageClosed())) {
+      tally[kind] += 1;
+      return undefined;
+    }
+    throw e;
+  });
+}
+
+// 🔴 9차(10/29 · 작업지시서 §0-13-3 고칠 자리 1 · §0-13-PM 조건 ①) — 화면 안 window.open 으로 연 팝업을
+//   「알림 받음 → 첫 문서 적재(domcontentloaded) → 우리 쪽 닫기」 까지 기다린다(열자마자 닫아 첫 요청 처리와 겨루던 원인 제거).
+//   받는 것 = page(공개 API 만: once/off 'popup' · 팝업의 waitForLoadState/close/isClosed) · open() = { value, opened } 를 돌려주는 함수 · ms = 상한.
+//   ⓐ 'popup' 받을 준비는 open() **전에** 건다 — 사건 처리기(once) 하나라 거절할 Promise 가 없다 → open 이 던지거나 안 열려도
+//      처리기 없는 거절 0 · 끝나면(어느 길이든) finally 에서 처리기를 거두고(off) 상한 시계를 끈다.
+//   ⓓ 상한 = 넘으면 예외(부르는 쪽 catch → H-DX 빨강 · 판별 못 하면 빨강). 기다리는 일들은 결과를 먼저 받아 두므로(then 두 갈래)
+//      상한이 먼저 와도 뒤늦은 거절이 처리기 없이 남지 않는다. Playwright 비공개 속성(`_` 로 시작) 읽기 0 · require('playwright') 0.
+function settlePopup(page, open, ms) {
+  const t0 = Date.now();
+  let gotPopup = null;
+  const reported = new Promise((resolve) => { gotPopup = resolve; });
+  const onPopup = (p) => gotPopup(p);
+  page.once('popup', onPopup); // ⓐ open() 전에
+  let timer = null;
+  const LATE = {};
+  const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(LATE), ms); });
+  const within = async (what, p) => {
+    const out = await Promise.race([Promise.resolve(p).then((v) => ({ v }), (e) => ({ e })), deadline]);
+    if (out === LATE) throw new Error(`settlePopup: ${what} 이 상한 ${ms}ms 안에 끝나지 않음`);
+    if ('e' in out) throw out.e;
+    return out.v;
+  };
+  const run = async () => {
+    const o = await open(); // ⓑ 화면 안 window.open 1회 — 던지면 그대로 위로(finally 가 처리기를 거둔다)
+    const res = { value: o ? o.value : undefined, opened: !!(o && o.opened === true), reported: false, loaded: false, closed: false, ms: 0 };
+    if (!res.opened) {
+      res.ms = Date.now() - t0;
+      return res; // 안 열림 → 기다리지 않는다(처리기는 finally 에서 거둠)
+    }
+    const popup = await within('팝업 알림', reported); // ⓒ
+    res.reported = true;
+    await within('첫 문서 적재', popup.waitForLoadState('domcontentloaded', { timeout: ms }));
+    res.loaded = true;
+    await within('우리 쪽 닫기', popup.close());
+    res.closed = popup.isClosed() === true;
+    res.ms = Date.now() - t0;
+    return res;
+  };
+  return run().finally(() => {
+    page.off('popup', onPopup);
+    clearTimeout(timer);
+  });
+}
+
 module.exports = {
   S0_NAMES, SECRET_PREFIX,
   mask, maskAndRegister, exportPlain, collectSecrets, sanitize,
@@ -354,4 +422,6 @@ module.exports = {
   bindAutosave, describeError, // 5차 ①
   NEEDLE_MIN_LEN, base64Needles, urlNeedles, needleForms, errorName, ERR_CAP, // 6차 ①②
   MASK_SKIPPED_LINE, maskProbeLines, intakeScan, // 7차 M3·M1·M4
+  isClosedRouteReject, guardRoute, // 8차 외부 차단 처리기
+  settlePopup, // 9차 H-T1 팝업 수명
 };

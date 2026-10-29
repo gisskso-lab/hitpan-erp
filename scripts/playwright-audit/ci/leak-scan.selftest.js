@@ -30,6 +30,25 @@
 //       └ V7-F1(10/29 [3-V]): 「`$` 로 시작하면 건너뜀」이 `$(…)`·`${X:-…}` 까지 놓쳤다 → 맨 변수만 건너뜀. 고치기 전 lib 에 붙이면 C14a 빨강(대조군)
 //   C14b M4 레포 .github/workflows 지금 그대로 → 대상 1(ui-browser.yml) · 잡힘 0(「항상 빨강」 아님)
 //   C14c M4 장치 경로 없는 워크플로만 → 대상 0 = 빨강
+// 🔴 8차(10/29 · 작업지시서 §0-12-6 + PM 조건 ②) — 경우 9개 더함(33 → 42). 외부 차단 처리기의 닫힌 창 처리 거절 판별(lib guardRoute).
+//   고치기 전 lib 에 붙이면 C15g1 만 초록(대조 줄) · 나머지 8 빨강(함수 없음 → FAIL 로 세고 다음 경우로).
+//   C15a 닫힘·continue → 이행 · continue 1 · 창 상태는 거절된 그때 한 번만 읽음   C15b 닫힘·abort → 이행 · abort 1
+//   C15c 충돌(창 닫힘 false) → 같은 객체로 거절 · 셈 0                         C15d 다른 거절(Route is already handled!) → 거절 · 셈 0
+//   C15e 글자 변형 셋(다른 API 이름 · 고쳐 쓴 꼴 · 같은 줄 끝 덧붙임) → 셋 다 거절 · 셈 0
+//   C15f Error 아님(같은 글자 문자열 · undefined) → 거절 · 셈 0 · 판별 함수가 안 터짐
+//   C15h 닫힘 + 여러 줄 꼬리(`\nCall log:` …) → 이행 · continue 1 (PM 조건 ② · 첫 줄만 비교)
+//   C15g1 자식 프로세스 · 거절을 받는 곳 없이 → unhandledRejection 1 = 대조 줄(빨강이면 시험이 틀렸다)
+//   C15g2 자식 프로세스 · 같은 거절을 guardRoute 로 감쌈 → unhandledRejection 0 · 종료 0
+//   거절 글자는 Playwright 문구뿐(런 40818528074 결과표 err 칸의 1.60.0 실물) — 자격증명 모양 0.
+// 🔴 9차(10/29 · 작업지시서 §0-13-5 + §0-13-PM 조건 ①) — 경우 6개 더함(42 → 48) · C15e 에 V8-R1 2꼴(개수 그대로).
+//   C16 = Playwright 1.60.0 원본 순서(F1~F9)를 옮긴 오프라인 모형(브라우저·네트워크 0) · 창 상태는 모형 메시지가 배달된 결과로만 정한다.
+//   C16a 대조 줄 · 옛 흐름(열자마자 화면 안 닫기 · lib 안 씀 · 처리기 = continue 그대로) → 서버 차례 S1·S3·S4 셋 다 받는 곳 없는 거절 1
+//   C16b 고침 흐름(lib settlePopup · 팝업 하위 요청 2 날던 중 닫음) → 거절 0 · 녹음 1(hitpanChat) · 알림·적재·닫음 참 · 닫기 전 첫 요청 continue 이행
+//   C16c 모형 민감도(C16b 와 같되 서버 순서만 실패 응답 → Close) → 거절 ≥1 이 나야 PASS
+//   C16d 8차 전제 반증(옛 흐름 + guardRoute · 창 상태 읽기) → S1 다시 던짐 · S3 다시 던짐(읽기 실패) · S4 삼킴
+//   C16e PM 조건 ① open 이 던짐(동기·비동기) → 같은 객체로 거절 · 'popup' 처리기 0 · 받는 곳 없는 거절 0 · 상한 안 기다림
+//   C16f PM 조건 ① 안 열림(window.open 이 null) → opened 거짓 · 셋 다 거짓 · 처리기 0 · 거절 0 · 상한 안 기다림 · 시계 남김 0
+//   고치기 전 lib(1a142dd3) = C16a 만 초록 · 8차 lib = C16a·C16d 초록.
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -400,6 +419,538 @@ const hasIntake = typeof L.intakeScan === 'function';
   check('C14c M4 대상 0 = 빨강(빈 검색은 거짓 통과)', ok, why);
 }
 
-const bad = results.filter((x) => !x.ok).length;
-console.log(`합계 ${results.length - bad}/${results.length} PASS`);
-process.exit(bad === 0 ? 0 : 1);
+// ── 🔴 8차(10/29 · §0-12-6 + PM 조건 ②) C15 — 외부 차단 처리기 닫힌 창 처리 거절 ─────────────────
+//   Promise 를 기다려야 하므로 합계 줄은 C15 뒤(아래 async 묶음 끝)로 옮긴다.
+// ⬛ [낡은 줄 · 6~7차] const bad = results.filter((x) => !x.ok).length;
+// ⬛ [낡은 줄 · 6~7차] console.log(`합계 ${results.length - bad}/${results.length} PASS`);
+// ⬛ [낡은 줄 · 6~7차] process.exit(bad === 0 ? 0 : 1);
+const C15_CLOSED_C = 'route.continue: Target page, context or browser has been closed';
+const C15_CLOSED_A = 'route.abort: Target page, context or browser has been closed';
+const hasGuard = typeof L.guardRoute === 'function' && typeof L.isClosedRouteReject === 'function';
+async function c15Settle(p) {
+  try {
+    return { ok: true, v: await p };
+  } catch (e) {
+    return { ok: false, e };
+  }
+}
+// 거절을 나중에 일으켜 「창 상태는 거절된 그때 한 번만 읽는다(결정 때 0)」 를 같이 잰다.
+async function c15Guard(reason, closed, kind = 'continue') {
+  const tally = { continue: 0, abort: 0 };
+  let reads = 0;
+  let reject = null;
+  const p = new Promise((_, rej) => { reject = rej; });
+  const g = L.guardRoute(p, () => { reads += 1; return closed; }, tally, kind);
+  const readsBefore = reads;
+  reject(reason);
+  const s = await c15Settle(g);
+  return { s, tally, reads, readsBefore };
+}
+const c15Zero = (t) => t.continue === 0 && t.abort === 0;
+const c15Why = (x) => `이행=${x.s.ok} · continue ${x.tally.continue} · abort ${x.tally.abort} · 읽음 ${x.readsBefore}→${x.reads}`;
+function c15Child(useGuard) {
+  // Playwright 1.60.0 RouteHandler 흉내 — 처리기가 돌려준 Promise 를 기다렸다가 거절이면 고쳐 쓴 글로 다시 던진다(받는 곳 0).
+  const child = [
+    'let n = 0;',
+    "process.on('unhandledRejection', () => { n += 1; });",
+    'const err = new Error(process.env.SELFTEST_MSG);',
+    "async function handle(p) { try { await p; } catch (e) { throw new Error('\"' + e.message + '\" while running route callback.'); } }",
+    'const tally = { continue: 0, abort: 0 };',
+    useGuard
+      ? "handle(require(process.env.SELFTEST_LIB).guardRoute(Promise.reject(err), () => true, tally, 'continue'));"
+      : 'handle(Promise.reject(err));',
+    "setTimeout(() => { console.log('UR=' + n + ' T=' + tally.continue); }, 50);",
+  ].join('\n');
+  const env = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, SELFTEST_LIB: path.join(__dirname, 'lib.js'), SELFTEST_MSG: C15_CLOSED_C };
+  const c = spawnSync(process.execPath, ['-e', child], { env, encoding: 'utf8', timeout: 20000 });
+  return { code: c.status, out: (c.stdout || '').trim() };
+}
+
+// ── 🔴 9차(10/29 · §0-13-5 + PM 조건 ①) C16 — Playwright 1.60.0 순서 모형 ─────────────────────────────
+//   원본(읽기만) = scripts/playwright-audit/node_modules/playwright-core/lib/coreBundle.js (package.json 1.60.0 · CI 와 같은 판).
+//   아래 각 부분 위의 `:줄` = 그 원본의 줄. 레포 뿌리 node_modules(1.62.1)는 근거 아님. 실물 브라우저가 아니다(한계 = 작업지시서 §0-13-5).
+const EventEmitter = require('events');
+const hasSettle = typeof L.settlePopup === 'function';
+const c16Tick = () => new Promise((ok) => setTimeout(ok, 30));
+let c16UR = 0; // 받는 곳 없는 거절 셈(C16 들어갈 때 그물을 건다)
+
+// F1 — :3308~3354 LongStandingScope · :3334~3336 safeRace · :3337~3353 _race
+class C16Scope {
+  constructor() {
+    this.closed = false;
+    this.waiters = new Set();
+  }
+  // :3319~3324 close — 기다리던 경주 전부 풀림
+  close() {
+    this.closed = true;
+    for (const w of this.waiters) w();
+  }
+  // :3342·3343 이미 닫힌 범위면 곧바로 · :3347 safe → defaultValue(undefined) 로 **이행**(거절 아님)
+  safeRace(p) {
+    let done = null;
+    const term = new Promise((ok) => { done = ok; });
+    if (this.closed) done();
+    this.waiters.add(done);
+    return Promise.race([term.then(() => undefined), p]).finally(() => this.waiters.delete(done));
+  }
+}
+
+// flow 'old' = 화면 안에서 열자마자 닫음(1~8차 H-T1 꼴) · 'new' = 우리 쪽이 기다렸다 닫음(9차)
+// closeOrder = 알려진 창이 닫힐 때 서버 차례('close-first' 원본 · 'fail-first' 민감도용) · unknownOrder = 알리기 전 닫힘 차례(S1·S3·S4)
+// engine 'webkit'(기본 · F4 늦은 알림) · 'chromium'(:35886~35889 세션 준비 뒤 곧바로 reportAsNew — 첫 이동을 안 기다림 ·
+//   모형은 evaluate 응답보다 먼저 알림 = PM 조건 ①「open() 전에 받을 준비」 를 재는 차례 · 실물 차례 ⚠️미측정)
+function c16World({ flow, closeOrder = 'close-first', unknownOrder = 'S3', handler, engine = 'webkit' }) {
+  const w = { log: [], readFail: 0, tally: { continue: 0, abort: 0 } };
+  // F6 — :58937·58938 in-process 연결: 메시지 하나마다 setImmediate(차례 그대로)
+  const toClient = (fn) => setImmediate(fn);
+  const toServer = (fn) => setImmediate(fn);
+  const calls = new Map();
+  let callNo = 0;
+  const command = (name, arg) => new Promise((ok, no) => {
+    callNo += 1;
+    const id = callNo;
+    calls.set(id, { ok, no });
+    toServer(() => srv.onCommand(id, name, arg));
+  });
+  const reply = (id, err, value) => toClient(() => {
+    const c = calls.get(id);
+    calls.delete(id);
+    if (err) c.no(new Error(err)); else c.ok(value);
+  });
+
+  // ── 손님 쪽 ──
+  class C16Page extends EventEmitter {
+    constructor(id) {
+      super();
+      this.id = id;
+      this.closedNow = false;
+      this.closeCalled = false;
+      this.loaded = false;
+      this.scope = new C16Scope();
+      this.once('close', () => this.scope.close()); // F7 :56438 Close → 범위 close
+    }
+    isClosed() { return this.closedNow; }
+    waitForLoadState(state) {
+      const closedErr = () => new Error('page.waitForLoadState: Target page, context or browser has been closed');
+      if (state !== 'domcontentloaded') return Promise.reject(new Error(`모형: 적재 상태 ${state} 모름`));
+      if (this.loaded) return Promise.resolve();
+      if (this.closedNow) return Promise.reject(closedErr());
+      return new Promise((ok, no) => {
+        const onLoad = () => { this.off('close', onClose); ok(); };
+        const onClose = () => { this.off('domcontentloaded', onLoad); no(closedErr()); };
+        this.once('domcontentloaded', onLoad);
+        this.once('close', onClose);
+      });
+    }
+    // F8 :56850~56853 page.close() — 부르면 _closeWasCalled → 이후 그 창의 경로 사건은 처리기를 안 부름(:57365)
+    close() {
+      this.closeCalled = true;
+      w.log.push('close-called');
+      return command('close', this.id);
+    }
+  }
+  const opener = new C16Page('opener');
+  const frames = new Map(); // F3 :50304~50309 — 창이 알려지기 전에도 프레임은 문맥 아래 먼저 붙는다
+  const pages = new Map();
+  const frameOf = (fid) => {
+    if (!frames.has(fid)) frames.set(fid, { pageObj: null });
+    return frames.get(fid);
+  };
+  const client = {
+    // F3 :56412 창 생성(알림) 때 mainFrame._page = this · 문맥 Page 사건 → 연 창에 popup
+    onPage(pid, fid) {
+      const pg = new C16Page(pid);
+      pages.set(pid, pg);
+      frameOf(fid).pageObj = pg;
+      w.log.push('announced');
+      opener.emit('popup', pg);
+    },
+    // F7 :56514~56519 손님 _onClose — 그 매크로태스크에서 _closed=true → Close 사건(→ 범위 close)
+    onClose(pid) {
+      const pg = pages.get(pid);
+      pg.closedNow = true;
+      w.log.push('close-delivered');
+      pg.emit('close', pg);
+    },
+    onDcl(pid) {
+      const pg = pages.get(pid);
+      pg.loaded = true;
+      pg.emit('domcontentloaded');
+    },
+    onRoute(rid, fid) {
+      const frame = frameOf(fid);
+      const req = {
+        id: rid,
+        // F3 :54789~54802 Request.frame() — 창이 손님에 아직 안 알려졌으면 던진다
+        frame() {
+          if (!frame.pageObj) throw new Error('Frame for this navigation request is not available, because the request was issued before the frame is created.');
+          return { page: () => frame.pageObj };
+        },
+      };
+      const route = {
+        request: () => req,
+        // F2 :54969~54977 continue → :54987~ _innerContinue → :54876~54878 _raceWithTargetClose → :54860~54862 _targetClosedScope
+        //   부르는 **그때** 범위를 잡는다 — 손님 쪽 창 객체가 없으면 새 범위(영영 안 닫힘) · 서버 실패 응답이면 그대로 거절
+        continue() {
+          const scope = frame.pageObj ? frame.pageObj.scope : new C16Scope();
+          const ch = command('continue', rid);
+          ch.then(() => w.log.push(`ok:${rid}`), () => w.log.push(`fail:${rid}`));
+          return scope.safeRace(ch);
+        },
+      };
+      // F8 :57360~57366 문맥 _onRoute — 우리 쪽 close() 를 부른 창이면 처리기를 안 부르고 건너뜀
+      if (frame.pageObj && frame.pageObj.closeCalled) {
+        w.log.push(`skip:${rid}`);
+        return;
+      }
+      // F9 :55307~55322 RouteHandler — 처리기 거절은 고쳐 다시 던져지고 받는 곳 0(→ 받는 곳 없는 거절)
+      (async () => {
+        try {
+          await handler(route, w);
+        } catch (e) {
+          throw new Error(`"${e && e.message}" while running route callback.`);
+        }
+      })();
+    },
+  };
+
+  // ── 서버 쪽 ──
+  let nextReq = 0;
+  const srv = {
+    popup: null,
+    onCommand(id, name, arg) {
+      if (name === 'open') return this.open(id);
+      if (name === 'continue') return this.onContinue(id, arg);
+      if (name === 'close') return this.close(id);
+      return reply(id, `모형: 모르는 명령 ${name}`);
+    },
+    route(p, kind) {
+      nextReq += 1;
+      const rid = `${kind}${nextReq}`;
+      toClient(() => client.onRoute(rid, p.fid));
+    },
+    // 화면 안 window.open 1회 — 첫 문서 요청을 가로채 손님에 보내고 evaluate 응답(녹음기 목록)
+    open(id) {
+      const p = { id: 'popup1', fid: 'f1', open: true, announced: false, pending: new Map() };
+      this.popup = p;
+      if (engine === 'chromium') { // :35886~35889 — 첫 이동 전에 알림
+        p.announced = true;
+        toClient(() => client.onPage(p.id, p.fid));
+      }
+      this.route(p, 'doc');
+      reply(id, null, [{ name: 'hitpanChat' }]);
+    },
+    onContinue(id, rid) {
+      const p = this.popup;
+      if (!p.open) return reply(id, C15_CLOSED_C); // 닫힌 뒤 온 명령
+      p.pending.set(id, rid);
+      if (rid.startsWith('doc')) {
+        if (flow === 'old') return this.closeTarget(); // 1~8차: 열자마자 닫음 → 첫 이동 확정 **전에** 닫힘(F4)
+        setImmediate(() => this.commitDoc(p, id)); // 브라우저가 첫 문서 요청을 마침
+      }
+      return undefined; // 하위 요청 = 브라우저 진행 중(닫힐 때까지 응답 없음) = 「닫는 때 날던 중」
+    },
+    // F4 :45261~45273 WebKit 팝업은 **첫 이동 확정 뒤에야** 손님에 알린다(reportAsNew) → 하위 요청 2 → domcontentloaded
+    commitDoc(p, id) {
+      if (!p.open) return;
+      p.pending.delete(id);
+      reply(id, null);
+      if (!p.announced) {
+        p.announced = true;
+        toClient(() => client.onPage(p.id, p.fid));
+      }
+      this.route(p, 'sub');
+      this.route(p, 'sub');
+      toClient(() => client.onDcl(p.id));
+    },
+    close(id) {
+      this.closeTarget();
+      reply(id, null);
+    },
+    // F5 :45199~45211 didClose · :44313 WKSession.dispose · :49016~49018 PageDispatcher
+    closeTarget() {
+      const p = this.popup;
+      if (!p.open) return;
+      p.open = false;
+      const pend = [...p.pending.keys()];
+      p.pending.clear();
+      const fail = () => { for (const id of pend) reply(id, C15_CLOSED_C); };
+      const closeMsg = () => toClient(() => client.onClose(p.id));
+      if (p.announced) {
+        if (closeOrder === 'fail-first') { // C16c 민감도 — 순서만 뒤집음(원본 아님)
+          fail();
+          closeMsg();
+          return;
+        }
+        Promise.resolve().then(fail); // :44313 dispose — 대기 명령 거절 → 실패 응답은 microtask 뒤
+        closeMsg(); // :45211 _page._didClose() 동기 → :49016~49018 Close 동기 송신(실패 응답보다 먼저)
+        return;
+      }
+      // F4 :45210·:45266~45273 · :19780~19803 — 알리기 전 닫힘: reportAsNew(오류) → 창 알림 + 이어 Close(:19800·19801).
+      //   실패 응답과의 차례는 서버 microtask 깊이에 달림(실물 ⚠️미측정) → 셋: S1 알림·실패·Close / S3 실패·알림·Close / S4 알림·Close·실패
+      const announce = () => {
+        p.announced = true;
+        toClient(() => client.onPage(p.id, p.fid));
+      };
+      const seq = { S1: [announce, fail, closeMsg], S3: [fail, announce, closeMsg], S4: [announce, closeMsg, fail] }[unknownOrder];
+      Promise.resolve().then(() => { for (const f of seq) f(); });
+    },
+  };
+  w.opener = opener;
+  w.command = command;
+  return w;
+}
+// 처리기 — 1~7차 꼴(continue 그대로)
+const c16Plain = async (route) => { await route.continue(); };
+// 처리기 — 8차 꼴(guardRoute + 거절된 그때 창 상태 읽기 · device-check.js routePageClosed 와 같은 읽기)
+const c16Guarded = (route, w) => {
+  const read = () => {
+    try {
+      return route.request().frame().page().isClosed();
+    } catch (e) {
+      w.readFail += 1;
+      w.log.push(`read-fail:${L.errorName(e)}`);
+      return false;
+    }
+  };
+  return L.guardRoute(route.continue(), read, w.tally, 'continue');
+};
+async function c16Old(order, handler) {
+  const w = c16World({ flow: 'old', unknownOrder: order, handler });
+  const ur0 = c16UR;
+  await w.command('open');
+  await c16Tick();
+  w.ur = c16UR - ur0;
+  return w;
+}
+async function c16New(closeOrder, engine = 'webkit') {
+  const w = c16World({ flow: 'new', closeOrder, handler: c16Plain, engine });
+  const ur0 = c16UR;
+  try {
+    w.s = await L.settlePopup(w.opener, async () => ({ value: await w.command('open'), opened: true }), 2000);
+  } catch (e) {
+    w.err = e;
+  }
+  await c16Tick();
+  w.ur = c16UR - ur0;
+  w.listeners = w.opener.listenerCount('popup');
+  return w;
+}
+const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? process.getActiveResourcesInfo().filter((x) => x === 'Timeout').length : null);
+
+(async () => {
+  { // C15a 닫힘·continue
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const x = await c15Guard(new Error(C15_CLOSED_C), true, 'continue');
+      ok = x.s.ok && x.tally.continue === 1 && x.tally.abort === 0 && x.readsBefore === 0 && x.reads === 1;
+      why = c15Why(x);
+    }
+    check('C15a 닫힘·continue → 이행 · continue 1 · 창 상태는 거절 때 한 번', ok, why);
+  }
+  { // C15b 닫힘·abort
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const x = await c15Guard(new Error(C15_CLOSED_A), true, 'abort');
+      ok = x.s.ok && x.tally.abort === 1 && x.tally.continue === 0 && x.readsBefore === 0 && x.reads === 1;
+      why = c15Why(x);
+    }
+    check('C15b 닫힘·abort → 이행 · abort 1', ok, why);
+  }
+  { // C15c 충돌 — 같은 글자 · 창 닫힘 false
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const err = new Error(C15_CLOSED_C);
+      const x = await c15Guard(err, false);
+      ok = !x.s.ok && x.s.e === err && c15Zero(x.tally);
+      why = `${c15Why(x)} · 같은 객체=${x.s.e === err}`;
+    }
+    check('C15c 충돌(창 닫힘 false) → 같은 객체로 거절 · 셈 0', ok, why);
+  }
+  { // C15d 다른 거절
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const err = new Error('route.continue: Route is already handled!');
+      const x = await c15Guard(err, true);
+      ok = !x.s.ok && x.s.e === err && c15Zero(x.tally);
+      why = `${c15Why(x)} · 같은 객체=${x.s.e === err}`;
+    }
+    check('C15d 다른 거절 → 같은 객체로 거절 · 셈 0', ok, why);
+  }
+  { // C15e 글자 변형 셋(앞뒤 고정 확인)
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const errs = [
+        new Error('route.fulfill: Target page, context or browser has been closed'),
+        new Error(`"${C15_CLOSED_C}" while running route callback.`),
+        new Error(`${C15_CLOSED_C}!`),
+        // 🔴 9차 V8-R1(§0-13-5 · [4] V8-4b) — 앞만 다른 꼴 · 대소문자 바꾼 꼴(같은 경우 안 · 셈 그대로) → `^` 뺌·`/i` 변이를 잡는다
+        new Error(`x${C15_CLOSED_C}`),
+        new Error('Route.continue: Target page, context or browser has been closed'),
+      ];
+      const xs = [];
+      for (const err of errs) xs.push(await c15Guard(err, true));
+      ok = xs.every((x, k) => !x.s.ok && x.s.e === errs[k] && c15Zero(x.tally));
+      why = xs.map((x, k) => `${k + 1}:거절=${!x.s.ok}·셈0=${c15Zero(x.tally)}`).join(' ');
+    }
+    // ⬛ [낡은 줄 · 8차] check('C15e 글자 변형 셋(다른 API · 고쳐 쓴 꼴 · 끝 덧붙임) → 셋 다 거절 · 셈 0', ok, why);
+    check('C15e 글자 변형 다섯(다른 API · 고쳐 쓴 꼴 · 끝 덧붙임 · 앞 덧붙임 · 대소문자) → 다섯 다 거절 · 셈 0', ok, why);
+  }
+  { // C15f Error 아님
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const vals = [C15_CLOSED_C, undefined];
+      const xs = [];
+      for (const v of vals) xs.push(await c15Guard(v, true));
+      let pureOk = false;
+      why = '판별 함수가 Error 아닌 값을 참으로 봄';
+      try {
+        pureOk = L.isClosedRouteReject(C15_CLOSED_C, true) === false && L.isClosedRouteReject(undefined, true) === false
+          && L.isClosedRouteReject(null, true) === false;
+      } catch (e) {
+        why = `판별 함수 예외 ${L.errorName(e)}`;
+      }
+      ok = pureOk && xs.every((x, k) => !x.s.ok && x.s.e === vals[k] && c15Zero(x.tally));
+      if (pureOk) why = xs.map((x, k) => `${k + 1}:거절=${!x.s.ok}·셈0=${c15Zero(x.tally)}`).join(' ');
+    }
+    check('C15f Error 아님(문자열 · undefined) → 거절 · 셈 0 · 판별 함수 안 터짐', ok, why);
+  }
+  { // C15h 닫힘 + 여러 줄 꼬리(PM 조건 ②)
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const x = await c15Guard(new Error(`${C15_CLOSED_C}\nCall log:\n  - route handler running`), true, 'continue');
+      ok = x.s.ok && x.tally.continue === 1 && x.tally.abort === 0;
+      why = c15Why(x);
+    }
+    check('C15h 닫힘 + 여러 줄 꼬리 → 이행 · continue 1(첫 줄만 비교)', ok, why);
+  }
+  { // C15g1 기제 재현(대조 줄 · lib 안 씀)
+    const c = c15Child(false);
+    check('C15g1 받는 곳 없는 닫힘 거절 = unhandledRejection 1(대조 줄 · 고치기 전에도 초록)', c.code === 0 && c.out === 'UR=1 T=0', `code=${c.code} · ${c.out}`);
+  }
+  { // C15g2 기제 고침
+    const c = hasGuard ? c15Child(true) : null;
+    check('C15g2 guardRoute 로 감쌈 = unhandledRejection 0 · 종료 0', !!c && c.code === 0 && c.out === 'UR=0 T=1', c ? `code=${c.code} · ${c.out}` : '함수 없음');
+  }
+  // ── 🔴 9차 C16 — 받는 곳 없는 거절 그물(셈만 · 이 뒤 끝까지 둔다) ──
+  process.on('unhandledRejection', () => { c16UR += 1; });
+  { // C16a 대조 줄 · 옛 흐름(lib 안 씀)
+    const ws = [];
+    for (const o of ['S1', 'S3', 'S4']) ws.push(await c16Old(o, c16Plain));
+    const ok = ws.every((x) => x.ur === 1);
+    check('C16a 옛 흐름(열자마자 닫기 · continue 그대로) = 받는 곳 없는 거절 1(S1·S3·S4 · 대조 줄 · 고치기 전에도 초록)', ok, ws.map((x, k) => `${['S1', 'S3', 'S4'][k]}:UR=${x.ur}`).join(' '));
+  }
+  { // C16b 고침 흐름
+    let ok = false;
+    let why = '함수 없음';
+    if (hasSettle) {
+      // WebKit(지시서 모형) + Chromium 차례(알림이 evaluate 응답보다 먼저 · 「open() 전에 받을 준비」 를 잰다) — 둘 다 맞아야 PASS
+      const parts = [];
+      for (const engine of ['webkit', 'chromium']) {
+        const w = await c16New('close-first', engine);
+        const s = w.s || {};
+        const iOk = w.log.indexOf('ok:doc1');
+        const iClose = w.log.indexOf('close-called');
+        const subInFlight = w.log.includes('fail:sub2') && w.log.includes('fail:sub3'); // 닫을 때 날던 중이었다(서버 실패 응답이 왔다)
+        const one = !w.err && w.ur === 0 && Array.isArray(s.value) && s.value.length === 1 && s.value[0].name === 'hitpanChat'
+          && s.opened === true && s.reported === true && s.loaded === true && s.closed === true
+          && iOk >= 0 && iClose > iOk && subInFlight && w.listeners === 0;
+        parts.push({ one, txt: `${engine}: 예외=${w.err ? L.errorName(w.err) : '없음'} · UR=${w.ur} · 알림·적재·닫음=${s.reported}·${s.loaded}·${s.closed} · 첫 요청 이행→닫기=${iOk}→${iClose} · 하위 2 날던 중=${subInFlight} · 처리기=${w.listeners}` });
+      }
+      ok = parts.every((x) => x.one);
+      why = parts.map((x) => x.txt).join(' | ');
+    }
+    check('C16b 고침 흐름(settlePopup) → 거절 0 · 녹음 1 · 알림·적재·닫음 참 · 닫기 전 첫 요청 continue 이행', ok, why);
+  }
+  { // C16c 모형 민감도 — 서버 순서만 뒤집음
+    let ok = false;
+    let why = '함수 없음';
+    if (hasSettle) {
+      const w = await c16New('fail-first');
+      ok = w.ur >= 1;
+      why = `UR=${w.ur}`;
+    }
+    check('C16c 모형 민감도(실패 응답 → Close) → 거절 ≥1(결과가 서버 순서에 따라 바뀐다)', ok, why);
+  }
+  { // C16d 8차 전제 반증 — 옛 흐름 + guardRoute
+    let ok = false;
+    let why = '함수 없음';
+    if (hasGuard) {
+      const s1 = await c16Old('S1', c16Guarded);
+      const s3 = await c16Old('S3', c16Guarded);
+      const s4 = await c16Old('S4', c16Guarded);
+      ok = s1.ur === 1 && s1.tally.continue === 0 && s1.readFail === 0
+        && s3.ur === 1 && s3.tally.continue === 0 && s3.readFail === 1
+        && s4.ur === 0 && s4.tally.continue === 1 && s4.readFail === 0;
+      why = [['S1', s1], ['S3', s3], ['S4', s4]].map(([n, x]) => `${n}:UR=${x.ur}·삼킴=${x.tally.continue}·읽기실패=${x.readFail}`).join(' ');
+    }
+    check('C16d 8차 전제 반증 → S1 다시 던짐 · S3 다시 던짐(읽기 실패) · S4 삼킴(8차는 S4 만 덮는다)', ok, why);
+  }
+  { // C16e PM 조건 ① — open 이 던짐(동기 · 비동기)
+    let ok = false;
+    let why = '함수 없음';
+    if (hasSettle) {
+      const forms = [(boom) => () => { throw boom; }, (boom) => () => Promise.reject(boom)];
+      const xs = [];
+      for (const make of forms) {
+        const w = c16World({ flow: 'new', handler: c16Plain });
+        const boom = new Error('모형: open 던짐');
+        const ur0 = c16UR;
+        const t0 = Date.now();
+        let got = null;
+        try {
+          await L.settlePopup(w.opener, make(boom), 5000);
+        } catch (e) {
+          got = e;
+        }
+        const ms = Date.now() - t0;
+        await c16Tick();
+        xs.push({ same: got === boom, listeners: w.opener.listenerCount('popup'), ur: c16UR - ur0, ms });
+      }
+      ok = xs.every((x) => x.same && x.listeners === 0 && x.ur === 0 && x.ms < 1000);
+      why = xs.map((x, k) => `${k ? '비동기' : '동기'}:같은 객체=${x.same}·처리기=${x.listeners}·UR=${x.ur}·${x.ms < 1000 ? '안 기다림' : `${x.ms}ms 기다림`}`).join(' ');
+    }
+    check('C16e open 이 던짐(동기·비동기) → 같은 객체로 거절 · popup 처리기 0 · 받는 곳 없는 거절 0 · 상한 안 기다림', ok, why);
+  }
+  { // C16f PM 조건 ① — 안 열림(window.open 이 null)
+    let ok = false;
+    let why = '함수 없음';
+    if (hasSettle) {
+      const w = c16World({ flow: 'new', handler: c16Plain });
+      const ur0 = c16UR;
+      const timers0 = c16Timers();
+      const t0 = Date.now();
+      let s = null;
+      let err = null;
+      try {
+        s = await L.settlePopup(w.opener, async () => ({ value: [{ name: 'hitpanChat' }], opened: false }), 5000);
+      } catch (e) {
+        err = e;
+      }
+      const ms = Date.now() - t0;
+      const timers1 = c16Timers();
+      const listeners = w.opener.listenerCount('popup');
+      w.opener.emit('popup', {}); // 늦게 온 popup — 거둔 뒤라 아무 일 없어야 한다
+      await c16Tick();
+      const ur = c16UR - ur0;
+      const timersOk = timers0 === null || timers1 === timers0;
+      ok = !err && !!s && s.opened === false && s.reported === false && s.loaded === false && s.closed === false
+        && Array.isArray(s.value) && listeners === 0 && ur === 0 && ms < 1000 && timersOk;
+      why = `예외=${err ? L.errorName(err) : '없음'} · opened=${s && s.opened} · 셋=${s && s.reported}·${s && s.loaded}·${s && s.closed} · 처리기=${listeners} · UR=${ur} · ${ms < 1000 ? '안 기다림' : `${ms}ms`} · 시계 ${timers0 === null ? '못 셈' : `${timers0}→${timers1}`}`;
+    }
+    check('C16f 안 열림(window.open null) → opened 거짓 · 셋 다 거짓 · 처리기 0 · 거절 0 · 상한 안 기다림 · 시계 남김 0', ok, why);
+  }
+  const bad = results.filter((x) => !x.ok).length;
+  console.log(`합계 ${results.length - bad}/${results.length} PASS`);
+  process.exit(bad === 0 ? 0 : 1);
+})().catch((e) => {
+  console.log(`FAIL C15 시험 자체 예외 — ${L.errorName(e)}`);
+  process.exit(1);
+});

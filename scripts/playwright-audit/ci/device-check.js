@@ -155,7 +155,21 @@ async function logoutViaApi(tok) {
   }
 }
 
+// 🔴 8차(10/29 · 작업지시서 §0-12-3 ② · K-5 ㉠) — 요청이 붙은 창이 닫혔나. 거절된 그때 guardRoute 가 한 번 부른다.
+//   못 읽으면(서비스워커 요청 등) false = 삼키지 않음(빨강 쪽) + 콘솔 한 줄(예외 이름만 · 값 0).
+// 9차: S4 만 덮는 보조 · 원천 제거는 H-T1 팝업 수명 기다림 · 전제 = 작업지시서 §0-13-2
+function routePageClosed(route) {
+  try {
+    return route.request().frame().page().isClosed();
+  } catch (e) {
+    console.log(`외부 차단 처리기: 창 상태 못 읽음 (${L.errorName(e)})`);
+    return false;
+  }
+}
+
 async function blockExternal(context, r) {
+  // 🔴 8차 — 닫힌 창 처리 거절 셈(결과표 머리 칸 · rec 자동 저장 때 함께 파일에 간다). 처음 부를 때 없으면 만든다.
+  if (!r.route_closed) r.route_closed = { continue: 0, abort: 0 };
   await context.route('**/*', (route) => {
     let host = '';
     try {
@@ -164,11 +178,13 @@ async function blockExternal(context, r) {
       console.log(`외부 차단: 주소 해석 실패 (${e.name})`);
     }
     if (ALLOWED_HOSTS.has(host) || route.request().url().startsWith('data:') || route.request().url().startsWith('blob:')) {
-      return route.continue();
+      // ⬛ [낡은 줄 · 1~7차] return route.continue(); — 닫힌 창에 날던 요청이면 거절이 처리기 없는 거절로 샜다(런 40818528074 H-DX).
+      return L.guardRoute(route.continue(), () => routePageClosed(route), r.route_closed, 'continue'); // 🔴 8차
     }
     r.external_blocked += 1;
     if (host && !r.external_hosts.includes(host)) r.external_hosts.push(host);
-    return route.abort('blockedbyclient');
+    // ⬛ [낡은 줄 · 1~7차] return route.abort('blockedbyclient');
+    return L.guardRoute(route.abort('blockedbyclient'), () => routePageClosed(route), r.route_closed, 'abort'); // 🔴 8차
   });
 }
 
@@ -641,16 +657,33 @@ async function runBrowser(pw, browserName, r, flags, full) {
     // H-T1 녹음기 대조 — 직접 1회 부르면 1건 · 이름 hitpanChat 이어야 한다.
     // ⬛ [낡은 줄 · 1~2차] window.__k35opens.length = 0 … return window.__k35opens.slice() — 3차 Q-2 sessionStorage 녹음기로.
     step.now = '녹음기 대조(H-T1)';
-    const t1 = await page.evaluate(() => {
-      if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
+    // ⬛ [낡은 줄 · 1~8차] const t1 = await page.evaluate(() => {
+    // ⬛ [낡은 줄 · 1~8차]   if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
+    // ⬛ [낡은 줄 · 1~8차]   window.__k35.clear();
+    // ⬛ [낡은 줄 · 1~8차]   const w = window.open('/chat-window/ci-probe', 'hitpanChat');
+    // ⬛ [낡은 줄 · 1~8차]   if (w) w.close(); — 열자마자 닫아 팝업 첫 요청 처리와 겨뤘다(런 12 WebKit · 작업지시서 §0-13-2 F2·F4)
+    // ⬛ [낡은 줄 · 1~8차]   return window.__k35.list();
+    // ⬛ [낡은 줄 · 1~8차] });
+    // 🔴 9차(10/29 · §0-13-3 고칠 자리 2 · K-6 ㉠) — 같은 window.open 1회(주소·이름·횟수 그대로)를 L.settlePopup 의 open 으로 감싼다:
+    //   팝업 알림 → 첫 문서 적재 → 우리 쪽 닫기까지 기다린 뒤 다음으로. 상한 = 아래 기존 장치 기다림과 같은 30000ms(새 숫자 0).
+    //   상한을 넘거나 팝업이 스스로 닫히면 예외 → 아래 catch → H-DX 빨강. t1 = 예전과 같은 값(녹음기 목록 또는 { err }).
+    const t1w = await L.settlePopup(page, () => page.evaluate(() => {
+      if (!window.__k35) return { value: { err: window.__k35err || '녹음기 없음' }, opened: false };
       window.__k35.clear();
       const w = window.open('/chat-window/ci-probe', 'hitpanChat');
-      if (w) w.close();
-      return window.__k35.list();
-    });
+      // ⬛ [낡은 줄 · 1~8차] if (w) w.close(); — 9차: 닫기는 settlePopup 이 첫 문서 적재 뒤 우리 쪽에서
+      return { value: window.__k35.list(), opened: !!w };
+    }), 30000);
+    const t1 = t1w.value;
     const t1pass = Array.isArray(t1) && t1.length === 1 && t1[0].name === 'hitpanChat';
     if (!t1pass) failed = true;
     L.rec(r, { ...tag, id: 'H-T1', what: '녹음기: window.open 직접 1회 → 기록 1 · 이름 hitpanChat', got: t1, pass: t1pass, kind: 'TEST' });
+    // 🔴 9차(§0-13-3 고칠 자리 2 · K-8 ㉠ DEVICE · PM 조건 ②) — 팝업 수명 한 줄. got = 참/거짓 3개 + 걸린 ms 만(주소·제목·예외 글자 0).
+    //   안 열렸으면 셋 다 거짓 = 빨강. 팝업은 이미 닫혔으므로 아래 H-T2 의 context.pages() 셈(before)은 그대로.
+    const t1wPass = t1w.opened && t1w.reported && t1w.loaded && t1w.closed;
+    if (!t1wPass) failed = true;
+    const yn = (b) => (b ? '✓' : '✗');
+    L.rec(r, { ...tag, id: 'H-T1w', what: 'H-T1 팝업 수명: 알림 받음 → 첫 문서 적재 → 우리 쪽 닫음(닫기 전 첫 요청 처리 끝 · §0-13)', got: `알림 ${yn(t1w.reported)} · 적재 ${yn(t1w.loaded)} · 닫음 ${yn(t1w.closed)} · ${Number(t1w.ms) || 0}ms`, pass: t1wPass, kind: 'DEVICE' });
 
     if (full) {
       step.now = '결재 길 흉내 준비(H-T2)';
@@ -786,6 +819,9 @@ async function main() {
   };
   const okC = await safeRun('chromium', true);
   const okW = await safeRun('webkit', false);
+  // 🔴 8차(10/29 · §0-12-3 ③ · K-3 ㉠) — 닫힌 창 처리 거절 삼킴 셈 한 줄. 0 이어도 찍는다(줄 목록 고정 · 「안 일어남」도 기록) · 삼킬 때마다 콘솔 줄 0.
+  const rc = r.route_closed || { continue: 0, abort: 0 };
+  L.rec(r, { id: 'H-RC', what: '외부 차단 처리기: 닫힌 창에 날던 요청의 처리 거절 삼킴(판별 = Playwright 1.60.0 닫힘 문구 + 창 닫힘 · 다른 거절은 H-DX 빨강)', got: `continue ${rc.continue} · abort ${rc.abort}`, pass: true, kind: 'DEVICE' });
   // 🟡 4차 ③ — 끝 상태 한 줄: 「나 = 동의 완료 · 본 화면 · 인증 API 200」(마지막 브라우저가 증명) → 다음 갈래 K 가 「나」를 브라우저로 쓴다.
   //   각 브라우저는 끝에 로그아웃(H-D4)하므로 K 는 화면 로그인부터 시작한다(약관 문 없이 본 화면이어야 한다).
   const endOk = !!(naEnd && naEnd.agreed && naEnd.api === 200);
