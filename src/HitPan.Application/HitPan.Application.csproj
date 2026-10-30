@@ -44,7 +44,12 @@
       는 DKIM canonicalization (수신 검증) 관련. 우리는 SMTP 발송만 사용 → 실질적 영향 없음.
       신규 패치 버전이 publish 되면 즉시 업그레이드.
     -->
-    <NoWarn>$(NoWarn);NU1902</NoWarn>
+    <!-- ⬛ 20261030작 MySqlConnector 판올림 (PM 브라운킴 결재 · 2026-10-30) — 위 NU1902 억제를 거둔다.
+         종전 줄은 지우지 않는다(#1):
+         <NoWarn>$(NoWarn);NU1902</NoWarn>
+         사유(MailKit 4.14 권고) 소멸 — 지금 MailKit 4.16.0 · 취약 조회(vulnerable) 0.
+         이 억제가 가리던 것은 MySqlConnector 하나였다(작업지시서 §2-3).
+         🔴 다시 켜지 마라 — build-and-test.yml 10/14 주석: 억제(NoWarn·WarningsNotAsErrors) 추가 금지 · 봉합은 꾸러미 갱신 차수 + 결재뿐. -->
   </PropertyGroup>
 
 </Project>
