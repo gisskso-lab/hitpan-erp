@@ -1,0 +1,2506 @@
+{
+ "mode": "lf",
+ "file_count": {
+  "erp": 113,
+  "backoffice": 16,
+  "control": 2
+ },
+ "untouched_shipping_ddl": {
+  "path": "installer/hitpan_db_clean.sql",
+  "sha256_before": "22e07fab8848d6439458003e52bb67bb35201c70979cf06f4febf7011783c531",
+  "sha256_after": "22e07fab8848d6439458003e52bb67bb35201c70979cf06f4febf7011783c531"
+ },
+ "assert_ok": true,
+ "assert_failures": [],
+ "files": [
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-02_3tier_schema.sql",
+   "name": "DB-02_3tier_schema.sql",
+   "before": {
+    "bytes": 10050,
+    "lf": 241,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "293c8378bdb199632440b822389bac5c028f7e56b38979562c5a4d3656231ae2"
+   },
+   "after": {
+    "bytes": 10050,
+    "lf": 241,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "293c8378bdb199632440b822389bac5c028f7e56b38979562c5a4d3656231ae2"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-03_test_accounts.sql",
+   "name": "DB-03_test_accounts.sql",
+   "before": {
+    "bytes": 2205,
+    "lf": 85,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "679daf0db907441e347a41cd5739fa5eacd166ead23e8125fed090e0cd5c2a88"
+   },
+   "after": {
+    "bytes": 2205,
+    "lf": 85,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "679daf0db907441e347a41cd5739fa5eacd166ead23e8125fed090e0cd5c2a88"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-04_week1_day1_security_performance.sql",
+   "name": "DB-04_week1_day1_security_performance.sql",
+   "before": {
+    "bytes": 6456,
+    "lf": 146,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "90b1c055927e86942914a66108b38438219597c1ad69230d6085b81525347007"
+   },
+   "after": {
+    "bytes": 6456,
+    "lf": 146,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "90b1c055927e86942914a66108b38438219597c1ad69230d6085b81525347007"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-05_mariadb114_generated_columns.sql",
+   "name": "DB-05_mariadb114_generated_columns.sql",
+   "before": {
+    "bytes": 501,
+    "lf": 15,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9a5fc5d64a0aaf9158a30be5890cc80d7380904d54c1d0cf3dabe118a7dc5888"
+   },
+   "after": {
+    "bytes": 501,
+    "lf": 15,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9a5fc5d64a0aaf9158a30be5890cc80d7380904d54c1d0cf3dabe118a7dc5888"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-06_week1_day2_indexes_softdelete.sql",
+   "name": "DB-06_week1_day2_indexes_softdelete.sql",
+   "before": {
+    "bytes": 4092,
+    "lf": 94,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f88823b3245b8e6649ec9263e956de563cd12298d48ef675cbba430a7d6e1db"
+   },
+   "after": {
+    "bytes": 4092,
+    "lf": 94,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f88823b3245b8e6649ec9263e956de563cd12298d48ef675cbba430a7d6e1db"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-07_fix_column_comments_utf8.sql",
+   "name": "DB-07_fix_column_comments_utf8.sql",
+   "before": {
+    "bytes": 1409,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "714384ed8d99f2ca78dacffc992d597c219c1691808534b023b71e793da91bf4"
+   },
+   "after": {
+    "bytes": 1409,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "714384ed8d99f2ca78dacffc992d597c219c1691808534b023b71e793da91bf4"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-08_week1_day3_users_tenants_master.sql",
+   "name": "DB-08_week1_day3_users_tenants_master.sql",
+   "before": {
+    "bytes": 451,
+    "lf": 10,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "66ce422d4d6dc82206de181913a5d14cf8b5eae1bc8d78560cfc7a5f9dc8ba86"
+   },
+   "after": {
+    "bytes": 451,
+    "lf": 10,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "66ce422d4d6dc82206de181913a5d14cf8b5eae1bc8d78560cfc7a5f9dc8ba86"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-08b_week1_day3_tenants_company_columns.sql",
+   "name": "DB-08b_week1_day3_tenants_company_columns.sql",
+   "before": {
+    "bytes": 739,
+    "lf": 13,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b013aef1628e77ba0b28dd18f044425c02b1a6553d71b181811963d7ec42804e"
+   },
+   "after": {
+    "bytes": 739,
+    "lf": 13,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b013aef1628e77ba0b28dd18f044425c02b1a6553d71b181811963d7ec42804e"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-09_tenants_rebuild_utf8_comments.sql",
+   "name": "DB-09_tenants_rebuild_utf8_comments.sql",
+   "before": {
+    "bytes": 1808,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5840312c37dff811e1881792de5a338afe2276175c1457da2ffec3ba878bcac6"
+   },
+   "after": {
+    "bytes": 1808,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5840312c37dff811e1881792de5a338afe2276175c1457da2ffec3ba878bcac6"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-100_payroll.sql",
+   "name": "DB-100_payroll.sql",
+   "before": {
+    "bytes": 12283,
+    "lf": 185,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d8c087e5b266a4dcbd8b65453e8286132c183050aa1edb3097994a296ec46cdf"
+   },
+   "after": {
+    "bytes": 12283,
+    "lf": 185,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d8c087e5b266a4dcbd8b65453e8286132c183050aa1edb3097994a296ec46cdf"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-101_chat.sql",
+   "name": "DB-101_chat.sql",
+   "before": {
+    "bytes": 12012,
+    "lf": 153,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "99cd8b63ce746eb22a641f4fad559df071232de6605cd284c84bd20f56521aec"
+   },
+   "after": {
+    "bytes": 12012,
+    "lf": 153,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "99cd8b63ce746eb22a641f4fad559df071232de6605cd284c84bd20f56521aec"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-102_absence_type_default.sql",
+   "name": "DB-102_absence_type_default.sql",
+   "before": {
+    "bytes": 2875,
+    "lf": 45,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "500bd7fc152f83b09e7fdf9e6028f1a73266e0556fb1ddf4c37445776d716a74"
+   },
+   "after": {
+    "bytes": 2875,
+    "lf": 45,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "500bd7fc152f83b09e7fdf9e6028f1a73266e0556fb1ddf4c37445776d716a74"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-103_tenant_devices_hardware_id.sql",
+   "name": "DB-103_tenant_devices_hardware_id.sql",
+   "before": {
+    "bytes": 7429,
+    "lf": 98,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eefb39b4d867dd3bcd20d796e830962a6990b0af8b0b0a6d74a17f30e36dc55c"
+   },
+   "after": {
+    "bytes": 7429,
+    "lf": 98,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eefb39b4d867dd3bcd20d796e830962a6990b0af8b0b0a6d74a17f30e36dc55c"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-104_device_slot_policy_settings.sql",
+   "name": "DB-104_device_slot_policy_settings.sql",
+   "before": {
+    "bytes": 13217,
+    "lf": 169,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "081e62236524336904dbefcab51cf49a782f9e98b7f47c0059ad1966e26f905e"
+   },
+   "after": {
+    "bytes": 13217,
+    "lf": 169,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "081e62236524336904dbefcab51cf49a782f9e98b7f47c0059ad1966e26f905e"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-105_fax_settings_history_partner_geo.sql",
+   "name": "DB-105_fax_settings_history_partner_geo.sql",
+   "before": {
+    "bytes": 10384,
+    "lf": 129,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "382a6a58cd110352b4bd8759aad191c934d13fbad0567260f35bf62adc0a8a78"
+   },
+   "after": {
+    "bytes": 10384,
+    "lf": 129,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "382a6a58cd110352b4bd8759aad191c934d13fbad0567260f35bf62adc0a8a78"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-106_resignation_letters.sql",
+   "name": "DB-106_resignation_letters.sql",
+   "before": {
+    "bytes": 9564,
+    "lf": 140,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c16bc85e5de60d0ba539a62b7b764b961b4009055d94e5e9070c1ce3f16a8301"
+   },
+   "after": {
+    "bytes": 9564,
+    "lf": 140,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c16bc85e5de60d0ba539a62b7b764b961b4009055d94e5e9070c1ce3f16a8301"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-107_stock_alert_ghost_cleanup.sql",
+   "name": "DB-107_stock_alert_ghost_cleanup.sql",
+   "before": {
+    "bytes": 1984,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fe6a9457c12dfeb666cd3147a179090fb828507cfc2757d595ea19ead71db4d2"
+   },
+   "after": {
+    "bytes": 1984,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fe6a9457c12dfeb666cd3147a179090fb828507cfc2757d595ea19ead71db4d2"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-108_sales_return_items_is_loss.sql",
+   "name": "DB-108_sales_return_items_is_loss.sql",
+   "before": {
+    "bytes": 2404,
+    "lf": 47,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "789adf80ea7f9f6483f372064614009bb8944386569bbc09d58e8f0145a6ad24"
+   },
+   "after": {
+    "bytes": 2404,
+    "lf": 47,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "789adf80ea7f9f6483f372064614009bb8944386569bbc09d58e8f0145a6ad24"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-109_purchase_returns_created_by.sql",
+   "name": "DB-109_purchase_returns_created_by.sql",
+   "before": {
+    "bytes": 2239,
+    "lf": 46,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "152157ae4df8eb034c45ed5ffcf36a7a16408d685a8366b04409dd98e0df24bd"
+   },
+   "after": {
+    "bytes": 2239,
+    "lf": 46,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "152157ae4df8eb034c45ed5ffcf36a7a16408d685a8366b04409dd98e0df24bd"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-10_safety_force_edit_logs.sql",
+   "name": "DB-10_safety_force_edit_logs.sql",
+   "before": {
+    "bytes": 2588,
+    "lf": 72,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5bb098a025c5dbce8812e39b705a39d605f425a6d8b12ffbe385edc69ebbef3b"
+   },
+   "after": {
+    "bytes": 2588,
+    "lf": 72,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5bb098a025c5dbce8812e39b705a39d605f425a6d8b12ffbe385edc69ebbef3b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-110_warehouse_address.sql",
+   "name": "DB-110_warehouse_address.sql",
+   "before": {
+    "bytes": 1955,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "cae504fe8ad29db8cf9c2ed5d2212c95a50d61dabc1d329bb8655350f2150f4c"
+   },
+   "after": {
+    "bytes": 1955,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "cae504fe8ad29db8cf9c2ed5d2212c95a50d61dabc1d329bb8655350f2150f4c"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-111_chart_of_accounts_expand.sql",
+   "name": "DB-111_chart_of_accounts_expand.sql",
+   "before": {
+    "bytes": 6031,
+    "lf": 91,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9596b403c2f8ad83f4c67a356f2cffb37deb9e48148512e5ba4f2bf76c65f589"
+   },
+   "after": {
+    "bytes": 6031,
+    "lf": 91,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9596b403c2f8ad83f4c67a356f2cffb37deb9e48148512e5ba4f2bf76c65f589"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-112_chart_of_accounts_local_tenant_fix.sql",
+   "name": "DB-112_chart_of_accounts_local_tenant_fix.sql",
+   "before": {
+    "bytes": 7045,
+    "lf": 107,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1a92c1468f5453a5004bd8925e17e16149aacab62e40657d39ab981758c3a12f"
+   },
+   "after": {
+    "bytes": 7045,
+    "lf": 107,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1a92c1468f5453a5004bd8925e17e16149aacab62e40657d39ab981758c3a12f"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-113_sales_chain_dup_guard.sql",
+   "name": "DB-113_sales_chain_dup_guard.sql",
+   "before": {
+    "bytes": 5009,
+    "lf": 104,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "333e3c05f4f4569c09c7ead2a3d4c8c345a83fcb9ae3c1aae02b5ea9f69ddc28"
+   },
+   "after": {
+    "bytes": 5009,
+    "lf": 104,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "333e3c05f4f4569c09c7ead2a3d4c8c345a83fcb9ae3c1aae02b5ea9f69ddc28"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-114_sales_orders_quotation_link.sql",
+   "name": "DB-114_sales_orders_quotation_link.sql",
+   "before": {
+    "bytes": 4218,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1833b4597f5234522f4f2e88af06aed805471dce18736818b0bafb211ac6e58b"
+   },
+   "after": {
+    "bytes": 4218,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1833b4597f5234522f4f2e88af06aed805471dce18736818b0bafb211ac6e58b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-115_sales_return_journal_source_type.sql",
+   "name": "DB-115_sales_return_journal_source_type.sql",
+   "before": {
+    "bytes": 3205,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6feeb6c2bb6e712d5246c1aff7dfedb04b50c8921db2f638495301df9f107cc9"
+   },
+   "after": {
+    "bytes": 3205,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6feeb6c2bb6e712d5246c1aff7dfedb04b50c8921db2f638495301df9f107cc9"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-116_sales_return_chain_backfill.sql",
+   "name": "DB-116_sales_return_chain_backfill.sql",
+   "before": {
+    "bytes": 4537,
+    "lf": 91,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2b91cf76a054cb78a154a72a1f374c0a898da7bb1f3076721c6e02b80ac935da"
+   },
+   "after": {
+    "bytes": 4537,
+    "lf": 91,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2b91cf76a054cb78a154a72a1f374c0a898da7bb1f3076721c6e02b80ac935da"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-117_stock_ledger_warehouse_unique.sql",
+   "name": "DB-117_stock_ledger_warehouse_unique.sql",
+   "before": {
+    "bytes": 4387,
+    "lf": 65,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2802d9d96f5dfb032fe370ef5d422d02b48a2a02cdd18993f2486f375f9923db"
+   },
+   "after": {
+    "bytes": 4387,
+    "lf": 65,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2802d9d96f5dfb032fe370ef5d422d02b48a2a02cdd18993f2486f375f9923db"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-118_payments_source.sql",
+   "name": "DB-118_payments_source.sql",
+   "before": {
+    "bytes": 4558,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6edfbf0ec396621200d0c875f314a8ff83accea09c0a042b22c5b5525faab616"
+   },
+   "after": {
+    "bytes": 4558,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6edfbf0ec396621200d0c875f314a8ff83accea09c0a042b22c5b5525faab616"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-119_hr_reports_source.sql",
+   "name": "DB-119_hr_reports_source.sql",
+   "before": {
+    "bytes": 5447,
+    "lf": 104,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "adf748634c76556b4c9b35cd200f0488ae933e7f9ef13e51967dcb16d0fb4de1"
+   },
+   "after": {
+    "bytes": 5447,
+    "lf": 104,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "adf748634c76556b4c9b35cd200f0488ae933e7f9ef13e51967dcb16d0fb4de1"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-11_week2_day1_partners_master.sql",
+   "name": "DB-11_week2_day1_partners_master.sql",
+   "before": {
+    "bytes": 3442,
+    "lf": 66,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3cb20e89bfb188a38230390754e08e14d33af69247e5b5cfc94d97edd07f2c6b"
+   },
+   "after": {
+    "bytes": 3442,
+    "lf": 66,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3cb20e89bfb188a38230390754e08e14d33af69247e5b5cfc94d97edd07f2c6b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-120_main_pc_single_row_guard.sql",
+   "name": "DB-120_main_pc_single_row_guard.sql",
+   "before": {
+    "bytes": 14855,
+    "lf": 211,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c464e76e4d91be6229783fc08abbff7f9731016ac737686b4fded08f4f0af822"
+   },
+   "after": {
+    "bytes": 14855,
+    "lf": 211,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c464e76e4d91be6229783fc08abbff7f9731016ac737686b4fded08f4f0af822"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-123_legacy_unposted_documents.sql",
+   "name": "DB-123_legacy_unposted_documents.sql",
+   "before": {
+    "bytes": 9744,
+    "lf": 129,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b871fcd5fd8ec37d0238f74df05ac34a7735c0d5d1cda7f1964990bd708c325b"
+   },
+   "after": {
+    "bytes": 9744,
+    "lf": 129,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b871fcd5fd8ec37d0238f74df05ac34a7735c0d5d1cda7f1964990bd708c325b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-126_tenant_devices_mainpc_sealed_key.sql",
+   "name": "DB-126_tenant_devices_mainpc_sealed_key.sql",
+   "before": {
+    "bytes": 8859,
+    "lf": 113,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b565c8d6d05c6f6147a293a4888229c08d8593a230bdb9a1a6db4e05637a6ba9"
+   },
+   "after": {
+    "bytes": 8859,
+    "lf": 113,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b565c8d6d05c6f6147a293a4888229c08d8593a230bdb9a1a6db4e05637a6ba9"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-127_user_sessions_device_kind.sql",
+   "name": "DB-127_user_sessions_device_kind.sql",
+   "before": {
+    "bytes": 11015,
+    "lf": 140,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "4e5cc5f08af47e8d6a5944d7442bd3f124442cb453063a018333e8f664142418"
+   },
+   "after": {
+    "bytes": 11015,
+    "lf": 140,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "4e5cc5f08af47e8d6a5944d7442bd3f124442cb453063a018333e8f664142418"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-128_tenant_settings_single_pc_default_off.sql",
+   "name": "DB-128_tenant_settings_single_pc_default_off.sql",
+   "before": {
+    "bytes": 6016,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "be06f2a8f1a3da14114ff89bd463d5d8f1d7397c8412e489dd75679d631f461f"
+   },
+   "after": {
+    "bytes": 6016,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "be06f2a8f1a3da14114ff89bd463d5d8f1d7397c8412e489dd75679d631f461f"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-129_tenant_settings_session_validity.sql",
+   "name": "DB-129_tenant_settings_session_validity.sql",
+   "before": {
+    "bytes": 10632,
+    "lf": 113,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "60ee4139a838d8280cfce2f0ef4e94310033ab58b2d90639196771e0cf11c3b4"
+   },
+   "after": {
+    "bytes": 10632,
+    "lf": 113,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "60ee4139a838d8280cfce2f0ef4e94310033ab58b2d90639196771e0cf11c3b4"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-12_week2_day2_items_master.sql",
+   "name": "DB-12_week2_day2_items_master.sql",
+   "before": {
+    "bytes": 2256,
+    "lf": 46,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1c9e2c0381aec0577477817d73b8237b29bdd9784ab1b88bd9ac9335b76c9b91"
+   },
+   "after": {
+    "bytes": 2256,
+    "lf": 46,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1c9e2c0381aec0577477817d73b8237b29bdd9784ab1b88bd9ac9335b76c9b91"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-130_refresh_tokens_session_id.sql",
+   "name": "DB-130_refresh_tokens_session_id.sql",
+   "before": {
+    "bytes": 3655,
+    "lf": 42,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "08fab9a66dea6f4747c3c70a22bde55780391712feffba09417cf2fddbdae7ce"
+   },
+   "after": {
+    "bytes": 3655,
+    "lf": 42,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "08fab9a66dea6f4747c3c70a22bde55780391712feffba09417cf2fddbdae7ce"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-131_tenant_settings_one_pc_login.sql",
+   "name": "DB-131_tenant_settings_one_pc_login.sql",
+   "before": {
+    "bytes": 4925,
+    "lf": 51,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3fe2c7d2d4cf5a3dc0c569396c1b31b5673a85acc3f9595a125a4d5a4f6cef04"
+   },
+   "after": {
+    "bytes": 4925,
+    "lf": 51,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3fe2c7d2d4cf5a3dc0c569396c1b31b5673a85acc3f9595a125a4d5a4f6cef04"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-135_local_update_attempts.sql",
+   "name": "DB-135_local_update_attempts.sql",
+   "before": {
+    "bytes": 2791,
+    "lf": 28,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "68b65c9b32194da5cd40e2f6b9438997a8f62d0a7a1f38108a726e476353e85d"
+   },
+   "after": {
+    "bytes": 2791,
+    "lf": 28,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "68b65c9b32194da5cd40e2f6b9438997a8f62d0a7a1f38108a726e476353e85d"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-136_account_seat_defaults.sql",
+   "name": "DB-136_account_seat_defaults.sql",
+   "before": {
+    "bytes": 4211,
+    "lf": 62,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "25cf45dfc2d99a09cc7352a57182f9adfec4c1213a3efd5283c2a21302a8cfc8"
+   },
+   "after": {
+    "bytes": 4211,
+    "lf": 62,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "25cf45dfc2d99a09cc7352a57182f9adfec4c1213a3efd5283c2a21302a8cfc8"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-137_employees_login_id.sql",
+   "name": "DB-137_employees_login_id.sql",
+   "before": {
+    "bytes": 5481,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f94e5e5a3f52e5ef3c2492f327b776a7372d6eb54df30c54e2c88efe32be83e0"
+   },
+   "after": {
+    "bytes": 5481,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f94e5e5a3f52e5ef3c2492f327b776a7372d6eb54df30c54e2c88efe32be83e0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-138_ai_export_consents.sql",
+   "name": "DB-138_ai_export_consents.sql",
+   "before": {
+    "bytes": 3631,
+    "lf": 41,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "61099c042fd55a5570d0a32553004a5fc2302b0abfcffdaf2a388675e422e2d9"
+   },
+   "after": {
+    "bytes": 3631,
+    "lf": 41,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "61099c042fd55a5570d0a32553004a5fc2302b0abfcffdaf2a388675e422e2d9"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-139_cs_requests.sql",
+   "name": "DB-139_cs_requests.sql",
+   "before": {
+    "bytes": 3210,
+    "lf": 38,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "57a398379a7236a2c7ddff95b2432c2f57c0fd6ffc758ec238dfc06e32b309fa"
+   },
+   "after": {
+    "bytes": 3210,
+    "lf": 38,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "57a398379a7236a2c7ddff95b2432c2f57c0fd6ffc758ec238dfc06e32b309fa"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-13_week2_day3_bom_auto_order.sql",
+   "name": "DB-13_week2_day3_bom_auto_order.sql",
+   "before": {
+    "bytes": 3082,
+    "lf": 68,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eb51e997ab8f4ff8000c005d295d92e830573acecb74b2ec7efd69fa84d18ba5"
+   },
+   "after": {
+    "bytes": 3082,
+    "lf": 68,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eb51e997ab8f4ff8000c005d295d92e830573acecb74b2ec7efd69fa84d18ba5"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-140_cs_outbox.sql",
+   "name": "DB-140_cs_outbox.sql",
+   "before": {
+    "bytes": 2713,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7cd498a8f34029810e501d59564fb373b97944ce098262ad3a83a2f302c6a51b"
+   },
+   "after": {
+    "bytes": 2713,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7cd498a8f34029810e501d59564fb373b97944ce098262ad3a83a2f302c6a51b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-141_cs_replies.sql",
+   "name": "DB-141_cs_replies.sql",
+   "before": {
+    "bytes": 1980,
+    "lf": 28,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "35cbeb09ce544d1580c5fbf5be7f228e12b07c1cef6b703f204e0ae6bbf7aab6"
+   },
+   "after": {
+    "bytes": 1980,
+    "lf": 28,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "35cbeb09ce544d1580c5fbf5be7f228e12b07c1cef6b703f204e0ae6bbf7aab6"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-142_cs_forbidden_rejects.sql",
+   "name": "DB-142_cs_forbidden_rejects.sql",
+   "before": {
+    "bytes": 1759,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "793ef6298b53dfca6b9bd82f8cb283891aa2b976373a487f015e8b82f449e289"
+   },
+   "after": {
+    "bytes": 1759,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "793ef6298b53dfca6b9bd82f8cb283891aa2b976373a487f015e8b82f449e289"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-143_cs_rating_outbox.sql",
+   "name": "DB-143_cs_rating_outbox.sql",
+   "before": {
+    "bytes": 4084,
+    "lf": 50,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "32b0d067830991eac7d84e03749e096002fe0d3ee58d44305a60caf13a39609f"
+   },
+   "after": {
+    "bytes": 4084,
+    "lf": 50,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "32b0d067830991eac7d84e03749e096002fe0d3ee58d44305a60caf13a39609f"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-144_cs_requests_origin.sql",
+   "name": "DB-144_cs_requests_origin.sql",
+   "before": {
+    "bytes": 2236,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8f4baf6c8487a1f7624e84a12f24e619e1389956c9a4e36547f93eaa91630f14"
+   },
+   "after": {
+    "bytes": 2236,
+    "lf": 35,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8f4baf6c8487a1f7624e84a12f24e619e1389956c9a4e36547f93eaa91630f14"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-145_cs_requests_hq_status.sql",
+   "name": "DB-145_cs_requests_hq_status.sql",
+   "before": {
+    "bytes": 2410,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "625fd22fb8e6cc7231dbf2dc9418cb078f8fae395f5250b7c69db35c672df817"
+   },
+   "after": {
+    "bytes": 2410,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "625fd22fb8e6cc7231dbf2dc9418cb078f8fae395f5250b7c69db35c672df817"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-146_cs_requests_purpose.sql",
+   "name": "DB-146_cs_requests_purpose.sql",
+   "before": {
+    "bytes": 3390,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f4fb7c9c827aded7a202ec554612b582097b8a9d7c2ad58f3c42f006bf05db4"
+   },
+   "after": {
+    "bytes": 3390,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f4fb7c9c827aded7a202ec554612b582097b8a9d7c2ad58f3c42f006bf05db4"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-147_form_templates_tear_line.sql",
+   "name": "DB-147_form_templates_tear_line.sql",
+   "before": {
+    "bytes": 2993,
+    "lf": 48,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "991350cfa667fcc0677efe8363d0955b8054b83c711ee08a6d86d28fd450360f"
+   },
+   "after": {
+    "bytes": 2993,
+    "lf": 48,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "991350cfa667fcc0677efe8363d0955b8054b83c711ee08a6d86d28fd450360f"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-148_form_watermark_print_background.sql",
+   "name": "DB-148_form_watermark_print_background.sql",
+   "before": {
+    "bytes": 9963,
+    "lf": 168,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "451daad4de3f273c4495d0f66a75e1a7d06629d21c3f739494eed10dfc456057"
+   },
+   "after": {
+    "bytes": 9963,
+    "lf": 168,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "451daad4de3f273c4495d0f66a75e1a7d06629d21c3f739494eed10dfc456057"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-149_show_watermark_three_values.sql",
+   "name": "DB-149_show_watermark_three_values.sql",
+   "before": {
+    "bytes": 3251,
+    "lf": 40,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "73e5aacc634ebbd34613acfa94e021df9ace29273d8267606773d2a8e06f38db"
+   },
+   "after": {
+    "bytes": 3251,
+    "lf": 40,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "73e5aacc634ebbd34613acfa94e021df9ace29273d8267606773d2a8e06f38db"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-14_week2_day4_permissions_company_enhance.sql",
+   "name": "DB-14_week2_day4_permissions_company_enhance.sql",
+   "before": {
+    "bytes": 1255,
+    "lf": 27,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "61450139c03d7922de085fbb50beea0d7f064b6818458a7855f818dcfebfd66a"
+   },
+   "after": {
+    "bytes": 1255,
+    "lf": 27,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "61450139c03d7922de085fbb50beea0d7f064b6818458a7855f818dcfebfd66a"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-15_phase4_approval_collection.sql",
+   "name": "DB-15_phase4_approval_collection.sql",
+   "before": {
+    "bytes": 9002,
+    "lf": 136,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "314cc413fc61c54cfe5dccdb13163f32cc9d70a514ce1dfac576c93ac86a4b5f"
+   },
+   "after": {
+    "bytes": 9002,
+    "lf": 136,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "314cc413fc61c54cfe5dccdb13163f32cc9d70a514ce1dfac576c93ac86a4b5f"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-16_phase5_certificates_etax_audit.sql",
+   "name": "DB-16_phase5_certificates_etax_audit.sql",
+   "before": {
+    "bytes": 10201,
+    "lf": 173,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b78092339f9606fa7c24e93b4484bf12dab08240bdc7531634d02dffe797a222"
+   },
+   "after": {
+    "bytes": 10201,
+    "lf": 173,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b78092339f9606fa7c24e93b4484bf12dab08240bdc7531634d02dffe797a222"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-18_idempotency_and_summary_sources.sql",
+   "name": "DB-18_idempotency_and_summary_sources.sql",
+   "before": {
+    "bytes": 4065,
+    "lf": 64,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fc63e7f0e2a2a4bcd19219b085f08b4398f56b731bca5742f727da27ddad520a"
+   },
+   "after": {
+    "bytes": 4065,
+    "lf": 64,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fc63e7f0e2a2a4bcd19219b085f08b4398f56b731bca5742f727da27ddad520a"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-19_tax_invoices_layer1.sql",
+   "name": "DB-19_tax_invoices_layer1.sql",
+   "before": {
+    "bytes": 4115,
+    "lf": 64,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8bcc41f31eff6e35da6c034ae7b392921c0df7295c8aacb2ba61fe42db9e21a5"
+   },
+   "after": {
+    "bytes": 4115,
+    "lf": 64,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8bcc41f31eff6e35da6c034ae7b392921c0df7295c8aacb2ba61fe42db9e21a5"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-20_sales_deliveries_tax_invoice_id.sql",
+   "name": "DB-20_sales_deliveries_tax_invoice_id.sql",
+   "before": {
+    "bytes": 2111,
+    "lf": 36,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "07e3344ee1592ae98a96147c76ca2aeee1d1b309c9050f5527f2d10a851e0d00"
+   },
+   "after": {
+    "bytes": 2111,
+    "lf": 36,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "07e3344ee1592ae98a96147c76ca2aeee1d1b309c9050f5527f2d10a851e0d00"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-21_items_auto_receive_on_order.sql",
+   "name": "DB-21_items_auto_receive_on_order.sql",
+   "before": {
+    "bytes": 754,
+    "lf": 11,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ebfec727c12826af5bb17ba243028f783ae9450bcc028ae68524f58c1f0b01a0"
+   },
+   "after": {
+    "bytes": 754,
+    "lf": 11,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ebfec727c12826af5bb17ba243028f783ae9450bcc028ae68524f58c1f0b01a0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-22_positions_and_approval_lines.sql",
+   "name": "DB-22_positions_and_approval_lines.sql",
+   "before": {
+    "bytes": 5630,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f53522425e83011ed7ee8a9c3584610d925e23a815306aacec0398848d6d2c29"
+   },
+   "after": {
+    "bytes": 5630,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f53522425e83011ed7ee8a9c3584610d925e23a815306aacec0398848d6d2c29"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-23_subscription_billing.sql",
+   "name": "DB-23_subscription_billing.sql",
+   "before": {
+    "bytes": 10341,
+    "lf": 157,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "4024c54f3895bca1157285973d3b3ca2f8e38b0b2b8f29a67cd060f26058c356"
+   },
+   "after": {
+    "bytes": 10341,
+    "lf": 157,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "4024c54f3895bca1157285973d3b3ca2f8e38b0b2b8f29a67cd060f26058c356"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-24_backup_settings_history.sql",
+   "name": "DB-24_backup_settings_history.sql",
+   "before": {
+    "bytes": 3459,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "54b137e1acf714ef39b5f2211c214a082f630a719a0295f73f5d9f431759e7d0"
+   },
+   "after": {
+    "bytes": 3459,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "54b137e1acf714ef39b5f2211c214a082f630a719a0295f73f5d9f431759e7d0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-25_bills_cards_bank.sql",
+   "name": "DB-25_bills_cards_bank.sql",
+   "before": {
+    "bytes": 6772,
+    "lf": 95,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c8200d66a5f6a6687a5d55fc6e0d86d514191139c653d8648af4de86f1356660"
+   },
+   "after": {
+    "bytes": 6772,
+    "lf": 95,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c8200d66a5f6a6687a5d55fc6e0d86d514191139c653d8648af4de86f1356660"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-26_email_smtp_history.sql",
+   "name": "DB-26_email_smtp_history.sql",
+   "before": {
+    "bytes": 3806,
+    "lf": 65,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b030c9593aab1e1a27493fa4256e41dc9355b6e7b81ecfa8a6919f73a06180ca"
+   },
+   "after": {
+    "bytes": 3806,
+    "lf": 65,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b030c9593aab1e1a27493fa4256e41dc9355b6e7b81ecfa8a6919f73a06180ca"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-27_tenant_ai_subscription_columns.sql",
+   "name": "DB-27_tenant_ai_subscription_columns.sql",
+   "before": {
+    "bytes": 3612,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e9e24e3629157417e63d09e07942d82447511bbdf33b093e1421674e31aa6470"
+   },
+   "after": {
+    "bytes": 3612,
+    "lf": 56,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e9e24e3629157417e63d09e07942d82447511bbdf33b093e1421674e31aa6470"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-28_tenant_settings_missing_columns.sql",
+   "name": "DB-28_tenant_settings_missing_columns.sql",
+   "before": {
+    "bytes": 2910,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e1b7b59d4f04e8c115aed4ae4d050251b4016ce7e6a0b65b29c6ef89d465f3c7"
+   },
+   "after": {
+    "bytes": 2910,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e1b7b59d4f04e8c115aed4ae4d050251b4016ce7e6a0b65b29c6ef89d465f3c7"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-29_approval_lines_schema_fix.sql",
+   "name": "DB-29_approval_lines_schema_fix.sql",
+   "before": {
+    "bytes": 1946,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9e45dd852d62ae23c65d3c176cedc06a1616293f7630abe406daf8c61680eef7"
+   },
+   "after": {
+    "bytes": 1946,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9e45dd852d62ae23c65d3c176cedc06a1616293f7630abe406daf8c61680eef7"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-30_approval_doc_lines.sql",
+   "name": "DB-30_approval_doc_lines.sql",
+   "before": {
+    "bytes": 1667,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f115fb0d1a2aac65339b3e82300a9aecd87b069dafd6121beea9b3f4947620d0"
+   },
+   "after": {
+    "bytes": 1667,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f115fb0d1a2aac65339b3e82300a9aecd87b069dafd6121beea9b3f4947620d0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-31_cleanup_orphan_draft_receipts.sql",
+   "name": "DB-31_cleanup_orphan_draft_receipts.sql",
+   "before": {
+    "bytes": 814,
+    "lf": 19,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "221bd1123a08b0638cab9cca3fc3b5b09361f797848e0ea4e710afc8959eb2b2"
+   },
+   "after": {
+    "bytes": 814,
+    "lf": 19,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "221bd1123a08b0638cab9cca3fc3b5b09361f797848e0ea4e710afc8959eb2b2"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-32_seed_chart_of_accounts.sql",
+   "name": "DB-32_seed_chart_of_accounts.sql",
+   "before": {
+    "bytes": 1628,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f8cb247f96e179ce5d47a5553e226441a3258bbfebe94ec3c04601f4d870048d"
+   },
+   "after": {
+    "bytes": 1628,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f8cb247f96e179ce5d47a5553e226441a3258bbfebe94ec3c04601f4d870048d"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-33_sales_orders_enum_expand.sql",
+   "name": "DB-33_sales_orders_enum_expand.sql",
+   "before": {
+    "bytes": 1059,
+    "lf": 23,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b92c385c823ed2297dce3ebdce7cd912795a31f458a9d22c41c55f6cd0eecf29"
+   },
+   "after": {
+    "bytes": 1059,
+    "lf": 23,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "b92c385c823ed2297dce3ebdce7cd912795a31f458a9d22c41c55f6cd0eecf29"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-34_sales_orders_is_auto.sql",
+   "name": "DB-34_sales_orders_is_auto.sql",
+   "before": {
+    "bytes": 512,
+    "lf": 8,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8cd72ace41bb9027a7d1724d100ce8aac880afb95d2a345ac807fca98cadc0b0"
+   },
+   "after": {
+    "bytes": 512,
+    "lf": 8,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8cd72ace41bb9027a7d1724d100ce8aac880afb95d2a345ac807fca98cadc0b0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-35_journal_lines_unique.sql",
+   "name": "DB-35_journal_lines_unique.sql",
+   "before": {
+    "bytes": 438,
+    "lf": 7,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "710e777fd435898ab61ab6a59e283de05be52ce111771d544da9f01edb417e99"
+   },
+   "after": {
+    "bytes": 438,
+    "lf": 7,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "710e777fd435898ab61ab6a59e283de05be52ce111771d544da9f01edb417e99"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-36_purchase_orders_is_auto.sql",
+   "name": "DB-36_purchase_orders_is_auto.sql",
+   "before": {
+    "bytes": 355,
+    "lf": 7,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "08d8a3f47fdfe281b577c4343094a683dad8d664ab261a4138981c0b015acb18"
+   },
+   "after": {
+    "bytes": 355,
+    "lf": 7,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "08d8a3f47fdfe281b577c4343094a683dad8d664ab261a4138981c0b015acb18"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-37_stock_ledger_unique.sql",
+   "name": "DB-37_stock_ledger_unique.sql",
+   "before": {
+    "bytes": 1029,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f60883a0ae34c4715da53bb729748958b168b99292333880924a280d1489f74"
+   },
+   "after": {
+    "bytes": 1029,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f60883a0ae34c4715da53bb729748958b168b99292333880924a280d1489f74"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-38_force_innodb.sql",
+   "name": "DB-38_force_innodb.sql",
+   "before": {
+    "bytes": 2724,
+    "lf": 55,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "26a2136765611aacc153f1d736de83dae35c3204cd1683bee7ea1e57193c7b22"
+   },
+   "after": {
+    "bytes": 2724,
+    "lf": 55,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "26a2136765611aacc153f1d736de83dae35c3204cd1683bee7ea1e57193c7b22"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-39_backoffice_schema.sql",
+   "name": "DB-39_backoffice_schema.sql",
+   "before": {
+    "bytes": 1854,
+    "lf": 21,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fe2624029fd10e75b331d2241a04849820d8c3194f87909b12f5d2f420db15ba"
+   },
+   "after": {
+    "bytes": 1854,
+    "lf": 21,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "fe2624029fd10e75b331d2241a04849820d8c3194f87909b12f5d2f420db15ba"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-50_unified_calendar.sql",
+   "name": "DB-50_unified_calendar.sql",
+   "before": {
+    "bytes": 2281,
+    "lf": 33,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f17cd474b9c7f517f92c623d0e5a2675fc65e6f3a5819cfd6c961d9bf5c54a3"
+   },
+   "after": {
+    "bytes": 2281,
+    "lf": 33,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f17cd474b9c7f517f92c623d0e5a2675fc65e6f3a5819cfd6c961d9bf5c54a3"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-60_backoffice_v1.sql",
+   "name": "DB-60_backoffice_v1.sql",
+   "before": {
+    "bytes": 1468,
+    "lf": 18,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8d4ac4d3cc960b718f83e35d7b9f374ff2b864cedb4b941eb31553ee6dd0c7bd"
+   },
+   "after": {
+    "bytes": 1468,
+    "lf": 18,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8d4ac4d3cc960b718f83e35d7b9f374ff2b864cedb4b941eb31553ee6dd0c7bd"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-70_watchdog_pings.sql",
+   "name": "DB-70_watchdog_pings.sql",
+   "before": {
+    "bytes": 1804,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5b6e261f954fece0336fd3bb62c9f5c316ae3e7d8f53d7fdedb87be10972a731"
+   },
+   "after": {
+    "bytes": 1804,
+    "lf": 34,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5b6e261f954fece0336fd3bb62c9f5c316ae3e7d8f53d7fdedb87be10972a731"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-71_licenses_token_hash.sql",
+   "name": "DB-71_licenses_token_hash.sql",
+   "before": {
+    "bytes": 1405,
+    "lf": 23,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7dbbbe7ac2347b9511022985d6f4f4472ef6c0e565fb06c372e456cda1de860b"
+   },
+   "after": {
+    "bytes": 1405,
+    "lf": 23,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7dbbbe7ac2347b9511022985d6f4f4472ef6c0e565fb06c372e456cda1de860b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-72_terms_consents.sql",
+   "name": "DB-72_terms_consents.sql",
+   "before": {
+    "bytes": 1558,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "327ad818d336d9e1ab7500e6764ffc5c4f0ba53decdc3d7ea93695c46aecfc62"
+   },
+   "after": {
+    "bytes": 1558,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "327ad818d336d9e1ab7500e6764ffc5c4f0ba53decdc3d7ea93695c46aecfc62"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-73_item_specs.sql",
+   "name": "DB-73_item_specs.sql",
+   "before": {
+    "bytes": 1987,
+    "lf": 32,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "32e9db6de42303a99c9980b4f0ed602d6e666ca1f47dc728f51b0705676b5d88"
+   },
+   "after": {
+    "bytes": 1987,
+    "lf": 32,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "32e9db6de42303a99c9980b4f0ed602d6e666ca1f47dc728f51b0705676b5d88"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-74_form_templates.sql",
+   "name": "DB-74_form_templates.sql",
+   "before": {
+    "bytes": 2638,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "816a3023138f0aff03fab94be89f64b0faac47489624a964881ec448c7960660"
+   },
+   "after": {
+    "bytes": 2638,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "816a3023138f0aff03fab94be89f64b0faac47489624a964881ec448c7960660"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-75_purchase_returns_reason.sql",
+   "name": "DB-75_purchase_returns_reason.sql",
+   "before": {
+    "bytes": 1464,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "a7452db9b606abd2f0b3dfc92c7a89fb6580a66c96e808f9fe2637e0ee2705f0"
+   },
+   "after": {
+    "bytes": 1464,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "a7452db9b606abd2f0b3dfc92c7a89fb6580a66c96e808f9fe2637e0ee2705f0"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-76_item_specs_seed.sql",
+   "name": "DB-76_item_specs_seed.sql",
+   "before": {
+    "bytes": 1942,
+    "lf": 42,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "72fdb12959104eee0422af275653e71bef6a145c0e7c5febf49babe25bc5a049"
+   },
+   "after": {
+    "bytes": 1942,
+    "lf": 42,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "72fdb12959104eee0422af275653e71bef6a145c0e7c5febf49babe25bc5a049"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-77_tenant_employees_snapshot.sql",
+   "name": "DB-77_tenant_employees_snapshot.sql",
+   "before": {
+    "bytes": 1247,
+    "lf": 20,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2a3a124900d549c3309e46140fd0a2315a1ea727f1792352be9886cf14385bfc"
+   },
+   "after": {
+    "bytes": 1247,
+    "lf": 20,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2a3a124900d549c3309e46140fd0a2315a1ea727f1792352be9886cf14385bfc"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-78_tenant_devices_snapshot.sql",
+   "name": "DB-78_tenant_devices_snapshot.sql",
+   "before": {
+    "bytes": 1001,
+    "lf": 17,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8e6b797ef514bbeb82e504f98f9fb07bf388275ff3a971f5eafb5cec1ac582b8"
+   },
+   "after": {
+    "bytes": 1001,
+    "lf": 17,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "8e6b797ef514bbeb82e504f98f9fb07bf388275ff3a971f5eafb5cec1ac582b8"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-79_sync_tokens.sql",
+   "name": "DB-79_sync_tokens.sql",
+   "before": {
+    "bytes": 1053,
+    "lf": 17,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "94cafc5e2751f8f5bd26575c09285fdf297ae747a8d7a1b19d51724660bea9ff"
+   },
+   "after": {
+    "bytes": 1053,
+    "lf": 17,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "94cafc5e2751f8f5bd26575c09285fdf297ae747a8d7a1b19d51724660bea9ff"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-80_reseller_applications.sql",
+   "name": "DB-80_reseller_applications.sql",
+   "before": {
+    "bytes": 1508,
+    "lf": 25,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "36312baa59f776da17f6b0924645c2eefcb7278d5edc9551fc851f24960cee17"
+   },
+   "after": {
+    "bytes": 1508,
+    "lf": 25,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "36312baa59f776da17f6b0924645c2eefcb7278d5edc9551fc851f24960cee17"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-81_leave_requests.sql",
+   "name": "DB-81_leave_requests.sql",
+   "before": {
+    "bytes": 2016,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f24e035955d22af4102f1bbc3b76f5aff6ebc2c3719a52d110c59d9635d7c080"
+   },
+   "after": {
+    "bytes": 2016,
+    "lf": 30,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f24e035955d22af4102f1bbc3b76f5aff6ebc2c3719a52d110c59d9635d7c080"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-82_watchdog_update_consents.sql",
+   "name": "DB-82_watchdog_update_consents.sql",
+   "before": {
+    "bytes": 2314,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d90894f90c873ecad53a80c596dafee63f580115557920a9c45226e79481829b"
+   },
+   "after": {
+    "bytes": 2314,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d90894f90c873ecad53a80c596dafee63f580115557920a9c45226e79481829b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-83_local_update_status.sql",
+   "name": "DB-83_local_update_status.sql",
+   "before": {
+    "bytes": 3115,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9db050b2f4c81a5bfd44a6a53ed7c9bc45b00f9be4c22b92cb61ac444571125b"
+   },
+   "after": {
+    "bytes": 3115,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9db050b2f4c81a5bfd44a6a53ed7c9bc45b00f9be4c22b92cb61ac444571125b"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-84_schema_migrations.sql",
+   "name": "DB-84_schema_migrations.sql",
+   "before": {
+    "bytes": 3895,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f8c65b9cea1b7b8e8105f7c5e0ce83119a4c60a0053a1b175d1465c81bc07ea5"
+   },
+   "after": {
+    "bytes": 3895,
+    "lf": 44,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f8c65b9cea1b7b8e8105f7c5e0ce83119a4c60a0053a1b175d1465c81bc07ea5"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-85_local_company_address_detail_and_images.sql",
+   "name": "DB-85_local_company_address_detail_and_images.sql",
+   "before": {
+    "bytes": 4078,
+    "lf": 53,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2cce56d90efaa8aa59a1b52ad68835dcfc06d062a6fb6d4e73a6ef7ec3f2f9c2"
+   },
+   "after": {
+    "bytes": 4078,
+    "lf": 53,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2cce56d90efaa8aa59a1b52ad68835dcfc06d062a6fb6d4e73a6ef7ec3f2f9c2"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-86_tenant_devices_is_main_pc.sql",
+   "name": "DB-86_tenant_devices_is_main_pc.sql",
+   "before": {
+    "bytes": 4282,
+    "lf": 58,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f166ad5d39d6d4152ab89cf3ef0dd923cff4ec42a6b34156ce1415fa3fa1fa4"
+   },
+   "after": {
+    "bytes": 4282,
+    "lf": 58,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "2f166ad5d39d6d4152ab89cf3ef0dd923cff4ec42a6b34156ce1415fa3fa1fa4"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-87_device_register_tokens.sql",
+   "name": "DB-87_device_register_tokens.sql",
+   "before": {
+    "bytes": 3314,
+    "lf": 50,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "afd2c93b7aa43717191eb2ee7af508813cb1d61291b853db0d2a0a999727bb83"
+   },
+   "after": {
+    "bytes": 3314,
+    "lf": 50,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "afd2c93b7aa43717191eb2ee7af508813cb1d61291b853db0d2a0a999727bb83"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-88_tenant_devices_auth_key.sql",
+   "name": "DB-88_tenant_devices_auth_key.sql",
+   "before": {
+    "bytes": 4960,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c214b91ddd2f27194888e1811e0c0728cbad145016e83ea628fc939ad6eb9214"
+   },
+   "after": {
+    "bytes": 4960,
+    "lf": 84,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "c214b91ddd2f27194888e1811e0c0728cbad145016e83ea628fc939ad6eb9214"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-89_main_pc_db_guard.sql",
+   "name": "DB-89_main_pc_db_guard.sql",
+   "before": {
+    "bytes": 4800,
+    "lf": 99,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f7c5ec4cac9ccebe450a49cb1886791dea2ee4b3d14704913a374c5fd79f00a"
+   },
+   "after": {
+    "bytes": 4800,
+    "lf": 99,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f7c5ec4cac9ccebe450a49cb1886791dea2ee4b3d14704913a374c5fd79f00a"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-90_form_templates_print_options.sql",
+   "name": "DB-90_form_templates_print_options.sql",
+   "before": {
+    "bytes": 4659,
+    "lf": 78,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "520e76b9b15b356e5f1d63f1c25c79dfaa2e214b4f8655c4c42d0452c17e6ffb"
+   },
+   "after": {
+    "bytes": 4659,
+    "lf": 78,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "520e76b9b15b356e5f1d63f1c25c79dfaa2e214b4f8655c4c42d0452c17e6ffb"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-91_ai_provider_3way.sql",
+   "name": "DB-91_ai_provider_3way.sql",
+   "before": {
+    "bytes": 5831,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d22c88a3af4fb3fc60d8d8715a8f50ede93a3b0d738f29fdc2d3589764e2c82d"
+   },
+   "after": {
+    "bytes": 5831,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d22c88a3af4fb3fc60d8d8715a8f50ede93a3b0d738f29fdc2d3589764e2c82d"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-92_hr_reports.sql",
+   "name": "DB-92_hr_reports.sql",
+   "before": {
+    "bytes": 5619,
+    "lf": 99,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eade765d16a0ebcdca28047f531bdd8073410a0708adae65d63328b422abd634"
+   },
+   "after": {
+    "bytes": 5619,
+    "lf": 99,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "eade765d16a0ebcdca28047f531bdd8073410a0708adae65d63328b422abd634"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-93_seed_positions_all_tenants.sql",
+   "name": "DB-93_seed_positions_all_tenants.sql",
+   "before": {
+    "bytes": 4558,
+    "lf": 67,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d10ab13c82b7793ee5b2e63cdf824e1f4576daa8e920724d48c1920eb1f216a1"
+   },
+   "after": {
+    "bytes": 4558,
+    "lf": 67,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "d10ab13c82b7793ee5b2e63cdf824e1f4576daa8e920724d48c1920eb1f216a1"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-94_employee_weekly_hours.sql",
+   "name": "DB-94_employee_weekly_hours.sql",
+   "before": {
+    "bytes": 2915,
+    "lf": 48,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6831a61f79eb348787e3d6278ebb70d98aa3f3c4059d754c47625675d3bd8962"
+   },
+   "after": {
+    "bytes": 2915,
+    "lf": 48,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6831a61f79eb348787e3d6278ebb70d98aa3f3c4059d754c47625675d3bd8962"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-95_workplace_labor_settings.sql",
+   "name": "DB-95_workplace_labor_settings.sql",
+   "before": {
+    "bytes": 5034,
+    "lf": 73,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "792920e6430fbc8f61989b274ff5df4df7d6101df6fbdd0083ecda59f7ccdf5d"
+   },
+   "after": {
+    "bytes": 5034,
+    "lf": 73,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "792920e6430fbc8f61989b274ff5df4df7d6101df6fbdd0083ecda59f7ccdf5d"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-96_labor_policy_settings.sql",
+   "name": "DB-96_labor_policy_settings.sql",
+   "before": {
+    "bytes": 8250,
+    "lf": 115,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f838fae61dd36c42b1d7006f0205033e346271c21b64b33e2649e4ce41459b1"
+   },
+   "after": {
+    "bytes": 8250,
+    "lf": 115,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "1f838fae61dd36c42b1d7006f0205033e346271c21b64b33e2649e4ce41459b1"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-97_annual_leave_grants.sql",
+   "name": "DB-97_annual_leave_grants.sql",
+   "before": {
+    "bytes": 4949,
+    "lf": 72,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "34bbb2ad21c4f6f1985351f69357c8cb0c213b9211fdd9b60589097f463db8d9"
+   },
+   "after": {
+    "bytes": 4949,
+    "lf": 72,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "34bbb2ad21c4f6f1985351f69357c8cb0c213b9211fdd9b60589097f463db8d9"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-98_employee_leave_of_absence.sql",
+   "name": "DB-98_employee_leave_of_absence.sql",
+   "before": {
+    "bytes": 10965,
+    "lf": 150,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9ed1734f2b81925a7bc435340a24251707a46482d7c2a2a9c5dfaff4217c8231"
+   },
+   "after": {
+    "bytes": 10965,
+    "lf": 150,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "9ed1734f2b81925a7bc435340a24251707a46482d7c2a2a9c5dfaff4217c8231"
+   }
+  },
+  {
+   "group": "erp",
+   "path": "src/HitPan.API/Migrations/SQL/DB-99_employee_work_status.sql",
+   "name": "DB-99_employee_work_status.sql",
+   "before": {
+    "bytes": 5479,
+    "lf": 87,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6f8f5200e55a2588beb5e88a4de952a90bfd66ad7bbf500723a9b509fc343750"
+   },
+   "after": {
+    "bytes": 5479,
+    "lf": 87,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "6f8f5200e55a2588beb5e88a4de952a90bfd66ad7bbf500723a9b509fc343750"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/00_backoffice_core.sql",
+   "name": "00_backoffice_core.sql",
+   "before": {
+    "bytes": 49162,
+    "lf": 713,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ddc836372239a23076be80d65fd3c583a746f0e3eca0a4ec7d2667c4b5f4b168"
+   },
+   "after": {
+    "bytes": 49162,
+    "lf": 713,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ddc836372239a23076be80d65fd3c583a746f0e3eca0a4ec7d2667c4b5f4b168"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/10_backoffice_payment.sql",
+   "name": "10_backoffice_payment.sql",
+   "before": {
+    "bytes": 3635,
+    "lf": 52,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e527361a5274183d0df25f55fb0b97ae55f72c8e2e7efd84a4a2acdef81c4839"
+   },
+   "after": {
+    "bytes": 3635,
+    "lf": 52,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e527361a5274183d0df25f55fb0b97ae55f72c8e2e7efd84a4a2acdef81c4839"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/11_backoffice_payment_z3_approved_at.sql",
+   "name": "11_backoffice_payment_z3_approved_at.sql",
+   "before": {
+    "bytes": 2582,
+    "lf": 39,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "bc3644b65ba5cc6296823bb599a2f5d6dcb57dec14c19fdc2408595b81f419c9"
+   },
+   "after": {
+    "bytes": 2582,
+    "lf": 39,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "bc3644b65ba5cc6296823bb599a2f5d6dcb57dec14c19fdc2408595b81f419c9"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/20_backoffice_telemetry.sql",
+   "name": "20_backoffice_telemetry.sql",
+   "before": {
+    "bytes": 6829,
+    "lf": 94,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "09c21542d28e64cbefb46e9ea2b1ca0fdc3f4a7b8d78dbff905191bd3190a452"
+   },
+   "after": {
+    "bytes": 6829,
+    "lf": 94,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "09c21542d28e64cbefb46e9ea2b1ca0fdc3f4a7b8d78dbff905191bd3190a452"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/30_backoffice_tenants_extra_accounts.sql",
+   "name": "30_backoffice_tenants_extra_accounts.sql",
+   "before": {
+    "bytes": 1984,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "528bbdd93b041dafb1dd59897af8fd0b2e15e85f99809130f109d5a0e60fca8e"
+   },
+   "after": {
+    "bytes": 1984,
+    "lf": 24,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "528bbdd93b041dafb1dd59897af8fd0b2e15e85f99809130f109d5a0e60fca8e"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/31_backoffice_z2_landing_signups_tenant_fk.sql",
+   "name": "31_backoffice_z2_landing_signups_tenant_fk.sql",
+   "before": {
+    "bytes": 10294,
+    "lf": 136,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f63b2369f9d65110f464f0c4f2519f468e0a8955d1a5379b884f06ce08d063d0"
+   },
+   "after": {
+    "bytes": 10294,
+    "lf": 136,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "f63b2369f9d65110f464f0c4f2519f468e0a8955d1a5379b884f06ce08d063d0"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/32_backoffice_s2_owner.sql",
+   "name": "32_backoffice_s2_owner.sql",
+   "before": {
+    "bytes": 1927,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "977ba94ec79c5a4bf824789ad634136bcef3c8219867c1ac5befe2833ec2871d"
+   },
+   "after": {
+    "bytes": 1927,
+    "lf": 26,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "977ba94ec79c5a4bf824789ad634136bcef3c8219867c1ac5befe2833ec2871d"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/40_backoffice_cs.sql",
+   "name": "40_backoffice_cs.sql",
+   "before": {
+    "bytes": 6220,
+    "lf": 88,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "66f40889db0b4ac2d62997f598421577914d5d907333945166c2ddc4b942ec11"
+   },
+   "after": {
+    "bytes": 6220,
+    "lf": 88,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "66f40889db0b4ac2d62997f598421577914d5d907333945166c2ddc4b942ec11"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/41_backoffice_cs_kb.sql",
+   "name": "41_backoffice_cs_kb.sql",
+   "before": {
+    "bytes": 6158,
+    "lf": 80,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "070ae03ae25a3e4031dc6161f6eb273dc46b0c31665019d61b0691cef83d8b56"
+   },
+   "after": {
+    "bytes": 6158,
+    "lf": 80,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "070ae03ae25a3e4031dc6161f6eb273dc46b0c31665019d61b0691cef83d8b56"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/42_backoffice_cs_stages.sql",
+   "name": "42_backoffice_cs_stages.sql",
+   "before": {
+    "bytes": 2471,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e693d15df36a674522177b6e186c7cffc32af02051df48fc9b64c404f3b40fd6"
+   },
+   "after": {
+    "bytes": 2471,
+    "lf": 37,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "e693d15df36a674522177b6e186c7cffc32af02051df48fc9b64c404f3b40fd6"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/43_backoffice_promotion_legacy_align.sql",
+   "name": "43_backoffice_promotion_legacy_align.sql",
+   "before": {
+    "bytes": 4976,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5f44476062f001a6570e76ae60c2420b397f928e2a0849944fd6194007a9e539"
+   },
+   "after": {
+    "bytes": 4976,
+    "lf": 75,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "5f44476062f001a6570e76ae60c2420b397f928e2a0849944fd6194007a9e539"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/44_backoffice_pricing_plan_columns.sql",
+   "name": "44_backoffice_pricing_plan_columns.sql",
+   "before": {
+    "bytes": 4617,
+    "lf": 59,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "562388b625147a9a7f41256743cca76b68cd0763d798d537c38d6557dbe339ef"
+   },
+   "after": {
+    "bytes": 4617,
+    "lf": 59,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "562388b625147a9a7f41256743cca76b68cd0763d798d537c38d6557dbe339ef"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/45_backoffice_cs_outbound_retention.sql",
+   "name": "45_backoffice_cs_outbound_retention.sql",
+   "before": {
+    "bytes": 7590,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7fb8e89a93fa119e5cd9719c5c97442fb18483dc3e9ea4d04e10f1eab3ade00c"
+   },
+   "after": {
+    "bytes": 7590,
+    "lf": 97,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "7fb8e89a93fa119e5cd9719c5c97442fb18483dc3e9ea4d04e10f1eab3ade00c"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/46_backoffice_email_send_history.sql",
+   "name": "46_backoffice_email_send_history.sql",
+   "before": {
+    "bytes": 5277,
+    "lf": 59,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ba2f00e24d32118678346e93afc957d2040e1aad3b84970cb07651b3dcd08cc7"
+   },
+   "after": {
+    "bytes": 5277,
+    "lf": 59,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ba2f00e24d32118678346e93afc957d2040e1aad3b84970cb07651b3dcd08cc7"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/90_seed_permissions.sql",
+   "name": "90_seed_permissions.sql",
+   "before": {
+    "bytes": 9185,
+    "lf": 88,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3f39911270d752db011f6582fac380aa2c6e6097d2a0b43fa90aa6af8ad25c37"
+   },
+   "after": {
+    "bytes": 9185,
+    "lf": 88,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "3f39911270d752db011f6582fac380aa2c6e6097d2a0b43fa90aa6af8ad25c37"
+   }
+  },
+  {
+   "group": "backoffice",
+   "path": "installer/backoffice/91_seed_admin.sql",
+   "name": "91_seed_admin.sql",
+   "before": {
+    "bytes": 2277,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ad455f53e81884f6740f4a51e71154fbf432a7be08e288418d40a70821df70fb"
+   },
+   "after": {
+    "bytes": 2277,
+    "lf": 29,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "ad455f53e81884f6740f4a51e71154fbf432a7be08e288418d40a70821df70fb"
+   }
+  },
+  {
+   "group": "control",
+   "path": "tests/measure/x733c/controls/c2_param.sql",
+   "name": "c2_param.sql",
+   "before": {
+    "bytes": 29,
+    "lf": 2,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "acd1783a2b4a7c642b9aac567b0538be9f8c49141187a4444b4f6eb39a7578ab"
+   },
+   "after": {
+    "bytes": 29,
+    "lf": 2,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "acd1783a2b4a7c642b9aac567b0538be9f8c49141187a4444b4f6eb39a7578ab"
+   }
+  },
+  {
+   "group": "control",
+   "path": "tests/measure/x733c/controls/c2b_qmark.sql",
+   "name": "c2b_qmark.sql",
+   "before": {
+    "bytes": 27,
+    "lf": 2,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "37620f409915733c3e4dddd287722bb9d03481ee67c93e2f9f09985dce74466a"
+   },
+   "after": {
+    "bytes": 27,
+    "lf": 2,
+    "cr": 0,
+    "crlf": 0,
+    "sha256": "37620f409915733c3e4dddd287722bb9d03481ee67c93e2f9f09985dce74466a"
+   }
+  }
+ ]
+}
