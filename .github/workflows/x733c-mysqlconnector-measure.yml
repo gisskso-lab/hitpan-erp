@@ -1,0 +1,531 @@
+# 🔴 X733c 계측 워크플로 — MySqlConnector 2.5.0 ↔ 2.6.2 × LF ↔ CRLF 격리 CI 실행 대조
+#
+#   계측 가지 measure/20261030-x733c-mysqlconnector 전용 · 머지 금지.
+#   근거: docs/운영기록/20261030작_MySqlConnector실행대조_작업지시서.md (PM 결재 K1~K8 · 조건 ①~④ · 추가 지시 ①~⑥)
+#
+#   - 트리거는 이 가지 push 하나뿐(경로 필터 = 계측 파일만). 다른 가지·PR·main 에서는 돌지 않는다.
+#   - 판 바꾸기는 칸 안에서만(커밋 0) · 줄끝 바꾸기도 칸 안에서만 · 기존 워크플로·제품 파일 0줄.
+#   - DB 는 칸마다 새 컨테이너 · 비번은 런 안 난수 + 가림 · 새 비밀값 0.
+#   - 🔴 재시도 루프 없음. FAIL 칸 재실행으로 초록 만들기 금지(작업지시서 §6-3). 런 상한 = 장치 2 + 측정 2 = 4(PM K6).
+#     (DB 기동 대기 반복은 「서버가 떴나」 를 묻는 것이지 측정을 다시 하는 것이 아니다.)
+#   - 판정은 compare 잡 하나 — 「같음(비교 항목 N개)」 / 「다름」 / 「무효 — 전제/장치/가설 불일치 · 원인 미확정」.
+
+name: X733c MySqlConnector 실행 대조 (계측용 · 머지 금지)
+
+on:
+  push:
+    branches:
+      - 'measure/20261030-x733c-mysqlconnector'
+    paths:
+      - '.github/workflows/x733c-mysqlconnector-measure.yml'
+      - 'tests/measure/x733c/**'
+      - 'src/HitPan.Tests/Measure/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: x733c
+  cancel-in-progress: false
+
+env:
+  X733C_BASE_SHA: '6b15caf92ea124ddc8e06d664560c83ba2484d59'
+  # 🔴 이미지 다이제스트 — [4] 권고 4: 푸시 전에 고정(2026-10-30 Docker Hub 레지스트리 HEAD manifests 조회 ·
+  #    이미지 내려받기·실행 0 · 값 = 다중 아키텍처 index 다이제스트). 조회 명령·결과는 개발명세서 §검증 지적 반영.
+  #    비우면 태그로 받고, 비교 잡이 그 런을 「무효(다이제스트 미고정 = 장치 런)」 로 적는다.
+  X733C_MARIADB_REPO: 'mariadb'
+  X733C_MARIADB_TAG: '11.4'
+  X733C_MARIADB_DIGEST: 'sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620'
+  X733C_MYSQL8_REPO: 'mysql'
+  X733C_MYSQL8_TAG: '8.0'
+  X733C_MYSQL8_DIGEST: 'sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  # ════════════════════════════════════════════════════════════════
+  # MariaDB 4칸 — 판 {2.5.0, 2.6.2} × 줄끝 {lf, crlf}
+  # ════════════════════════════════════════════════════════════════
+  measure:
+    name: 칸 MariaDB ${{ matrix.driver }} × ${{ matrix.eol }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: ['2.5.0', '2.6.2']
+        eol: ['lf', 'crlf']
+    env:
+      CELL_KIND: 'mariadb'
+      CELL_DRIVER: ${{ matrix.driver }}
+      CELL_EOL: ${{ matrix.eol }}
+      CELL_ID: mariadb-${{ matrix.driver }}-${{ matrix.eol }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 장치 — 제품 나무 = 바닥 6b15caf9 단언 · SQL 목록 기록
+        run: |
+          set -euo pipefail
+          EVID="$RUNNER_TEMP/x733c-cell"
+          mkdir -p "$EVID"
+          echo "EVID=$EVID" >> "$GITHUB_ENV"
+          echo "$CELL_ID" > "$EVID/cell_id.txt"
+          git rev-parse HEAD > "$EVID/head_sha.txt"
+          if ! git cat-file -e "${X733C_BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::바닥 커밋이 체크아웃 깊이 안에 없다 — 멈춘다(작업지시서 §6-3 ①)"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$X733C_BASE_SHA" HEAD; then
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::바닥 커밋이 HEAD 의 조상이 아니다 — 멈춘다(§6-3 ①)"; exit 1
+          fi
+          git diff --name-only "$X733C_BASE_SHA" HEAD > "$EVID/changed_paths.txt"
+          # 제품 나무 = 바닥. 계측 파일 3자리와 문서(docs)만 바뀔 수 있다.
+          if git diff --quiet "$X733C_BASE_SHA" HEAD -- . \
+               ':(exclude)tests/measure/x733c' \
+               ':(exclude).github/workflows/x733c-mysqlconnector-measure.yml' \
+               ':(exclude)src/HitPan.Tests/Measure' \
+               ':(exclude)docs'; then
+            echo "ok" > "$EVID/tree_assert.txt"
+          else
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::제품 나무가 바닥과 다르다 — 멈춘다(§6-3 ①)"; exit 1
+          fi
+          git ls-tree -r HEAD -- src/HitPan.API/Migrations/SQL installer/backoffice tests/measure/x733c/controls > "$EVID/sqllist.txt"
+          sha256sum installer/hitpan_db_clean.sql | cut -d' ' -f1 > "$EVID/ddl_sha256.txt"
+          echo "바뀐 경로:"; cat "$EVID/changed_paths.txt"
+
+      - name: 장치 — 판 바꾸기 (칸 안에서만 · 커밋 0 · 바뀐 줄 8파일 8줄 단언)
+        run: |
+          set -euo pipefail
+          if [ "$CELL_DRIVER" = "2.5.0" ]; then
+            git ls-files -z -- '*.csproj' \
+              | xargs -0 sed -i -E '/Include="MySqlConnector"/ s/Version="2\.6\.2"/Version="2.5.0"/'
+          fi
+          git diff --numstat -- '*.csproj' > "$EVID/csproj_numstat.txt"
+          git diff -U0 -- '*.csproj' > "$EVID/csproj_diff.txt"
+          cat "$EVID/csproj_numstat.txt"
+          if [ "$CELL_DRIVER" = "2.5.0" ]; then
+            expected="$(printf '%s\n' \
+              src/HitPan.API/HitPan.API.csproj \
+              src/HitPan.Application/HitPan.Application.csproj \
+              src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj \
+              src/HitPan.Infrastructure/HitPan.Infrastructure.csproj \
+              src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj \
+              tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj \
+              tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj \
+              tools/MigrationSmokeTest/MigrationSmokeTest.csproj | sort)"
+            got="$(awk -F'\t' '$1 == 1 && $2 == 1 { print $3 }' "$EVID/csproj_numstat.txt" | sort)"
+            rows="$(wc -l < "$EVID/csproj_numstat.txt")"
+            added="$(grep -cE '^\+[[:space:]]*<PackageReference Include="MySqlConnector" Version="2\.5\.0" />' "$EVID/csproj_diff.txt" || true)"
+            if [ "$rows" -ne 8 ] || [ "$got" != "$expected" ] || [ "$added" -ne 8 ]; then
+              echo "::error::바뀐 줄이 8파일 8줄이 아니다(rows=$rows · added=$added) — 멈춘다(§6-3 ②)"; exit 1
+            fi
+          else
+            if [ -s "$EVID/csproj_numstat.txt" ]; then
+              echo "::error::2.6.2 칸인데 csproj 가 바뀌었다 — 멈춘다(§6-3 ②)"; exit 1
+            fi
+          fi
+
+      - name: 장치 — 줄끝 바꾸기 (체크아웃 직후 · restore/빌드 전)
+        run: |
+          set -euo pipefail
+          python3 -I tests/measure/x733c/eol_convert.py "$CELL_EOL" "$EVID/eol.json"
+
+      - name: 장치 — DB 기동 (새 컨테이너 · 런 안 난수 비번 · general_log 표)
+        run: |
+          set -euo pipefail
+          PW="$(openssl rand -hex 24)"
+          echo "::add-mask::$PW"
+          echo "X733C_DB_PASS=$PW" >> "$GITHUB_ENV"
+          if [ -n "$X733C_MARIADB_DIGEST" ]; then
+            IMG="${X733C_MARIADB_REPO}@${X733C_MARIADB_DIGEST}"; PINNED=true
+          else
+            IMG="${X733C_MARIADB_REPO}:${X733C_MARIADB_TAG}"; PINNED=false
+            echo "::warning::DB 이미지 다이제스트 미고정 — 이 런은 장치 런이다(비교 잡이 무효로 적는다)"
+          fi
+          docker pull -q "$IMG"
+          {
+            echo "ref=$IMG"
+            echo "pinned=$PINNED"
+            echo "repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$IMG")"
+            echo "image_id=$(docker image inspect --format '{{.Id}}' "$IMG")"
+          } > "$EVID/image.txt"
+          cat "$EVID/image.txt"
+          MARIADB_ROOT_PASSWORD="$PW" docker run -d --name x733c-db -p 127.0.0.1:3306:3306 \
+            -e MARIADB_ROOT_PASSWORD "$IMG" \
+            --max-connections=500 --general-log=1 --log-output=TABLE
+          ready=0
+          for i in $(seq 1 60); do
+            if MYSQL_PWD="$PW" docker exec -e MYSQL_PWD x733c-db mariadb -uroot -h127.0.0.1 -N -e "SELECT 1" >/dev/null 2>&1; then
+              ready=1; break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::DB 컨테이너가 120초 안에 안 떴다"; docker logs x733c-db 2>&1 | tail -20; exit 1
+          fi
+          # 출하 DDL CLI 적재용 — 같은 이미지 안의 클라이언트를 쓴다(apt 미러 0 · 클라이언트 판도 다이제스트로 고정).
+          mkdir -p "$RUNNER_TEMP/x733c-bin"
+          printf '%s\n' '#!/usr/bin/env bash' 'exec docker exec -i x733c-db mariadb "$@"' > "$RUNNER_TEMP/x733c-bin/mysql-in-container"
+          chmod +x "$RUNNER_TEMP/x733c-bin/mysql-in-container"
+          echo "X733C_MYSQL=$RUNNER_TEMP/x733c-bin/mysql-in-container" >> "$GITHUB_ENV"
+
+      - name: Restore & Build (HitPan.Tests 만)
+        run: |
+          set -euo pipefail
+          dotnet --version > "$EVID/dotnet_version.txt"
+          echo "${ImageOS:-unknown} ${ImageVersion:-unknown}" > "$EVID/runner_image.txt"
+          dotnet restore src/HitPan.Tests/HitPan.Tests.csproj --nologo 2>&1 | tee "$EVID/restore.log"
+          dotnet build src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-restore --nologo 2>&1 | tee "$EVID/build.log"
+
+      - name: 장치 — 판 증거 ② project.assets.json · ④ NU1902 (기록 · 판정은 compare)
+        run: |
+          set -euo pipefail
+          : > "$EVID/assets.txt"
+          for p in src/HitPan.Application src/HitPan.Infrastructure src/HitPan.API src/HitPan.Backoffice.API src/HitPan.Tests; do
+            k="$(jq -r '.libraries | keys[] | select(startswith("MySqlConnector/"))' "$p/obj/project.assets.json" | paste -sd, -)"
+            echo "$p $k" >> "$EVID/assets.txt"
+          done
+          # [3-V] R3 · [4] 권고 5 — MySqlConnector 줄만 센다(다른 꾸러미 권고가 판 증거 ④ 를 채우지 못하게).
+          n1902="$( { grep -E "warning NU1902: Package .MySqlConnector. " "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          n1902_all="$( { grep -E 'warning NU1902' "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          n1900="$( { grep -E 'warning NU1900' "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          printf 'nu1902=%s\nnu1902_all_packages=%s\nnu1900=%s\n' "$n1902" "$n1902_all" "$n1900" > "$EVID/nuget_audit.txt"
+          cat "$EVID/assets.txt" "$EVID/nuget_audit.txt"
+
+      - name: 시험 — G-W13-5 무수정 실행 (같은 실행기의 닻)
+        run: |
+          set -euo pipefail
+          export CI=true HITPAN_REQUIRE_DB=true HITPAN_MYSQL="$X733C_MYSQL"
+          export HITPAN_DB_HOST=127.0.0.1 HITPAN_DB_PORT=3306 HITPAN_DB_USER=root HITPAN_DB_PASS="$X733C_DB_PASS"
+          export HITPAN_W13_ERP_DB=gate_x733c
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~HitPan.Tests.Integrity.ErpMigrationApplyGateTests.G_W13_5" \
+            --results-directory "$EVID" --logger "trx;LogFileName=anchor.trx" \
+            --logger "console;verbosity=normal" 2>&1 | tee "$EVID/anchor.log"
+
+      - name: 시험 — 측정 시험 (칸 JSON)
+        run: |
+          set -euo pipefail
+          export CI=true HITPAN_REQUIRE_DB=true HITPAN_MYSQL="$X733C_MYSQL"
+          export HITPAN_DB_HOST=127.0.0.1 HITPAN_DB_PORT=3306 HITPAN_DB_USER=root HITPAN_DB_PASS="$X733C_DB_PASS"
+          export HITPAN_X733C_CELL="$CELL_ID" HITPAN_X733C_KIND="$CELL_KIND"
+          export HITPAN_X733C_DRIVER="$CELL_DRIVER" HITPAN_X733C_EOL="$CELL_EOL"
+          export HITPAN_X733C_OUT="$EVID" HITPAN_X733C_DB=gate_x733c
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~HitPan.Tests.Measure.X733cMySqlConnectorProbeTests" \
+            --results-directory "$EVID" --logger "trx;LogFileName=probe.trx" \
+            --logger "console;verbosity=normal" 2>&1 | tee "$EVID/probe.log"
+
+      - name: Gate — SKIP 0 · 시험 0건 0
+        if: always()
+        run: |
+          bad=0
+          for f in anchor.log probe.log; do
+            [ -f "$EVID/$f" ] || continue
+            if grep -q '\[SKIP\]' "$EVID/$f"; then echo "::error::$f 에 [SKIP] — 안 돈 시험은 통과가 아니다"; bad=1; fi
+            if grep -q 'No test matches the given testcase filter' "$EVID/$f"; then echo "::error::$f 필터가 시험 0건"; bad=1; fi
+          done
+          exit $bad
+
+      - name: 보안 — 산출물에 비번 글자 0 (있으면 가리고 빨강)
+        if: always()
+        run: |
+          [ -n "${X733C_DB_PASS:-}" ] && [ -d "${EVID:-/nonexistent}" ] || exit 0
+          if grep -rlF -- "$X733C_DB_PASS" "$EVID" > "$RUNNER_TEMP/x733c-leak.txt" 2>/dev/null; then
+            while IFS= read -r f; do sed -i "s/${X733C_DB_PASS}/***/g" "$f"; done < "$RUNNER_TEMP/x733c-leak.txt"
+            echo "scrubbed=$(wc -l < "$RUNNER_TEMP/x733c-leak.txt")" > "$EVID/secret_scrubbed.txt"
+            echo "::error::칸 산출물에 DB 비번 글자가 있었다 — 가렸다. 이 칸은 무효로 적힌다."; exit 1
+          fi
+
+      - name: 칸 증거 올리기 (14일)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: x733c-cell-${{ env.CELL_ID }}
+          path: ${{ runner.temp }}/x733c-cell
+          retention-days: 14
+          if-no-files-found: error
+
+  # ════════════════════════════════════════════════════════════════
+  # 백오피스 MySQL 8 2칸 — 판 {2.5.0, 2.6.2} × lf (PM K3 ⓑ)
+  # ════════════════════════════════════════════════════════════════
+  measure-bo-mysql8:
+    name: 칸 MySQL 8 ${{ matrix.driver }} × ${{ matrix.eol }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: ['2.5.0', '2.6.2']
+        eol: ['lf']
+    env:
+      CELL_KIND: 'mysql8'
+      CELL_DRIVER: ${{ matrix.driver }}
+      CELL_EOL: ${{ matrix.eol }}
+      CELL_ID: mysql8-${{ matrix.driver }}-${{ matrix.eol }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 장치 — 제품 나무 = 바닥 6b15caf9 단언 · SQL 목록 기록
+        run: |
+          set -euo pipefail
+          EVID="$RUNNER_TEMP/x733c-cell"
+          mkdir -p "$EVID"
+          echo "EVID=$EVID" >> "$GITHUB_ENV"
+          echo "$CELL_ID" > "$EVID/cell_id.txt"
+          git rev-parse HEAD > "$EVID/head_sha.txt"
+          if ! git cat-file -e "${X733C_BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::바닥 커밋이 체크아웃 깊이 안에 없다 — 멈춘다(§6-3 ①)"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$X733C_BASE_SHA" HEAD; then
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::바닥 커밋이 HEAD 의 조상이 아니다 — 멈춘다(§6-3 ①)"; exit 1
+          fi
+          git diff --name-only "$X733C_BASE_SHA" HEAD > "$EVID/changed_paths.txt"
+          if git diff --quiet "$X733C_BASE_SHA" HEAD -- . \
+               ':(exclude)tests/measure/x733c' \
+               ':(exclude).github/workflows/x733c-mysqlconnector-measure.yml' \
+               ':(exclude)src/HitPan.Tests/Measure' \
+               ':(exclude)docs'; then
+            echo "ok" > "$EVID/tree_assert.txt"
+          else
+            echo "fail" > "$EVID/tree_assert.txt"
+            echo "::error::제품 나무가 바닥과 다르다 — 멈춘다(§6-3 ①)"; exit 1
+          fi
+          git ls-tree -r HEAD -- src/HitPan.API/Migrations/SQL installer/backoffice tests/measure/x733c/controls > "$EVID/sqllist.txt"
+          sha256sum installer/hitpan_db_clean.sql | cut -d' ' -f1 > "$EVID/ddl_sha256.txt"
+
+      - name: 장치 — 판 바꾸기 (칸 안에서만 · 커밋 0 · 바뀐 줄 8파일 8줄 단언)
+        run: |
+          set -euo pipefail
+          if [ "$CELL_DRIVER" = "2.5.0" ]; then
+            git ls-files -z -- '*.csproj' \
+              | xargs -0 sed -i -E '/Include="MySqlConnector"/ s/Version="2\.6\.2"/Version="2.5.0"/'
+          fi
+          git diff --numstat -- '*.csproj' > "$EVID/csproj_numstat.txt"
+          git diff -U0 -- '*.csproj' > "$EVID/csproj_diff.txt"
+          cat "$EVID/csproj_numstat.txt"
+          if [ "$CELL_DRIVER" = "2.5.0" ]; then
+            expected="$(printf '%s\n' \
+              src/HitPan.API/HitPan.API.csproj \
+              src/HitPan.Application/HitPan.Application.csproj \
+              src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj \
+              src/HitPan.Infrastructure/HitPan.Infrastructure.csproj \
+              src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj \
+              tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj \
+              tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj \
+              tools/MigrationSmokeTest/MigrationSmokeTest.csproj | sort)"
+            got="$(awk -F'\t' '$1 == 1 && $2 == 1 { print $3 }' "$EVID/csproj_numstat.txt" | sort)"
+            rows="$(wc -l < "$EVID/csproj_numstat.txt")"
+            added="$(grep -cE '^\+[[:space:]]*<PackageReference Include="MySqlConnector" Version="2\.5\.0" />' "$EVID/csproj_diff.txt" || true)"
+            if [ "$rows" -ne 8 ] || [ "$got" != "$expected" ] || [ "$added" -ne 8 ]; then
+              echo "::error::바뀐 줄이 8파일 8줄이 아니다(rows=$rows · added=$added) — 멈춘다(§6-3 ②)"; exit 1
+            fi
+          else
+            if [ -s "$EVID/csproj_numstat.txt" ]; then
+              echo "::error::2.6.2 칸인데 csproj 가 바뀌었다 — 멈춘다(§6-3 ②)"; exit 1
+            fi
+          fi
+
+      - name: 장치 — 줄끝 바꾸기 (체크아웃 직후 · restore/빌드 전)
+        run: |
+          set -euo pipefail
+          python3 -I tests/measure/x733c/eol_convert.py "$CELL_EOL" "$EVID/eol.json"
+
+      - name: 장치 — DB 기동 (MySQL 8 새 컨테이너 · 런 안 난수 비번 · general_log 표)
+        run: |
+          set -euo pipefail
+          PW="$(openssl rand -hex 24)"
+          echo "::add-mask::$PW"
+          echo "X733C_DB_PASS=$PW" >> "$GITHUB_ENV"
+          if [ -n "$X733C_MYSQL8_DIGEST" ]; then
+            IMG="${X733C_MYSQL8_REPO}@${X733C_MYSQL8_DIGEST}"; PINNED=true
+          else
+            IMG="${X733C_MYSQL8_REPO}:${X733C_MYSQL8_TAG}"; PINNED=false
+            echo "::warning::DB 이미지 다이제스트 미고정 — 이 런은 장치 런이다(비교 잡이 무효로 적는다)"
+          fi
+          docker pull -q "$IMG"
+          {
+            echo "ref=$IMG"
+            echo "pinned=$PINNED"
+            echo "repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$IMG")"
+            echo "image_id=$(docker image inspect --format '{{.Id}}' "$IMG")"
+          } > "$EVID/image.txt"
+          cat "$EVID/image.txt"
+          MYSQL_ROOT_PASSWORD="$PW" docker run -d --name x733c-db -p 127.0.0.1:3306:3306 \
+            -e MYSQL_ROOT_PASSWORD "$IMG" \
+            --max-connections=500 --general-log=1 --log-output=TABLE
+          ready=0
+          for i in $(seq 1 60); do
+            if MYSQL_PWD="$PW" docker exec -e MYSQL_PWD x733c-db mysql -uroot -h127.0.0.1 -N -e "SELECT 1" >/dev/null 2>&1; then
+              ready=1; break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::DB 컨테이너가 120초 안에 안 떴다"; docker logs x733c-db 2>&1 | tail -20; exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/x733c-bin"
+          printf '%s\n' '#!/usr/bin/env bash' 'exec docker exec -i x733c-db mysql "$@"' > "$RUNNER_TEMP/x733c-bin/mysql-in-container"
+          chmod +x "$RUNNER_TEMP/x733c-bin/mysql-in-container"
+          echo "X733C_MYSQL=$RUNNER_TEMP/x733c-bin/mysql-in-container" >> "$GITHUB_ENV"
+
+      - name: Restore & Build (HitPan.Tests 만)
+        run: |
+          set -euo pipefail
+          dotnet --version > "$EVID/dotnet_version.txt"
+          echo "${ImageOS:-unknown} ${ImageVersion:-unknown}" > "$EVID/runner_image.txt"
+          dotnet restore src/HitPan.Tests/HitPan.Tests.csproj --nologo 2>&1 | tee "$EVID/restore.log"
+          dotnet build src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-restore --nologo 2>&1 | tee "$EVID/build.log"
+
+      - name: 장치 — 판 증거 ② project.assets.json · ④ NU1902 (기록 · 판정은 compare)
+        run: |
+          set -euo pipefail
+          : > "$EVID/assets.txt"
+          for p in src/HitPan.Application src/HitPan.Infrastructure src/HitPan.API src/HitPan.Backoffice.API src/HitPan.Tests; do
+            k="$(jq -r '.libraries | keys[] | select(startswith("MySqlConnector/"))' "$p/obj/project.assets.json" | paste -sd, -)"
+            echo "$p $k" >> "$EVID/assets.txt"
+          done
+          # [3-V] R3 · [4] 권고 5 — MySqlConnector 줄만 센다(다른 꾸러미 권고가 판 증거 ④ 를 채우지 못하게).
+          n1902="$( { grep -E "warning NU1902: Package .MySqlConnector. " "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          n1902_all="$( { grep -E 'warning NU1902' "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          n1900="$( { grep -E 'warning NU1900' "$EVID/restore.log" || true; } | sort -u | wc -l)"
+          printf 'nu1902=%s\nnu1902_all_packages=%s\nnu1900=%s\n' "$n1902" "$n1902_all" "$n1900" > "$EVID/nuget_audit.txt"
+          cat "$EVID/assets.txt" "$EVID/nuget_audit.txt"
+
+      - name: 시험 — BackofficeSchemaMysql8Gate 무수정 실행 (닻)
+        run: |
+          set -euo pipefail
+          export CI=true HITPAN_REQUIRE_DB=true HITPAN_MYSQL="$X733C_MYSQL"
+          export HITPAN_DB_HOST=127.0.0.1 HITPAN_DB_PORT=3306 HITPAN_DB_USER=root HITPAN_DB_PASS="$X733C_DB_PASS"
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~BackofficeSchemaMysql8Gate" \
+            --results-directory "$EVID" --logger "trx;LogFileName=anchor.trx" \
+            --logger "console;verbosity=normal" 2>&1 | tee "$EVID/anchor.log"
+
+      - name: 시험 — 측정 시험 (칸 JSON)
+        run: |
+          set -euo pipefail
+          export CI=true HITPAN_REQUIRE_DB=true HITPAN_MYSQL="$X733C_MYSQL"
+          export HITPAN_DB_HOST=127.0.0.1 HITPAN_DB_PORT=3306 HITPAN_DB_USER=root HITPAN_DB_PASS="$X733C_DB_PASS"
+          export HITPAN_X733C_CELL="$CELL_ID" HITPAN_X733C_KIND="$CELL_KIND"
+          export HITPAN_X733C_DRIVER="$CELL_DRIVER" HITPAN_X733C_EOL="$CELL_EOL"
+          export HITPAN_X733C_OUT="$EVID" HITPAN_X733C_DB=gate_x733c
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-build --nologo \
+            --filter "FullyQualifiedName~HitPan.Tests.Measure.X733cMySqlConnectorProbeTests" \
+            --results-directory "$EVID" --logger "trx;LogFileName=probe.trx" \
+            --logger "console;verbosity=normal" 2>&1 | tee "$EVID/probe.log"
+
+      - name: Gate — SKIP 0 · 시험 0건 0
+        if: always()
+        run: |
+          bad=0
+          for f in anchor.log probe.log; do
+            [ -f "$EVID/$f" ] || continue
+            if grep -q '\[SKIP\]' "$EVID/$f"; then echo "::error::$f 에 [SKIP] — 안 돈 시험은 통과가 아니다"; bad=1; fi
+            if grep -q 'No test matches the given testcase filter' "$EVID/$f"; then echo "::error::$f 필터가 시험 0건"; bad=1; fi
+          done
+          exit $bad
+
+      - name: 보안 — 산출물에 비번 글자 0 (있으면 가리고 빨강)
+        if: always()
+        run: |
+          [ -n "${X733C_DB_PASS:-}" ] && [ -d "${EVID:-/nonexistent}" ] || exit 0
+          if grep -rlF -- "$X733C_DB_PASS" "$EVID" > "$RUNNER_TEMP/x733c-leak.txt" 2>/dev/null; then
+            while IFS= read -r f; do sed -i "s/${X733C_DB_PASS}/***/g" "$f"; done < "$RUNNER_TEMP/x733c-leak.txt"
+            echo "scrubbed=$(wc -l < "$RUNNER_TEMP/x733c-leak.txt")" > "$EVID/secret_scrubbed.txt"
+            echo "::error::칸 산출물에 DB 비번 글자가 있었다 — 가렸다. 이 칸은 무효로 적힌다."; exit 1
+          fi
+
+      - name: 칸 증거 올리기 (14일)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: x733c-cell-${{ env.CELL_ID }}
+          path: ${{ runner.temp }}/x733c-cell
+          retention-days: 14
+          if-no-files-found: error
+
+  # ════════════════════════════════════════════════════════════════
+  # 비교 — 같음(비교 항목 N개) 0 / 다름 1 / 무효 2
+  # ════════════════════════════════════════════════════════════════
+  compare:
+    name: 비교 — 같음 / 다름 / 무효
+    needs: [measure, measure-bo-mysql8]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 칸 증거 내려받기
+        uses: actions/download-artifact@v8
+        with:
+          pattern: x733c-cell-*
+          path: x733c-cells
+
+      - name: 기계 판정
+        id: judge
+        if: always()
+        env:
+          # [3-V] R1 — 칸 잡 결론. success 가 아니면 비교기가 무효(2)로 적는다.
+          X733C_NEEDS_MEASURE: ${{ needs.measure.result }}
+          X733C_NEEDS_MEASURE_BO_MYSQL8: ${{ needs.measure-bo-mysql8.result }}
+        run: |
+          set +e
+          mkdir -p x733c-cells x733c-verdict
+          python3 -I tests/measure/x733c/compare_cells.py x733c-cells x733c-verdict
+          code=$?
+          echo "$code" > x733c-verdict/exit_code.txt
+          [ -f x733c-verdict/verdict.md ] && cat x733c-verdict/verdict.md >> "$GITHUB_STEP_SUMMARY"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: 판정 올리기 (14일)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: x733c-verdict
+          path: x733c-verdict
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 판정 종료 코드 (0 같음 · 1 다름 · 2 무효)
+        if: always()
+        env:
+          CODE: ${{ steps.judge.outputs.code }}
+        run: |
+          echo "판정 종료 코드 = ${CODE:-없음}"
+          case "${CODE:-}" in
+            0) exit 0 ;;
+            1) exit 1 ;;
+            *) exit 2 ;;
+          esac
