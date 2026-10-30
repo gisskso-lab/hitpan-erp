@@ -91,3 +91,36 @@
 4. net8.0 판 공개 API 비교 · Pomelo 실행 호환(CI EF 경로).
 5. `hitpan_db_clean.sql` C# 소비처 실행 경로(A-2) · R-1 정적 모사기는 상류 상태 기계를 옮긴 것이고 상류 원본으로 실행한 것이 아님.
 6. 백오피스 운영 DB 위치(K-4) · tools 3곳 판 내림 NU1605 반사실(8곳 함께 올려 발생 0 — 5곳만 올린 경우는 안 쟀다).
+
+## §A-2 닫기 (10/30 · [4] 검증팀장 · CTO 격상 [5] 필수)
+
+**판정 🟢 닫힘** — 출하 DDL `installer/hitpan_db_clean.sql` 을 MySqlConnector 로 보내는 C# 경로는 **0곳**이다. 실행하는 31곳 전부 mysql 클라이언트 프로세스(30) 또는 PowerShell 글자 대조(1)이고, 2.6.x 해석기가 닿는 길이 없다. 「src 안 5곳」은 다시 세어 보니 **전부 주석**이었다(정정). 근거는 `f84dbf5e` 정적 대조 + 상류 태그 원본(2.5.0·2.6.2 `Core/SqlParser.cs`·`Core/StatementPreparer.cs`, 읽기만)이다.
+
+**1. 실행 경로표** (`git grep -l hitpan_db_clean -- '*.cs'` = 54파일 · src 밖 .cs 0)
+
+| 꼴 | 수 | 보내는 방식 | 2.6.x 닿음 |
+|---|---|---|---|
+| A. mysql 클라이언트 프로세스 | 30 | `ProcessStartInfo(MysqlExe())` → `proc.StandardInput.Write(File.ReadAllText(ddl))`. `MysqlExe()` = `HITPAN_MYSQL` 또는 MariaDB `mysql.exe`. 예: `src/HitPan.Tests/Integrity/AccountSeatGateTests.cs:111-124` · `ErpMigrationApplyGateTests.cs:738` · `ErpCsOriginQueryGateTests.cs:371` · `SessionRecordConcurrentPcGateTests.cs:205→226` · `LegacyBalanceFormulaGateTests.cs:51` 외 25 (전부 `src/HitPan.Tests/Integrity/*GateTests.cs` · `*GateDbTests.cs`) | **없음** |
+| B. pwsh 로 `installer/updates/build-manifest.ps1` 실행 | 1 | `BuildManifestGuardGateTests.cs:111`. ps1:122 는 `Get-Content -Raw` 로 칸 이름만 대조하고 DB 로는 안 보낸다 | 없음 |
+| C. 글자 읽기(정규식 · Contains) 또는 시험 안 주석 | 18 | `File.ReadAllText`만 하거나 주석에 이름만 있다(예: `WatermarkRenderGateTests.cs:344` · `AiProvider3WayGuardTests.cs:138` · `UpdateConsentRuleCTests.cs:966` · `UpdateStatusDdlGateTests.cs:27`) | 없음 |
+| D. 주석에 이름만 | 5 | `PdfRenderService.cs:689` · `StockService.cs:126` · `TaxInvoiceService.cs:29` · `TenantDeviceService.cs:235` · `WatchdogStatusWriter.cs:305` | 없음 |
+| E. MySqlCommand 통째 · 직접 나눔 · MySqlScript · 준비문 | **0** | `git grep "MySqlScript\|MySqlBatch"` 0. `Execute*(`/`CommandText =` 에 DDL 글자를 넘기는 곳 0 | — |
+
+- 비교군(출하 DDL 밖 경로): 고객 설치 `installer/HitPan-Universal.iss:2306` = `"!MYSQL!" … < hitpan_db.sql` · CI `build-and-test.yml:354` = `mysql … < installer/hitpan_db_clean.sql` · 워치독 `WatchdogStatusWriter.cs:14-17` = 드라이버 없이 CLI 사용. **출하 DDL 은 어느 환경에서도 MySqlConnector 를 거치지 않는다.**
+- 2.6.x 가 실제로 닿는 .sql 경로는 마이그다(출하 DDL 아님 · §3 의 「매개변수 차이 0/146」이 이미 덮는다). `MigrationRunner.cs:113→135` = 파일 통째 한 명령(Dapper · 준비 안 함). `Backoffice SchemaMigrator.cs:222` = 우리 코드가 직접 나눈 뒤 하나씩 보낸다. 준비문은 `MdbMigrationService.cs:6318` 한 곳뿐인데 단일 `INSERT IGNORE`(`--`·`;` 없음)라 무관하다. `IgnorePrepare` 는 설정 0 ⇒ 상류 기본값 false(준비가 실제로 일어난다, `MySqlConnectionStringBuilder.cs:1233-1235`).
+
+**2. 상류 원본 대조 — 문장 끝은 어디서 쓰이나**
+- 준비 안 하는 길: `StatementPreparer.ParseAndBindParameters` → `ParameterSqlParser` 는 **매개변수 자리만** 쓴다. 문장 끝(`OnStatementEnd`)은 버리고 글자 전체를 한 번에 보낸다(서버가 나눈다). 문장 나눔(`SplitStatements` → `PreparedCommandSqlParser`)은 **준비문 길에서만** 쓰인다. 리뷰서 A-2 의 「⚠️ 미대조」는 이 대조로 확인됐다(StatementPreparer 는 2.5.0↔2.6.2 차이 0).
+- SqlParser 차이는 셋뿐이다: ① `--` 셋째 글자 조건이 `' '` → `(\0~' ')|\x7F` (`:138` · `:222`) ② 따옴표 이름 매개변수 끝 처리 ③ 끝에 남은 이름 매개변수 처리. ②③은 이 파일에 해당 꼴이 0이다.
+
+**3. CRLF 10곳의 기전 — R-1 과 다른 원인이다** (2.5.0·2.6.2 상태 기계를 그대로 옮긴 모사로 재현: LF 362→351 = 11 · CRLF 362→352 = 10 · 리뷰서 숫자 일치)
+- 꼴: 맨 `--` 한 줄(덤프 머리 L12, 뷰 머리 L4634·4652…) 뒤에 주석·빈 줄만 오고 `/*!…*/;` 가 온다. 10곳 = L17 `/*!40101 SET @OLD_CHARACTER_SET_CLIENT…*/;` · L4638·4656·4674·4692·4710·4728·4746·4764·4782 `/*!50001 DROP VIEW IF EXISTS …*/;`
+- **2.5.0**: `--\r` 를 주석으로 안 본다 → `--` 자리에서 가짜 문장이 시작되고(`OnStatementBegin`) 뒤의 `;` 가 그것을 닫는다. 그래서 문장 끝이 하나 더 잡힌다.
+- **2.6.2**: `--\r` 를 주석으로 열고 `\n` 에서 닫는다 → 상태가 `Beginning` 에 머물고 C 주석 `/*!…*/` 뒤의 `;` 는 `state == Beginning` 이라 무시된다(`:254-257`).
+- 즉 **2.5.0 이 서버(`--`+제어문자 = 주석)와 어긋나던 것을 2.6.2 가 바로잡은 쪽**이다. LF 에도 이 10곳이 똑같이 있고, LF 에만 있는 1곳(L1453 `DROP TABLE IF EXISTS print_common_settings;`)이 R-1(`--\n` 이 다음 줄을 먹음 · L1450→1451, L1452→1453)이다.
+- **실제 영향 0**: ⓐ 31곳 모두 MySqlConnector 를 안 거친다 ⓑ 매개변수 자리는 LF·CRLF 모두 2.5.0↔2.6.2 **위치까지 동일**하다(유일한 검출 `@saved_cs_client` 18곳) ⓒ 문장 빠짐·합쳐짐은 준비문 길에서만 생기는데 그 길로 이 파일을 보내는 곳이 0이다.
+- 반사실 대조: 누가 이 파일을 MySqlCommand 로 보내면 `@saved_cs_client` 때문에 `AllowUserVariables` 없이는 **두 판 모두** `Parameter … must be defined` 로 시끄럽게 실패한다(조용한 오답이 아니다). 준비문으로 보내면 2.6.2-LF 에서 L1453 DROP 이 빠진다(R-1). 단 이것은 지금 없는 경로다.
+
+**4. 남는 것**
+- 🔵 A-1 정적 검사 후보에 한 줄 추가(별건): 「출하 DDL·마이그를 MySqlCommand/준비문으로 보내는 새 경로가 생기면 R-1·`/*!…*/` 가 닿는다 — 그때 다시 재라」.
+- ⚠️미측정: ① 모사기는 상류 상태 기계를 옮긴 것이다. 상류 DLL 로 실행한 것이 아니다. CI 측정 줄 제안: 시험 프로젝트에서 반사로 `MySqlConnector.Core.StatementPreparer.SplitStatements()` 를 출하 DDL(LF)에 걸고 문장 수 351을 확인하고, 2.5.0 바닥에서 362인지 비교 ② mysql 클라이언트 자체의 `--` 처리는 이 차수 밖이다(판이 안 바뀌었다) ③ A 30곳의 실제 import 초록은 §7-1 CI 판독에 묶여 있다.
