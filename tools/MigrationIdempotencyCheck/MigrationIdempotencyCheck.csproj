@@ -21,7 +21,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <!-- 🔴 20261030작 MySqlConnector 판올림 (PM 브라운킴 결재 · 2026-10-30) — NU1902 GHSA-473q-m89c-ghf8 봉합.
+         종전 줄은 지우지 않는다(#1):
+         <PackageReference Include="MySqlConnector" Version="2.5.0" />
+         🔴 이 판은 8곳(src 5 · tools 3)이 같아야 한다 — 한 곳만 올리면 판이 갈린다(판 내림 NU1605).
+            src: API · Application · Backoffice.API · Infrastructure · IntegrationTests
+            tools: MdbMigrationBaselineRun · MigrationIdempotencyCheck · MigrationSmokeTest
+         정확한 판 하나로 적는다(범위식 금지). 근거 docs/운영기록/20261030작_MySqlConnector판올림_작업지시서.md -->
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
   </ItemGroup>
 
