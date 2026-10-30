@@ -173,7 +173,12 @@ function maskProbeLines(probe, control) {
 // 대상 = dir 의 *.yml·*.yaml 중 본문에 장치 경로가 든 파일. 대상 0 = 빨강(빈 검색은 거짓 통과).
 // 건너뛰는 줄 = 통째 주석(첫 글자 #)이면서 `${{` 없는 줄뿐(셸 주석 속 식도 GitHub 가 값으로 바꾼다 → 검사).
 // 잡힘 줄에는 파일명·줄 번호·종류만(줄 글자 0 — 주소·식 안에 값이 섞일 수 있다).
-// 한계(K3·K4 결재): 실수로 생긴 유입 감지까지 · 위변조는 범위 밖 · 낱말 = 비밀값·입력 칸·주소 3종만.
+// ⬛ [낡은 줄 · 7~9차] 한계(K3·K4 결재): 실수로 생긴 유입 감지까지 · 위변조는 범위 밖 · 낱말 = 비밀값·입력 칸·주소 3종만.
+// 🔴 10차(10/30 · 작업지시서 §0-14-3 ⓒ · K-11 ㉠ · K-15 ㉠) 한계(K3·K4 결재): 실수로 생긴 유입 감지까지 · 위변조는 범위 밖.
+//   종류 = 여섯: 비밀값 · 입력 칸 · 주소 · 저장소 변수(`vars` 뒤 `.`/`[`) · 토큰(github 의 token 칸 점·대괄호 꼴 · GITHUB_TOKEN 글자 · toJSON(github) 통째)
+//         · 트리거(workflow_call · pull_request_target) — 트리거는 값이 아니라 **길** → 잡힘 줄 머리 = `M4 유입 길`(「실값 유입」이라 부르지 않는다).
+//   알고 받는 오탐 = 조건식·문자열 속 트리거 낱말(통째 주석 · 식 없음 줄은 지금처럼 건너뜀). `github.` 통째는 잡지 않는다.
+//   범위 밖(기록): 장치가 부르는 JS 의 환경변수 읽기 · permissions 넓힘 · checkout 토큰 보관 · 의도적 위변조 · 통째 넘김의 다른 꼴(객체 거르개 · format 등).
 const INTAKE_MARK = 'scripts/playwright-audit/ci/';
 const INTAKE_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 function intakeHostOf(s) {
@@ -201,6 +206,19 @@ function intakeAddressBad(line) {
   }
   return false;
 }
+// 🔴 10차 ⓒ 규칙(작업지시서 §0-14-3 ⓒ 표 · 대소문자 무시 · 띄어쓰기 허용)
+//   저장소 변수 = `vars` 낱말 뒤 `.` 또는 `[`
+//   토큰 = github + `.token` · github[ 'token' / "token" ] · GITHUB_TOKEN(글자 안 어디든) · toJSON( github )(괄호 안이 github 하나뿐)
+//   트리거 = workflow_call · pull_request_target 낱말 그대로
+const INTAKE_VARS = /\bvars\s*[.[]/i;
+const INTAKE_TOKEN = [
+  /\bgithub\s*\.\s*token\b/i,
+  /\bgithub\s*\[\s*(['"])token\1\s*\]/i,
+  /GITHUB_TOKEN/i,
+  /\btoJSON\s*\(\s*github\s*\)/i,
+];
+const INTAKE_TRIGGER = /\b(?:workflow_call|pull_request_target)\b/i;
+const INTAKE_KIND_TRIGGER = '트리거';
 function intakeScan(dir) {
   const targets = [];
   const hits = [];
@@ -220,13 +238,22 @@ function intakeScan(dir) {
       if (/\bsecrets\b/i.test(line)) kinds.add('비밀값');
       if (/\binputs\b/i.test(line)) kinds.add('입력 칸');
       if (intakeAddressBad(line)) kinds.add('주소');
+      // 🔴 10차 ⓒ — 낱말 넷(대소문자 무시 · 띄어쓰기 허용 · `github.` 통째 0)
+      if (INTAKE_VARS.test(line)) kinds.add('저장소 변수');
+      if (INTAKE_TOKEN.some((re) => re.test(line))) kinds.add('토큰');
+      if (INTAKE_TRIGGER.test(line)) kinds.add(INTAKE_KIND_TRIGGER);
       for (const kind of kinds) hits.push({ file: name, line: i + 1, kind });
     });
   }
   const ok = targets.length > 0 && hits.length === 0;
   const lines = [];
   if (targets.length === 0) lines.push('⚫ FAIL [장치] M4 실값 유입 — 대상 0개(장치를 부르는 워크플로를 못 찾음 · 빈 검색은 거짓 통과)');
-  for (const h of hits) lines.push(`⚫ FAIL [장치] M4 실값 유입 — ${h.file}:${h.line} · 종류=${h.kind}`);
+  // ⬛ [낡은 줄 · 7~9차] for (const h of hits) lines.push(`⚫ FAIL [장치] M4 실값 유입 — ${h.file}:${h.line} · 종류=${h.kind}`);
+  // 🔴 10차 ⓒ(K-11 ㉠) — 트리거는 머리 `M4 유입 길` · 나머지 다섯은 지금 머리 그대로(줄 글자 0 그대로)
+  for (const h of hits) {
+    const head = h.kind === INTAKE_KIND_TRIGGER ? 'M4 유입 길' : 'M4 실값 유입';
+    lines.push(`⚫ FAIL [장치] ${head} — ${h.file}:${h.line} · 종류=${h.kind}`);
+  }
   if (ok) lines.push(`🟢 PASS [장치] M4 실값 유입 0 — 대상 ${targets.length}개`);
   return { ok, targets, hits, lines };
 }
@@ -290,8 +317,25 @@ function bindAutosave(r) {
 
 // 🔴 5차 ① — 끊긴 자리 한 줄용 예외 설명: 「이름: 메시지 앞 200자」. 값·토큰 0 —
 //   알고 있는 생성값(sanitize) · 인증 머리글 꼴 · 점 셋 토큰 꼴을 **자르기 전에** 지운다(잘린 반쪽 값이 남지 않게).
+// 🔴 10차 ⓐ(10/30 · 작업지시서 §0-14-3 ⓐ 안 a1 · K-12 ㉠) — 메시지 줄기(7차 ⓓ 순서)를 내부 함수 하나로 묶어
+//   **이름·메시지 둘 다** 같은 줄기로 지난다. 이름은 그 뒤 40자(errorName 과 같은 숫자)에서 자른다 · 반환 꼴 `이름: 메시지` 그대로.
+//   이름·메시지 경계에 걸친 값(이름 끝 + `: ` + 메시지 앞)은 rec 의 바깥 소독도 **덮지 않는다**(앞·뒤 반쪽이 남음 · [4] 10차 V10-M2 실측) — 범위 밖 · 기록만.
+const ERR_NAME_CAP = 40;
+function scrubErrorText(text) {
+  let s = String(text);
+  s = s.replace(/\u001b\[[0-9;]*m/g, ''); // 색 제어 글자(Playwright 호출 기록)
+  s = sanitize(s, Number.MAX_SAFE_INTEGER)
+    .replace(/Bearer\s+\S+/gi, 'Bearer ***')
+    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '***')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return sanitize(s, Number.MAX_SAFE_INTEGER); // 7차 ⓓ — 접은 뒤 한 번 더(자르지 않음)
+}
 function describeError(e, cap = 200) {
-  const name = e && e.name ? String(e.name) : typeof e;
+  // ⬛ [낡은 줄 · 5~9차] const name = e && e.name ? String(e.name) : typeof e; — 이름은 소독·자르기 0([4-X] 2/3 ⓐ)
+  const rawName = e && e.name ? String(e.name) : typeof e;
+  const scrubbedName = scrubErrorText(rawName);
+  const name = scrubbedName.length > ERR_NAME_CAP ? `${scrubbedName.slice(0, ERR_NAME_CAP)}…` : scrubbedName;
   let msg = e && e.message !== undefined ? String(e.message) : String(e);
   // ⬛ [낡은 순서 · 5차] 소독 → 색 글자 제거 — 값 사이에 색 글자가 끼면 소독이 놓치고, 지운 뒤 값이 다시 이어졌다.
   // msg = sanitize(msg, Number.MAX_SAFE_INTEGER)
@@ -299,13 +343,15 @@ function describeError(e, cap = 200) {
   // ⬛ [낡은 순서 · 6차] 색 글자 제거 → 3꼴 소독 → Bearer·점 셋 → 공백 접기 → 자르기
   //   — 접기가 값 안 공백과 다른 공백(줄바꿈·두 칸)을 한 칸으로 바꿔 값이 접힌 **뒤에** 다시 생겼다([4-X] X702-H1 ⓓ).
   // 🔴 7차 ⓓ(10/29 · §0-11-11-3) — 순서 = 색 글자 제거 → 3꼴 소독 → Bearer·점 셋 → 공백 접기 → 3꼴 소독(둘째 · 자르지 않음) → 자르기.
-  msg = msg.replace(/\u001b\[[0-9;]*m/g, ''); // 색 제어 글자(Playwright 호출 기록)
-  msg = sanitize(msg, Number.MAX_SAFE_INTEGER)
-    .replace(/Bearer\s+\S+/gi, 'Bearer ***')
-    .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '***')
-    .replace(/\s+/g, ' ')
-    .trim();
-  msg = sanitize(msg, Number.MAX_SAFE_INTEGER); // 7차 ⓓ — 접은 뒤 한 번 더(자르지 않음)
+  // ⬛ [낡은 줄 · 7~9차] 아래 일곱 줄 = 지금 scrubErrorText 몸통과 같은 순서(10차에 함수로 묶음 · 결과 글자 같음)
+  // msg = msg.replace(/\u001b\[[0-9;]*m/g, ''); // 색 제어 글자(Playwright 호출 기록)
+  // msg = sanitize(msg, Number.MAX_SAFE_INTEGER)
+  //   .replace(/Bearer\s+\S+/gi, 'Bearer ***')
+  //   .replace(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '***')
+  //   .replace(/\s+/g, ' ')
+  //   .trim();
+  // msg = sanitize(msg, Number.MAX_SAFE_INTEGER); // 7차 ⓓ — 접은 뒤 한 번 더(자르지 않음)
+  msg = scrubErrorText(msg); // 🔴 10차 ⓐ — 이름과 같은 줄기
   return `${name}: ${msg.length > cap ? `${msg.slice(0, cap)}…` : msg}`;
 }
 
@@ -373,28 +419,61 @@ function guardRoute(promise, readPageClosed, tally, kind) {
 
 // 🔴 9차(10/29 · 작업지시서 §0-13-3 고칠 자리 1 · §0-13-PM 조건 ①) — 화면 안 window.open 으로 연 팝업을
 //   「알림 받음 → 첫 문서 적재(domcontentloaded) → 우리 쪽 닫기」 까지 기다린다(열자마자 닫아 첫 요청 처리와 겨루던 원인 제거).
-//   받는 것 = page(공개 API 만: once/off 'popup' · 팝업의 waitForLoadState/close/isClosed) · open() = { value, opened } 를 돌려주는 함수 · ms = 상한.
+// ⬛ [낡은 줄 · 9차] //   받는 것 = page(공개 API 만: once/off 'popup' · 팝업의 waitForLoadState/close/isClosed) · open() = { value, opened } 를 돌려주는 함수 · ms = 상한.
+// 🔴 10차 V9-R1 — 받는 것 = page(공개 API 만: once/off 'popup' · 팝업의 waitForLoadState/close/isClosed) · open() = { value, opened } 를 돌려주는 함수
+//      · ms = 상한 = **창 열기부터 우리 쪽 닫기까지 네 단계(열기·알림·적재·닫기) 합**(시계 하나).
 //   ⓐ 'popup' 받을 준비는 open() **전에** 건다 — 사건 처리기(once) 하나라 거절할 Promise 가 없다 → open 이 던지거나 안 열려도
 //      처리기 없는 거절 0 · 끝나면(어느 길이든) finally 에서 처리기를 거두고(off) 상한 시계를 끈다.
-//   ⓓ 상한 = 넘으면 예외(부르는 쪽 catch → H-DX 빨강 · 판별 못 하면 빨강). 기다리는 일들은 결과를 먼저 받아 두므로(then 두 갈래)
-//      상한이 먼저 와도 뒤늦은 거절이 처리기 없이 남지 않는다. Playwright 비공개 속성(`_` 로 시작) 읽기 0 · require('playwright') 0.
+// ⬛ [낡은 줄 · 9차] //   ⓓ 상한 = 넘으면 예외(부르는 쪽 catch → H-DX 빨강 · 판별 못 하면 빨강). 기다리는 일들은 결과를 먼저 받아 두므로(then 두 갈래)
+// ⬛ [낡은 줄 · 9차] //      상한이 먼저 와도 뒤늦은 거절이 처리기 없이 남지 않는다. Playwright 비공개 속성(`_` 로 시작) 읽기 0 · require('playwright') 0.
+// 🔴 10차 V9-R1 · ⓑ(작업지시서 §0-14-3 ⓑ 안 b1 · K-10 ㉠) —
+//   ⓓ 상한 = 네 단계 합(창 열기 포함)을 넘으면 예외(부르는 쪽 catch → H-DX 빨강 · 판별 못 하면 빨강).
+//      상한에 걸리면 처리기 즉시 거둠·시계 끔(finally) + **이미 받은 팝업을 아직 우리가 닫으라 하지 않았으면 close() 1회**(기다리지 않음 ·
+//      결과는 then 두 갈래로 흡수 · 실패는 콘솔 한 줄 = errorName 만). 상한 **뒤에** 새로 열린 팝업은 받지 않는다(처리기 0) — 부르는 쪽 구조
+//      (예외 → H-DX → browser.close())가 정리. 늦게 끝난 열기·적재·닫기 결과는 within 이 흡수 → 이미 던진 결과를 바꾸는 길 0.
+//      Playwright 비공개 속성(`_` 로 시작) 읽기 0 · require('playwright') 0. 상한 숫자는 부르는 쪽 몫(새 숫자 0).
 function settlePopup(page, open, ms) {
   const t0 = Date.now();
   let gotPopup = null;
   const reported = new Promise((resolve) => { gotPopup = resolve; });
-  const onPopup = (p) => gotPopup(p);
+  // ⬛ [낡은 줄 · 9차] const onPopup = (p) => gotPopup(p);
+  let received = null; // 🔴 10차 — 받은 팝업(상한 뒤 닫기 1회용)
+  let closeAsked = false; // 🔴 10차 — 우리 쪽 close() 를 이미 불렀나(같은 팝업에 두 번 부르지 않는다)
+  let timedOut = false; // 🔴 10차 — 상한에 걸렸나
+  const onPopup = (p) => { received = p; gotPopup(p); };
   page.once('popup', onPopup); // ⓐ open() 전에
   let timer = null;
   const LATE = {};
   const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(LATE), ms); });
   const within = async (what, p) => {
     const out = await Promise.race([Promise.resolve(p).then((v) => ({ v }), (e) => ({ e })), deadline]);
-    if (out === LATE) throw new Error(`settlePopup: ${what} 이 상한 ${ms}ms 안에 끝나지 않음`);
+    // ⬛ [낡은 줄 · 9차] if (out === LATE) throw new Error(`settlePopup: ${what} 이 상한 ${ms}ms 안에 끝나지 않음`);
+    if (out === LATE) {
+      timedOut = true; // 🔴 10차 — finally 에서 받은 팝업 닫기 1회
+      throw new Error(`settlePopup: ${what} 이 상한 ${ms}ms 안에 끝나지 않음`);
+    }
     if ('e' in out) throw out.e;
     return out.v;
   };
+  // 🔴 10차 ⓑ — 상한 뒤 받은 팝업 닫기 1회 · 기다리지 않음 · 동기 예외·거절 둘 다 흡수(받는 곳 없는 거절 0) · 콘솔엔 errorName 만
+  const closeLeftover = () => {
+    if (!timedOut || !received || closeAsked) return;
+    closeAsked = true;
+    const p = received;
+    let pending;
+    try {
+      pending = Promise.resolve(p.close());
+    } catch (e) {
+      pending = Promise.reject(e);
+    }
+    pending.then(() => undefined, (e) => {
+      console.log(`settlePopup: 상한 뒤 받은 팝업 닫기 실패 · 예외=${errorName(e)}`);
+    });
+  };
   const run = async () => {
-    const o = await open(); // ⓑ 화면 안 window.open 1회 — 던지면 그대로 위로(finally 가 처리기를 거둔다)
+    // ⬛ [낡은 줄 · 9차] const o = await open(); // ⓑ 화면 안 window.open 1회 — 던지면 그대로 위로(finally 가 처리기를 거둔다)
+    // 🔴 10차 ⓑ — 창 열기도 상한 안(시계 하나가 네 단계 합) · 던지면 같은 객체 그대로 위로(동기 던짐은 within 전에 run 을 거절)
+    const o = await within('창 열기', open());
     const res = { value: o ? o.value : undefined, opened: !!(o && o.opened === true), reported: false, loaded: false, closed: false, ms: 0 };
     if (!res.opened) {
       res.ms = Date.now() - t0;
@@ -404,6 +483,7 @@ function settlePopup(page, open, ms) {
     res.reported = true;
     await within('첫 문서 적재', popup.waitForLoadState('domcontentloaded', { timeout: ms }));
     res.loaded = true;
+    closeAsked = true; // 🔴 10차 — 우리 쪽 닫기를 부른 뒤 상한이면 다시 부르지 않는다
     await within('우리 쪽 닫기', popup.close());
     res.closed = popup.isClosed() === true;
     res.ms = Date.now() - t0;
@@ -412,6 +492,7 @@ function settlePopup(page, open, ms) {
   return run().finally(() => {
     page.off('popup', onPopup);
     clearTimeout(timer);
+    closeLeftover(); // 🔴 10차 ⓑ — 상한일 때만 · 거둔 뒤
   });
 }
 

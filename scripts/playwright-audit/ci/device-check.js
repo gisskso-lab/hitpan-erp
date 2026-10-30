@@ -37,6 +37,9 @@
 const fs = require('fs');
 const path = require('path');
 const L = require('./lib');
+// 🔴 10차 K-14(대표 결재 10/30 · 작업지시서 §0-14-PM2) — 콘솔·got 으로 가는 예외 이름 29자리를 `L.errorName()` 으로.
+//   ⬛ 옛 꼴 = `${<예외 변수>.name}` 그대로(소독 0 · [4-X] 2/3 ⓐ 와 같은 꼴) · 새 꼴 = 허용목록 `[A-Za-z0-9_]` 1~40자 + 소독 뒤 같을 때만 그대로 · 아니면 `Error`.
+//   H-D0 의 `e.code || e.name` 도 같은 문으로(코드 글자도 허용목록). 화면 안 스크립트(`window.__k35err` 쪽 3자리)는 브라우저 문맥이라 L 이 없다 — 그대로(개발명세서 §15-8).
 
 const BASE = process.env.UI_BASE || 'http://127.0.0.1:18080';
 const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost']);
@@ -128,7 +131,7 @@ async function watchTokens(context, tok) {
         tok.loginTerms = t === undefined ? '응답에 칸 없음' : String(t);
       }
     } catch (e) {
-      console.log(`토큰 가로채기: 본문 읽기 실패 (원문 생략 · ${e.name})`);
+      console.log(`토큰 가로채기: 본문 읽기 실패 (원문 생략 · ${L.errorName(e)})`);
     }
   });
 }
@@ -151,7 +154,7 @@ async function logoutViaApi(tok) {
     const res = await fetch(`${BASE}/api/auth/logout`, { method: 'POST', headers, body: '{}' });
     return { ok: res.status === 200, got: `status=${res.status}` };
   } catch (e) {
-    return { ok: false, got: `요청 실패 ${e.name}` };
+    return { ok: false, got: `요청 실패 ${L.errorName(e)}` };
   }
 }
 
@@ -175,7 +178,7 @@ async function blockExternal(context, r) {
     try {
       host = new URL(route.request().url()).hostname;
     } catch (e) {
-      console.log(`외부 차단: 주소 해석 실패 (${e.name})`);
+      console.log(`외부 차단: 주소 해석 실패 (${L.errorName(e)})`);
     }
     if (ALLOWED_HOSTS.has(host) || route.request().url().startsWith('data:') || route.request().url().startsWith('blob:')) {
       // ⬛ [낡은 줄 · 1~7차] return route.continue(); — 닫힌 창에 날던 요청이면 거절이 처리기 없는 거절로 샜다(런 40818528074 H-DX).
@@ -209,7 +212,7 @@ async function closeDeviceNotice(page, note) {
     return true;
   } catch (e) {
     note.errs += 1;
-    console.log(`기기 등록 안내 창 닫기 실패 (${e.name}) — 다음 회차에 다시 본다`);
+    console.log(`기기 등록 안내 창 닫기 실패 (${L.errorName(e)}) — 다음 회차에 다시 본다`);
     return false;
   }
 }
@@ -256,7 +259,7 @@ async function closeBriefing(page, br, appearMs = 0) {
     // 🔴 6차 ② — 콘솔용은 이름만(briefText 가 찍는다) · 예외 글자는 br.lastExc 로 따로 두고 rec 의 err 칸(결과표)으로만 넘긴다.
     br.lastErr = L.errorName(e);
     br.lastExc = e;
-    console.log(`브리핑 팝업 닫기 실패 (${e.name})`);
+    console.log(`브리핑 팝업 닫기 실패 (${L.errorName(e)})`);
     return false;
   }
 }
@@ -323,7 +326,7 @@ async function whereNow(page, probe) {
     }, [TERMS_MARK, MAIN_MARK]);
   } catch (e) {
     probe.navErrors += 1;
-    probe.lastErr = e.name;
+    probe.lastErr = L.errorName(e); // 10차 V10-F1(K-14 남은 자리 · 대입 꼴) · ⬛ 옛 = e.name
     return null;
   }
 }
@@ -361,7 +364,7 @@ async function apiInPage(page, tok) {
       return { status: res.status, termsBlock: text.includes('forbidden_terms_consent') };
     }, { api: TERMS_PROBE_API, access: tok.access, dev: tok.deviceId });
   } catch (e) {
-    return { status: null, err: `요청 실패 ${e.name}` };
+    return { status: null, err: `요청 실패 ${L.errorName(e)}` };
   }
 }
 
@@ -371,7 +374,7 @@ async function apiInPage(page, tok) {
 function watchNav(page, context) {
   const nav = { armed: false, doc: [], st: [], noFrame: 0, noFrameErr: null };
   const pathOf = (u) => {
-    try { return new URL(u).pathname; } catch (e) { return `(주소 해석 실패 ${e.name})`; }
+    try { return new URL(u).pathname; } catch (e) { return `(주소 해석 실패 ${L.errorName(e)})`; }
   };
   const find = (req) => nav.doc.find((x) => x.req === req);
   page.on('request', (req) => {
@@ -382,7 +385,7 @@ function watchNav(page, context) {
     } catch (e) {
       // 서비스 워커 요청은 frame() 이 던진다(프레임 없음) — 문서 이동이 아니므로 세기만 한다.
       nav.noFrame += 1;
-      nav.noFrameErr = e.name;
+      nav.noFrameErr = L.errorName(e); // 10차 R6(K-14 · 대입 꼴 · 읽는 곳 0) · ⬛ 옛 = e.name
       return;
     }
     if (mainDoc) nav.doc.push({ req, path: pathOf(req.url()), end: '대기' });
@@ -391,7 +394,7 @@ function watchNav(page, context) {
     const x = find(req);
     if (!x) return;
     x.end = '완료';
-    req.response().then((res) => { if (res) x.end = `완료 ${res.status()}`; }).catch((e) => console.log(`문서 이동 응답 읽기 실패 (${e.name})`));
+    req.response().then((res) => { if (res) x.end = `완료 ${res.status()}`; }).catch((e) => console.log(`문서 이동 응답 읽기 실패 (${L.errorName(e)})`));
   });
   page.on('requestfailed', (req) => {
     const x = find(req);
@@ -408,7 +411,7 @@ function watchNav(page, context) {
       const v = j && (j.hasAgreed ?? j.HasAgreed);
       one.hasAgreed = v === undefined ? '칸 없음' : String(v);
     } catch (e) {
-      one.hasAgreed = `본문 못 읽음 ${e.name}`;
+      one.hasAgreed = `본문 못 읽음 ${L.errorName(e)}`;
     }
   });
   nav.arm = () => { nav.doc = []; nav.st = []; nav.noFrame = 0; nav.armed = true; };
@@ -429,7 +432,7 @@ async function noticeTexts(page) {
         .slice(0, 6).map((s) => s.slice(0, 120));
     });
   } catch (e) {
-    return [`읽기 실패 ${e.name}`];
+    return [`읽기 실패 ${L.errorName(e)}`];
   }
 }
 
@@ -445,7 +448,7 @@ async function agreeViaApi(page, tok) {
       return { status: res.status };
     }, { api: TERMS_AGREE_API, access: tok.access, dev: tok.deviceId, ver: TERMS_VERSION });
   } catch (e) {
-    return { status: null, err: `요청 실패 ${e.name}` };
+    return { status: null, err: `요청 실패 ${L.errorName(e)}` };
   }
 }
 
@@ -458,7 +461,7 @@ async function forgetBrowserLogin(page) {
       return { ok: true, got: `저장소 칸 ${keys.length}개 지움` };
     }, AUTH_STORAGE_KEYS);
   } catch (e) {
-    return { ok: false, got: `저장소 지우기 실패 ${e.name}` };
+    return { ok: false, got: `저장소 지우기 실패 ${L.errorName(e)}` };
   }
 }
 
@@ -552,9 +555,9 @@ async function termsGate(page, r, tag, tok, step, note) {
       } catch (e) {
         // 첫 실행 길(1~4런 미실행) — 접근성 이름이 안 맞으면 화면 글자를 누르는 사람 동작으로 한 번 더. 최종 판정은 아래 단추·API 동작.
         //   check 가 눌렀는데 상태 확인만 늦은 경우 다시 누르면 꺼진다 → 켜져 있지 않을 때만 누른다.
-        console.log(`약관 체크상자 역할 선택 실패 (${e.name}) → 켜짐 확인 뒤 글자 클릭`);
+        console.log(`약관 체크상자 역할 선택 실패 (${L.errorName(e)}) → 켜짐 확인 뒤 글자 클릭`);
         const on = await cb.isChecked({ timeout: 2000 }).catch((ie) => {
-          console.log(`약관 체크상자 상태 읽기 실패 (${ie.name}) → 꺼짐으로 본다`);
+          console.log(`약관 체크상자 상태 읽기 실패 (${L.errorName(ie)}) → 꺼짐으로 본다`);
           return false;
         });
         if (on) {
@@ -603,7 +606,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
     context = await browser.newContext({ baseURL: BASE });
     L.rec(r, { ...tag, id: 'H-D1', what: '브라우저 기동', got: browserName, pass: true, kind: 'DEVICE' });
   } catch (e) {
-    L.rec(r, { ...tag, id: 'H-D1', what: '브라우저 기동', got: `실패 ${e.name}`, pass: false, kind: 'DEVICE' });
+    L.rec(r, { ...tag, id: 'H-D1', what: '브라우저 기동', got: `실패 ${L.errorName(e)}`, pass: false, kind: 'DEVICE' });
     return false;
   }
   // ⬛ [낡은 줄 · 1차] await context.tracing.start({ screenshots: true, snapshots: true }); — 2차 ① 기록 안 함
@@ -626,13 +629,13 @@ async function runBrowser(pw, browserName, r, flags, full) {
       const gateOk = await termsGate(page, r, tag, tok, step, note);
       if (!gateOk) {
         failed = true;
-        await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+        await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
         return false;
       }
     } catch (e) {
       failed = true;
-      L.rec(r, { ...tag, id: 'H-D2x', what: `화면 로그인·약관 단계=${step.now}`, got: `실패 ${e.name} @ ${new URL(page.url()).pathname} · ${SEED_FACT_NA}`, pass: false, kind: 'DEVICE' });
-      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+      L.rec(r, { ...tag, id: 'H-D2x', what: `화면 로그인·약관 단계=${step.now}`, got: `실패 ${L.errorName(e)} @ ${new URL(page.url()).pathname} · ${SEED_FACT_NA}`, pass: false, kind: 'DEVICE' });
+      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
       return false;
     }
 
@@ -640,7 +643,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
     // 🔴 5차 ②③ — 본 화면 진입 직후 브리핑 팝업 공통 처리(뜨면 [닫기] · 안 뜨면 지나감 · H-BRIEF 한 줄).
     if (!(await enterMainScreen(page, r, tag, step, br))) {
       failed = true;
-      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
       return false;
     }
 
@@ -650,7 +653,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
     L.rec(r, { ...tag, id: 'H-D3', what: '화면 로그인 뒤 브라우저 접속 토큰을 가리고 S10 검색 대상에 넣음', got: `가린 토큰 ${masked}건`, pass: maskedOk, kind: 'DEVICE' });
     if (!maskedOk) {
       failed = true;
-      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+      await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
       return false;
     }
 
@@ -666,7 +669,10 @@ async function runBrowser(pw, browserName, r, flags, full) {
     // ⬛ [낡은 줄 · 1~8차] });
     // 🔴 9차(10/29 · §0-13-3 고칠 자리 2 · K-6 ㉠) — 같은 window.open 1회(주소·이름·횟수 그대로)를 L.settlePopup 의 open 으로 감싼다:
     //   팝업 알림 → 첫 문서 적재 → 우리 쪽 닫기까지 기다린 뒤 다음으로. 상한 = 아래 기존 장치 기다림과 같은 30000ms(새 숫자 0).
-    //   상한을 넘거나 팝업이 스스로 닫히면 예외 → 아래 catch → H-DX 빨강. t1 = 예전과 같은 값(녹음기 목록 또는 { err }).
+    // ⬛ [낡은 줄 · 9차] //   상한을 넘거나 팝업이 스스로 닫히면 예외 → 아래 catch → H-DX 빨강. t1 = 예전과 같은 값(녹음기 목록 또는 { err }).
+    // 🔴 10차 V9-R1 — 상한(창 열기 포함 · 열기·알림·적재·닫기 네 단계 합)을 넘거나 팝업이 **첫 문서 적재 전에** 스스로 닫히면 예외
+    //   → 아래 catch → H-DX 빨강. 적재 **뒤** 스스로 닫히면 close() 가 삼켜 통과(첫 요청은 이미 끝남).
+    //   t1 = 예전과 같은 값(녹음기 목록 또는 { err }).
     const t1w = await L.settlePopup(page, () => page.evaluate(() => {
       if (!window.__k35) return { value: { err: window.__k35err || '녹음기 없음' }, opened: false };
       window.__k35.clear();
@@ -711,7 +717,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
       if (!(await closeBriefing(page, br, 0))) {
         failed = true;
         L.rec(r, { ...tag, id: 'H-BRIEF', what: '결재 길 클릭 직전 일일 브리핑 팝업을 [닫기] 로 닫음', got: briefText(br), pass: false, kind: 'DEVICE' });
-        await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+        await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
         return false;
       }
       if (br.seen > seenBefore) L.rec(r, { ...tag, id: 'H-BRIEF', what: '결재 길 클릭 직전 일일 브리핑 팝업(늦게 뜸)을 [닫기] 로 닫음', got: briefText(br), pass: true, kind: 'DEVICE' });
@@ -720,12 +726,12 @@ async function runBrowser(pw, browserName, r, flags, full) {
       step.now = '결재 길 이동 뒤 읽기(H-T2)';
       // 런8(40755189494) H-T2: 제품은 /approval/pending 을 ApprovalRedirectPage 가 받아 결재관리 /approval 로 넘긴다
       //   (ApprovalRedirectPage.razor:1 · ApprovalPendingPage.razor:4 설명) — 본 창이 결재 화면에 닿았는지는 /approval 머리로 본다. PM 고침 · [4] 확인 대상(SoD).
-      await page.waitForURL((u) => u.pathname.startsWith('/approval'), { timeout: 30000 }).catch((we) => console.log(`결재 길 이동 대기 끝 (${we.name})`));
-      await page.waitForLoadState('load', { timeout: 30000 }).catch((le) => console.log(`결재 길 문서 적재 대기 끝 (${le.name})`));
+      await page.waitForURL((u) => u.pathname.startsWith('/approval'), { timeout: 30000 }).catch((we) => console.log(`결재 길 이동 대기 끝 (${L.errorName(we)})`));
+      await page.waitForLoadState('load', { timeout: 30000 }).catch((le) => console.log(`결재 길 문서 적재 대기 끝 (${L.errorName(le)})`));
       const post = await page.evaluate(() => {
         if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
         return { opens: window.__k35.list().length, mark: window.__k35.markNow(), doc: window.__k35.doc };
-      }).catch((pe) => ({ err: `읽기 실패 ${pe.name}` }));
+      }).catch((pe) => ({ err: `읽기 실패 ${L.errorName(pe)}` }));
       const alive = !pre.err && !post.err && post.mark === mark;
       const opens = alive ? post.opens : null;
       // reload = 이동이 전체 새로고침이었나(문서 번호가 바뀌었나) — 사실 기록 · 판정에는 안 쓴다(어느 쪽이든 기록은 이어진다).
@@ -744,7 +750,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
         L.rec(r, { ...tag, id: 'H-T2', what: '본 창 이동(결재 길 흉내 · /approval/pending → 제품이 /approval 로 넘김) → window.open 0회 · 새 창 0 · 본 창 결재 화면', got, pass, kind: 'TEST' });
       }
     }
-    await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+    await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
     return !failed;
   } catch (e) {
     // 🔴 5차 ① — 어떤 예외로 흐름이 끊겨도: 앞 줄들은 이미 파일에 있다(lib bindAutosave) + 끊긴 자리를 [장치] 한 줄로.
@@ -754,7 +760,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
     // ⬛ [낡은 줄 · 5차] L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `${L.describeError(e)} @ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE' });
     // 🔴 6차 ② — got 에서 예외 글자를 뺀다 · 이 예외와 br 의 예외를 err 칸(결과표)으로만(콘솔 = 「예외=<이름>」).
     L.rec(r, { ...tag, id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=${step.now}`, got: `@ ${at} · ${briefText(br)}`, pass: false, kind: 'DEVICE', err: [e, br.lastExc] });
-    if (page) await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${se.name}`));
+    if (page) await page.screenshot({ path: path.join(shots, `H-device-${browserName}.png`) }).catch((se) => console.log(`스크린샷 실패 ${L.errorName(se)}`));
     return false;
   } finally {
     // ⬛ [낡은 갈래 · 1차] 실패면 context.tracing.stop({ path: trace/H-device-<브라우저>.zip }) · 아니면 stop() — 2차 ① 제거.
@@ -766,7 +772,7 @@ async function runBrowser(pw, browserName, r, flags, full) {
       // finally 안이라 이미 정해진 return 값을 못 바꾼다 → 모듈 칸으로 main 에 알린다.
       if (!lo.ok) logoutFailures += 1;
     }
-    await browser.close().catch((ce) => console.log(`브라우저 닫기 실패 ${ce.name}`));
+    await browser.close().catch((ce) => console.log(`브라우저 닫기 실패 ${L.errorName(ce)}`));
   }
 }
 
@@ -778,7 +784,7 @@ function onFatal(r, where) {
       // ⬛ [낡은 줄 · 5차] L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: L.describeError(e), pass: false, kind: 'DEVICE' });
       L.rec(r, { id: 'H-DX', what: `[장치] 브라우저 흐름 끊김 — 단계=프로세스 밖 예외(${where})`, got: '예외 글자는 결과표 err 칸', pass: false, kind: 'DEVICE', err: e }); // 🔴 6차 ②
     } catch (e2) {
-      console.log(`⚫ FAIL [장치] 끊긴 자리 기록 실패 (${e2.name})`);
+      console.log(`⚫ FAIL [장치] 끊긴 자리 기록 실패 (${L.errorName(e2)})`);
     }
     process.exit(1);
   };
@@ -799,7 +805,7 @@ async function main() {
   try {
     pw = require('playwright');
   } catch (e) {
-    L.rec(r, { id: 'H-D0', what: 'playwright 불러오기', got: `실패 ${e.code || e.name}`, pass: false, kind: 'DEVICE' });
+    L.rec(r, { id: 'H-D0', what: 'playwright 불러오기', got: `실패 ${L.errorName(e && e.code ? { name: String(e.code) } : e)}`, pass: false, kind: 'DEVICE' });
     L.saveResult(r);
     process.exit(1);
   }

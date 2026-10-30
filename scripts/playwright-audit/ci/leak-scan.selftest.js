@@ -49,6 +49,24 @@
 //   C16e PM 조건 ① open 이 던짐(동기·비동기) → 같은 객체로 거절 · 'popup' 처리기 0 · 받는 곳 없는 거절 0 · 상한 안 기다림
 //   C16f PM 조건 ① 안 열림(window.open 이 null) → opened 거짓 · 셋 다 거짓 · 처리기 0 · 거절 0 · 상한 안 기다림 · 시계 남김 0
 //   고치기 전 lib(1a142dd3) = C16a 만 초록 · 8차 lib = C16a·C16d 초록.
+// 🔴 10차(10/30 · 작업지시서 §0-14-5 + §0-14-PM 조건 ①~③) — 경우 16개 더함(48 → 64) · 고치기 전 lib(0b2f9343) 예상 53/64.
+//   V9-R2: 받는 곳 없는 거절 그물을 **첫 경우 전**으로 옮겨 전 구간을 센다(C16 각 창 셈은 그대로 · 끝에 C16z).
+//   C16g1 open 이 영영 안 끝남(HQA 합성 A) · ms=300 → 상한 예외(단계 `창 열기`) · 걸린 시간 ∈ [299, 400) · 처리기 0 · 시계 원래대로 · 거절 0
+//   C16g2 open 이 500ms 뒤 열림 + 늦은 popup → 위와 같음 + 결과 = 거절 1회 그대로 · 늦은 사건 받는 곳 0 · 늦은 팝업 닫기 0
+//   C16g3 열렸는데 popup 영영 안 옴(HQA 합성 B) → 상한 예외(단계 `팝업 알림`) = 대조 줄(고치기 전에도 초록)
+//   C16g4 알림 왔는데 적재 영영 안 끝남(닫기 이행 · 닫기 거절 두 벌) → 상한 예외(단계 `첫 문서 적재`) · 받은 팝업 close() 1회 · 거절 0
+//   C16z 창 밖 받는 곳 없는 거절 = 전체 − 창 안 합 = 0 = 대조 줄
+//   C17a 함수 단독 · 이름에 등록값 원문·URL 대·소문자·base64 자리 0/1/2(HQA 합성) → 이름 부분에 꼴 0 · *** 있음
+//   C17b 함수 단독 · 이름에 인증 머리글 꼴·점 셋 꼴(실행 중 16진으로 만듦) → 가려짐
+//   C17c 함수 단독 · 긴 이름 → 이름 부분 = 앞 40자 + `…`
+//   C17d rec 결과표 err 칸 · 이름에 등록값 3꼴 → 가려짐 = 대조 줄 · C17e 같은 자리 · 인증 머리글·점 셋 꼴 → 가려짐
+//   C17f rec 콘솔 `예외=` · 이름에 등록값·기호·긴 글자 → `Error` 고정 = 대조 줄
+//   C18a 토큰 꼴(HQA 합성 + 띄어쓰기 · 대괄호 두 따옴표 · GITHUB_TOKEN 글자 · toJSON(github)) 한 줄씩 → 줄마다 종류=토큰 · 줄 글자 0
+//   C18b 저장소 변수(`vars.` 식 · `vars[...]` · if: 암묵 식) → 종류=저장소 변수
+//   C18c 트리거(키 둘 · on: 한 줄 목록) → 종류=트리거 · 머리 `M4 유입 길` · `M4 실값 유입` 머리 0
+//   C18d 정상 줄(실물 꼴 · toJSON(github.event) · github.repository·sha · $GITHUB_ENV · 통째 주석 속 낱말) → 잡힘 0 · 통과 줄 1 = 대조 줄
+//   C18e 알고 받는 오탐(조건식 속 트리거 낱말 1줄) → 잡힘 정확히 1(트리거)
+//   합성 값(인증 머리글 꼴·점 셋 꼴·식 안 이름)은 전부 실행 중 16진·조각 이어 붙이기로 만든다 — 파일 글자에 자격증명 모양 0.
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -97,6 +115,15 @@ function check(name, cond, detail) {
   results.push({ name, ok: !!cond });
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 }
+// 🔴 10차 V9-R2 — 받는 곳 없는 거절 그물을 첫 경우 **전**에 건다(전 구간 셈 · 셈만 · 글자 0).
+//   urAll = 전체 · urInWin = C16 각 창에서 잰 셈의 합 → 끝의 C16z 가 urAll − urInWin = 0 을 본다.
+//   c16UR(9차 창 셈 · 아래 `let`)도 여기서 같이 올린다 — 거절 사건은 맨 위 동기 코드가 다 돈 뒤에야 오므로 그때는 이미 선언돼 있다.
+let urAll = 0;
+let urInWin = 0;
+process.on('unhandledRejection', () => {
+  urAll += 1;
+  c16UR += 1;
+});
 
 const E = fakeEnv();
 { // C1
@@ -419,6 +446,198 @@ const hasIntake = typeof L.intakeScan === 'function';
   check('C14c M4 대상 0 = 빨강(빈 검색은 거짓 통과)', ok, why);
 }
 
+// ── 🔴 10차(10/30 · §0-14-5) C17 — 예외 **이름** 소독(층 ① 함수 단독 · 층 ② 결과표 err 칸 · 층 ③ 콘솔 `예외=`) ─────────
+//   메시지는 고정 'note' · 이름 칸만 바꾼다. 꼴 글자는 시험이 따로 계산(b64Mid · encodeURIComponent).
+//   인증 머리글 꼴·점 셋 꼴은 실행 중에 조각 이어 붙이기 + 16진으로만 만든다(파일 글자에 그 꼴 0).
+function c17Err(name) {
+  const e = new Error('note');
+  e.name = name;
+  return e;
+}
+const c17NamePart = (d) => { const k = d.lastIndexOf(': note'); return k >= 0 ? d.slice(0, k) : d; };
+const c17AuthWord = ['Bea', 'rer'].join('');
+const c17Auth = () => `${c17AuthWord} ${hex()}${hex()}${hex()}`;
+const c17Dots = () => [hex(), hex(), hex()].join('.');
+// rec 1회 — 콘솔 줄은 잡아 두고(selftest 출력에 안 섞임) 결과표 줄과 함께 돌려준다
+function c17Rec(err) {
+  const r = { rows: [] };
+  const logs = [];
+  const orig = console.log;
+  console.log = (...a) => { logs.push(a.join(' ')); };
+  try {
+    L.rec(r, { id: 'C17-REC', what: '이름 소독', got: '끊김', pass: true, kind: 'DEVICE', err });
+  } finally {
+    console.log = orig;
+  }
+  return { row: r.rows[0] || {}, line: logs.join('\n') };
+}
+{ // C17a HQA 합성 — 이름에 등록값 3꼴
+  const enc = encodeURIComponent(C9_VALUE);
+  const forms = [
+    ['원문', C9_VALUE, C9_VALUE],
+    ['URL 대문자', enc, enc],
+    ['URL 소문자', enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()), enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase())],
+  ];
+  for (let k = 0; k < 3; k += 1) {
+    const { full, mid } = b64Mid(C9_VALUE, k);
+    forms.push([`base64 자리 ${k}`, full, mid]);
+  }
+  const xs = forms.map(([label, put, needle]) => {
+    const part = c17NamePart(L.describeError(c17Err(`pre ${put} post`)));
+    return { label, ok: !part.includes(needle) && part.includes('***') };
+  });
+  check('C17a 이름에 등록값 3꼴(원문 · URL 대·소문자 · base64 자리 0/1/2) → 이름 부분에 꼴 0 · *** 있음', xs.every((x) => x.ok),
+    xs.map((x) => `${x.label}:${x.ok ? '가림' : '남음'}`).join(' '));
+}
+{ // C17b 이름에 인증 머리글 꼴·점 셋 꼴
+  const auth = c17Auth();
+  const dots = c17Dots();
+  const authTail = auth.slice(c17AuthWord.length + 1);
+  const pa = c17NamePart(L.describeError(c17Err(`pre ${auth} post`)));
+  const pd = c17NamePart(L.describeError(c17Err(`pre ${dots} post`)));
+  const okA = !pa.includes(authTail) && pa.includes('***');
+  const okD = !pd.includes(dots) && pd.includes('***');
+  check('C17b 이름에 인증 머리글 꼴·점 셋 꼴 → 가려짐', okA && okD, `인증 머리글:${okA ? '가림' : '남음'} · 점 셋:${okD ? '가림' : '남음'}`);
+}
+{ // C17c 긴 이름
+  const long = `N${'x'.repeat(400)}`;
+  const part = c17NamePart(L.describeError(c17Err(long)));
+  const ok = part === `${long.slice(0, 40)}…`;
+  check('C17c 긴 이름 → 이름 부분 = 앞 40자 + …', ok, `이름 부분 ${part.length}자`);
+}
+{ // C17d rec 결과표 err 칸 · 이름에 등록값 3꼴(대조 줄)
+  const enc = encodeURIComponent(C9_VALUE);
+  const encLower = enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
+  const b = b64Mid(C9_VALUE, 1);
+  const { row } = c17Rec(c17Err(`pre ${C9_VALUE} | ${enc} | ${encLower} | ${b.full} post`));
+  const err = String(row.err || '');
+  const ok = err !== '' && ![C9_VALUE, enc, encLower, b.mid].some((n) => err.includes(n)) && err.includes('***');
+  check('C17d rec 결과표 err 칸 · 이름에 등록값 3꼴 → 가려짐(대조 줄 · 고치기 전에도 초록)', ok, `err 칸 ${err.length}자`);
+}
+{ // C17e rec 결과표 err 칸 · 이름에 인증 머리글 꼴·점 셋 꼴
+  const auth = c17Auth();
+  const dots = c17Dots();
+  const authTail = auth.slice(c17AuthWord.length + 1);
+  const { row } = c17Rec([c17Err(`pre ${auth} post`), c17Err(`pre ${dots} post`)]);
+  const err = String(row.err || '');
+  const okA = !err.includes(authTail);
+  const okD = !err.includes(dots);
+  check('C17e rec 결과표 err 칸 · 이름에 인증 머리글 꼴·점 셋 꼴 → 가려짐', err !== '' && okA && okD, `인증 머리글:${okA ? '가림' : '남음'} · 점 셋:${okD ? '가림' : '남음'}`);
+}
+{ // C17f rec 콘솔 `예외=` · 이름에 등록값·기호·긴 글자(대조 줄)
+  const { line } = c17Rec(c17Err(`${C9_VALUE}!@#${'y'.repeat(60)}`));
+  const ok = /예외=Error$/.test(line.trimEnd()) && !line.includes(C9_VALUE) && !line.includes('y'.repeat(60));
+  check('C17f rec 콘솔 예외= · 이름에 등록값·기호·긴 글자 → Error 고정(대조 줄 · 고치기 전에도 초록)', ok, `콘솔 끝=${(line.match(/예외=\S*$/) || ['없음'])[0]}`);
+}
+
+// ── 🔴 10차(10/30 · §0-14-5) C18 — M4 유입 검사 낱말 넷(A2 · K-11 ㉠ · K-15 ㉠) ─────────
+//   임시 폴더만(레포 .github/ 쓰기 0). 워크플로 글은 따옴표 문자열(`${{` 가 보간으로 읽히지 않게). 식 안 이름은 16진.
+const C18_MARK_LINE = '      - run: node scripts/playwright-audit/ci/mask-probe.js';
+const c18Head = ['name: c18', 'on: workflow_dispatch', 'jobs:', '  a:', '    runs-on: ubuntu-latest', '    steps:', C18_MARK_LINE];
+// 한 파일 검사 → { r, got(파일:줄:종류 정렬), out(출력 글자) }
+function c18Scan(dir) {
+  const r = L.intakeScan(dir);
+  return { r, got: r.hits.map((h) => `${h.file}:${h.line}:${h.kind}`).sort(), out: r.lines.join('\n') };
+}
+const c18Want = (file, yml, picks, kind) => picks.map((s) => `${file}:${yml.indexOf(s) + 1}:${kind}`).sort();
+{ // C18a 토큰 꼴(HQA 합성 + 변형) — 한 줄씩
+  const d = c14Dir('c18a');
+  const plant = hex();
+  const picks = [
+    '          GITHUB_TOKEN: ${{ github.token }}', // HQA 합성
+    '          T1_' + plant + ': ${{ github .  token }}',
+    "          T2_" + plant + ": ${{ github['token'] }}",
+    '          T3_' + plant + ': ${{ github[ "token" ] }}',
+    '      - run: test -n "$GITHUB_TOKEN"',
+    '          T4_' + plant + ': ${{ toJSON( github ) }}',
+  ];
+  const yml = [...c18Head, '      - run: echo ok', '        env:', ...picks];
+  fs.writeFileSync(path.join(d, 'c18a.yml'), yml.join('\n'));
+  const { r, got, out } = c18Scan(d);
+  const want = c18Want('c18a.yml', yml, picks, '토큰');
+  const noText = !/github|token|tojson/i.test(out) && !out.includes(plant) && !out.includes('${{');
+  const ok = !r.ok && got.join('|') === want.join('|') && noText;
+  check('C18a 토큰 꼴(HQA 합성 · 띄어쓰기 · 대괄호 두 따옴표 · GITHUB_TOKEN 글자 · toJSON(github)) → 줄마다 종류=토큰 · 줄 번호 맞음 · 출력에 줄 글자 0', ok,
+    `잡힘 ${r.hits.length}/${picks.length} · 기대와 같음=${got.join('|') === want.join('|')} · 줄 글자 0=${noText}`);
+}
+{ // C18b 저장소 변수(HQA 합성 `vars.` 식 + 대괄호 + if: 암묵 식)
+  const d = c14Dir('c18b');
+  const plant = hex();
+  const picks = [
+    '          V1_' + plant + ': ${{ vars.FAKE_' + plant + ' }}', // HQA 합성
+    "          V2_" + plant + ": ${{ vars['FAKE_" + plant + "'] }}",
+    "        if: vars.FAKE_" + plant + " == 'on'",
+  ];
+  const yml = [...c18Head, '      - run: echo ok', '        env:', ...picks];
+  fs.writeFileSync(path.join(d, 'c18b.yml'), yml.join('\n'));
+  const { r, got, out } = c18Scan(d);
+  const want = c18Want('c18b.yml', yml, picks, '저장소 변수');
+  const ok = !r.ok && got.join('|') === want.join('|') && !out.includes(plant) && !/vars/i.test(out);
+  check('C18b 저장소 변수(`vars.` 식 · `vars[...]` · if: 암묵 식) → 종류=저장소 변수', ok, `잡힘 ${r.hits.length}/${picks.length} · 기대와 같음=${got.join('|') === want.join('|')}`);
+}
+{ // C18c 트리거 — 키 둘 · on: 한 줄 목록
+  const d = c14Dir('c18c');
+  const ya = ['name: c18c-a', 'on:', '  pull_request_target:', '  workflow_call:', 'jobs:', '  a:', '    runs-on: ubuntu-latest', '    steps:', C18_MARK_LINE];
+  const yb = ['name: c18c-b', 'on: [push, workflow_call, pull_request_target]', 'jobs:', '  a:', '    runs-on: ubuntu-latest', '    steps:', C18_MARK_LINE];
+  fs.writeFileSync(path.join(d, 'c18c-a.yml'), ya.join('\n'));
+  fs.writeFileSync(path.join(d, 'c18c-b.yml'), yb.join('\n'));
+  const { r, got } = c18Scan(d);
+  const want = [
+    ...c18Want('c18c-a.yml', ya, ['  pull_request_target:', '  workflow_call:'], '트리거'),
+    ...c18Want('c18c-b.yml', yb, ['on: [push, workflow_call, pull_request_target]'], '트리거'),
+  ].sort();
+  const heads = r.lines.filter((l) => l.startsWith('⚫ FAIL [장치] M4 유입 길 — ') && l.endsWith(' · 종류=트리거')).length;
+  const oldHead = r.lines.filter((l) => l.startsWith('⚫ FAIL [장치] M4 실값 유입 — ')).length;
+  const ok = !r.ok && r.targets.length === 2 && got.join('|') === want.join('|') && heads === 3 && oldHead === 0;
+  check('C18c 트리거(키 둘 · on: 한 줄 목록) → 종류=트리거 · 머리 M4 유입 길 · M4 실값 유입 머리 0', ok,
+    `잡힘 ${r.hits.length}/3 · 기대와 같음=${got.join('|') === want.join('|')} · 유입 길 머리 ${heads} · 실값 유입 머리 ${oldHead}`);
+}
+{ // C18d 정상 줄(대조 줄) — 실물 ui-browser.yml 꼴 + 오탐 기대값 ②
+  const d = c14Dir('c18d');
+  const yml = [
+    'name: c18d',
+    'on:',
+    '  pull_request:',
+    '    branches: [develop, main]',
+    '  workflow_dispatch:',
+    'permissions:',
+    '  contents: read',
+    'concurrency:',
+    '  group: ui-browser-${{ github.event.pull_request.number || github.ref }}',
+    '  cancel-in-progress: true',
+    'jobs:',
+    '  ui:',
+    "    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/c18d-')",
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    '      # 통째 주석(식 없음): vars. vars[ github.token GITHUB_TOKEN toJSON(github) workflow_call pull_request_target',
+    '      - run: |',
+    '          put() { echo "::add-mask::$2"; echo "$1=$2" >> "$GITHUB_ENV"; }',
+    '          {',
+    '            echo "UI_OUT=$RUNNER_TEMP/ui-out"',
+    '          } >> "$GITHUB_ENV"',
+    "      - run: echo '${{ toJSON(github.event) }}' > ev.json",
+    '      - run: echo "${{ github.repository }} ${{ github.sha }}"',
+    C18_MARK_LINE,
+  ];
+  fs.writeFileSync(path.join(d, 'c18d.yml'), yml.join('\n'));
+  const { r, got } = c18Scan(d);
+  const ok = r.ok && r.targets.length === 1 && r.hits.length === 0
+    && r.lines.length === 1 && r.lines[0] === '🟢 PASS [장치] M4 실값 유입 0 — 대상 1개';
+  check('C18d 정상 줄(실물 꼴 · toJSON(github.event) · github.repository·sha · $GITHUB_ENV · 통째 주석 속 낱말) → 잡힘 0 · 통과 줄 1(대조 줄)', ok,
+    `잡힘 ${r.hits.length}${got.length ? ` (${got.join(' ')})` : ''}`);
+}
+{ // C18e 알고 받는 오탐 — 조건식 속 트리거 낱말(정책 기대값 고정)
+  const d = c14Dir('c18e');
+  const pick = "    if: github.event_name != 'pull_request_target'";
+  const yml = ['name: c18e', 'on: workflow_dispatch', 'jobs:', '  a:', pick, '    runs-on: ubuntu-latest', '    steps:', C18_MARK_LINE];
+  fs.writeFileSync(path.join(d, 'c18e.yml'), yml.join('\n'));
+  const { r, got } = c18Scan(d);
+  const want = c18Want('c18e.yml', yml, [pick], '트리거');
+  const ok = !r.ok && got.join('|') === want.join('|');
+  check('C18e 알고 받는 오탐(조건식 속 트리거 낱말 1줄) → 잡힘 정확히 1(트리거)', ok, `잡힘 ${r.hits.length} · 기대와 같음=${got.join('|') === want.join('|')}`);
+}
+
 // ── 🔴 8차(10/29 · §0-12-6 + PM 조건 ②) C15 — 외부 차단 처리기 닫힌 창 처리 거절 ─────────────────
 //   Promise 를 기다려야 하므로 합계 줄은 C15 뒤(아래 async 묶음 끝)로 옮긴다.
 // ⬛ [낡은 줄 · 6~7차] const bad = results.filter((x) => !x.ok).length;
@@ -721,6 +940,7 @@ async function c16Old(order, handler) {
   await w.command('open');
   await c16Tick();
   w.ur = c16UR - ur0;
+  urInWin += w.ur; // 🔴 10차 V9-R2 — 창 안 셈 합
   return w;
 }
 async function c16New(closeOrder, engine = 'webkit') {
@@ -733,6 +953,7 @@ async function c16New(closeOrder, engine = 'webkit') {
   }
   await c16Tick();
   w.ur = c16UR - ur0;
+  urInWin += w.ur; // 🔴 10차 V9-R2 — 창 안 셈 합
   w.listeners = w.opener.listenerCount('popup');
   return w;
 }
@@ -840,7 +1061,7 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     check('C15g2 guardRoute 로 감쌈 = unhandledRejection 0 · 종료 0', !!c && c.code === 0 && c.out === 'UR=0 T=1', c ? `code=${c.code} · ${c.out}` : '함수 없음');
   }
   // ── 🔴 9차 C16 — 받는 곳 없는 거절 그물(셈만 · 이 뒤 끝까지 둔다) ──
-  process.on('unhandledRejection', () => { c16UR += 1; });
+  // ⬛ [낡은 줄 · 9차] process.on('unhandledRejection', () => { c16UR += 1; }); — 10차 V9-R2: 맨 위(첫 경우 전) 그물로 옮김(셈은 같은 c16UR)
   { // C16a 대조 줄 · 옛 흐름(lib 안 씀)
     const ws = [];
     for (const o of ['S1', 'S3', 'S4']) ws.push(await c16Old(o, c16Plain));
@@ -913,6 +1134,7 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const ms = Date.now() - t0;
         await c16Tick();
         xs.push({ same: got === boom, listeners: w.opener.listenerCount('popup'), ur: c16UR - ur0, ms });
+        urInWin += xs[xs.length - 1].ur; // 🔴 10차 V9-R2 — 창 안 셈 합
       }
       ok = xs.every((x) => x.same && x.listeners === 0 && x.ur === 0 && x.ms < 1000);
       why = xs.map((x, k) => `${k ? '비동기' : '동기'}:같은 객체=${x.same}·처리기=${x.listeners}·UR=${x.ur}·${x.ms < 1000 ? '안 기다림' : `${x.ms}ms 기다림`}`).join(' ');
@@ -940,12 +1162,106 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       w.opener.emit('popup', {}); // 늦게 온 popup — 거둔 뒤라 아무 일 없어야 한다
       await c16Tick();
       const ur = c16UR - ur0;
+      urInWin += ur; // 🔴 10차 V9-R2 — 창 안 셈 합
       const timersOk = timers0 === null || timers1 === timers0;
       ok = !err && !!s && s.opened === false && s.reported === false && s.loaded === false && s.closed === false
         && Array.isArray(s.value) && listeners === 0 && ur === 0 && ms < 1000 && timersOk;
       why = `예외=${err ? L.errorName(err) : '없음'} · opened=${s && s.opened} · 셋=${s && s.reported}·${s && s.loaded}·${s && s.closed} · 처리기=${listeners} · UR=${ur} · ${ms < 1000 ? '안 기다림' : `${ms}ms`} · 시계 ${timers0 === null ? '못 셈' : `${timers0}→${timers1}`}`;
     }
     check('C16f 안 열림(window.open null) → opened 거짓 · 셋 다 거짓 · 처리기 0 · 거절 0 · 상한 안 기다림 · 시계 남김 0', ok, why);
+  }
+  // ── 🔴 10차(10/30 · §0-14-5 · K-10 ㉠ · K-13 ㉠) C16g — settlePopup 상한 경로(V9-R3) ──
+  //   ms = 300 · 걸린 시간 ∈ [299, 400)(여유 100ms · [4] 9차 D1~D3 초과 3~16ms 와 D4 501ms 사이) · 시험 감시 시계 1000ms(끝나지 않으면 PENDING = FAIL)
+  //   공통 단언: 예외 머리 `settlePopup:` + 단계 이름 + `상한 300ms` · 처리기 0 · Timeout 자원 수 전후 같음 · 창 안 받는 곳 없는 거절 0
+  const C16G_MS = 300;
+  const C16G_SLACK = 100;
+  const C16G_WATCH = 1000;
+  const c16gWait = (n) => new Promise((ok) => setTimeout(ok, n));
+  const c16gPopup = (closeRejects = false) => {
+    const pp = { closeCalls: 0, closed: false };
+    pp.waitForLoadState = () => new Promise(() => {}); // 적재 영영 안 끝남
+    pp.close = () => {
+      pp.closeCalls += 1;
+      if (closeRejects) return Promise.reject(new Error('모형: 닫기 거절'));
+      pp.closed = true;
+      return Promise.resolve();
+    };
+    pp.isClosed = () => pp.closed;
+    return pp;
+  };
+  // settlePopup 1회 + 감시 시계 · settled = 이행/거절 횟수(늦은 결과가 결과를 바꾸지 않나)
+  async function c16gRun(page, open, settleAfter = 0) {
+    const ur0 = c16UR;
+    const timers0 = c16Timers();
+    const settled = { res: 0, rej: 0 };
+    const PENDING = {};
+    let wd = null;
+    const watch = new Promise((ok) => { wd = setTimeout(() => ok(PENDING), C16G_WATCH); });
+    const t0 = Date.now();
+    const tracked = L.settlePopup(page, open, C16G_MS).then((v) => { settled.res += 1; return { v }; }, (e) => { settled.rej += 1; return { e }; });
+    const out = await Promise.race([tracked, watch]);
+    const ms = Date.now() - t0;
+    clearTimeout(wd);
+    if (settleAfter > 0) await c16gWait(settleAfter); // 늦은 결과·사건이 다 지나가게
+    await c16Tick();
+    const timers1 = c16Timers();
+    const ur = c16UR - ur0;
+    urInWin += ur;
+    return { out, pending: out === PENDING, ms, settled, ur, listeners: page.listenerCount('popup'), timersOk: timers0 === null || timers0 === timers1, timers0, timers1 };
+  }
+  const c16gLimitErr = (x, step) => !x.pending && 'e' in x.out && x.out.e instanceof Error
+    && x.out.e.message.startsWith('settlePopup:') && x.out.e.message.includes(step) && x.out.e.message.includes(`상한 ${C16G_MS}ms`);
+  const c16gCommon = (x) => x.ms >= C16G_MS - 1 && x.ms < C16G_MS + C16G_SLACK && x.listeners === 0 && x.timersOk && x.ur === 0;
+  const c16gWhy = (x) => (x.pending ? `PENDING(감시 ${C16G_WATCH}ms)` : `예외=${'e' in x.out ? `${L.errorName(x.out.e)}:${String(x.out.e.message).slice(0, 40)}` : '없음(이행)'}`)
+    + ` · ${x.ms}ms · 처리기=${x.listeners} · 시계 ${x.timers0 === null ? '못 셈' : `${x.timers0}→${x.timers1}`} · UR=${x.ur}`;
+  { // C16g1 HQA 합성 A — open 이 영영 안 끝남
+    const page = new EventEmitter();
+    const x = await c16gRun(page, () => new Promise(() => {}));
+    const ok = c16gLimitErr(x, '창 열기') && c16gCommon(x);
+    check('C16g1 open 이 영영 안 끝남(HQA 합성 A) → 상한 예외(창 열기) · 시간 ∈ [299, 400) · 처리기 0 · 시계 원래대로 · 거절 0', ok, c16gWhy(x));
+  }
+  { // C16g2 D4 꼴 — open 이 500ms 뒤 열림 + 그 뒤 늦은 popup 사건
+    const page = new EventEmitter();
+    const late = c16gPopup();
+    let lateHeard = null;
+    const open = () => new Promise((ok) => {
+      setTimeout(() => {
+        ok({ value: [{ name: 'hitpanChat' }], opened: true });
+        setImmediate(() => { lateHeard = page.emit('popup', late); });
+      }, 500);
+    });
+    const x = await c16gRun(page, open, 400);
+    const ok = c16gLimitErr(x, '창 열기') && c16gCommon(x)
+      && x.settled.res === 0 && x.settled.rej === 1 && lateHeard === false && late.closeCalls === 0;
+    check('C16g2 open 이 500ms 뒤 열림 + 늦은 popup → 상한 예외(창 열기) · 거절 1회 그대로 · 늦은 사건 받는 곳 0 · 늦은 팝업 닫기 0 · 시계·처리기 0', ok,
+      `${c16gWhy(x)} · 이행 ${x.settled.res} 거절 ${x.settled.rej} · 늦은 사건 들음=${lateHeard} · 늦은 팝업 닫기 ${late.closeCalls}`);
+  }
+  { // C16g3 HQA 합성 B — 열렸는데 popup 영영 안 옴(대조 줄)
+    const page = new EventEmitter();
+    const x = await c16gRun(page, async () => ({ value: [{ name: 'hitpanChat' }], opened: true }));
+    const ok = c16gLimitErr(x, '팝업 알림') && c16gCommon(x);
+    check('C16g3 열렸는데 popup 영영 안 옴(HQA 합성 B) → 상한 예외(팝업 알림)(대조 줄 · 고치기 전에도 초록)', ok, c16gWhy(x));
+  }
+  { // C16g4 알림 왔는데 적재 영영 안 끝남 — 닫기 이행 · 닫기 거절 두 벌
+    const parts = [];
+    for (const closeRejects of [false, true]) {
+      const page = new EventEmitter();
+      const pp = c16gPopup(closeRejects);
+      const open = () => {
+        page.emit('popup', pp); // 알림이 open 응답보다 먼저(Chromium 차례)
+        return Promise.resolve({ value: [{ name: 'hitpanChat' }], opened: true });
+      };
+      const x = await c16gRun(page, open);
+      const one = c16gLimitErr(x, '첫 문서 적재') && c16gCommon(x) && pp.closeCalls === 1;
+      parts.push({ one, txt: `${closeRejects ? '닫기 거절' : '닫기 이행'}: ${c16gWhy(x)} · 받은 팝업 닫기 ${pp.closeCalls}` });
+    }
+    check('C16g4 알림 왔는데 적재 영영 안 끝남(닫기 이행·거절) → 상한 예외(첫 문서 적재) · 받은 팝업 close() 1회 · 거절 0 · 처리기·시계 0',
+      parts.every((p) => p.one), parts.map((p) => p.txt).join(' | '));
+  }
+  { // C16z V9-R2 — 창 밖 받는 곳 없는 거절 = 전체 − 창 안 합 = 0(대조 줄)
+    await c16Tick();
+    const outside = urAll - urInWin;
+    check('C16z 창 밖 받는 곳 없는 거절 = 전체 − 창 안 합 = 0(V9-R2 · 대조 줄)', outside === 0, `전체 ${urAll} · 창 안 ${urInWin} · 창 밖 ${outside}`);
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);
