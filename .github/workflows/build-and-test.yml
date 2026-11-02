@@ -105,6 +105,7 @@ jobs:
           #    .iss 에서 PS 블록을 복원해 powershell.exe 로 **실제 실행** + 로컬 HttpListener 가 423/401/500 한글 JSON 반환.
           #    대조군·FAIL 실측: docs/개발/백오피스/20261007작12_2차수_T6_설치실패문구_도달_개발명세서.md §4
           GATES="$GATES|InstallerBootstrapMessageGateTests"
+          GATES="$GATES|SqlStringGateTests"
           echo "▶ 이 단계가 무는 게이트: $GATES"
           FILTER=$(echo "$GATES" | sed 's/|/|FullyQualifiedName~/g')
           dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
@@ -113,6 +114,7 @@ jobs:
             --logger "trx;LogFileName=swap-gate-results.trx" 2>&1 | tee "$RUNNER_TEMP/swapgate.log"
           TRX=$(find . -name 'swap-gate-results.trx' -print | head -n 1)
           if [ -z "$TRX" ]; then echo "::error::swap-gate-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          grep -o 'PASS files=[^<]*' "$TRX" | head -n 1 || true
           MISSING=""
           for g in $(echo "$GATES" | tr '|' ' '); do
             n=$(grep -o "className=\"[^\"]*\.$g\"" "$TRX" | wc -l)
