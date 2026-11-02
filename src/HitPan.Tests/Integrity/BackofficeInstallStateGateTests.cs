@@ -415,6 +415,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             var thread = await monitor.ExecuteScalarAsync<long?>(@"
                 SELECT ID FROM information_schema.PROCESSLIST
                 WHERE DB = DATABASE() AND ID <> CONNECTION_ID()
+                  AND COMMAND <> 'Killed'
                   AND INFO LIKE '%serial_verify_attempts%'
                 LIMIT 1");
             if (thread is not null)
@@ -422,6 +423,9 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
                 await monitor.ExecuteAsync($"KILL {thread}");
                 var res = await WithinLimitAsync(gate, path, request);
                 _out.WriteLine($"[{gate}] {path} {res.Status} {watch.ElapsedMilliseconds}ms");
+                // 시간 초과로 끝났으면 세션이 살아 있어 끊김 갈래를 잰 것이 아니다.
+                Assert.True(watch.Elapsed < LockedCallFloor,
+                    $"[{gate}] {watch.ElapsedMilliseconds}ms 만에 끝났다 — 끊기지 않고 시간 초과로 끝났다.");
                 return res;
             }
             await Task.Delay(50);
