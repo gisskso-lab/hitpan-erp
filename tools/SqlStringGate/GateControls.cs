@@ -18,6 +18,7 @@ internal static class GateControls
         ("var s = $@\"SELECT 1 --\n{x}\n, @p\";", RuleId.F1),
         ("var s = @\"SELECT 1 --\n--\n--\n, @p\";", RuleId.F1),
         ("var s = @\"x --\n, @p\";", RuleId.F1),
+        ("var s = @\"x --\n, @Name_1\";", RuleId.F1),
     };
 
     public static readonly string[] Positive =

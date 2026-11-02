@@ -33,6 +33,7 @@ jobs:
         if: always()
         run: |
           dotnet --version
-          packages="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
+          packages="$(dotnet nuget locals global-packages --list | sed 's/^[^:]*: *//; s|/$||')" || true
           echo "packages: $packages"
           find "$packages" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sed "s|^$packages/||" | sort
+          jq -c '.project.frameworks[].downloadDependencies' tools/SqlStringGate/obj/project.assets.json || true

@@ -294,7 +294,8 @@ internal static class GateRunner
                 {
                     FileReport mutated = Analyze(report.Name, report.Source.Insert(site.NextLine, Probe));
                     caught = mutated.Error == null
-                        && mutated.Findings.FindAll(f => f.Rule == RuleId.F1).Count == 1;
+                        && mutated.Findings.FindAll(f => f.Rule == RuleId.F1).Count == 1
+                        && !Report(mutated, TextWriter.Null);
                 }
 
                 if (!caught)
