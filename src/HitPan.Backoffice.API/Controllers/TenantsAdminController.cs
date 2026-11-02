@@ -76,7 +76,9 @@ public class TenantsAdminController : ControllerBase
                 ORDER BY created_at DESC
                 LIMIT 500";
 
-            var rows = await db.QueryAsync<TenantRow>(sql, param);
+            var rows = (await db.QueryAsync<TenantRow>(sql, param)).AsList();
+            // 🔴 20261102작 (설계 §3): 「ERP 설치」 판정은 둘째 문장이 맡는다. 실패해도 목록은 산다.
+            await TenantInstallStateReader.FillAsync(db, rows, _logger, ct);
             return Ok(new { success = true, items = rows });
         }
         catch (Exception ex)
@@ -127,6 +129,9 @@ public class TenantsAdminController : ControllerBase
                 new { Id = id });
             if (row is null)
                 return NotFound(new { success = false, message = "고객사를 찾을 수 없습니다." });
+
+            // 🔴 20261102작 (설계 §3): 목록과 같은 판정 한 벌. 실패해도 상세는 산다.
+            await TenantInstallStateReader.FillAsync(db, new[] { row }, _logger, ct);
 
             // 결제 이력 최근 10건 (메타만, 카드정보 0건)
             var payments = await db.QueryAsync<PaymentMetaRow>(@"
@@ -371,6 +376,11 @@ public class TenantsAdminController : ControllerBase
         public DateTime? TrialEndsAt { get; set; }
         public DateTime? BootstrapAt { get; set; }
         public DateTime CreatedAt { get; set; }
+        // 🔴 20261102작 (설계 §4): 첫 SELECT 가 아니라 TenantInstallStateReader 가 채운다.
+        //   null = 판정 못 함(화면 「확인 불가」) — 「미설치」(none) 와 다르다.
+        public string? InstallState { get; set; }
+        // 최근 ERP 기동 보고 시각(UTC). 설치 시각이 아니다.
+        public DateTime? LastErpStartAt { get; set; }
     }
 
     public class TenantDetailRow : TenantRow
