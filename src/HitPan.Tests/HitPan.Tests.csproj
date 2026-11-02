@@ -119,6 +119,11 @@
     <Compile Include="..\HitPan.Backoffice\Components\Pages\Platform\Components\CsOutboundRow.cs"
              Link="Linked\CsOutboundRow.cs" />
 
+    <!-- 🔴 20261102작 (설계 §7) — 고객사 「ERP 설치」 칸. 게이트가 화면이 읽는 그 형 · 그 문구를 **불러서** 잰다.
+         Blazor 의존 0 순수 C#(CsVocab.cs 선례). HitPan.Backoffice 는 ProjectReference 가 없어 CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Backoffice\Components\Pages\Platform\Components\TenantInstallText.cs"
+             Link="Linked\TenantInstallText.cs" />
+
     <!-- 🔴 20261018작B2-A (G-B2A-1~6) — `/owner/…` 5장이 **누구도 못 들어가는** 상태였다(P0 실측).
          게이트는 정책을 베끼지 않고 **제품이 쓰는 그 메서드를 불러서** 평가한다
          (`AddBackofficePolicies` ← Program.cs 도 같은 메서드를 쓴다).
