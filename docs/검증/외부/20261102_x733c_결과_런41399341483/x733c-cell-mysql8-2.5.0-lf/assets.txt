@@ -1,0 +1,5 @@
+src/HitPan.Application MySqlConnector/2.5.0
+src/HitPan.Infrastructure MySqlConnector/2.5.0
+src/HitPan.API MySqlConnector/2.5.0
+src/HitPan.Backoffice.API MySqlConnector/2.5.0
+src/HitPan.Tests MySqlConnector/2.5.0
