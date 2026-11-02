@@ -19,10 +19,13 @@
      (2.6.2×LF = a=7,b=NULL + 서버 수신 둘째 줄 @P · 나머지 = a=7,b=7 · 오류 0) 밖이면 무효(2) ·
      칸마다 바닥값(파일 수 · 회차별 서버 수신 · 확장 모양 줄 수 · 백오피스 적용/수신) 아래면 무효(2) ·
      줄끝 CR 수는 칸 산출물에서 직접 다시 센다.
+   - (HQA X744-C2b) 대조군 ②′ 가 실제로 돌았다는 증거(앞 확인 = ②′ 한 건만 대상 · 러너 적용/실패 위치 ·
+     서버 수신 표식)가 없거나 어긋나면 무효(2). ②′ 결과값 자체는 여전히 기록만(판정 안 함).
 """
 import glob
 import json
 import os
+import re
 import sys
 import traceback
 import xml.etree.ElementTree as ET
@@ -39,6 +42,15 @@ MYSQL8_CELLS = [("2.5.0", "lf"), ("2.6.2", "lf")]
 CONTROL2_DIFF_CELL = ("2.6.2", "lf")
 CONTROL2_SAME_OUTCOME = "a=7,b=7"
 CONTROL2_DIFF_OUTCOME = "a=7,b=NULL"  # [4] §5 오프라인 실측: 2.6.2 LF 는 둘째 `@P` 를 치환하지 않는다 → 서버에서 NULL
+# 대조군 ②′ 실행 증거(HQA X744-C2b) — 결과값(칸 사이 같음/다름)은 기록만 · 「실제로 돌았나」 만 전제로 본다.
+#   러너 패턴(MigrationRunner.cs:39~40)과 식별자 규칙(:70)을 비교기도 따로 대조한다(측정 시험 깃발만 믿지 않음).
+CONTROL2B_PROBE_FILE = "DB-9999zzx_probe.sql"
+CONTROL2B_PROBE_ID = "DB-9999zzx"
+CONTROL2B_MARKER = "SELECT 1 AS a"
+# 서버 수신 0 인 ⓑ 는 이 드라이버 거부만 받는다 — 파일 읽기 실패 등 「문장을 안 보낸 실패」 는 ②′ 를 잰 것이 아니다.
+CONTROL2B_DRIVER_EX_TYPE = "MySqlConnector.MySqlException"
+CONTROL2B_DRIVER_REFUSAL = "Parameter index 0 is invalid"
+RUNNER_FILE_PATTERN =re.compile(r"^DB-(?P<num>\d+)(?P<suffix>[a-zA-Z]*)_")
 # 칸 잡 결론 — 워크플로가 env 로 넘긴다([3-V] R1). success 가 아니면 무효(2).
 JOB_RESULT_ENVS = ["X733C_NEEDS_MEASURE", "X733C_NEEDS_MEASURE_BO_MYSQL8"]
 
@@ -609,6 +621,73 @@ def control2_cell_ok(key, c2):
     return True, ""
 
 
+def runner_id_of(file_name):
+    """러너 식별자 규칙(MigrationRunner.cs:39~40 · :70) — 패턴에 안 맞으면 None(러너가 안 고른다)."""
+    m = RUNNER_FILE_PATTERN.match(str(file_name))
+    if not m:
+        return None
+    return "DB-" + m.group("num").rjust(2, "0") + m.group("suffix")
+
+
+def control2b_cell_ok(c2b):
+    """대조군 ②′ 한 칸 — 실행 증거만 본다(HQA X744-C2b). (통과?, 사유). 결과값은 판정하지 않는다.
+
+    통과 = 앞 확인(②′ 한 건만 미적용 대상) 이고 ⓐ 또는 ⓑ:
+      ⓐ 러너 적용 목록 = [②′] · 실패 위치 없음 · 서버 수신 표식 ≥ 1
+      ⓑ 러너 실패 위치 = ②′ · 적용 목록 비어 있음 · (서버 수신 표식 ≥ 1 또는 드라이버 거부 예외)
+    ⓑ 가 기대되는 본길이다(2.5.0 두 칸·2.6.2×CRLF = 드라이버 거부 · 2.6.2×LF = 서버 도달). 수신 0 인데
+    드라이버 거부도 아니면(파일 읽기 실패 등) 문장을 보낸 적이 없으므로 통과가 아니다.
+    그 밖 —「②′ 미실행」(적용·실패·수신 모두 없음) 또는 「②′ 실행 증거 어긋남」 — 은 무효(2).
+    """
+    if not isinstance(c2b, dict):
+        return False, "②′ 기록 없음"
+    pre, ex = c2b.get("precheck"), c2b.get("execution")
+    if not isinstance(pre, dict) or not isinstance(ex, dict):
+        return False, "②′ 미실행 — 앞 확인(precheck)·실행 증거(execution) 기록 없음"
+    if runner_id_of(CONTROL2B_PROBE_FILE) != CONTROL2B_PROBE_ID:
+        return False, f"비교기 상수 어긋남 — {CONTROL2B_PROBE_FILE} → {runner_id_of(CONTROL2B_PROBE_FILE)}"
+    if pre.get("probe_file") != CONTROL2B_PROBE_FILE or pre.get("probe_id") != CONTROL2B_PROBE_ID:
+        return False, f"②′ 파일·식별자 다름 — {pre.get('probe_file')!r} / {pre.get('probe_id')!r}"
+    if pre.get("probe_file_matches_runner_pattern") is not True:
+        return False, "②′ 파일이 러너 패턴에 안 맞는다(측정 시험 기록)"
+    pending = pre.get("pending_ids")
+    if pending != [CONTROL2B_PROBE_ID]:
+        return False, f"②′ 앞 러너 대상이 ②′ 한 건이 아니다 — {canon(pending)[:200]}"
+    total = pre.get("runner_pattern_ids")
+    if not isinstance(total, int) or total < 2:
+        return False, f"②′ 앞 러너 대상 전체 수 이상 — {total!r}"
+    if ex.get("marker") != CONTROL2B_MARKER or ex.get("marker_in_source") is not True:
+        return False, f"②′ 문장 표식 어긋남 — marker={ex.get('marker')!r} · 원문에 있음={ex.get('marker_in_source')!r}"
+    applied_ids, failed_id, hits, skipped = (ex.get("applied_ids"), ex.get("failed_id"),
+                                             ex.get("server_marker_hits"), ex.get("skipped"))
+    if not isinstance(applied_ids, list) or not isinstance(hits, int) or not isinstance(skipped, int):
+        return False, "②′ 실행 증거 칸 모양 이상"
+    if skipped != total - 1:
+        return False, f"②′ 실행 증거 어긋남 — 건너뜀 {skipped} ≠ 대상 전체 {total} - 1"
+    applied_ok = applied_ids == [CONTROL2B_PROBE_ID] and failed_id is None and hits >= 1
+    res = c2b.get("result") if isinstance(c2b.get("result"), dict) else {}
+    driver_refused = (res.get("ex_type") == CONTROL2B_DRIVER_EX_TYPE
+                      and CONTROL2B_DRIVER_REFUSAL in str(res.get("ex_msg1") or ""))
+    failed_ok = (failed_id == CONTROL2B_PROBE_ID and applied_ids == []
+                 and (hits >= 1 or driver_refused))
+    if applied_ok or failed_ok:
+        return True, ""
+    if not applied_ids and failed_id is None and hits == 0:
+        return False, "②′ 미실행 — 러너 적용·실패 위치·서버 수신 표식 모두 없음"
+    return False, (f"②′ 실행 증거 어긋남 — applied={canon(applied_ids)[:80]} · failed_id={failed_id!r} · "
+                   f"서버 수신 표식 {hits}건")
+
+
+def control2b_reasons(cells):
+    """MariaDB 칸마다 ②′ 실행 증거 — 어긋나면 무효 사유."""
+    reasons = []
+    for cid, c in cells.items():
+        ok, why = control2b_cell_ok(dig(c["probe"], "control2b_qmark"))
+        if not ok:
+            reasons.append(f"{cid}: 대조군 {why} · {VERDICT_INVALID}")
+    return reasons
+
+
 # ──────────────────────────────────────────────────────────────
 # 출력
 # ──────────────────────────────────────────────────────────────
@@ -713,6 +792,8 @@ def judge(cells_root, job_results):
     r1, t1 = group_prereq("MariaDB", groups["mariadb"], MARIADB_CELLS)
     r2, t2 = group_prereq("MySQL 8", groups["mysql8"], MYSQL8_CELLS)
     invalid += r1 + r2
+    # HQA X744-C2b — ②′ 가 실제로 돌았나(실행 증거만 · 결과값은 아래 informational 에 기록만)
+    invalid += control2b_reasons(groups["mariadb"])
 
     items = []
     if groups["mariadb"]:
@@ -744,6 +825,10 @@ def judge(cells_root, job_results):
             cid: dig(c["probe"], "control2b_qmark", "result") and {
                 k: dig(c["probe"], "control2b_qmark", "result").get(k)
                 for k in ("ok", "applied", "ex_type", "err_no", "ex_msg1", "runner_msg1")}
+            for cid, c in groups["mariadb"].items()},
+        "대조군 ②′ 실행 증거(HQA X744-C2b · 어긋나면 위 무효 사유)": {
+            cid: {k: dig(c["probe"], "control2b_qmark", "execution", k)
+                  for k in ("state", "applied_ids", "failed_id", "server_marker_hits", "skipped")}
             for cid, c in groups["mariadb"].items()},
         "DB-16 — 실제 설치/업데이트 경로의 기존 한계": DB16_EXISTING_LIMIT,
     }

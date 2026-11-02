@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Dapper;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
@@ -41,8 +42,18 @@ public sealed class X733cMySqlConnectorProbeTests
 {
     private const string ErpDbName = "gate_x733c";
     private const string BoDbName = "gate_x733c_bo";
-    private const string ProbeMigrationFile = "DB-9999zzx733c_probe.sql";
-    private const string ProbeMigrationId = "DB-9999zzx733c";
+    // HQA X744-C2b — 런 1 의 「DB-9999zzx733c_probe.sql」 은 접미사에 숫자가 끼어 러너 패턴
+    //   (MigrationRunner.cs:39~40 `^DB-(?<num>\d+)(?<suffix>[a-zA-Z]*)_`)에 안 맞아 러너가 고르지 않았다.
+    //   러너 식별자 규칙(MigrationRunner.cs:70 `DB-{num.PadLeft(2,'0')}{suffix}`) 그대로 → 「DB-9999zzx」.
+    //   레포 Migrations/SQL 최대 번호 149 · 「DB-9999」 0건(2026-10-30 확인) — 겹치지 않는다.
+    private const string ProbeMigrationFile = "DB-9999zzx_probe.sql";
+    private const string ProbeMigrationId = "DB-9999zzx";
+
+    /// <summary>②′ 문장 표식 — <c>controls/c2b_qmark.sql</c> 첫 줄 앞부분. 러너 연결이 서버로 보낸 문장(general_log)에서 찾는다.</summary>
+    private const string C2bMarker = "SELECT 1 AS a";
+
+    /// <summary>러너와 같은 파일 선별 패턴(MigrationRunner.cs:39~40 · private 이라 베낀다).</summary>
+    private static readonly Regex RunnerFilePattern = new(@"^DB-(?<num>\d+)(?<suffix>[a-zA-Z]*)_", RegexOptions.Compiled);
 
     [Fact(DisplayName = "X733c 계측 — 한 칸(판 × 줄끝)의 원결과를 JSON 으로 남긴다 (계측 가지 전용 · 판정 안 함)")]
     public async Task X733c_한칸_원결과_기록()
@@ -200,13 +211,65 @@ public sealed class X733cMySqlConnectorProbeTests
         try
         {
             var bytes = await File.ReadAllBytesAsync(c2bDst);
-            var (c2b, c2brec) = await RunOnceAsync(runner, logger, factory, quiet, ProbeMigrationId, 1);
+            var marker = Encoding.UTF8.GetBytes(C2bMarker);
+
+            // ── HQA X744-C2b ③ — ②′ 앞 러너 상태 확인 ──
+            //   러너는 success=1 인 식별자를 건너뛰고, 대상이 0건이면 빈 작업을 성공으로 돌려준다.
+            //   ②′ 한 건만 미적용 대상이어야 「ok=true」 가 ②′ 를 잰 결과가 된다(아니면 장치 오류 · 무효).
+            var runnerIds = RunnerPatternIds(MigrationGateDb.RunnerSqlDir());
+            var appliedBefore = (await quiet.QueryAsync<string>(
+                    "SELECT migration_id FROM schema_migrations WHERE success = 1;"))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var pending = runnerIds.Where(id => !appliedBefore.Contains(id)).ToList();
+            var precheckOk = pending.Count == 1
+                && string.Equals(pending[0], ProbeMigrationId, StringComparison.OrdinalIgnoreCase);
+            if (!precheckOk)
+                deviceErrors.Add($"②′ 앞 러너 대상이 ②′ 한 건이 아니다 — 대상 {pending.Count}건 [{string.Join(", ", pending.Take(10))}]");
+
+            var (c2b, c2brec, c2bRows) = await RunOnceWithRowsAsync(runner, logger, factory, quiet, ProbeMigrationId, 1);
+
+            // ── HQA X744-C2b ② — ②′ 실행 단언(러너가 그 파일을 실제로 골랐나 · 서버가 그 문장을 받았나) ──
+            var appliedProbe = c2b.AppliedMigrationIds.Contains(ProbeMigrationId, StringComparer.OrdinalIgnoreCase);
+            var failedAtProbe = string.Equals(c2b.FailedMigrationId, ProbeMigrationId, StringComparison.OrdinalIgnoreCase);
+            var markerHits = c2bRows.Count(x => x.CommandType == "Query" && factory.Threads.Contains(x.ThreadId)
+                                               && x.Argument.AsSpan().IndexOf(marker) >= 0);
+            var executed = (appliedProbe && markerHits > 0) || failedAtProbe;
+            // state 는 기록용 글자 — 수신 0 인 실패가 드라이버 거부인지는 비교기가 원기록으로 가른다.
+            var state = appliedProbe && markerHits > 0 ? "적용 · 서버 수신"
+                : failedAtProbe && markerHits > 0 ? "러너 실패 · 서버 수신"
+                : failedAtProbe ? "러너 실패 · 서버 수신 0"
+                : (!appliedProbe && markerHits == 0) ? "②′ 미실행"
+                : "②′ 실행 증거 어긋남";
+            if (!executed)
+                deviceErrors.Add($"{state} — applied={appliedProbe} · failed_id={c2b.FailedMigrationId ?? "null"} · 서버 수신 표식 {markerHits}건");
+
             report["control2b_qmark"] = new
             {
-                note = "기록만 — 판정하지 않는다(작업지시서 §5 ②′).",
+                note = "기록만 — 판정하지 않는다(작업지시서 §5 ②′). 실행 증거(execution)만 비교기가 전제로 본다(HQA X744-C2b).",
                 file = FileFacts(ProbeMigrationFile, bytes),
-                applied = c2b.AppliedMigrationIds.Contains(ProbeMigrationId, StringComparer.OrdinalIgnoreCase),
+                applied = appliedProbe,
                 result = c2brec,
+                precheck = new
+                {
+                    probe_id = ProbeMigrationId,
+                    probe_file = ProbeMigrationFile,
+                    probe_file_matches_runner_pattern = runnerIds.Contains(ProbeMigrationId, StringComparer.OrdinalIgnoreCase),
+                    runner_pattern_ids = runnerIds.Count,
+                    pending_ids = pending,
+                    ok = precheckOk,
+                },
+                execution = new
+                {
+                    applied_ids = c2b.AppliedMigrationIds,
+                    failed_id = c2b.FailedMigrationId,
+                    skipped = c2b.SkippedCount,
+                    applied_probe = appliedProbe,
+                    failed_at_probe = failedAtProbe,
+                    marker = C2bMarker,
+                    marker_in_source = bytes.AsSpan().IndexOf(marker) >= 0,
+                    server_marker_hits = markerHits,
+                    state,
+                },
             };
         }
         finally
@@ -239,6 +302,15 @@ public sealed class X733cMySqlConnectorProbeTests
         MigrationRunner runner, CapturingLogger logger, ProbeConnFactory factory,
         MySqlConnection quiet, string id, int pass)
     {
+        var (r, record, _) = await RunOnceWithRowsAsync(runner, logger, factory, quiet, id, pass);
+        return (r, record);
+    }
+
+    /// <summary><see cref="RunOnceAsync"/> 와 같다 — 그 회차의 general_log 행도 돌려준다(②′ 표식 찾기 · HQA X744-C2b).</summary>
+    private static async Task<(MigrationRunResult Result, object Record, List<LogRow> Rows)> RunOnceWithRowsAsync(
+        MigrationRunner runner, CapturingLogger logger, ProbeConnFactory factory,
+        MySqlConnection quiet, string id, int pass)
+    {
         await quiet.ExecuteAsync("TRUNCATE TABLE mysql.general_log;");
         logger.Reset();
         var r = await runner.ApplyPendingAsync("w13-gate");
@@ -268,7 +340,7 @@ public sealed class X733cMySqlConnectorProbeTests
             log_queries = queries,
             log_other_commands = otherCommands,
         };
-        return (r, record);
+        return (r, record, rows);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -488,6 +560,17 @@ public sealed class X733cMySqlConnectorProbeTests
             list.Add(FileFacts(Path.GetFileName(f), File.ReadAllBytes(f)));
         return list;
     }
+
+    /// <summary>
+    /// 러너가 그 폴더에서 고를 식별자 전부 — MigrationRunner.cs:60~72 와 같은 규칙
+    /// (<c>DB-*.sql</c> · 패턴 일치만 · <c>DB-{num.PadLeft(2,'0')}{suffix}</c>). HQA X744-C2b ③.
+    /// </summary>
+    private static List<string> RunnerPatternIds(string dir) =>
+        Directory.GetFiles(dir, "DB-*.sql")
+            .Select(p => RunnerFilePattern.Match(Path.GetFileName(p)))
+            .Where(m => m.Success)
+            .Select(m => $"DB-{m.Groups["num"].Value.PadLeft(2, '0')}{m.Groups["suffix"].Value}")
+            .ToList();
 
     private static object FileFacts(string name, byte[] data)
     {
