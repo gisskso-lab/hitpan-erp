@@ -51,6 +51,7 @@ else if (_items.Count == 0)
 }
 else
 {
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1" Style="display:block;">@TenantInstallText.ListNotice</MudText>
     <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
         <MudDataGrid T="TenantRow" Items="_items" Hover="true" Dense="true" SortMode="SortMode.Single">
             <Columns>

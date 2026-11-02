@@ -31,6 +31,11 @@ public static class TenantInstallText
     private const string RanRecord = "고객 PC에서 ERP가 실행된 기록이 있습니다.";
     private const string StaysAfterRemoval = "프로그램을 지워도 이 표시는 바뀌지 않습니다.";
 
+    /// <summary>목록 표 위 안내 한 줄 — 칸만 훑는 직원에게 툴팁 안 한계 설명은 안 보인다(지시서 §8-2).</summary>
+    public const string ListNotice = "설치 칸은 고객 PC에서 온 기록이라 실제와 다를 수 있습니다. "
+                                   + "고객 지원 확인에만 쓰고, 과금 · 정산 · 해지 판단과 영업 연락에는 쓰지 마세요. "
+                                   + "칸 위에 마우스를 올리면 설명이 보입니다.";
+
     public static string Label(string? state) => state switch
     {
         Installed => "완료",
@@ -44,15 +49,15 @@ public static class TenantInstallText
     public static string Help(string? state, DateTime? lastErpStartAt) => state switch
     {
         Installed => lastErpStartAt is DateTime at
-            ? $"{RanRecord} 최근 ERP 기동: {FormatKst(at)}. {StaysAfterRemoval}"
-            // 완료는 기동 기록이 있을 때만 나온다 ⇒ 정상 경로에서 시각은 늘 있다. 어긋난 응답이 와도 시각 없음을 사실로 말하지 않는다.
+            ? $"{RanRecord} 최근 ERP 기동: {FormatKst(at)}. 이 시각으로 지금 쓰는지는 알 수 없습니다. {StaysAfterRemoval}"
+            // 목록은 시각을 받지 않는다(지시서 §8-2) ⇒ 시각 없는 이 말이 목록의 정상 경로다. 시각 없음을 사실로 말하지 않는다.
             : $"{RanRecord} {StaysAfterRemoval}",
         // 끝 문장 = 대표 결정 5 — 옛 판 고객이 이 칸에 섞인다. 다음 업데이트 뒤 「완료」로 옮겨 간다.
         Started => "설치 기록은 있지만 ERP가 실행된 기록은 아직 없습니다. "
                  + "설치 중이거나 중간에 멈췄을 수 있습니다. "
                  + "이전 판 프로그램을 쓰는 고객은 설치가 끝났어도 업데이트 전까지 이렇게 보일 수 있습니다.",
         // 「설치되지 않았습니다」 단정 금지 — 본사가 모를 뿐인 고객이 있다.
-        None => "본사에 설치 진행 기록이 없습니다.",
+        None => "본사에 설치 진행 기록이 없습니다. 설치했지만 기록이 오지 않은 고객일 수 있습니다.",
         _ => "설치 기록을 읽지 못했습니다. 잠시 뒤 새로고침해 주세요."
     };
 

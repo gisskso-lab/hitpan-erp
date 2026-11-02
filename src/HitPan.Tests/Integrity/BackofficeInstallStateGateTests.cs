@@ -143,7 +143,8 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
                     rid = _h.ResellerA,
                     owner = key == "A" ? OwnerAt : (DateTime?)null,
                     locked = key == "D" ? 1 : 0,
-                    boot = key == "D" ? OwnerAt : (DateTime?)null,
+                    // 옛 칸 값은 기동 시각과 달라야 한다 — 설치⑦ 이 응답 원문에서 기동 시각만 찾는다.
+                    boot = key == "D" ? OwnerAt.AddDays(-1) : (DateTime?)null,
                 });
         }
 
@@ -197,7 +198,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             ?? throw new Xunit.Sdk.XunitException("상세 응답에 item 이 없다.");
     }
 
-    /// <summary>목록을 읽고 대조군 전건의 상세도 읽어 <b>두 화면이 같은 값</b>인지 먼저 본다.</summary>
+    /// <summary>목록을 읽고 대조군 전건의 상세도 읽어 <b>두 화면의 판정이 같은지</b> 먼저 본다. 돌려주는 행은 상세다 — 시각은 상세에만 있다.</summary>
     private async Task<Dictionary<string, GateRow>> ReadControlsAsync(Dictionary<string, string> seeded)
     {
         var token = await _h.LoginHqAsync();
@@ -210,9 +211,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             var detail = await ReadDetailAsync(token, id);
             Assert.True(row.InstallState == detail.InstallState,
                 $"{key}: 목록({row.InstallState}) ≠ 상세({detail.InstallState})");
-            Assert.True(row.LastErpStartAt == detail.LastErpStartAt,
-                $"{key}: 시각이 목록({row.LastErpStartAt}) ≠ 상세({detail.LastErpStartAt})");
-            byKey[key] = row;
+            byKey[key] = detail;
         }
         return byKey;
     }
@@ -310,6 +309,25 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             Assert.Equal("설치 시작", TenantInstallText.Label(rows[key].InstallState));
             Assert.Contains("설치 기록은 있지만", TenantInstallText.Help(rows[key].InstallState, rows[key].LastErpStartAt));
         }
+    }
+
+    [Fact(DisplayName = "설치⑦ 🔴 시각은 상세에서만 — 목록 응답 원문에 시각 값이 없다 (시각을 되살리면 빨강)")]
+    public async Task Control7_List_Has_No_Time()
+    {
+        if (!await SetUpAsync("설치⑦")) return;
+        var seeded = await SeedControlsAsync();
+        var token = await _h.LoginHqAsync();
+        var stamp = OwnerAt.ToString("yyyy-MM-ddTHH:mm");
+
+        // 화면 모델이 아니라 원문을 본다 — 화면에서 숨겨도 응답에 실려 있으면 빨강이어야 한다.
+        var list = await _h.SendAsync(token, ListPath);
+        Assert.True(list.Status == 200, $"목록이 200 이 아니다(실측 {list.Status}). 본문: {Trim(list.Body)}");
+        Assert.DoesNotContain(stamp, list.Body);
+
+        // 대조 — 같은 고객의 상세 원문에는 있다. 이게 없으면 「목록에 없다」 가 시드 탓일 수 있다.
+        var detail = await _h.SendAsync(token, $"{ListPath}/{seeded["A"]}");
+        Assert.True(detail.Status == 200, $"상세가 200 이 아니다(실측 {detail.Status}). 본문: {Trim(detail.Body)}");
+        Assert.Contains(stamp, detail.Body);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -522,10 +540,17 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         Assert.Contains("이전 판 프로그램", started);
         // 재료가 업데이트 보고뿐인 고객도 이 문구를 받는다 — 시리얼 번호를 전제하면 틀린 말이 된다.
         Assert.DoesNotContain("시리얼", started);
-        Assert.Contains("본사에 설치 진행 기록이 없습니다", TenantInstallText.Help(TenantInstallText.None, null));
-        Assert.Contains("지워도 이 표시는 바뀌지 않습니다", TenantInstallText.Help(TenantInstallText.Installed, OwnerAt));
-        // 시각 뒤에 구분이 없으면 한 문장으로 붙는다.
-        Assert.Contains("2026-11-02 09:30. 프로그램을", TenantInstallText.Help(TenantInstallText.Installed, OwnerAt));
+        var none = TenantInstallText.Help(TenantInstallText.None, null);
+        Assert.Contains("본사에 설치 진행 기록이 없습니다", none);
+        Assert.Contains("설치했지만 기록이 오지 않은 고객일 수 있습니다", none);
+        var installed = TenantInstallText.Help(TenantInstallText.Installed, OwnerAt);
+        Assert.Contains("지워도 이 표시는 바뀌지 않습니다", installed);
+        // 시각 뒤에 구분이 없으면 한 문장으로 붙는다. 「최근」 을 지금 쓰는지로 읽지 않게 바로 뒤에서 막는다.
+        Assert.Contains("2026-11-02 09:30. 이 시각으로 지금 쓰는지는 알 수 없습니다.", installed);
+        // 목록은 시각 없이 부른다 — 시각 없는 말이 한계 문장을 잃으면 안 된다.
+        Assert.Contains("지워도 이 표시는 바뀌지 않습니다", TenantInstallText.Help(TenantInstallText.Installed, null));
+        foreach (var word in new[] { "고객 지원 확인에만", "과금", "정산", "해지", "영업 연락" })
+            Assert.Contains(word, TenantInstallText.ListNotice);
     }
 
     [Fact(DisplayName = "G-7 🔴 금지 낱말 0 — 받은 글자 전부 (설계 §5 쓰지 않는 말)")]
@@ -539,6 +564,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
                 TenantInstallText.Help(s, OwnerAt),
                 TenantInstallText.Help(s, null),
             })
+            .Append(TenantInstallText.ListNotice)
             .ToList();
 
         var banned = new[]

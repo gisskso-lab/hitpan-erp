@@ -79,6 +79,8 @@ public class TenantsAdminController : ControllerBase
             var rows = (await db.QueryAsync<TenantRow>(sql, param)).AsList();
             // 🔴 20261102작 (설계 §3): 「ERP 설치」 판정은 둘째 문장이 맡는다. 실패해도 목록은 산다.
             await TenantInstallStateReader.FillAsync(db, rows, _logger, ct);
+            // 🔴 지시서 §8-2: 시각은 고객 1건을 볼 때만 내보낸다. 목록은 칩만 쓰므로 전 고객분을 한 응답에 싣지 않는다.
+            foreach (var row in rows) row.LastErpStartAt = null;
             return Ok(new { success = true, items = rows });
         }
         catch (Exception ex)
