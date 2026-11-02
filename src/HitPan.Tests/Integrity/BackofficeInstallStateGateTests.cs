@@ -12,7 +12,7 @@ namespace HitPan.Tests.Integrity;
 /// <summary>
 /// 🔴 20261102작 — 고객사 화면 「ERP 설치」 칸 게이트 (설계 <c>docs/설계/백오피스/20261102_설치유무표시_설계문서.md</c> §7).
 ///
-/// <para>재는 것은 둘이다: <b>거짓 완료</b>(시리얼만 통과 · 옛 칸 값)와 <b>거짓 미설치</b>(재료 있음 · 읽기 실패).
+/// <para>재는 것은 둘이다: <b>거짓 완료</b>(시리얼만 통과 · 옛 칸 값 · 업데이트 보고)와 <b>거짓 미설치</b>(재료 있음 · 업데이트 보고만 있음 · 읽기 실패).
 /// 실물 적용기 · 실물 JWT · 실물 컨트롤러로 HTTP 요청을 흘리고, 응답을 <b>화면이 읽는 그 형</b>
 /// (<see cref="TenantInstallFields"/> 상속)으로 받아 <see cref="TenantInstallText"/> 를 불러 판독한다.
 /// 사전으로 읽지 않는다(10/13 <c>attempt_count</c> 사고).</para>
@@ -20,7 +20,7 @@ namespace HitPan.Tests.Integrity;
 /// <para>🔴 <b>CI 자리는 <c>bo-mysql8-gate</c> 잡이다.</b> <c>build</c> 잡은 <c>[SKIP]</c> 으로 조용히 초록이 된다
 /// (G-7 은 DB 를 안 타므로 어디서나 돈다). 운영 백오피스는 MySQL 8 이라 CI 에서 MariaDB 에 붙으면 FAIL 한다.</para>
 ///
-/// <para>음성 대조 ⓐ~ⓔ(설계 §7-3)는 CI 계측 가지에서 잰다 — 개발명세서 §4.</para>
+/// <para>음성 대조(설계 §7-3 · 작업리뷰서 §5)는 CI 계측 가지에서 잰다 — 개발명세서 §4.</para>
 /// </summary>
 [Collection(BoSignupTenantKeyGateCollection.Name)]
 public sealed class BackofficeInstallStateGateTests : IDisposable
@@ -38,8 +38,18 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
     // UTC 00:30 — 화면에는 09:30 으로 나와야 한다(G-7 과 같은 값).
     private static readonly DateTime OwnerAt = new(2026, 11, 2, 0, 30, 0);
 
-    // 하니스가 심는 고객사 4행 + 대조군 5행 — 행이 불어나면 이 수가 깨진다.
+    // 하니스가 심는 고객사 4행 + 대조군 — 행이 불어나면 이 수가 깨진다.
     private const int HarnessTenants = 4;
+
+    private const string ListPath = "/api/backoffice/tenants";
+
+    private const string PaymentOrderId = "GATE-ORDER-1";
+
+    // 5초 상한 + 취소 대기 2초(드라이버 기본값) + 여유. commandTimeout 이 빠지면 연결 기본값(하니스 90초)까지 늘어져 이 선을 넘는다.
+    private static readonly TimeSpan LockedCallLimit = TimeSpan.FromSeconds(8);
+
+    // 이보다 빨리 끝나면 잠금을 안 기다린 것이다 — 다른 이유의 실패를 시간 초과 증거로 읽으면 안 된다.
+    private static readonly TimeSpan LockedCallFloor = TimeSpan.FromSeconds(4);
 
     private sealed class GateRow : TenantInstallFields
     {
@@ -54,9 +64,15 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         public List<GateRow> Items { get; set; } = new();
     }
 
+    private sealed class PaymentRow
+    {
+        public string? OrderId { get; set; }
+    }
+
     private sealed class DetailBody
     {
         public GateRow? Item { get; set; }
+        public List<PaymentRow> Payments { get; set; } = new();
     }
 
     // 구판 화면 모델 모양 — 새 칸을 모른다.
@@ -104,15 +120,16 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
     }
 
     /// <summary>
-    /// 대조군 5건 (설계 §7-1). A = 대표 아이디 수집만 · B = 업데이트 보고만(같은 고객 2행) + tenant_id NULL 행 ·
-    /// C = 시리얼 통과 3행 · D = 재료 없음 + 옛 칸 값 · E = 재료 없음 + 자기 행에 다른 결과 글자.
+    /// 대조군 7건 (설계 §7-1 + 지시서 §8-1). A = 대표 아이디 수집만 · B = 성공 업데이트 보고만(같은 고객 2행) + tenant_id NULL 행 ·
+    /// C = 시리얼 통과 3행 · D = 재료 없음 + 옛 칸 값 · E = 재료 없음 + 자기 행에 다른 결과 글자 ·
+    /// F = 실패 업데이트 보고만 · G = 시리얼 통과 + 성공 업데이트 보고(로그인 불가 설치).
     /// </summary>
-    private async Task<Dictionary<string, string>> SeedFiveAsync()
+    private async Task<Dictionary<string, string>> SeedControlsAsync()
     {
-        var five = new[] { "A", "B", "C", "D", "E" }.ToDictionary(k => k, _ => Guid.NewGuid().ToString());
+        var seeded = new[] { "A", "B", "C", "D", "E", "F", "G" }.ToDictionary(k => k, _ => Guid.NewGuid().ToString());
         await using var db = await _h.OpenAsync();
 
-        foreach (var (key, id) in five)
+        foreach (var (key, id) in seeded)
         {
             await db.ExecuteAsync(@"
                 INSERT INTO tenants (tenant_id, tenant_code, company_name, reseller_id, status, subscription_tier,
@@ -131,26 +148,43 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         }
 
         await db.ExecuteAsync(@"
-            INSERT INTO tenant_update_state (tenant_id_hash, tenant_id, last_result, last_reported_at)
-            VALUES ('gate-b-1', @b, 'success', UTC_TIMESTAMP(6)),
-                   ('gate-b-2', @b, 'success', UTC_TIMESTAMP(6)),
-                   ('gate-null', NULL, 'success', UTC_TIMESTAMP(6))",
-            new { b = five["B"] });
+            INSERT INTO tenant_update_state (tenant_id_hash, tenant_id, current_version, last_result, last_reported_at)
+            VALUES ('gate-b-1', @b, '1.3.60', 'success', UTC_TIMESTAMP(6)),
+                   ('gate-b-2', @b, '1.3.60', 'success', UTC_TIMESTAMP(6)),
+                   ('gate-f', @f, NULL, 'failed', UTC_TIMESTAMP(6)),
+                   ('gate-g', @g, '1.3.60', 'success', UTC_TIMESTAMP(6)),
+                   ('gate-null', NULL, '1.3.60', 'success', UTC_TIMESTAMP(6))",
+            new { b = seeded["B"], f = seeded["F"], g = seeded["G"] });
 
         await db.ExecuteAsync(@"
             INSERT INTO serial_verify_attempts (tenant_id, submitted_hash, result)
             VALUES (@c, 'gate-c', 'installer-bootstrap'),
                    (@c, 'gate-c', 'installer-bootstrap'),
                    (@c, 'gate-c', 'installer-bootstrap'),
-                   (@e, 'gate-e', 'installer-mismatch')",
-            new { c = five["C"], e = five["E"] });
+                   (@e, 'gate-e', 'installer-mismatch'),
+                   (@g, 'gate-g', 'installer-bootstrap')",
+            new { c = seeded["C"], e = seeded["E"], g = seeded["G"] });
 
-        return five;
+        return seeded;
+    }
+
+    /// <summary>결제 1건 — 판정이 실패해도 상세의 결제 칸이 살아 있는지 재는 표식.</summary>
+    private async Task SeedPaymentAsync(string companyName)
+    {
+        await using var db = await _h.OpenAsync();
+        await db.ExecuteAsync(@"
+            INSERT INTO landing_signups (signup_token, biz_no_hash, company_name, email, phone)
+            VALUES ('gate-signup', 'gate-biz', @companyName, 'install@gate.test', '010')",
+            new { companyName });
+        await db.ExecuteAsync(@"
+            INSERT INTO tenant_payments (payment_id, order_id, signup_token, payment_key, amount, status)
+            VALUES (@paymentId, @orderId, 'gate-signup', 'gate-key', 1000, 'approved')",
+            new { paymentId = Guid.NewGuid().ToString(), orderId = PaymentOrderId });
     }
 
     private async Task<List<GateRow>> ReadListAsync(string token)
     {
-        var res = await _h.SendAsync(token, "/api/backoffice/tenants");
+        var res = await _h.SendAsync(token, ListPath);
         Assert.True(res.Status == 200, $"목록이 200 이 아니다(실측 {res.Status}). 본문: {Trim(res.Body)}");
         return JsonSerializer.Deserialize<ListBody>(res.Body, Web)!.Items;
     }
@@ -163,14 +197,14 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             ?? throw new Xunit.Sdk.XunitException("상세 응답에 item 이 없다.");
     }
 
-    /// <summary>목록을 읽고 대조군 5건의 상세도 읽어 <b>두 화면이 같은 값</b>인지 먼저 본다.</summary>
-    private async Task<Dictionary<string, GateRow>> ReadFiveAsync(Dictionary<string, string> five)
+    /// <summary>목록을 읽고 대조군 전건의 상세도 읽어 <b>두 화면이 같은 값</b>인지 먼저 본다.</summary>
+    private async Task<Dictionary<string, GateRow>> ReadControlsAsync(Dictionary<string, string> seeded)
     {
         var token = await _h.LoginHqAsync();
         var list = await ReadListAsync(token);
         var byKey = new Dictionary<string, GateRow>();
 
-        foreach (var (key, id) in five)
+        foreach (var (key, id) in seeded)
         {
             var row = list.Single(r => r.TenantId == id);
             var detail = await ReadDetailAsync(token, id);
@@ -186,30 +220,27 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
     private static string Trim(string body) => body.Length <= 300 ? body : body[..300];
 
     // ══════════════════════════════════════════════════════════════
-    // 대조군 ①~⑤ — 목록 + 상세
+    // 대조군 ①~⑥ — 목록 + 상세
     // ══════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "설치① 🔴 거짓 미설치 — 옛 칸이 비어 있어도 재료가 있으면 완료 (판정을 IsLocked 로 되돌리면 빨강)")]
+    [Fact(DisplayName = "설치① 🔴 거짓 미설치 — 옛 칸이 비어 있어도 ERP 기동 기록이 있으면 완료 (판정을 IsLocked 로 되돌리면 빨강)")]
     public async Task Control1_Installed_Without_Old_Columns()
     {
         if (!await SetUpAsync("설치①")) return;
-        var rows = await ReadFiveAsync(await SeedFiveAsync());
+        var rows = await ReadControlsAsync(await SeedControlsAsync());
 
-        foreach (var key in new[] { "A", "B" })
-        {
-            Assert.Equal(0, rows[key].IsLocked);
-            Assert.Null(rows[key].BootstrapAt);
-            Assert.True(rows[key].InstallState == TenantInstallStateReader.Installed,
-                $"{key}: 재료가 있는데 {rows[key].InstallState} — 거짓 미설치다.");
-            Assert.Equal("완료", TenantInstallText.Label(rows[key].InstallState));
-        }
+        Assert.Equal(0, rows["A"].IsLocked);
+        Assert.Null(rows["A"].BootstrapAt);
+        Assert.True(rows["A"].InstallState == TenantInstallStateReader.Installed,
+            $"A: ERP 기동 기록이 있는데 {rows["A"].InstallState} — 거짓 미설치다.");
+        Assert.Equal("완료", TenantInstallText.Label(rows["A"].InstallState));
     }
 
     [Fact(DisplayName = "설치② 🔴 거짓 완료 — 시리얼만 통과한 고객은 설치 시작이다")]
     public async Task Control2_Serial_Pass_Is_Not_Installed()
     {
         if (!await SetUpAsync("설치②")) return;
-        var rows = await ReadFiveAsync(await SeedFiveAsync());
+        var rows = await ReadControlsAsync(await SeedControlsAsync());
 
         Assert.True(rows["C"].InstallState == TenantInstallStateReader.Started,
             $"C: 시리얼만 통과했는데 {rows["C"].InstallState} — 거짓 완료다.");
@@ -217,31 +248,26 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         Assert.Equal("설치 시작", TenantInstallText.Label(rows["C"].InstallState));
     }
 
-    [Fact(DisplayName = "설치③ 양성 — 재료 하나씩: A 는 시각까지 · B 는 시각 없이 완료")]
-    public async Task Control3_Each_Material_Alone()
+    [Fact(DisplayName = "설치③ 양성 — 완료는 ERP 기동 시각까지 함께 나온다")]
+    public async Task Control3_Installed_Carries_Time()
     {
         if (!await SetUpAsync("설치③")) return;
-        var rows = await ReadFiveAsync(await SeedFiveAsync());
+        var rows = await ReadControlsAsync(await SeedControlsAsync());
 
         Assert.Equal(TenantInstallStateReader.Installed, rows["A"].InstallState);
         Assert.Equal(OwnerAt, rows["A"].LastErpStartAt);
         Assert.Contains("최근 ERP 기동: 2026-11-02 09:30",
             TenantInstallText.Help(rows["A"].InstallState, rows["A"].LastErpStartAt));
-
-        Assert.Equal(TenantInstallStateReader.Installed, rows["B"].InstallState);
-        Assert.Null(rows["B"].LastErpStartAt);
-        Assert.Contains("최근 ERP 기동 시각은 아직 없습니다",
-            TenantInstallText.Help(rows["B"].InstallState, rows["B"].LastErpStartAt));
     }
 
     [Fact(DisplayName = "설치④ N행 — 1고객 N행 재료가 행을 불리지 않고 전 행이 판정된다")]
     public async Task Control4_Many_Rows_Do_Not_Multiply()
     {
         if (!await SetUpAsync("설치④")) return;
-        var five = await SeedFiveAsync();
+        var seeded = await SeedControlsAsync();
         var list = await ReadListAsync(await _h.LoginHqAsync());
 
-        Assert.Equal(HarnessTenants + five.Count, list.Count);
+        Assert.Equal(HarnessTenants + seeded.Count, list.Count);
         Assert.Equal(list.Count, list.Select(r => r.TenantId).Distinct().Count());
         Assert.True(list.All(r => r.InstallState is not null), "판정 없는 행이 있다 — 둘째 문장이 실패했거나 행을 놓쳤다.");
 
@@ -257,7 +283,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
     public async Task Control5_Old_Columns_And_Other_Results_Are_None()
     {
         if (!await SetUpAsync("설치⑤")) return;
-        var rows = await ReadFiveAsync(await SeedFiveAsync());
+        var rows = await ReadControlsAsync(await SeedControlsAsync());
 
         Assert.Equal(1, rows["D"].IsLocked);
         Assert.NotNull(rows["D"].BootstrapAt);
@@ -269,15 +295,32 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "설치⑥ 🔴 업데이트 보고는 완료가 아니고 미설치도 아니다 (성공 · 실패 · 시리얼 통과 + 성공 전부 설치 시작)")]
+    public async Task Control6_Update_Report_Is_Started()
+    {
+        if (!await SetUpAsync("설치⑥")) return;
+        var rows = await ReadControlsAsync(await SeedControlsAsync());
+
+        // G = 로그인 불가 설치 — 깔다 멈춘 고객이 업데이트 보고 1건으로 찾는 목록에서 빠지면 안 된다.
+        foreach (var key in new[] { "B", "F", "G" })
+        {
+            Assert.True(rows[key].InstallState == TenantInstallStateReader.Started,
+                $"{key}: 업데이트 보고가 있는데 {rows[key].InstallState} — 설치 시작이어야 한다.");
+            Assert.Null(rows[key].LastErpStartAt);
+            Assert.Equal("설치 시작", TenantInstallText.Label(rows[key].InstallState));
+            Assert.Contains("설치 기록은 있지만", TenantInstallText.Help(rows[key].InstallState, rows[key].LastErpStartAt));
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════
-    // G-6 첫 읽기 보호 — 세 갈래
+    // G-6 첫 읽기 보호 — 오류 세 갈래 · 시간 초과 · 연결 끊김
     // ══════════════════════════════════════════════════════════════
 
     /// <summary>재료를 망가뜨리고 <b>그 오류 번호가 실제로 나는지</b> 먼저 본 뒤, 목록 · 상세가 살아 있고 전부 판정 없음인지 잰다.</summary>
     private async Task AssertSurvivesAsync(string gate, string breakSql, int expectedError)
     {
         if (!await SetUpAsync(gate)) return;
-        var five = await SeedFiveAsync();
+        var seeded = await SeedControlsAsync();
         var token = await _h.LoginHqAsync();
 
         // 대조 — 망가뜨리기 전에는 판정이 나온다. 이게 없으면 「전부 null」이 보호의 증거가 아니다.
@@ -288,7 +331,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         {
             await db.ExecuteAsync(breakSql);
             var ex = await Assert.ThrowsAsync<MySqlException>(() =>
-                db.QueryAsync<IdRow>(TenantInstallStateReader.ReadSql, new { Ids = five.Values.ToList() }));
+                db.QueryAsync<IdRow>(TenantInstallStateReader.ReadSql, new { Ids = seeded.Values.ToList() }));
             Assert.Equal(expectedError, ex.Number);
         }
 
@@ -301,14 +344,19 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
             Assert.NotEqual("미설치", TenantInstallText.Label(row.InstallState));
         }
 
-        var detail = await ReadDetailAsync(token, five["A"]);
+        var detail = await ReadDetailAsync(token, seeded["A"]);
         Assert.Null(detail.InstallState);
         Assert.Equal("확인 불가", TenantInstallText.Label(detail.InstallState));
     }
 
-    [Fact(DisplayName = "G-6ⓐ 🔴 표 없음(1146) — 목록 · 상세 200 · 행 수 불변 · 확인 불가")]
-    public Task G6_Table_Missing() =>
-        AssertSurvivesAsync("G-6ⓐ", "DROP TABLE tenant_update_state", 1146);
+    // 🔴 재료 표마다 잰다 — 한 표만 없을 때 남은 표로 반쪽 판정을 내면 빨강이다.
+    [Fact(DisplayName = "G-6ⓐ1 🔴 시리얼 표 없음(1146) — 목록 · 상세 200 · 행 수 불변 · 확인 불가")]
+    public Task G6_Serial_Table_Missing() =>
+        AssertSurvivesAsync("G-6ⓐ1", "DROP TABLE serial_verify_attempts", 1146);
+
+    [Fact(DisplayName = "G-6ⓐ2 🔴 업데이트 표 없음(1146) — 목록 · 상세 200 · 행 수 불변 · 확인 불가")]
+    public Task G6_Update_Table_Missing() =>
+        AssertSurvivesAsync("G-6ⓐ2", "DROP TABLE tenant_update_state", 1146);
 
     [Fact(DisplayName = "G-6ⓑ 🔴 칸 없음(1054) — 목록 · 상세 200 · 행 수 불변 · 확인 불가")]
     public Task G6_Column_Missing() =>
@@ -321,6 +369,118 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
           + "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL",
             1267);
 
+    /// <summary>요청을 끝까지 기다리되 상한을 넘기면 빨강이다. 상한이 빠진 코드는 연결 기본값까지 늘어지므로 여기서 잡힌다.</summary>
+    private static async Task<BackofficeRoleGateHarness.Outcome> WithinLimitAsync(
+        string gate, string path, Task<BackofficeRoleGateHarness.Outcome> request)
+    {
+        try
+        {
+            return await request.WaitAsync(LockedCallLimit);
+        }
+        catch (TimeoutException)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"[{gate}] {path} 가 {LockedCallLimit.TotalSeconds}초 안에 안 끝났다 — 둘째 문장의 시간 상한이 안 먹는다.");
+        }
+    }
+
+    /// <summary>재료 표가 잠긴 채 돌아온 응답 판독 — 목록 · 상세 공용 앞부분.</summary>
+    private static T ReadLockedBody<T>(string gate, string what, BackofficeRoleGateHarness.Outcome res)
+    {
+        Assert.True(res.Status == 200, $"[{gate}] {what}이 200 이 아니다(실측 {res.Status}). 본문: {Trim(res.Body)}");
+        return JsonSerializer.Deserialize<T>(res.Body, Web)!;
+    }
+
+    /// <summary>시간 초과 — 잠긴 표를 기다리다 상한에 걸려 끝난다. 잠금을 안 기다렸으면 이 시험의 증거가 아니다.</summary>
+    private async Task<BackofficeRoleGateHarness.Outcome> SendUntilTimeoutAsync(string gate, string token, string path)
+    {
+        var watch = Stopwatch.StartNew();
+        var res = await WithinLimitAsync(gate, path, Task.Run(() => _h.SendAsync(token, path)));
+        watch.Stop();
+        _out.WriteLine($"[{gate}] {path} {res.Status} {watch.ElapsedMilliseconds}ms");
+        Assert.True(watch.Elapsed >= LockedCallFloor,
+            $"[{gate}] {watch.ElapsedMilliseconds}ms 만에 끝났다 — 잠금을 기다리지 않았다.");
+        return res;
+    }
+
+    /// <summary>연결 끊김 — 잠긴 표를 기다리는 둘째 문장의 연결을 서버에서 끊는다. 드라이버 연결이 망가진 채 판정이 끝나는 갈래다.</summary>
+    private async Task<BackofficeRoleGateHarness.Outcome> SendAndKillAsync(string gate, string token, string path)
+    {
+        await using var monitor = await _h.OpenAsync();
+        var request = Task.Run(() => _h.SendAsync(token, path));
+        var watch = Stopwatch.StartNew();
+
+        while (!request.IsCompleted && watch.Elapsed < LockedCallLimit)
+        {
+            var thread = await monitor.ExecuteScalarAsync<long?>(@"
+                SELECT ID FROM information_schema.PROCESSLIST
+                WHERE DB = DATABASE() AND ID <> CONNECTION_ID()
+                  AND INFO LIKE '%serial_verify_attempts%'
+                LIMIT 1");
+            if (thread is not null)
+            {
+                await monitor.ExecuteAsync($"KILL {thread}");
+                var res = await WithinLimitAsync(gate, path, request);
+                _out.WriteLine($"[{gate}] {path} {res.Status} {watch.ElapsedMilliseconds}ms");
+                return res;
+            }
+            await Task.Delay(50);
+        }
+
+        throw new Xunit.Sdk.XunitException($"[{gate}] 잠금에 걸린 둘째 문장을 못 찾았다 — 끊김 갈래를 재지 못했다.");
+    }
+
+    /// <summary>
+    /// 재료 표를 잠가 둘째 문장만 세운 뒤 목록 · 상세가 살아 있고 전부 판정 없음 · 결제 정상인지 잰다.
+    /// <para>🔴 <c>LOCK TABLES</c> 여야 한다 — InnoDB 일반 읽기는 행 잠금을 안 기다린다. 첫 문장 · 결제 · 인증은 이 표를 안 읽는다.</para>
+    /// <para>🔴 <c>UNLOCK</c> 을 직접 부른다 — 안 풀리면 뒷정리 <c>DROP DATABASE</c> 가 멈춘다.</para>
+    /// </summary>
+    private async Task AssertSurvivesLockedAsync(
+        string gate, Func<string, string, Task<BackofficeRoleGateHarness.Outcome>> send)
+    {
+        if (!await SetUpAsync(gate)) return;
+        var seeded = await SeedControlsAsync();
+        await SeedPaymentAsync("설치시험A");
+        var token = await _h.LoginHqAsync();
+        var detailPath = $"{ListPath}/{seeded["A"]}";
+
+        // 대조 — 잠그기 전에는 판정 · 결제 표식이 다 나온다.
+        var before = await ReadListAsync(token);
+        Assert.True(before.All(r => r.InstallState is not null), $"[{gate}] 잠그기 전부터 판정이 없다.");
+        var beforeDetail = ReadLockedBody<DetailBody>(gate, "상세", await _h.SendAsync(token, detailPath));
+        Assert.Contains(beforeDetail.Payments, p => p.OrderId == PaymentOrderId);
+
+        await using var holder = await _h.OpenAsync();
+        await holder.ExecuteAsync("LOCK TABLES serial_verify_attempts WRITE");
+        try
+        {
+            var after = ReadLockedBody<ListBody>(gate, "목록", await send(token, ListPath)).Items;
+            Assert.Equal(before.Count, after.Count);
+            foreach (var row in after)
+            {
+                Assert.True(row.InstallState is null, $"[{gate}] 읽기가 실패했는데 판정이 있다: {row.InstallState}");
+                Assert.Equal("확인 불가", TenantInstallText.Label(row.InstallState));
+            }
+
+            var detail = ReadLockedBody<DetailBody>(gate, "상세", await send(token, detailPath));
+            Assert.Null(detail.Item!.InstallState);
+            Assert.Equal("확인 불가", TenantInstallText.Label(detail.Item.InstallState));
+            Assert.Contains(detail.Payments, p => p.OrderId == PaymentOrderId);
+        }
+        finally
+        {
+            await holder.ExecuteAsync("UNLOCK TABLES");
+        }
+    }
+
+    [Fact(DisplayName = "G-6ⓓ 🔴 시간 초과 — 재료 표가 잠겨도 목록 · 상세 200 · 확인 불가 · 결제 정상 · 8초 안 (commandTimeout 을 지우면 빨강)")]
+    public Task G6_Statement_Timeout() =>
+        AssertSurvivesLockedAsync("G-6ⓓ", (token, path) => SendUntilTimeoutAsync("G-6ⓓ", token, path));
+
+    [Fact(DisplayName = "G-6ⓔ 🔴 연결 끊김 — 판정 중 연결이 끊겨도 목록 · 상세 200 · 확인 불가 · 결제 정상 (호출을 결제 조회 앞으로 되돌리면 빨강)")]
+    public Task G6_Connection_Killed() =>
+        AssertSurvivesLockedAsync("G-6ⓔ", (token, path) => SendAndKillAsync("G-6ⓔ", token, path));
+
     // ══════════════════════════════════════════════════════════════
     // G-7 순수 함수 — DB 안 탄다
     // ══════════════════════════════════════════════════════════════
@@ -329,9 +489,10 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
     public void G7_Decide()
     {
         Assert.Equal("installed", TenantInstallStateReader.Decide(OwnerAt, 0, 0));
-        Assert.Equal("installed", TenantInstallStateReader.Decide(null, 1, 0));
-        Assert.Equal("installed", TenantInstallStateReader.Decide(null, 1, 1));
+        Assert.Equal("installed", TenantInstallStateReader.Decide(OwnerAt, 1, 1));
+        Assert.Equal("started", TenantInstallStateReader.Decide(null, 1, 0));
         Assert.Equal("started", TenantInstallStateReader.Decide(null, 0, 1));
+        Assert.Equal("started", TenantInstallStateReader.Decide(null, 1, 1));
         Assert.Equal("none", TenantInstallStateReader.Decide(null, 0, 0));
     }
 
@@ -355,8 +516,12 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         var started = TenantInstallText.Help(TenantInstallText.Started, OwnerAt);
         Assert.DoesNotContain("2026", started);
         Assert.Contains("이전 판 프로그램", started);
-        Assert.Contains("기록이 없습니다", TenantInstallText.Help(TenantInstallText.None, null));
+        // 재료가 업데이트 보고뿐인 고객도 이 문구를 받는다 — 시리얼 번호를 전제하면 틀린 말이 된다.
+        Assert.DoesNotContain("시리얼", started);
+        Assert.Contains("본사에 설치 진행 기록이 없습니다", TenantInstallText.Help(TenantInstallText.None, null));
         Assert.Contains("지워도 이 표시는 바뀌지 않습니다", TenantInstallText.Help(TenantInstallText.Installed, OwnerAt));
+        // 시각 뒤에 구분이 없으면 한 문장으로 붙는다.
+        Assert.Contains("2026-11-02 09:30. 프로그램을", TenantInstallText.Help(TenantInstallText.Installed, OwnerAt));
     }
 
     [Fact(DisplayName = "G-7 🔴 금지 낱말 0 — 받은 글자 전부 (설계 §5 쓰지 않는 말)")]
@@ -448,7 +613,7 @@ public sealed class BackofficeInstallStateGateTests : IDisposable
         foreach (var (table, key) in new[] { ("u", "idx_tus_tenant"), ("a", "ix_tenant_attempted") })
         {
             var row = plan.Single(p => p.Table == table);
-            Assert.True(row.Type != "ALL", $"[G-8] {table} 를 전체 훑기 한다.");
+            Assert.True(row.Type == "ref", $"[G-8] {table} 의 접근 방식이 {row.Type} — ref 여야 한다.");
             Assert.True(row.Key == key, $"[G-8] {table} 의 인덱스가 {row.Key} — {key} 여야 한다. 힌트 즉석 투입 금지 · [2] 로 돌아간다.");
         }
 

@@ -130,9 +130,6 @@ public class TenantsAdminController : ControllerBase
             if (row is null)
                 return NotFound(new { success = false, message = "고객사를 찾을 수 없습니다." });
 
-            // 🔴 20261102작 (설계 §3): 목록과 같은 판정 한 벌. 실패해도 상세는 산다.
-            await TenantInstallStateReader.FillAsync(db, new[] { row }, _logger, ct);
-
             // 결제 이력 최근 10건 (메타만, 카드정보 0건)
             var payments = await db.QueryAsync<PaymentMetaRow>(@"
                 SELECT
@@ -149,6 +146,10 @@ public class TenantsAdminController : ControllerBase
                 ORDER BY created_at DESC
                 LIMIT 10",
                 new { row.CompanyName });
+
+            // 🔴 20261102작 (설계 §3 · 지시서 §8-1): 목록과 같은 판정 한 벌. 실패해도 상세는 산다.
+            //    결제 조회 뒤라야 한다 — 판정 중 연결이 끊기면 같은 연결의 다음 문장이 던져 상세가 500 이 된다(G-6ⓔ).
+            await TenantInstallStateReader.FillAsync(db, new[] { row }, _logger, ct);
 
             return Ok(new { success = true, item = row, payments });
         }

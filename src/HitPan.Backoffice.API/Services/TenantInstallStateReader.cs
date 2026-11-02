@@ -11,10 +11,14 @@ namespace HitPan.Backoffice.API.Services;
 /// 설치에 성공해도 전 고객이 「미설치」로 보였다. 이미 쌓이는 재료를 읽어 판정하되, 재료 표 · 칸이 없는 DB
 /// (로컬 · 시험 · 복원)에서 기존 목록까지 500 이 되면 안 된다 ⇒ 기존 SELECT 는 그대로 두고 따로 읽는다.</para>
 ///
-/// <para>🔴 <b>재료를 한 문장으로 다 읽는다.</b> 표마다 나누어 보호하면 <c>tenant_update_state</c> 만 없을 때
-/// 완료 고객이 「설치 시작」으로 보인다(반쪽 재료 판정 = 거짓 표시). 성공하면 전부 판정 · 실패하면 전부 판정 없음.</para>
+/// <para>🔴 <b>재료를 한 문장으로 다 읽는다.</b> 표마다 나누어 보호하면 한 표만 없을 때
+/// 그 표 몫의 고객이 「미설치」로 보인다(반쪽 재료 판정 = 거짓 표시). 성공하면 전부 판정 · 실패하면 전부 판정 없음.</para>
 ///
 /// <para>🔴 실패를 「미설치」로 떨어뜨리지 않는다. <c>InstallState = null</c> 로 두면 화면이 「확인 불가」로 읽는다.</para>
+///
+/// <para>🔴 <b><c>tenant_update_state</c> 는 「완료」 재료가 아니다</b>(지시서 §8-1). 업데이트 보고는 ERP 실행 증거가 아니고,
+/// 실패 보고 · 로그인 불가 설치도 행을 만든다. 다만 설치 흔적이므로 「설치 시작」 재료로는 인정한다
+/// — 보고가 있는 고객을 「미설치」로 보이면 틀린 표시다.</para>
 /// </summary>
 public static class TenantInstallStateReader
 {
@@ -22,10 +26,10 @@ public static class TenantInstallStateReader
     public const string Started = "started";
     public const string None = "none";
 
-    // 5초 — 커진 표가 목록을 잡고 늘어지지 않게 한다(G-8 실측으로 재확인).
+    // 5초 — 커진 표가 목록을 잡고 늘어지지 않게 한다. 넘으면 드라이버 취소 대기까지 약 7초 안에 끝난다(G-6ⓓ · G-8).
     private const int CommandTimeoutSeconds = 5;
 
-    // EXISTS 만 쓴다 — tenant_update_state 는 1고객 N행 · tenant_id NULL 가능이라 JOIN 하면 행이 불어난다.
+    // EXISTS 만 쓴다 — 재료 표 둘 다 1고객 N행이고 tenant_update_state 는 tenant_id NULL 행도 있어 JOIN 하면 행이 불어난다.
     // 🔴 이 문자열 안에는 SQL 주석을 쓰지 않는다. 설명은 여기 C# 주석으로.
     public const string ReadSql = @"
         SELECT CAST(t.tenant_id AS CHAR) AS TenantId,
@@ -38,11 +42,11 @@ public static class TenantInstallStateReader
         FROM tenants t
         WHERE t.tenant_id IN @Ids";
 
-    /// <summary>판정식 — 설계 §2. 옛 칸은 판정에 쓰지 않는다.</summary>
+    /// <summary>판정식 — 설계 §2 · 지시서 §8-1. 완료 = ERP 기동 기록 있음뿐 · 설치 시작 = 시리얼 통과 또는 업데이트 보고. 옛 칸은 판정에 쓰지 않는다.</summary>
     public static string Decide(DateTime? lastErpStartAt, long hasUpdateReport, long hasSerialPass)
     {
-        if (lastErpStartAt is not null || hasUpdateReport != 0) return Installed;
-        return hasSerialPass != 0 ? Started : None;
+        if (lastErpStartAt is not null) return Installed;
+        return hasSerialPass != 0 || hasUpdateReport != 0 ? Started : None;
     }
 
     /// <summary>

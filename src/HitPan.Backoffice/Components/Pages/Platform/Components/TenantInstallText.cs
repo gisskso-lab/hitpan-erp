@@ -39,14 +39,16 @@ public static class TenantInstallText
         _ => "확인 불가"
     };
 
-    /// <summary>목록 툴팁 = 상세 보조문. 「설치 시작」 은 시각을 쓰지 않는다 — 시리얼 확인 시각을 설치 시각으로 읽을 수 있다.</summary>
+    /// <summary>목록 툴팁 = 상세 보조문. 「설치 시작」 은 시각을 쓰지 않는다 — 시리얼 확인 시각을 설치 시각으로 읽을 수 있다.
+    /// 재료가 시리얼 통과 또는 업데이트 보고라 시리얼 번호를 전제하지 않는 말로 쓴다.</summary>
     public static string Help(string? state, DateTime? lastErpStartAt) => state switch
     {
         Installed => lastErpStartAt is DateTime at
-            ? $"{RanRecord} 최근 ERP 기동: {FormatKst(at)} {StaysAfterRemoval}"
-            : $"{RanRecord} 최근 ERP 기동 시각은 아직 없습니다. {StaysAfterRemoval}",
+            ? $"{RanRecord} 최근 ERP 기동: {FormatKst(at)}. {StaysAfterRemoval}"
+            // 완료는 기동 기록이 있을 때만 나온다 ⇒ 정상 경로에서 시각은 늘 있다. 어긋난 응답이 와도 시각 없음을 사실로 말하지 않는다.
+            : $"{RanRecord} {StaysAfterRemoval}",
         // 끝 문장 = 대표 결정 5 — 옛 판 고객이 이 칸에 섞인다. 다음 업데이트 뒤 「완료」로 옮겨 간다.
-        Started => "시리얼 번호 확인까지 진행됐습니다. ERP가 실행된 기록은 아직 없습니다. "
+        Started => "설치 기록은 있지만 ERP가 실행된 기록은 아직 없습니다. "
                  + "설치 중이거나 중간에 멈췄을 수 있습니다. "
                  + "이전 판 프로그램을 쓰는 고객은 설치가 끝났어도 업데이트 전까지 이렇게 보일 수 있습니다.",
         // 「설치되지 않았습니다」 단정 금지 — 본사가 모를 뿐인 고객이 있다.
