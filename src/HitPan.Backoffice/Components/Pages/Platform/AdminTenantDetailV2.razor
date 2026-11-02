@@ -81,14 +81,9 @@ else
                 <div class="bo-row">
                     <div class="bo-row-label">ERP 설치</div>
                     <div class="bo-row-value">
-                        @if (_item.IsLocked == 1)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success">완료 (@_item.BootstrapAt?.ToString("yyyy-MM-dd HH:mm"))</MudChip>
-                        }
-                        else
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">미설치</MudChip>
-                        }
+                        @* 🔴 20261102작 (설계 §5): 문구는 TenantInstallText 한 벌. 시각은 보조문의 「최근 ERP 기동」 으로만 말한다. *@
+                        <MudChip T="string" Size="Size.Small" Color="@InstallColor(_item.InstallState)">@TenantInstallText.Label(_item.InstallState)</MudChip>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Style="display:block;">@TenantInstallText.Help(_item.InstallState, _item.LastErpStartAt)</MudText>
                     </div>
                 </div>
                 @RowText("가입일", _item.CreatedAt.ToString("yyyy-MM-dd HH:mm"))
@@ -330,6 +325,15 @@ else
         _ => Color.Default
     };
 
+    // 20261102작 — 「ERP 설치」 칩 색. 값 없음 · 모르는 값 = 판정 못 함(회색).
+    private static Color InstallColor(string? state) => state switch
+    {
+        TenantInstallText.Installed => Color.Success,
+        TenantInstallText.Started => Color.Info,
+        TenantInstallText.None => Color.Warning,
+        _ => Color.Default
+    };
+
     private static Color PaymentStatusColor(string s) => s switch
     {
         "confirmed" => Color.Success,
@@ -346,7 +350,7 @@ else
         </div>
     };
 
-    public class TenantDetail
+    public class TenantDetail : TenantInstallFields
     {
         public string TenantId { get; set; } = "";
         public string TenantCode { get; set; } = "";
