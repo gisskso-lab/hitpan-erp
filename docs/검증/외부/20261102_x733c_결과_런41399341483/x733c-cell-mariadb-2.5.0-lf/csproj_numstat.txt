@@ -1,0 +1,8 @@
+1	1	src/HitPan.API/HitPan.API.csproj
+1	1	src/HitPan.Application/HitPan.Application.csproj
+1	1	src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj
+1	1	src/HitPan.Infrastructure/HitPan.Infrastructure.csproj
+1	1	src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj
+1	1	tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj
+1	1	tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj
+1	1	tools/MigrationSmokeTest/MigrationSmokeTest.csproj

@@ -1,0 +1,56 @@
+diff --git a/src/HitPan.API/HitPan.API.csproj b/src/HitPan.API/HitPan.API.csproj
+index 79fccea..2f001c3 100644
+--- a/src/HitPan.API/HitPan.API.csproj
++++ b/src/HitPan.API/HitPan.API.csproj
+@@ -40 +40 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/src/HitPan.Application/HitPan.Application.csproj b/src/HitPan.Application/HitPan.Application.csproj
+index 4cc6025..cdbf355 100644
+--- a/src/HitPan.Application/HitPan.Application.csproj
++++ b/src/HitPan.Application/HitPan.Application.csproj
+@@ -21 +21 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj b/src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj
+index 63d9f2a..2db8157 100644
+--- a/src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj
++++ b/src/HitPan.Backoffice.API/HitPan.Backoffice.API.csproj
+@@ -28 +28 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/src/HitPan.Infrastructure/HitPan.Infrastructure.csproj b/src/HitPan.Infrastructure/HitPan.Infrastructure.csproj
+index 843ce89..5e82943 100644
+--- a/src/HitPan.Infrastructure/HitPan.Infrastructure.csproj
++++ b/src/HitPan.Infrastructure/HitPan.Infrastructure.csproj
+@@ -31 +31 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj b/src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj
+index dc5b537..1d71599 100644
+--- a/src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj
++++ b/src/HitPan.IntegrationTests/HitPan.IntegrationTests.csproj
+@@ -21 +21 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj b/tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj
+index 77f87ec..4786dbf 100644
+--- a/tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj
++++ b/tools/MdbMigrationBaselineRun/MdbMigrationBaselineRun.csproj
+@@ -37 +37 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj b/tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj
+index 2336963..10d88c6 100644
+--- a/tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj
++++ b/tools/MigrationIdempotencyCheck/MigrationIdempotencyCheck.csproj
+@@ -31 +31 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+diff --git a/tools/MigrationSmokeTest/MigrationSmokeTest.csproj b/tools/MigrationSmokeTest/MigrationSmokeTest.csproj
+index 19092fa..1596542 100644
+--- a/tools/MigrationSmokeTest/MigrationSmokeTest.csproj
++++ b/tools/MigrationSmokeTest/MigrationSmokeTest.csproj
+@@ -25 +25 @@
+-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
++    <PackageReference Include="MySqlConnector" Version="2.5.0" />
