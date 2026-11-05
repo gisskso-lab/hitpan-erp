@@ -87,6 +87,12 @@ const EXPECT_H = {
     ['H-D2', 'H-D2a', 'H-D2b'], // 약관 화면 길(자리=약관 화면 → 동의 전 API 대조 → 화면 동의)
     ['H-D2'], // 이미 동의된 길(앞 브라우저가 동의함)
   ],
+  // 🔴 F-PR [4] P1(PM 11/6) — 정상 경로에서 같은 키가 두 줄 생기는 자리: 장치가 본 화면 진입 직후 한 줄 +
+  //   첫 브라우저(결재 길 흉내를 도는 쪽)만 결재 길 클릭 직전 늦게 뜬 팝업을 닫으면 한 줄 더(통과 줄).
+  //   그 id 만 첫 브라우저에서 2줄까지 허용 · 3줄 이상 = 중복 빨강 · 다른 브라우저는 1줄(그 길을 안 돈다).
+  //   둘째 줄이 실패 줄이면 기존 [장치] 실패 규칙으로 빨강(키 틀이 가리지 않음).
+  //   다른 id 의 다중 줄 · 조건 줄 전수 = 로컬 세부 표(공개 문서엔 범주만).
+  twoRowsFirstBrowser: ['H-BRIEF'],
 };
 // G 기대 키 자리 — 비워 둔다(K 연결 PR 이 rowKey 꼴로 채운다 · D3). K 본문이 있는데 비어 있으면 빨강.
 const EXPECT_G = [];
@@ -112,7 +118,9 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
   for (const b of EXPECT_BROWSERS) for (const grp of EXPECT_H.branchPerBrowser) for (const id of grp) branchKeys.add(hKey(id, b));
   const gKeys = new Set(EXPECT_G);
   const missing = [...required].filter((k) => !counts.has(k)).sort();
-  const dup = [...counts].filter(([, n]) => n > 1).map(([k]) => k).sort();
+  // ⬛ [낡은 줄 · F-PR 첫 꼴] const dup = [...counts].filter(([, n]) => n > 1).map(([k]) => k).sort();
+  const cap = new Map(EXPECT_H.twoRowsFirstBrowser.map((id) => [hKey(id, EXPECT_BROWSERS[0]), 2])); // F-PR [4] P1
+  const dup = [...counts].filter(([k, n]) => n > (cap.get(k) || 1)).map(([k]) => k).sort();
   const unknown = [...counts.keys()].filter((k) => (scopeOf.get(k) === 'H'
     ? !required.has(k) && !branchKeys.has(k)
     : !gKeys.has(k))).sort();
@@ -171,7 +179,9 @@ function main() {
   for (const x of good) {
     if (x.kind === 'OBS') {
       // ⬛ [낡은 줄 · 4~10차] console.log(`🟡 OBS ${x.scope || '-'} ${x.id}${x.browser ? ` (${x.browser})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${L.sanitize(x.got, 1200)}`);
-      console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${L.sanitize(x.got, 1200)}`);
+      // ⬛ [낡은 줄 · F-PR 첫 꼴] console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${L.sanitize(x.got, 1200)}`);
+      // 🔴 F-PR [3-V] 2차 P2 — 관찰 결과 칸도 소독 뒤 제어 글자 가림
+      console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${showCtl(L.sanitize(x.got, 1200))}`);
       continue;
     }
     const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
@@ -183,7 +193,9 @@ function main() {
     const kind = x && typeof x === 'object' ? JSON.stringify(x.kind ?? null) : '-';
     const pass = x && typeof x === 'object' ? `${typeof x.pass}` : '-';
     const why = x && typeof x === 'object' && x.kind === 'OBS' && !OBS_ALLOWED.has(x.id) ? ' · OBS 허용 목록 밖 id' : '';
-    console.log(`⚫ FAIL [장치] 줄 꼴 이상 ${L.sanitize(id)} · kind=${L.sanitize(kind)} · pass 형=${pass}${why}`);
+    // ⬛ [낡은 줄 · 1~10차 · F-PR 첫 꼴 그대로] console.log(`⚫ FAIL [장치] 줄 꼴 이상 ${L.sanitize(id)} · kind=${L.sanitize(kind)} · pass 형=${pass}${why}`);
+    // 🔴 F-PR [3-V] 2차 P2 — 줄 꼴 이상 줄도 소독 뒤 제어 글자 가림(일관성)
+    console.log(`⚫ FAIL [장치] 줄 꼴 이상 ${showCtl(L.sanitize(id))} · kind=${showCtl(L.sanitize(kind))} · pass 형=${pass}${why}`);
   }
   // ⬛ [낡은 줄 · 1~10차] console.log(`시드: ${r && r.seed ? `${r.seed.mode} · ${r.seed.path}` : '기록 없음'}`);
   console.log(`시드: ${r && r.seed ? `${m(r.seed.mode)} · ${m(r.seed.path)}` : '기록 없음'}`);
@@ -194,7 +206,9 @@ function main() {
   console.log(`키 틀: 누락 ${keys.missing.length} · 중복 ${keys.dup.length} · 모르는 ${keys.unknown.length} · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''}`);
   if (r && r.external_blocked > 0) {
     // ⬛ [낡은 줄 · 1~10차] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${(r.external_hosts || []).join(', ')}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
-    console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${L.sanitize((r.external_hosts || []).join(', '), 600)}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
+    // ⬛ [낡은 줄 · F-PR 첫 꼴] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${L.sanitize((r.external_hosts || []).join(', '), 600)}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
+    // 🔴 F-PR [3-V] 2차 P2 — 외부 호스트 줄도 소독 뒤 제어 글자 가림
+    console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${showCtl(L.sanitize((r.external_hosts || []).join(', '), 600))}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
   } else {
     console.log('외부 요청 끊음 0건');
   }

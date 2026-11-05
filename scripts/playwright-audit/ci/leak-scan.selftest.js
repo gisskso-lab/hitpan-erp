@@ -76,6 +76,10 @@
 //   F-C20a~d N3 메타 칸 소독 — 콘솔 · 결과표 · 판정기 좋은 줄 · 시드 · 외부 호스트 · 키 칸 상한 경계
 //   F-C21a~h 상신-L14 판정기 H 기대 키 틀 — 누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리(양성 두 벌 = 관찰 갈래 · 일반 갈래)
 //   H 결과표 생성기는 판정기 상수를 읽지 않고 참고 런 키를 따로 적는다(자기 증명 0).
+// 🔴 F-PR 푸시 전 고침(11/6 · [4] P1 + [3-V] 2차 P2 PM 결재) — 경우 3개 더함(86 → 89)
+//   F-C20f 판정기 관찰 결과 칸 · 외부 호스트 줄 · 줄 꼴 이상 줄 안 제어 글자 → 줄 갈라짐 0 · 제어 글자 0
+//   F-C21j 양성 · 첫 브라우저 늦은 팝업 정상 꼴(같은 키 2줄) → rc 0
+//   F-C21k 같은 키 3줄(첫 브라우저) · 둘째 브라우저 2줄 · 둘째 줄 실패 → 셋 다 rc 1
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1506,6 +1510,23 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       check('F-C20e N3 판정기 측정 커밋 표지 줄 → 원문·URL·base64 꼴 0 · 가림 표지 있음', line.length > 0 && f20Clean(x.out) && line.includes('***'),
         `표지 줄 ${line.length > 0} · 꼴 0=${f20Clean(x.out)}`);
     }
+    { // F-C20f [3-V] 2차 P2 — 관찰 결과 칸 · 외부 호스트 · 줄 꼴 이상 줄 안 제어 글자(줄바꿈 · 색 제어)
+      const nl = (tag) => ['F20F-', tag, '\n', `F20F-${tag}-NEXT`, '\u001b', '[31m'].join('');
+      const rows = fHRows().map((w) => (w.id === 'H-OBS-TERMS' ? { ...w, got: nl('OBS') } : w));
+      rows.push({ ...fRow(nl('BAD'), 'DEVICE'), kind: 'obs' });
+      const x = fNode([F_JUDGE], { UI_OUT: fTable('c20f', rows, { external_blocked: 1, external_hosts: [nl('HOST')] }) });
+      const lines = x.out.split('\n');
+      const part = (tag, head) => ({
+        tag,
+        seen: lines.some((s) => s.includes(head) && s.includes(`F20F-${tag}`)),
+        split: lines.some((s) => s.startsWith(`F20F-${tag}-NEXT`)),
+      });
+      const ps = [part('OBS', '🟡 OBS'), part('HOST', '외부 요청 끊음'), part('BAD', '줄 꼴 이상')];
+      const esc = x.out.includes('\u001b');
+      const ok = x.code === 1 && ps.every((p) => p.seen && !p.split) && !esc && x.out.includes('\\u000a');
+      check('F-C20f N3 판정기 관찰 결과 칸 · 외부 호스트 줄 · 줄 꼴 이상 줄 제어 글자 → 줄 갈라짐 0 · 제어 글자 0 · 가린 글자 있음', ok,
+        `rc=${x.code} · ${ps.map((p) => `${p.tag} 찍힘=${p.seen} 갈라짐=${p.split}`).join(' · ')} · 제어 글자=${esc}`);
+    }
 
     // 상신-L14 — 판정기 H 기대 키 틀(누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리)
     const fJ = (name, rows) => fNode([F_JUDGE], { UI_OUT: fTable(name, rows) });
@@ -1554,6 +1575,21 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const esc = x.out.includes('\u001b');
       check('F-C21i L14 모르는 키 이름표 안 제어 글자 → rc 1 · 줄 갈라짐 0 · 제어 글자 0 · 가린 글자 있음', x.code === 1 && !split && !esc && x.out.includes('\\u000a'),
         `rc=${x.code} · 갈라짐=${split} · 제어 글자=${esc}`);
+    }
+    // 🔴 [4] P1 — 장치가 정상 경로에서 같은 키를 두 줄 적는 자리(첫 브라우저 · 늦게 뜬 팝업을 결재 길 클릭 직전 닫음)
+    { // F-C21j 양성 — 늦은 팝업 정상 꼴
+      const x = fJ('c21j', [...fHRows(), fRow('H-BRIEF', 'DEVICE', 'chromium')]);
+      check('F-C21j L14 양성 · 첫 브라우저 늦은 팝업 정상 꼴(같은 키 2줄 · 둘 다 통과) → rc 0 · 중복 0', x.code === 0 && /🟢 PASS 전부/.test(x.out) && /중복 0 /.test(x.out),
+        `rc=${x.code}`);
+    }
+    { // F-C21k 허용 넓힘 0 — 3줄 · 둘째 브라우저 2줄 · 둘째 줄 실패
+      const extra = (b, pass = true) => fRow('H-BRIEF', 'DEVICE', b, pass);
+      const a = fJ('c21k-1', [...fHRows(), extra('chromium'), extra('chromium')]);
+      const b = fJ('c21k-2', [...fHRows(), extra('webkit')]);
+      const c = fJ('c21k-3', [...fHRows(), extra('chromium', false)]);
+      const ok = a.code === 1 && /중복 1 /.test(a.out) && b.code === 1 && /중복 1 /.test(b.out) && c.code === 1 && /⚫ FAIL \[장치\]/.test(c.out);
+      check('F-C21k L14 같은 키 3줄(첫 브라우저) · 둘째 브라우저 2줄 → 중복 빨강 · 둘째 줄 실패 → [장치] 빨강', ok,
+        `3줄 rc=${a.code} · 둘째 2줄 rc=${b.code} · 실패 줄 rc=${c.code}`);
     }
   }
   const bad = results.filter((x) => !x.ok).length;
