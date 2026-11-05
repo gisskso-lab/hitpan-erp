@@ -19,6 +19,7 @@ internal static class GateControls
         ("var s = @\"SELECT 1 --\n--\n--\n, @p\";", RuleId.F1),
         ("var s = @\"x --\n, @p\";", RuleId.F1),
         ("var s = @\"x --\n, @Name_1\";", RuleId.F1),
+        ("\f#region a /*\nvar s = @\"SELECT 1 --\n, @p\";\n// */", RuleId.F1),
     };
 
     public static readonly string[] Positive =
@@ -33,6 +34,7 @@ internal static class GateControls
         "var s = @\"/* --\n */ SELECT @p\";",
         "var s = @\"SELECT 1 --\n--\n, @p\";",
         "var s = \"SELECT 1 --\\r\\n, @p\";",
+        "\f#region a /*\nvar s = @\"SELECT 1 -- note\n, @p\";\n// */",
     };
 
     public static readonly string[] Broken =

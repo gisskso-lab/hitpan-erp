@@ -123,7 +123,7 @@ internal sealed class CsStringLexer
                 continue;
             }
 
-            if (c is ' ' or '\t')
+            if (c is ' ' or '\t' or '\v' or '\f' or '\u001A' or '\uFEFF' || System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.SpaceSeparator)
             {
                 i++;
                 continue;
