@@ -67,8 +67,10 @@
 //   C18d 정상 줄(실물 꼴 · toJSON(github.event) · github.repository·sha · $GITHUB_ENV · 통째 주석 속 낱말) → 잡힘 0 · 통과 줄 1 = 대조 줄
 //   C18e 알고 받는 오탐(조건식 속 트리거 낱말 1줄) → 잡힘 정확히 1(트리거)
 //   합성 값(인증 머리글 꼴·점 셋 꼴·식 안 이름)은 전부 실행 중 16진·조각 이어 붙이기로 만든다 — 파일 글자에 자격증명 모양 0.
-// 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §6) — 경우 20개 더함(64 → 84) · 칸 이름 머리 `F-`(10차 C18a~e 와 겹치지 않게).
-//   고치기 전 장치(main)에 붙이면 F-C18d · F-C19b · F-C20c · F-C21c · F-C21d 다섯만 초록(대조 줄) · 나머지 15 빨강 = 69/84.
+// ⬛ [낡은 줄 · F-PR 첫 꼴] 경우 20개 더함(64 → 84) · 고치기 전 69/84.
+// 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §6 + [3-V] 01~03 PM 승인) — 경우 22개 더함(64 → 86) · 칸 이름 머리 `F-`(10차 C18a~e 와 겹치지 않게).
+//   고치기 전 장치(main)에 붙이면 F-C18d · F-C19b · F-C20c · F-C21c · F-C21d 다섯만 초록(대조 줄) · 나머지 17 빨강 = 69/86.
+//   [3-V] 반영: F-C21d 양성 = 장치가 실제로 만드는 약관 고친 뒤 꼴 · F-C20d 에 경계 걸침 입력 · 새 칸 F-C20e(표지 줄 소독) · F-C21i(제어 글자).
 //   F-C18a~d N1 K 본문 이름 — 선택(실행기)과 계수(판정기)가 한 규칙 · 경계 꼴은 이상 쪽(사본 폴더 · 함수 단독 · 실행기 --dir)
 //   F-C19a~d N2 기록 함수 결과 칸 계약 — 참거짓 아니면 줄 넣기 전에 던짐 · 흐름 밖 종료 코드 ≠ 0 · 흐름 잡이 안 끊김 줄 1
 //   F-C20a~d N3 메타 칸 소독 — 콘솔 · 결과표 · 판정기 좋은 줄 · 시드 · 외부 호스트 · 키 칸 상한 경계
@@ -1313,7 +1315,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     const fRow = (id, kind, browser = null, pass = true) => ({ id, g: null, path: null, browser, what: 'f', got: 'f', pass, kind, scope: 'H' });
     const fBranch = (b, how) => {
       if (how === 'obs') return [fRow('H-OBS-TERMS', 'OBS', b, false), fRow('H-D2b', 'DEVICE', b)];
-      if (how === 'normal') return [fRow('H-D2', 'DEVICE', b)];
+      if (how === 'normal') return [fRow('H-D2', 'DEVICE', b)]; // 이미 동의된 길
+      // 🔴 [3-V] 01 — 약관 화면 길(장치가 통과 경로에서 실제로 적는 줄 · 약관 결함이 고쳐진 뒤 첫 브라우저 꼴)
+      if (how === 'terms') return [fRow('H-D2', 'DEVICE', b), fRow('H-D2a', 'DEVICE', b), fRow('H-D2b', 'DEVICE', b)];
       if (how === 'both') return [fRow('H-OBS-TERMS', 'OBS', b, false), fRow('H-D2b', 'DEVICE', b), fRow('H-D2', 'DEVICE', b)];
       return []; // 'none'
     };
@@ -1480,15 +1484,27 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const r = { rows: [] };
         L.rec(r, { id: id120, what: 'w', got: 'g', pass: true, kind: 'DEVICE' });
         L.rec(r, { id: id121, what: 'w', got: 'g', pass: true, kind: 'DEVICE' });
+        // 🔴 [3-V] 02 — 등록값이 상한 경계에 걸치는 입력(앞 반쪽만 상한 안) → 지운 뒤 자르기면 반쪽 0 · 자르고 지우기면 반쪽이 남는다
+        L.rec(r, { id: `H${'a'.repeat(110)}${C9_VALUE}`, what: 'w', got: 'g', pass: true, kind: 'DEVICE' });
         rows = r.rows;
       } catch (e) {
         why = `예외=${L.errorName(e)}`;
       } finally {
         console.log = so;
       }
-      const ok = rows.length === 2 && rows[0].id === id120 && rows[1].id !== id121
-        && String(rows[1].id).startsWith(id121.slice(0, 120)) && String(rows[1].id).includes('…');
-      check('F-C20d N3 키 칸 상한 경계 · 120자 그대로 · 121자 잘림 표지', ok, why || `줄 ${rows.length}`);
+      const straddle = rows.length === 3 ? String(rows[2].id) : '';
+      const straddleOk = straddle.length > 0 && !straddle.includes(C9_VALUE.slice(0, 8)) && straddle.includes('***');
+      // ⬛ [낡은 줄 · F-PR 첫 꼴] const ok = rows.length === 2 && rows[0].id === id120 && …(경계 걸침 입력 없음)
+      const ok = rows.length === 3 && rows[0].id === id120 && rows[1].id !== id121
+        && String(rows[1].id).startsWith(id121.slice(0, 120)) && String(rows[1].id).includes('…') && straddleOk;
+      check('F-C20d N3 키 칸 상한 경계 · 120자 그대로 · 121자 잘림 표지 · 경계에 걸친 등록값 반쪽 0(지운 뒤 자르기)', ok, why || `줄 ${rows.length} · 걸침 반쪽 0=${straddleOk}`);
+    }
+    { // F-C20e [3-V] 03 — 판정기 측정 커밋 표지 줄 → 꼴 0
+      const o = fTable('c20e', fHRows(), { plant: [f20Mix('pl')] });
+      const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      const line = x.out.split('\n').find((s) => s.includes('측정 커밋 런')) || '';
+      check('F-C20e N3 판정기 측정 커밋 표지 줄 → 원문·URL·base64 꼴 0 · 가림 표지 있음', line.length > 0 && f20Clean(x.out) && line.includes('***'),
+        `표지 줄 ${line.length > 0} · 꼴 0=${f20Clean(x.out)}`);
     }
 
     // 상신-L14 — 판정기 H 기대 키 틀(누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리)
@@ -1505,9 +1521,10 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const x = fJ('c21c', fHRows('obs', 'normal'));
       check('F-C21c L14 양성 · 전 키(관찰 갈래 + 일반 갈래) → rc 0(대조 줄)', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
     }
-    { // F-C21d 양성 — 약관 고친 뒤 꼴(두 브라우저 다 일반 갈래 · 관찰 0)
-      const x = fJ('c21d', fHRows('normal', 'normal'));
-      check('F-C21d L14 양성 · 두 브라우저 일반 갈래 · 관찰 0 → rc 0(대조 줄)', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
+    // ⬛ [낡은 칸 · F-PR 첫 꼴] F-C21d 양성 = 두 브라우저 다 「이미 동의된 길」 · 관찰 0 — 장치가 실제로 만들 수 없는 꼴([3-V] 01)
+    { // F-C21d 양성 — 약관 고친 뒤 장치가 실제로 만드는 꼴(첫 브라우저 약관 화면 길 · 둘째 이미 동의된 길 · 관찰 0)
+      const x = fJ('c21d', fHRows('terms', 'normal'));
+      check('F-C21d L14 양성 · 약관 고친 뒤 꼴(첫 브라우저 약관 화면 길 · 둘째 동의 끝 길 · 관찰 0) → rc 0(대조 줄)', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
     }
     { // F-C21e 브라우저별 필수 하나 뺌
       const rows = fHRows().filter((w) => !(w.id === 'H-D3' && w.browser === 'webkit'));
@@ -1529,6 +1546,14 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const gRow = { id: 'G-F21H', g: 'G-F21H', path: null, browser: 'chromium', what: 'f', got: 'f', pass: true, kind: 'TEST', scope: 'G' };
       const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c21h-out', [...fHRows(), gRow]) });
       check('F-C21h L14 K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → rc 1 · G 자리 비었음', x.code === 1 && /G 자리 비었음/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21i [3-V] 03 — 모르는 키 이름표 안 제어 글자(줄바꿈 · 색 제어) → 출력 줄이 갈라지지 않음 · 가린 글자로
+      const odd = fRow(['H-ZZ', '\n', 'F21I-NEXT', '\u001b', '[31m'].join(''), 'DEVICE');
+      const x = fJ('c21i', [...fHRows(), odd]);
+      const split = x.out.split('\n').some((s) => s.startsWith('F21I-NEXT'));
+      const esc = x.out.includes('\u001b');
+      check('F-C21i L14 모르는 키 이름표 안 제어 글자 → rc 1 · 줄 갈라짐 0 · 제어 글자 0 · 가린 글자 있음', x.code === 1 && !split && !esc && x.out.includes('\\u000a'),
+        `rc=${x.code} · 갈라짐=${split} · 제어 글자=${esc}`);
     }
   }
   const bad = results.filter((x) => !x.ok).length;
