@@ -1,0 +1,239 @@
+# 화면 실측 CI — K35 알림·메신저 팝업 게이트 G1~G5 (작업지시서 docs/운영기록/20261028작G1-3_CI브라우저실측_K35_작업지시서.md)
+#
+# 🔴 build-and-test.yml 과 **따로** 띄운다(§2-3 · 대표 확인 §0-2 둘째 줄) — 게시 전 「빌드·시험 초록」 규율의 뜻을 안 바꾼다.
+# 🔴 GitHub 시험 서버의 빈 DB 에서만 잰다 — 이 PC·운영·demo 무접촉(§0-2 첫째 줄 · #39).
+# 🔴 새 비밀값(Secrets) 0 — 전부 런 안에서 난수로 만들고 가린다(S0). 본사로 가는 길은 닫힌 로컬 포트(#18·#22).
+# 🔴 CI 로 못 재는 것: 터널 경로 · 실제 크롬 팝업 차단 강도 → HQA 실측팀 몫(§2-4 · §0-10). 「CI 초록 = 실제 크롬에서 안 막힘」 아님.
+#
+# 트리거(개발명세서 §1-1 · §0-9 ② B안 순서 함정):
+#   pull_request + workflow_dispatch 를 두되 **잡 단위 if** 로 「이 갈래(H) 브랜치의 PR 이거나 수동 실행」일 때만 돈다.
+#   그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
+#   갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
+#   경로 거르기(paths)는 안 쓴다(§3-1). 필수 검사 지정 = 지금 안 함 · 조건 뒤 따로 결재(§0-10).
+#
+# 실패 구분(§5): 단계 이름 머리 [장치] / [시험]. 🔴 [시험] 빨강 → 재실행 금지. [장치] 빨강 → 같은 커밋 재실행 1회까지.
+# 측정 커밋: scripts/playwright-audit/ci/plant.flags 에 `red`(심은 빨강 §4-3 ⓒ) · `leak`(누출 검사 3꼴 §0-9 ⑪). 머지 금지.
+#   2차(10/29): 두 낱말은 **한 측정 커밋에 함께**(`red leak`) — S8·S9 는 H-PLANT 로 빨강 · S10 은 꼴 3개 잡음으로 빨강(따로 읽힌다).
+name: UI Browser (K35)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-browser-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-k35:
+    name: ui-k35
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: "[장치] S0 난수 만들기 · 가림"
+        # 값은 만든 즉시 ::add-mask:: → $GITHUB_ENV 로만 넘긴다. 화면·파일 출력 0. set -x 금지(값이 찍힌다).
+        # 16진 난수 — JWT_SECRET 의 약한 표지 낱말 검사(AuthExtensions.cs:17~41)에 안 걸리고, 암호화 키는 64자 = 32바이트.
+        run: |
+          set -euo pipefail
+          put() { echo "::add-mask::$2"; echo "$1=$2" >> "$GITHUB_ENV"; }
+          put UI_DB_PASSWORD "$(openssl rand -hex 24)"
+          put UI_JWT_SECRET  "$(openssl rand -hex 32)"
+          put UI_ENC_KEY     "$(openssl rand -hex 32)"
+          put UI_BOOT_KEY    "$(openssl rand -hex 32)"
+          put UI_PW_PARENT   "Ui#$(openssl rand -hex 16)"
+          put UI_PW_GA       "Ui#$(openssl rand -hex 16)"
+          put UI_PW_NA       "Ui#$(openssl rand -hex 16)"
+          {
+            echo "UI_OUT=$RUNNER_TEMP/ui-out"
+            echo "UI_API_DIR=$RUNNER_TEMP/ui-api"
+            echo "UI_API_EXE=$RUNNER_TEMP/ui-api/HitPan.API"
+            echo "UI_BASE=http://127.0.0.1:18080"
+            echo "UI_LOGIN_PARENT=ci-parent"
+            echo "UI_LOGIN_GA=ci-ga"
+            echo "UI_LOGIN_NA=ci-na"
+            echo "HITPAN_LOG_DIR=$RUNNER_TEMP/ui-out/main/api-logs"
+          } >> "$GITHUB_ENV"
+          # 2차(10/29) ①: trace 는 기록·업로드 안 함 → trace 폴더를 만들지 않는다.
+          mkdir -p "$RUNNER_TEMP/ui-out/main"
+          node scripts/playwright-audit/ci/mask-probe.js
+
+      - name: "[장치] S0 API 설정값 (환경변수 폴백 · appsettings 무접촉 #21)"
+        # TenantConfigReader 는 db.conf 후보가 비면 환경변수를 읽는다(TenantConfigReader.cs:24·47~51).
+        # 게시 폴더는 RUNNER_TEMP 아래 — 레포 안 db.conf 후보 경로와 겹치지 않는다.
+        run: |
+          set -euo pipefail
+          {
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=13306"
+            echo "DB_NAME=hitpan_ui"
+            echo "DB_USER=root"
+            echo "DB_PASSWORD=$UI_DB_PASSWORD"
+            echo "JWT_SECRET=$UI_JWT_SECRET"
+            echo "ERP_ENCRYPTION_KEY=$UI_ENC_KEY"
+            echo "HITPAN_BOOTSTRAP_TOKEN_KEY=$UI_BOOT_KEY"
+            echo "TENANT_CODE=CIUI"
+            echo "HITPAN_HQ_API_URL=http://127.0.0.1:9"
+            echo "ASPNETCORE_ENVIRONMENT=Production"
+            echo "ASPNETCORE_URLS=http://127.0.0.1:18080"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: "[장치] S1 컨테이너 DB (mariadb:11.4 · 127.0.0.1 만)"
+        # services: 로 두면 단계보다 먼저 떠서 S0 난수를 못 받는다 — 그래서 단계 안 docker run(§3-2 S1).
+        # 비번은 docker 인자에 값을 쓰지 않고 이름만 넘긴다(-e 이름 = 환경에서 읽음).
+        env:
+          MARIADB_ROOT_PASSWORD: ${{ env.UI_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          docker run -d --name ui-mariadb -p 127.0.0.1:13306:3306 \
+            -e MARIADB_ROOT_PASSWORD \
+            --health-cmd="healthcheck.sh --connect --innodb_initialized" \
+            --health-interval=5s --health-timeout=5s --health-retries=30 \
+            mariadb:11.4 >/dev/null
+          for i in $(seq 1 60); do
+            st=$(docker inspect -f '{{.State.Health.Status}}' ui-mariadb)
+            if [ "$st" = "healthy" ]; then echo "MariaDB healthy"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::[장치] MariaDB 컨테이너 헬스체크 시간초과"; exit 1
+
+      - name: "[장치] S2 클라이언트 설치 · 대기 (db-gate 그대로)"
+        env:
+          MYSQL_PWD: ${{ env.UI_DB_PASSWORD }}
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            if sudo timeout 240 apt-get update && sudo timeout 240 apt-get install -y mariadb-client; then ok=1; break; fi
+            echo "::warning::apt 시도 $i 실패 — 재시도"
+            sleep 10
+          done
+          if [ "$ok" != "1" ]; then echo "::error::[장치] mariadb-client 설치 3회 실패 (apt 미러)"; exit 1; fi
+          for i in $(seq 1 30); do
+            if mysql -h 127.0.0.1 -P 13306 -u root -e "SELECT 1" >/dev/null 2>&1; then echo "MariaDB ready"; exit 0; fi
+            echo "waiting for mariadb ($i)"; sleep 2
+          done
+          echo "::error::[장치] MariaDB 접속 대기 시간초과"; exit 1
+
+      - name: "[장치] S3 출하 DDL 적재 (#36)"
+        env:
+          MYSQL_PWD: ${{ env.UI_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -P 13306 -u root --default-character-set=utf8mb4 \
+            -e "CREATE DATABASE IF NOT EXISTS hitpan_ui CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          mysql -h 127.0.0.1 -P 13306 -u root --default-character-set=utf8mb4 hitpan_ui < installer/hitpan_db_clean.sql
+          n=$(mysql -h 127.0.0.1 -P 13306 -u root -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hitpan_ui';")
+          echo "적재된 표 개수: $n"
+          if [ "${n:-0}" -eq 0 ]; then echo "::error::[장치] 출하 DDL 적재 표 0개"; exit 1; fi
+
+      - name: "[장치] S4 빌드·게시 (API linux-x64 · Web → api/wwwroot)"
+        # 경고 0 확인은 build 잡 몫(중복 안 함 · §3-2 S4). 실행은 반드시 앱호스트(HitPan.API) —
+        # `dotnet HitPan.API.dll` 로 띄우면 ProcessPath 가 dotnet 이라 wwwroot·설정 후보 경로가 엇나간다(Program.cs:58~65).
+        run: |
+          set -euo pipefail
+          dotnet publish src/HitPan.API/HitPan.API.csproj -c Release -r linux-x64 --self-contained false -o "$UI_API_DIR" -v q
+          dotnet publish src/HitPan.Web/HitPan.Web.csproj -c Release -o "$RUNNER_TEMP/ui-web" -v q
+          mkdir -p "$UI_API_DIR/wwwroot"
+          cp -r "$RUNNER_TEMP/ui-web/wwwroot/." "$UI_API_DIR/wwwroot/"
+          test -f "$UI_API_DIR/wwwroot/index.html" || { echo "::error::[장치] api/wwwroot/index.html 없음"; exit 1; }
+          test -x "$UI_API_EXE" || { echo "::error::[장치] 앱호스트 HitPan.API 없음"; exit 1; }
+
+      - name: "[장치] S5 시드 ① 부모계정 (1안 · seed-parent 실물 길)"
+        run: node scripts/playwright-audit/ci/seed-parent.js
+
+      - name: "[장치] S6 API 기동 (Production · 본사 길 닫힌 포트)"
+        run: |
+          set -uo pipefail
+          # H 런 1(40722840211) 장치 빨강: API 는 떴으나 Content root = 체크아웃 폴더 · 「WebRootPath was not found」 → index.html 이 200 이 안 됐다.
+          # ⬛ [낡은 줄 · 사실과 다름 — 리뷰서 §재확인 Q-5] 고객 PC 는 서비스가 설치 폴더를 Content root 로 쓴다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0 · [4] 확인 대상).
+          # 고객 PC 는 작업 스케줄러(HitPan-Universal.iss:2990)·폴백 배치(hitpan-start.bat:78)가 api 폴더에서 띄운다 → 여기서도 앱 폴더에서 띄운다(PM 장치 고침 · 제품 코드 0).
+          ls -la "$UI_API_DIR/wwwroot" | head -5
+          cd "$UI_API_DIR"
+          nohup "$UI_API_EXE" > "$UI_OUT/main/api-stdout.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/ui-api.pid"
+          pid=$(cat "$RUNNER_TEMP/ui-api.pid")
+          code=000
+          for i in $(seq 1 90); do
+            if ! kill -0 "$pid" 2>/dev/null; then echo "::error::[장치] API 프로세스가 기동 중 끝났다"; exit 1; fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$UI_BASE/index.html" || echo 000)
+            if [ "$code" = "200" ]; then echo "API·화면 ready (${i}s)"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::[장치] API 기동 90초 시간초과 · 마지막 index.html 응답=$code"; exit 1
+
+      - name: "[장치] S5 시드 ② 자식 2 · 대화방 2 (API 기동 뒤)"
+        run: node scripts/playwright-audit/ci/seed-children.js
+
+      - name: "[장치] S7 브라우저 설치 (playwright 판 고정 1.60.0 · 3회 제한)"
+        working-directory: scripts/playwright-audit
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            if timeout 300 npm install --no-save --no-package-lock --no-audit --no-fund playwright@1.60.0; then ok=1; break; fi
+            echo "::warning::npm 시도 $i 실패"; sleep 10
+          done
+          if [ "$ok" != "1" ]; then echo "::error::[장치] playwright 설치 3회 실패"; exit 1; fi
+          ok=0
+          for i in 1 2 3; do
+            if timeout 600 npx playwright install --with-deps chromium webkit; then ok=1; break; fi
+            echo "::warning::브라우저 내려받기 시도 $i 실패"; sleep 10
+          done
+          if [ "$ok" != "1" ]; then echo "::error::[장치] 브라우저 설치 3회 실패"; exit 1; fi
+          node -e "console.log('playwright', require('playwright/package.json').version)"
+
+      - name: "[시험] S8 K35 시험 (H 단계 = 장치 점검 + 대조 단언 · K 본문은 k35-*.js)"
+        # 🔴 시험 러너를 끼우지 않는다 — 일반 node 가 표준출력에 가림 줄을 그대로 쓴다(§0-9 ⑫ⓐ).
+        # 🔴 표준출력을 업로드 폴더에 tee 하지 않는다(⑫ⓑ).
+        run: |
+          set -uo pipefail
+          rc=0
+          node scripts/playwright-audit/ci/device-check.js || rc=1
+          shopt -s nullglob
+          for f in scripts/playwright-audit/ci/k35-*.js; do
+            echo "── $f"
+            node "$f" || rc=1
+          done
+          exit $rc
+
+      - name: "[시험] S9 판정"
+        if: always()
+        run: node scripts/playwright-audit/ci/judge.js
+
+      - name: "[장치] API 멈춤 (로그 마무리)"
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/ui-api.pid" ]; then kill "$(cat "$RUNNER_TEMP/ui-api.pid")" 2>/dev/null || echo "API 이미 멈춤"; sleep 2; fi
+          c=$(grep -r -c -I "hitpan.kr" "$UI_OUT/main" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')
+          echo "API·화면 로그 안 hitpan.kr 언급 ${c}줄 (기록용 · 요청 증거 아님 · §3-4)"
+
+      - name: "[장치] S10 누출 검사 (3꼴 · zip 풀어서)"
+        id: leak
+        if: always()
+        run: node scripts/playwright-audit/ci/leak-scan.js "$UI_OUT"
+
+      - name: "[장치] S11 업로드 — 결과표·스크린샷·로그 (S10 통과분만 · 7일)"
+        if: always() && steps.leak.outcome == 'success'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ui-k35-main
+          path: ${{ env.UI_OUT }}/main
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ⬛ [뺀 단계 · 1차] "[장치] S11 업로드 — 실패 시 trace (S10 통과분만 · 포크 PR 런 제외 · 7일)" (ui-k35-trace)
+      # 🔴 2차(10/29 · 작업지시서 §0-9 항목 5 · 보안상무 안 ⓐ): trace 는 기록도 업로드도 안 한다.
+      #   로그인 칸 입력(비번 원문)·인증 헤더가 trace 에 남아 실패 런마다 S10 빨강 → main/ 까지 업로드 0 이 되기 때문.
+      #   실패 증거 = 결과표 · 스크린샷 · API 로그 · 단언 메시지(위 ui-k35-main · 모두 S10 통과분).
