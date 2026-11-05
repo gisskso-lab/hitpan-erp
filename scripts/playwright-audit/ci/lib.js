@@ -363,6 +363,21 @@ function errorName(e) {
 }
 // 🔴 6차 ② — 결과표 err 칸 상한(PM 확정 §0-11-9 · 1000자). 콘솔 상한은 지금 그대로(got 300 · OBS 1200).
 const ERR_CAP = 1000;
+// 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §4 C3·C4) — 기록 함수 입력 계약 · 메타 칸 소독 상한
+//   META_CAP = 키 칸 다섯(이름표·G·경로·브라우저·범위) · WHAT_CAP = 설명(결과 칸과 같은 300).
+//   키 칸이 가려지거나 잘리면 키가 바뀐다 → 판정기 키 틀이 「모르는 키」 빨강으로 세운다(조용히 지나가지 않음).
+const META_CAP = 120;
+const WHAT_CAP = 300;
+function meta(v) {
+  return v === null || v === undefined ? v : sanitize(String(v), META_CAP);
+}
+// 결과 칸이 참거짓이 아닐 때 던지는 예외 — 이름 고정(errorName 이 그대로 통과하는 영문 40자 이하).
+class RecContractError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RecContractError';
+  }
+}
 // 한 줄 기록 — 기존 audit 스크립트의 rec(id, what, got, pass) 꼴 + kind·scope.
 // 4차(10/29) — kind `OBS`(제품 관찰) 추가. 기록만 허용하고 **허용 id 판정은 judge.js 한 곳**(OBS_ALLOWED)이 한다
 //   — 목록 밖 id 의 OBS 줄은 judge 가 「줄 꼴 이상」 ⚫[장치] 빨강으로 세운다.
@@ -372,8 +387,21 @@ const ERR_CAP = 1000;
 function rec(r, { id, what, got, pass, kind, scope = 'H', browser = null, path: way = null, g = null, err = null }) {
   // ⬛ [낡은 줄 · 1~3차] if (kind !== 'TEST' && kind !== 'DEVICE') throw new Error(`rec: kind 는 TEST/DEVICE 뿐 (${kind})`);
   if (kind !== 'TEST' && kind !== 'DEVICE' && kind !== 'OBS') throw new Error(`rec: kind 는 TEST/DEVICE/OBS 뿐 (${kind})`);
+  // 🔴 F-PR N2(11/6 · 작업지시서 20261106작 F-PR §4 C3) — 결과 칸은 참거짓만. 아니면 **줄을 넣기 전·콘솔에 찍기 전에** 던진다.
+  //   메시지 = 소독된 이름표 + 형 이름만(값 0). 흐름 안 = 부르는 쪽 흐름 잡이가 끊김 줄(거짓)로 · 흐름 밖 = 처리 안 된 예외로 종료 코드 ≠ 0.
+  if (typeof pass !== 'boolean') {
+    const shape = pass === null ? 'null' : Array.isArray(pass) ? 'array' : typeof pass;
+    throw new RecContractError(`rec: pass 는 참거짓만 (id=${sanitize(String(id ?? '-'), META_CAP)} · 형=${shape})`);
+  }
   const cap = kind === 'OBS' ? 1200 : 300;
-  const row = { id, g, path: way, browser, what, got: sanitize(typeof got === 'string' ? got : JSON.stringify(got), cap), pass: !!pass, kind, scope };
+  // ⬛ [낡은 줄 · 1~10차] const row = { id, g, path: way, browser, what, got: sanitize(typeof got === 'string' ? got : JSON.stringify(got), cap), pass: !!pass, kind, scope };
+  //   └ 결과 칸을 !! 로 바꿔 글자 "false" 가 참으로 저장됐다(N2) · 메타 칸은 원문 그대로였다(N3).
+  // 🔴 F-PR N2·N3 — pass 그대로(위에서 참거짓 확인) · 키 칸 다섯(이름표·G·경로·브라우저·범위) = 소독 120자 · 설명 = 소독 300자.
+  const row = {
+    id: meta(id), g: meta(g), path: meta(way), browser: meta(browser),
+    what: sanitize(String(what ?? ''), WHAT_CAP),
+    got: sanitize(typeof got === 'string' ? got : JSON.stringify(got), cap), pass, kind, scope: meta(scope),
+  };
   const errs = (Array.isArray(err) ? err : [err]).filter((x) => x !== null && x !== undefined);
   if (errs.length > 0) {
     // 하나씩 소독(자르기 전 3꼴 제거) → 이어 붙인 것을 한 번 더 소독하며 1000자에서 자른다.
@@ -384,12 +412,17 @@ function rec(r, { id, what, got, pass, kind, scope = 'H', browser = null, path: 
   if (autosaved.has(r)) saveResult(r); // 5차 ① — 콘솔에 찍기 전에 파일에 먼저(찍혔는데 표에 없는 줄 0)
   if (kind === 'OBS') {
     // ⬛ [낡은 줄 · 1~5차] console.log(`🟡 OBS ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}`);
-    console.log(`🟡 OBS ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}${errTail}`);
+    // ⬛ [낡은 줄 · 6~10차] console.log(`🟡 OBS ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}${errTail}`);
+    // 🔴 F-PR N3 — 콘솔도 소독된 줄 값으로(경로 1)
+    console.log(`🟡 OBS ${row.id}${row.browser ? ` (${row.browser})` : ''} — ${row.what} · got=${row.got}${errTail}`);
     return row;
   }
-  const mark = row.pass ? '🟢 PASS' : (kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+  // ⬛ [낡은 줄 · 1~10차] const mark = row.pass ? '🟢 PASS' : (kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+  const mark = row.pass === true ? '🟢 PASS' : (kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
   // ⬛ [낡은 줄 · 1~5차] console.log(`${mark} ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}`);
-  console.log(`${mark} ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}${errTail}`);
+  // ⬛ [낡은 줄 · 6~10차] console.log(`${mark} ${id}${browser ? ` (${browser})` : ''} — ${what} · got=${row.got}${errTail}`);
+  // 🔴 F-PR N3 — 콘솔도 소독된 줄 값으로(경로 1)
+  console.log(`${mark} ${row.id}${row.browser ? ` (${row.browser})` : ''} — ${row.what} · got=${row.got}${errTail}`);
   return row;
 }
 
@@ -505,4 +538,6 @@ module.exports = {
   MASK_SKIPPED_LINE, maskProbeLines, intakeScan, // 7차 M3·M1·M4
   isClosedRouteReject, guardRoute, // 8차 외부 차단 처리기
   settlePopup, // 9차 H-T1 팝업 수명
+  // ⬛ [낡은 줄 · 9~10차] 내보내기 끝 = settlePopup
+  RecContractError, META_CAP, WHAT_CAP, // F-PR N2·N3 기록 함수 계약
 };
