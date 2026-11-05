@@ -10,6 +10,7 @@
 #   그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
 #   갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
 #   경로 거르기(paths)는 안 쓴다(§3-1). 필수 검사 지정 = 지금 안 함 · 조건 뒤 따로 결재(§0-10).
+#   🔴 F-PR(11/6 · PM 판단 C5): 자체시험 잡(ui-selftest)은 조건 없음 — 대상 PR 마다 · 수동 실행에서 돈다(짧은 잡 · 읽기 권한만).
 #
 # 실패 구분(§5): 단계 이름 머리 [장치] / [시험]. 🔴 [시험] 빨강 → 재실행 금지. [장치] 빨강 → 같은 커밋 재실행 1회까지.
 # 측정 커밋: scripts/playwright-audit/ci/plant.flags 에 `red`(심은 빨강 §4-3 ⓒ) · `leak`(누출 검사 3꼴 §0-9 ⑪). 머지 금지.
@@ -201,11 +202,12 @@ jobs:
           set -uo pipefail
           rc=0
           node scripts/playwright-audit/ci/device-check.js || rc=1
-          shopt -s nullglob
-          for f in scripts/playwright-audit/ci/k35-*.js; do
-            echo "── $f"
-            node "$f" || rc=1
-          done
+          # ⬛ [낡은 줄 · F-PR] shopt -s nullglob
+          # ⬛ [낡은 줄 · F-PR] for f in scripts/playwright-audit/ci/k35-*.js; do
+          # ⬛ [낡은 줄 · F-PR]   echo "── $f"; node "$f" || rc=1
+          # ⬛ [낡은 줄 · F-PR] done
+          # 🔴 F-PR N1 — 셸 글롭 대신 판정기와 같은 함수로 고르는 실행기(이상한 이름 = 아무것도 안 돌리고 실패)
+          node scripts/playwright-audit/ci/run-k-bodies.js || rc=1
           exit $rc
 
       - name: "[시험] S9 판정"
@@ -237,3 +239,24 @@ jobs:
       # 🔴 2차(10/29 · 작업지시서 §0-9 항목 5 · 보안상무 안 ⓐ): trace 는 기록도 업로드도 안 한다.
       #   로그인 칸 입력(비번 원문)·인증 헤더가 trace 에 남아 실패 런마다 S10 빨강 → main/ 까지 업로드 0 이 되기 때문.
       #   실패 증거 = 결과표 · 스크린샷 · API 로그 · 단언 메시지(위 ui-k35-main · 모두 S10 통과분).
+
+  # 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §4 C5 · 상신-L16) — 장치 자체시험 별도 잡.
+  #   조건 없음(대상 PR 전부 + 수동 실행) · 권한 읽기만 · 비밀값·환경 등록 0 · 브라우저·DB·네트워크 0 · 필수 검사 지정 안 함.
+  #   체크아웃은 위 잡과 같은 꼴(자격증명 보존 기본값은 별건 전수에서 다룬다 · 이 잡 1칸 기록).
+  #   레포 위치 그대로 실행한다(사본 실행이면 워크플로 셈 칸이 대상을 못 찾는다).
+  ui-selftest:
+    name: ui-selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: "[장치] 자체시험 작업 폴더"
+        run: mkdir -p "$RUNNER_TEMP/selftest-work"
+
+      - name: "[장치] 장치 자체시험 (누출 검사 · 기록 함수 · 판정기 · 실행기)"
+        run: node scripts/playwright-audit/ci/leak-scan.selftest.js "$RUNNER_TEMP/selftest-work"
