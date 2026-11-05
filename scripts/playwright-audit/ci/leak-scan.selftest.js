@@ -67,6 +67,13 @@
 //   C18d 정상 줄(실물 꼴 · toJSON(github.event) · github.repository·sha · $GITHUB_ENV · 통째 주석 속 낱말) → 잡힘 0 · 통과 줄 1 = 대조 줄
 //   C18e 알고 받는 오탐(조건식 속 트리거 낱말 1줄) → 잡힘 정확히 1(트리거)
 //   합성 값(인증 머리글 꼴·점 셋 꼴·식 안 이름)은 전부 실행 중 16진·조각 이어 붙이기로 만든다 — 파일 글자에 자격증명 모양 0.
+// 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §6) — 경우 20개 더함(64 → 84) · 칸 이름 머리 `F-`(10차 C18a~e 와 겹치지 않게).
+//   고치기 전 장치(main)에 붙이면 F-C18d · F-C19b · F-C20c · F-C21c · F-C21d 다섯만 초록(대조 줄) · 나머지 15 빨강 = 69/84.
+//   F-C18a~d N1 K 본문 이름 — 선택(실행기)과 계수(판정기)가 한 규칙 · 경계 꼴은 이상 쪽(사본 폴더 · 함수 단독 · 실행기 --dir)
+//   F-C19a~d N2 기록 함수 결과 칸 계약 — 참거짓 아니면 줄 넣기 전에 던짐 · 흐름 밖 종료 코드 ≠ 0 · 흐름 잡이 안 끊김 줄 1
+//   F-C20a~d N3 메타 칸 소독 — 콘솔 · 결과표 · 판정기 좋은 줄 · 시드 · 외부 호스트 · 키 칸 상한 경계
+//   F-C21a~h 상신-L14 판정기 H 기대 키 틀 — 누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리(양성 두 벌 = 관찰 갈래 · 일반 갈래)
+//   H 결과표 생성기는 판정기 상수를 읽지 않고 참고 런 키를 따로 적는다(자기 증명 0).
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1262,6 +1269,267 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     await c16Tick();
     const outside = urAll - urInWin;
     check('C16z 창 밖 받는 곳 없는 거절 = 전체 − 창 안 합 = 0(V9-R2 · 대조 줄)', outside === 0, `전체 ${urAll} · 창 안 ${urInWin} · 창 밖 ${outside}`);
+  }
+  // ── 🔴 F-PR(11/6 · 작업지시서 20261106작 F-PR §6) 새 20칸 — 칸 이름 머리 `F-`(위 10차 C18a~e 와 겹치지 않게) ──
+  //   전부 동기 · 자식 프로세스 env 는 run() 처럼 새로 만든다(GITHUB_ACTIONS · GITHUB_ENV 0) · 작업 폴더 = work/fpr 아래.
+  //   H 결과표 생성기는 판정기 상수를 읽지 않는다(같은 상수로 만들면 틀이 틀려도 초록 = 자기 증명) — 참고 런 키를 여기 따로 적는다.
+  {
+    const F_CI = __dirname;
+    const F_LIB = path.join(F_CI, 'lib.js');
+    const F_JUDGE = path.join(F_CI, 'judge.js');
+    const F_RUNNER = path.join(F_CI, 'run-k-bodies.js');
+    const fK = (mid) => ['k35', '-', mid, '.js'].join(''); // K 본문 꼴 이름(작업 폴더 안에서만 만든다)
+    const fEnvBase = () => ({ PATH: process.env.PATH, SystemRoot: process.env.SystemRoot });
+    const fNode = (args, envPatch = {}) => {
+      const x = spawnSync(process.execPath, args, { env: { ...fEnvBase(), ...envPatch }, encoding: 'utf8' });
+      return { code: x.status, out: `${x.stdout || ''}${x.stderr || ''}` };
+    };
+    const fDir = (name) => {
+      const d = path.join(work, 'fpr', name);
+      fs.rmSync(d, { recursive: true, force: true });
+      fs.mkdirSync(d, { recursive: true });
+      return d;
+    };
+    const fTable = (name, rows, extra = {}) => {
+      const o = fDir(name);
+      fs.mkdirSync(path.join(o, 'main'), { recursive: true });
+      fs.writeFileSync(path.join(o, 'main', 'ui-k35-result.json'),
+        JSON.stringify({ schema: 'ui-k35-result/1', seed: null, external_blocked: 0, external_hosts: [], rows, ...extra }));
+      return o;
+    };
+    const fReadRows = (o) => JSON.parse(fs.readFileSync(path.join(o, 'main', 'ui-k35-result.json'), 'utf8')).rows;
+    const fCopy = (name, kFiles = {}) => {
+      const d = fDir(name);
+      for (const f of ['judge.js', 'lib.js', 'leak-scan.js']) fs.copyFileSync(path.join(F_CI, f), path.join(d, f));
+      for (const [n, body] of Object.entries(kFiles)) fs.writeFileSync(path.join(d, n), body);
+      return d;
+    };
+    const fChild = (name, code, envPatch = {}) => {
+      const o = fDir(name);
+      const x = fNode(['-e', code], { F_LIB, UI_OUT: o, ...envPatch });
+      return { ...x, o };
+    };
+    // 참고 런 24행 키(범위 H · 브라우저 없음 5 + 두 브라우저 7×2 + 첫 브라우저만 2 + 갈래 묶음) — 판정기 상수와 따로 적는다.
+    const fRow = (id, kind, browser = null, pass = true) => ({ id, g: null, path: null, browser, what: 'f', got: 'f', pass, kind, scope: 'H' });
+    const fBranch = (b, how) => {
+      if (how === 'obs') return [fRow('H-OBS-TERMS', 'OBS', b, false), fRow('H-D2b', 'DEVICE', b)];
+      if (how === 'normal') return [fRow('H-D2', 'DEVICE', b)];
+      if (how === 'both') return [fRow('H-OBS-TERMS', 'OBS', b, false), fRow('H-D2b', 'DEVICE', b), fRow('H-D2', 'DEVICE', b)];
+      return []; // 'none'
+    };
+    const fHRows = (cHow = 'obs', wHow = 'normal') => [
+      fRow('H-S5a', 'DEVICE'), fRow('H-S5b', 'DEVICE'), fRow('H-S5c', 'DEVICE'),
+      fRow('H-D1', 'DEVICE', 'chromium'), ...fBranch('chromium', cHow), fRow('H-D2c', 'DEVICE', 'chromium'),
+      fRow('H-BRIEF', 'DEVICE', 'chromium'), fRow('H-D3', 'DEVICE', 'chromium'), fRow('H-T1', 'TEST', 'chromium'),
+      fRow('H-T1w', 'DEVICE', 'chromium'), fRow('H-T2r', 'TEST', 'chromium'), fRow('H-T2', 'TEST', 'chromium'), fRow('H-D4', 'DEVICE', 'chromium'),
+      fRow('H-D1', 'DEVICE', 'webkit'), ...fBranch('webkit', wHow), fRow('H-D2c', 'DEVICE', 'webkit'),
+      fRow('H-BRIEF', 'DEVICE', 'webkit'), fRow('H-D3', 'DEVICE', 'webkit'), fRow('H-T1', 'TEST', 'webkit'),
+      fRow('H-T1w', 'DEVICE', 'webkit'), fRow('H-D4', 'DEVICE', 'webkit'),
+      fRow('H-RC', 'DEVICE'), fRow('H-NA-END', 'DEVICE'),
+    ];
+    const K_OK_BODY = "process.stdout.write('F18-RAN-OK\\n');\n";
+    const K_ODD_BODY = "process.stdout.write('F18-RAN-ODD\\n');\n";
+
+    // N1 — 선택(S8)과 계수(판정기)가 한 규칙인가
+    { // F-C18a 이상한 이름(사본 폴더) + H 전 키 → 사본 판정기 빨강
+      const d = fCopy('c18a', { [fK('')]: K_ODD_BODY });
+      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18a-out', fHRows()) });
+      check('F-C18a N1 K 본문 이름 꼴 이상(사본 폴더) + H 전 키 → 사본 판정기 rc 1 · 「이름 꼴 이상」', x.code === 1 && /이름 꼴 이상/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C18b 공용 분류 함수 단독 — 경계 꼴 둘(하나는 리눅스에서만 만들 수 있는 이름) → 이상 쪽
+      let ok = false;
+      let why = '함수 없음';
+      const J = require(F_JUDGE);
+      if (typeof J.classifyKNames === 'function') {
+        const c = J.classifyKNames([fK(''), fK('a\nb'), fK('ok'), 'x.js']);
+        ok = Array.isArray(c.odd) && Array.isArray(c.run) && c.odd.length === 2 && c.run.length === 1 && c.run[0] === fK('ok');
+        why = `실행 ${c.run.length} · 이상 ${c.odd.length}`;
+      }
+      check('F-C18b N1 공용 분류 함수 단독 · 경계 꼴 둘 → 이상 2 · 실행 1', ok, why);
+    }
+    { // F-C18c 실행기 — 이상 이름이 있으면 아무것도 안 돌고 실패 · 정상 이름만이면 1개 실행
+      let ok = false;
+      let why = '실행기 없음';
+      if (fs.existsSync(F_RUNNER)) {
+        const d1 = fDir('c18c-1');
+        fs.writeFileSync(path.join(d1, fK('')), K_ODD_BODY);
+        fs.writeFileSync(path.join(d1, fK('ok')), K_OK_BODY);
+        const a = fNode([F_RUNNER, '--dir', d1]);
+        const d2 = fDir('c18c-2');
+        fs.writeFileSync(path.join(d2, fK('ok')), K_OK_BODY);
+        const b = fNode([F_RUNNER, '--dir', d2]);
+        const ranA = (a.out.match(/F18-RAN-/g) || []).length;
+        const ranB = (b.out.match(/F18-RAN-OK/g) || []).length;
+        ok = a.code === 1 && ranA === 0 && b.code === 0 && ranB === 1 && !/F18-RAN-ODD/.test(b.out);
+        why = `이상 섞임 rc=${a.code} 실행 ${ranA} · 정상만 rc=${b.code} 실행 ${ranB}`;
+      }
+      check('F-C18c N1 실행기 · 이상 이름 → 실행 0 · rc 1 / 정상 이름만 → 1개 실행 · rc 0', ok, why);
+    }
+    { // F-C18d 양성 대조 — 정상 꼴 이름 1개가 판정기에 K 본문 1개로 세어짐(종료 코드는 안 본다)
+      const d = fCopy('c18d', { [fK('ok')]: K_OK_BODY });
+      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18d-out', fHRows()) });
+      check('F-C18d N1 양성 · 정상 꼴 이름 1개 → 판정기 「K 본문 파일 1」(종료 코드 무관 · 대조 줄)', /K 본문 파일 1\)/.test(x.out), `rc=${x.code}`);
+    }
+
+    // N2 — 기록 함수 입력 계약(결과 칸 = 참거짓만 · 아니면 줄 넣기 전에 던짐)
+    { // F-C19a 참거짓 아닌 11꼴 → 전부 던짐 · 결과표 줄 0 · 콘솔 PASS 0 · 메시지 = 이름표 + 형 이름만
+      const code = [
+        'const L = require(process.env.F_LIB); const r = L.loadResult(); L.bindAutosave(r);',
+        "const vals = ['false', 1, 0, {}, [], '0', 'no', '', null, undefined, Promise.resolve(true)];",
+        'const out = [];',
+        "for (const v of vals) { try { L.rec(r, { id: 'H-F19A', what: 'w', got: 'g', pass: v, kind: 'TEST' }); out.push({ t: false }); }",
+        '  catch (e) { out.push({ t: true, n: String(e && e.name), m: String(e && e.message) }); } }',
+        "process.stdout.write('F19A-OUT ' + JSON.stringify(out) + '\\n');",
+      ].join('\n');
+      const x = fChild('c19a', code);
+      const line = x.out.split('\n').find((s) => s.startsWith('F19A-OUT '));
+      const got = line ? JSON.parse(line.slice('F19A-OUT '.length)) : [];
+      const types = ['string', 'number', 'number', 'object', 'array', 'string', 'string', 'string', 'null', 'undefined', 'object'];
+      const msgOk = got.length === 11 && got.every((g, i) => g.t === true && g.n === 'RecContractError'
+        && g.m === `rec: pass 는 참거짓만 (id=H-F19A · 형=${types[i]})`);
+      const rows = fs.existsSync(path.join(x.o, 'main', 'ui-k35-result.json')) ? fReadRows(x.o).length : -1;
+      const rest = x.out.split('\n').filter((s) => !s.startsWith('F19A-OUT ')).join('\n');
+      check('F-C19a N2 참거짓 아닌 11꼴 → 전부 던짐(RecContractError · 메시지 = 이름표+형만) · 결과표 줄 0 · 콘솔 PASS 0',
+        msgOk && rows === 0 && !/PASS/.test(rest), `던짐 ${got.filter((g) => g.t).length}/11 · 꼴 맞음=${msgOk} · 결과표 줄 ${rows}`);
+    }
+    { // F-C19b 양성 — 참·거짓은 그대로 · 콘솔 표지 그대로
+      const capt = [];
+      const so = console.log;
+      let rows = [];
+      let why = '';
+      console.log = (s) => capt.push(String(s));
+      try {
+        const r = { rows: [] };
+        L.rec(r, { id: 'H-F19B', what: 'w', got: 'g', pass: true, kind: 'TEST' });
+        L.rec(r, { id: 'H-F19B', what: 'w', got: 'g', pass: false, kind: 'TEST' });
+        rows = r.rows;
+      } catch (e) {
+        why = `예외=${L.errorName(e)}`;
+      } finally {
+        console.log = so;
+      }
+      const ok = rows.length === 2 && rows[0].pass === true && rows[1].pass === false
+        && capt.length === 2 && capt[0].startsWith('🟢 PASS H-F19B') && capt[1].startsWith('🔴 FAIL [시험] H-F19B');
+      check('F-C19b N2 양성 · 참·거짓 그대로 · 콘솔 🟢/🔴(대조 줄)', ok, why || `줄 ${rows.length} · 콘솔 ${capt.length}`);
+    }
+    { // F-C19c 흐름 밖(처리기 없음) 위반 → 종료 코드 ≠ 0
+      const code = [
+        'const L = require(process.env.F_LIB); const r = L.loadResult(); L.bindAutosave(r);',
+        "L.rec(r, { id: 'H-F19C', what: 'w', got: 'g', pass: 'false', kind: 'TEST' });",
+      ].join('\n');
+      const x = fChild('c19c', code);
+      check('F-C19c N2 흐름 밖 위반(처리기 없음) → 종료 코드 ≠ 0 · 콘솔 PASS 0', x.code !== 0 && x.code !== null && !/PASS/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C19d 흐름 잡이 꼴 안 위반 → 끊김 줄 1 · 판정기 rc 1
+      const code = [
+        'const L = require(process.env.F_LIB); const r = L.loadResult(); L.bindAutosave(r);',
+        "const tag = { scope: 'H', browser: 'chromium' };",
+        "try { L.rec(r, { ...tag, id: 'H-T1', what: 'w', got: 'g', pass: 'false', kind: 'TEST' }); }",
+        "catch (e) { L.rec(r, { ...tag, id: 'H-DX', what: '[장치] 흐름 끊김', got: '@', pass: false, kind: 'DEVICE', err: e }); }",
+      ].join('\n');
+      const x = fChild('c19d', code);
+      const rows = fs.existsSync(path.join(x.o, 'main', 'ui-k35-result.json')) ? fReadRows(x.o) : [];
+      const dx = rows.filter((w) => w.id === 'H-DX').length;
+      const t1 = rows.filter((w) => w.id === 'H-T1').length;
+      const j = fNode([F_JUDGE], { UI_OUT: x.o });
+      check('F-C19d N2 흐름 잡이 꼴 안 위반 → 끊김 줄 1 · 위반 줄 0 · 판정기 rc 1', dx === 1 && t1 === 0 && j.code === 1, `끊김 ${dx} · 위반 줄 ${t1} · 판정 rc=${j.code}`);
+    }
+
+    // N3 — 메타 칸 소독(경로 1 콘솔 · 2 결과표 · 3 판정기 좋은 줄 · 5 시드 · 6 외부 호스트)
+    const F20_LABEL = 'UI_SECRET_SELFTEST_C20_1_ABCDEF';
+    const F20_VALUE = `SELFTEST_C20 #${hex()}/${hex()}~${hex()}+${hex()}`;
+    const f20Enc = encodeURIComponent(F20_VALUE);
+    const f20Needles = [F20_VALUE, f20Enc, f20Enc.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase()), b64Mid(F20_VALUE, 0).mid];
+    const f20Mix = (head) => `${head}-${F20_VALUE}|${f20Enc}|${Buffer.from(F20_VALUE, 'utf8').toString('base64')}`;
+    const f20Clean = (s) => f20Needles.every((n) => !s.includes(n));
+    const f20Payload = { id: f20Mix('H'), what: f20Mix('w'), browser: f20Mix('b'), path: f20Mix('p'), g: f20Mix('G'), scope: f20Mix('s'), got: f20Mix('got') };
+    let f20Out = null;
+    { // F-C20a 가짜 등록값을 메타 6칸에 → 콘솔 · 결과표에 꼴 0 · 가림 표지 있음
+      const code = [
+        'const L = require(process.env.F_LIB); const r = L.loadResult(); L.bindAutosave(r);',
+        'const P = JSON.parse(process.env.F_PAYLOAD);',
+        "L.rec(r, { id: P.id, what: P.what, got: P.got, pass: true, kind: 'TEST', browser: P.browser, path: P.path, g: P.g, scope: P.scope });",
+      ].join('\n');
+      const x = fChild('c20a', code, { [F20_LABEL]: F20_VALUE, F_PAYLOAD: JSON.stringify(f20Payload) });
+      f20Out = x.o;
+      const file = fs.existsSync(path.join(x.o, 'main', 'ui-k35-result.json')) ? fs.readFileSync(path.join(x.o, 'main', 'ui-k35-result.json'), 'utf8') : '';
+      const ok = x.code === 0 && file.length > 0 && f20Clean(x.out) && f20Clean(file) && x.out.includes('***') && file.includes('***');
+      check('F-C20a N3 가짜 등록값 → 메타 6칸 · 콘솔 · 결과표에 원문·URL·base64 꼴 0 · 가림 표지 있음', ok,
+        `rc=${x.code} · 콘솔 꼴 0=${f20Clean(x.out)} · 결과표 꼴 0=${f20Clean(file)}`);
+    }
+    { // F-C20b 같은 값을 결과표 줄(직접 기록) · 시드 두 칸 · 외부 호스트에 → 판정기 출력 꼴 0
+      const raw = { id: f20Mix('H'), g: f20Mix('G'), path: f20Mix('p'), browser: f20Mix('b'), scope: f20Mix('s'), what: 'w', got: 'g', pass: true, kind: 'TEST' };
+      const rows = [...(f20Out && fs.existsSync(path.join(f20Out, 'main', 'ui-k35-result.json')) ? fReadRows(f20Out) : []), raw];
+      const o = fTable('c20b', rows, { seed: { mode: f20Mix('m'), path: f20Mix('sp') }, external_blocked: 1, external_hosts: [f20Mix('h1'), f20Mix('h2')] });
+      const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      check('F-C20b N3 판정기 좋은 줄 · 시드 줄 · 외부 호스트 줄 → 꼴 0', f20Clean(x.out) && x.out.includes('***'), `rc=${x.code} · 꼴 0=${f20Clean(x.out)}`);
+    }
+    { // F-C20c 대조 — 결과 칸(got)은 지금도 가림
+      const rows = f20Out && fs.existsSync(path.join(f20Out, 'main', 'ui-k35-result.json')) ? fReadRows(f20Out) : [];
+      const g = rows.length === 1 ? String(rows[0].got) : '';
+      check('F-C20c N3 결과 칸 = 가림(대조 줄)', g.length > 0 && f20Clean(g) && g.includes('***'), `줄 ${rows.length}`);
+    }
+    { // F-C20d 상한 경계 — 키 칸 120 그대로 · 121 잘림 표지
+      const id120 = `H${'a'.repeat(119)}`;
+      const id121 = `H${'a'.repeat(120)}`;
+      const so = console.log;
+      let rows = [];
+      let why = '';
+      console.log = () => {};
+      try {
+        const r = { rows: [] };
+        L.rec(r, { id: id120, what: 'w', got: 'g', pass: true, kind: 'DEVICE' });
+        L.rec(r, { id: id121, what: 'w', got: 'g', pass: true, kind: 'DEVICE' });
+        rows = r.rows;
+      } catch (e) {
+        why = `예외=${L.errorName(e)}`;
+      } finally {
+        console.log = so;
+      }
+      const ok = rows.length === 2 && rows[0].id === id120 && rows[1].id !== id121
+        && String(rows[1].id).startsWith(id121.slice(0, 120)) && String(rows[1].id).includes('…');
+      check('F-C20d N3 키 칸 상한 경계 · 120자 그대로 · 121자 잘림 표지', ok, why || `줄 ${rows.length}`);
+    }
+
+    // 상신-L14 — 판정기 H 기대 키 틀(누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리)
+    const fJ = (name, rows) => fNode([F_JUDGE], { UI_OUT: fTable(name, rows) });
+    { // F-C21a H 한 행
+      const x = fJ('c21a', [fRow('H-T1', 'TEST', 'chromium')]);
+      check('F-C21a L14 H 한 행 → rc 1 · 누락 > 0', x.code === 1 && /키 틀: 누락 [1-9]/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21b 같은 행 두 번
+      const x = fJ('c21b', [...fHRows(), fRow('H-T1', 'TEST', 'chromium')]);
+      check('F-C21b L14 전 키 + 한 행 중복 → rc 1 · 중복 1', x.code === 1 && /중복 1 /.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21c 양성 — 전 키(첫 브라우저 관찰 갈래 · 둘째 일반 갈래)
+      const x = fJ('c21c', fHRows('obs', 'normal'));
+      check('F-C21c L14 양성 · 전 키(관찰 갈래 + 일반 갈래) → rc 0(대조 줄)', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21d 양성 — 약관 고친 뒤 꼴(두 브라우저 다 일반 갈래 · 관찰 0)
+      const x = fJ('c21d', fHRows('normal', 'normal'));
+      check('F-C21d L14 양성 · 두 브라우저 일반 갈래 · 관찰 0 → rc 0(대조 줄)', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21e 브라우저별 필수 하나 뺌
+      const rows = fHRows().filter((w) => !(w.id === 'H-D3' && w.browser === 'webkit'));
+      const x = fJ('c21e', rows);
+      check('F-C21e L14 둘째 브라우저 필수 하나 뺌 → rc 1 · 누락 1', x.code === 1 && /키 틀: 누락 1 /.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21f 한 브라우저 두 갈래 / 갈래 없음 — 두 벌
+      const a = fJ('c21f-1', fHRows('both', 'normal'));
+      const b = fJ('c21f-2', fHRows('obs', 'none'));
+      const ok = a.code === 1 && /갈래 [1-9]/.test(a.out) && b.code === 1 && /갈래 [1-9]/.test(b.out);
+      check('F-C21f L14 한 브라우저 두 갈래 / 갈래 없음 → 둘 다 rc 1 · 갈래', ok, `두 갈래 rc=${a.code} · 갈래 없음 rc=${b.code}`);
+    }
+    { // F-C21g 모르는 H 키
+      const x = fJ('c21g', [...fHRows(), fRow('H-ZZ', 'DEVICE')]);
+      check('F-C21g L14 모르는 H 키 → rc 1 · 모르는 1', x.code === 1 && /모르는 1 /.test(x.out), `rc=${x.code}`);
+    }
+    { // F-C21h K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → 빨강
+      const d = fCopy('c21h', { [fK('ok')]: K_OK_BODY });
+      const gRow = { id: 'G-F21H', g: 'G-F21H', path: null, browser: 'chromium', what: 'f', got: 'f', pass: true, kind: 'TEST', scope: 'G' };
+      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c21h-out', [...fHRows(), gRow]) });
+      check('F-C21h L14 K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → rc 1 · G 자리 비었음', x.code === 1 && /G 자리 비었음/.test(x.out), `rc=${x.code}`);
+    }
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);
