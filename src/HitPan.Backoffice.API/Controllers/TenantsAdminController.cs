@@ -76,7 +76,11 @@ public class TenantsAdminController : ControllerBase
                 ORDER BY created_at DESC
                 LIMIT 500";
 
-            var rows = await db.QueryAsync<TenantRow>(sql, param);
+            var rows = (await db.QueryAsync<TenantRow>(sql, param)).AsList();
+            // 🔴 20261102작 (설계 §3): 「ERP 설치」 판정은 둘째 문장이 맡는다. 실패해도 목록은 산다.
+            await TenantInstallStateReader.FillAsync(db, rows, _logger, ct);
+            // 🔴 지시서 §8-2: 시각은 고객 1건을 볼 때만 내보낸다. 목록은 칩만 쓰므로 전 고객분을 한 응답에 싣지 않는다.
+            foreach (var row in rows) row.LastErpStartAt = null;
             return Ok(new { success = true, items = rows });
         }
         catch (Exception ex)
@@ -144,6 +148,10 @@ public class TenantsAdminController : ControllerBase
                 ORDER BY created_at DESC
                 LIMIT 10",
                 new { row.CompanyName });
+
+            // 🔴 20261102작 (설계 §3 · 지시서 §8-1): 목록과 같은 판정 한 벌. 실패해도 상세는 산다.
+            //    결제 조회 뒤라야 한다 — 판정 중 연결이 끊기면 같은 연결의 다음 문장이 던져 상세가 500 이 된다(G-6ⓔ).
+            await TenantInstallStateReader.FillAsync(db, new[] { row }, _logger, ct);
 
             return Ok(new { success = true, item = row, payments });
         }
@@ -371,6 +379,11 @@ public class TenantsAdminController : ControllerBase
         public DateTime? TrialEndsAt { get; set; }
         public DateTime? BootstrapAt { get; set; }
         public DateTime CreatedAt { get; set; }
+        // 🔴 20261102작 (설계 §4): 첫 SELECT 가 아니라 TenantInstallStateReader 가 채운다.
+        //   null = 판정 못 함(화면 「확인 불가」) — 「미설치」(none) 와 다르다.
+        public string? InstallState { get; set; }
+        // 최근 ERP 기동 보고 시각(UTC). 설치 시각이 아니다.
+        public DateTime? LastErpStartAt { get; set; }
     }
 
     public class TenantDetailRow : TenantRow

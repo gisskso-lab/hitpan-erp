@@ -1,0 +1,1545 @@
+{
+ "schema": "x733c-verdict/1",
+ "verdict": "같음",
+ "label": "같음(비교 항목 24개)",
+ "exit_code": 0,
+ "compared_items": 24,
+ "header_notes": [
+  "🔴 합성 대조군 ② 생존 = 장치가 「`--` 바로 뒤 줄바꿈 다음 줄의 매개변수」라는 **그 특정 차이**를 잡는다는 증거일 뿐이다. 실제 SQL 집합 전체에서 차이가 없다는(누락 없음) 증명이 아니다.",
+  "🔴 「같음(비교 항목 N개)」 = 아래 표의 N개 항목이 칸 사이 같다는 뜻뿐이다. 「정상 적용」「호환」「안전」 판정이 아니다. 같은 거부 · 같은 적용 수는 「같다」 일 뿐 「정상」 이 아니다.",
+  "🔴 항목마다 「보장하는 범위 / 못 보는 범위」 를 함께 읽는다. 못 보는 범위는 이 런이 재지 않은 것이다.",
+  "🔴 무효여도 네 칸 원결과 · 실제 로드된 조립품 판 · 줄끝 증거는 칸 산출물(x733c-cell-*)에 그대로 남는다."
+ ],
+ "invalid_reasons": [],
+ "cells": {
+  "mariadb-2.5.0-crlf": {
+   "id": "mariadb-2.5.0-crlf",
+   "folder": "x733c-cell-mariadb-2.5.0-crlf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 8파일 8줄",
+     "ok": true,
+     "detail": "8줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e"
+    },
+    {
+     "check": "판 증거 ④ NU1902 ≥ 1",
+     "ok": true,
+     "detail": "nu1902=4 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=crlf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (erp) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(erp)",
+     "ok": true,
+     "detail": "113파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 G-W13-5 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "G-W13-5 방식 측정 수 ≥ 100 · = 파일 수",
+     "ok": true,
+     "detail": "113/113"
+    },
+    {
+     "check": "측정 시험 깨짐 집합 = G-W13-5 명단",
+     "ok": true,
+     "detail": "[\"DB-02\", \"DB-09\", \"DB-16\", \"DB-20\", \"DB-27\", \"DB-34\", \"DB-35\", \"DB-36\", \"DB-37\", \"DB-38\"]"
+    },
+    {
+     "check": "바닥 ① ERP len(files) = all_count = measured",
+     "ok": true,
+     "detail": "files=113 · all_count=113 · measured=113"
+    },
+    {
+     "check": "바닥 ② ERP 깨지지 않은 파일 회차마다 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "빈 회차 0: "
+    },
+    {
+     "check": "바닥 ③ ERP 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=3081 · count=3081"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=49"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"
+    }
+   ],
+   "runtime_informational_version": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e",
+   "eol_mode": "crlf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "4",
+    "nu1902_all_packages": "4",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+    "pinned": "true",
+    "repo_digests": "[\"mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620\"]",
+    "image_id": "sha256:1d2b32fbc13a8ed222b073036d268b669ddb1396e6b8f35b41e5b1b08ac15ea1"
+   },
+   "control2_outcome": "a=7,b=7",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\r\n, 7 AS b"
+   ],
+   "control2b_outcome": {
+    "id": "DB-9999zzx733c",
+    "pass": 1,
+    "ok": true,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": null,
+    "runner_msg1": null,
+    "ex_type": null,
+    "err_no": null,
+    "sqlstate": null,
+    "ex_msg1": null,
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "control1_db16": {
+    "id": "DB-16",
+    "pass": 1,
+    "ok": false,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": "DB-16",
+    "runner_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "ex_type": "MySqlConnector.MySqlException",
+    "err_no": -3,
+    "sqlstate": null,
+    "ex_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     },
+     {
+      "sha256": "f24a1a151262d42914ab93be08c865384e76af244c754a33b26b0b4c2fc4df78",
+      "len": 10372
+     },
+     {
+      "sha256": "40cec2f3c0eb1c9b0434fdabc38c44af767b5ee88267824def1536deb57ff756",
+      "len": 383
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "general_log_argument": {
+    "data_type": "mediumtext",
+    "charset": "utf8mb3"
+   }
+  },
+  "mariadb-2.5.0-lf": {
+   "id": "mariadb-2.5.0-lf",
+   "folder": "x733c-cell-mariadb-2.5.0-lf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 8파일 8줄",
+     "ok": true,
+     "detail": "8줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e"
+    },
+    {
+     "check": "판 증거 ④ NU1902 ≥ 1",
+     "ok": true,
+     "detail": "nu1902=4 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=lf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (erp) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(erp)",
+     "ok": true,
+     "detail": "113파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 G-W13-5 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "G-W13-5 방식 측정 수 ≥ 100 · = 파일 수",
+     "ok": true,
+     "detail": "113/113"
+    },
+    {
+     "check": "측정 시험 깨짐 집합 = G-W13-5 명단",
+     "ok": true,
+     "detail": "[\"DB-02\", \"DB-09\", \"DB-16\", \"DB-20\", \"DB-27\", \"DB-34\", \"DB-35\", \"DB-36\", \"DB-37\", \"DB-38\"]"
+    },
+    {
+     "check": "바닥 ① ERP len(files) = all_count = measured",
+     "ok": true,
+     "detail": "files=113 · all_count=113 · measured=113"
+    },
+    {
+     "check": "바닥 ② ERP 깨지지 않은 파일 회차마다 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "빈 회차 0: "
+    },
+    {
+     "check": "바닥 ③ ERP 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=3081 · count=3081"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=49"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"
+    }
+   ],
+   "runtime_informational_version": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e",
+   "eol_mode": "lf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "4",
+    "nu1902_all_packages": "4",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+    "pinned": "true",
+    "repo_digests": "[\"mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620\"]",
+    "image_id": "sha256:1d2b32fbc13a8ed222b073036d268b669ddb1396e6b8f35b41e5b1b08ac15ea1"
+   },
+   "control2_outcome": "a=7,b=7",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\n, 7 AS b"
+   ],
+   "control2b_outcome": {
+    "id": "DB-9999zzx733c",
+    "pass": 1,
+    "ok": true,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": null,
+    "runner_msg1": null,
+    "ex_type": null,
+    "err_no": null,
+    "sqlstate": null,
+    "ex_msg1": null,
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "control1_db16": {
+    "id": "DB-16",
+    "pass": 1,
+    "ok": false,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": "DB-16",
+    "runner_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "ex_type": "MySqlConnector.MySqlException",
+    "err_no": -3,
+    "sqlstate": null,
+    "ex_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     },
+     {
+      "sha256": "bdb0a7a5a078b7af94f9584fbee6e8fea065c052a55ea750b55cc6ee351c737d",
+      "len": 10200
+     },
+     {
+      "sha256": "4428ddc265ea517daca8c858401d4941ca4c7eee5085bbb479bf4a2f396c5570",
+      "len": 383
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "general_log_argument": {
+    "data_type": "mediumtext",
+    "charset": "utf8mb3"
+   }
+  },
+  "mariadb-2.6.2-crlf": {
+   "id": "mariadb-2.6.2-crlf",
+   "folder": "x733c-cell-mariadb-2.6.2-crlf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 0",
+     "ok": true,
+     "detail": "0줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4"
+    },
+    {
+     "check": "판 증거 ④ NU1902 = 0",
+     "ok": true,
+     "detail": "nu1902=0 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=crlf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (erp) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(erp)",
+     "ok": true,
+     "detail": "113파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 G-W13-5 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "G-W13-5 방식 측정 수 ≥ 100 · = 파일 수",
+     "ok": true,
+     "detail": "113/113"
+    },
+    {
+     "check": "측정 시험 깨짐 집합 = G-W13-5 명단",
+     "ok": true,
+     "detail": "[\"DB-02\", \"DB-09\", \"DB-16\", \"DB-20\", \"DB-27\", \"DB-34\", \"DB-35\", \"DB-36\", \"DB-37\", \"DB-38\"]"
+    },
+    {
+     "check": "바닥 ① ERP len(files) = all_count = measured",
+     "ok": true,
+     "detail": "files=113 · all_count=113 · measured=113"
+    },
+    {
+     "check": "바닥 ② ERP 깨지지 않은 파일 회차마다 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "빈 회차 0: "
+    },
+    {
+     "check": "바닥 ③ ERP 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=3081 · count=3081"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=49"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"
+    }
+   ],
+   "runtime_informational_version": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4",
+   "eol_mode": "crlf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "0",
+    "nu1902_all_packages": "0",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+    "pinned": "true",
+    "repo_digests": "[\"mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620\"]",
+    "image_id": "sha256:1d2b32fbc13a8ed222b073036d268b669ddb1396e6b8f35b41e5b1b08ac15ea1"
+   },
+   "control2_outcome": "a=7,b=7",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\r\n, 7 AS b"
+   ],
+   "control2b_outcome": {
+    "id": "DB-9999zzx733c",
+    "pass": 1,
+    "ok": true,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": null,
+    "runner_msg1": null,
+    "ex_type": null,
+    "err_no": null,
+    "sqlstate": null,
+    "ex_msg1": null,
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "control1_db16": {
+    "id": "DB-16",
+    "pass": 1,
+    "ok": false,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": "DB-16",
+    "runner_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "ex_type": "MySqlConnector.MySqlException",
+    "err_no": -3,
+    "sqlstate": null,
+    "ex_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     },
+     {
+      "sha256": "f24a1a151262d42914ab93be08c865384e76af244c754a33b26b0b4c2fc4df78",
+      "len": 10372
+     },
+     {
+      "sha256": "40cec2f3c0eb1c9b0434fdabc38c44af767b5ee88267824def1536deb57ff756",
+      "len": 383
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "general_log_argument": {
+    "data_type": "mediumtext",
+    "charset": "utf8mb3"
+   }
+  },
+  "mariadb-2.6.2-lf": {
+   "id": "mariadb-2.6.2-lf",
+   "folder": "x733c-cell-mariadb-2.6.2-lf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 0",
+     "ok": true,
+     "detail": "0줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4"
+    },
+    {
+     "check": "판 증거 ④ NU1902 = 0",
+     "ok": true,
+     "detail": "nu1902=0 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=lf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (erp) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(erp)",
+     "ok": true,
+     "detail": "113파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 G-W13-5 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "G-W13-5 방식 측정 수 ≥ 100 · = 파일 수",
+     "ok": true,
+     "detail": "113/113"
+    },
+    {
+     "check": "측정 시험 깨짐 집합 = G-W13-5 명단",
+     "ok": true,
+     "detail": "[\"DB-02\", \"DB-09\", \"DB-16\", \"DB-20\", \"DB-27\", \"DB-34\", \"DB-35\", \"DB-36\", \"DB-37\", \"DB-38\"]"
+    },
+    {
+     "check": "바닥 ① ERP len(files) = all_count = measured",
+     "ok": true,
+     "detail": "files=113 · all_count=113 · measured=113"
+    },
+    {
+     "check": "바닥 ② ERP 깨지지 않은 파일 회차마다 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "빈 회차 0: "
+    },
+    {
+     "check": "바닥 ③ ERP 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=3081 · count=3081"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=49"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"
+    }
+   ],
+   "runtime_informational_version": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4",
+   "eol_mode": "lf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "0",
+    "nu1902_all_packages": "0",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+    "pinned": "true",
+    "repo_digests": "[\"mariadb@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620\"]",
+    "image_id": "sha256:1d2b32fbc13a8ed222b073036d268b669ddb1396e6b8f35b41e5b1b08ac15ea1"
+   },
+   "control2_outcome": "a=7,b=NULL",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\n, @P AS b"
+   ],
+   "control2b_outcome": {
+    "id": "DB-9999zzx733c",
+    "pass": 1,
+    "ok": true,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": null,
+    "runner_msg1": null,
+    "ex_type": null,
+    "err_no": null,
+    "sqlstate": null,
+    "ex_msg1": null,
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "control1_db16": {
+    "id": "DB-16",
+    "pass": 1,
+    "ok": false,
+    "applied": false,
+    "applied_count": 0,
+    "failed_id": "DB-16",
+    "runner_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "ex_type": "MySqlConnector.MySqlException",
+    "err_no": -3,
+    "sqlstate": null,
+    "ex_msg1": "'DELIMITER' should not be used with MySqlConnector. See https://mysqlconnector.net/delimiter",
+    "log_queries": [
+     {
+      "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+      "len": 17
+     },
+     {
+      "sha256": "b7cdcae001ded7f0e81c711a9efde88f2536a3ec93f9750cfb5d2ed7610777eb",
+      "len": 487
+     },
+     {
+      "sha256": "1c50e556a472e75a878c46cca70b82a88c00f4b7df8679d7ed575bf19d16c7dd",
+      "len": 60
+     },
+     {
+      "sha256": "bdb0a7a5a078b7af94f9584fbee6e8fea065c052a55ea750b55cc6ee351c737d",
+      "len": 10200
+     },
+     {
+      "sha256": "4428ddc265ea517daca8c858401d4941ca4c7eee5085bbb479bf4a2f396c5570",
+      "len": 383
+     }
+    ],
+    "log_other_commands": {}
+   },
+   "general_log_argument": {
+    "data_type": "mediumtext",
+    "charset": "utf8mb3"
+   }
+  },
+  "mysql8-2.5.0-lf": {
+   "id": "mysql8-2.5.0-lf",
+   "folder": "x733c-cell-mysql8-2.5.0-lf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 8파일 8줄",
+     "ok": true,
+     "detail": "8줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e"
+    },
+    {
+     "check": "판 증거 ④ NU1902 ≥ 1",
+     "ok": true,
+     "detail": "nu1902=4 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=lf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 BackofficeSchemaMysql8Gate 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 9, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 9, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 9, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=106"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"
+    }
+   ],
+   "runtime_informational_version": "2.5.0+a86c07e8d04166a0334be6a2ce16351cf3804c9e",
+   "eol_mode": "lf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "4",
+    "nu1902_all_packages": "4",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+    "pinned": "true",
+    "repo_digests": "[\"mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b\"]",
+    "image_id": "sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39"
+   },
+   "control2_outcome": "a=7,b=7",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\n, 7 AS b"
+   ],
+   "control2b_outcome": null,
+   "control1_db16": null,
+   "general_log_argument": {
+    "data_type": "mediumblob",
+    "charset": null
+   }
+  },
+  "mysql8-2.6.2-lf": {
+   "id": "mysql8-2.6.2-lf",
+   "folder": "x733c-cell-mysql8-2.6.2-lf",
+   "prereq_ok": true,
+   "prereq": [
+    {
+     "check": "필수 증거 파일",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "산출물에 비번 글자 없음",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "제품 나무 = 바닥 6b15caf9",
+     "ok": true,
+     "detail": "ok"
+    },
+    {
+     "check": "판 증거 ① csproj 바뀐 줄 0",
+     "ok": true,
+     "detail": "0줄"
+    },
+    {
+     "check": "판 증거 ② project.assets.json 5개",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "판 증거 ③ 실제 로드된 조립품 판",
+     "ok": true,
+     "detail": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4"
+    },
+    {
+     "check": "판 증거 ④ NU1902 = 0",
+     "ok": true,
+     "detail": "nu1902=0 · nu1900=0"
+    },
+    {
+     "check": "줄끝 단언(변환 직후)",
+     "ok": true,
+     "detail": "mode=lf · 실패 0"
+    },
+    {
+     "check": "SQL 집합 수 113 · 16 · 2",
+     "ok": true,
+     "detail": "{\"backoffice\": 16, \"control\": 2, \"erp\": 113}"
+    },
+    {
+     "check": "출하 DDL 은 줄끝 안 바뀜",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "실행기 폴더 재계수 (backoffice) = 변환 결과",
+     "ok": true,
+     "detail": ""
+    },
+    {
+     "check": "줄끝 직접 재계수 — eol.json after",
+     "ok": true,
+     "detail": "131파일 · 어긋남 0: "
+    },
+    {
+     "check": "줄끝 직접 재계수 — 실행기 폴더(backoffice)",
+     "ok": true,
+     "detail": "16파일 · 어긋남 0: "
+    },
+    {
+     "check": "닻 BackofficeSchemaMysql8Gate 무수정 초록",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 9, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 9, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 9, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 단언 통과",
+     "ok": true,
+     "detail": "{\"aborted\": 0, \"completed\": 0, \"disconnected\": 0, \"error\": 0, \"executed\": 1, \"failed\": 0, \"inProgress\": 0, \"inconclusive\": 0, \"notExecuted\": 0, \"notRunnable\": 0, \"passed\": 1, \"passedButRunAborted\": 0, \"pending\": 0, \"timeout\": 0, \"total\": 1, \"warning\": 0}"
+    },
+    {
+     "check": "측정 시험 장치 오류 0",
+     "ok": true,
+     "detail": "[]"
+    },
+    {
+     "check": "바닥 ④ 백오피스 적용 ≥ 1 · 서버 수신 ≥ 1",
+     "ok": true,
+     "detail": "applied=15 · 수신=106"
+    },
+    {
+     "check": "바닥 ⑤ 백오피스 확장 모양 줄 수 > 0",
+     "ok": true,
+     "detail": "lines=667 · count=667"
+    },
+    {
+     "check": "DB 이미지 다이제스트 고정",
+     "ok": true,
+     "detail": "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"
+    }
+   ],
+   "runtime_informational_version": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4",
+   "eol_mode": "lf",
+   "eol_assert_ok": true,
+   "nuget_audit": {
+    "nu1902": "0",
+    "nu1902_all_packages": "0",
+    "nu1900": "0"
+   },
+   "image": {
+    "ref": "mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+    "pinned": "true",
+    "repo_digests": "[\"mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b\"]",
+    "image_id": "sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39"
+   },
+   "control2_outcome": "a=7,b=NULL",
+   "control2_server_received": [
+    "SET NAMES utf8mb4",
+    "SELECT 7 AS a --\n, @P AS b"
+   ],
+   "control2b_outcome": null,
+   "control1_db16": null,
+   "general_log_argument": {
+    "data_type": "mediumblob",
+    "charset": null
+   }
+  }
+ },
+ "items": [
+  {
+   "id": "E1",
+   "title": "ERP 깨짐 집합",
+   "axis": "4칸 전체",
+   "guarantee": "113 마이그를 출하 DDL 위에서 G-W13-5 순서(번호순 · 한 건씩 · 두 바퀴)로 실물 MigrationRunner 에 태운 결과가 칸 사이 같음",
+   "blind": "성공 = 예외 없음일 뿐 「정상 적용」 아님 · 번호순 한 순서만(역순·다른 순서 미측정) · 업무 SQL(C# 안 문장) 미포함 · 윈도우 고객 PC·실제 설치판 미포함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E2",
+   "title": "ERP 깨짐 사유(회차 · 오류 번호 · 예외 형 · 메시지 첫 줄)",
+   "axis": "4칸 전체",
+   "guarantee": "깨진 파일마다 러너가 보고한 사유 모양이 칸 사이 같음",
+   "blind": "메시지 첫 줄만 봄(둘째 줄 이하 미비교) · 사유가 같아도 원인이 같다는 증명 아님",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E3",
+   "title": "ERP 적용 건수",
+   "axis": "4칸 전체",
+   "guarantee": "러너가 「적용」 으로 보고한 건수가 칸 사이 같음",
+   "blind": "건수만 봄 — 적용된 내용의 의미 동일성은 E4·E5·B1 로만 일부 봄",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E4",
+   "title": "ERP 파일별 회차 결과(성공 · 적용 · 실패 위치)",
+   "axis": "4칸 전체",
+   "guarantee": "113 파일 각각의 1·2회차 성공 여부와 실패 파일 위치가 칸 사이 같음",
+   "blind": "결과 표지만 봄(실행 시간·경고·영향 행 수 미비교)",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E5",
+   "title": "ERP 확장 모양(표 · 칸 형 · 널 · DEFAULT · COMMENT · 인덱스)",
+   "axis": "4칸 전체",
+   "guarantee": "information_schema 의 표·칸(형·널·기본값·설명)·인덱스(이름·고유·칸 순서) 집합이 칸 사이 같음 (schema_migrations 제외)",
+   "blind": "트리거·루틴·뷰·이벤트·FK 조건·CHECK·데이터 행·표 엔진/정렬 규칙·AUTO_INCREMENT 값 미비교",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E6",
+   "title": "대조군 ① DB-16 원본 거부 대조",
+   "axis": "4칸 전체",
+   "guarantee": "원본 DB-16(줄끝 축만 바뀜)을 한 건만 실물 러너에 태웠을 때 거부 모양(성공 여부·적용 0·예외 형·메시지 첫 줄)이 칸 사이 같음",
+   "blind": "실제 설치/업데이트 경로의 기존 한계(DELIMITER 를 제품 적용기가 못 돌림)는 이 칸이 재지 않는다 — 아래 별도 칸",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E7",
+   "title": "백오피스 적용 파일 수 · _schema_migrations 파일명 집합",
+   "axis": "4칸 전체",
+   "guarantee": "실물 SchemaMigrator.ApplyAsync(빈 DB · installer/backoffice)가 남긴 이력 파일명·건수가 칸 사이 같음",
+   "blind": "`${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E8",
+   "title": "백오피스 적용 오류",
+   "axis": "4칸 전체",
+   "guarantee": "적용기가 던진 예외 유무·모양이 칸 사이 같음",
+   "blind": "메시지 첫 줄만 봄 · `${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "E9",
+   "title": "백오피스 확장 모양",
+   "axis": "4칸 전체",
+   "guarantee": "백오피스 DB 의 표·칸(형·널·기본값·설명)·인덱스 집합이 칸 사이 같음 (_schema_migrations 제외)",
+   "blind": "트리거·루틴·뷰·FK 조건·데이터 행 미비교 · `${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-crlf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "B1-lf",
+   "title": "ERP 서버 수신 문장 바이트(general_log · 파일 · 회차별 sha256 열)",
+   "axis": "판 축 · lf",
+   "guarantee": "실물 러너 연결이 서버에 보낸 COM_QUERY 를 general_log 가 저장한 바이트가 판 사이 같음 — 드라이버가 문장을 바꿨다면 여기서 드러남",
+   "blind": "general_log argument 칸 문자셋 변환(칸 기록 server.general_log_argument 참조 · utf8mb3 등이면 4바이트 글자는 저장 전에 바뀜) · 준비문(prepared) 경로 · 매개변수 있는 업무 문장(대조군 ② 한 줄만) · 줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-lf"
+  },
+  {
+   "id": "B2-lf",
+   "title": "ERP 러너 체크섬(schema_migrations.checksum)",
+   "axis": "판 축 · lf",
+   "guarantee": "러너가 읽은 문자열의 sha256(줄끝 포함)이 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 당연히 다름 — 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-lf"
+  },
+  {
+   "id": "B3-lf",
+   "title": "SQL 파일 sha256(변환 뒤)",
+   "axis": "판 축 · lf",
+   "guarantee": "실행기에 들어간 파일 바이트가 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-lf"
+  },
+  {
+   "id": "BB1-lf",
+   "title": "백오피스 content_hash",
+   "axis": "판 축 · lf",
+   "guarantee": "백오피스 적용기가 읽은 원본 문자열 sha256 이 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-lf"
+  },
+  {
+   "id": "BB2-lf",
+   "title": "백오피스 서버 수신 문장 바이트(적용 전체의 문장 순서 sha256 열)",
+   "axis": "판 축 · lf",
+   "guarantee": "SchemaMigrator 연결이 서버에 보낸 문장을 general_log 가 저장한 바이트 열이 판 사이 같음",
+   "blind": "파일별로 끊지 않은 전체 순서 · general_log 문자셋 변환 · 줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-lf",
+    "mariadb-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-lf"
+  },
+  {
+   "id": "B1-crlf",
+   "title": "ERP 서버 수신 문장 바이트(general_log · 파일 · 회차별 sha256 열)",
+   "axis": "판 축 · crlf",
+   "guarantee": "실물 러너 연결이 서버에 보낸 COM_QUERY 를 general_log 가 저장한 바이트가 판 사이 같음 — 드라이버가 문장을 바꿨다면 여기서 드러남",
+   "blind": "general_log argument 칸 문자셋 변환(칸 기록 server.general_log_argument 참조 · utf8mb3 등이면 4바이트 글자는 저장 전에 바뀜) · 준비문(prepared) 경로 · 매개변수 있는 업무 문장(대조군 ② 한 줄만) · 줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.6.2-crlf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "B2-crlf",
+   "title": "ERP 러너 체크섬(schema_migrations.checksum)",
+   "axis": "판 축 · crlf",
+   "guarantee": "러너가 읽은 문자열의 sha256(줄끝 포함)이 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 당연히 다름 — 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.6.2-crlf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "B3-crlf",
+   "title": "SQL 파일 sha256(변환 뒤)",
+   "axis": "판 축 · crlf",
+   "guarantee": "실행기에 들어간 파일 바이트가 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.6.2-crlf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "BB1-crlf",
+   "title": "백오피스 content_hash",
+   "axis": "판 축 · crlf",
+   "guarantee": "백오피스 적용기가 읽은 원본 문자열 sha256 이 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.6.2-crlf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "BB2-crlf",
+   "title": "백오피스 서버 수신 문장 바이트(적용 전체의 문장 순서 sha256 열)",
+   "axis": "판 축 · crlf",
+   "guarantee": "SchemaMigrator 연결이 서버에 보낸 문장을 general_log 가 저장한 바이트 열이 판 사이 같음",
+   "blind": "파일별로 끊지 않은 전체 순서 · general_log 문자셋 변환 · 줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mariadb-2.5.0-crlf",
+    "mariadb-2.6.2-crlf"
+   ],
+   "result": "같음",
+   "detail": "기준 mariadb-2.5.0-crlf"
+  },
+  {
+   "id": "M7",
+   "title": "백오피스 적용 파일 수 · _schema_migrations 파일명 집합",
+   "axis": "MySQL 8 · 판 축 · lf",
+   "guarantee": "실물 SchemaMigrator.ApplyAsync(빈 DB · installer/backoffice)가 남긴 이력 파일명·건수가 칸 사이 같음",
+   "blind": "`${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mysql8-2.5.0-lf",
+    "mysql8-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mysql8-2.5.0-lf"
+  },
+  {
+   "id": "M8",
+   "title": "백오피스 적용 오류",
+   "axis": "MySQL 8 · 판 축 · lf",
+   "guarantee": "적용기가 던진 예외 유무·모양이 칸 사이 같음",
+   "blind": "메시지 첫 줄만 봄 · `${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mysql8-2.5.0-lf",
+    "mysql8-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mysql8-2.5.0-lf"
+  },
+  {
+   "id": "M9",
+   "title": "백오피스 확장 모양",
+   "axis": "MySQL 8 · 판 축 · lf",
+   "guarantee": "백오피스 DB 의 표·칸(형·널·기본값·설명)·인덱스 집합이 칸 사이 같음 (_schema_migrations 제외)",
+   "blind": "트리거·루틴·뷰·FK 조건·데이터 행 미비교 · `${VAR}` 치환 파일은 칸에 환경 변수가 없어 건너뜀(운영 동작 미측정) · 운영 MySQL 8 설정·연결 옵션 미포함 · MariaDB 칸은 통째 실행 경로만, MySQL 8 칸은 자체 분리 경로만 돈다",
+   "cells": [
+    "mysql8-2.5.0-lf",
+    "mysql8-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mysql8-2.5.0-lf"
+  },
+  {
+   "id": "BB1-lf (MySQL 8)",
+   "title": "백오피스 content_hash",
+   "axis": "판 축 · lf (MySQL 8)",
+   "guarantee": "백오피스 적용기가 읽은 원본 문자열 sha256 이 판 사이 같음",
+   "blind": "줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mysql8-2.5.0-lf",
+    "mysql8-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mysql8-2.5.0-lf"
+  },
+  {
+   "id": "BB2-lf (MySQL 8)",
+   "title": "백오피스 서버 수신 문장 바이트(적용 전체의 문장 순서 sha256 열)",
+   "axis": "판 축 · lf (MySQL 8)",
+   "guarantee": "SchemaMigrator 연결이 서버에 보낸 문장을 general_log 가 저장한 바이트 열이 판 사이 같음",
+   "blind": "파일별로 끊지 않은 전체 순서 · general_log 문자셋 변환 · 줄끝이 다른 칸끼리는 비교 안 함",
+   "cells": [
+    "mysql8-2.5.0-lf",
+    "mysql8-2.6.2-lf"
+   ],
+   "result": "같음",
+   "detail": "기준 mysql8-2.5.0-lf"
+  }
+ ],
+ "informational": {
+  "대조군 ② 결과(MariaDB)": {
+   "2.5.0×lf": "a=7,b=7",
+   "2.5.0×crlf": "a=7,b=7",
+   "2.6.2×lf": "a=7,b=NULL",
+   "2.6.2×crlf": "a=7,b=7"
+  },
+  "대조군 ② 결과(MySQL 8)": {
+   "2.5.0×lf": "a=7,b=7",
+   "2.6.2×lf": "a=7,b=NULL"
+  },
+  "대조군 ②′ .sql 경로 변형(MariaDB · 기록만)": {
+   "mariadb-2.5.0-crlf": {
+    "ok": true,
+    "applied": false,
+    "ex_type": null,
+    "err_no": null,
+    "ex_msg1": null,
+    "runner_msg1": null
+   },
+   "mariadb-2.5.0-lf": {
+    "ok": true,
+    "applied": false,
+    "ex_type": null,
+    "err_no": null,
+    "ex_msg1": null,
+    "runner_msg1": null
+   },
+   "mariadb-2.6.2-crlf": {
+    "ok": true,
+    "applied": false,
+    "ex_type": null,
+    "err_no": null,
+    "ex_msg1": null,
+    "runner_msg1": null
+   },
+   "mariadb-2.6.2-lf": {
+    "ok": true,
+    "applied": false,
+    "ex_type": null,
+    "err_no": null,
+    "ex_msg1": null,
+    "runner_msg1": null
+   }
+  },
+  "DB-16 — 실제 설치/업데이트 경로의 기존 한계": "실제 설치/업데이트 경로의 기존 한계 (판정 안 함 · 이 런이 재는 것 아님): DB-16 은 `DELIMITER` 를 쓰는 유일한 마이그이고, 제품 적용기(MigrationRunner → MySqlConnector)로는 판과 무관하게 돌지 않는다(G-W13-5 명단 `KnownNotReapplyable` · 정적 회신 §1-3). 표의 「대조군 ① DB-16 원본 거부 대조」 는 이 한계를 재는 칸이 아니라, 그 거부 모양이 판·줄끝 사이에서 바뀌는지만 본다."
+ }
+}
