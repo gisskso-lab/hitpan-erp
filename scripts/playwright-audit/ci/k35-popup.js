@@ -128,8 +128,10 @@ async function clickVia(kb, step, way, title, itemText, popupMs) {
     if (!(await K.waitNoToasts(kb.page))) throw new K.KitStepError('토스트가 상한 안에 안 사라짐');
     await K.briefOff(kb.page, kb, 0);
     step.now = '종 목록 클릭';
-    popP = K.expectPopup(kb.page, popupMs);
-    await K.clickBellItem(kb.page, itemText);
+    // ⬛ [낡은 줄 · 1~3차] popP = K.expectPopup(kb.page, popupMs);
+    // ⬛ [낡은 줄 · 1~3차] await K.clickBellItem(kb.page, itemText);
+    // 🔴 4차 — 팝업 기다림은 항목 클릭 바로 전(종 열기 · 다시 열기 시간이 상한을 먹지 않게) · 항목 = 제목 + 본문 일부
+    popP = await K.clickBellItem(kb.page, itemText, { title, arm: () => K.expectPopup(kb.page, popupMs) });
   } else {
     step.now = '토스트 클릭';
     popP = K.expectPopup(kb.page, popupMs);

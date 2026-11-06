@@ -355,11 +355,124 @@ const MESSENGER_BUTTON = '.hitpan-top-header-right button[aria-label="메신저"
 async function clickMessenger(page) {
   await page.locator(MESSENGER_BUTTON).first().click({ timeout: 15000 });
 }
-async function clickBellItem(page, text) {
-  await page.locator(BELL_BUTTON).first().click({ timeout: 15000 });
-  const item = page.locator('.mud-menu-item', { hasText: text }).first();
-  await item.waitFor({ state: 'visible', timeout: 15000 });
-  await item.click({ timeout: 15000 });
+// ⬛ [낡은 몸통 · 1~3차] 종 클릭 → 항목 보임 → 항목 클릭 한 줄기 · 실패하면 예외 이름만 남았다(첫 K 런: 종 길 8 전부 TimeoutError · 어느 줄인지 · 왜인지 모름).
+// async function clickBellItem(page, text) {
+//   await page.locator(BELL_BUTTON).first().click({ timeout: 15000 });
+//   const item = page.locator('.mud-menu-item', { hasText: text }).first();
+//   await item.waitFor({ state: 'visible', timeout: 15000 });
+//   await item.click({ timeout: 15000 });
+// }
+// 🔴 4차(첫 K 런 뒤) — 「누르기까지」 장치 단계만 단단하게 + 진단. 무엇을 재는지(G 단언)는 그대로.
+//   하위 단계 = 종 단추 찾기 → 종 클릭 → 메뉴 열림 → 항목 보임 → 항목 클릭. 메뉴가 이미 열려 있으면 종을 다시 누르지 않는다(닫힘 방지).
+//   항목 클릭 전 단계에서 실패하면 다시 열기 1회. 항목 클릭에서 실패하면 다시 안 한다(두 번 누름 = 창 2 → 단언이 거짓 빨강).
+//   팝업 기다림(arm)은 항목 클릭 **바로 전**에 건다 — 메뉴 여는 시간이 팝업 상한을 먹지 않게(clickVia 주석의 뜻 그대로).
+//   실패하면 KitStepError 글 = 하위 단계 이름 + 소독한 짧은 사유 + 그 순간 숫자(항목 글자 원문 0 · 수만).
+const BELL_MENU = '.mud-popover-open:has(.mud-menu-item), .mud-popover-open:has(.mud-menu-list)';
+const BELL_ITEM = '.mud-popover-open .mud-menu-item';
+// 사유(순수) — Playwright 오류 글에서 고정 낱말과 「가로막은 요소」 의 태그·클래스 이름만 꺼낸다(원문 줄 0).
+//   클래스 낱말 = 영숫자 · - · _ 만 · 낱말 40자 · 최대 3개 → 제어 글자 0 → 소독(등록값 가림) → 길이 상한.
+const BELL_WHY_WORDS = [
+  [/intercepts pointer events/i, '가로막음'],
+  [/not attached|detached/i, '떨어짐'],
+  [/not visible/i, '안 보임'],
+  [/not stable/i, '안정 안 됨'],
+  [/not enabled|is disabled/i, '안 켜짐'],
+  [/outside of the viewport/i, '화면 밖'],
+  [/Timeout \d+ms exceeded|TimeoutError/i, '시간초과'],
+];
+function bellWhy(msg, cap = 60) {
+  const s = String(msg ?? '');
+  const words = BELL_WHY_WORDS.filter(([re]) => re.test(s)).map(([, w]) => w);
+  let who = '';
+  const line = s.split(/\r?\n/).find((x) => /intercepts pointer events/i.test(x)) || '';
+  const m = line.match(/<([A-Za-z][A-Za-z0-9-]{0,20})[\s>]/);
+  if (m) {
+    const cls = (line.slice(m.index).match(/\sclass="([^"]*)"/) || [])[1] || ''; // 가로막은 요소의 첫 class="…"(값 안 > 에 안 끊기게)
+    const toks = cls.split(/\s+/).filter((t) => /^[A-Za-z_][A-Za-z0-9_-]{0,39}$/.test(t)).slice(0, 3);
+    who = [m[1].toLowerCase(), ...toks].join('.');
+  }
+  const out = `${words.length ? words.join('·') : '기타'}${who ? ` ${who}` : ''}`.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
+  return L.sanitize(out, cap);
+}
+// 그 순간 숫자 → 글(순수) · 정수가 아니면 「?」(글자 값이 들어와도 찍지 않는다).
+const BELL_COUNT_KEYS = [['bell', '종'], ['act', '감쌈'], ['menus', '열린메뉴'], ['items', '항목'], ['allItems', '전체항목'], ['overlays', '덮개'], ['dialogs', '대화상자'], ['top', '종맨위']];
+function bellCountsText(c) {
+  if (!c || typeof c !== 'object') return '숫자 못 셈';
+  if (c.err !== undefined) return `숫자 못 셈(${/^[A-Za-z0-9_]{1,40}$/.test(String(c.err)) ? c.err : 'Error'})`;
+  return `숫자 ${BELL_COUNT_KEYS.map(([k, n]) => `${n} ${Number.isInteger(c[k]) ? c[k] : '?'}`).join(' ')}`;
+}
+const BELL_SUBS = new Set(['종 단추 찾기', '종 클릭', '메뉴 열림', '항목 보임', '항목 클릭']);
+function bellStepMessage(sub, why, tries, counts) {
+  const s = BELL_SUBS.has(sub) ? sub : '?';
+  const n = Number.isInteger(tries) ? tries : '?';
+  return `종 길 하위=${s} · 사유=${L.sanitize(String(why ?? ''), 80)} · 열기 ${n}번 · ${bellCountsText(counts)}`;
+}
+// 그 순간 숫자 — 종 단추 · 메뉴 감쌈 · 열린 메뉴 · 열린 메뉴 항목 · 전체 메뉴 항목 · 보이는 덮개 · 대화상자 · 종 가운데 맨 위가 종인가(1/0 · 종 없음 -1)
+async function bellCounts(page) {
+  try {
+    return await withTimeout(page.evaluate(([b, menu, item]) => {
+      const q = (s) => document.querySelectorAll(s).length;
+      const vis = (s) => [...document.querySelectorAll(s)].filter((e) => {
+        const r = e.getBoundingClientRect();
+        const cs = window.getComputedStyle(e);
+        return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none';
+      }).length;
+      const el = document.querySelector(b);
+      let top = -1;
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        top = hit && (hit === el || el.contains(hit)) ? 1 : 0;
+      }
+      return { bell: q(b), act: q('.hitpan-top-header-right .mud-menu-activator'), menus: q(menu), items: q(item), allItems: q('.mud-menu-item'), overlays: vis('.mud-overlay'), dialogs: q('.mud-dialog'), top };
+    }, [BELL_BUTTON, BELL_MENU, BELL_ITEM]), EVAL_MS, '종 길 숫자');
+  } catch (e) {
+    return { err: L.errorName(e) };
+  }
+}
+async function clickBellItem(page, text, { title = null, arm = null } = {}) {
+  const bell = page.locator(BELL_BUTTON).first();
+  const menu = page.locator(BELL_MENU);
+  let item = page.locator(BELL_ITEM, { hasText: text });
+  if (title && title !== text) item = item.filter({ hasText: title }); // 제목 + 본문 일부
+  item = item.first();
+  let sub = '종 단추 찾기';
+  let tries = 0;
+  let last = null;
+  try {
+    await bell.waitFor({ state: 'visible', timeout: 10000 });
+  } catch (e) {
+    last = e;
+  }
+  if (!last) {
+    for (tries = 1; tries <= 2; tries += 1) {
+      last = null;
+      try {
+        if ((await menu.count()) === 0) {
+          sub = '종 클릭';
+          await bell.click({ timeout: 8000 });
+          sub = '메뉴 열림';
+          await menu.first().waitFor({ state: 'visible', timeout: 4000 });
+        }
+        sub = '항목 보임';
+        await item.waitFor({ state: 'visible', timeout: 6000 });
+        sub = '항목 클릭';
+        const popP = typeof arm === 'function' ? arm() : null;
+        await item.click({ timeout: 8000 });
+        console.log(`K 종 길 누름 — 열기 ${tries}번`);
+        return popP;
+      } catch (e) {
+        last = e;
+        if (sub === '항목 클릭') break;
+        if (tries < 2) {
+          console.log(`K 종 길 ${tries}번째 실패 · 다시 열기 — ${bellStepMessage(sub, bellWhy(e && e.message), tries, await bellCounts(page))}`);
+          await page.mouse.move(420, 420).catch((e2) => console.log(`K 마우스 옮기기 실패 ${L.errorName(e2)}`));
+          await sleep(800);
+        }
+      }
+    }
+  }
+  throw new KitStepError(bellStepMessage(sub, bellWhy(last && last.message), tries, await bellCounts(page)));
 }
 async function toastTexts(page) {
   try {
@@ -741,6 +854,7 @@ module.exports = {
   apiCall, apiLogin, apiLogout,
   sleep, pathOf, blockExternal, watchTokens, waitMasked, watchConsole, screenLogin, watchHub, waitHub,
   briefOff, waitNoToasts, waitToast, clickToast, clickBellItem, clickMessenger, toastTexts,
+  bellWhy, bellCountsText, bellStepMessage,
   recorder, closePopups, popupsOf, expectPopup,
   g4Reset, g4StartOk, navigateInApp,
   COLLECT, pageId, sameSet, scanAll, shotsDir, stageDir, stageOutside, guardedShot, n4Verdict, markN4Hit, recN4,

@@ -2328,6 +2328,64 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       }
       check('K-C25g 시간 상한 도우미(상한 → KitStepError · 통과 · 거절 그대로) · K 전체 < S8 단계 < 잡 · 화면 평가 상한', ok, why);
     }
+    // ── 🔴 K 연결 4차(첫 K 런 뒤) — 종 길 진단 글(순수) ──
+    //   K-C26a 사유 = 고정 낱말 + 가로막은 요소 태그·클래스만(원문 줄 0 · 제어 글자 0 · 길이 상한) · 숫자 = 정수만(글자 값 → ?)
+    //   K-C26b 사유 소독 = 등록값 가림(자식 프로세스) · 항목 클릭 실패 뒤 다시 누르지 않음(글자 · 주석 뺀 줄)
+    //   못 재는 것(미측정): 실제 MudBlazor 메뉴 열림 · 실제 Playwright 오류 글 꼴(다음 K 런 got 으로 확인).
+    { // K-C26a 종 길 사유 · 숫자 글(순수)
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K && typeof K.bellWhy === 'function' && typeof K.bellStepMessage === 'function') {
+        const ctlRe = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+        const icp = 'locator.click: Timeout 8000ms exceeded.\nCall log:\n  - waiting for locator(\'x\')\n  -   <div tabindex="-1" class="mud-overlay mud-overlay-dialog q\u0007z bad<>">…</div> intercepts pointer events\n';
+        const w1 = K.bellWhy(icp);
+        const w2 = K.bellWhy('locator.waitFor: Timeout 6000ms exceeded.\n  - element is not visible');
+        const w3 = K.bellWhy('zzz');
+        const w4 = K.bellWhy(`TimeoutError <span class="${'a'.repeat(300)} b c d e f">x</span> intercepts pointer events`, 20);
+        const w5 = K.bellWhy(`${'\u2028'}TimeoutError hasText "SELFTEST_ITEM_${hex()}"\u0000`);
+        const m1 = K.bellStepMessage('항목 보임', w2, 2, { bell: 1, act: 1, menus: 1, items: '새 메시지 원문', allItems: 3, overlays: 0, dialogs: 0, top: 1 });
+        const m2 = K.bellStepMessage('아무거나', w3, 'x', { err: 'not a name!' });
+        const r = [
+          /^시간초과·가로막음|^가로막음·시간초과/.test(w1), w1.includes('div.mud-overlay.mud-overlay-dialog'), !ctlRe.test(w1), !/[<>"']/.test(w1), !w1.includes('locator'),
+          w2 === '안 보임·시간초과', w3 === '기타',
+          w4.length <= 20 + '…(이하 생략)'.length, !w4.includes('a'.repeat(41)),
+          !ctlRe.test(w5), !w5.includes('SELFTEST_ITEM_'),
+          m1.includes('하위=항목 보임') && m1.includes('항목 ?') && !m1.includes('새 메시지 원문') && m1.includes('열기 2번') && m1.includes('종맨위 1'),
+          m2.includes('하위=?') && m2.includes('열기 ?번') && m2.includes('숫자 못 셈(Error)'),
+        ];
+        ok = r.every((x) => x === true);
+        why = `통과 ${r.filter((x) => x).length}/${r.length} · 가로막음 꼴 ${JSON.stringify(w1)} · 길이 상한 ${w4.length}`;
+      }
+      check('K-C26a 종 길 사유 = 고정 낱말 + 가로막은 요소 태그·클래스만(원문 0 · 제어 글자 0 · 길이 상한) · 숫자 = 정수만 · 하위 단계 이름 고정', ok, why);
+    }
+    { // K-C26b 사유 소독(등록값) · 항목 클릭 실패 뒤 다시 누르지 않음
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K && typeof K.bellWhy === 'function') {
+        const fn = async (K2) => {
+          const path = require('path');
+          const L2 = require(path.join(path.dirname(process.env.F_KIT), 'lib.js'));
+          const v = process.env.K26B_VALUE;
+          const msg = `TimeoutError\n  - <div class="mud-x ${v}">…</div> intercepts pointer events`;
+          const before = K2.bellWhy(msg, 200);
+          L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v);
+          const after = K2.bellWhy(msg, 200);
+          const m = K2.bellStepMessage('종 클릭', after, 1, null);
+          return { beforeHas: before.includes(v), afterHas: after.includes(v), masked: after.includes('***'), msgHas: m.includes(v), noCount: m.includes('숫자 못 셈') };
+        };
+        const x = kChild('k26b', fn, { K26B_VALUE: `SELFTEST_K26B_${hex()}${hex()}` });
+        const v = x.v || {};
+        const src = fs.readFileSync(F_KIT, 'utf8');
+        const body = src.slice(src.indexOf('async function clickBellItem('), src.indexOf('async function toastTexts('));
+        const live = body.split('\n').filter((s) => !/^\s*\/\//.test(s)).join('\n');
+        const noRepeat = /if \(sub === '항목 클릭'\) break;/.test(live) && live.indexOf('arm()') > 0 && live.indexOf('arm()') < live.indexOf('item.click(');
+        ok = !!x.v && v.beforeHas === true && v.afterHas === false && v.masked === true && v.msgHas === false && v.noCount === true && noRepeat;
+        why = x.v ? `등록 전 값(대조) ${v.beforeHas} · 등록 뒤 값 ${v.afterHas} · 가림 ${v.masked} · 글에 값 ${v.msgHas} · 숫자 없음 표시 ${v.noCount} · 항목 클릭 뒤 다시 안 함 · 팝업 기다림 클릭 바로 전 ${noRepeat}` : `rc=${x.code} · 결과 줄 없음 ${x.err}`;
+      }
+      check('K-C26b 종 길 사유 소독(등록값 가림 · 대조 = 등록 전엔 보임) · 항목 클릭 실패 뒤 다시 안 누름 · 팝업 기다림은 항목 클릭 바로 전', ok, why);
+    }
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);
