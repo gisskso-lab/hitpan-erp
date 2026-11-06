@@ -11,6 +11,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
 const L = require('./lib');
 const K = require('./kit35');
 const DC = require('./device-check');
@@ -27,6 +28,10 @@ const T_CHATAPPR = '결재 안내'; // ChatService 결재 안내 제목
 const POP_MS = 15000;
 const NAV_MS = 15000;
 const SETTLE_MS = 1500;
+// 🔴 3차(PM 결정 4V-2 P2-a) — 경우 하나 · K 본문 전체 시간 상한. 넘으면 그 경우 DEVICE 거짓 · 그 브라우저 흐름 끊음 /
+//   전체 상한은 예외 길(남은 키 DEVICE · N4 강제 거짓 · 표지 먼저 · 종료). 워크플로 S8 단계 상한(20분) 안 · 잡 30분 안.
+const CASE_MS = 150000;
+const K_TOTAL_MS = 12 * 60 * 1000;
 const BROWSERS = ['chromium', 'webkit'];
 
 const key = (id, g, p, browser) => ({ id, g, path: p, browser });
@@ -215,16 +220,38 @@ async function g3(kb, st, step) {
 }
 
 // ── G4 결재 알림 · 채팅방 결재 안내 → 팝업 0 · 본 창(주소 정확히 일치) ──
+// ⬛ [낡은 꼴 · 2차] 시작 주소 = 앞 경우 도착 주소 그대로(before) → 앞 경우가 목표에 남기면 다음 경우가 제품 잘못 없이 [시험] 빨강(4V-2 P1-a).
+// 🔴 3차 — 목표 주소를 먼저 구하고 → 본 창을 중립 주소(로그인 뒤 자리)로 되돌려 확인 → 시작 = 목표면 DEVICE(단언 전 실패) → 상신.
+async function toNeutral(kb, step, want) {
+  step.now = '본 창 중립 주소로 되돌림';
+  const cur = K.pathOf(kb.page.url());
+  const plan = K.g4Reset(cur, kb.home, want);
+  if (!plan.ok) throw new K.KitStepError(`되돌림 판단 — ${plan.why}`);
+  if (plan.nav) {
+    if (!(await K.navigateInApp(kb.page, kb.home))) throw new K.KitStepError('앱 안 이동 함수 없음');
+    await nowait(kb.page.waitForURL((u) => `${u.pathname}${u.search}` === kb.home, { timeout: NAV_MS, waitUntil: 'commit' }), '중립 주소 이동');
+    await K.sleep(SETTLE_MS);
+    await K.briefOff(kb.page, kb, 2000);
+  }
+  const start = K.pathOf(kb.page.url());
+  if (!K.g4StartOk(start, kb.home, want)) throw new K.KitStepError(start === want ? '시작 주소 = 목표 주소' : '되돌린 뒤 중립 주소 아님');
+  return start;
+}
 async function g4(kb, st, step, way, which) {
-  step.now = '결재 상신(실제 흐름)';
-  const before = K.pathOf(kb.page.url());
-  await submitApproval(st, `G4 ${which} ${way}`);
+  // ⬛ [낡은 줄 · 2차] step.now = '결재 상신(실제 흐름)';
+  // ⬛ [낡은 줄 · 2차] const before = K.pathOf(kb.page.url());
+  // ⬛ [낡은 줄 · 2차] await submitApproval(st, `G4 ${which} ${way}`);
+  step.now = '결재 준비';
+  await approvalReady(st);
   const title = which === 'APPR' ? T_APPR : T_CHATAPPR;
   let want = '/approval?scope=pending'; // 제품이 /approval/pending 을 결재관리로 넘긴다(ApprovalRedirectPage)
   if (which === 'CHATAPPR') {
     step.now = '부모 ↔ 나 1:1 방 찾기';
     want = `/chat/${await roomParentNa(st)}`;
   }
+  const before = await toNeutral(kb, step, want);
+  step.now = '결재 상신(실제 흐름)';
+  await submitApproval(st, `G4 ${which} ${way}`);
   const popP = await clickVia(kb, step, way, title, title, 5000);
   step.now = '본 창 이동 기다림';
   await nowait(kb.page.waitForURL((u) => `${u.pathname}${u.search}` === want, { timeout: NAV_MS, waitUntil: 'commit' }), '본 창 이동');
@@ -243,7 +270,8 @@ async function g5(kb, st, step, way) {
   const wantB = `/chat-window/${ROOM_B}`;
   step.now = '팝업 방 A 준비(hitpanChat.openRoom)';
   const p0P = K.expectPopup(kb.page, POP_MS);
-  const opened = await kb.page.evaluate((u) => !!(window.hitpanChat && window.hitpanChat.openRoom(u)), wantA);
+  // ⬛ [낡은 줄 · 2차] const opened = await kb.page.evaluate((u) => !!(window.hitpanChat && window.hitpanChat.openRoom(u)), wantA);
+  const opened = await K.withTimeout(kb.page.evaluate((u) => !!(window.hitpanChat && window.hitpanChat.openRoom(u)), wantA), K.EVAL_MS, '팝업 방 A 열기');
   const pop = await p0P;
   if (!opened || !pop) throw new K.KitStepError(`팝업 방 A 준비 실패(열림 ${opened} · 팝업 ${!!pop})`);
   await nowait(pop.waitForLoadState('load', { timeout: 30000 }), '팝업 A 적재');
@@ -288,13 +316,24 @@ function casesFor(browser) {
   ];
 }
 
+// 🔴 3차(4V-2 P2-a) — 경우 하나에 시간 상한. 넘으면 그 경우 DEVICE 거짓 · 그림 안 찍음 · 돌려주는 값 true = 그 브라우저 흐름 끊음.
 async function runCase(kb, st, c) {
-  if (K.isWritten(st.r, c.key)) return;
+  // ⬛ [낡은 줄 · 2차] if (K.isWritten(st.r, c.key)) return;
+  if (K.isWritten(st.r, c.key)) return false;
   const step = { now: '준비' };
+  let timedOut = false;
   try {
     if (!kb.page || kb.page.isClosed()) throw new K.KitStepError('본 창 닫힘');
-    await prep(kb, step);
-    const res = await c.fn(kb, st, step);
+    // ⬛ [낡은 줄 · 2차] await prep(kb, step);
+    // ⬛ [낡은 줄 · 2차] const res = await c.fn(kb, st, step);
+    const body = (async () => {
+      await prep(kb, step);
+      return c.fn(kb, st, step);
+    })();
+    const res = await K.withTimeout(body, CASE_MS, `경우 ${c.label}`).catch((e) => {
+      if (e instanceof K.KitStepError && e.message.startsWith('시간 상한 ') && e.message.endsWith(`경우 ${c.label}`)) timedOut = true;
+      throw e;
+    });
     K.recK(st.r, { key: c.key, what: c.what, got: res.got, pass: res.pass, kind: 'TEST' });
   } catch (e) {
     const why = e instanceof K.KitStepError ? L.sanitize(e.message, 200) : `예외 ${L.errorName(e)}`;
@@ -303,12 +342,15 @@ async function runCase(kb, st, c) {
       K.recK(st.r, { key: c.key, what: c.what, got: `단언 전 실패 — 단계=${step.now} · ${why}`, pass: false, kind: 'DEVICE', err: e instanceof K.KitStepError ? null : e });
     }
   }
+  K.flushConsole(kb);
+  if (timedOut) return true; // 멈춘 동작이 뒤에서 돌 수 있다 — 그림 안 찍고 흐름을 끊는다
   try {
     await K.guardedShot(kb, c.label);
   } catch (e) {
     console.log(`K 그림 단계 예외 ${c.label} (${L.errorName(e)}) — 안 찍힌 것으로 본다`);
     kb.n4.errs += 1;
   }
+  return false;
 }
 
 function newKb(browser, flags) {
@@ -316,9 +358,12 @@ function newKb(browser, flags) {
     browser, flags, plantN4: flags.has('n4'),
     br: { seen: 0, closed: 0, errs: 0, lastErr: null },
     tok: { access: null, deviceId: null, masked: 0 },
-    n4: { verified: 0, shots: 0, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, planted: false },
-    hub: { ws: 0 }, consoleLines: 0, tally: { continue: 0, abort: 0 },
-    pw: null, context: null, page: null, done: false,
+    // ⬛ [낡은 줄 · 2차] n4: { verified: 0, shots: 0, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, planted: false },
+    n4: { verified: 0, shots: 0, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, winDiff: 0, moveFail: 0, planted: false },
+    // ⬛ [낡은 줄 · 2차] hub: { ws: 0 }, consoleLines: 0, tally: { continue: 0, abort: 0 },
+    hub: { ws: 0 }, consoleLines: 0, consoleBuf: [], tally: { continue: 0, abort: 0 },
+    // ⬛ [낡은 줄 · 2차] pw: null, context: null, page: null, done: false,
+    pw: null, context: null, page: null, done: false, sealed: false, home: null,
   };
 }
 // 브라우저 하나 끝 — 남은 키 DEVICE 거짓 · N4 줄 · 로그아웃 · 닫기(어느 길이든 한 번)
@@ -327,13 +372,19 @@ async function finishBrowser(st, kb, why) {
   kb.done = true;
   const keys = K.expectKeys(kb.browser).filter((k) => k.g !== 'N4');
   K.fillDevice(st.r, keys, why);
-  K.recN4(st.r, kb);
+  K.recN4(st.r, kb); // 3차 — 안에서 봉인 → 판정 → 표지 먼저 → 기록
+  K.flushConsole(kb);
   if (kb.tok.access) {
     const lo = await K.apiLogout({ who: `나(${kb.browser})`, token: kb.tok.access, deviceId: kb.tok.deviceId });
     console.log(`K 로그아웃 ${lo.got}`);
     if (!lo.ok) st.logoutFail += 1;
   }
   if (kb.pw) await kb.pw.close().catch((e) => console.log(`K 브라우저 닫기 실패 ${L.errorName(e)}`));
+  try {
+    fs.rmSync(K.stageDir(kb.browser), { recursive: true, force: true }); // 3차 — 임시 자리 정리(업로드 밖 · 실패해도 올라가지 않는다)
+  } catch (e) {
+    console.log(`K 임시 그림 자리 정리 실패 ${L.errorName(e)}`);
+  }
   console.log(`K ${kb.browser} 외부 차단 처리기 닫힌 창 거절 삼킴 continue ${kb.tally.continue} · abort ${kb.tally.abort}`);
 }
 
@@ -344,8 +395,9 @@ async function runBrowser(pwlib, st, kb) {
     kb.context = await kb.pw.newContext({ baseURL: K.BASE });
     await K.blockExternal(kb.context, st.r, kb.tally);
     K.watchTokens(kb.context, kb.tok);
-    await kb.context.addInitScript(K.BLOCKER); // 먼저 — 녹음기가 그 위를 감싼다
-    await kb.context.addInitScript(DC.RECORDER);
+    // ⬛ [낡은 줄 · 2차] await kb.context.addInitScript(K.BLOCKER); // 먼저 — 녹음기가 그 위를 감싼다
+    // ⬛ [낡은 줄 · 2차] await kb.context.addInitScript(DC.RECORDER);
+    await kb.context.addInitScript(K.INIT_SCRIPT); // 3차(4V-2 P2-c) — 한 덩어리 · 막기 먼저 → 녹음기(순서 = 코드)
     kb.page = await kb.context.newPage();
     K.watchConsole(kb.context, kb);
     K.watchHub(kb.page, kb.hub);
@@ -355,11 +407,16 @@ async function runBrowser(pwlib, st, kb) {
     step.now = '토큰 가림 확인';
     await K.waitMasked(kb.tok);
     if (kb.tok.masked === 0) console.log('K 가린 브라우저 토큰 0 — N4 거짓으로 남는다');
+    K.flushConsole(kb); // 3차(3V2-05) — 토큰 등록 뒤 소독해 찍음
     step.now = '브리핑 덮개(본 화면 진입)';
     await K.briefOff(kb.page, kb, 3000);
+    kb.home = K.pathOf(kb.page.url()); // 3차(4V-2 P1-a) — G4 되돌림 중립 주소
     step.now = '알림 배관 연결';
     if (!(await K.waitHub(kb.hub))) throw new K.KitStepError('알림 배관 연결 0');
-    for (const c of casesFor(kb.browser)) await runCase(kb, st, c);
+    // ⬛ [낡은 줄 · 2차] for (const c of casesFor(kb.browser)) await runCase(kb, st, c);
+    for (const c of casesFor(kb.browser)) {
+      if (await runCase(kb, st, c)) throw new K.KitStepError(`경우 시간 상한(${c.label}) — 이 브라우저 남은 경우 안 돌림`);
+    }
     await finishBrowser(st, kb, '경우 끝 뒤 남은 키(있으면 장치 오류)');
   } catch (e) {
     const why = e instanceof K.KitStepError ? L.sanitize(e.message, 200) : `예외 ${L.errorName(e)}`;
@@ -374,14 +431,23 @@ async function main() {
   const flags = DC.plantFlags();
   const st = { r, ga: null, parent: null, appr: null, roomPN: null, logoutFail: 0 };
   const kbs = BROWSERS.map((b) => newKb(b, flags));
+  // ⬛ [낡은 꼴 · 2차] 예외 길 — N4 를 그때까지의 셈으로 계산(앞 그림이 통과했으면 참 · 표지 없음) · 표지는 기록 뒤(3V2-01 ③④).
+  // 🔴 3차(PM 결정 3V-2 ㉢) — 예외 길 = 봉인 먼저(그 뒤 옮김 0) → 표지 먼저 → 남은 키 DEVICE → N4 강제 거짓. 시간 상한 · 신호도 같은 길.
+  let fatalOnce = false;
   const fatal = (where) => (e) => {
+    if (fatalOnce) return;
+    fatalOnce = true;
+    for (const kb of kbs) kb.sealed = true;
+    K.markN4Hit(`예외 길 ${where}`);
     try {
       console.log(`K 프로세스 밖 예외(${where}) ${L.errorName(e)}`);
       for (const kb of kbs) {
         if (kb.done) continue;
         kb.done = true;
         K.fillDevice(r, K.expectKeys(kb.browser).filter((k) => k.g !== 'N4'), `단언 전 실패 — 프로세스 밖 예외(${where})`, e);
-        K.recN4(r, kb);
+        // ⬛ [낡은 줄 · 2차] K.recN4(r, kb);
+        K.recN4(r, kb, where);
+        K.flushConsole(kb);
       }
     } catch (e2) {
       console.log(`⚫ K 끊긴 자리 기록 실패 (${L.errorName(e2)})`);
@@ -390,6 +456,8 @@ async function main() {
   };
   process.on('unhandledRejection', fatal('unhandledRejection'));
   process.on('uncaughtException', fatal('uncaughtException'));
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => fatal(`신호 ${sig}`)(new K.KitStepError(`신호 ${sig}`)));
+  setTimeout(() => fatal('K 전체 시간 상한')(new K.KitStepError(`K 전체 시간 상한 ${K_TOTAL_MS / 60000}분`)), K_TOTAL_MS).unref();
 
   // G3 비교식 자체 점검 — 시험 안에서 먼저(브라우저와 무관 · 늘 TEST)
   const self = K.g3SelfCheck();

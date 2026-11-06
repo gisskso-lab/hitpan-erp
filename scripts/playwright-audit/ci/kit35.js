@@ -13,6 +13,14 @@
 //   ③ 브라우저 로그인 응답의 접속·갱신 토큰은 받는 즉시 가리고 누출 검사 대상으로 넘긴다(가린 토큰 0 = N4 거짓).
 //   ④ N4 거짓이면 다음 단계에 표지(UI_N4_HIT=1)를 넘긴다 — 업로드 단계가 그 표지면 올리지 않는다(워크플로 조건 한 줄).
 //   ⑤ 브라우저 콘솔 글자를 찍을 때는 소독 → 제어 글자 가림 순서. 예외는 이름만 콘솔에(빈 catch 0 · #15).
+// 🔴 3차(PM 결정 3V-2 · 4V-2) — 위 규칙에 더한다
+//   ②′ 그림은 업로드 자리 밖 임시 자리(stageDir)에 찍고, 찍은 직후 대조를 지난 파일만 업로드 자리(shotsDir)로 옮긴다.
+//      찍기 직전 · 찍을 때 · 찍은 직후의 열린 창 집합이 하나라도 다르면 그 묶음은 확인 안 됨(옮기지 않음 · 대조 못 함).
+//      N4 줄을 적기 시작하면(정상 길 · 예외 길 모두) 봉인 — 그 뒤 옮김 0. 강제 종료 · 시간초과 · 취소에도 업로드 자리엔 대조 지난 그림만.
+//   ④′ N4 거짓 이유 = 「누출 신호」(걸림 · 가림형 아닌 비밀번호 칸 · 지우기 실패) / 「대조 못 함(장치)」(가린 토큰 0 · 통과 그림 0 ·
+//      대조 예외 · 창 집합 다름 · 예외 길 강제 거짓). 표지(UI_N4_HIT=1) 쓰기를 결과표 기록보다 **먼저**.
+//   ⑤′ 콘솔 줄은 쌓아 두었다가 찍는 그 시점 등록 목록으로 소독한다(토큰 등록 전에 온 줄도 등록 뒤 소독).
+//   ⑥ 화면 평가(evaluate)마다 시간 상한 · 막기 · 녹음기 초기 스크립트는 한 덩어리(막기 먼저 · 순서를 코드로 고정).
 'use strict';
 
 const fs = require('fs');
@@ -121,6 +129,27 @@ function ctl(s) {
 function consoleLine(text, cap = 300) {
   return ctl(L.sanitize(text, cap));
 }
+// 🔴 3차(3V-2 · 3V2-05) — 쌓아 둔 콘솔 줄을 지금 등록 목록으로 소독해 찍고 비운다(원문은 메모리에만 · 상한 20줄은 쌓을 때).
+function flushConsole(kb) {
+  const buf = Array.isArray(kb.consoleBuf) ? kb.consoleBuf.splice(0) : [];
+  for (const x of buf) {
+    if (x.kind === 'pageerror') console.log(`K 브라우저 화면 예외(${kb.browser}) ${x.name}`);
+    else console.log(`K 브라우저 콘솔(오류 · ${kb.browser}) ${consoleLine(x.text)}`);
+  }
+  return buf.length;
+}
+
+// ── ⑥ 시간 상한 ────────────────────────────────────────────────────
+const EVAL_MS = 10000; // 화면 평가 한 번
+const SHOT_MS = 15000; // 그림 한 장
+// 상한 안에 안 끝나면 KitStepError(그 단계 = 단언 전 실패 · DEVICE). 원래 약속은 경주가 받아 주므로 거절이 버려지지 않는다.
+function withTimeout(p, ms, what) {
+  let t = null;
+  const limit = new Promise((_, no) => {
+    t = setTimeout(() => no(new KitStepError(`시간 상한 ${Math.round(ms / 1000)}초 — ${what}`)), ms);
+  });
+  return Promise.race([Promise.resolve(p), limit]).finally(() => clearTimeout(t));
+}
 
 // ── window.open 막기(G2) · 녹음기는 device-check 내보냄 그대로 ─────────
 // 막기 스크립트를 **먼저** 건다 → 녹음기가 그 위를 감싼다(녹음기 기록 → 막기 → null). 막기는 탭 저장소 표지가 '1' 일 때만.
@@ -133,6 +162,12 @@ const BLOCKER = `(() => {
     return orig.call(window, url, name, features);
   };
 })();`;
+// 🔴 3차(PM 결정 4V-2 P2-c) — 초기 스크립트 둘을 따로 걸면 실행 순서가 정해져 있지 않다(Playwright 공개 문서).
+//   한 덩어리로 합쳐 순서를 코드로 고정한다: 막기 먼저 → 녹음기가 그 위를 감싼다(녹음기 기록 → 막기 → null).
+function initScript(recorder) {
+  return `${BLOCKER}\n${recorder}`;
+}
+const INIT_SCRIPT = initScript(DC.RECORDER);
 
 // ── API(가 · 부모) ─────────────────────────────────────────────────
 class KitStepError extends Error {
@@ -242,17 +277,22 @@ async function waitMasked(tok, ms = 10000) {
 }
 
 // ⑤ 브라우저 콘솔 오류 줄(창마다 · 상한 20줄)
+// ⬛ [낡은 꼴 · 2차] 받는 즉시 소독해 찍었다 — 토큰 등록 전에 온 줄은 그 토큰을 모르는 소독을 지났다(3V2-05).
+// 🔴 3차 — 받으면 쌓기만 하고(원문은 메모리에만) 찍기는 flushConsole(찍는 그 시점 등록 목록으로 소독).
 function watchConsole(context, kb) {
+  if (!Array.isArray(kb.consoleBuf)) kb.consoleBuf = [];
   const attach = (p) => {
     p.on('console', (msg) => {
       if (msg.type() !== 'error' || kb.consoleLines >= 20) return;
       kb.consoleLines += 1;
-      console.log(`K 브라우저 콘솔(오류 · ${kb.browser}) ${consoleLine(msg.text())}`);
+      // ⬛ [낡은 줄 · 2차] console.log(`K 브라우저 콘솔(오류 · ${kb.browser}) ${consoleLine(msg.text())}`);
+      kb.consoleBuf.push({ kind: 'console', text: String(msg.text()) });
     });
     p.on('pageerror', (e) => {
       if (kb.consoleLines >= 20) return;
       kb.consoleLines += 1;
-      console.log(`K 브라우저 화면 예외(${kb.browser}) ${L.errorName(e)}`);
+      // ⬛ [낡은 줄 · 2차] console.log(`K 브라우저 화면 예외(${kb.browser}) ${L.errorName(e)}`);
+      kb.consoleBuf.push({ kind: 'pageerror', name: L.errorName(e) });
     });
   };
   for (const p of context.pages()) attach(p);
@@ -323,8 +363,9 @@ async function clickBellItem(page, text) {
 }
 async function toastTexts(page) {
   try {
-    return await page.evaluate(() => [...document.querySelectorAll('.mud-snackbar')]
-      .map((e) => String(e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80)).slice(0, 4));
+    // ⬛ [낡은 줄 · 2차] return await page.evaluate(() => [...document.querySelectorAll('.mud-snackbar')]
+    return await withTimeout(page.evaluate(() => [...document.querySelectorAll('.mud-snackbar')]
+      .map((e) => String(e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80)).slice(0, 4)), EVAL_MS, '토스트 글자 읽기');
   } catch (e) {
     return [`읽기 실패 ${L.errorName(e)}`];
   }
@@ -332,13 +373,36 @@ async function toastTexts(page) {
 
 // 녹음기(장치 RECORDER) 읽기 · 비우기 · 막기 표지
 async function recorder(page, op) {
-  return page.evaluate((o) => {
+  // ⬛ [낡은 줄 · 2차] return page.evaluate((o) => {
+  return withTimeout(page.evaluate((o) => {
     if (!window.__k35) return { err: window.__k35err || '녹음기 없음' };
     if (o === 'clear') { window.__k35.clear(); return { ok: true }; }
     if (o === 'block-on') { window.sessionStorage.setItem('__k35block', '1'); return { ok: true }; }
     if (o === 'block-off') { window.sessionStorage.removeItem('__k35block'); return { ok: true }; }
     return { list: window.__k35.list() };
-  }, op);
+  }, op), EVAL_MS, `녹음기 ${op}`);
+}
+// 🔴 3차(PM 결정 4V-2 P1-a) — G4 경우마다 본 창을 중립 주소(로그인 뒤 자리)로 되돌린다. 판단은 순수 함수.
+//   중립 주소를 모르거나 중립 = 목표면 되돌려도 「시작 ≠ 목표」 를 못 세운다 → 진행 안 함(그 경우 DEVICE).
+//   지금 자리 ≠ 중립이면 옮긴다(지금 = 목표인 경우 포함 · 앞 경우 도착 주소에 묶이지 않게).
+function g4Reset(cur, home, want) {
+  if (typeof home !== 'string' || home.length === 0) return { ok: false, nav: false, why: '중립 주소 모름' };
+  if (typeof want !== 'string' || want.length === 0) return { ok: false, nav: false, why: '목표 주소 모름' };
+  if (home === want) return { ok: false, nav: false, why: '중립 주소 = 목표 주소' };
+  return { ok: true, nav: cur !== home, why: cur === want ? '시작 = 목표 → 되돌림' : (cur === home ? '이미 중립' : '중립 아님 → 되돌림') };
+}
+// 되돌린 뒤 확인 — 시작 주소 = 중립 그리고 ≠ 목표일 때만 단언으로 간다(아니면 DEVICE · [시험] 아님).
+function g4StartOk(start, home, want) {
+  return typeof start === 'string' && start === home && start !== want;
+}
+// 앱 안 이동(제품 팝업 쪽이 쓰는 같은 공개 함수 Blazor.navigateTo · 새로고침 0 · 알림 배관 그대로)
+async function navigateInApp(page, url) {
+  return withTimeout(page.evaluate((u) => {
+    const b = window.Blazor;
+    if (!b || typeof b.navigateTo !== 'function') return false;
+    b.navigateTo(u);
+    return true;
+  }, url), EVAL_MS, '앱 안 이동');
 }
 // 본 창 밖 창(팝업) 전부 닫기 — 다음 경우가 깨끗한 바닥에서 시작하게.
 async function closePopups(context, main) {
@@ -381,14 +445,34 @@ const COLLECT = () => {
   }
   return out;
 };
+// 🔴 3차(3V2-04) — 창마다 번호(이 프로세스 안 · 글자 0)를 붙여 찍기 직전 · 찍을 때 · 찍은 직후 창 집합을 비교한다.
+const pageIds = new WeakMap();
+let pageSeq = 0;
+function pageId(p) {
+  let n = pageIds.get(p);
+  if (n === undefined) {
+    pageSeq += 1;
+    n = pageSeq;
+    pageIds.set(p, n);
+  }
+  return n;
+}
+function sameSet(a, b) {
+  const x = [...new Set(a)].sort((m, n) => m - n).join(',');
+  const y = [...new Set(b)].sort((m, n) => m - n).join(',');
+  return x === y;
+}
 async function scanAll(context, registered) {
-  const res = { pages: 0, frames: 0, hits: 0, pwOpen: 0, errs: 0, errName: null };
+  // ⬛ [낡은 줄 · 2차] const res = { pages: 0, frames: 0, hits: 0, pwOpen: 0, errs: 0, errName: null };
+  const res = { pages: 0, frames: 0, hits: 0, pwOpen: 0, errs: 0, errName: null, ids: [] };
   for (const p of context.pages()) {
     if (p.isClosed()) continue;
     res.pages += 1;
+    res.ids.push(pageId(p));
     for (const f of p.frames()) {
       try {
-        const c = await f.evaluate(COLLECT);
+        // ⬛ [낡은 줄 · 2차] const c = await f.evaluate(COLLECT);
+        const c = await withTimeout(f.evaluate(COLLECT), EVAL_MS, '화면 글자 모으기');
         res.frames += 1;
         res.hits += domLeakHits([c.text, ...c.vals, ...c.ph].join('\n'), registered);
         res.pwOpen += c.pwOpen;
@@ -403,21 +487,51 @@ async function scanAll(context, registered) {
 function shotsDir() {
   return path.join(L.outDir(), 'main', 'shots', 'k35');
 }
-// n4 = { verified, shots, blocked, removed, delFail, hits, errs, planted }
+// 🔴 3차(PM 결정 3V-2 · 3V2-01 ㉠) — 임시 자리 = 결과 폴더(UI_OUT)의 **옆**(업로드 경로 · 누출 검사 경로 밖 · 같은 파일계라 옮김은 이름 바꾸기).
+function stageDir(browser = 'x') {
+  const b = String(browser).replace(/[^a-z0-9]/gi, '_');
+  return path.join(path.dirname(path.resolve(L.outDir())), 'ui-k35-stage', b);
+}
+// 임시 자리가 업로드 자리(결과 폴더 main) 밖인지 — 안이면 계약 오류(찍기 전에 던진다).
+function stageOutside(stage = stageDir(), upload = path.join(path.resolve(L.outDir()), 'main')) {
+  const rel = path.relative(path.resolve(upload), path.resolve(stage));
+  return rel.startsWith('..') || path.isAbsolute(rel);
+}
+function rmQuiet(f, what) {
+  try {
+    fs.rmSync(f, { force: true });
+    return !fs.existsSync(f);
+  } catch (e) {
+    console.log(`K ${what} 실패 (${L.errorName(e)})`);
+    return false;
+  }
+}
+// n4 = { verified, shots, blocked, removed, delFail, hits, errs, winDiff, moveFail, planted }
+// ⬛ [낡은 꼴 · 2차 · 55c5131b] guardedShot — 그림을 처음부터 업로드 자리에 찍고(const dir = shotsDir(); const f = path.join(dir, name)),
+// ⬛   찍은 직후 대조에 걸리면 지웠다 → 찍기와 직후 대조 사이에 죽으면 대조 안 된 그림이 업로드 자리에 남았다(3V2-01 · 4V-2 P1-b).
+// 🔴 3차 — 순서: (봉인이면 안 찍음) → 찍기 직전 대조 → 임시 자리에 찍음 → 찍은 직후 대조 → 창 집합 셋 비교 →
+//   통과 묶음만 업로드 자리로 이름 바꾸기(봉인 확인은 바꾸기 바로 앞 · 같은 동기 구간) → 걸림 · 예외 · 집합 다름 = 임시 자리에서 지움.
 async function guardedShot(kb, label) {
   const { context, page } = kb;
   const n4 = kb.n4;
+  if (kb.sealed) {
+    console.log(`K 그림 안 찍음 ${label} — N4 줄 적은 뒤(봉인)`);
+    return false;
+  }
+  const stage = stageDir(kb.browser);
+  if (!stageOutside(stage)) throw new KitContractError('guardedShot: 임시 자리가 업로드 자리 안');
   const registered = registeredValues();
   // 측정 가지 표지(plant.flags 에 n4) — 등록값 하나를 본 창 글자로 심는다(값은 화면에만 · 출력 0). 기대 = 안 찍힘 · N4 거짓.
   if (kb.plantN4 && !n4.planted && page && !page.isClosed()) {
     const v = process.env.UI_PW_GA || '';
-    await page.evaluate((x) => {
+    // ⬛ [낡은 줄 · 2차] await page.evaluate((x) => {
+    await withTimeout(page.evaluate((x) => {
       const d = document.createElement('div');
       d.id = 'k35-n4-plant';
       d.textContent = x;
       d.style.cssText = 'position:fixed;bottom:4px;left:4px;z-index:2147483647;background:#fff;';
       document.body.appendChild(d);
-    }, v).then(() => { n4.planted = true; }, (e) => console.log(`K N4 심기 실패 ${L.errorName(e)}`));
+    }, v), EVAL_MS, 'N4 심기').then(() => { n4.planted = true; }, (e) => console.log(`K N4 심기 실패 ${L.errorName(e)}`));
   }
   const pre = await scanAll(context, registered);
   if (pre.hits > 0 || pre.pwOpen > 0 || pre.errs > 0 || pre.frames === 0) {
@@ -427,78 +541,207 @@ async function guardedShot(kb, label) {
     console.log(`K 그림 안 찍음 ${label} — 찍기 직전 대조 걸림 ${pre.hits} · 가림형 아닌 비밀번호 칸 ${pre.pwOpen} · 예외 ${pre.errs}${pre.errName ? `(${pre.errName})` : ''} · 프레임 ${pre.frames}`);
     return false;
   }
-  const dir = shotsDir();
-  fs.mkdirSync(dir, { recursive: true });
-  const files = [];
+  fs.mkdirSync(stage, { recursive: true });
+  const staged = []; // { src, name }
+  const shotIds = [];
   let i = 0;
   for (const p of context.pages()) {
     if (p.isClosed()) continue;
+    shotIds.push(pageId(p));
     const name = p === page ? `${label}-${kb.browser}.png` : `${label}-${kb.browser}-popup${++i}.png`;
-    const f = path.join(dir, name);
+    const src = path.join(stage, name);
     try {
-      await p.screenshot({ path: f });
-      files.push(f);
+      await withTimeout(p.screenshot({ path: src, timeout: SHOT_MS }), SHOT_MS + 2000, '그림 찍기');
+      staged.push({ src, name });
     } catch (e) {
-      console.log(`K 스크린샷 실패 ${label} (${L.errorName(e)})`);
-      if (fs.existsSync(f)) files.push(f);
+      console.log(`K 스크린샷 실패 ${label} (${L.errorName(e)}) — 그 장은 옮기지 않는다`);
+      if (fs.existsSync(src) && !rmQuiet(src, '실패한 그림 지우기')) n4.delFail += 1;
     }
   }
   const post = await scanAll(context, registered);
-  if (post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0) {
+  const winSame = sameSet(pre.ids, shotIds) && sameSet(shotIds, post.ids);
+  const bad = post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0 || !winSame;
+  if (bad) {
     if (post.hits > 0 || post.pwOpen > 0) n4.hits += 1;
     if (post.errs > 0 || post.frames === 0) n4.errs += 1;
+    if (!winSame) n4.winDiff += 1;
     let fail = 0;
-    for (const f of files) {
-      try {
-        fs.rmSync(f, { force: true });
-        if (fs.existsSync(f)) fail += 1;
-      } catch (e) {
-        fail += 1;
-        console.log(`K 그림 지우기 실패 (${L.errorName(e)})`);
-      }
-    }
+    for (const s of staged) if (!rmQuiet(s.src, '그림 지우기')) fail += 1;
     if (fail > 0) {
       n4.delFail += 1;
       try {
-        fs.rmSync(dir, { recursive: true, force: true });
+        fs.rmSync(stage, { recursive: true, force: true });
       } catch (e) {
-        console.log(`K 그림 폴더 통째 지우기 실패 (${L.errorName(e)})`);
+        console.log(`K 임시 그림 폴더 통째 지우기 실패 (${L.errorName(e)})`);
       }
     }
     n4.removed += 1;
-    console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 지우기 실패 ${fail}`);
+    console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 창 집합 ${winSame ? '같음' : '다름'} · 지우기 실패 ${fail} (업로드 자리 옮김 0)`);
     return false;
   }
-  n4.verified += 1;
-  n4.shots += files.length;
-  return true;
+  // 옮김 — 봉인 확인과 이름 바꾸기 사이에 기다림(await) 0
+  if (kb.sealed) {
+    for (const s of staged) if (!rmQuiet(s.src, '봉인 뒤 그림 지우기')) n4.delFail += 1;
+    console.log(`K 그림 안 옮김 ${label} — 대조 중 봉인`);
+    return false;
+  }
+  const dir = shotsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  let moved = 0;
+  for (const s of staged) {
+    try {
+      fs.renameSync(s.src, path.join(dir, s.name));
+      moved += 1;
+    } catch (e) {
+      n4.moveFail += 1;
+      console.log(`K 그림 옮기기 실패 ${label} (${L.errorName(e)}) — 그 장은 업로드 자리에 없다`);
+      if (fs.existsSync(s.src) && !rmQuiet(s.src, '못 옮긴 그림 지우기')) n4.delFail += 1;
+    }
+  }
+  if (staged.length > 0 && moved === staged.length) n4.verified += 1;
+  n4.shots += moved;
+  return moved > 0 && moved === staged.length;
+}
+// 🔴 3차(3V-2 · 4V-2 P2-b) — N4 판정(순수). 이유 = 누출 신호(걸림 · 지우기 실패) 먼저 · 그 밖 거짓 = 대조 못 함(장치).
+//   forced = 예외 길(프로세스 밖 예외 · 시간 상한 · 신호) — 셈과 무관하게 거짓.
+function n4Verdict(n4, masked, forced = false) {
+  const leak = n4.hits > 0 || n4.delFail > 0;
+  const noCheck = masked === 0 || n4.verified === 0 || n4.errs > 0 || (n4.winDiff || 0) > 0;
+  const pass = !forced && !leak && !noCheck;
+  const why = pass ? null : (leak ? 'leak' : 'device');
+  return { pass, why };
+}
+function n4Got(kb, v, forcedWhy) {
+  const n4 = kb.n4;
+  const head = v.pass ? 'N4 통과' : J.N4_WHY[v.why];
+  return `${head}${forcedWhy ? ` · 강제 거짓(${forcedWhy})` : ''} · 가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 창 집합 다름 ${n4.winDiff || 0} · 옮기기 실패 ${n4.moveFail || 0} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
+}
+// 표지 쓰기 — 실패해도 던지지 않는다(뒤 기록이 이어지게 · 업로드 자리엔 이미 대조 지난 그림만 있다).
+function markN4Hit(where) {
+  try {
+    L.exportPlain('UI_N4_HIT', '1');
+    return true;
+  } catch (e) {
+    console.log(`K N4 표지 쓰기 실패(${where}) ${L.errorName(e)}`);
+    return false;
+  }
 }
 // N4 줄(브라우저마다 한 줄 · DEVICE) — 거짓이면 다음 단계 업로드를 닫는 표지를 넘긴다.
-function recN4(r, kb) {
-  const n4 = kb.n4;
-  const pass = kb.tok.masked > 0 && n4.verified > 0 && n4.hits === 0 && n4.errs === 0 && n4.delFail === 0;
-  const got = `가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
-  const row = recK(r, {
-    key: { id: 'K35-N4', g: 'N4', path: null, browser: kb.browser },
-    what: 'N4 그림 전 화면 글자 대조(모든 창 · 모든 프레임 · 입력·자리표시 글자 · 대소문자 무시 · 찍기 직전·직후) — 거짓이면 누출 신호 · 재실행 대상 아님',
-    got, pass, kind: 'DEVICE',
-  });
-  if (!pass) {
-    L.exportPlain('UI_N4_HIT', '1');
-    console.log('K N4 거짓 — 누출 신호(재실행 대상 아님) · 다음 업로드 단계 닫힘 표지 넘김');
+// ⬛ [낡은 꼴 · 2차] recN4 — pass 를 셈으로 계산 → recK 먼저 → 표지(UI_N4_HIT) 나중. recK 가 던지면 표지 없이 넘어갔다(3V2-01 ④).
+// 🔴 3차 — 봉인 먼저 → 판정 → (거짓이면) 표지 먼저 → 결과표 기록. forcedWhy 가 있으면 예외 길(강제 거짓).
+function recN4(r, kb, forcedWhy = null) {
+  kb.sealed = true;
+  const v = n4Verdict(kb.n4, kb.tok.masked, !!forcedWhy);
+  if (!v.pass) {
+    markN4Hit(kb.browser);
+    console.log(`K N4 거짓(${v.why === 'leak' ? '누출 신호' : '대조 못 함 · 장치'}) — 재실행 대상 아님 · 다음 업로드 단계 닫힘 표지 넘김`);
   }
-  return row;
+  return recK(r, {
+    key: { id: 'K35-N4', g: 'N4', path: null, browser: kb.browser },
+    what: 'N4 그림 전 화면 글자 대조(모든 창 · 모든 프레임 · 입력·자리표시 글자 · 대소문자 무시 · 찍기 직전·직후 · 임시 자리 → 통과분만 옮김) — 거짓이면 누출 신호 또는 대조 못 함 · 재실행 대상 아님',
+    got: n4Got(kb, v, forcedWhy), pass: v.pass, kind: 'DEVICE',
+  });
 }
 
+// ⬛ [낡은 꼴 원문 · 2차 55c5131b] guardedShot · recN4 — 3차에서 위 새 꼴로 바뀜(3V2-01 · 3V2-02 · 4V-2 P1-b · P2-b). 지우지 않고 남긴다.
+// ⬛ // n4 = { verified, shots, blocked, removed, delFail, hits, errs, planted }
+// ⬛ async function guardedShot(kb, label) {
+// ⬛   const { context, page } = kb;
+// ⬛   const n4 = kb.n4;
+// ⬛   const registered = registeredValues();
+// ⬛   // 측정 가지 표지(plant.flags 에 n4) — 등록값 하나를 본 창 글자로 심는다(값은 화면에만 · 출력 0). 기대 = 안 찍힘 · N4 거짓.
+// ⬛   if (kb.plantN4 && !n4.planted && page && !page.isClosed()) {
+// ⬛     const v = process.env.UI_PW_GA || '';
+// ⬛     await page.evaluate((x) => {
+// ⬛       const d = document.createElement('div');
+// ⬛       d.id = 'k35-n4-plant';
+// ⬛       d.textContent = x;
+// ⬛       d.style.cssText = 'position:fixed;bottom:4px;left:4px;z-index:2147483647;background:#fff;';
+// ⬛       document.body.appendChild(d);
+// ⬛     }, v).then(() => { n4.planted = true; }, (e) => console.log(`K N4 심기 실패 ${L.errorName(e)}`));
+// ⬛   }
+// ⬛   const pre = await scanAll(context, registered);
+// ⬛   if (pre.hits > 0 || pre.pwOpen > 0 || pre.errs > 0 || pre.frames === 0) {
+// ⬛     n4.blocked += 1;
+// ⬛     if (pre.hits > 0 || pre.pwOpen > 0) n4.hits += 1;
+// ⬛     if (pre.errs > 0 || pre.frames === 0) n4.errs += 1;
+// ⬛     console.log(`K 그림 안 찍음 ${label} — 찍기 직전 대조 걸림 ${pre.hits} · 가림형 아닌 비밀번호 칸 ${pre.pwOpen} · 예외 ${pre.errs}${pre.errName ? `(${pre.errName})` : ''} · 프레임 ${pre.frames}`);
+// ⬛     return false;
+// ⬛   }
+// ⬛   const dir = shotsDir();
+// ⬛   fs.mkdirSync(dir, { recursive: true });
+// ⬛   const files = [];
+// ⬛   let i = 0;
+// ⬛   for (const p of context.pages()) {
+// ⬛     if (p.isClosed()) continue;
+// ⬛     const name = p === page ? `${label}-${kb.browser}.png` : `${label}-${kb.browser}-popup${++i}.png`;
+// ⬛     const f = path.join(dir, name);
+// ⬛     try {
+// ⬛       await p.screenshot({ path: f });
+// ⬛       files.push(f);
+// ⬛     } catch (e) {
+// ⬛       console.log(`K 스크린샷 실패 ${label} (${L.errorName(e)})`);
+// ⬛       if (fs.existsSync(f)) files.push(f);
+// ⬛     }
+// ⬛   }
+// ⬛   const post = await scanAll(context, registered);
+// ⬛   if (post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0) {
+// ⬛     if (post.hits > 0 || post.pwOpen > 0) n4.hits += 1;
+// ⬛     if (post.errs > 0 || post.frames === 0) n4.errs += 1;
+// ⬛     let fail = 0;
+// ⬛     for (const f of files) {
+// ⬛       try {
+// ⬛         fs.rmSync(f, { force: true });
+// ⬛         if (fs.existsSync(f)) fail += 1;
+// ⬛       } catch (e) {
+// ⬛         fail += 1;
+// ⬛         console.log(`K 그림 지우기 실패 (${L.errorName(e)})`);
+// ⬛       }
+// ⬛     }
+// ⬛     if (fail > 0) {
+// ⬛       n4.delFail += 1;
+// ⬛       try {
+// ⬛         fs.rmSync(dir, { recursive: true, force: true });
+// ⬛       } catch (e) {
+// ⬛         console.log(`K 그림 폴더 통째 지우기 실패 (${L.errorName(e)})`);
+// ⬛       }
+// ⬛     }
+// ⬛     n4.removed += 1;
+// ⬛     console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 지우기 실패 ${fail}`);
+// ⬛     return false;
+// ⬛   }
+// ⬛   n4.verified += 1;
+// ⬛   n4.shots += files.length;
+// ⬛   return true;
+// ⬛ }
+// ⬛ // N4 줄(브라우저마다 한 줄 · DEVICE) — 거짓이면 다음 단계 업로드를 닫는 표지를 넘긴다.
+// ⬛ function recN4(r, kb) {
+// ⬛   const n4 = kb.n4;
+// ⬛   const pass = kb.tok.masked > 0 && n4.verified > 0 && n4.hits === 0 && n4.errs === 0 && n4.delFail === 0;
+// ⬛   const got = `가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
+// ⬛   const row = recK(r, {
+// ⬛     key: { id: 'K35-N4', g: 'N4', path: null, browser: kb.browser },
+// ⬛     what: 'N4 그림 전 화면 글자 대조(모든 창 · 모든 프레임 · 입력·자리표시 글자 · 대소문자 무시 · 찍기 직전·직후) — 거짓이면 누출 신호 · 재실행 대상 아님',
+// ⬛     got, pass, kind: 'DEVICE',
+// ⬛   });
+// ⬛   if (!pass) {
+// ⬛     L.exportPlain('UI_N4_HIT', '1');
+// ⬛     console.log('K N4 거짓 — 누출 신호(재실행 대상 아님) · 다음 업로드 단계 닫힘 표지 넘김');
+// ⬛   }
+// ⬛   return row;
+// ⬛ }
+
 module.exports = {
-  BASE, POPUP_NAME, BLOCKER,
+  BASE, POPUP_NAME, BLOCKER, INIT_SCRIPT, initScript,
   KitContractError, KitStepError,
   kKey, recK, isWritten, fillDevice, expectKeys,
   sameWindowName, g3SelfCheck,
-  domLeakHits, registeredValues, ctl, consoleLine,
+  domLeakHits, registeredValues, ctl, consoleLine, flushConsole,
+  EVAL_MS, SHOT_MS, withTimeout,
   apiCall, apiLogin, apiLogout,
   sleep, pathOf, blockExternal, watchTokens, waitMasked, watchConsole, screenLogin, watchHub, waitHub,
   briefOff, waitNoToasts, waitToast, clickToast, clickBellItem, clickMessenger, toastTexts,
   recorder, closePopups, popupsOf, expectPopup,
-  COLLECT, scanAll, shotsDir, guardedShot, recN4,
+  g4Reset, g4StartOk, navigateInApp,
+  COLLECT, pageId, sameSet, scanAll, shotsDir, stageDir, stageOutside, guardedShot, n4Verdict, markN4Hit, recN4,
 };

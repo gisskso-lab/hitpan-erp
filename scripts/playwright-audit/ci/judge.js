@@ -31,6 +31,8 @@
 //   ⑪ G 기대 키 16(G 14 · N4 2)을 채우고 필수 집합에 넣는다 — K 본문 수와 무관. 빠지면 누락 빨강.
 //      🔴 2차(A7) — G4 토스트 길 2 추가 → 기대 키 18(G 16 · N4 2).
 //   ⑭ 2차(PM 결정 4V-1 ④) — N4 줄 거짓 = 끝 줄 「누출 의심 · 재실행 금지」(빨강 · [장치] 실패보다 먼저 분류 · kind 는 DEVICE 그대로).
+//      🔴 3차(PM 결정 3V-2 · 4V-2 P2-b) — 거짓 이유를 둘로: 「누출 신호」(기본 · 머리 글자 없음 포함) / 「대조 못 함(장치)」.
+//      끝 줄도 둘(누출 신호가 먼저) · 둘 다 빨강 · 둘 다 같은 커밋 재실행 문구 0.
 //   ⑫ G 키 줄의 통과는 TEST 줄로만(N4 줄만 DEVICE) — DEVICE 통과 줄로 채우면 「G 통과 꼴 이상」 키 틀 빨강.
 //   ⑬ K 본문 0 인데 G 기대 키가 있다 = 키 틀 빨강(이유 줄 「K 본문 0 · G 기대 n」).
 //   중복(상한 1) · 목록 밖 비H 키(모르는 키) · G 빈 자리 검사는 그대로. 빨강 순서 그대로(G 줄은 키 틀 안).
@@ -128,6 +130,14 @@ const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K',
 // N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
 const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
   .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
+// 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
+//   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
+//   둘 다 업로드 닫힘 · 둘 다 같은 커밋 재실행 문구 0 · 섞이면 누출 신호 끝 줄이 먼저.
+const N4_WHY = Object.freeze({ leak: 'N4 이유=누출 신호', device: 'N4 이유=대조 못 함(장치)' });
+function n4Why(row) {
+  const got = row && typeof row.got === 'string' ? row.got : '';
+  return got.startsWith(N4_WHY.device) ? 'device' : 'leak';
+}
 // 🔴 F-PR [3-V] 03 — 결과표에서 온 글자를 찍기 전 제어 글자(줄바꿈 · 색 제어 등)를 \uXXXX 글자로 가린다
 //   (한 줄이 두 줄로 갈라져 러너 명령 줄처럼 읽히는 길 0). 소독 **뒤에** 가린다 — 값 안 제어 글자로 소독 대조가 깨지지 않게.
 function showCtl(s) {
@@ -235,7 +245,10 @@ function main() {
     // ⬛ [낡은 줄 · F-PR] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
     // 🔴 PM 결정 4V-1 ④ — N4 거짓 줄은 「누출 의심」 표지(재실행 대상 아님 · kind 는 DEVICE 그대로)
     const n4Bad = x.pass !== true && x.kind === 'DEVICE' && x.scope !== 'H' && EXPECT_G_DEVICE.has(rowKey(x));
-    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? '🔴 FAIL [장치 · 누출 의심]' : '⚫ FAIL [장치]'));
+    // ⬛ [낡은 줄 · 4V-1] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? '🔴 FAIL [장치 · 누출 의심]' : '⚫ FAIL [장치]'));
+    // 🔴 3차(3V-2 · 4V-2 P2-b) — N4 거짓 줄 표지 둘(누출 신호 / 대조 못 함)
+    const n4Mark = n4Bad && n4Why(x) === 'device' ? '🔴 FAIL [장치 · 대조 못 함]' : '🔴 FAIL [장치 · 누출 의심]';
+    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? n4Mark : '⚫ FAIL [장치]'));
     // ⬛ [낡은 줄 · 1~10차] console.log(`${mark} ${x.scope || '-'} ${x.id}${x.g ? ` ${x.g}` : ''}${x.path ? ` ${x.path}` : ''}${x.browser ? ` (${x.browser})` : ''}`);
     console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`);
   }
@@ -310,8 +323,19 @@ function main() {
   // 🔴 PM 결정 4V-1 ④(11/6 · [4] 1차 P2-4) — N4 줄(DEVICE 그대로)이 거짓이면 [장치] 재실행 꼴이 아니라 누출 의심 끝 줄.
   //   [장치] 실패보다 먼저 분류한다(다른 장치 실패와 섞여도 끝 줄이 「재실행 1회」 로 읽히지 않게).
   const failN4 = failD.filter((x) => EXPECT_G_DEVICE.has(rowKey(x)));
+  // ⬛ [낡은 줄 · 4V-1] if (failN4.length > 0) {
+  // ⬛ [낡은 줄 · 4V-1]   console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄 — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
+  // ⬛ [낡은 줄 · 4V-1]   process.exit(1);
+  // ⬛ [낡은 줄 · 4V-1] }
+  // 🔴 3차(3V-2 · 4V-2 P2-b) — 끝 줄 둘. 누출 신호가 하나라도 있으면 그 끝 줄이 먼저 · 모두 「대조 못 함」 이면 장치 이유 끝 줄.
+  //   둘 다 빨강 · 업로드 닫힘 · 같은 커밋 재실행 문구 0(측정 런 재실행 금지 그대로).
+  const n4Leak = failN4.filter((x) => n4Why(x) === 'leak');
+  if (n4Leak.length > 0) {
+    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄(누출 신호 ${n4Leak.length}) — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
+    process.exit(1);
+  }
   if (failN4.length > 0) {
-    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄 — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
+    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄(대조 못 함 ${failN4.length} · 누출 신호 0) — 대조 못 함 · 장치 이유부터 확인(업로드 닫힘 · 재실행 금지)`);
     process.exit(1);
   }
   if (failD.length > 0) {
@@ -329,4 +353,5 @@ module.exports = {
   K_BODY_STRICT, classifyKNames, kBodyScan, // F-PR ⑧
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
+  N4_WHY, n4Why, // K 연결 3차 ⑭
 };
