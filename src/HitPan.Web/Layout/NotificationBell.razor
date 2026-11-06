@@ -24,8 +24,17 @@
     <ActivatorContent>
         <MudBadge Content="@Notify.UnreadCount" Color="Color.Error" Overlap="true"
                   Visible="@(Notify.UnreadCount > 0)" Bordered="true">
+            @* ⬛ 옛 줄 보존 — 종 단추에 「누르면 목록 열기」 연결이 없어 눌러도 알림 목록이 안 펼쳐졌다(P1).
             <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
                            Color="Color.Default" Size="Size.Medium"
+                           aria-label="알림" />
+            *@
+            @* 🔴 근거: docs/운영기록/20261107_결재_691알림종목록안열림_691안에서고침_대표.md
+               화면 구성 요소 9.3 은 사용자 지정 열기 칸 안 단추에 열기 연결을 직접 다는 꼴(패키지 설명 예시).
+               단추는 기본값으로 클릭을 바깥 칸에 넘기지 않으므로(ClickPropagation 기본 false) 열고 닫기는 이 한 곳만 한다. *@
+            <MudIconButton Icon="@Icons.Material.Outlined.Notifications"
+                           Color="Color.Default" Size="Size.Medium"
+                           OnClick="@context.ToggleAsync"
                            aria-label="알림" />
         </MudBadge>
     </ActivatorContent>
