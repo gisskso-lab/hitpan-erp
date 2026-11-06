@@ -11,7 +11,9 @@
 #   ⬛ [낡은 줄 · F-PR] 갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
 #   🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §5-4 · 대표 Q1 「화면·API 바뀐 PR만」 · PM A3 ㉯ · C3 · C4):
 #     거르기 잡(ui-changes)이 PR 합침 커밋의 첫 부모와 비교해 바뀐 파일을 범주로 센다(외부 액션 0 · 읽기 권한만 · 비밀값 0).
-#     화면 · API(와 참조 프로젝트) · 출하 DDL · 장치 · 이 워크플로가 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
+#     ⬛ [낡은 줄 · 갈래 A 첫 꼴] 화면 · API(와 참조 프로젝트) · 출하 DDL · 장치 · 이 워크플로가 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
+#     🔴 PM 결정 3V-1 — 문서(docs/ 아래 · .md) 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도(경로 허용 목록 0).
+#     잔여 한계: 이 워크플로 파일 자체도 PR 쪽 사본이다 — PR 이 이 파일을 바꾸면 거르기도 바뀐다(고정 「돈다」 가 걸리는 자리 · 리뷰로 본다).
 #     문서만 바꾼 PR 은 ui-k35 가 건너뛰어진다(런 결론은 success 로 보인다 · 「건너뜀 ≠ 초록」 = 읽는 규칙 · 머지 상신 잡별 결과표).
 #     거르기 오류 · 빈 출력 · 거르기 잡 실패 · 수동 실행 = 「돈다」(닫힌 쪽 = 도는 쪽).
 #   경로 거르기(paths)는 안 쓴다(§3-1). 필수 검사 지정 = 지금 안 함 · 조건 뒤 따로 결재(§0-10).
@@ -53,26 +55,31 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: "[장치] 거르기 — 화면 · API · 장치 · 워크플로 바뀜"
+      # ⬛ [낡은 단계 · 갈래 A 첫 꼴] "[장치] 거르기 — 화면 · API · 장치 · 워크플로 바뀜"
+      #   git diff --no-renames --name-only -z → 규칙 스크립트(경로 허용 목록) → run 줄 grep → 출력 칸
+      # 🔴 PM 결정 3V-1(11/6) — 닫힌 쪽: 전부 문서일 때만 안 돈다 · 장치·워크플로 폴더가 바뀌면 스크립트 전에 고정 「돈다」
+      #   (스크립트는 PR 쪽 사본이라 그 판단만 믿지 않는다) · 출력 칸은 끝에 한 번만 · 예외 · 빈 목록 · 해석 못 함 = 돈다.
+      #   파일 이름은 로그에 찍지 않는다(범주별 수만).
+      - name: "[장치] 거르기 — 문서만 바뀐 PR 만 안 돈다"
         id: pick
         run: |
           lst="$RUNNER_TEMP/ui-changed.lst"
           out="$RUNNER_TEMP/ui-changes.out"
-          if ! git diff --no-renames --name-only -z HEAD^1 HEAD > "$lst"; then
-            : > "$lst"
+          run="true"
+          if git -c core.quotePath=false diff -z --no-renames --name-only HEAD^1 HEAD > "$lst"; then
+            if grep -qzE '^(scripts/playwright-audit/ci/|\.github/workflows/)' "$lst"; then
+              echo "거르기: 장치 · 워크플로 폴더 바뀜 → 돈다(스크립트 판단 전 고정)"
+            elif node scripts/playwright-audit/ci/ui-changes.js < "$lst" > "$out"; then
+              grep -m1 -E '^거르기: ' "$out" || echo "거르기: 이유 줄 없음"
+              if [ "$(grep -c -x 'run=false' "$out")" = "1" ] && [ "$(grep -c '^run=' "$out")" = "1" ]; then run="false"; fi
+            else
+              echo "거르기: 규칙 스크립트 실패 → 돈다"
+            fi
+          else
             echo "거르기: 바뀐 파일 목록 못 구함(비교 실패) → 돈다"
           fi
-          if ! node scripts/playwright-audit/ci/ui-changes.js < "$lst" > "$out"; then
-            echo "거르기: 규칙 스크립트 실패 → 돈다"
-            echo "run=true" > "$out"
-          fi
-          cat "$out"
-          line="$(grep -m1 -E '^run=(true|false)$' "$out" || true)"
-          if [ -z "$line" ]; then
-            echo "거르기: 출력 칸 없음 → 돈다"
-            line="run=true"
-          fi
-          echo "$line" >> "$GITHUB_OUTPUT"
+          echo "거르기 결론: run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
 
   ui-k35:
     name: ui-k35
