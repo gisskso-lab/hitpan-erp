@@ -1,0 +1,39 @@
+# 잡 이름을 바꾸면 저장소 규칙도 같이 바꿔야 한다.
+name: SQL String Gate
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  sql-string-gate:
+    name: SQL String Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run gate
+        run: dotnet run --project tools/SqlStringGate/SqlStringGate.csproj -c Release -- .
+
+      - name: Show SDK and restored packages
+        if: always()
+        run: |
+          dotnet --version
+          packages="$(dotnet nuget locals global-packages --list | sed 's/^[^:]*: *//; s|/$||')" || true
+          echo "packages: $packages"
+          find "$packages" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sed "s|^$packages/||" | sort
+          jq -c '.project.frameworks[].downloadDependencies' tools/SqlStringGate/obj/project.assets.json || true

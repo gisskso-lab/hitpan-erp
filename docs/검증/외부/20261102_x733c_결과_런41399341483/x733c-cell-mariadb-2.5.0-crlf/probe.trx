@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="ec886296-a89e-4ea1-b989-fee3396c3680" name="@runnervm48cm3 2026-11-02 06:22:03" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-11-02T06:22:03.4416421+00:00" queuing="2026-11-02T06:22:03.4416421+00:00" start="2026-11-02T06:22:00.0328014+00:00" finish="2026-11-02T06:22:03.4464794+00:00" />
+  <TestSettings name="default" id="d3b43a2b-3967-456e-bf5a-216fa68d0353">
+    <Deployment runDeploymentRoot="_runnervm48cm3_2026-11-02_06_22_03" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="db34db50-857b-4f68-9ee3-dbd466ea0925" testId="56f3a2a6-618f-bd0c-1f2b-1dce9e26f036" testName="X733c 계측 — 한 칸(판 × 줄끝)의 원결과를 JSON 으로 남긴다 (계측 가지 전용 · 판정 안 함)" computerName="runnervm48cm3" duration="00:00:02.5891417" startTime="2026-11-02T06:22:00.7775293+00:00" endTime="2026-11-02T06:22:03.3723555+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="db34db50-857b-4f68-9ee3-dbd466ea0925" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="X733c 계측 — 한 칸(판 × 줄끝)의 원결과를 JSON 으로 남긴다 (계측 가지 전용 · 판정 안 함)" storage="/home/runner/work/hitpan-erp/hitpan-erp/src/hitpan.tests/bin/release/net8.0/hitpan.tests.dll" id="56f3a2a6-618f-bd0c-1f2b-1dce9e26f036">
+      <Execution id="db34db50-857b-4f68-9ee3-dbd466ea0925" />
+      <TestMethod codeBase="/home/runner/work/hitpan-erp/hitpan-erp/src/HitPan.Tests/bin/Release/net8.0/HitPan.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="HitPan.Tests.Measure.X733cMySqlConnectorProbeTests" name="X733c_한칸_원결과_기록" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="56f3a2a6-618f-bd0c-1f2b-1dce9e26f036" executionId="db34db50-857b-4f68-9ee3-dbd466ea0925" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 8.0.33)
+[xUnit.net 00:00:00.13]   Discovering: HitPan.Tests
+[xUnit.net 00:00:00.39]   Discovered:  HitPan.Tests
+[xUnit.net 00:00:00.40]   Starting:    HitPan.Tests
+[xUnit.net 00:00:03.02]   Finished:    HitPan.Tests
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

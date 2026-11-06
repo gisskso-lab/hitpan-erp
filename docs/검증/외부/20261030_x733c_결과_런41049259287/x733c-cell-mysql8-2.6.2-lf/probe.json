@@ -1,0 +1,1322 @@
+{
+  "schema": "x733c-probe/1",
+  "cell": {
+    "id": "mysql8-2.6.2-lf",
+    "kind": "mysql8",
+    "driver": "2.6.2",
+    "eol": "lf"
+  },
+  "runtime": {
+    "informational_version": "2.6.2+775689bb3e1ab55d16171e0795264fa746e364c4",
+    "file_version": "2.6.2.0",
+    "assembly_version": "2.0.0.0",
+    "file_name": "MySqlConnector.dll"
+  },
+  "device_errors": [],
+  "server": {
+    "vars": {
+      "VERSION()": "8.0.46",
+      "@@version_comment": "MySQL Community Server - GPL",
+      "@@sql_mode": "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+      "@@character_set_server": "utf8mb4",
+      "@@collation_server": "utf8mb4_0900_ai_ci",
+      "@@max_connections": "500",
+      "@@general_log": "1",
+      "@@log_output": "TABLE",
+      "@@lower_case_table_names": "0",
+      "@@time_zone": "SYSTEM"
+    },
+    "general_log_argument": {
+      "data_type": "mediumblob",
+      "charset": null
+    }
+  },
+  "dir_recount_backoffice": [
+    {
+      "name": "00_backoffice_core.sql",
+      "bytes": 49162,
+      "lf": 713,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "ddc836372239a23076be80d65fd3c583a746f0e3eca0a4ec7d2667c4b5f4b168"
+    },
+    {
+      "name": "10_backoffice_payment.sql",
+      "bytes": 3635,
+      "lf": 52,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "e527361a5274183d0df25f55fb0b97ae55f72c8e2e7efd84a4a2acdef81c4839"
+    },
+    {
+      "name": "11_backoffice_payment_z3_approved_at.sql",
+      "bytes": 2582,
+      "lf": 39,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "bc3644b65ba5cc6296823bb599a2f5d6dcb57dec14c19fdc2408595b81f419c9"
+    },
+    {
+      "name": "20_backoffice_telemetry.sql",
+      "bytes": 6829,
+      "lf": 94,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "09c21542d28e64cbefb46e9ea2b1ca0fdc3f4a7b8d78dbff905191bd3190a452"
+    },
+    {
+      "name": "30_backoffice_tenants_extra_accounts.sql",
+      "bytes": 1984,
+      "lf": 24,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "528bbdd93b041dafb1dd59897af8fd0b2e15e85f99809130f109d5a0e60fca8e"
+    },
+    {
+      "name": "31_backoffice_z2_landing_signups_tenant_fk.sql",
+      "bytes": 10294,
+      "lf": 136,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "f63b2369f9d65110f464f0c4f2519f468e0a8955d1a5379b884f06ce08d063d0"
+    },
+    {
+      "name": "32_backoffice_s2_owner.sql",
+      "bytes": 1927,
+      "lf": 26,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "977ba94ec79c5a4bf824789ad634136bcef3c8219867c1ac5befe2833ec2871d"
+    },
+    {
+      "name": "40_backoffice_cs.sql",
+      "bytes": 6220,
+      "lf": 88,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "66f40889db0b4ac2d62997f598421577914d5d907333945166c2ddc4b942ec11"
+    },
+    {
+      "name": "41_backoffice_cs_kb.sql",
+      "bytes": 6158,
+      "lf": 80,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "070ae03ae25a3e4031dc6161f6eb273dc46b0c31665019d61b0691cef83d8b56"
+    },
+    {
+      "name": "42_backoffice_cs_stages.sql",
+      "bytes": 2471,
+      "lf": 37,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "e693d15df36a674522177b6e186c7cffc32af02051df48fc9b64c404f3b40fd6"
+    },
+    {
+      "name": "43_backoffice_promotion_legacy_align.sql",
+      "bytes": 4976,
+      "lf": 75,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "5f44476062f001a6570e76ae60c2420b397f928e2a0849944fd6194007a9e539"
+    },
+    {
+      "name": "44_backoffice_pricing_plan_columns.sql",
+      "bytes": 4617,
+      "lf": 59,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "562388b625147a9a7f41256743cca76b68cd0763d798d537c38d6557dbe339ef"
+    },
+    {
+      "name": "45_backoffice_cs_outbound_retention.sql",
+      "bytes": 7590,
+      "lf": 97,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "7fb8e89a93fa119e5cd9719c5c97442fb18483dc3e9ea4d04e10f1eab3ade00c"
+    },
+    {
+      "name": "46_backoffice_email_send_history.sql",
+      "bytes": 5277,
+      "lf": 59,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "ba2f00e24d32118678346e93afc957d2040e1aad3b84970cb07651b3dcd08cc7"
+    },
+    {
+      "name": "90_seed_permissions.sql",
+      "bytes": 9185,
+      "lf": 88,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "3f39911270d752db011f6582fac380aa2c6e6097d2a0b43fa90aa6af8ad25c37"
+    },
+    {
+      "name": "91_seed_admin.sql",
+      "bytes": 2277,
+      "lf": 29,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "ad455f53e81884f6740f4a51e71154fbf432a7be08e288418d40a70821df70fb"
+    }
+  ],
+  "control2_param": {
+    "file": {
+      "name": "c2_param.sql",
+      "bytes": 29,
+      "lf": 2,
+      "cr": 0,
+      "crlf": 0,
+      "sha256": "acd1783a2b4a7c642b9aac567b0538be9f8c49141187a4444b4f6eb39a7578ab"
+    },
+    "parameter": "P=7",
+    "a": "7",
+    "b": null,
+    "error": null,
+    "outcome": "a=7,b=NULL",
+    "server_received": [
+      "SET NAMES utf8mb4",
+      "SELECT 7 AS a --\n, @P AS b"
+    ]
+  },
+  "backoffice": {
+    "applied_count": 15,
+    "file_names": [
+      "00_backoffice_core.sql",
+      "10_backoffice_payment.sql",
+      "11_backoffice_payment_z3_approved_at.sql",
+      "20_backoffice_telemetry.sql",
+      "30_backoffice_tenants_extra_accounts.sql",
+      "31_backoffice_z2_landing_signups_tenant_fk.sql",
+      "32_backoffice_s2_owner.sql",
+      "40_backoffice_cs.sql",
+      "41_backoffice_cs_kb.sql",
+      "42_backoffice_cs_stages.sql",
+      "43_backoffice_promotion_legacy_align.sql",
+      "44_backoffice_pricing_plan_columns.sql",
+      "45_backoffice_cs_outbound_retention.sql",
+      "46_backoffice_email_send_history.sql",
+      "90_seed_permissions.sql"
+    ],
+    "content_hash": {
+      "00_backoffice_core.sql": "ddc836372239a23076be80d65fd3c583a746f0e3eca0a4ec7d2667c4b5f4b168",
+      "10_backoffice_payment.sql": "e527361a5274183d0df25f55fb0b97ae55f72c8e2e7efd84a4a2acdef81c4839",
+      "11_backoffice_payment_z3_approved_at.sql": "bc3644b65ba5cc6296823bb599a2f5d6dcb57dec14c19fdc2408595b81f419c9",
+      "20_backoffice_telemetry.sql": "09c21542d28e64cbefb46e9ea2b1ca0fdc3f4a7b8d78dbff905191bd3190a452",
+      "30_backoffice_tenants_extra_accounts.sql": "528bbdd93b041dafb1dd59897af8fd0b2e15e85f99809130f109d5a0e60fca8e",
+      "31_backoffice_z2_landing_signups_tenant_fk.sql": "f63b2369f9d65110f464f0c4f2519f468e0a8955d1a5379b884f06ce08d063d0",
+      "32_backoffice_s2_owner.sql": "977ba94ec79c5a4bf824789ad634136bcef3c8219867c1ac5befe2833ec2871d",
+      "40_backoffice_cs.sql": "66f40889db0b4ac2d62997f598421577914d5d907333945166c2ddc4b942ec11",
+      "41_backoffice_cs_kb.sql": "070ae03ae25a3e4031dc6161f6eb273dc46b0c31665019d61b0691cef83d8b56",
+      "42_backoffice_cs_stages.sql": "e693d15df36a674522177b6e186c7cffc32af02051df48fc9b64c404f3b40fd6",
+      "43_backoffice_promotion_legacy_align.sql": "5f44476062f001a6570e76ae60c2420b397f928e2a0849944fd6194007a9e539",
+      "44_backoffice_pricing_plan_columns.sql": "562388b625147a9a7f41256743cca76b68cd0763d798d537c38d6557dbe339ef",
+      "45_backoffice_cs_outbound_retention.sql": "7fb8e89a93fa119e5cd9719c5c97442fb18483dc3e9ea4d04e10f1eab3ade00c",
+      "46_backoffice_email_send_history.sql": "ba2f00e24d32118678346e93afc957d2040e1aad3b84970cb07651b3dcd08cc7",
+      "90_seed_permissions.sql": "3f39911270d752db011f6582fac380aa2c6e6097d2a0b43fa90aa6af8ad25c37"
+    },
+    "error": null,
+    "log_filter_rule": "mysql.general_log 에서 command_type='Query' 전부 · 측정 연결은 sql_log_off=1 · 적용 직전 연결 풀 비움 + TRUNCATE ⇒ 남는 것은 SchemaMigrator 연결뿐(파일별이 아니라 적용 전체의 문장 순서)",
+    "log_queries": [
+      {
+        "sha256": "dba85262f83250a1743703cea6ed3b8a9cd931b871f2c6294115a7dedb9b5adf",
+        "len": 17
+      },
+      {
+        "sha256": "dae178513ed93ac8293d76703955a24a0cb55fed97e0eb01227227bf4e68f8fd",
+        "len": 16
+      },
+      {
+        "sha256": "e11c33832f39e6c7de02d95ad2f88a0fe5f0ef178785feb488eaac9163baf7db",
+        "len": 354
+      },
+      {
+        "sha256": "9c0d2e4d6227b4781d43a779f8e904b01490cf72c586e27e70195179fce5e2b6",
+        "len": 86
+      },
+      {
+        "sha256": "bc4912155befadd356345452448ed49a2e29ef0345aac39fdf5786de6a26f434",
+        "len": 1979
+      },
+      {
+        "sha256": "d561ff3ea5a15e005c319a28d4ab85bf5831e585ce9fc0c602e2b296d15548cd",
+        "len": 1180
+      },
+      {
+        "sha256": "a2d5cf9f4fc45e9c7f4a61d09515d7943901fc34e743f37a40eeb85148272723",
+        "len": 1412
+      },
+      {
+        "sha256": "47878c3474616c14dfa8726c24453632644c5967cf24fb20ec116fca8c38e853",
+        "len": 1993
+      },
+      {
+        "sha256": "70d10187240003d549dd634740aaa86ce9f2cb3299e36ad37b822d803280c028",
+        "len": 3507
+      },
+      {
+        "sha256": "5ce3a4e8559105db1cb0f03ed4d225e3d946e4a8360860233ee32a128a37be36",
+        "len": 1607
+      },
+      {
+        "sha256": "ceae24025b93d1ff50b64fbe420698b7aca584101df8e99caa0143ab21127412",
+        "len": 1647
+      },
+      {
+        "sha256": "4b97996fde8e220bc587a68847c4d6f7fbd9b5e3760a4e310de628cd80d33fd5",
+        "len": 1726
+      },
+      {
+        "sha256": "3cd7e6a4dc047fdbe5a6f3ee305e54e7bb9e8e104719c278aeb4a0d80ec9da8f",
+        "len": 1574
+      },
+      {
+        "sha256": "93c56fd7cd3bf12c9e4ee5ebee91c01a76c121ac39a9c8e144bace53f699519a",
+        "len": 1330
+      },
+      {
+        "sha256": "98f217aa2b5fceb4df3e2d8ccca159131e1a028c03047f1144f54ef500ccb6cf",
+        "len": 1156
+      },
+      {
+        "sha256": "84f0664be047b9c4d63d40c7cdeb1b2f04d86f6ab000ac0288956a09cbc9e7c4",
+        "len": 1424
+      },
+      {
+        "sha256": "2f8b8e2da3c267ed95f33f4e03e548b24ea10f2713df64faf0b7304a384e9f9f",
+        "len": 1707
+      },
+      {
+        "sha256": "06746e962a2ce662a935bb03204d625aab26f63b627842450681e693ee1f9f01",
+        "len": 1498
+      },
+      {
+        "sha256": "2c803817bedf655cd5c592c0b8ab0911eb51fac10df5f346a3db1ddde5d57e7e",
+        "len": 1514
+      },
+      {
+        "sha256": "0abc2a499737b338402cec23f9f34d8d5de42ddc5c51132d2da0ae026668241b",
+        "len": 2038
+      },
+      {
+        "sha256": "06da2e38afa283d7935c755e63776cd8888b355662eeafaf8e155fc0032b4917",
+        "len": 2539
+      },
+      {
+        "sha256": "5876f9458677b6157d6acf7e07ba573648c895690a5de9360976682da541ca5e",
+        "len": 1360
+      },
+      {
+        "sha256": "970218b03974ee89e6e7a711058315627c41db993306a21fead4918b255b7562",
+        "len": 1298
+      },
+      {
+        "sha256": "f79c0a0a73bf882600b3fb2f88a6e581548d171a561c520ff791616136055af5",
+        "len": 1317
+      },
+      {
+        "sha256": "dcf72d0487a03a7379414dce45a4a70213205ce164732f76031ca3960917f816",
+        "len": 1367
+      },
+      {
+        "sha256": "e5d97c61fd7e3939568c4225eb966708867f426f6123b2ca92d87a52ff8ef623",
+        "len": 2173
+      },
+      {
+        "sha256": "6323ba996bc3f82b63175e2e2daa5540ad1728b2efcb879bcaeec4cd90402ddd",
+        "len": 897
+      },
+      {
+        "sha256": "da318eca1ce9012c8d7ebfeaded05412d487addc11971534a26b38ef2eb0eb0f",
+        "len": 1546
+      },
+      {
+        "sha256": "78d8ab28e82df86e9435b08d790e40143b51c8d42a024aedc75aa7d170eef863",
+        "len": 1199
+      },
+      {
+        "sha256": "c42ad8fbd9f0cafc8f4c317c6d4ccbf1fa931bcf6354701679ba3f20fed62c41",
+        "len": 1826
+      },
+      {
+        "sha256": "685cd7bb85c73696656668907b26c32aec606d850aba694ec8ddbfd7f4836c2b",
+        "len": 1961
+      },
+      {
+        "sha256": "632393f0b5acbf460c24671de377218f6a6f44d34117102ae8a7ef6039ba478c",
+        "len": 1404
+      },
+      {
+        "sha256": "ac2dc96fc678cc0f422237ea778c1e2b2f92a00448b72cc4274e0cc1d61fdbbc",
+        "len": 2280
+      },
+      {
+        "sha256": "637cb13be4bba7cd967109669d7f7331c4bc0f8f30d1e11a91076e8db65bd060",
+        "len": 24
+      },
+      {
+        "sha256": "37f71d1c89f0adba9691a7af532c18980f1c540255721cfa10cef26997a7c7b5",
+        "len": 373
+      },
+      {
+        "sha256": "dfbdd5cd8990f6e2a7287f2051e59af4762b7599172b4a959d8037c1b19253c3",
+        "len": 89
+      },
+      {
+        "sha256": "ee995077f99f69918595ac5857422a760ba1c2417c5fe172c49baccb3ffa3cb8",
+        "len": 1526
+      },
+      {
+        "sha256": "26bb899f093d04ab3ec2d19801ae8883eebca51016b9dde8457ae0569a13b9d2",
+        "len": 1539
+      },
+      {
+        "sha256": "637cb13be4bba7cd967109669d7f7331c4bc0f8f30d1e11a91076e8db65bd060",
+        "len": 24
+      },
+      {
+        "sha256": "b2e9276ddf872ce89eba4278764fc4a3c3fa2f6ba09427a3779c9a9c8481467d",
+        "len": 376
+      },
+      {
+        "sha256": "43e25ecbfa30453ccb2d675cec83ad8b61f3f7d37d4bfa74b5f853ddc6469f95",
+        "len": 104
+      },
+      {
+        "sha256": "4066fee1ed7517d82c641abe4fc13929ca190540b7e6d0f7c93bd7477f16031f",
+        "len": 2003
+      },
+      {
+        "sha256": "32994cc66e68bb5e47cb73c65ccefa3b4e5278b7b706cb346ee81d6096d863e1",
+        "len": 188
+      },
+      {
+        "sha256": "16fcc08ee973b7e67bc3bd32da2b409677ae773039decfdcd3b04eba3e75108b",
+        "len": 369
+      },
+      {
+        "sha256": "da192a07de730562bbbb0423b572332e085ee4dbc92a453b9513b2935dac70ab",
+        "len": 391
+      },
+      {
+        "sha256": "8fcd069cc70f25b201dcb020a0e67cb5a7185d185d8d2c18a19fe31a21ef9a8d",
+        "len": 91
+      },
+      {
+        "sha256": "c65df76a1b063c34e08ac6757e8a74edc3d3d63a52e070d40fa801ce896c0df0",
+        "len": 1866
+      },
+      {
+        "sha256": "bc4a028c03da22d789c914b24bdf6525d3496d40f4aea97a74c517349e8e7811",
+        "len": 2136
+      },
+      {
+        "sha256": "e7da560b6a2897da3c67fa358782df4c6ec4173cc63c3d712d3c9467281018c1",
+        "len": 2329
+      },
+      {
+        "sha256": "637cb13be4bba7cd967109669d7f7331c4bc0f8f30d1e11a91076e8db65bd060",
+        "len": 24
+      },
+      {
+        "sha256": "a9259b9d766381a9fdb1142b82486077a86c951bdb78ee6bf5593255b95a6ea0",
+        "len": 378
+      },
+      {
+        "sha256": "9d0a092b77a4893a3a51510b51daff8b7b59c3290427a01c21045dfd5576eb0c",
+        "len": 104
+      },
+      {
+        "sha256": "6d514c77c1988f957f21c370eb0a28245427a1b9c5a1a3a12e63b7185ef62330",
+        "len": 1968
+      },
+      {
+        "sha256": "788cd1bf24935fa942bcffdeeeb89a3e50826bc9fba27cefa10ec714cafec496",
+        "len": 391
+      },
+      {
+        "sha256": "219f59f0491bd873bf04ec5492a927b9986157b5a535890221ba9696e5f8d09a",
+        "len": 110
+      },
+      {
+        "sha256": "de68d11a359a77bee0063bad172f6d7863937c291ed96d8e0fc24591f3fc7a12",
+        "len": 3034
+      },
+      {
+        "sha256": "0e38edfe8d351e3f8b6b41421027e147e44add6bf427d8d993ed3d97d1cb47fb",
+        "len": 77
+      },
+      {
+        "sha256": "2f953e3975004b5b31b74d9168a97a409678f87dfd75c99170063e63f5f14323",
+        "len": 1470
+      },
+      {
+        "sha256": "3d69d3ef4f72848fd07dd49fd115e1633df143c35dc39286f9791820d768e72c",
+        "len": 327
+      },
+      {
+        "sha256": "2d066731529938e38fb2b8da229a18004dadf85670d92c4a0113c91199e8ab0a",
+        "len": 3144
+      },
+      {
+        "sha256": "4f561f85002aff2a8ff77e97a92d4bf60d40d4d7ed6bb390c55391ef37c674cc",
+        "len": 2183
+      },
+      {
+        "sha256": "8f822a95956651fb73d6839311f964cbb6371c7e4c81de575ed66a9d4bd257fa",
+        "len": 397
+      },
+      {
+        "sha256": "e5dc2be4bafb49861d0c33f91fd7572fa351d4547c83ec9075ca73e33bc613ef",
+        "len": 90
+      },
+      {
+        "sha256": "73c4b49e60441578fff85fb271b3a168f53bc9c5452c243003f819c8fa06b1b1",
+        "len": 1869
+      },
+      {
+        "sha256": "e6043ea396432efd4e9da55007d17f66208ea05116fe62a0309aa3a4ff760d7e",
+        "len": 377
+      },
+      {
+        "sha256": "e88c96f6c7dc1a5a38032301ca5acdc3dce61045d7833d5725add6e17f5b2a0b",
+        "len": 84
+      },
+      {
+        "sha256": "fb8d1e288faa851d06d272f4275604adfbacd6119796059fc1979331b8f0593f",
+        "len": 3490
+      },
+      {
+        "sha256": "863ea7b20286db7aca6474029b13af21563e4f2dc84e051cdde33f2d1b9d406e",
+        "len": 588
+      },
+      {
+        "sha256": "c6644c9a3e3e0793e9b35710a3fa2becaa4315240f059471f55f8cb678248db0",
+        "len": 1278
+      },
+      {
+        "sha256": "351b15c2749285dfa84d2f246177c10dcb151172785c17404687379e391c06db",
+        "len": 853
+      },
+      {
+        "sha256": "fd719f771fe55af5e9fdadad8d24b7dc06c656e96a084f0cf52636d1105306c4",
+        "len": 371
+      },
+      {
+        "sha256": "07aca855f1c06e29b79e2e3afe9f7841573a10356461f2a2f6022a7d7b0e38e4",
+        "len": 87
+      },
+      {
+        "sha256": "3c2814ddb327ad9d52aa50d809d7d8da489f07508537663f3677f973757f6ed7",
+        "len": 1581
+      },
+      {
+        "sha256": "95d0ab616eef6dd7096fa18a7b29a24655cb68511cb253a7472c54911da421ea",
+        "len": 1982
+      },
+      {
+        "sha256": "5620287d83796cf4f5c0a17fe789a51f544b799fa6ea641f866fc46b95470781",
+        "len": 919
+      },
+      {
+        "sha256": "7460169bf6cd8a0e6ec70d76ef155b61832025123d3e8d469b75d188d3ac60e1",
+        "len": 1651
+      },
+      {
+        "sha256": "ef9a3b96ddd1fa17bfa401b43960803554386b397c5d4fbfadd1fb52979cb736",
+        "len": 374
+      },
+      {
+        "sha256": "723580117904ec2509d97f6a83ebc819968c561cbf8ba79bdd8f6e3d7357a614",
+        "len": 91
+      },
+      {
+        "sha256": "78ca660f7540cab16b5d3bfc3118f38fc67c1232906a1c657b710b08d4c9a251",
+        "len": 2237
+      },
+      {
+        "sha256": "7570bfbf73befb66acb753ff865285f70e797add8c77243e449828c5df9ea5a1",
+        "len": 131
+      },
+      {
+        "sha256": "fa9b64a0bad099e8de8920863e5a1aea1fa3bb39594bc11150801df747b3838e",
+        "len": 378
+      },
+      {
+        "sha256": "2eb463b2371d8b65f1ea60fb40cf782de140129fa7418ef470209e747a8f90ad",
+        "len": 104
+      },
+      {
+        "sha256": "1ea45e804826ae36c772bcb8f47f7a4113792729c1b2166a96e86102dedf5c69",
+        "len": 4074
+      },
+      {
+        "sha256": "6323ba996bc3f82b63175e2e2daa5540ad1728b2efcb879bcaeec4cd90402ddd",
+        "len": 897
+      },
+      {
+        "sha256": "aad0800de41d4e5b163bc3856151a366f5e24cabdf33975a3559ed1e2b37e779",
+        "len": 391
+      },
+      {
+        "sha256": "05538bd8c6683c0896e9238cd82607ce3c5475a2725d940b0139b7a55625c6e8",
+        "len": 102
+      },
+      {
+        "sha256": "c67ea930cf11ae032ed13d9083861fef4291f056020c04fe33530e6928914f24",
+        "len": 4130
+      },
+      {
+        "sha256": "b01aaa8c1e43d1f3421cf1a2ef1186f584eec84b3ba03796719a015168821c93",
+        "len": 213
+      },
+      {
+        "sha256": "606a10706af833102273ade29b90bc363b1103c6d4a29f188ad3815bb6f3974b",
+        "len": 224
+      },
+      {
+        "sha256": "32e0b24bd1b631593e493cf20e51c3e8ee0de37fa87514f04ddf6807c0757485",
+        "len": 389
+      },
+      {
+        "sha256": "357db323c2a7bb776f36db464487f30d012b5365a403af6f18900f6f2c7fff48",
+        "len": 103
+      },
+      {
+        "sha256": "fc91584ca1e225987173314cf211322abac5b5f0e2f4685cbf6daa53555e053f",
+        "len": 5110
+      },
+      {
+        "sha256": "5c31ad17a98b55271eccee725e36a146e4aaaa271d4548e288fb7c1f32f3b450",
+        "len": 1047
+      },
+      {
+        "sha256": "280761e6f08b2724c629cc82a87fd4fa639554089f3fe6050eb0842b5e3f0b69",
+        "len": 440
+      },
+      {
+        "sha256": "9827ba433888456f0627c0406ec9cb2ea03f41c95ec72ed335a0dda265d7a349",
+        "len": 667
+      },
+      {
+        "sha256": "b67f8fcbc2d143f9243036ccc34d32f5329b5206c6d1f765d480af6c376cb0e3",
+        "len": 115
+      },
+      {
+        "sha256": "704863ada5ca3362099447201b5a30a2a1924492f3910f3a85e7086fd644401c",
+        "len": 152
+      },
+      {
+        "sha256": "53e0d009948aaeaec9dacb5d2ae3fe5be3774db828243d5da43227df6ac94656",
+        "len": 390
+      },
+      {
+        "sha256": "d855776cd595443b2c77b0d2579ae8781eb711748fbf5c5afa9ca4ece7f6593c",
+        "len": 100
+      },
+      {
+        "sha256": "61b05fda130c1a9a3544243ade57b9dc7c58b08b2e9259b2149a1fca5415b8f0",
+        "len": 5275
+      },
+      {
+        "sha256": "e79b83d8940247faa41aa7d5c23fdcf6a3fcb7a4196c2d483411045a470286af",
+        "len": 387
+      },
+      {
+        "sha256": "94c56d8167c57ae5d9f0e8736375ddac8cbbec4b106b64dba93109a4b3cf9187",
+        "len": 87
+      },
+      {
+        "sha256": "7374699036cbd347416586e36c132b684cd48e713012e799de64874ecc9a72ba",
+        "len": 2338
+      },
+      {
+        "sha256": "23a13094dbacff417f0fdd1c46a55285e0f2d0bf6c8ba66d536a8a9724c295ac",
+        "len": 6842
+      },
+      {
+        "sha256": "8a7812bc2f25ec2443cf7f27645d36870939b5508cbe2ede89df2cf4dd0b21b0",
+        "len": 374
+      },
+      {
+        "sha256": "4d6ddb78bd6d7ee087f65cd24b4919e9b4e55b3a0173825e23dc8fff76979ae7",
+        "len": 81
+      }
+    ]
+  },
+  "backoffice_shape": {
+    "excluded_table": "_schema_migrations",
+    "count": 667,
+    "sha256": "d5a5a851f3457bd63ecf46b26ff187d6af2fd0eb96c84daccb4e95c0844e31c4",
+    "lines": [
+      "인덱스 beta_signups.PRIMARY : 고유아님 0 : signup_id",
+      "인덱스 bo_ai_export_consents.PRIMARY : 고유아님 0 : id",
+      "인덱스 bo_ai_export_consents.idx_bo_ai_consent_tenant : 고유아님 1 : tenant_id,granted_at",
+      "인덱스 bo_approval_queue.PRIMARY : 고유아님 0 : approval_id",
+      "인덱스 bo_approval_queue.idx_approval_requester : 고유아님 1 : requester_id",
+      "인덱스 bo_approval_queue.idx_approval_status : 고유아님 1 : status,expires_at",
+      "인덱스 bo_audit_log.PRIMARY : 고유아님 0 : log_id",
+      "인덱스 bo_audit_log.idx_audit_action : 고유아님 1 : action,created_at",
+      "인덱스 bo_audit_log.idx_audit_actor : 고유아님 1 : actor_user_id,created_at",
+      "인덱스 bo_audit_log.idx_audit_target : 고유아님 1 : target_type,target_id",
+      "인덱스 bo_cs_outbound.PRIMARY : 고유아님 0 : outbound_id",
+      "인덱스 bo_cs_outbound.idx_bo_cs_outbound_pending : 고유아님 1 : delivered_at,created_at",
+      "인덱스 bo_cs_outbound.idx_bo_cs_outbound_tenant : 고유아님 1 : tenant_id,created_at",
+      "인덱스 bo_cs_reject_logs.PRIMARY : 고유아님 0 : id",
+      "인덱스 bo_cs_reject_logs.idx_bo_cs_reject_code : 고유아님 1 : tenant_code,occurred_at",
+      "인덱스 bo_cs_reject_logs.idx_bo_cs_reject_time : 고유아님 1 : occurred_at",
+      "인덱스 bo_cs_replies.PRIMARY : 고유아님 0 : reply_id",
+      "인덱스 bo_cs_replies.idx_bo_cs_reply_tenant : 고유아님 1 : tenant_id,created_at",
+      "인덱스 bo_cs_replies.idx_bo_cs_reply_ticket : 고유아님 1 : ticket_id",
+      "인덱스 bo_cs_retention_policy.PRIMARY : 고유아님 0 : policy_id",
+      "인덱스 bo_cs_ticket_logs.PRIMARY : 고유아님 0 : id",
+      "인덱스 bo_cs_ticket_logs.idx_bo_cs_log_ticket : 고유아님 1 : ticket_id,acted_at",
+      "인덱스 bo_cs_tickets.PRIMARY : 고유아님 0 : id",
+      "인덱스 bo_cs_tickets.idx_bo_cs_reseller : 고유아님 1 : reseller_id,status",
+      "인덱스 bo_cs_tickets.idx_bo_cs_stage : 고유아님 1 : read_at,status,rated_at",
+      "인덱스 bo_cs_tickets.idx_bo_cs_status_time : 고유아님 1 : status,received_at",
+      "인덱스 bo_cs_tickets.idx_bo_cs_tenant : 고유아님 1 : tenant_id",
+      "인덱스 bo_cs_tickets.uq_bo_cs_client : 고유아님 0 : tenant_id,client_ticket_uid",
+      "인덱스 bo_email_send_history.PRIMARY : 고유아님 0 : send_id",
+      "인덱스 bo_email_send_history.idx_bo_email_hist_result : 고유아님 1 : result,sent_at",
+      "인덱스 bo_email_send_history.idx_bo_email_hist_sent : 고유아님 1 : sent_at",
+      "인덱스 bo_email_send_history.idx_bo_email_hist_to : 고유아님 1 : to_email,sent_at",
+      "인덱스 bo_kb_doc_logs.PRIMARY : 고유아님 0 : id",
+      "인덱스 bo_kb_doc_logs.idx_bo_kb_log_action : 고유아님 1 : action,acted_at",
+      "인덱스 bo_kb_doc_logs.idx_bo_kb_log_doc : 고유아님 1 : doc_id,acted_at",
+      "인덱스 bo_kb_docs.PRIMARY : 고유아님 0 : doc_id",
+      "인덱스 bo_kb_docs.idx_bo_kb_code : 고유아님 1 : issue_code,version",
+      "인덱스 bo_kb_docs.idx_bo_kb_status : 고유아님 1 : status,category",
+      "인덱스 bo_kb_docs.uq_bo_kb_code_ver : 고유아님 0 : issue_code,version",
+      "인덱스 bo_permissions.PRIMARY : 고유아님 0 : permission_key",
+      "인덱스 bo_permissions.idx_category : 고유아님 1 : category",
+      "인덱스 bo_user_mfa.PRIMARY : 고유아님 0 : user_id",
+      "인덱스 bo_users.PRIMARY : 고유아님 0 : user_id",
+      "인덱스 bo_users.idx_bo_users_reseller : 고유아님 1 : reseller_id",
+      "인덱스 bo_users.idx_bo_users_role : 고유아님 1 : role,is_active",
+      "인덱스 bo_users.uq_bo_users_email : 고유아님 0 : email",
+      "인덱스 landing_signups.PRIMARY : 고유아님 0 : signup_id",
+      "인덱스 landing_signups.ix_biz_no_hash : 고유아님 1 : biz_no_hash",
+      "인덱스 landing_signups.ix_email : 고유아님 1 : email",
+      "인덱스 landing_signups.ix_landing_signups_tenant : 고유아님 1 : tenant_id",
+      "인덱스 landing_signups.ix_status : 고유아님 1 : status",
+      "인덱스 landing_signups.ix_submitted_at : 고유아님 1 : submitted_at",
+      "인덱스 landing_signups.uk_signup_token : 고유아님 0 : signup_token",
+      "인덱스 platform_admins.PRIMARY : 고유아님 0 : admin_id",
+      "인덱스 platform_admins.idx_platform_admins_role_active : 고유아님 1 : role,is_active",
+      "인덱스 platform_admins.uk_platform_admins_email : 고유아님 0 : email",
+      "인덱스 platforms.PRIMARY : 고유아님 0 : platform_id",
+      "인덱스 pricing_history.PRIMARY : 고유아님 0 : history_id",
+      "인덱스 pricing_history.ix_changed_by : 고유아님 1 : changed_by,changed_at",
+      "인덱스 pricing_history.ix_entity : 고유아님 1 : entity_type,entity_id,changed_at",
+      "인덱스 pricing_plans.PRIMARY : 고유아님 0 : plan_id",
+      "인덱스 pricing_plans.ix_active_visible : 고유아님 1 : is_active,is_visible",
+      "인덱스 promotion_usages.PRIMARY : 고유아님 0 : usage_id",
+      "인덱스 promotion_usages.ix_applied_at : 고유아님 1 : applied_at",
+      "인덱스 promotion_usages.ix_promotion : 고유아님 1 : promotion_id",
+      "인덱스 promotion_usages.ix_signup_token : 고유아님 1 : signup_token",
+      "인덱스 promotion_usages.ix_tenant : 고유아님 1 : tenant_id",
+      "인덱스 promotions.PRIMARY : 고유아님 0 : promotion_id",
+      "인덱스 promotions.ix_promotions_active : 고유아님 1 : is_active,starts_at,ends_at",
+      "인덱스 promotions.uk_promotion_code : 고유아님 0 : promotion_code",
+      "인덱스 promotions_legacy.PRIMARY : 고유아님 0 : promotion_id",
+      "인덱스 promotions_legacy.ix_status_period : 고유아님 1 : status,starts_at,ends_at",
+      "인덱스 promotions_legacy.ix_target_plan : 고유아님 1 : target_plan",
+      "인덱스 promotions_legacy.uk_promo_code : 고유아님 0 : promo_code",
+      "인덱스 reseller_accounts.PRIMARY : 고유아님 0 : account_id",
+      "인덱스 reseller_accounts.idx_reseller_accounts_active : 고유아님 1 : is_active",
+      "인덱스 reseller_accounts.idx_reseller_accounts_reseller : 고유아님 1 : reseller_id",
+      "인덱스 reseller_accounts.uk_reseller_accounts_email : 고유아님 0 : reseller_id,email",
+      "인덱스 reseller_applications.PRIMARY : 고유아님 0 : application_id",
+      "인덱스 reseller_applications.idx_email : 고유아님 1 : contact_email",
+      "인덱스 reseller_applications.idx_status_submitted : 고유아님 1 : status,submitted_at",
+      "인덱스 reseller_serials.PRIMARY : 고유아님 0 : serial_id",
+      "인덱스 reseller_serials.idx_serial_reseller : 고유아님 1 : reseller_id,status",
+      "인덱스 reseller_serials.idx_serial_status : 고유아님 1 : status",
+      "인덱스 reseller_serials.uq_serial_code : 고유아님 0 : serial_code",
+      "인덱스 reseller_settlement_lines.PRIMARY : 고유아님 0 : line_id",
+      "인덱스 reseller_settlement_lines.idx_settlement_lines_settlement : 고유아님 1 : settlement_id",
+      "인덱스 reseller_settlements.PRIMARY : 고유아님 0 : settlement_id",
+      "인덱스 reseller_settlements.idx_settlement_month : 고유아님 1 : settlement_month,status",
+      "인덱스 reseller_settlements.uq_reseller_month : 고유아님 0 : reseller_id,settlement_month",
+      "인덱스 resellers.PRIMARY : 고유아님 0 : reseller_id",
+      "인덱스 resellers.idx_resellers_join_date : 고유아님 1 : join_date",
+      "인덱스 resellers.idx_resellers_status : 고유아님 1 : status",
+      "인덱스 resellers.uk_resellers_biz_no : 고유아님 0 : biz_no",
+      "인덱스 resellers.uk_resellers_code : 고유아님 0 : reseller_code",
+      "인덱스 serial_verify_attempts.PRIMARY : 고유아님 0 : attempt_id",
+      "인덱스 serial_verify_attempts.ix_fingerprint_attempted : 고유아님 1 : client_fingerprint,attempted_at",
+      "인덱스 serial_verify_attempts.ix_result : 고유아님 1 : result,attempted_at",
+      "인덱스 serial_verify_attempts.ix_tenant_attempted : 고유아님 1 : tenant_id,attempted_at",
+      "인덱스 serial_verify_locks.PRIMARY : 고유아님 0 : lock_id",
+      "인덱스 serial_verify_locks.ix_locked : 고유아님 1 : is_locked,last_failed_at",
+      "인덱스 serial_verify_locks.uk_fingerprint : 고유아님 0 : client_fingerprint",
+      "인덱스 tenant_devices.PRIMARY : 고유아님 0 : device_id",
+      "인덱스 tenant_devices.idx_tenant_type_status : 고유아님 1 : tenant_id,device_type,status",
+      "인덱스 tenant_devices.idx_user : 고유아님 1 : user_id",
+      "인덱스 tenant_devices.ix_device_token_hash : 고유아님 1 : device_token_hash",
+      "인덱스 tenant_devices.uq_tenant_fp : 고유아님 0 : tenant_id,fingerprint",
+      "인덱스 tenant_domains.PRIMARY : 고유아님 0 : domain_id",
+      "인덱스 tenant_domains.ix_status : 고유아님 1 : status",
+      "인덱스 tenant_domains.ix_tenant : 고유아님 1 : tenant_id",
+      "인덱스 tenant_domains.uk_domain : 고유아님 0 : domain",
+      "인덱스 tenant_etax_settings.PRIMARY : 고유아님 0 : tenant_id",
+      "인덱스 tenant_payments.PRIMARY : 고유아님 0 : payment_id",
+      "인덱스 tenant_payments.idx_tenant_payments_status : 고유아님 1 : status,created_at",
+      "인덱스 tenant_payments.idx_tenant_payments_token : 고유아님 1 : signup_token",
+      "인덱스 tenant_payments.uq_tenant_payments_order : 고유아님 0 : order_id",
+      "인덱스 tenant_rewards.PRIMARY : 고유아님 0 : reward_id",
+      "인덱스 tenant_rewards.ix_granted_by : 고유아님 1 : granted_by,granted_at",
+      "인덱스 tenant_rewards.ix_tenant : 고유아님 1 : tenant_id,is_consumed",
+      "인덱스 tenant_update_history.PRIMARY : 고유아님 0 : history_id",
+      "인덱스 tenant_update_history.idx_tuh_hash : 고유아님 1 : tenant_id_hash,occurred_at",
+      "인덱스 tenant_update_history.idx_tuh_result : 고유아님 1 : result,occurred_at",
+      "인덱스 tenant_update_history.idx_tuh_tenant : 고유아님 1 : tenant_id,occurred_at",
+      "인덱스 tenant_update_state.PRIMARY : 고유아님 0 : tenant_id_hash",
+      "인덱스 tenant_update_state.idx_tus_reported : 고유아님 1 : last_reported_at",
+      "인덱스 tenant_update_state.idx_tus_tenant : 고유아님 1 : tenant_id",
+      "인덱스 tenant_update_state.idx_tus_version : 고유아님 1 : current_version",
+      "인덱스 tenants.PRIMARY : 고유아님 0 : tenant_id",
+      "인덱스 tenants.ix_tenants_domain_alias : 고유아님 1 : domain_alias",
+      "인덱스 tenants.ix_tenants_reseller : 고유아님 1 : reseller_id",
+      "인덱스 tenants.uq_tenant_code : 고유아님 0 : tenant_code",
+      "인덱스 webhook_outbox.PRIMARY : 고유아님 0 : outbox_id",
+      "인덱스 webhook_outbox.idx_outbox_status_next : 고유아님 1 : status,next_retry_at",
+      "인덱스 webhook_outbox.idx_outbox_tenant : 고유아님 1 : tenant_id,created_at",
+      "인덱스 webhook_outbox.uk_outbox_nonce : 고유아님 0 : nonce",
+      "칸 beta_signups.company_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.contact_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 beta_signups.email : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.employee_cnt : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.ip_address : varchar(45) : YES : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.message : text : YES : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.phone : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.signup_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 beta_signups.status : varchar(20) : NO : 기본 pending : 설명 ",
+      "칸 bo_ai_export_consents.granted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_ai_export_consents.granted_by : varchar(36) : NO : 기본 <NULL> : 설명 동의를 받은 사람(본사 담당) — 누가 열었나",
+      "칸 bo_ai_export_consents.id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_ai_export_consents.legal_ref : varchar(100) : YES : 기본 <NULL> : 설명 약관·계약 판 식별(법무 4건 뒤 채움)",
+      "칸 bo_ai_export_consents.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 테넌트 단위 — 전역 스위치 없음(한 곳 동의가 다른 곳을 열지 않는다)",
+      "칸 bo_approval_queue.action : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.approval_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.approver_email : varchar(255) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.approver_id : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.decided_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.executed_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.expires_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.payload_json : text : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.rejection_reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.requested_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_approval_queue.requester_email : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.requester_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.status : varchar(20) : NO : 기본 pending : 설명 ",
+      "칸 bo_approval_queue.target_id : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_approval_queue.target_type : varchar(40) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.action : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.actor_email : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.actor_role : varchar(32) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.actor_user_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_audit_log.detail_json : text : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.ip_address : varchar(45) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.log_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.target_id : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.target_type : varchar(40) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_audit_log.user_agent : varchar(255) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_outbound.body : varchar(2000) : YES : 기본 <NULL> : 설명 금지필드 검사 통과분만 저장(BoForbiddenFieldScanner) · 폐기 시 NULL",
+      "칸 bo_cs_outbound.canceled_at : datetime(6) : YES : 기본 <NULL> : 설명 보내기 전 취소",
+      "칸 bo_cs_outbound.canceled_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_outbound.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_outbound.created_by : varchar(36) : NO : 기본 <NULL> : 설명 쓴 사람(본사 어드민 id)",
+      "칸 bo_cs_outbound.delivered_at : datetime(6) : YES : 기본 <NULL> : 설명 NULL = 전달 대기 · 값 = ERP 가 가져간 시각",
+      "칸 bo_cs_outbound.outbound_id : varchar(36) : NO : 기본 <NULL> : 설명 본사가 발급 — ERP 전달 시 멱등 열쇠가 된다",
+      "칸 bo_cs_outbound.purge_reason : varchar(200) : YES : 기본 <NULL> : 설명 폐기 사유 — 입력 필수(화면·서버 양쪽이 강제)",
+      "칸 bo_cs_outbound.purged_at : datetime(6) : YES : 기본 <NULL> : 설명 폐기 시각 — 값이 있으면 본문은 비워져 있다",
+      "칸 bo_cs_outbound.purged_by : varchar(36) : YES : 기본 <NULL> : 설명 폐기한 사람",
+      "칸 bo_cs_outbound.purpose : varchar(20) : NO : 기본 etc : 설명 용도 — promo/event/billing/etc (사장님 오더 3종 + 기타)",
+      "칸 bo_cs_outbound.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_outbound.title : varchar(100) : YES : 기본 <NULL> : 설명 한 줄 제목(선택)",
+      "칸 bo_cs_reject_logs.id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_reject_logs.occurred_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_reject_logs.rule_code : varchar(40) : NO : 기본 <NULL> : 설명 auth_mismatch/forbidden_field/rate_limited/locked/body_too_long/bad_payload …",
+      "칸 bo_cs_reject_logs.tenant_code : varchar(20) : YES : 기본 <NULL> : 설명 주장된 테넌트넘버(대조 실패여도 코드 자체는 기록 — 공격 관찰)",
+      "칸 bo_cs_replies.approved_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_replies.approved_by : varchar(36) : NO : 기본 <NULL> : 설명 ? NOT NULL — 사람 확정 없인 행이 안 생긴다",
+      "칸 bo_cs_replies.body : varchar(4000) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_replies.client_ticket_uid : varchar(36) : NO : 기본 <NULL> : 설명 ERP cs_request_id — Pull 응답이 이 값으로 연결",
+      "칸 bo_cs_replies.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_replies.delivered_at : datetime(6) : YES : 기본 <NULL> : 설명 ERP Pull 이 가져간 시각(전달 관찰용 · 멱등과 무관)",
+      "칸 bo_cs_replies.replied_by_kind : varchar(10) : NO : 기본 <NULL> : 설명 hq/reseller — 사람 이름은 안 내보낸다(설계 §5-3)",
+      "칸 bo_cs_replies.reply_id : varchar(36) : NO : 기본 <NULL> : 설명 본사 발급 — ERP 가 이 값 그대로 멱등 수신",
+      "칸 bo_cs_replies.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_replies.ticket_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_retention_policy.policy_id : tinyint : NO : 기본 1 : 설명 전역 1행 고정",
+      "칸 bo_cs_retention_policy.retain_days : int : YES : 기본 <NULL> : 설명 NULL = 무기한(기본값) · n = n일 지난 쪽지는 폐기 후보",
+      "칸 bo_cs_retention_policy.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_retention_policy.updated_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_ticket_logs.acted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_ticket_logs.actor_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_ticket_logs.from_status : varchar(10) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_ticket_logs.id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_ticket_logs.ticket_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_ticket_logs.to_status : varchar(10) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.auto_class : varchar(20) : YES : 기본 <NULL> : 설명 규칙 기반 1차 분류(F-21 · 외부 호출 0)",
+      "칸 bo_cs_tickets.auto_confidence : decimal(5,2) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.body : varchar(2000) : YES : 기본 <NULL> : 설명 결-5 ㉯ 본문 — 문③ 통과분만 저장(금지필드 게이트 같은 커밋)",
+      "칸 bo_cs_tickets.category : varchar(20) : NO : 기본 <NULL> : 설명 8종 정본(use/set/net/dat/upd/bug/ins/etc — 결-9) · 사람이 재분류 가능",
+      "칸 bo_cs_tickets.client_ticket_uid : varchar(36) : NO : 기본 <NULL> : 설명 ERP 발급 cs_request_id — 멱등의 유일한 근거(설계 §3-2)",
+      "칸 bo_cs_tickets.completed_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.erp_version : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.handled_via : varchar(20) : YES : 기본 <NULL> : 설명 응대 유형 message/phone/remote — 완료로 넘길 때 필수(사장님 3단계)",
+      "칸 bo_cs_tickets.handler_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.handler_type : varchar(10) : YES : 기본 <NULL> : 설명 대리점1차/본사2차",
+      "칸 bo_cs_tickets.id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.incident_id : bigint : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.kb_doc_id : bigint : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.promised_at : datetime(6) : YES : 기본 <NULL> : 설명 답 약속 시각 — 서버 제안 후 사람 조정 가능(C-2 · N-1)",
+      "칸 bo_cs_tickets.purge_reason : varchar(200) : YES : 기본 <NULL> : 설명 폐기 사유 — 입력 필수(화면이 강제)",
+      "칸 bo_cs_tickets.purged_at : datetime(6) : YES : 기본 <NULL> : 설명 폐기 시각 — 값이 있으면 본문은 비워져 있다 (20261011작2 C-10)",
+      "칸 bo_cs_tickets.purged_by : varchar(36) : YES : 기본 <NULL> : 설명 폐기한 사람",
+      "칸 bo_cs_tickets.rated_at : datetime(6) : YES : 기본 <NULL> : 설명 평가 받은 시각 — NOT NULL 이면 ④ CS평가 완료 단계",
+      "칸 bo_cs_tickets.rating : tinyint : YES : 기본 <NULL> : 설명 만족도 1 아쉬워요 / 2 보통 / 3 좋아요 — 고객이 ERP 에서 고름(강제 아님)",
+      "칸 bo_cs_tickets.rating_comment : varchar(500) : YES : 기본 <NULL> : 설명 고객 한 줄 — 금지필드 검사 통과분만(수신측 문③ 그대로)",
+      "칸 bo_cs_tickets.read_at : datetime(6) : YES : 기본 <NULL> : 설명 본사·대리점이 처음 열어 본 시각 — NULL = 아직 아무도 안 봄(①단계)",
+      "칸 bo_cs_tickets.read_by : varchar(36) : YES : 기본 <NULL> : 설명 처음 열어 본 사람 — 덮어쓰지 않는다(최초 1회만)",
+      "칸 bo_cs_tickets.received_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_cs_tickets.received_channel : varchar(20) : NO : 기본 phone : 설명 phone/erp_message — 쪽지가 전화를 줄였나를 세는 재료",
+      "칸 bo_cs_tickets.reseller_id : varchar(36) : YES : 기본 <NULL> : 설명 NULL = 직판 → 본사 1차(F-14 결재 조건ⓐ)",
+      "칸 bo_cs_tickets.rework_of_id : bigint : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.screen_code : varchar(40) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_cs_tickets.shape_tag : varchar(20) : YES : 기본 <NULL> : 설명 7모양 보조 태그(결-9 보조축) — ERP 가 보낸 고객 언어",
+      "칸 bo_cs_tickets.status : varchar(10) : NO : 기본 접수 : 설명 접수/처리중/보류/완료 + 고객답대기(결-1)",
+      "칸 bo_cs_tickets.sub_tag : varchar(30) : NO : 기본 <NULL> : 설명 사전정의 목록만 — 자유입력 불가(쟁점-3)",
+      "칸 bo_cs_tickets.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_email_send_history.caller : varchar(120) : YES : 기본 <NULL> : 설명 호출출처 — 예: LandingSignupController.Submit. 못 가리면 unknown",
+      "칸 bo_email_send_history.has_attachment : tinyint(1) : NO : 기본 0 : 설명 첨부 1건 흐름(협력업체 계약서 PDF) 구분",
+      "칸 bo_email_send_history.reason : varchar(500) : YES : 기본 <NULL> : 설명 사유 사람말 — 실패 원인 요약(예외 메시지 앞부분). 자격증명 값은 담지 않는다",
+      "칸 bo_email_send_history.reason_code : varchar(40) : YES : 기본 <NULL> : 설명 사유 코드 — ok / not_configured / smtp_error",
+      "칸 bo_email_send_history.result : varchar(20) : NO : 기본 <NULL> : 설명 결과 — sent / failed. 이 두 값뿐",
+      "칸 bo_email_send_history.send_id : varchar(36) : NO : 기본 <NULL> : 설명 발송기가 발급(GUID) — 로그와 표를 맞추는 열쇠",
+      "칸 bo_email_send_history.sent_at : datetime(6) : NO : 기본 <NULL> : 설명 발송 시도 시각 — 쓰기 경로가 UTC 를 명시한다",
+      "칸 bo_email_send_history.subject : varchar(200) : YES : 기본 <NULL> : 설명 제목(머리만) — 본문은 담지 않는다(#22)",
+      "칸 bo_email_send_history.to_email : varchar(200) : NO : 기본 <NULL> : 설명 받는이 — 가입 신청자·협력업체 신청자·본사 담당자",
+      "칸 bo_kb_doc_logs.acted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_kb_doc_logs.action : varchar(20) : NO : 기본 <NULL> : 설명 promote_draft/save_draft/approve/reject/revise/discard",
+      "칸 bo_kb_doc_logs.actor_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_doc_logs.doc_id : bigint : YES : 기본 <NULL> : 설명 초안 생성 시점엔 행이 없다 — 그래서 NULL 허용",
+      "칸 bo_kb_doc_logs.id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_doc_logs.issue_code : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_doc_logs.rule_code : varchar(40) : YES : 기본 <NULL> : 설명 거부 사유코드만 — 걸린 값은 저장 안 함(#22·#40)",
+      "칸 bo_kb_docs.approved_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_docs.approved_by : varchar(36) : YES : 기본 <NULL> : 설명 ? 승인 판은 NULL 불가(아래 CHECK) — 사람 확정의 증거",
+      "칸 bo_kb_docs.body_md : text : NO : 기본 <NULL> : 설명 문제점/해결점 PRD 틀(AI수석 실물) — md 가 저장 형식",
+      "칸 bo_kb_docs.category : varchar(20) : NO : 기본 <NULL> : 설명 8종 정본(use/set/net/dat/upd/bug/ins/etc — 결-9)",
+      "칸 bo_kb_docs.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_kb_docs.created_by : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_docs.doc_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_docs.issue_code : varchar(20) : NO : 기본 <NULL> : 설명 이슈코드 USE/SET/NET/DAT/UPD/BUG/INS/ETC-번호(C-3)",
+      "칸 bo_kb_docs.source_ticket_id : bigint : YES : 기본 <NULL> : 설명 승격 출처 티켓 — 원 티켓 행은 보존(C-3 병합 원칙)",
+      "칸 bo_kb_docs.status : varchar(10) : NO : 기본 초안 : 설명 초안/승인/폐기",
+      "칸 bo_kb_docs.title : varchar(200) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_kb_docs.version : int : NO : 기본 1 : 설명 UPDATE 금지 — 고치면 version+1 새 행",
+      "칸 bo_permissions.allowed_roles : varchar(200) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_permissions.category : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_permissions.description : text : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_permissions.display_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_permissions.permission_key : varchar(80) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_permissions.updated_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 bo_permissions.updated_by : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_user_mfa.backup_codes_hash : text : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_user_mfa.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_user_mfa.enrolled_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_user_mfa.is_enabled : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 bo_user_mfa.last_used_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_user_mfa.secret_encrypted : varbinary(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_user_mfa.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 bo_user_mfa.user_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_users.created_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 bo_users.email : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_users.failed_login_cnt : int : NO : 기본 0 : 설명 ",
+      "칸 bo_users.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 bo_users.last_login_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_users.name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_users.password_hash : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_users.reseller_id : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_users.role : varchar(32) : NO : 기본 <NULL> : 설명 ",
+      "칸 bo_users.updated_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 bo_users.user_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.agree_privacy : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 landing_signups.agree_terms : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 landing_signups.biz_no_hash : varchar(128) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.company_name : varchar(120) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.desired_domain : varchar(255) : YES : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.email : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.phone : varchar(30) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.plan_type : varchar(20) : NO : 기본 basic : 설명 ",
+      "칸 landing_signups.reseller_code : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.signup_id : bigint unsigned : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.signup_token : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 landing_signups.status : varchar(20) : NO : 기본 submitted : 설명 ",
+      "칸 landing_signups.submitted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 landing_signups.tenant_id : varchar(36) : YES : 기본 <NULL> : 설명 Z2 키 연결(승인 시 기록) — NULL = 옛 행(글자 조인 폴백) 또는 모호·고아",
+      "칸 platform_admins.admin_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.admin_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.created_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 platform_admins.department : varchar(50) : YES : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.email : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 platform_admins.last_login_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.password_hash : varchar(256) : NO : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.role : enum('super_admin','billing_admin','cs_admin','readonly') : NO : 기본 <NULL> : 설명 ",
+      "칸 platform_admins.updated_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 platforms.contact_email : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 platforms.contact_tel : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 platforms.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 platforms.domain : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 platforms.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 platforms.platform_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 platforms.platform_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 platforms.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 pricing_history.action : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.after_json : text : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.before_json : text : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.changed_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 pricing_history.changed_by : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.changed_by_name : varchar(50) : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.entity_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.entity_type : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.history_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_history.reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.ai_token_monthly : int : NO : 기본 0 : 설명 ",
+      "칸 pricing_plans.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 pricing_plans.description : text : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.display_order : int : NO : 기본 0 : 설명 ",
+      "칸 pricing_plans.features_json : text : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 pricing_plans.is_visible : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 pricing_plans.max_devices : int : NO : 기본 3 : 설명 ",
+      "칸 pricing_plans.max_mobile_devices : int : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.max_pc_devices : int : YES : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.max_users : int : NO : 기본 3 : 설명 ",
+      "칸 pricing_plans.monthly_price : decimal(10,0) : NO : 기본 0 : 설명 ",
+      "칸 pricing_plans.plan_id : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.plan_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 pricing_plans.price_display : varchar(50) : NO : 기본 number : 설명 ",
+      "칸 pricing_plans.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 pricing_plans.yearly_price : decimal(10,0) : NO : 기본 0 : 설명 ",
+      "칸 promotion_usages.applied_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 promotion_usages.applied_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 promotion_usages.promo_code : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotion_usages.promotion_id : bigint unsigned : NO : 기본 <NULL> : 설명 ",
+      "칸 promotion_usages.signup_token : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 promotion_usages.source : varchar(40) : NO : 기본 landing_signup : 설명 ",
+      "칸 promotion_usages.tenant_id : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 promotion_usages.usage_id : bigint unsigned : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 promotions.created_by : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.description : text : YES : 기본 <NULL> : 설명 ",
+      "칸 promotions.discount_type : varchar(20) : NO : 기본 percent : 설명 ",
+      "칸 promotions.discount_value : decimal(10,2) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.ends_at : datetime : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 promotions.max_uses : int : NO : 기본 0 : 설명 ",
+      "칸 promotions.promotion_code : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.promotion_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.promotion_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.starts_at : datetime : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions.target_filter : text : YES : 기본 <NULL> : 설명 ",
+      "칸 promotions.target_plan_id : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 promotions.target_scope : varchar(20) : NO : 기본 all : 설명 ",
+      "칸 promotions.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 promotions.used_count : int : NO : 기본 0 : 설명 ",
+      "칸 promotions_legacy.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 promotions_legacy.created_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.discount_type : varchar(20) : NO : 기본 percent : 설명 ",
+      "칸 promotions_legacy.discount_value : decimal(10,2) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.ends_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.max_uses : int : NO : 기본 0 : 설명 ",
+      "칸 promotions_legacy.promo_code : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.promotion_id : bigint unsigned : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.starts_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.status : varchar(20) : NO : 기본 active : 설명 ",
+      "칸 promotions_legacy.target_plan : varchar(40) : YES : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.title : varchar(200) : NO : 기본 <NULL> : 설명 ",
+      "칸 promotions_legacy.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 promotions_legacy.use_count : int : NO : 기본 0 : 설명 ",
+      "칸 reseller_accounts.account_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.account_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.created_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 reseller_accounts.email : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.is_active : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 reseller_accounts.last_login_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.password_hash : varchar(256) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.phone : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.reseller_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.role : enum('reseller_admin','reseller_user','reseller_readonly') : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_accounts.updated_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 reseller_applications.application_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.business_no : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.company_name : varchar(120) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.contact_email : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.contact_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.contact_phone : varchar(30) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.expected_customers : int : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.motivation : text : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.region : varchar(50) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.rejection_reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.representative_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.reviewed_at : timestamp : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.reviewed_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.sales_channel : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_applications.status : enum('pending','reviewing','approved','rejected') : NO : 기본 pending : 설명 ",
+      "칸 reseller_applications.submitted_at : timestamp : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 reseller_serials.claimed_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.claimed_tenant_id : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.issued_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 reseller_serials.issued_by : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.max_users : tinyint unsigned : NO : 기본 3 : 설명 ",
+      "칸 reseller_serials.reseller_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.revoked_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.revoked_reason : varchar(255) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.serial_code : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.serial_hash : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.serial_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_serials.status : varchar(20) : NO : 기본 available : 설명 ",
+      "칸 reseller_serials.subscription_tier : varchar(20) : NO : 기본 basic : 설명 ",
+      "칸 reseller_serials.valid_until : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlement_lines.commission_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlement_lines.company_name : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlement_lines.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 reseller_settlement_lines.line_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlement_lines.payment_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlement_lines.settlement_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlement_lines.tenant_code : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlement_lines.tenant_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.commission_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlements.commission_rate : decimal(5,4) : NO : 기본 0.0000 : 설명 ",
+      "칸 reseller_settlements.confirmed_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.confirmed_by : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 reseller_settlements.gross_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlements.incentive_amount : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlements.memo : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.paid_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.reseller_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.settlement_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.settlement_month : char(7) : NO : 기본 <NULL> : 설명 ",
+      "칸 reseller_settlements.status : varchar(20) : NO : 기본 draft : 설명 ",
+      "칸 reseller_settlements.tenant_count : int : NO : 기본 0 : 설명 ",
+      "칸 reseller_settlements.total_payable : decimal(14,2) : NO : 기본 0.00 : 설명 ",
+      "칸 reseller_settlements.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 resellers.account_holder : varchar(30) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.address : varchar(200) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.bank_account : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.bank_name : varchar(30) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.biz_no : varchar(12) : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.ceo_name : varchar(50) : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.contact_email : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.contact_person : varchar(50) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.contact_phone : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.created_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 resellers.created_by : char(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.join_date : date : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.reseller_code : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.reseller_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.reseller_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 resellers.status : enum('active','suspended','inactive','terminated') : NO : 기본 active : 설명 ",
+      "칸 resellers.tel : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 resellers.updated_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 serial_verify_attempts.attempt_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_attempts.attempted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 serial_verify_attempts.client_fingerprint : varchar(128) : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_attempts.client_ip : varchar(45) : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_attempts.result : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_attempts.submitted_hash : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_attempts.tenant_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.client_fingerprint : varchar(128) : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.failed_count : int : NO : 기본 0 : 설명 ",
+      "칸 serial_verify_locks.first_failed_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.is_locked : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 serial_verify_locks.last_failed_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.lock_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.locked_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.unlock_reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.unlocked_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 serial_verify_locks.unlocked_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.approved_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.approved_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.device_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.device_name : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.device_token_hash : varchar(128) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.device_type : varchar(10) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.fingerprint : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.ip_address : varchar(50) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.issued_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.last_seen_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.os_info : varchar(200) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.registered_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_devices.revoked_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.revoked_reason : varchar(200) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.status : varchar(20) : NO : 기본 approved : 설명 ",
+      "칸 tenant_devices.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.user_agent : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_devices.user_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.cf_record_id : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.cf_tunnel_id : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.cf_zone_id : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_domains.domain : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.domain_id : bigint unsigned : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.issued_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.last_error : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.status : varchar(20) : NO : 기본 pending : 설명 ",
+      "칸 tenant_domains.tenant_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_domains.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_etax_settings.batch_time : time : NO : 기본 18:00:00 : 설명 ",
+      "칸 tenant_etax_settings.batch_weekdays : varchar(20) : NO : 기본 1,2,3,4,5 : 설명 ",
+      "칸 tenant_etax_settings.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_etax_settings.exclude_holidays : tinyint(1) : NO : 기본 1 : 설명 ",
+      "칸 tenant_etax_settings.issue_mode : varchar(20) : NO : 기본 scheduled : 설명 ",
+      "칸 tenant_etax_settings.notify_before_min : int : YES : 기본 30 : 설명 ",
+      "칸 tenant_etax_settings.notify_manager_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_etax_settings.retry_count : int : NO : 기본 3 : 설명 ",
+      "칸 tenant_etax_settings.retry_interval_min : int : NO : 기본 60 : 설명 ",
+      "칸 tenant_etax_settings.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_etax_settings.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_etax_settings.updated_by : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.amount : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.approved_at : varchar(32) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.approved_at_dt : datetime : YES : 기본 <NULL> : 설명 승인 시각 DATETIME (작8 Z3 — varchar approved_at 병행 보존)",
+      "칸 tenant_payments.created_at : datetime : NO : 기본 CURRENT_TIMESTAMP : 설명 ",
+      "칸 tenant_payments.method : varchar(32) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.order_id : varchar(64) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.payment_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.payment_key : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.raw_status : varchar(32) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.signup_token : varchar(64) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_payments.status : varchar(32) : NO : 기본 pending : 설명 ",
+      "칸 tenant_payments.updated_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.consumed_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.expires_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.granted_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_rewards.granted_by : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.is_consumed : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 tenant_rewards.reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.reward_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.reward_type : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.reward_value : decimal(10,2) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_rewards.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.channel : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.failure_reason : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.from_version : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.history_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.occurred_at : datetime(6) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.received_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_update_history.result : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.tenant_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.tenant_id_hash : varchar(80) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_history.to_version : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenant_update_state.cs_note : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.current_version : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.last_channel : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.last_reported_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.last_result : varchar(20) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.tenant_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.tenant_id_hash : varchar(80) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenant_update_state.updated_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.ai_mode : varchar(20) : NO : 기본 hitpan_pool : 설명 ",
+      "칸 tenants.ai_token_extra : int : NO : 기본 0 : 설명 ",
+      "칸 tenants.ai_token_monthly_limit : int : NO : 기본 100000 : 설명 ",
+      "칸 tenants.anthropic_api_key_encrypted : varchar(512) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.anthropic_api_key_last4 : varchar(8) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.anthropic_key_status : varchar(20) : NO : 기본 none : 설명 ",
+      "칸 tenants.bootstrap_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.company_name : varchar(100) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenants.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 tenants.db_host : varchar(100) : NO : 기본  : 설명 ",
+      "칸 tenants.db_name : varchar(50) : NO : 기본  : 설명 ",
+      "칸 tenants.domain_alias : varchar(255) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.email : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.extra_accounts : int : NO : 기본 0 : 설명 추가 구매 계정 수(계정 과금 · 20261006작8 Z5) — 웹훅 ExtraAccounts 로 ERP local_subscription.extra_accounts 에 간다",
+      "칸 tenants.extra_device_slots : int : NO : 기본 0 : 설명 ",
+      "칸 tenants.is_locked_from_landing : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 tenants.license_key_hash : varchar(256) : NO : 기본  : 설명 ",
+      "칸 tenants.max_users : tinyint unsigned : NO : 기본 3 : 설명 ",
+      "칸 tenants.owner_account_id : varchar(100) : YES : 기본 <NULL> : 설명 ERP 부모계정 로그인 아이디 — 개통 후 첫 보고(S-2)로 수집 · 비번류 절대 금지(#40)",
+      "칸 tenants.owner_collect_path : varchar(30) : YES : 기본 <NULL> : 설명 대표 아이디 수집 경로 (erp_first_report 등)",
+      "칸 tenants.owner_collected_at : datetime : YES : 기본 <NULL> : 설명 대표 아이디 수집 시각",
+      "칸 tenants.owner_email : varchar(255) : YES : 기본 <NULL> : 설명 가입 시 대표 이메일 — 랜딩 가입 입력값 · 죽은 칸 email(K-2)과 별개",
+      "칸 tenants.platform_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.reseller_id : varchar(36) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.reseller_tier : tinyint unsigned : NO : 기본 0 : 설명 ",
+      "칸 tenants.serial_verified : tinyint(1) : NO : 기본 0 : 설명 ",
+      "칸 tenants.serial_verified_at : datetime : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.serial_verified_fingerprint : varchar(128) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.status : varchar(20) : NO : 기본 trial : 설명 ",
+      "칸 tenants.subscription_tier : varchar(20) : NO : 기본 basic : 설명 ",
+      "칸 tenants.tel : varchar(100) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.tenant_code : varchar(20) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenants.tenant_id : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 tenants.trial_ends_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 tenants.updated_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 webhook_outbox.created_at : datetime(6) : NO : 기본 CURRENT_TIMESTAMP(6) : 설명 ",
+      "칸 webhook_outbox.event_type : varchar(40) : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.last_error : varchar(500) : YES : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.next_retry_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.nonce : varchar(36) : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.outbox_id : bigint : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.payload_json : text : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.retry_count : int : NO : 기본 0 : 설명 ",
+      "칸 webhook_outbox.sent_at : datetime(6) : YES : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.signature : varchar(128) : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.status : varchar(20) : NO : 기본 pending : 설명 ",
+      "칸 webhook_outbox.target_url : varchar(255) : NO : 기본 <NULL> : 설명 ",
+      "칸 webhook_outbox.tenant_id : char(36) : NO : 기본 <NULL> : 설명 ",
+      "표 beta_signups",
+      "표 bo_ai_export_consents",
+      "표 bo_approval_queue",
+      "표 bo_audit_log",
+      "표 bo_cs_outbound",
+      "표 bo_cs_reject_logs",
+      "표 bo_cs_replies",
+      "표 bo_cs_retention_policy",
+      "표 bo_cs_ticket_logs",
+      "표 bo_cs_tickets",
+      "표 bo_email_send_history",
+      "표 bo_kb_doc_logs",
+      "표 bo_kb_docs",
+      "표 bo_permissions",
+      "표 bo_user_mfa",
+      "표 bo_users",
+      "표 landing_signups",
+      "표 platform_admins",
+      "표 platforms",
+      "표 pricing_history",
+      "표 pricing_plans",
+      "표 promotion_usages",
+      "표 promotions",
+      "표 promotions_legacy",
+      "표 reseller_accounts",
+      "표 reseller_applications",
+      "표 reseller_serials",
+      "표 reseller_settlement_lines",
+      "표 reseller_settlements",
+      "표 resellers",
+      "표 serial_verify_attempts",
+      "표 serial_verify_locks",
+      "표 tenant_devices",
+      "표 tenant_domains",
+      "표 tenant_etax_settings",
+      "표 tenant_payments",
+      "표 tenant_rewards",
+      "표 tenant_update_history",
+      "표 tenant_update_state",
+      "표 tenants",
+      "표 webhook_outbox"
+    ]
+  }
+}

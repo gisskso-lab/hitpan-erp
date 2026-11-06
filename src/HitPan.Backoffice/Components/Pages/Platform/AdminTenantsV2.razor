@@ -51,6 +51,7 @@ else if (_items.Count == 0)
 }
 else
 {
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1" Style="display:block;">@TenantInstallText.ListNotice</MudText>
     <MudPaper Elevation="1" Style="border-radius:12px;overflow:hidden;">
         <MudDataGrid T="TenantRow" Items="_items" Hover="true" Dense="true" SortMode="SortMode.Single">
             <Columns>
@@ -78,18 +79,12 @@ else
                 </TemplateColumn>
                 <TemplateColumn Title="설치">
                     <CellTemplate>
-                        @if (context.Item.IsLocked == 1)
-                        {
-                            <MudTooltip Text="@($"설치 완료: {context.Item.BootstrapAt:yyyy-MM-dd HH:mm}")">
-                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                            </MudTooltip>
-                        }
-                        else
-                        {
-                            <MudTooltip Text="ERP 설치 미완료">
-                                <MudIcon Icon="@Icons.Material.Filled.PendingActions" Color="Color.Warning" Size="Size.Small" />
-                            </MudTooltip>
-                        }
+                        @* 🔴 20261102작 (설계 §5): 아이콘은 올려 봐야 알아 처음 보는 사람이 못 읽는다 ⇒ 글자 칩. 문구는 TenantInstallText 한 벌. *@
+                        <MudTooltip Text="@TenantInstallText.Help(context.Item.InstallState, context.Item.LastErpStartAt)">
+                            <MudChip T="string" Size="Size.Small" Color="@InstallColor(context.Item.InstallState)">
+                                @TenantInstallText.Label(context.Item.InstallState)
+                            </MudChip>
+                        </MudTooltip>
                     </CellTemplate>
                 </TemplateColumn>
                 <PropertyColumn Property="x => x.CreatedAt" Title="가입일" Format="yyyy-MM-dd" />
@@ -274,7 +269,16 @@ else
         _ => Color.Default
     };
 
-    public class TenantRow
+    // 20261102작 — 「ERP 설치」 칩 색. 값 없음 · 모르는 값 = 판정 못 함(회색).
+    private static Color InstallColor(string? state) => state switch
+    {
+        TenantInstallText.Installed => Color.Success,
+        TenantInstallText.Started => Color.Info,
+        TenantInstallText.None => Color.Warning,
+        _ => Color.Default
+    };
+
+    public class TenantRow : TenantInstallFields
     {
         public string TenantId { get; set; } = "";
         public string TenantCode { get; set; } = "";
