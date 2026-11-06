@@ -94,8 +94,23 @@ const EXPECT_H = {
   //   다른 id 의 다중 줄 · 조건 줄 전수 = 로컬 세부 표(공개 문서엔 범주만).
   twoRowsFirstBrowser: ['H-BRIEF'],
 };
-// G 기대 키 자리 — 비워 둔다(K 연결 PR 이 rowKey 꼴로 채운다 · D3). K 본문이 있는데 비어 있으면 빨강.
-const EXPECT_G = [];
+// ⬛ [낡은 줄 · F-PR] G 기대 키 자리 — 비워 둔다(K 연결 PR 이 rowKey 꼴로 채운다 · D3). K 본문이 있는데 비어 있으면 빨강.
+// ⬛ [낡은 줄 · F-PR] const EXPECT_G = [];
+// 🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §4-2 · PM C2) — G 기대 키 16 = G 14 + N4 2.
+//   키 = 범위|id|G|길|브라우저(rowKey 그대로 · 범위 = K). G 칸 N4 줄만 DEVICE · 나머지 G 줄 통과는 TEST 만.
+const EXPECT_G_ROWS = [
+  ['K35-G1', 'G1', 'bell', 'chromium'], ['K35-G1', 'G1', 'bell', 'webkit'],
+  ['K35-G1', 'G1', 'toast', 'chromium'], ['K35-G1', 'G1', 'toast', 'webkit'],
+  ['K35-G2', 'G2', 'bell', 'chromium'], ['K35-G2', 'G2', 'bell', 'webkit'],
+  ['K35-G2', 'G2', 'toast', 'chromium'], ['K35-G2', 'G2', 'toast', 'webkit'],
+  ['K35-G3', 'G3', 'bell', 'chromium'],
+  ['K35-G3-SELF', 'G3', 'self', 'chromium'],
+  ['K35-G4-APPR', 'G4', 'bell', 'chromium'],
+  ['K35-G4-CHATAPPR', 'G4', 'bell', 'chromium'],
+  ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
+  ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
+];
+const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 // 🔴 F-PR [3-V] 03 — 결과표에서 온 글자를 찍기 전 제어 글자(줄바꿈 · 색 제어 등)를 \uXXXX 글자로 가린다
 //   (한 줄이 두 줄로 갈라져 러너 명령 줄처럼 읽히는 길 0). 소독 **뒤에** 가린다 — 값 안 제어 글자로 소독 대조가 깨지지 않게.
 function showCtl(s) {
