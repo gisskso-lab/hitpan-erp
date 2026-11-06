@@ -12,7 +12,8 @@
 #   🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §5-4 · 대표 Q1 「화면·API 바뀐 PR만」 · PM A3 ㉯ · C3 · C4):
 #     거르기 잡(ui-changes)이 PR 합침 커밋의 첫 부모와 비교해 바뀐 파일을 범주로 센다(외부 액션 0 · 읽기 권한만 · 비밀값 0).
 #     ⬛ [낡은 줄 · 갈래 A 첫 꼴] 화면 · API(와 참조 프로젝트) · 출하 DDL · 장치 · 이 워크플로가 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
-#     🔴 PM 결정 3V-1 — 문서(docs/ 아래 · .md) 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도(경로 허용 목록 0).
+#     ⬛ [낡은 줄 · 3V-1] 🔴 PM 결정 3V-1 — 문서(docs/ 아래 · .md) 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도(경로 허용 목록 0).
+#     🔴 PM 결정 4V-1 ① — 문서 = docs/ 아래만(.md 라도 docs/ 밖이면 돈다 · 제어 글자 든 이름 = 돈다). docs/ 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
 #     잔여 한계: 이 워크플로 파일 자체도 PR 쪽 사본이다 — PR 이 이 파일을 바꾸면 거르기도 바뀐다(고정 「돈다」 가 걸리는 자리 · 리뷰로 본다).
 #     문서만 바꾼 PR 은 ui-k35 가 건너뛰어진다(런 결론은 success 로 보인다 · 「건너뜀 ≠ 초록」 = 읽는 규칙 · 머지 상신 잡별 결과표).
 #     거르기 오류 · 빈 출력 · 거르기 잡 실패 · 수동 실행 = 「돈다」(닫힌 쪽 = 도는 쪽).
@@ -281,7 +282,9 @@ jobs:
         run: node scripts/playwright-audit/ci/leak-scan.js "$UI_OUT"
 
       - name: "[장치] S11 업로드 — 결과표·스크린샷·로그 (S10 통과분만 · 7일)"
-        if: always() && steps.leak.outcome == 'success'
+        # ⬛ [낡은 줄 · F-PR] if: always() && steps.leak.outcome == 'success'
+        # 🔴 K 연결 2차(보안상무 [3-V] P1-07 · PM 결정 3V-1) — K 의 N4 줄이 거짓이면(kit35 가 S8 에서 표지를 넘김) 올리지 않는다.
+        if: always() && steps.leak.outcome == 'success' && env.UI_N4_HIT != '1'
         uses: actions/upload-artifact@v5
         with:
           name: ui-k35-main

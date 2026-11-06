@@ -29,6 +29,8 @@
 //
 // 🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §4-2 · PM 결재 A2 · C2) — G 기대 키 = 필수 목록
 //   ⑪ G 기대 키 16(G 14 · N4 2)을 채우고 필수 집합에 넣는다 — K 본문 수와 무관. 빠지면 누락 빨강.
+//      🔴 2차(A7) — G4 토스트 길 2 추가 → 기대 키 18(G 16 · N4 2).
+//   ⑭ 2차(PM 결정 4V-1 ④) — N4 줄 거짓 = 끝 줄 「누출 의심 · 재실행 금지」(빨강 · [장치] 실패보다 먼저 분류 · kind 는 DEVICE 그대로).
 //   ⑫ G 키 줄의 통과는 TEST 줄로만(N4 줄만 DEVICE) — DEVICE 통과 줄로 채우면 「G 통과 꼴 이상」 키 틀 빨강.
 //   ⑬ K 본문 0 인데 G 기대 키가 있다 = 키 틀 빨강(이유 줄 「K 본문 0 · G 기대 n」).
 //   중복(상한 1) · 목록 밖 비H 키(모르는 키) · G 빈 자리 검사는 그대로. 빨강 순서 그대로(G 줄은 키 틀 안).
@@ -115,6 +117,10 @@ const EXPECT_G_ROWS = [
   ['K35-G3-SELF', 'G3', 'self', 'chromium'],
   ['K35-G4-APPR', 'G4', 'bell', 'chromium'],
   ['K35-G4-CHATAPPR', 'G4', 'bell', 'chromium'],
+  // 🔴 K 연결 2차(PM 결재 A7 · PM Q3) — G4 토스트 길이 실제 흐름으로 선다(코드 읽기: 결재 상신 → 알림 배관 → 토스트 OnClick → 본 창 이동)
+  //   → 키 2 추가(16 → 18 = G 16 · N4 2). 선택 키 0 — 빠지면 누락 빨강. 자체시험 K-C22k 고정 수도 같은 커밋에서 18.
+  ['K35-G4-APPR', 'G4', 'toast', 'chromium'],
+  ['K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'],
   ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
   ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
 ];
@@ -226,7 +232,10 @@ function main() {
       console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${showCtl(L.sanitize(x.got, 1200))}`);
       continue;
     }
-    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+    // ⬛ [낡은 줄 · F-PR] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+    // 🔴 PM 결정 4V-1 ④ — N4 거짓 줄은 「누출 의심」 표지(재실행 대상 아님 · kind 는 DEVICE 그대로)
+    const n4Bad = x.pass !== true && x.kind === 'DEVICE' && x.scope !== 'H' && EXPECT_G_DEVICE.has(rowKey(x));
+    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? '🔴 FAIL [장치 · 누출 의심]' : '⚫ FAIL [장치]'));
     // ⬛ [낡은 줄 · 1~10차] console.log(`${mark} ${x.scope || '-'} ${x.id}${x.g ? ` ${x.g}` : ''}${x.path ? ` ${x.path}` : ''}${x.browser ? ` (${x.browser})` : ''}`);
     console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`);
   }
@@ -296,6 +305,13 @@ function main() {
   }
   if (kFiles.length > 0 && gTests.length === 0) {
     console.log(`🔴 FAIL 돈 시험 0건 = 빨강 — K 본문 ${kFiles.length}개가 있는데 G 시험 0건(H 자체 점검은 안 센다 · §4-3 ⓔ)`);
+    process.exit(1);
+  }
+  // 🔴 PM 결정 4V-1 ④(11/6 · [4] 1차 P2-4) — N4 줄(DEVICE 그대로)이 거짓이면 [장치] 재실행 꼴이 아니라 누출 의심 끝 줄.
+  //   [장치] 실패보다 먼저 분류한다(다른 장치 실패와 섞여도 끝 줄이 「재실행 1회」 로 읽히지 않게).
+  const failN4 = failD.filter((x) => EXPECT_G_DEVICE.has(rowKey(x)));
+  if (failN4.length > 0) {
+    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄 — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
     process.exit(1);
   }
   if (failD.length > 0) {

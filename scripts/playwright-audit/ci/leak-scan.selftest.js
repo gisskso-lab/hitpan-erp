@@ -89,6 +89,9 @@
 //   K-C22a~j 판정기 G 기대 키 필수(양성 1 · 음성 · 대조) — 규칙 고치기 전(G 자리만 채운) 판정기에서는 음성 6칸이 빨강(대조)
 //   K-C24a~d 거르기 규칙(ui-changes.js · 순수 함수 + 실행 껍데기) — 문서만 → 안 돈다 · 화면 → 돈다 · 장치·워크플로·DDL → 돈다 · 빈 입력·오류 → 돈다
 //   G 기대 키 생성기는 판정기 상수를 읽지 않고 작업지시서 §4-2 표에서 따로 적는다(자기 증명 0).
+// 🔴 K 연결 2차(11/6 · 갈래 B · PM 결정 4V-1) — 105 → 111(새 6 · 바뀐 칸 3)
+//   K-C23a~c K 도우미(kit35.js) 순수 함수 · K-C24g 줄바꿈 든 이름(NUL 로만 나눔) · K-C24h 워크플로 세 지킴 글자 잠금 · K-C22l N4 거짓 끝 줄
+//   바뀐 칸: K-C24a · K-C24c(문서 = docs/ 아래만 · 4V-1 ①) · K-C22k(A7 G4 토스트 길 2 → 기대 키 18)
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1358,6 +1361,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-G3-SELF', 'G3', 'self', 'chromium'),
       fG('K35-G4-APPR', 'G4', 'bell', 'chromium'),
       fG('K35-G4-CHATAPPR', 'G4', 'bell', 'chromium'),
+      // 🔴 K 연결 2차(A7) — G4 토스트 길 2(작업지시서 §4-2 표 「확인 필요」 칸이 실제 흐름으로 섬 · 개발 세부 2차)
+      fG('K35-G4-APPR', 'G4', 'toast', 'chromium'),
+      fG('K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'),
       fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
       fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
     ];
@@ -1715,13 +1721,18 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       let ok = false;
       let why = '함수 없음';
       if (P) {
-        const docs = ['docs/a.md', 'docs/개발/b.md', 'README.md'];
+        // ⬛ [낡은 줄 · 3V-1] const docs = ['docs/a.md', 'docs/개발/b.md', 'README.md'];
+        // 🔴 PM 결정 4V-1 ① — 문서 = docs/ 아래만 · 뿌리 README.md 는 문서 아님(대조 = 돈다)
+        const docs = ['docs/a.md', 'docs/개발/b.md', 'docs/c.png'];
         const f = P.decideRun(docs);
         const c = kPickCli(docs);
-        ok = f.run === false && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=false';
-        why = `함수 ${f.run} · 껍데기 rc=${c.code} ${c.runs.join(',')}`;
+        const outside = P.decideRun(['docs/a.md', 'README.md']).run;
+        // ⬛ [낡은 줄 · 3V-1] ok = f.run === false && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=false';
+        ok = f.run === false && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=false' && outside === true;
+        why = `함수 ${f.run} · 껍데기 rc=${c.code} ${c.runs.join(',')} · docs 밖 .md 섞임 ${outside}`;
       }
-      check('K-C24a 거르기 · 문서만 → 안 돈다(함수 · 실행 껍데기)', ok, why);
+      // ⬛ [낡은 이름 · 3V-1] 'K-C24a 거르기 · 문서만 → 안 돈다(함수 · 실행 껍데기)'
+      check('K-C24a 거르기 · docs/ 아래만 → 안 돈다(함수 · 실행 껍데기) · docs 밖 .md 섞임 → 돈다', ok, why);
     }
     { // K-C24b 화면 파일 1 → 돈다(이름에 한글 · 껍데기는 NUL 구분 원문)
       const P = kPick();
@@ -1754,9 +1765,13 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const more = [
           ['.github/workflows/build-and-test.yml'], ['src/HitPan.Watchdog/a.cs'], ['scripts/playwright-audit/package.json'],
         ].map((n) => P.decideRun(n).run);
-        const docsOnly = P.decideRun(['docs/a.png', 'installer/README.md', 'docs/b/c.md']).run;
-        ok = each.every((v) => v === true) && more.every((v) => v === true) && docsOnly === false;
-        why = `돈다 ${each.filter((v) => v === true).length}/${each.length} · 목록 밖 돈다 ${more.filter((v) => v === true).length}/${more.length} · 문서만 ${docsOnly}`;
+        // ⬛ [낡은 줄 · 3V-1] const docsOnly = P.decideRun(['docs/a.png', 'installer/README.md', 'docs/b/c.md']).run;
+        // 🔴 PM 결정 4V-1 ① — docs/ 아래만 → 안 돈다(대조) · docs 밖 .md(설치 폴더 README) 만 → 돈다
+        const docsOnly = P.decideRun(['docs/a.png', 'docs/b/c.md']).run;
+        const mdOutside = P.decideRun(['installer/README.md']).run;
+        // ⬛ [낡은 줄 · 3V-1] ok = each.every((v) => v === true) && more.every((v) => v === true) && docsOnly === false;
+        ok = each.every((v) => v === true) && more.every((v) => v === true) && docsOnly === false && mdOutside === true;
+        why = `돈다 ${each.filter((v) => v === true).length}/${each.length} · 목록 밖 돈다 ${more.filter((v) => v === true).length}/${more.length} · 문서만 ${docsOnly} · docs 밖 .md ${mdOutside}`;
       }
       // ⬛ [낡은 이름 · 갈래 A 첫 꼴] 'K-C24c 거르기 · 장치 · 워크플로 · API 참조 · 출하 DDL → 돈다 / 다른 워크플로만 → 안 돈다(대조)'
       check('K-C24c 거르기 · 장치 · 워크플로 · API · 출하 DDL · 목록 밖 파일 → 돈다 / 문서만 → 안 돈다(대조)', ok, why);
@@ -1852,8 +1867,139 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const J = require(F_JUDGE);
       const mine = fGRows().map((w) => [w.scope, w.id, w.g ?? '-', w.path ?? '-', w.browser ?? '-'].join('|')).sort();
       const theirs = Array.isArray(J.EXPECT_G) ? [...J.EXPECT_G].sort() : [];
-      const ok = theirs.length === 16 && mine.length === 16 && new Set(theirs).size === 16 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 16 고정(G 14 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 1차] const ok = theirs.length === 16 && mine.length === 16 && new Set(theirs).size === 16 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 1차] check('K-C22k G 기대 키 수 16 고정(G 14 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 2차(A7) — G4 토스트 길 2 추가로 18(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+    }
+    // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
+    { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const nl = ['docs/a', 'src/HitPan.Web/x.razor'].join('\n'); // 이름 하나(줄바꿈이 이름의 일부)
+        const f = P.decideRun([nl]).run;
+        const parsed = typeof P.parseList === 'function' ? P.parseList(['docs/a.md', nl].join('\0')) : null;
+        const c = kPickCli(['docs/a.md', nl]);
+        const docOnly = kPickCli(['docs/a.md', 'docs/b.md']);
+        ok = f === true && Array.isArray(parsed) && parsed.length === 2 && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=true'
+          && docOnly.runs.length === 1 && docOnly.runs[0] === 'run=false';
+        why = `함수 ${f} · 나눈 수 ${parsed ? parsed.length : '-'} · 껍데기 ${c.runs.join(',')} · 대조(문서만) ${docOnly.runs.join(',')}`;
+      }
+      check('K-C24g 거르기 · 줄바꿈 든 이름 → NUL 로만 나눔 · 돈다(대조 = 문서만 안 돈다)', ok, why);
+    }
+    { // K-C24h 워크플로 세 지킴 글자 잠금 — 취소 아님 · 장치·워크플로 폴더 고정 「돈다」 · run=false 정확히 1줄 확인
+      const ymlPath = path.join(F_CI, '..', '..', '..', '.github', 'workflows', 'ui-browser.yml');
+      const guards = [
+        ['취소 아님', /^\s*if: \$\{\{ !cancelled\(\) && /m],
+        ['고정 돈다', /grep -qzE '\^\(scripts\/playwright-audit\/ci\/\|\\\.github\/workflows\/\)'/],
+        ['run=false 정확히 1줄', /\[ "\$\(grep -c -x 'run=false' "\$out"\)" = "1" \] && \[ "\$\(grep -c '\^run=' "\$out"\)" = "1" \]/],
+      ];
+      const lock = (text) => guards.map(([, re]) => re.test(text));
+      const yml = fs.existsSync(ymlPath) ? fs.readFileSync(ymlPath, 'utf8') : '';
+      const real = lock(yml);
+      // 대조 — 사본 글자에서 지킴 하나씩 지우면 그 칸이 거짓
+      const cut = [
+        yml.replace(/!cancelled\(\) && /g, ''),
+        yml.replace(/scripts\/playwright-audit\/ci\/\|\\\.github\/workflows\//g, 'scripts/x/'),
+        yml.replace(/grep -c -x 'run=false'/g, "grep -c 'run=false'"),
+      ].map((t, i) => lock(t)[i] === false);
+      const ok = yml.length > 0 && real.every((v) => v === true) && cut.every((v) => v === true);
+      check('K-C24h 워크플로 세 지킴 글자 잠금(취소 아님 · 고정 돈다 · run=false 1줄) · 하나씩 지운 사본 → 그 칸 거짓(대조)', ok,
+        `실물 ${guards.map(([n], i) => `${n}=${real[i]}`).join(' · ')} · 지운 사본 대조 ${cut.filter((v) => v).length}/3`);
+    }
+    { // K-C22l N4 거짓 끝 줄 = 누출 의심 · 재실행 금지(빨강) · 다른 [장치] 실패와 섞여도 같음 / 대조 = N4 밖 [장치] 실패 → 재실행 1회 끝 줄
+      const n4Off = (w) => (w.g === 'N4' && w.browser === 'webkit' ? { ...w, pass: false } : w);
+      const devOff = (w) => (w.id === 'K35-G1' && w.path === 'bell' && w.browser === 'webkit' ? { ...w, kind: 'DEVICE', pass: false } : w);
+      const a = kJ('k22l-1', [...fHRows(), ...fGRows().map(n4Off)]);
+      const b = kJ('k22l-2', [...fHRows(), ...fGRows().map((w) => devOff(n4Off(w)))]);
+      const c = kJ('k22l-3', [...fHRows(), ...fGRows().map(devOff)]);
+      const leak = (x) => x.code === 1 && kLast(x.out).includes('누출 의심 · 재실행 금지') && !kLast(x.out).includes('재실행 1회');
+      const ok = leak(a) && leak(b) && c.code === 1 && kLast(c.out).includes('재실행 1회') && !c.out.includes('누출 의심');
+      check('K-C22l N4 거짓 → 끝 줄 누출 의심 · 재실행 금지(섞여도 같음) · 대조 = N4 밖 [장치] → 재실행 1회', ok,
+        `N4 rc=${a.code} · 섞임 rc=${b.code} · 대조 rc=${c.code}`);
+    }
+    // ── 🔴 K 연결 2차(갈래 B · §5-1 K-C23a~c) — K 도우미(kit35.js) 순수 함수 ──
+    const F_KIT = path.join(F_CI, 'kit35.js');
+    const kKit = () => {
+      if (!fs.existsSync(F_KIT)) return null;
+      try {
+        const K = require(F_KIT);
+        return typeof K.sameWindowName === 'function' && typeof K.domLeakHits === 'function' && typeof K.recK === 'function' ? K : null;
+      } catch (e) {
+        console.log(`K 도우미 불러오기 실패 ${L.errorName(e)}`);
+        return null;
+      }
+    };
+    { // K-C23a G3 비교식 — 같은 이름 통과 · 바꾼 이름 가짜 기록 빨강 · 자체 점검이 망가진 비교식을 잡음
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K) {
+        const same = K.sameWindowName('hitpanChat', 'hitpanChat');
+        const renamed = K.sameWindowName('hitpanChat', 'hitpanChatX');
+        const empty = K.sameWindowName('', '');
+        const self = K.g3SelfCheck();
+        const broken = K.g3SelfCheck(() => true); // 늘 참인 비교식 → 자체 점검 거짓이어야
+        ok = same === true && renamed === false && empty === false && self.pass === true && broken.pass === false;
+        why = `같음 ${same} · 바꿈 ${renamed} · 빈 ${empty} · 자체 점검 ${self.pass} · 망가진 비교식 ${broken.pass}`;
+      }
+      check('K-C23a G3 비교식 · 같은 이름 통과 · 바꾼 이름 빨강 · 망가진 비교식을 자체 점검이 잡음', ok, why);
+    }
+    { // K-C23b N4 대조 — 등록값(원문 · 대문자 · base64 · url 꼴) 든 글자 잡힘 · 없는 글자 통과
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K) {
+        const v = `SELFTEST_N4 #${hex()}/${hex()}+${hex()}`;
+        const reg = [v];
+        const raw = K.domLeakHits(`화면 ${v} 끝`, reg);
+        const upper = K.domLeakHits(`화면 ${v.toUpperCase()} 끝`, reg);
+        const b64 = K.domLeakHits(`x ${Buffer.from(`a${v}b`, 'utf8').toString('base64')} y`, reg);
+        const url = K.domLeakHits(`q=${encodeURIComponent(v)}&n=1`, reg);
+        const none = K.domLeakHits('시험 가 · 새 메시지 · K35 G1 bell', reg);
+        const short = K.domLeakHits('abc', ['abc']); // 소독 하한(4) 밑 = 안 봄
+        ok = raw === 1 && upper === 1 && b64 === 1 && url === 1 && none === 0 && short === 0;
+        why = `원문 ${raw} · 대문자 ${upper} · base64 ${b64} · url ${url} · 없음 ${none} · 짧은 값 ${short}`;
+      }
+      check('K-C23b N4 대조 · 등록값 3꼴·대소문자 잡힘 · 없는 글자 통과', ok, why);
+    }
+    { // K-C23c K 기록 도우미 — 범위 K 고정 · 목록 밖 id 던짐 · G 키 DEVICE 통과 던짐 · N4 TEST 던짐 · 같은 키 두 번 던짐 · N4 길 칸 빈 글자 던짐(자식 프로세스)
+      let ok = false;
+      let why = '함수 없음';
+      if (kKit()) {
+        const code = [
+          "const K = require(process.env.F_KIT);",
+          "const r = { rows: [] };",
+          "const t = (f) => { try { f(); return 'ok'; } catch (e) { return e.name; } };",
+          "const g1 = { id: 'K35-G1', g: 'G1', path: 'bell', browser: 'chromium' };",
+          "const out = {",
+          "  a: t(() => K.recK(r, { key: g1, what: 'k', got: 'k', pass: true, kind: 'TEST' })),",
+          "  scope: r.rows.length === 1 ? r.rows[0].scope : '-',",
+          "  out: t(() => K.recK(r, { key: { id: 'K35-ZZ', g: 'G1', path: 'bell', browser: 'chromium' }, what: 'k', got: 'k', pass: true, kind: 'TEST' })),",
+          "  devPass: t(() => K.recK(r, { key: { id: 'K35-G1', g: 'G1', path: 'toast', browser: 'chromium' }, what: 'k', got: 'k', pass: true, kind: 'DEVICE' })),",
+          "  devFail: t(() => K.recK(r, { key: { id: 'K35-G1', g: 'G1', path: 'toast', browser: 'webkit' }, what: 'k', got: 'k', pass: false, kind: 'DEVICE' })),",
+          "  n4Test: t(() => K.recK(r, { key: { id: 'K35-N4', g: 'N4', path: null, browser: 'chromium' }, what: 'k', got: 'k', pass: true, kind: 'TEST' })),",
+          "  n4Empty: t(() => K.recK(r, { key: { id: 'K35-N4', g: 'N4', path: '', browser: 'chromium' }, what: 'k', got: 'k', pass: true, kind: 'DEVICE' })),",
+          "  n4Upper: t(() => K.recK(r, { key: { id: 'K35-N4', g: 'N4', path: null, browser: 'Chromium' }, what: 'k', got: 'k', pass: true, kind: 'DEVICE' })),",
+          "  n4: t(() => K.recK(r, { key: { id: 'K35-N4', g: 'N4', path: null, browser: 'chromium' }, what: 'k', got: 'k', pass: true, kind: 'DEVICE' })),",
+          "  dup: t(() => K.recK(r, { key: g1, what: 'k', got: 'k', pass: true, kind: 'TEST' })),",
+          "  rows: r.rows.length,",
+          "};",
+          "process.stdout.write('K23C=' + JSON.stringify(out) + '\\n');",
+        ].join('\n');
+        const x = fNode(['-e', code], { F_KIT, UI_OUT: fDir('k23c-out') });
+        const line = x.out.split('\n').find((s) => s.startsWith('K23C=')) || '';
+        let o = null;
+        try { o = JSON.parse(line.slice(5)); } catch (e) { o = null; }
+        const C = 'KitContractError';
+        ok = !!o && o.a === 'ok' && o.scope === 'K' && o.out === C && o.devPass === C && o.devFail === 'ok' && o.n4Test === C
+          && o.n4Empty === C && o.n4Upper === C && o.n4 === 'ok' && o.dup === C && o.rows === 3;
+        why = o ? `통과 ${o.a} · 범위 ${o.scope} · 목록 밖 ${o.out} · G DEVICE 통과 ${o.devPass} · G DEVICE 실패 ${o.devFail} · N4 TEST ${o.n4Test} · N4 빈 길 ${o.n4Empty} · 대문자 ${o.n4Upper} · N4 ${o.n4} · 중복 ${o.dup} · 줄 ${o.rows}` : `rc=${x.code} · 결과 줄 없음`;
+      }
+      check('K-C23c K 기록 도우미 · 범위 K 고정 · 목록 밖 · 꼴 이상 · 빈 길 칸 · 대문자 · 중복 → 던짐', ok, why);
     }
   }
   const bad = results.filter((x) => !x.ok).length;
