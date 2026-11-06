@@ -6,9 +6,14 @@
 # 🔴 CI 로 못 재는 것: 터널 경로 · 실제 크롬 팝업 차단 강도 → HQA 실측팀 몫(§2-4 · §0-10). 「CI 초록 = 실제 크롬에서 안 막힘」 아님.
 #
 # 트리거(개발명세서 §1-1 · §0-9 ② B안 순서 함정):
-#   pull_request + workflow_dispatch 를 두되 **잡 단위 if** 로 「이 갈래(H) 브랜치의 PR 이거나 수동 실행」일 때만 돈다.
-#   그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
-#   갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
+#   ⬛ [낡은 줄 · F-PR] pull_request + workflow_dispatch 를 두되 **잡 단위 if** 로 「이 갈래(H) 브랜치의 PR 이거나 수동 실행」일 때만 돈다.
+#   ⬛ [낡은 줄 · F-PR] 그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
+#   ⬛ [낡은 줄 · F-PR] 갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
+#   🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §5-4 · 대표 Q1 「화면·API 바뀐 PR만」 · PM A3 ㉯ · C3 · C4):
+#     거르기 잡(ui-changes)이 PR 합침 커밋의 첫 부모와 비교해 바뀐 파일을 범주로 센다(외부 액션 0 · 읽기 권한만 · 비밀값 0).
+#     화면 · API(와 참조 프로젝트) · 출하 DDL · 장치 · 이 워크플로가 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
+#     문서만 바꾼 PR 은 ui-k35 가 건너뛰어진다(런 결론은 success 로 보인다 · 「건너뜀 ≠ 초록」 = 읽는 규칙 · 머지 상신 잡별 결과표).
+#     거르기 오류 · 빈 출력 · 거르기 잡 실패 · 수동 실행 = 「돈다」(닫힌 쪽 = 도는 쪽).
 #   경로 거르기(paths)는 안 쓴다(§3-1). 필수 검사 지정 = 지금 안 함 · 조건 뒤 따로 결재(§0-10).
 #   🔴 F-PR(11/6 · PM 판단 C5): 자체시험 잡(ui-selftest)은 조건 없음 — 대상 PR 마다 · 수동 실행에서 돈다(짧은 잡 · 읽기 권한만).
 #
@@ -30,9 +35,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 🔴 K 연결 — 거르기 잡. 바뀐 파일 이름은 파일로만 넘긴다(식 · 셸 글자로 run 줄에 들어가는 자리 0).
+  #   체크아웃은 아래 잡들과 같은 꼴 + 비교에 필요한 깊이 2 만 더함(자격증명 보존 기본값은 별건 전수 · 이 잡 1칸 기록).
+  #   합침 커밋 첫 부모 = 기준 가지 머리 · 이름이 옮겨져도 옛 자리 · 새 자리 둘 다 센다(옮김 짝 맞추기 끔).
+  ui-changes:
+    name: ui-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.pick.outputs.run }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: "[장치] 거르기 — 화면 · API · 장치 · 워크플로 바뀜"
+        id: pick
+        run: |
+          lst="$RUNNER_TEMP/ui-changed.lst"
+          out="$RUNNER_TEMP/ui-changes.out"
+          if ! git diff --no-renames --name-only -z HEAD^1 HEAD > "$lst"; then
+            : > "$lst"
+            echo "거르기: 바뀐 파일 목록 못 구함(비교 실패) → 돈다"
+          fi
+          if ! node scripts/playwright-audit/ci/ui-changes.js < "$lst" > "$out"; then
+            echo "거르기: 규칙 스크립트 실패 → 돈다"
+            echo "run=true" > "$out"
+          fi
+          cat "$out"
+          line="$(grep -m1 -E '^run=(true|false)$' "$out" || true)"
+          if [ -z "$line" ]; then
+            echo "거르기: 출력 칸 없음 → 돈다"
+            line="run=true"
+          fi
+          echo "$line" >> "$GITHUB_OUTPUT"
+
   ui-k35:
     name: ui-k35
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-')
+    # ⬛ [낡은 줄 · F-PR] if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-')
+    # 🔴 K 연결 — 취소 아님 그리고 (수동 실행 · H 머리 가지 · 거르기 출력이 「안 돈다」가 아님). 빈 출력 · 거르기 잡 실패 = 돈다.
+    needs: ui-changes
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-') || needs.ui-changes.outputs.run != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
