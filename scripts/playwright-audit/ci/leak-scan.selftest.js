@@ -80,6 +80,15 @@
 //   F-C20f 판정기 관찰 결과 칸 · 외부 호스트 줄 · 줄 꼴 이상 줄 안 제어 글자 → 줄 갈라짐 0 · 제어 글자 0
 //   F-C21j 양성 · 첫 브라우저 늦은 팝업 정상 꼴(같은 키 2줄) → rc 0
 //   F-C21k 같은 키 3줄(첫 브라우저) · 둘째 브라우저 2줄 · 둘째 줄 실패 → 셋 다 rc 1
+// ⬛ [낡은 줄 · 갈래 A 첫 꼴] 🔴 K 연결 1차(…) — 89 → 102(2차 도우미 3칸 뒤 105) · 88 + 새 14
+// 🔴 K 연결 1차(11/6 · 작업지시서 20261106작 #691 재기반 §5-1 · PM C1~C6 · PM 결정 3V-1 ⑤) — 89 → 105(2차 도우미 3칸 뒤 108)
+//   F-C21h 「G 자리 비었음」 = ⬛ 낡은 칸(G 자리를 채워 전제가 사라짐 · 뜻은 K-C22b 가 잇는다) → 88 + 새 17(K-C22a~k 11 · K-C24a~f 6).
+//   PM 결정 3V-1 — 거르기 규칙 = 닫힌 쪽(전부 문서일 때만 안 돈다) · K-C24e 비ASCII 이름 · K-C24f 이동(실물 git) · K-C22k 기대 키 수 16 고정.
+//   장치 · 워크플로 폴더가 바뀌면 스크립트 판단과 무관하게 돈다(워크플로 단계) — 자체시험으로 못 잰다 = 미측정(워크플로 읽기 확인).
+//   판정기를 부르는 기존 칸은 G 기대 키 전부를 입력에 더하고 **사본 폴더**(K 본문 꼴 1개)에서 돈다 — 칸 이름 · 기대 결과 그대로.
+//   K-C22a~j 판정기 G 기대 키 필수(양성 1 · 음성 · 대조) — 규칙 고치기 전(G 자리만 채운) 판정기에서는 음성 6칸이 빨강(대조)
+//   K-C24a~d 거르기 규칙(ui-changes.js · 순수 함수 + 실행 껍데기) — 문서만 → 안 돈다 · 화면 → 돈다 · 장치·워크플로·DDL → 돈다 · 빈 입력·오류 → 돈다
+//   G 기대 키 생성기는 판정기 상수를 읽지 않고 작업지시서 §4-2 표에서 따로 적는다(자기 증명 0).
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1337,11 +1346,33 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     ];
     const K_OK_BODY = "process.stdout.write('F18-RAN-OK\\n');\n";
     const K_ODD_BODY = "process.stdout.write('F18-RAN-ODD\\n');\n";
+    // 🔴 K 연결 1차 — G 기대 키 16(G 14 · N4 2 · PM C2). 판정기 상수를 읽지 않고 작업지시서 §4-2 표에서 따로 적는다.
+    //   G 줄 통과 = TEST · N4 줄 = DEVICE(§4-2 ②).
+    const fG = (id, g, p, browser, kind = 'TEST', pass = true) => ({ id, g, path: p, browser, what: 'k', got: 'k', pass, kind, scope: 'K' });
+    const fGRows = () => [
+      fG('K35-G1', 'G1', 'bell', 'chromium'), fG('K35-G1', 'G1', 'bell', 'webkit'),
+      fG('K35-G1', 'G1', 'toast', 'chromium'), fG('K35-G1', 'G1', 'toast', 'webkit'),
+      fG('K35-G2', 'G2', 'bell', 'chromium'), fG('K35-G2', 'G2', 'bell', 'webkit'),
+      fG('K35-G2', 'G2', 'toast', 'chromium'), fG('K35-G2', 'G2', 'toast', 'webkit'),
+      fG('K35-G3', 'G3', 'bell', 'chromium'),
+      fG('K35-G3-SELF', 'G3', 'self', 'chromium'),
+      fG('K35-G4-APPR', 'G4', 'bell', 'chromium'),
+      fG('K35-G4-CHATAPPR', 'G4', 'bell', 'chromium'),
+      fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
+      fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
+    ];
+    const F_G_N = fGRows().length;
+    // 🔴 K 연결 1차 — 판정기를 부르는 칸은 사본 폴더(K 본문 꼴 1개 기본)에서 돈다 · 실물 폴더의 K 본문 수에 묶이지 않게(§5-1).
+    const fJudge = (name, outDir, envPatch = {}, kFiles = { [fK('ok')]: K_OK_BODY }) => {
+      const d = fCopy(`${name}-ci`, kFiles);
+      return fNode([path.join(d, 'judge.js')], { UI_OUT: outDir, ...envPatch });
+    };
 
     // N1 — 선택(S8)과 계수(판정기)가 한 규칙인가
     { // F-C18a 이상한 이름(사본 폴더) + H 전 키 → 사본 판정기 빨강
       const d = fCopy('c18a', { [fK('')]: K_ODD_BODY });
-      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18a-out', fHRows()) });
+      // ⬛ [낡은 줄 · F-PR] const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18a-out', fHRows()) });
+      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18a-out', [...fHRows(), ...fGRows()]) }); // K 연결 1차 — G 전 키
       check('F-C18a N1 K 본문 이름 꼴 이상(사본 폴더) + H 전 키 → 사본 판정기 rc 1 · 「이름 꼴 이상」', x.code === 1 && /이름 꼴 이상/.test(x.out), `rc=${x.code}`);
     }
     { // F-C18b 공용 분류 함수 단독 — 경계 꼴 둘(하나는 리눅스에서만 만들 수 있는 이름) → 이상 쪽
@@ -1375,7 +1406,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     }
     { // F-C18d 양성 대조 — 정상 꼴 이름 1개가 판정기에 K 본문 1개로 세어짐(종료 코드는 안 본다)
       const d = fCopy('c18d', { [fK('ok')]: K_OK_BODY });
-      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18d-out', fHRows()) });
+      // ⬛ [낡은 줄 · F-PR] const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18d-out', fHRows()) });
+      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c18d-out', [...fHRows(), ...fGRows()]) }); // K 연결 1차 — G 전 키
       check('F-C18d N1 양성 · 정상 꼴 이름 1개 → 판정기 「K 본문 파일 1」(종료 코드 무관 · 대조 줄)', /K 본문 파일 1\)/.test(x.out), `rc=${x.code}`);
     }
 
@@ -1439,7 +1471,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const rows = fs.existsSync(path.join(x.o, 'main', 'ui-k35-result.json')) ? fReadRows(x.o) : [];
       const dx = rows.filter((w) => w.id === 'H-DX').length;
       const t1 = rows.filter((w) => w.id === 'H-T1').length;
-      const j = fNode([F_JUDGE], { UI_OUT: x.o });
+      // ⬛ [낡은 줄 · F-PR] const j = fNode([F_JUDGE], { UI_OUT: x.o });
+      const j = fJudge('c19d', x.o); // K 연결 1차 — 사본 폴더(결과표는 흐름 잡이가 적은 그대로 · 기대 rc 1 그대로)
       check('F-C19d N2 흐름 잡이 꼴 안 위반 → 끊김 줄 1 · 위반 줄 0 · 판정기 rc 1', dx === 1 && t1 === 0 && j.code === 1, `끊김 ${dx} · 위반 줄 ${t1} · 판정 rc=${j.code}`);
     }
 
@@ -1468,8 +1501,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     { // F-C20b 같은 값을 결과표 줄(직접 기록) · 시드 두 칸 · 외부 호스트에 → 판정기 출력 꼴 0
       const raw = { id: f20Mix('H'), g: f20Mix('G'), path: f20Mix('p'), browser: f20Mix('b'), scope: f20Mix('s'), what: 'w', got: 'g', pass: true, kind: 'TEST' };
       const rows = [...(f20Out && fs.existsSync(path.join(f20Out, 'main', 'ui-k35-result.json')) ? fReadRows(f20Out) : []), raw];
-      const o = fTable('c20b', rows, { seed: { mode: f20Mix('m'), path: f20Mix('sp') }, external_blocked: 1, external_hosts: [f20Mix('h1'), f20Mix('h2')] });
-      const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      // ⬛ [낡은 줄 · F-PR] const o = fTable('c20b', rows, { seed: … }) · const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      const o = fTable('c20b', [...rows, ...fGRows()], { seed: { mode: f20Mix('m'), path: f20Mix('sp') }, external_blocked: 1, external_hosts: [f20Mix('h1'), f20Mix('h2')] });
+      const x = fJudge('c20b', o, { [F20_LABEL]: F20_VALUE }); // K 연결 1차 — G 전 키 · 사본 폴더
       check('F-C20b N3 판정기 좋은 줄 · 시드 줄 · 외부 호스트 줄 → 꼴 0', f20Clean(x.out) && x.out.includes('***'), `rc=${x.code} · 꼴 0=${f20Clean(x.out)}`);
     }
     { // F-C20c 대조 — 결과 칸(got)은 지금도 가림
@@ -1504,17 +1538,21 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       check('F-C20d N3 키 칸 상한 경계 · 120자 그대로 · 121자 잘림 표지 · 경계에 걸친 등록값 반쪽 0(지운 뒤 자르기)', ok, why || `줄 ${rows.length} · 걸침 반쪽 0=${straddleOk}`);
     }
     { // F-C20e [3-V] 03 — 판정기 측정 커밋 표지 줄 → 꼴 0
-      const o = fTable('c20e', fHRows(), { plant: [f20Mix('pl')] });
-      const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      // ⬛ [낡은 줄 · F-PR] const o = fTable('c20e', fHRows(), { plant: [f20Mix('pl')] });
+      // ⬛ [낡은 줄 · F-PR] const x = fNode([F_JUDGE], { UI_OUT: o, [F20_LABEL]: F20_VALUE });
+      const o = fTable('c20e', [...fHRows(), ...fGRows()], { plant: [f20Mix('pl')] }); // K 연결 1차 — G 전 키
+      const x = fJudge('c20e', o, { [F20_LABEL]: F20_VALUE }); // K 연결 1차 — 사본 폴더
       const line = x.out.split('\n').find((s) => s.includes('측정 커밋 런')) || '';
       check('F-C20e N3 판정기 측정 커밋 표지 줄 → 원문·URL·base64 꼴 0 · 가림 표지 있음', line.length > 0 && f20Clean(x.out) && line.includes('***'),
         `표지 줄 ${line.length > 0} · 꼴 0=${f20Clean(x.out)}`);
     }
     { // F-C20f [3-V] 2차 P2 — 관찰 결과 칸 · 외부 호스트 · 줄 꼴 이상 줄 안 제어 글자(줄바꿈 · 색 제어)
       const nl = (tag) => ['F20F-', tag, '\n', `F20F-${tag}-NEXT`, '\u001b', '[31m'].join('');
-      const rows = fHRows().map((w) => (w.id === 'H-OBS-TERMS' ? { ...w, got: nl('OBS') } : w));
+      // ⬛ [낡은 줄 · F-PR] const rows = fHRows().map(…) — G 키 없음
+      const rows = [...fHRows(), ...fGRows()].map((w) => (w.id === 'H-OBS-TERMS' ? { ...w, got: nl('OBS') } : w)); // K 연결 1차 — G 전 키
       rows.push({ ...fRow(nl('BAD'), 'DEVICE'), kind: 'obs' });
-      const x = fNode([F_JUDGE], { UI_OUT: fTable('c20f', rows, { external_blocked: 1, external_hosts: [nl('HOST')] }) });
+      // ⬛ [낡은 줄 · F-PR] const x = fNode([F_JUDGE], { UI_OUT: fTable('c20f', rows, { external_blocked: 1, external_hosts: [nl('HOST')] }) });
+      const x = fJudge('c20f', fTable('c20f', rows, { external_blocked: 1, external_hosts: [nl('HOST')] })); // K 연결 1차 — 사본 폴더
       const lines = x.out.split('\n');
       const part = (tag, head) => ({
         tag,
@@ -1529,7 +1567,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     }
 
     // 상신-L14 — 판정기 H 기대 키 틀(누락 · 중복 · 모르는 키 · 갈래 · G 빈 자리)
-    const fJ = (name, rows) => fNode([F_JUDGE], { UI_OUT: fTable(name, rows) });
+    // ⬛ [낡은 줄 · F-PR] const fJ = (name, rows) => fNode([F_JUDGE], { UI_OUT: fTable(name, rows) });
+    const fJ = (name, rows) => fJudge(name, fTable(name, [...rows, ...fGRows()])); // K 연결 1차 — G 전 키 · 사본 폴더(칸 이름 · 기대 그대로)
     { // F-C21a H 한 행
       const x = fJ('c21a', [fRow('H-T1', 'TEST', 'chromium')]);
       check('F-C21a L14 H 한 행 → rc 1 · 누락 > 0', x.code === 1 && /키 틀: 누락 [1-9]/.test(x.out), `rc=${x.code}`);
@@ -1562,12 +1601,13 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const x = fJ('c21g', [...fHRows(), fRow('H-ZZ', 'DEVICE')]);
       check('F-C21g L14 모르는 H 키 → rc 1 · 모르는 1', x.code === 1 && /모르는 1 /.test(x.out), `rc=${x.code}`);
     }
-    { // F-C21h K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → 빨강
-      const d = fCopy('c21h', { [fK('ok')]: K_OK_BODY });
-      const gRow = { id: 'G-F21H', g: 'G-F21H', path: null, browser: 'chromium', what: 'f', got: 'f', pass: true, kind: 'TEST', scope: 'G' };
-      const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c21h-out', [...fHRows(), gRow]) });
-      check('F-C21h L14 K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → rc 1 · G 자리 비었음', x.code === 1 && /G 자리 비었음/.test(x.out), `rc=${x.code}`);
-    }
+    // ⬛ [낡은 칸 · F-PR] F-C21h — G 자리를 채워(K 연결 1차) 전제 「G 자리 빈 틀」 이 사라졌다. 뜻(G 키 없이 초록 0)은 K-C22b 가 잇는다.
+    // { // F-C21h K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → 빨강
+    //   const d = fCopy('c21h', { [fK('ok')]: K_OK_BODY });
+    //   const gRow = { id: 'G-F21H', g: 'G-F21H', path: null, browser: 'chromium', what: 'f', got: 'f', pass: true, kind: 'TEST', scope: 'G' };
+    //   const x = fNode([path.join(d, 'judge.js')], { UI_OUT: fTable('c21h-out', [...fHRows(), gRow]) });
+    //   check('F-C21h L14 K 본문(사본) + G 칸 빈 틀 + G 시험 줄 → rc 1 · G 자리 비었음', x.code === 1 && /G 자리 비었음/.test(x.out), `rc=${x.code}`);
+    // }
     { // F-C21i [3-V] 03 — 모르는 키 이름표 안 제어 글자(줄바꿈 · 색 제어) → 출력 줄이 갈라지지 않음 · 가린 글자로
       const odd = fRow(['H-ZZ', '\n', 'F21I-NEXT', '\u001b', '[31m'].join(''), 'DEVICE');
       const x = fJ('c21i', [...fHRows(), odd]);
@@ -1590,6 +1630,230 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const ok = a.code === 1 && /중복 1 /.test(a.out) && b.code === 1 && /중복 1 /.test(b.out) && c.code === 1 && /⚫ FAIL \[장치\]/.test(c.out);
       check('F-C21k L14 같은 키 3줄(첫 브라우저) · 둘째 브라우저 2줄 → 중복 빨강 · 둘째 줄 실패 → [장치] 빨강', ok,
         `3줄 rc=${a.code} · 둘째 2줄 rc=${b.code} · 실패 줄 rc=${c.code}`);
+    }
+
+    // ── 🔴 K 연결 1차(11/6 · 작업지시서 20261106작 #691 재기반 §4-2 · §5-1) — 판정기 G 기대 키 필수 ──
+    //   전부 사본 폴더. 규칙 고치기 전(G 자리만 채운) 판정기에서는 b · c · d · e · g · h 여섯 칸이 빨강이어야 한다(대조).
+    const kJ = (name, rows, kFiles) => fJudge(name, fTable(name, rows), {}, kFiles);
+    const kAll = () => [...fHRows(), ...fGRows()];
+    const kOutside = ['x', fK('ok')].join(''); // K 본문 머리로 시작하지 않는 이름(판정기·실행기가 보지 않는다)
+    const kLast = (out) => out.split('\n').map((s) => s.trim()).filter((s) => s.length > 0).pop() || '';
+    { // K-C22a 양성 — H 전 키 + G 전 키 + K 본문 1(사본)
+      const x = kJ('k22a', kAll());
+      check('K-C22a G 양성 · H 전 키 + G 전 키 + K 본문 1 → rc 0', x.code === 0 && /🟢 PASS 전부/.test(x.out), `rc=${x.code}`);
+    }
+    { // K-C22b 음성(A) — G 한 키만
+      const x = kJ('k22b', [...fHRows(), fGRows()[0]]);
+      check(`K-C22b G 음성 · G 한 키만 → rc 1 · 누락 ${F_G_N - 1}`, x.code === 1 && x.out.includes(`키 틀: 누락 ${F_G_N - 1} `), `rc=${x.code}`);
+    }
+    { // K-C22c 음성(B) — K 본문 0 · G 0
+      const x = kJ('k22c', fHRows(), {});
+      check(`K-C22c G 음성 · K 본문 0 · G 0 → rc 1 · 누락 ${F_G_N}`, x.code === 1 && x.out.includes(`키 틀: 누락 ${F_G_N} `), `rc=${x.code}`);
+    }
+    { // K-C22d 음성(E) — 머리 밖 이름 파일 · G 0
+      const x = kJ('k22d', fHRows(), { [kOutside]: K_OK_BODY });
+      check(`K-C22d G 음성 · 머리 밖 이름 파일 · G 0 → rc 1 · 누락 ${F_G_N}`, x.code === 1 && x.out.includes(`키 틀: 누락 ${F_G_N} `), `rc=${x.code}`);
+    }
+    { // K-C22e 음성 — G 전 키 있으나 K 본문 0 → 이유 줄
+      const x = kJ('k22e', kAll(), {});
+      check(`K-C22e G 음성 · G 전 키 · K 본문 0 → rc 1 · 「K 본문 0 · G 기대 ${F_G_N}」`, x.code === 1 && x.out.includes(`K 본문 0 · G 기대 ${F_G_N}`), `rc=${x.code}`);
+    }
+    { // K-C22f 음성 — G 줄 중복
+      const x = kJ('k22f', [...kAll(), fGRows()[0]]);
+      check('K-C22f G 음성 · G 줄 중복 → rc 1 · 중복 1', x.code === 1 && /중복 1 /.test(x.out), `rc=${x.code}`);
+    }
+    { // K-C22g 음성 두 벌 — 한 브라우저만 키에 둘째 브라우저 줄 더함 / 두 브라우저 키에서 둘째 브라우저 줄 뺌
+      const extra = fGRows().filter((w) => w.browser === 'chromium' && /^G[3-5]$/.test(w.g)).map((w) => ({ ...w, browser: 'webkit' }));
+      const a = kJ('k22g-1', [...kAll(), ...extra]);
+      const cut = kAll().filter((w) => !(w.scope === 'K' && /^G[12]$/.test(w.g) && w.browser === 'webkit'));
+      const b = kJ('k22g-2', cut);
+      const ok = a.code === 1 && /모르는 [1-9]/.test(a.out) && b.code === 1 && b.out.includes('키 틀: 누락 4 ');
+      check('K-C22g G 음성 두 벌 · 한 브라우저 키에 둘째 브라우저 줄 / 두 브라우저 키에서 둘째 브라우저 줄 빠짐 → 둘 다 rc 1', ok,
+        `더함 rc=${a.code} · 빠짐 rc=${b.code}`);
+    }
+    { // K-C22h 음성 두 벌 — G 키 하나를 DEVICE 통과 줄로 채움 / N4 키를 TEST 줄로 채움
+      const g = fGRows().map((w) => (w.id === 'K35-G2' && w.path === 'toast' && w.browser === 'webkit' ? { ...w, kind: 'DEVICE' } : w));
+      const a = kJ('k22h-1', [...fHRows(), ...g]);
+      const n = fGRows().map((w) => (w.g === 'N4' && w.browser === 'webkit' ? { ...w, kind: 'TEST' } : w));
+      const b = kJ('k22h-2', [...fHRows(), ...n]);
+      const ok = a.code === 1 && /G 통과 꼴 이상/.test(a.out) && b.code === 1 && /G 통과 꼴 이상/.test(b.out);
+      check('K-C22h G 음성 두 벌 · G 키를 DEVICE 통과 줄로 / N4 키를 TEST 줄로 → 둘 다 rc 1 · G 통과 꼴 이상', ok, `DEVICE 채움 rc=${a.code} · N4 TEST rc=${b.code}`);
+    }
+    { // K-C22i 대조(D) — G 줄을 범위 H 로 적음(기록 함수 범위 기본값) → 모르는 H 키
+      const x = kJ('k22i', [...fHRows(), ...fGRows().map((w) => ({ ...w, scope: 'H' }))]);
+      check('K-C22i G 대조 · G 줄 범위 H → rc 1 · 모르는 키', x.code === 1 && /모르는 [1-9]/.test(x.out), `rc=${x.code}`);
+    }
+    { // K-C22j 이유 줄(측정 런 ⓐ 꼴) — G 전 키 · 일부 TEST 실패 → 끝 줄 [시험] · 판정표에 실패 G 줄만 🔴
+      const fail = (w) => (w.id === 'K35-G1' && w.path === 'bell' && w.browser === 'chromium') || (w.id === 'K35-G5' && w.path === 'toast');
+      const x = kJ('k22j', [...fHRows(), ...fGRows().map((w) => (fail(w) ? { ...w, pass: false } : w))]);
+      const lines = x.out.split('\n');
+      const red = lines.filter((s) => s.startsWith('🔴 FAIL [시험] K K35-'));
+      const green = lines.filter((s) => s.startsWith('🟢 PASS K K35-'));
+      const ok = x.code === 1 && kLast(x.out).startsWith('🔴 FAIL [시험]') && red.length === 2
+        && red.some((s) => s.includes('K35-G1 G1 bell (chromium)')) && red.some((s) => s.includes('K35-G5 G5 toast (chromium)'))
+        && green.length === F_G_N - 2;
+      check('K-C22j G 이유 줄 · G 전 키 · 일부 TEST 실패 → 끝 줄 [시험] · 판정표 실패 G 줄만 🔴', ok,
+        `rc=${x.code} · 🔴 ${red.length} · 🟢 ${green.length} · 끝 줄 [시험]=${kLast(x.out).startsWith('🔴 FAIL [시험]')}`);
+    }
+
+    // ── 🔴 K 연결 1차(§5-4 · 대표 Q1) — 거르기 규칙(ui-changes.js · 순수 함수 + 실행 껍데기) ──
+    //   함수 없음 = 빨강. 실행 껍데기는 NUL 구분 목록을 표준입력으로 받는다(잡과 같은 꼴).
+    const F_PICK = path.join(F_CI, 'ui-changes.js');
+    const kPick = () => {
+      if (!fs.existsSync(F_PICK)) return null;
+      const P = require(F_PICK);
+      return typeof P.decideRun === 'function' ? P : null;
+    };
+    const kPickCli = (names) => {
+      const x = spawnSync(process.execPath, [F_PICK], { input: names.join('\0'), env: fEnvBase(), encoding: 'utf8' });
+      const out = `${x.stdout || ''}${x.stderr || ''}`;
+      const runs = out.split('\n').filter((s) => /^run=/.test(s));
+      return { code: x.status, out, runs };
+    };
+    { // K-C24a 문서만 → 안 돈다(함수 · 실행 껍데기)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const docs = ['docs/a.md', 'docs/개발/b.md', 'README.md'];
+        const f = P.decideRun(docs);
+        const c = kPickCli(docs);
+        ok = f.run === false && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=false';
+        why = `함수 ${f.run} · 껍데기 rc=${c.code} ${c.runs.join(',')}`;
+      }
+      check('K-C24a 거르기 · 문서만 → 안 돈다(함수 · 실행 껍데기)', ok, why);
+    }
+    { // K-C24b 화면 파일 1 → 돈다(이름에 한글 · 껍데기는 NUL 구분 원문)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const names = ['docs/a.md', 'src/HitPan.Web/Pages/가나.razor'];
+        const f = P.decideRun(names);
+        const c = kPickCli(names);
+        // ⬛ [낡은 줄 · 갈래 A 첫 꼴] const near = P.decideRun(['src/HitPan.WebX/a.cs', 'src/HitPan.Web']); — 허용 목록 머리 경계(폐기)
+        // 🔴 PM 결정 3V-1 — 문서 머리 경계: 문서 폴더 머리와 글자만 비슷한 폴더 · 대문자 확장자 → 문서 아님 = 돈다
+        const near = P.decideRun(['docsx/a.txt', 'doc/a.txt', 'notes/a.MD']);
+        ok = f.run === true && c.code === 0 && c.runs.length === 1 && c.runs[0] === 'run=true' && near.run === true;
+        why = `함수 ${f.run} · 껍데기 ${c.runs.join(',')} · 경계 대조 ${near.run}`;
+      }
+      // ⬛ [낡은 이름 · 갈래 A 첫 꼴] 'K-C24b 거르기 · 화면 파일 1 → 돈다 · 폴더 머리 경계 밖 → 안 돈다(대조)'
+      check('K-C24b 거르기 · 화면 파일 1 → 돈다 · 문서 머리 경계 밖(비슷한 폴더 · 대문자 확장자) → 돈다', ok, why);
+    }
+    { // K-C24c 장치 · 워크플로 · API 참조 · 출하 DDL → 돈다 / 다른 워크플로만 → 안 돈다(대조)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const each = [
+          ['scripts/playwright-audit/ci/judge.js'], ['.github/workflows/ui-browser.yml'], ['src/HitPan.API/Program.cs'],
+          ['src/HitPan.Contracts/a.cs'], ['Directory.Build.props'], ['installer/hitpan_db_clean.sql'],
+        ].map((n) => P.decideRun(n).run);
+        // ⬛ [낡은 줄 · 갈래 A 첫 꼴] const other = P.decideRun(['.github/workflows/build-and-test.yml']).run; — 다른 워크플로만 → 안 돈다(폐기)
+        // 🔴 PM 결정 3V-1 — 목록 밖(다른 워크플로 · 다른 프로젝트 · 패키지 목록)도 돈다 / 문서 폴더 + 다른 자리 .md 만 → 안 돈다(대조)
+        const more = [
+          ['.github/workflows/build-and-test.yml'], ['src/HitPan.Watchdog/a.cs'], ['scripts/playwright-audit/package.json'],
+        ].map((n) => P.decideRun(n).run);
+        const docsOnly = P.decideRun(['docs/a.png', 'installer/README.md', 'docs/b/c.md']).run;
+        ok = each.every((v) => v === true) && more.every((v) => v === true) && docsOnly === false;
+        why = `돈다 ${each.filter((v) => v === true).length}/${each.length} · 목록 밖 돈다 ${more.filter((v) => v === true).length}/${more.length} · 문서만 ${docsOnly}`;
+      }
+      // ⬛ [낡은 이름 · 갈래 A 첫 꼴] 'K-C24c 거르기 · 장치 · 워크플로 · API 참조 · 출하 DDL → 돈다 / 다른 워크플로만 → 안 돈다(대조)'
+      check('K-C24c 거르기 · 장치 · 워크플로 · API · 출하 DDL · 목록 밖 파일 → 돈다 / 문서만 → 안 돈다(대조)', ok, why);
+    }
+    { // K-C24d 목록 못 구함(빈 입력 · 꼴 이상) → 돈다(닫힌 쪽 = 도는 쪽)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const a = P.decideRun([]).run;
+        const b = P.decideRun(null).run;
+        const c = P.decideRun(undefined).run;
+        const e = kPickCli([]);
+        ok = a === true && b === true && c === true && e.code === 0 && e.runs.length === 1 && e.runs[0] === 'run=true';
+        why = `빈 ${a} · null ${b} · undefined ${c} · 껍데기 빈 입력 ${e.runs.join(',')}`;
+      }
+      check('K-C24d 거르기 · 빈 입력 · 꼴 이상 → 돈다', ok, why);
+    }
+    // 🔴 PM 결정 3V-1 ⑤ — 거르기 칸 +2(비ASCII 이름 · 이동) · 실물 git 으로 목록을 만든다(작업 폴더 안 임시 저장소 · 사용자 설정 안 읽음).
+    //   목록 명령 글자는 워크플로 거르기 단계와 같다(K-C24f 가 워크플로 글자와 대조).
+    const kGitArgs = ['-c', 'core.quotePath=false', 'diff', '-z', '--no-renames', '--name-only', 'HEAD^1', 'HEAD'];
+    const kRepo = (name) => {
+      const d = fDir(name);
+      const cfg = path.join(fDir(`${name}-cfg`), 'empty.gitconfig');
+      fs.writeFileSync(cfg, '');
+      const env = {
+        ...fEnvBase(), HOME: path.dirname(cfg), USERPROFILE: path.dirname(cfg), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: cfg,
+        GIT_AUTHOR_NAME: 'selftest', GIT_AUTHOR_EMAIL: 'selftest@invalid', GIT_COMMITTER_NAME: 'selftest', GIT_COMMITTER_EMAIL: 'selftest@invalid',
+      };
+      const git = (args) => {
+        const x = spawnSync('git', args, { cwd: d, env, encoding: 'utf8' });
+        return { code: x.status, out: x.stdout || '' };
+      };
+      const put = (rel, body = 'x\n') => { fs.mkdirSync(path.dirname(path.join(d, rel)), { recursive: true }); fs.writeFileSync(path.join(d, rel), body); };
+      const commit = (msg) => git(['add', '-A']).code === 0 && git(['commit', '-q', '-m', msg]).code === 0;
+      const ok = git(['init', '-q']).code === 0;
+      return { d, git, put, commit, ok };
+    };
+    const kList = (r, args = kGitArgs) => { const x = r.git(args); return x.code === 0 ? x.out.split('\0').filter((s) => s.length > 0) : null; };
+    { // K-C24e 비ASCII 이름 — 문서 폴더 한글 이름만 → 안 돈다 · 화면 폴더 한글 이름 → 돈다 · 따옴표 꼴 목록이면 문서로 못 알아봄(대조 = 돈다 쪽)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const r = kRepo('k24e');
+        let a = null; let aCli = null; let quoted = null; let b = null; let bCli = null;
+        if (r.ok) {
+          r.put('README.txt');
+          if (r.commit('c1')) {
+            r.put('docs/가나 다.md');
+            if (r.commit('c2')) {
+              a = kList(r);
+              aCli = a ? kPickCli(a) : null;
+              const q = r.git(['-c', 'core.quotePath=true', 'diff', '--no-renames', '--name-only', 'HEAD^1', 'HEAD']);
+              quoted = q.code === 0 ? P.decideRun(q.out.split('\n')).run : null;
+              r.put('src/HitPan.Web/Pages/가나.razor');
+              if (r.commit('c3')) { b = kList(r); bCli = b ? kPickCli(b) : null; }
+            }
+          }
+        }
+        ok = !!a && a.length === 1 && a[0] === 'docs/가나 다.md' && aCli && aCli.runs.length === 1 && aCli.runs[0] === 'run=false'
+          && quoted === true && !!b && bCli && bCli.runs.length === 1 && bCli.runs[0] === 'run=true';
+        why = `git=${r.ok} · 문서 한글 ${aCli ? aCli.runs.join(',') : '-'} · 따옴표 꼴 ${quoted} · 화면 한글 ${bCli ? bCli.runs.join(',') : '-'}`;
+      }
+      check('K-C24e 거르기 · 비ASCII 이름(실물 git) · 문서만 → 안 돈다 · 화면 → 돈다 · 따옴표 꼴 목록 → 돈다(대조)', ok, why);
+    }
+    { // K-C24f 이동 — 화면 파일을 문서 폴더로 옮김 → 옛 자리도 목록에 남아 돈다 · 옮김 짝 맞추기를 켜면 새 자리만 남아 안 돈다(대조)
+      const P = kPick();
+      let ok = false;
+      let why = '함수 없음';
+      if (P) {
+        const r = kRepo('k24f');
+        let off = null; let on = null;
+        if (r.ok) {
+          r.put('src/HitPan.Web/Pages/a.razor', '@page "/a"\n<p>selftest</p>\n');
+          fs.mkdirSync(path.join(r.d, 'docs'), { recursive: true }); // 옮길 자리 폴더(git mv 는 없는 폴더로 못 옮긴다)
+          if (r.commit('c1') && r.git(['mv', 'src/HitPan.Web/Pages/a.razor', 'docs/a.md']).code === 0 && r.commit('c2')) {
+            const l1 = kList(r);
+            off = l1 ? kPickCli(l1).runs.join(',') : null;
+            const l2 = kList(r, ['-c', 'core.quotePath=false', '-c', 'diff.renames=true', 'diff', '-z', '--find-renames', '--name-only', 'HEAD^1', 'HEAD']);
+            on = l2 ? kPickCli(l2).runs.join(',') : null;
+          }
+        }
+        // 워크플로 글자 대조(동작 아님 · 고정 「돈다」 동작은 미측정 — 워크플로 읽기 확인)
+        const yml = fs.readFileSync(path.join(F_CI, '..', '..', '..', '.github', 'workflows', 'ui-browser.yml'), 'utf8');
+        const same = yml.includes(`git ${kGitArgs.join(' ')} > "$lst"`);
+        ok = off === 'run=true' && on === 'run=false' && same;
+        why = `git=${r.ok} · 짝 끔 ${off} · 짝 켬 ${on} · 워크플로 목록 명령 글자 같음=${same}`;
+      }
+      check('K-C24f 거르기 · 이동(화면 → 문서 폴더 · 실물 git) → 돈다 · 짝 맞추기 켜면 안 돈다(대조) · 워크플로 명령 글자 같음', ok, why);
+    }
+    { // K-C22k G 기대 키 수 16 고정 · 판정기 목록 = 작업지시서 표(여기 따로 적은 목록 · 키 글자도 여기서 따로 만든다)
+      const J = require(F_JUDGE);
+      const mine = fGRows().map((w) => [w.scope, w.id, w.g ?? '-', w.path ?? '-', w.browser ?? '-'].join('|')).sort();
+      const theirs = Array.isArray(J.EXPECT_G) ? [...J.EXPECT_G].sort() : [];
+      const ok = theirs.length === 16 && mine.length === 16 && new Set(theirs).size === 16 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 16 고정(G 14 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
   }
   const bad = results.filter((x) => !x.ok).length;
