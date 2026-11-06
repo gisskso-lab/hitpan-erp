@@ -316,4 +316,252 @@ public sealed class CsStageGateTests : IDisposable
         Assert.True(await db.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM bo_cs_reject_logs WHERE rule_code = 'forbidden_field'") >= 1);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261107작 갈래 B §7-1 — 아래 표시줄 고객사 거름 (G-C-15 ~ G-C-20)
+    //   새 입구 `CountsForTenant` · 목록 `List(..., tenant)` 를 **제품 메서드 그대로** 불러서 잰다.
+    //   대조군은 **시드 상수(기대 숫자)** 에 묶는다(3V-B4) — 두 입구를 서로만 견주면 둘 다 거름을 빼도 같다.
+    //   시드 이름·코드·값은 전부 가짜(C4) · 고객사마다 다른 가짜 코드(3V-B5).
+    // ══════════════════════════════════════════════════════════════════════
+
+    private async Task<string> SeedBarTenantAsync(string code, string name)
+    {
+        var tenantId = Guid.NewGuid().ToString();
+        await using var db = await _h.OpenAsync();
+        await db.ExecuteAsync(@"
+            INSERT INTO tenants (tenant_id, tenant_code, company_name, license_key_hash, owner_account_id)
+            VALUES (@Id, @Code, @Name, @Hash, @Owner)",
+            new { Id = tenantId, Code = code, Name = name, Hash = Hmac("GATE-CS-BAR-" + code), Owner = $"owner-{code.ToLowerInvariant()}@gate.test" });
+        return tenantId;
+    }
+
+    /// <summary>한 고객사에 단계별 쪽지를 정해진 수만큼 넣는다(단계 식과 같은 칸만 쓴다).</summary>
+    private async Task SeedBarTicketsAsync(string tenantId, int unread, int open, int done, int rated)
+    {
+        await using var db = await _h.OpenAsync();
+        async Task Put(string status, bool read, bool isRated)
+        {
+            await db.ExecuteAsync(@"
+                INSERT INTO bo_cs_tickets (tenant_id, client_ticket_uid, received_channel, category, sub_tag, body,
+                                           status, read_at, rating, rated_at)
+                VALUES (@T, @Uid, 'erp_message', 'use', 'etc', '가짜 본문',
+                        @Status, @ReadAt, @Rating, @RatedAt)",
+                new
+                {
+                    T = tenantId, Uid = Guid.NewGuid().ToString(), Status = status,
+                    ReadAt = read ? DateTime.UtcNow : (DateTime?)null,
+                    Rating = isRated ? 3 : (int?)null,
+                    RatedAt = isRated ? DateTime.UtcNow : (DateTime?)null,
+                });
+        }
+        for (int i = 0; i < unread; i++) await Put("접수", false, false);
+        for (int i = 0; i < open; i++) await Put("접수", true, false);
+        for (int i = 0; i < done; i++) await Put("완료", true, false);
+        for (int i = 0; i < rated; i++) await Put("완료", true, true);
+    }
+
+    private static JsonElement BarJson(IActionResult r) => JsonSerializer.SerializeToElement(((ObjectResult)r).Value);
+
+    private static int BarCode(IActionResult r) => r switch
+    {
+        ObjectResult o => o.StatusCode ?? 200,
+        StatusCodeResult s => s.StatusCode,
+        _ => -1,
+    };
+
+    private static async Task<int> BarListCount(CsAdminController cs, string? stage, string? tenant, string? q = null)
+    {
+        var res = await cs.List(null, q, false, stage, default, tenant);
+        Assert.Equal(200, BarCode(res));
+        return BarJson(res).GetProperty("data").GetArrayLength();
+    }
+
+    private static long BarNum(JsonElement j, string name) => j.GetProperty(name).GetInt64();
+
+    // 시드 상수 — G-C-15 · G-C-16 (고객사 X 와 Y 가 단계마다 **갈리는 값**을 갖도록 골랐다)
+    private const int XUnread = 2, XOpen = 1, XDone = 1, XRated = 1, XTotal = 5;
+    private const int YUnread = 3, YTotal = 3;
+
+    // ── G-C-15 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-15 🔴 고객사 숫자 = 그 고객사 목록 줄 수 = 시드 상수 (+대조: 전체 숫자는 다르다)")]
+    public async Task G_C_15_고객사숫자_목록_시드상수()
+    {
+        if (!await _h.TrySetUpAsync("G-C-15")) return;
+        var x = await SeedBarTenantAsync("GBARX15", "게이트가짜엑스");
+        var y = await SeedBarTenantAsync("GBARY15", "게이트가짜와이");
+        await SeedBarTicketsAsync(x, XUnread, XOpen, XDone, XRated);
+        await SeedBarTicketsAsync(y, YUnread, 0, 0, 0);
+        var cs = Cs("cs-bar");
+
+        // 🔴 대조군 먼저 — 시드가 「갈리는 값」을 가졌나(전체 ≠ X). 거름 없는 구현이면 아래 X 단언이 빨강.
+        var all = BarJson(await cs.Counts(default));
+        Assert.Equal(XTotal + YTotal, BarNum(all, "total"));
+        Assert.Equal(XUnread + YUnread, BarNum(all, "unread"));
+        Assert.NotEqual(XTotal, BarNum(all, "total"));
+        Assert.NotEqual(XUnread, BarNum(all, "unread"));
+
+        var res = await cs.CountsForTenant(x, default);
+        Assert.Equal(200, BarCode(res));
+        var j = BarJson(res);
+        Assert.True(j.GetProperty("found").GetBoolean());
+        Assert.Equal("게이트가짜엑스", j.GetProperty("companyName").GetString());
+        // 입구가 돌려준 값을 **시드 상수**에 묶는다
+        Assert.Equal(XUnread, BarNum(j, "unread"));
+        Assert.Equal(XOpen, BarNum(j, "open"));
+        Assert.Equal(XDone, BarNum(j, "done"));
+        Assert.Equal(XRated, BarNum(j, "rated"));
+        Assert.Equal(XTotal, BarNum(j, "total"));
+
+        // 목록도 같은 시드 상수 — 단계마다
+        Assert.Equal(XUnread, await BarListCount(cs, "unread", x));
+        Assert.Equal(XOpen, await BarListCount(cs, "open", x));
+        Assert.Equal(XDone, await BarListCount(cs, "done", x));
+        Assert.Equal(XRated, await BarListCount(cs, "rated", x));
+        Assert.Equal(XTotal, await BarListCount(cs, "all", x));
+        Assert.Equal(XTotal, await BarListCount(cs, null, x));
+    }
+
+    // ── G-C-16 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-16 🔴 다른 고객사 쪽지가 늘어도 X 숫자·X 목록 불변 (+대조: 전체는 늘었다)")]
+    public async Task G_C_16_서로안섞임()
+    {
+        if (!await _h.TrySetUpAsync("G-C-16")) return;
+        var x = await SeedBarTenantAsync("GBARX16", "게이트가짜엑스");
+        var y = await SeedBarTenantAsync("GBARY16", "게이트가짜와이");
+        await SeedBarTicketsAsync(x, XUnread, XOpen, XDone, XRated);
+        await SeedBarTicketsAsync(y, YUnread, 0, 0, 0);
+        var cs = Cs("cs-bar");
+
+        var before = BarNum(BarJson(await cs.Counts(default)), "total");
+        await SeedBarTicketsAsync(y, 2, 0, 0, 0);
+        var after = BarNum(BarJson(await cs.Counts(default)), "total");
+
+        // 대조: 같은 시점 전체 숫자는 정말 늘었다(시드가 먹었다)
+        Assert.Equal(before + 2, after);
+        Assert.Equal(XTotal + YTotal + 2, after);
+
+        var j = BarJson(await cs.CountsForTenant(x, default));
+        Assert.Equal(XUnread, BarNum(j, "unread"));
+        Assert.Equal(XTotal, BarNum(j, "total"));
+        Assert.Equal(XTotal, await BarListCount(cs, null, x));
+        Assert.Equal(XUnread, await BarListCount(cs, "unread", x));
+    }
+
+    // ── G-C-17 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-17 🔴 이름이 겹치는 고객사 — tenant 고유값 일치는 안 섞인다 (+대조: q 부분 일치는 섞인다 · % _ 무력)")]
+    public async Task G_C_17_고유값일치()
+    {
+        if (!await _h.TrySetUpAsync("G-C-17")) return;
+        const string nameA = "게이트겹침가짜";
+        const string nameB = "게이트겹침가짜둘";
+        var a = await SeedBarTenantAsync("GBARA17", nameA);
+        var b = await SeedBarTenantAsync("GBARB17", nameB);
+        await SeedBarTicketsAsync(a, 2, 0, 0, 0);
+        await SeedBarTicketsAsync(b, 3, 0, 0, 0);
+        var cs = Cs("cs-bar");
+
+        // 🔴 대조군 — 같은 시드에서 부분 일치(q)는 두 고객사를 다 잡는다(부분 일치로 베낀 구현 = 아래가 빨강)
+        var byQ = await BarListCount(cs, null, null, q: nameA);
+        Assert.Equal(5, byQ);
+
+        var byTenant = await BarListCount(cs, null, a);
+        Assert.Equal(2, byTenant);
+        Assert.True(byQ > byTenant);
+
+        var rows = BarJson(await cs.List(null, null, false, null, default, a)).GetProperty("data");
+        foreach (var r in rows.EnumerateArray())
+            Assert.Equal(nameA, r.GetProperty("companyName").GetString());
+
+        Assert.Equal(2, BarNum(BarJson(await cs.CountsForTenant(a, default)), "total"));
+
+        // 🔴 3V-B4 — LIKE 로 베낀 구현이면 아래 칸들이 전 줄을 연다(빨강). 고유값 일치는 0줄 · found=false.
+        //   「_」 한 글자는 LIKE 여도 36자 값과 안 맞으므로, 고객사값 꼴(36자)로 만든 「_」 무늬도 함께 잰다.
+        var underscoreUuid = "________-____-____-____-____________";
+        foreach (var pattern in new[] { "%", "_", underscoreUuid })
+        {
+            Assert.Equal(0, await BarListCount(cs, null, pattern));
+            var p = BarJson(await cs.CountsForTenant(pattern, default));
+            Assert.False(p.GetProperty("found").GetBoolean(), $"「{pattern}」 가 고객사로 잡혔다 — 부분 일치 구현");
+        }
+    }
+
+    // ── G-C-18 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-18 인자 없음 = 종전 — 전체 숫자 합 = 전체 · 고객사 인자 없는/빈 목록 = 전 줄 (회귀)")]
+    public async Task G_C_18_인자없음_종전()
+    {
+        if (!await _h.TrySetUpAsync("G-C-18")) return;
+        var x = await SeedBarTenantAsync("GBARX18", "게이트가짜엑스");
+        var y = await SeedBarTenantAsync("GBARY18", "게이트가짜와이");
+        await SeedBarTicketsAsync(x, 1, 1, 0, 0);
+        await SeedBarTicketsAsync(y, 0, 0, 1, 1);
+        var cs = Cs("cs-bar");
+
+        var all = BarJson(await cs.Counts(default));
+        Assert.Equal(4, BarNum(all, "total"));
+        Assert.Equal(BarNum(all, "total"),
+            BarNum(all, "unread") + BarNum(all, "open") + BarNum(all, "done") + BarNum(all, "rated"));
+
+        Assert.Equal(4, await BarListCount(cs, null, null));
+        Assert.Equal(4, await BarListCount(cs, null, ""));
+        Assert.Equal(4, await BarListCount(cs, null, "   "));
+
+        // 기존 직접 호출 꼴(인자 5개)도 그대로 전 줄
+        var legacy = await cs.List(null, null, false, null, default);
+        Assert.Equal(4, BarJson(legacy).GetProperty("data").GetArrayLength());
+    }
+
+    // ── G-C-19 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-19 🔴 없는 고객사 = found=false · 숫자 칸 없음 · 빈/공백/36자 초과 = 400 (+대조: 있는 고객사 0건 = 숫자 0 있음)")]
+    public async Task G_C_19_없는고객사_값검사()
+    {
+        if (!await _h.TrySetUpAsync("G-C-19")) return;
+        var empty = await SeedBarTenantAsync("GBARE19", "게이트가짜빈곳");
+        var cs = Cs("cs-bar");
+        var numberFields = new[] { "unread", "open", "done", "rated", "total" };
+
+        // 없는 고객사 — 숫자 칸 자체가 없어야 한다(0 으로 채우면 「0건」 으로 읽힌다)
+        var none = await cs.CountsForTenant(Guid.NewGuid().ToString(), default);
+        Assert.Equal(200, BarCode(none));
+        var jn = BarJson(none);
+        Assert.False(jn.GetProperty("found").GetBoolean());
+        foreach (var f in numberFields)
+            Assert.False(jn.TryGetProperty(f, out _), $"없는 고객사 응답에 숫자 칸 「{f}」 가 있다 — 0 채우기");
+
+        // 🔴 대조군(3V-B5) — 있는 고객사 · 쪽지 0건 = found=true · 숫자 칸 **있음** · 0
+        var je = BarJson(await cs.CountsForTenant(empty, default));
+        Assert.True(je.GetProperty("found").GetBoolean());
+        foreach (var f in numberFields)
+            Assert.Equal(0, BarNum(je, f));
+
+        // 값 검사
+        Assert.Equal(400, BarCode(await cs.CountsForTenant(null, default)));
+        Assert.Equal(400, BarCode(await cs.CountsForTenant("", default)));
+        Assert.Equal(400, BarCode(await cs.CountsForTenant("   ", default)));
+        Assert.Equal(400, BarCode(await cs.CountsForTenant(new string('a', 37), default)));
+        Assert.Equal(200, BarCode(await cs.CountsForTenant(new string('a', 36), default)));   // 경계 — 36자는 받는다
+    }
+
+    // ── G-C-20 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-20 🔴 새 입구 CountsForTenant 는 PlatformAdmin 정책 아래 · AllowAnonymous 0 (+음성 대조)")]
+    public void G_C_20_새입구_인가()
+    {
+        var t = typeof(CsAdminController);
+        var policy = t.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false)
+                      .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+                      .Select(a => a.Policy).ToList();
+        Assert.Contains("PlatformAdmin", policy);
+
+        var m = t.GetMethod(nameof(CsAdminController.CountsForTenant));
+        Assert.NotNull(m);
+        Assert.Empty(m!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute), false));
+        var route = m.GetCustomAttributes(typeof(HttpGetAttribute), false).Cast<HttpGetAttribute>().Select(a => a.Template).ToList();
+        Assert.Contains("counts/tenant", route);
+
+        // 🔴 음성 대조군 — 익명 허용 타입을 같은 식으로 재면 정책이 **없음**으로 나와야 한다(늘 통과하는 검사가 아니다)
+        var anonPolicies = typeof(CsInboundController)
+            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false)
+            .Cast<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>()
+            .Select(a => a.Policy).ToList();
+        Assert.DoesNotContain("PlatformAdmin", anonPolicies);
+    }
 }
