@@ -128,6 +128,11 @@
     <Compile Include="..\HitPan.Backoffice\Components\Pages\Platform\Components\TenantInstallText.cs"
              Link="Linked\TenantInstallText.cs" />
 
+    <!-- 🔴 20261107작 갈래 B (§7-2) — 아래 CS 표시줄의 주소 해석기. 시험이 제품이 쓰는 그 코드를 **불러서** 잰다.
+         Blazor 의존 0 순수 C#(TenantInstallText.cs 선례). HitPan.Backoffice 는 ProjectReference 가 없어 CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Backoffice\Services\CsBarScope.cs"
+             Link="Linked\CsBarScope.cs" />
+
     <!-- 🔴 20261018작B2-A (G-B2A-1~6) — `/owner/…` 5장이 **누구도 못 들어가는** 상태였다(P0 실측).
          게이트는 정책을 베끼지 않고 **제품이 쓰는 그 메서드를 불러서** 평가한다
          (`AddBackofficePolicies` ← Program.cs 도 같은 메서드를 쓴다).

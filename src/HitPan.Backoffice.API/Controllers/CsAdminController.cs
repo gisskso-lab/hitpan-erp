@@ -142,6 +142,23 @@ public class CsAdminController : ControllerBase
                             ELSE 2 END AS stage
                   FROM bo_cs_tickets) s";
 
+    // 🔴 20261107작 갈래 B — 고객사 한 곳 숫자(고객 상세 · 그 고객사로 걸러진 고객A/S창구의 아래 표시줄).
+    //   위 StageCountSql 은 **글자 하나 안 바꾼다**(사이드바·평소 표시줄 응답 불변을 구조로 보장).
+    //   단계 식은 위와 같고, 하위 질의에 고유값 일치 한 줄만 더한다.
+    //   칸을 형변환·함수로 감싸지 않는다(색인 idx_bo_cs_tenant 무력화 방지) · 값은 Dapper 인자로만.
+    private const string TenantStageCountSql = @"
+        SELECT SUM(stage = 1) AS unread,
+               SUM(stage = 2) AS open,
+               SUM(stage = 3) AS done,
+               SUM(stage = 4) AS rated,
+               COUNT(*)       AS total
+          FROM (SELECT CASE WHEN rated_at IS NOT NULL THEN 4
+                            WHEN status = '완료'      THEN 3
+                            WHEN read_at IS NULL      THEN 1
+                            ELSE 2 END AS stage
+                  FROM bo_cs_tickets
+                 WHERE tenant_id = @TenantId) s";
+
     // 🔴 작5 — ILoggerFactory 는 「지금 준비하기」가 적용기에 넘길 로거용(추가만 · 기존 인자 무변).
     private readonly ILoggerFactory _loggerFactory;
 
@@ -156,8 +173,13 @@ public class CsAdminController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? q,
                                           [FromQuery] bool mine, [FromQuery] string? stage,
-                                          CancellationToken ct)
+                                          CancellationToken ct,
+                                          // 🔴 20261107작 갈래 B(D8) — 고객사 고유값 거름. 맨 끝 · 기본값 null
+                                          //   → 기존 직접 호출(인자 5개)은 고치지 않아도 그대로 컴파일된다.
+                                          [FromQuery] string? tenant = null)
     {
+        // 빈 값 · 공백 = 거름 없음. 값이 있을 때만 아래 고정 글자 조각이 붙는다(사용자 글자는 SQL 에 0).
+        var tenantFilter = string.IsNullOrWhiteSpace(tenant) ? null : tenant.Trim();
         var adminId = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
         await using var db = await OpenAsync(ct);
         // 🔴 [4] V-9 봉합 — PRD C-13 은 「**목록**·상세에 「폐기됨」 표시」다. 목록이 `purged_at` 을
@@ -194,6 +216,7 @@ public class CsAdminController : ControllerBase
                           WHEN k.read_at IS NULL      THEN 'unread'
                           ELSE 'open' END) = @Stage)
                AND (@Q IS NULL OR t.company_name LIKE CONCAT('%', @Q, '%') OR t.tenant_code LIKE CONCAT('%', @Q, '%'))
+               {(tenantFilter is null ? "" : "AND k.tenant_id = @Tenant")}
              ORDER BY k.received_at DESC
              LIMIT 300",
             new
@@ -203,6 +226,7 @@ public class CsAdminController : ControllerBase
                 Mine = mine ? 1 : 0,
                 AdminId = adminId,
                 Stage = string.IsNullOrWhiteSpace(stage) || stage == "all" ? null : stage.Trim(),
+                Tenant = tenantFilter,
             });
         return Ok(new { success = true, data = rows });
     }
@@ -411,6 +435,42 @@ public class CsAdminController : ControllerBase
             open = (long?)row.open ?? 0,       // ② 처리되지 않음
             done = (long?)row.done ?? 0,       // ③ 처리 완료
             rated = (long?)row.rated ?? 0,     // ④ CS평가 완료
+            total = (long)row.total,
+        });
+    }
+
+    // ── 고객사 한 곳의 진행 4단계 숫자 — 20261107작 갈래 B(D4) ──────────
+    //    고객 상세 · 그 고객사로 걸러진 고객A/S창구에서만 아래 표시줄이 읽는다.
+    //    🔴 사이드바 빨간 숫자는 언제나 위 Counts(전체) — 이 입구는 사이드바가 부르지 않는다.
+    //    🔴 클래스 정책(PlatformAdmin) 그대로 상속 — AllowAnonymous 0.
+    //    🔴 없는 고객사 = found=false 이고 **숫자 칸 자체가 없다**(0 으로 채우면 「0건」 으로 읽힌다).
+    //    순서: 같은 연결에서 차례로(#16) — ① 값 검사 ② 회사명 1행 ③ 있으면 단계 숫자.
+    [HttpGet("counts/tenant")]
+    public async Task<IActionResult> CountsForTenant([FromQuery] string? tenantId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return BadRequest(new { success = false, message = "고객사를 골라 주세요" });
+        var id = tenantId.Trim();
+        if (id.Length > 36)
+            return BadRequest(new { success = false, message = "고객사 값이 올바르지 않습니다" });
+
+        await using var db = await OpenAsync(ct);
+        var companyName = await db.QueryFirstOrDefaultAsync<string?>(
+            "SELECT company_name FROM tenants WHERE tenant_id = @TenantId LIMIT 1",
+            new { TenantId = id });
+        if (companyName is null)
+            return Ok(new { success = true, found = false, companyName = (string?)null });
+
+        var row = await db.QueryFirstAsync(TenantStageCountSql, new { TenantId = id });
+        return Ok(new
+        {
+            success = true,
+            found = true,
+            companyName,
+            unread = (long?)row.unread ?? 0,
+            open = (long?)row.open ?? 0,
+            done = (long?)row.done ?? 0,
+            rated = (long?)row.rated ?? 0,
             total = (long)row.total,
         });
     }
