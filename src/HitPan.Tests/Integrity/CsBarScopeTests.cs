@@ -93,6 +93,64 @@ public sealed class CsBarScopeTests
             fakePages.Where(l => !CsBarScope.LiteralTenantSegments.Contains(l, StringComparer.OrdinalIgnoreCase)));
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261107작 외부후보 U1 · I-1a 고침 — CSBAR-6 ~ CSBAR-9 (추가만 · 위 칸 무수정)
+    //   기대값 출처 = 내부 대조 카드 §1 의 .NET 8 길 찾기 표 실측 판정을 **상수로** 적은 것
+    //   (IssuePage · NotFound → null · DetailPage → 그 값). 시험 안 프레임워크 내부 반사 호출 0.
+    //   CSBAR-8b 의 두 칸은 [3] 이 레포 밖 재현 프로젝트로 길 찾기 판정을 먼저 잰 값이다.
+    //   🔴 화면 실측 아님 — 브라우저가 넘기는 주소 꼴 · 선렌더 주소 꼴은 미측정.
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Theory(DisplayName = "CSBAR-6 🔴 U1-A 대조군 — 인코딩된 글자 주소는 길 찾기가 고정 화면(IssuePage)으로 연다 → null (길 찾기 표 기준 · 화면 실측 아님)")]
+    [InlineData("admin/tenants/%69ssue")]
+    [InlineData("admin/tenants/iss%75e")]
+    [InlineData("admin/tenants/%49SSUE")]
+    public void CSBAR_6_인코딩글자주소_전체(string uri) => Assert.Null(CsBarScope.Resolve(uri));
+
+    [Theory(DisplayName = "CSBAR-7 🔴 U1-B 대조군 — 가운데 빈 칸은 길 찾기가 없는 화면(NotFound) → null (길 찾기 표 기준 · 화면 실측 아님)")]
+    [InlineData("admin//tenants/x")]
+    [InlineData("admin/tenants//x")]
+    [InlineData("admin/tenants/x//")]
+    [InlineData("admin//cs?tenant=a")]
+    public void CSBAR_7_빈칸_전체(string uri) => Assert.Null(CsBarScope.Resolve(uri));
+
+    [Theory(DisplayName = "CSBAR-8 정상 대조 — 길 찾기가 고객사 상세(DetailPage)로 여는 꼴은 그 값 · 이중 풀기 없음 (길 찾기 표 기준 · 화면 실측 아님)")]
+    [InlineData("admin/tenants/%2569ssue", "%69ssue")]
+    [InlineData("admin/tenants/a%2Fb", "a/b")]
+    [InlineData("admin/tenants/%20issue", " issue")]
+    public void CSBAR_8_상세주소_정상대조(string uri, string expected) => Assert.Equal(expected, CsBarScope.Resolve(uri));
+
+    [Theory(DisplayName = "CSBAR-8b 정상 대조 — 추가 실측 2건: 끝에 인코딩 슬래시 · 틀린 인코딩은 길 찾기가 상세(DetailPage)로 연다 (길 찾기 표 기준 · 화면 실측 아님)")]
+    [InlineData("admin/tenants/issue%2F", "issue/")]
+    [InlineData("admin/tenants/%zz", "%zz")]
+    public void CSBAR_8b_추가실측_정상대조(string uri, string expected) => Assert.Equal(expected, CsBarScope.Resolve(uri));
+
+    /// <summary>
+    /// CSBAR-9 — 판정 함수는 이름으로 찾는다(우리 제품 함수 · 프레임워크 내부 아님).
+    /// 🔴 함수가 없으면(바닥 판) 「늘 서버를 부른다」 = 바닥 동작으로 잰다 → 37자 대조군 칸만 빨강이 된다.
+    ///   이름이 바뀌어 못 찾아도 37자 칸이 빨강이라 이 검사는 눈을 감지 않는다.
+    /// </summary>
+    private static bool ExceedsByProduct(string value)
+    {
+        var m = typeof(CsBarScope).GetMethod("ExceedsServerTenantIdLength",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+            null, new[] { typeof(string) }, null);
+        if (m is null) return false;
+        return (bool)m.Invoke(null, new object?[] { value })!;
+    }
+
+    [Theory(DisplayName = "CSBAR-9 🔴 I-1a 서버를 부르지 않는 길이 — Trim 뒤 36자 보냄 · 37자 안 보냄(대조군) · 앞뒤 공백 붙은 36자 보냄 (서버 Trim 뒤 Length > 36 과 같게)")]
+    [InlineData(36, 0, false)]
+    [InlineData(37, 0, true)]
+    [InlineData(36, 1, false)]
+    public void CSBAR_9_서버상한_관문(int coreLength, int padEachSide, bool expectedExceeds)
+    {
+        var pad = new string(' ', padEachSide);
+        var value = pad + new string('a', coreLength) + pad;
+        Assert.Equal(coreLength + 2 * padEachSide, value.Length);   // 대조: 공백 칸은 날 길이로는 37자 이상이다
+        Assert.Equal(expectedExceeds, ExceedsByProduct(value));
+    }
+
     private static string FindRepoRoot()
     {
         var dir = AppContext.BaseDirectory;

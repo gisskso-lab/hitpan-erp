@@ -42,16 +42,30 @@ public static class CsBarScope
         if (qm >= 0) { path = s[..qm]; query = s[(qm + 1)..]; }
         else { path = s; query = ""; }
 
-        var segs = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // ⬛ [낡은 줄 · U1-B] var segs = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // 🔴 20261107작 U1-B — 빈 칸을 접지 않는다(.NET 8 길 찾기: 「admin//tenants/x」 · 「admin/tenants//x」 ·
+        //   「admin/tenants/x//」 = 없는 화면). 맨 앞 「/」 1개 · 맨 끝 「/」 1개만 떼고 가운데 빈 칸이 있으면 전체.
+        if (path.StartsWith('/')) path = path[1..];
+        if (path.EndsWith('/')) path = path[..^1];
+        var segs = path.Split('/');
+        foreach (var seg in segs)
+            if (seg.Length == 0) return null;
 
         // ① /admin/tenants/{한 칸}
         if (segs.Length == 3
             && Eq(segs[0], "admin") && Eq(segs[1], "tenants"))
         {
-            var raw = segs[2];
+            // ⬛ [낡은 줄 · U1-A] var raw = segs[2];
+            // ⬛ [낡은 줄 · U1-A] foreach (var lit in literalSegments)
+            // ⬛ [낡은 줄 · U1-A]     if (Eq(raw, lit)) return null;
+            // ⬛ [낡은 줄 · U1-A] var v = Uri.UnescapeDataString(raw);   // 경로 칸의 「+」 는 글자 그대로다(질의와 다름)
+            // ⬛ [낡은 줄 · U1-A] return string.IsNullOrWhiteSpace(v) ? null : v;
+            // 🔴 20261107작 U1-A — 날 「/」 로 먼저 가른 칸을 **한 번만** 풀고 그다음 글자 주소와 비교한다
+            //   (.NET 8 길 찾기는 「%69ssue」 를 「issue」 로 풀어 고정 화면을 연다). 이중 풀기 금지:
+            //   「%2569ssue」 → 「%69ssue」 로 남는다. 경로 칸의 「+」 는 글자 그대로다(질의와 다름).
+            var v = Uri.UnescapeDataString(segs[2]);
             foreach (var lit in literalSegments)
-                if (Eq(raw, lit)) return null;
-            var v = Uri.UnescapeDataString(raw);   // 경로 칸의 「+」 는 글자 그대로다(질의와 다름)
+                if (Eq(v, lit)) return null;
             return string.IsNullOrWhiteSpace(v) ? null : v;
         }
 
@@ -64,6 +78,20 @@ public static class CsBarScope
 
         return null;
     }
+
+    /// <summary>
+    /// 🔴 20261107작 I-1a — 서버 고객사 숫자 입구(<c>CountsForTenant</c>)가 받는 고객사값 길이 상한.
+    /// 서버는 <c>Trim</c> 뒤 <c>Length &gt; 36</c> 이면 400 이다(G-C-19 가 37 → 400 · 36 → 200 을 잰다) — 같은 값이다.
+    /// </summary>
+    public const int ServerTenantIdMaxLength = 36;
+
+    /// <summary>
+    /// 🔴 20261107작 I-1a — 이 고객사값을 서버에 물으면 400 이 될 길이인가(서버와 같게 <c>Trim</c> 뒤 길이로 잰다).
+    /// true 면 <c>CsTenantCountsService</c> 가 서버를 부르지 않고 기존 「고객사를 찾지 못했습니다」 상태로 둔다.
+    /// 해석기(<c>Resolve</c>)는 이 값을 자르지 않는다 — 길 찾기는 그 주소를 고객사 상세로 연다.
+    /// </summary>
+    public static bool ExceedsServerTenantIdLength(string? tenantId)
+        => tenantId is not null && tenantId.Trim().Length > ServerTenantIdMaxLength;
 
     private static bool Eq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 

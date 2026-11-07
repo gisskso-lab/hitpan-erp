@@ -564,4 +564,92 @@ public sealed class CsStageGateTests : IDisposable
             .Select(a => a.Policy).ToList();
         Assert.DoesNotContain("PlatformAdmin", anonPolicies);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261107작 외부후보 T1 — G-C-21 (추가만 · G-C-15~20 · SeedBarTenantAsync 무수정)
+    //   G-C-17 의 「%」 「_」 무늬는 존재 조회(회사명 1행)에서 found=false 로 끝나 숫자 하위 질의까지 안 간다.
+    //   여기서는 **무늬 글자가 든 고객사값 자체를 시드**해 존재 조회를 지나 숫자 질의(TenantStageCountSql)까지 닿게 한다.
+    //   넷 다 36자 · 넷째 글자만 다르다 → A 의 「_」 무늬와 C 의 「%」 무늬가 각각 넷 모두에 걸린다.
+    //   🔴 시험 안 변이 대조: 제품 상수 글자를 반사로 읽어 「=」 → 「LIKE」 로 바꿔 같은 시드에 직접 돌린다
+    //     → A 10 · C 10 이 나와야 시드가 실제로 무늬에 걸린 것(2 · 1 이면 눈 감은 대조군).
+    //   제품 SQL 글자를 베끼지 않는다(제품 SQL 이 바뀌면 대조도 따라간다) · 제품 코드는 바꾸지 않는다.
+    //   운영 새 행의 고객사값 = GUID 생성 1곳 · 옛 이관 행 값 꼴은 미측정 — 지금은 제품 SQL 이 「=」 라 무관.
+    //   시드 이름·코드·값은 전부 가짜.
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>고객사값을 **받아서** 넣는다(INSERT 칸은 <see cref="SeedBarTenantAsync"/> 와 같다).</summary>
+    private async Task SeedBarTenantWithIdAsync(string tenantId, string code, string name)
+    {
+        await using var db = await _h.OpenAsync();
+        await db.ExecuteAsync(@"
+            INSERT INTO tenants (tenant_id, tenant_code, company_name, license_key_hash, owner_account_id)
+            VALUES (@Id, @Code, @Name, @Hash, @Owner)",
+            new { Id = tenantId, Code = code, Name = name, Hash = Hmac("GATE-CS-BAR-" + code), Owner = $"owner-{code.ToLowerInvariant()}@gate.test" });
+    }
+
+    private static int CountOrdinal(string haystack, string needle)
+    {
+        int n = 0, i = 0;
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
+        return n;
+    }
+
+    // ── G-C-21 ───────────────────────────────────────────────────────
+    [Fact(DisplayName = "G-C-21 🔴 「_」 「%」 가 든 36자 고객사값 — 숫자 질의까지 닿아도 고유값 일치 A2 · C1 (+시험 안 LIKE 변이 대조 A10 · C10)")]
+    public async Task G_C_21_무늬고객사값_숫자질의()
+    {
+        if (!await _h.TrySetUpAsync("G-C-21")) return;
+        var s = Guid.NewGuid().ToString("N");   // 32자
+        var a = "g21_" + s;
+        var b = "g21x" + s;
+        var c = "g21%" + s;
+        var d = "g21q" + s;
+        foreach (var v in new[] { a, b, c, d })
+            Assert.Equal(36, v.Length);   // 서버 상한(36) 안 · 칸 varchar(36) 안
+
+        await SeedBarTenantWithIdAsync(a, "GBARA21", "게이트무늬가짜에이");
+        await SeedBarTenantWithIdAsync(b, "GBARB21", "게이트무늬가짜비");
+        await SeedBarTenantWithIdAsync(c, "GBARC21", "게이트무늬가짜씨");
+        await SeedBarTenantWithIdAsync(d, "GBARD21", "게이트무늬가짜디");
+        await SeedBarTicketsAsync(a, 2, 0, 0, 0);
+        await SeedBarTicketsAsync(b, 3, 0, 0, 0);
+        await SeedBarTicketsAsync(c, 1, 0, 0, 0);
+        await SeedBarTicketsAsync(d, 4, 0, 0, 0);
+        var cs = Cs("cs-bar");
+
+        // 제품 입구 그대로 — 존재 조회를 지나(found=true) 숫자 질의까지 닿는다
+        var ja = BarJson(await cs.CountsForTenant(a, default));
+        Assert.True(ja.GetProperty("found").GetBoolean());
+        Assert.Equal(2, BarNum(ja, "total"));
+        Assert.Equal(2, BarNum(ja, "unread"));
+        var jc = BarJson(await cs.CountsForTenant(c, default));
+        Assert.True(jc.GetProperty("found").GetBoolean());
+        Assert.Equal(1, BarNum(jc, "total"));
+        Assert.Equal(2, await BarListCount(cs, null, a));
+        Assert.Equal(1, await BarListCount(cs, null, c));
+
+        // 🔴 시험 안 변이 대조 — 제품 상수(컨트롤러 SQL 상수)를 반사로 읽는다(프레임워크 내부 아님)
+        var field = typeof(CsAdminController).GetField("TenantStageCountSql",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(field);
+        var original = (string)field!.GetRawConstantValue()!;
+        const string eqText = "tenant_id = @TenantId";
+        const string likeText = "tenant_id LIKE @TenantId";
+        var mutated = original.Replace(eqText, likeText, StringComparison.Ordinal);
+        Assert.NotEqual(original, mutated);                 // 0건 치환 = 눈 감은 대조군
+        Assert.Equal(1, CountOrdinal(original, eqText));    // 치환은 정확히 1곳
+        Assert.Equal(1, CountOrdinal(mutated, likeText));
+
+        await using var db = await _h.OpenAsync();
+        long eqA = Convert.ToInt64((object)(await db.QueryFirstAsync(original, new { TenantId = a })).total);
+        long eqC = Convert.ToInt64((object)(await db.QueryFirstAsync(original, new { TenantId = c })).total);
+        long likeA = Convert.ToInt64((object)(await db.QueryFirstAsync(mutated, new { TenantId = a })).total);
+        long likeC = Convert.ToInt64((object)(await db.QueryFirstAsync(mutated, new { TenantId = c })).total);
+        Console.WriteLine($"[G-C-21] 제품(=) A total={eqA} · C total={eqC} / 변이(LIKE) A total={likeA} · C total={likeC}");
+
+        Assert.Equal(2, eqA);
+        Assert.Equal(1, eqC);
+        Assert.Equal(10, likeA);   // 2 + 3 + 1 + 4 — 「_」 무늬가 넷 모두에 걸렸다
+        Assert.Equal(10, likeC);   // 「%」 무늬가 넷 모두에 걸렸다
+    }
 }

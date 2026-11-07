@@ -68,6 +68,20 @@ public sealed class CsTenantCountsService
         var asked = TenantId;
         var gen = _generation;
         if (asked is null) return;
+
+        // 🔴 20261107작 I-1a — 서버가 400 으로 돌려줄 길이(Trim 뒤 36자 초과)면 **서버를 부르지 않는다.**
+        //   부르면 매 주기 400 · 경고 로그 반복 · 표시줄이 「불러오는 중」 에 머문다.
+        //   기존 「고객사를 찾지 못했습니다」 상태(Loaded=true · Found=false)로 둔다 — 새 표시 0 · 숫자 0 표기 0.
+        //   상한 값과 판정은 해석기 파일 한 곳(CsBarScope.ExceedsServerTenantIdLength · 서버와 같은 36).
+        if (CsBarScope.ExceedsServerTenantIdLength(asked))
+        {
+            Found = false;
+            CompanyName = null;
+            Loaded = true;
+            Changed?.Invoke();
+            return;
+        }
+
         try
         {
             var http = _factory.CreateClient("backoffice-authed");
