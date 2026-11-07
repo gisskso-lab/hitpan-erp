@@ -9,24 +9,48 @@
       ② 지금 값이 목록 밖이면(예전부터 「처리중」으로 앉은 수기건) **그대로 보여주고 고르지 못하게** 한다.
          지우거나 다른 값으로 바꿔 적으면 사실이 사라진다(#1).
       ③ 메뉴를 누른 손이 **행 클릭(상세 열기)으로 새지 않는다** — `@onclick:stopPropagation`
+      ④ 목록은 꼬리표 옆에 펼쳐 꼬리표를 덮지 않는다(20261107작 S4)
 *@
 
 <div @onclick:stopPropagation="true">
-    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.BottomLeft">
+    @* ⬛ 옛 값(20261013작2 ~ 20261107작 갈래 A) — AnchorOrigin="Origin.BottomLeft"
+         아래로 펼쳐, 화면 아래쪽 줄에서 연 목록이 위로 뒤집힌 뒤 화면 위로 당겨져 꼬리표를 덮었다(대표 실물 S4 반려 · 11/7).
+       🔴 20261107작 S4 — 목록 왼쪽 위 = 꼬리표 오른쪽 위(TopRight / TopLeft). 9.3 의 위·아래 뒤집기 · 세로 당김은
+         꼬리표와 가로로 떨어진 자리에서만 일어난다 · 오른쪽이 모자라면 꼬리표 왼쪽으로 뒤집힌다(약속 ④). *@
+    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft">
         <ActivatorContent>
             @* ⬛ 옛 줄(20261013작2) — 열기 연결이 없어 안 펼쳐졌다(별건 P1 · 11/7)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
             *@
-            @* 🔴 20261107작 갈래 A(PM 결정 3V-A1) — 같은 span 에 열기 연결 하나만 단다(ERP #691 알림 종 고침과 같은 꼴).
+            @* ⬛ 옛 줄(20261107작 갈래 A) — 목록이 꼬리표를 덮으면 못 닫음 · 탭 정지 0
+                 바로 아래 주석의 「키보드는 그 감싼 div 가 맡는다」 는 전제가 틀렸다 — 9.3 의 감싼 div 는
+                 display:contents 라 초점을 못 받아 탭이 이 칸을 건너뛴다([1-V] 20261107 D1). 주석 · span 둘 다 지우지 않고 남긴다. *@
+            @* ⬛ (옛 주석) 20261107작 갈래 A(PM 결정 3V-A1) — 같은 span 에 열기 연결 하나만 단다(ERP #691 알림 종 고침과 같은 꼴).
                  · 단추로 감싸지 않는다: 9.3 이 이 칸을 키 손잡이를 가진 div(tabindex=0 · role=button)로 이미 감싼다
                    → 단추를 넣으면 단추 안 단추 · 탭 정지 2 · 키 사건 + 클릭 사건 두 번 토글.
                  · 키보드(탭 · 엔터 · 스페이스)는 그 감싼 div 가 맡는다 — 여기 키 손잡이 추가 0.
                  · 전파 막음은 이 span 과 바깥 div 두 겹 — 행 클릭(상세 열기)으로 새지 않는다(약속 ③). *@
+            @* ⬛ 옛 줄(20261107작 갈래 A)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle"
                   @onclick="@context.ToggleAsync"
                   @onclick:stopPropagation="true">
                 @CsVocab.StatusLabel(Status)
                 <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
+            </span>
+            *@
+            @* 🔴 20261107작 S4(PM 결정 D3 · V3) — 9.3 원문이 ActivatorContent 예로 든 꼴 그대로: MudButton OnClick=context.ToggleAsync.
+                 · 탭 정지 = 진짜 <button> 하나(MudButton 기본 type="button") · 꼬리표 모양은 안쪽 span 이 그대로 맡는다(CSS 는 단추 꾸밈만 지움).
+                 · 엔터는 감싼 div 키 손잡이가 열고, 곧이은 단추 click 은 9.3 이 50ms 안이면 무시한다(이중 토글 0).
+                 · 🔴 안쪽 꼬리표 span 에 @onclick · 전파 막음을 달지 않는다 — 단추 OnClick 까지 못 가 열기 0 이 된다.
+                 · 전파 막음은 바깥 span(MudButton 은 컴포넌트라 직접 못 단다)과 바깥 div 두 겹(약속 ③). *@
+            <span class="bo-status-activator" @onclick:stopPropagation="true">
+                <MudButton Class="bo-status-btn" Ripple="false" title="@PickTitle"
+                           OnClick="@context.ToggleAsync">
+                    <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer">
+                        @CsVocab.StatusLabel(Status)
+                        <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
+                    </span>
+                </MudButton>
             </span>
         </ActivatorContent>
         <ChildContent>

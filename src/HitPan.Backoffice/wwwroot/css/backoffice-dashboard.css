@@ -369,3 +369,11 @@
 .bo-status-chip--expired { background: #FEE2E2; color: #B91C1C; }
 .bo-status-chip--terminated { background: #F3F4F6; color: #4B5563; }
 .bo-status-chip--neutral { background: #F3F4F6; color: #4B5563; }
+
+/* 20261107작 S4 — 상태 칸 단추: 겉모습은 안쪽 .bo-status-chip 이 그대로 맡고 단추는 자리·초점·누름만 */
+.mud-button-root.bo-status-btn { padding: 0; min-width: 0; border-radius: 999px; background-color: transparent;
+    color: inherit; font: inherit; line-height: inherit; letter-spacing: normal; text-transform: none; }
+.mud-button-root.bo-status-btn:hover,
+.mud-button-root.bo-status-btn:active,
+.mud-button-root.bo-status-btn:focus-visible { background-color: transparent; }
+.mud-button-root.bo-status-btn:focus-visible { outline: 2px solid #1D4ED8; outline-offset: 2px; }
