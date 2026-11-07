@@ -117,6 +117,7 @@ public class Program
         // CS 4단계 숫자 — 사이드바 빨간 숫자와 화면 아래 띠가 **같은 값**을 쓰도록 한 벌로 모은다
         //   (각자 세면 두 숫자가 어긋나고, 그러면 사람이 화면을 안 믿는다 · 사장님 지시 2026-10-08)
         builder.Services.AddScoped<HitPan.Backoffice.Services.CsCountsService>();
+        builder.Services.AddScoped<HitPan.Backoffice.Services.CsTenantCountsService>();   // 20261107작 갈래 B — 고객사 한 벌(전체 한 벌 무접촉)
 
         var app = builder.Build();
 
