@@ -12,7 +12,13 @@
       ④ 목록은 꼬리표 옆에 펼쳐 꼬리표를 덮지 않는다(20261107작 S4)
 *@
 
+@* ⬛ 옛 줄(20261013작2 ~ 20261107작 V2) — 바깥 칸 여는 줄. 마우스로 연 목록에 Esc 가 닿지 않았다([4] 1회차 M12 무반응).
 <div @onclick:stopPropagation="true">
+*@
+@* 🔴 20261107작 S4 E1-a — 9.3 은 Esc 를 목록 쪽 키 가로채기로만 받는다(MudMenu.razor.cs L1071~1082 · L990~997).
+     마우스로 열고 초점이 칸 안 단추에 남으면 Esc 가 안 닿는다 → 바깥 칸에서 Esc 만 받아 닫는다(아래 @code OnCellKeyDownAsync).
+     · preventDefault · stopPropagation 0 — 칸 모든 키에 걸려 엔터·스페이스 열기 · Tab 이동이 죽는다(작업지시서 §12-3 ②). *@
+<div @onclick:stopPropagation="true" @onkeydown="OnCellKeyDownAsync">
     @* ⬛ 옛 값(20261013작2 ~ 20261107작 갈래 A) — AnchorOrigin="Origin.BottomLeft"
          아래로 펼쳐, 화면 아래쪽 줄에서 연 목록이 위로 뒤집힌 뒤 화면 위로 당겨져 꼬리표를 덮었다(대표 실물 S4 반려 · 11/7).
        🔴 20261107작 S4 — 목록 왼쪽 위 = 꼬리표 오른쪽 위(TopRight / TopLeft). 9.3 의 위·아래 뒤집기 · 세로 당김은
@@ -26,7 +32,9 @@
          · 단추 클래스는 9.3 이 고정한다 → 색은 바깥 div(Class = MudMenu 맨 바깥 div · L6)에 상태 클래스를 주고 CSS 가 안쪽 단추를 칠한다.
          · title 은 남는 속성 → 바깥 div(L5 @attributes) · 단추 위에 올리면 그대로 보인다.
          · 행 클릭으로 새지 않음 = 9.3 단추 자체 click 전파 끊음(<button> 이면 기본) + 바깥 div @onclick:stopPropagation(약속 ③). *@
+    @* 🔴 20261107작 S4 E1-a — @ref="_menu" 한 줄만 끼웠다(기존 속성 줄 글자 무변) · Esc 로 닫을 때 CloseMenuAsync(L495) 를 부르는 참조. *@
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
+             @ref="_menu"
              Class="@($"bo-status-menu {CsVocab.StatusChipClass(Status)}")"
              Label="@CsVocab.StatusLabel(Status)"
              EndIcon="@Icons.Material.Filled.ArrowDropDown"
@@ -112,4 +120,16 @@
         CsVocab.StatusesFor(Channel).Count <= 2
             ? "손으로 적은 A/S — 접수·완료만 기록합니다"
             : "눌러서 상태를 바꿉니다";
+
+    // 🔴 20261107작 S4 E1-a — 목록 닫기용 참조
+    private MudMenu? _menu;
+
+    // 🔴 20261107작 S4 E1-a — Esc 만 받아 닫는다. Esc 외 키(엔터·스페이스·화살표·Tab)는 손대지 않는다(9.3 그대로).
+    //    · _menu.Open 으로 거르지 않는다 — 9.3 은 private _openState(L22 · L525 · L586)만 바꿔 Open 은 늘 false(§12-3 ④).
+    //    · 닫힌 때 불러도 L513 해제를 건너뛰고 닫힌 직후 값과 같다(L508~510 · L525).
+    private async Task OnCellKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || _menu is null) return;
+        await _menu.CloseMenuAsync();
+    }
 }
