@@ -1,0 +1,149 @@
+{
+ "closedPortUsed": 57889,
+ "rows": [
+  {
+   "proxy": "old",
+   "delay": 0,
+   "a": {
+    "pass": false,
+    "detail": "0B close 16ms"
+   },
+   "b": {
+    "pass": false,
+    "detail": "0B sha:diff close 7ms"
+   },
+   "c": {
+    "pass": false,
+    "detail": "serverGotReq:0B resp:0/262209B close 9ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 2182ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 14ms (limit 1000ms) 0B"
+   }
+  },
+  {
+   "proxy": "old",
+   "delay": 150,
+   "a": {
+    "pass": false,
+    "detail": "0B close 18ms"
+   },
+   "b": {
+    "pass": false,
+    "detail": "0B sha:diff close 18ms"
+   },
+   "c": {
+    "pass": false,
+    "detail": "serverGotReq:noneB resp:0/262209B close 4ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 31868ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 7ms (limit 1150ms) 0B"
+   }
+  },
+  {
+   "proxy": "old",
+   "delay": 300,
+   "a": {
+    "pass": false,
+    "detail": "0B close 11ms"
+   },
+   "b": {
+    "pass": false,
+    "detail": "0B sha:diff close 7ms"
+   },
+   "c": {
+    "pass": false,
+    "detail": "serverGotReq:noneB resp:0/262209B close 3ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 61754ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 9ms (limit 1300ms) 0B"
+   }
+  },
+  {
+   "proxy": "new",
+   "delay": 0,
+   "a": {
+    "pass": true,
+    "detail": "17B close 15ms"
+   },
+   "b": {
+    "pass": true,
+    "detail": "1048576B sha:match close 14ms"
+   },
+   "c": {
+    "pass": true,
+    "detail": "serverGotReq:1000B resp:262209/262209B close 9ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 2383ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 13ms (limit 1000ms) 0B"
+   }
+  },
+  {
+   "proxy": "new",
+   "delay": 150,
+   "a": {
+    "pass": true,
+    "detail": "17B close 170ms"
+   },
+   "b": {
+    "pass": true,
+    "detail": "1048576B sha:match close 166ms"
+   },
+   "c": {
+    "pass": true,
+    "detail": "serverGotReq:1000B resp:262209/262209B close 329ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 32196ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 168ms (limit 1150ms) 0B"
+   }
+  },
+  {
+   "proxy": "new",
+   "delay": 300,
+   "a": {
+    "pass": true,
+    "detail": "17B close 314ms"
+   },
+   "b": {
+    "pass": true,
+    "detail": "1048576B sha:match close 333ms"
+   },
+   "c": {
+    "pass": true,
+    "detail": "serverGotReq:1000B resp:262209/262209B close 611ms"
+   },
+   "e": {
+    "pass": true,
+    "detail": "100/100 inOrder bad:0 close 62572ms"
+   },
+   "d": {
+    "pass": true,
+    "detail": "close 324ms (limit 1300ms) 0B"
+   }
+  }
+ ]
+}
