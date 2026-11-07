@@ -105,9 +105,14 @@ public class BackofficeAuthController : Controller
     {
         // 봉합 2026-07-07: signin 과 동일 — 만료 토큰 400 대신 우아하게 로그인으로.
         try { await _antiforgery.ValidateRequestAsync(HttpContext); }
-        catch (AntiforgeryValidationException)
+        // ⬛ 옛 줄(20261107작): catch (AntiforgeryValidationException) { return LocalRedirect("/backoffice/login"); }
+        //    — 실패해도 로그인 화면이 떠 「나갔다」 로 믿는다(쿠키는 남음 · [1-V] #5 조용한 실패)
+        // D1-c(PM 결재 11/7): 실패를 알린다 · 쿠키는 지우지 않는다(CSRF 방어 그대로) · 안내 글자는 고정(입력 반영 0 · 내부 정보 0)
+        catch (AntiforgeryValidationException ex)
         {
-            return LocalRedirect("/backoffice/login");
+            _logger.LogWarning(ex, "[BackofficeAuth] signout 위조방지 만료/무효 → 쿠키 유지 · 로그아웃 미완료 안내");
+            return Redirect("/backoffice/login?error=" +
+                Uri.EscapeDataString("로그아웃이 끝나지 않았습니다. 화면을 새로 고친 뒤 다시 눌러 주세요."));
         }
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return LocalRedirect("/backoffice/login");

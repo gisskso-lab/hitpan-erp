@@ -3,6 +3,12 @@
 <div class="bo-shell">
     <aside class="bo-sidebar-aside">
         <BackofficeSidebar />
+        @* 20261107작 갈래 B(대표 결재 11/7 D4 「같이 더한다」): 대리점 화면엔 상단 바가 없어 로그아웃 단추가 없었다.
+           본사와 같은 방식 — App.razor 정적 영역 숨은 폼(bo-signout-form)을 form= 으로 제출 · @onclick 없음 · 자리 = 사이드바 아래 끝 *@
+        <button type="submit" form="bo-signout-form" class="bo2-profile-menu-item">
+            <span class="material-icons">logout</span>
+            <span>로그아웃</span>
+        </button>
     </aside>
     <div class="bo-main">
         <main class="bo-content mud-pa-4">

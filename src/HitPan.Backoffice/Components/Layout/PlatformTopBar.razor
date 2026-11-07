@@ -57,7 +57,9 @@
                         <div class="bo2-profile-name">@_displayName</div>
                         <div class="bo2-profile-role">@_displayRole</div>
                     </div>
-                    <button class="bo2-profile-menu-item" @onclick="LogoutAsync">
+                    @* ⬛ 옛 줄(20261107작): <button class="bo2-profile-menu-item" @onclick="LogoutAsync"> — 이동만, 쿠키 남음
+                       새 줄: App.razor 정적 영역의 숨은 폼(bo-signout-form)을 form= 으로 제출 · @onclick 을 두지 않는다(회로 처리와 제출 경합) *@
+                    <button type="submit" form="bo-signout-form" class="bo2-profile-menu-item">
                         <span class="material-icons">logout</span>
                         <span>로그아웃</span>
                     </button>
@@ -119,9 +121,10 @@
         }
     }
 
-    private void LogoutAsync()
-    {
-        _profileOpen = false;
-        Nav.NavigateTo("/backoffice/login", forceLoad: true);
-    }
+    // ⬛ 옛 길(20261107작): 이동만 하고 쿠키를 안 지움 — 불리는 곳 0 (단추가 숨은 폼 제출로 바뀜) · #1 보존
+    // private void LogoutAsync()
+    // {
+    //     _profileOpen = false;
+    //     Nav.NavigateTo("/backoffice/login", forceLoad: true);
+    // }
 }
