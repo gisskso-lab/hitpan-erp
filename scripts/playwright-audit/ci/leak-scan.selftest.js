@@ -2430,6 +2430,18 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const { ret, kb } = await run('i7', { calls: 0, collect: clean, shot: writePng });
         out.c5zero = moved(ret, kb, 'i7');
       }
+      // [4] P2-1(11/7 푸시 전 반증) — 대기 수가 남아 정상 런이 거짓 빨강이 되는 변이 2(예외 길 안 내림 · 거른 응답까지 올림)를 무는 칸
+      { // C5 대조군 ② — 읽기 실패 응답 → finally 가 내림 → 다음 깨끗한 촬영 옮김
+        handlers[0]({ url: () => 'http://127.0.0.1:18080/api/auth/refresh', json: () => Promise.reject(new Error('시험 읽기 실패')) });
+        await settle();
+        const { ret, kb } = await run('i8', { calls: 0, collect: clean, shot: writePng });
+        out.c5fail = moved(ret, kb, 'i8') && rg(kb) === 0;
+      }
+      { // C5 대조군 ③ — 토큰 길 밖 주소 응답(끝나지 않는 읽기) → 셈 0 → 옮김
+        handlers[0]({ url: () => 'http://127.0.0.1:18080/api/notifications', json: () => new Promise(() => {}) });
+        const { ret, kb } = await run('i9', { calls: 0, collect: clean, shot: writePng });
+        out.c5skip = moved(ret, kb, 'i9') && rg(kb) === 0;
+      }
       const base = () => ({ verified: 2, shots: 2, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, winDiff: 0, moveFail: 0, planted: false });
       const a = K.n4Verdict({ ...base(), regGrow: 1 }, 2);
       const b = K.n4Verdict(base(), 2);
@@ -2443,7 +2455,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       if (K && typeof K.guardedShot === 'function' && typeof K.watchTokens === 'function') {
         const x = kChild('k25i', kRegWorld, { K25I_VALUE: `SELFTEST_K25I_${hex()}${hex()}` });
         const v = x.v || {};
-        const names = ['c0', 'c1', 'c2a', 'c2b', 'c3', 'noFalse', 'c5shot', 'c5pre', 'c5zero'];
+        // ⬛ [낡은 줄 · P2-1] const names = ['c0', 'c1', 'c2a', 'c2b', 'c3', 'noFalse', 'c5shot', 'c5pre', 'c5zero'];
+        const names = ['c0', 'c1', 'c2a', 'c2b', 'c3', 'noFalse', 'c5shot', 'c5pre', 'c5zero', 'c5fail', 'c5skip'];
         ok = !!x.v && names.every((n) => v[n] === true) && v.verdict === 'false/device true/null';
         why = x.v ? `${names.map((n) => `${n} ${v[n]}`).join(' · ')} · 판정 ${v.verdict}` : `rc=${x.code} · 결과 줄 없음 ${x.err}`;
       }
