@@ -1,0 +1,46 @@
+@* 20261107작 F6 2회차(작업지시서 §15 · §10 D1 분기) — 화면 이동 때 h1 초점(화면읽기 프로그램에 새 화면 알림)은 그대로 두고,
+   전체 문서 로드 직후 회로 첫 렌더에서만 초점을 옮기지 않는다.
+   이유: 미리 그리기를 끈 뒤 첫 렌더 직후 0~150ms 안에 FocusOnNavigate 가 초점을 h1 으로 끌어가
+   먼저 누른 입력칸의 글자가 사라짐([4] 1회차 H7 6/90). 전체 문서 로드는 브라우저가 이미 새 문서를 알린다.
+   방식: FocusOnNavigate 와 같은 기준(페이지 형식이 바뀔 때)을 쓴다 — 첫 렌더의 페이지 형식을 기억하고,
+   다른 페이지 형식으로 한 번이라도 이동한 뒤부터 FocusOnNavigate 를 그린다. 그 뒤 동작은 FocusOnNavigate 원본 그대로.
+   이벤트 구독 0(Router 가 매 이동마다 새 RouteData 로 이 구성요소를 다시 그린다) → 해제할 것 없음. *@
+@if (_armed)
+{
+    <FocusOnNavigate RouteData="RouteData" Selector="@Selector" />
+}
+
+@code {
+    /// <summary>둘러싼 Router 의 RouteData — FocusOnNavigate 에 그대로 넘긴다.</summary>
+    [Parameter, EditorRequired] public RouteData? RouteData { get; set; }
+
+    /// <summary>초점을 옮길 요소의 CSS 선택자 — FocusOnNavigate 에 그대로 넘긴다.</summary>
+    [Parameter, EditorRequired] public string? Selector { get; set; }
+
+    private bool _seenFirstRender;
+    private Type? _firstPageType;
+    private bool _armed;
+
+    protected override void OnParametersSet()
+    {
+        if (RouteData is null)
+        {
+            throw new InvalidOperationException($"{nameof(FocusOnNavigateAfterFirst)} 에는 {nameof(RouteData)} 값이 있어야 합니다.");
+        }
+
+        if (!_seenFirstRender)
+        {
+            // 회로 첫 렌더(전체 문서 로드 직후) — 초점을 옮기지 않는다.
+            _seenFirstRender = true;
+            _firstPageType = RouteData.PageType;
+            return;
+        }
+
+        if (!_armed && RouteData.PageType != _firstPageType)
+        {
+            // 회로 안 첫 화면 이동 — 여기서부터 FocusOnNavigate 를 그린다.
+            // 새로 만들어진 FocusOnNavigate 는 첫 OnParametersSet 에서 페이지 형식이 바뀐 것으로 보고 렌더 뒤 초점을 옮긴다.
+            _armed = true;
+        }
+    }
+}

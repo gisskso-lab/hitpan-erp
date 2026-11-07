@@ -6,7 +6,8 @@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        @* ⬛ 옛 줄(20261107작 F6 2회차) — 회로 첫 렌더 직후 초점을 h1 으로 끌어가 먼저 누른 입력칸 글자 유실: <FocusOnNavigate RouteData="routeData" Selector="h1" /> *@
+        <FocusOnNavigateAfterFirst RouteData="routeData" Selector="h1" />
     </Found>
     <NotFound>
         <LayoutView Layout="typeof(Layout.MainLayout)">

@@ -18,7 +18,9 @@ public class Program
             .AddInteractiveServerComponents(o =>
             {
                 // 사고 진단용 — 회선 종료 시 정확한 예외 메시지 노출 (사장님 진단 요청 2026-06-16)
-                o.DetailedErrors = true;
+                // 20261107작 F6 2회차 — 미리 그리기 끔 뒤 운영 브라우저 콘솔에 예외 메시지·스택이 그대로 보임([4] 1회차 C1) → 대표 11/7 「운영에서는 끔」 · 운영 진단은 서버 로그로
+                // ⬛ 옛 줄(20261107작 F6 2회차): o.DetailedErrors = true;
+                o.DetailedErrors = builder.Environment.IsDevelopment();
             });
 
         // 폼 POST 로그인용 컨트롤러 (Views 포함 — AntiForgery 필터 등록 위해)
