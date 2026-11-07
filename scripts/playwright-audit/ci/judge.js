@@ -26,6 +26,18 @@
 //      G 기대 키 자리(EXPECT_G)는 비워 둔다 — K 본문이 있는데 비어 있으면 빨강(G 키는 K 연결 PR 이 채운다 · D3).
 //   ⑩ 좋은 줄 · 시드 줄 · 외부 호스트 줄도 소독해서 찍는다(N3 경로 3·5·6).
 //   판정 순서 = [시험] 실패 → 줄 꼴 이상 → 이름 꼴 이상 · 키 틀 → 돈 시험 0 → K·G 0 → [장치] 실패.
+//
+// 🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §4-2 · PM 결재 A2 · C2) — G 기대 키 = 필수 목록
+//   ⑪ G 기대 키 16(G 14 · N4 2)을 채우고 필수 집합에 넣는다 — K 본문 수와 무관. 빠지면 누락 빨강.
+//      🔴 2차(A7) — G4 토스트 길 2 추가 → 기대 키 18(G 16 · N4 2).
+//   ⑭ 2차(PM 결정 4V-1 ④) — N4 줄 거짓 = 끝 줄 「누출 의심 · 재실행 금지」(빨강 · [장치] 실패보다 먼저 분류 · kind 는 DEVICE 그대로).
+//      🔴 3차(PM 결정 3V-2 · 4V-2 P2-b) — 거짓 이유를 둘로: 「누출 신호」(기본 · 머리 글자 없음 포함) / 「대조 못 함(장치)」.
+//      끝 줄도 둘(누출 신호가 먼저) · 둘 다 빨강 · 둘 다 같은 커밋 재실행 문구 0.
+//   ⑫ G 키 줄의 통과는 TEST 줄로만(N4 줄만 DEVICE) — DEVICE 통과 줄로 채우면 「G 통과 꼴 이상」 키 틀 빨강.
+//   ⑬ K 본문 0 인데 G 기대 키가 있다 = 키 틀 빨강(이유 줄 「K 본문 0 · G 기대 n」).
+//   중복(상한 1) · 목록 밖 비H 키(모르는 키) · G 빈 자리 검사는 그대로. 빨강 순서 그대로(G 줄은 키 틀 안).
+//   (⑪ ⑫ ⑬ = 작업지시서 §4-2 ① ② ⑤ · 아래 줄 주석의 「K 연결 ①②⑤」 와 같은 것)
+//   되돌릴 때: K 본문만 지우면 ⑬ 때문에 대상 PR 이 전부 빨강 — G 기대 키도 같이 비운다(작업지시서 §11).
 'use strict';
 
 const fs = require('fs');
@@ -94,8 +106,38 @@ const EXPECT_H = {
   //   다른 id 의 다중 줄 · 조건 줄 전수 = 로컬 세부 표(공개 문서엔 범주만).
   twoRowsFirstBrowser: ['H-BRIEF'],
 };
-// G 기대 키 자리 — 비워 둔다(K 연결 PR 이 rowKey 꼴로 채운다 · D3). K 본문이 있는데 비어 있으면 빨강.
-const EXPECT_G = [];
+// ⬛ [낡은 줄 · F-PR] G 기대 키 자리 — 비워 둔다(K 연결 PR 이 rowKey 꼴로 채운다 · D3). K 본문이 있는데 비어 있으면 빨강.
+// ⬛ [낡은 줄 · F-PR] const EXPECT_G = [];
+// 🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §4-2 · PM C2) — G 기대 키 16 = G 14 + N4 2.
+//   키 = 범위|id|G|길|브라우저(rowKey 그대로 · 범위 = K). G 칸 N4 줄만 DEVICE · 나머지 G 줄 통과는 TEST 만.
+const EXPECT_G_ROWS = [
+  ['K35-G1', 'G1', 'bell', 'chromium'], ['K35-G1', 'G1', 'bell', 'webkit'],
+  ['K35-G1', 'G1', 'toast', 'chromium'], ['K35-G1', 'G1', 'toast', 'webkit'],
+  ['K35-G2', 'G2', 'bell', 'chromium'], ['K35-G2', 'G2', 'bell', 'webkit'],
+  ['K35-G2', 'G2', 'toast', 'chromium'], ['K35-G2', 'G2', 'toast', 'webkit'],
+  ['K35-G3', 'G3', 'bell', 'chromium'],
+  ['K35-G3-SELF', 'G3', 'self', 'chromium'],
+  ['K35-G4-APPR', 'G4', 'bell', 'chromium'],
+  ['K35-G4-CHATAPPR', 'G4', 'bell', 'chromium'],
+  // 🔴 K 연결 2차(PM 결재 A7 · PM Q3) — G4 토스트 길이 실제 흐름으로 선다(코드 읽기: 결재 상신 → 알림 배관 → 토스트 OnClick → 본 창 이동)
+  //   → 키 2 추가(16 → 18 = G 16 · N4 2). 선택 키 0 — 빠지면 누락 빨강. 자체시험 K-C22k 고정 수도 같은 커밋에서 18.
+  ['K35-G4-APPR', 'G4', 'toast', 'chromium'],
+  ['K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'],
+  ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
+  ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
+];
+const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
+const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
+  .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
+// 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
+//   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
+//   둘 다 업로드 닫힘 · 둘 다 같은 커밋 재실행 문구 0 · 섞이면 누출 신호 끝 줄이 먼저.
+const N4_WHY = Object.freeze({ leak: 'N4 이유=누출 신호', device: 'N4 이유=대조 못 함(장치)' });
+function n4Why(row) {
+  const got = row && typeof row.got === 'string' ? row.got : '';
+  return got.startsWith(N4_WHY.device) ? 'device' : 'leak';
+}
 // 🔴 F-PR [3-V] 03 — 결과표에서 온 글자를 찍기 전 제어 글자(줄바꿈 · 색 제어 등)를 \uXXXX 글자로 가린다
 //   (한 줄이 두 줄로 갈라져 러너 명령 줄처럼 읽히는 길 0). 소독 **뒤에** 가린다 — 값 안 제어 글자로 소독 대조가 깨지지 않게.
 function showCtl(s) {
@@ -114,6 +156,8 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
   for (const id of EXPECT_H.global) required.add(hKey(id));
   for (const b of EXPECT_BROWSERS) for (const id of EXPECT_H.perBrowser) required.add(hKey(id, b));
   for (const id of EXPECT_H.firstBrowser) required.add(hKey(id, EXPECT_BROWSERS[0]));
+  // 🔴 K 연결 ① — 필수 집합 = H 필수 ∪ G 기대 키 전부(K 본문 수와 무관 · §4-2 A2)
+  for (const k of EXPECT_G) required.add(k);
   const branchKeys = new Set();
   for (const b of EXPECT_BROWSERS) for (const grp of EXPECT_H.branchPerBrowser) for (const id of grp) branchKeys.add(hKey(id, b));
   const gKeys = new Set(EXPECT_G);
@@ -133,8 +177,22 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
     const same = EXPECT_H.branchPerBrowser.some((grp) => [...grp].sort().join(',') === have);
     if (!same) branch.push(b);
   }
-  const gEmpty = kFiles > 0 && EXPECT_G.length === 0;
-  return { missing, dup, unknown, branch, gEmpty };
+  const gEmpty = kFiles > 0 && EXPECT_G.length === 0; // ⑥ 그대로(G 자리를 채운 뒤에는 닿지 않음 · 기록)
+  // 🔴 K 연결 ② — G 기대 키 줄의 통과는 TEST 줄로만(N4 줄만 DEVICE). DEVICE 통과 줄로 G 키를 채우면 키 틀 빨강.
+  //   G 키의 DEVICE 실패 줄(단언 전 실패)은 꼴 이상이 아니다 — 아래 [장치] 실패 규칙이 빨강으로 잡는다.
+  //   ③ 중복 = 위 dup(상한 1 · G 키는 두 줄 허용 목록에 없음) · ④ 목록 밖 비H 키 = 위 unknown 그대로.
+  const gForm = [];
+  for (const x of rows) {
+    const k = rowKey(x);
+    if (x.scope === 'H' || !gKeys.has(k)) continue;
+    const okForm = EXPECT_G_DEVICE.has(k) ? x.kind === 'DEVICE' : (x.kind === 'TEST' || x.pass !== true);
+    if (!okForm && !gForm.includes(k)) gForm.push(k);
+  }
+  gForm.sort();
+  // 🔴 K 연결 ⑤ — K 본문 0 인데 G 기대 키가 정의됨 = 키 틀 빨강(이유 줄 「K 본문 0 · G 기대 n」)
+  const kZero = kFiles === 0 && EXPECT_G.length > 0;
+  // ⬛ [낡은 줄 · F-PR] return { missing, dup, unknown, branch, gEmpty };
+  return { missing, dup, unknown, branch, gEmpty, gForm, kZero };
 }
 
 function isGTest(x) {
@@ -184,7 +242,13 @@ function main() {
       console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${showCtl(L.sanitize(x.got, 1200))}`);
       continue;
     }
-    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+    // ⬛ [낡은 줄 · F-PR] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
+    // 🔴 PM 결정 4V-1 ④ — N4 거짓 줄은 「누출 의심」 표지(재실행 대상 아님 · kind 는 DEVICE 그대로)
+    const n4Bad = x.pass !== true && x.kind === 'DEVICE' && x.scope !== 'H' && EXPECT_G_DEVICE.has(rowKey(x));
+    // ⬛ [낡은 줄 · 4V-1] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? '🔴 FAIL [장치 · 누출 의심]' : '⚫ FAIL [장치]'));
+    // 🔴 3차(3V-2 · 4V-2 P2-b) — N4 거짓 줄 표지 둘(누출 신호 / 대조 못 함)
+    const n4Mark = n4Bad && n4Why(x) === 'device' ? '🔴 FAIL [장치 · 대조 못 함]' : '🔴 FAIL [장치 · 누출 의심]';
+    const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? n4Mark : '⚫ FAIL [장치]'));
     // ⬛ [낡은 줄 · 1~10차] console.log(`${mark} ${x.scope || '-'} ${x.id}${x.g ? ` ${x.g}` : ''}${x.path ? ` ${x.path}` : ''}${x.browser ? ` (${x.browser})` : ''}`);
     console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`);
   }
@@ -203,7 +267,9 @@ function main() {
   console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length} · 🟡 관찰 ${obs.length}(빨강 아님)`);
   // 🔴 F-PR ⑧⑨ — 이름 · 키 틀 한 줄(키 글자는 빨강 줄에서 소독 뒤)
   console.log(`K 본문 이름: 실행 ${kFiles.length} · 이상 ${kScan.odd.length}`);
-  console.log(`키 틀: 누락 ${keys.missing.length} · 중복 ${keys.dup.length} · 모르는 ${keys.unknown.length} · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''}`);
+  // ⬛ [낡은 줄 · F-PR] console.log(`키 틀: 누락 … · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''}`);
+  // 🔴 K 연결 — 끝에 G 통과 꼴 수를 더한다(앞 칸 꼴 그대로)
+  console.log(`키 틀: 누락 ${keys.missing.length} · 중복 ${keys.dup.length} · 모르는 ${keys.unknown.length} · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''} · G 통과 꼴 ${keys.gForm.length}`);
   if (r && r.external_blocked > 0) {
     // ⬛ [낡은 줄 · 1~10차] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${(r.external_hosts || []).join(', ')}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
     // ⬛ [낡은 줄 · F-PR 첫 꼴] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${L.sanitize((r.external_hosts || []).join(', '), 600)}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
@@ -233,13 +299,16 @@ function main() {
     process.exit(1);
   }
   // 🔴 F-PR ⑨ — H 기대 키 틀
-  if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length > 0 || keys.gEmpty) {
+  // ⬛ [낡은 줄 · F-PR] if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length > 0 || keys.gEmpty) {
+  if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length + keys.gForm.length > 0 || keys.gEmpty || keys.kZero) {
     const why = [];
     if (keys.missing.length) why.push(`누락 [${showList(keys.missing)}]`);
     if (keys.dup.length) why.push(`중복 [${showList(keys.dup)}]`);
     if (keys.unknown.length) why.push(`모르는 [${showList(keys.unknown)}]`);
     if (keys.branch.length) why.push(`갈래 어긋난 브라우저 [${showList(keys.branch)}]`);
     if (keys.gEmpty) why.push(`K 본문 ${kFiles.length}개가 있는데 G 자리 비었음(G 기대 키 = K 연결 PR 몫)`);
+    if (keys.gForm.length) why.push(`G 통과 꼴 이상(G 줄 통과는 TEST · N4 줄은 DEVICE) [${showList(keys.gForm)}]`); // K 연결 ②
+    if (keys.kZero) why.push(`K 본문 0 · G 기대 ${EXPECT_G.length}`); // K 연결 ⑤
     console.log(`⚫ FAIL [장치] 키 틀 — ${why.join(' · ')}`);
     process.exit(1);
   }
@@ -249,6 +318,24 @@ function main() {
   }
   if (kFiles.length > 0 && gTests.length === 0) {
     console.log(`🔴 FAIL 돈 시험 0건 = 빨강 — K 본문 ${kFiles.length}개가 있는데 G 시험 0건(H 자체 점검은 안 센다 · §4-3 ⓔ)`);
+    process.exit(1);
+  }
+  // 🔴 PM 결정 4V-1 ④(11/6 · [4] 1차 P2-4) — N4 줄(DEVICE 그대로)이 거짓이면 [장치] 재실행 꼴이 아니라 누출 의심 끝 줄.
+  //   [장치] 실패보다 먼저 분류한다(다른 장치 실패와 섞여도 끝 줄이 「재실행 1회」 로 읽히지 않게).
+  const failN4 = failD.filter((x) => EXPECT_G_DEVICE.has(rowKey(x)));
+  // ⬛ [낡은 줄 · 4V-1] if (failN4.length > 0) {
+  // ⬛ [낡은 줄 · 4V-1]   console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄 — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
+  // ⬛ [낡은 줄 · 4V-1]   process.exit(1);
+  // ⬛ [낡은 줄 · 4V-1] }
+  // 🔴 3차(3V-2 · 4V-2 P2-b) — 끝 줄 둘. 누출 신호가 하나라도 있으면 그 끝 줄이 먼저 · 모두 「대조 못 함」 이면 장치 이유 끝 줄.
+  //   둘 다 빨강 · 업로드 닫힘 · 같은 커밋 재실행 문구 0(측정 런 재실행 금지 그대로).
+  const n4Leak = failN4.filter((x) => n4Why(x) === 'leak');
+  if (n4Leak.length > 0) {
+    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄(누출 신호 ${n4Leak.length}) — 누출 의심 · 재실행 금지(업로드 닫힘 · 원인부터 본다)`);
+    process.exit(1);
+  }
+  if (failN4.length > 0) {
+    console.log(`🔴 FAIL [장치] N4 거짓 ${failN4.length}줄(대조 못 함 ${failN4.length} · 누출 신호 0) — 대조 못 함 · 장치 이유부터 확인(업로드 닫힘 · 재실행 금지)`);
     process.exit(1);
   }
   if (failD.length > 0) {
@@ -265,4 +352,6 @@ module.exports = {
   kBodyFiles, isGTest, OBS_ALLOWED, isObsRow,
   K_BODY_STRICT, classifyKNames, kBodyScan, // F-PR ⑧
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
+  EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
+  N4_WHY, n4Why, // K 연결 3차 ⑭
 };

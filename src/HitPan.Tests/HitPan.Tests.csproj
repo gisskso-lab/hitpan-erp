@@ -110,6 +110,10 @@
     <!-- 🔴 20261005작2 — 되돌리기 [예] 뒤 감시 판정·루프(순수 C#) — 가짜 시계·응답으로 실제 루프를 돌린다(G-W1~W9). -->
     <Compile Include="..\HitPan.Web\Services\RollbackWatch.cs"
              Link="Linked\RollbackWatch.cs" />
+    <!-- 🔴 20261028작G1-1 (K35) G0 — 알림 → 메신저 팝업 판정(순수 C#)을 **실제로 불러** 잰다.
+         HitPan.Tests 는 HitPan.Web 을 ProjectReference 하지 않는다 ⇒ CS0436 위험 0 (위 RefreshGate·RollbackWatch 와 같은 방식). -->
+    <Compile Include="..\HitPan.Web\Services\ChatNotificationRoute.cs"
+             Link="Linked\ChatNotificationRoute.cs" />
 
     <!-- 🔴 20261013작1 갈래③ (G-W7-6) — 「히트판공지 전송」 화면이 읽는 **그 형**을 게이트가 본다.
          베낀 모양으로 재면 화면이 바뀌어도 게이트는 초록이다(2026-10-12 사고: 게이트는 사전으로 읽어
@@ -123,6 +127,11 @@
          Blazor 의존 0 순수 C#(CsVocab.cs 선례). HitPan.Backoffice 는 ProjectReference 가 없어 CS0436 위험 0. -->
     <Compile Include="..\HitPan.Backoffice\Components\Pages\Platform\Components\TenantInstallText.cs"
              Link="Linked\TenantInstallText.cs" />
+
+    <!-- 🔴 20261107작 갈래 B (§7-2) — 아래 CS 표시줄의 주소 해석기. 시험이 제품이 쓰는 그 코드를 **불러서** 잰다.
+         Blazor 의존 0 순수 C#(TenantInstallText.cs 선례). HitPan.Backoffice 는 ProjectReference 가 없어 CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Backoffice\Services\CsBarScope.cs"
+             Link="Linked\CsBarScope.cs" />
 
     <!-- 🔴 20261018작B2-A (G-B2A-1~6) — `/owner/…` 5장이 **누구도 못 들어가는** 상태였다(P0 실측).
          게이트는 정책을 베끼지 않고 **제품이 쓰는 그 메서드를 불러서** 평가한다

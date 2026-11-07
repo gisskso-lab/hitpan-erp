@@ -9,11 +9,23 @@
     - Razor 에 C# raw string 금지(#14) · 빈 catch 금지(#15)
 *@
 
+@*
+    🔴 20261107작 갈래 B — 고객사 화면에서는 그 고객사만 (대표 오더 11/7)
+      - 「고객 상세(/admin/tenants/{값})」 · 「그 고객사로 걸러진 고객A/S창구(/admin/cs?tenant=)」 에서만
+        숫자 4 + 전체 = 그 고객사 한 벌 · 머리 글자 = 「{회사명} CS」 · 누르면 그 고객사 · 그 단계로 간다.
+      - 그 밖 화면 = 아래 옛 블록 그대로(전체 한 벌).
+      - 🔴 사이드바 빨간 숫자는 언제나 전체 — 60초 시계는 전체 다시 세기를 **계속** 부른다(C2).
+      - 주소 해석 = 순수 C# CsBarScope(시험이 잰다) · 같은 바탕틀 안 이동은 이 띠를 다시 만들지 않으므로
+        LocationChanged 를 구독해 매 이동마다 다시 정한다.
+*@
 @implements IDisposable
 @inject HitPan.Backoffice.Services.CsCountsService Counts
+@inject HitPan.Backoffice.Services.CsTenantCountsService Tenant
 @inject NavigationManager Nav
+@inject ILogger<CsStatusBar> Logger
 
-@if (Counts.Loaded)
+@* ⬛ 옛 줄(20261008) — @if (Counts.Loaded) · 고객사 화면이 아닐 때만 그대로 쓴다 *@
+@if (Tenant.TenantId is null && Counts.Loaded)
 {
     <div class="bo2-cs-bar">
         <span class="bo2-cs-bar__label">CS</span>
@@ -39,6 +51,44 @@
         <span class="bo2-cs-bar__total">전체 @Counts.Total.ToString("N0")건</span>
     </div>
 }
+else if (Tenant.TenantId is not null)
+{
+    @* 🔴 고객사 한 벌 — 불러오는 중 · 못 찾음에는 숫자를 보이지 않는다(0건 표기 금지 · 전체 숫자에 회사명 붙이지 않는다) *@
+    <div class="bo2-cs-bar">
+        @if (!Tenant.Loaded)
+        {
+            <span class="bo2-cs-bar__label">CS 불러오는 중…</span>
+        }
+        else if (!Tenant.Found)
+        {
+            <span class="bo2-cs-bar__label">고객사를 찾지 못했습니다</span>
+        }
+        else
+        {
+            <span class="bo2-cs-bar__label">@Tenant.CompanyName CS</span>
+
+            <button type="button" class="bo2-cs-bar__item @(Tenant.Unread > 0 ? "danger" : "")"
+                    @onclick="@(() => Go("unread"))">
+                읽지 않은 CS <strong>@Tenant.Unread.ToString("N0")</strong>건
+            </button>
+
+            <button type="button" class="bo2-cs-bar__item @(Tenant.Open > 0 ? "warn" : "")"
+                    @onclick="@(() => Go("open"))">
+                처리되지 않은 CS <strong>@Tenant.Open.ToString("N0")</strong>건
+            </button>
+
+            <button type="button" class="bo2-cs-bar__item" @onclick="@(() => Go("done"))">
+                처리 완료 <strong>@Tenant.Done.ToString("N0")</strong>건
+            </button>
+
+            <button type="button" class="bo2-cs-bar__item" @onclick="@(() => Go("rated"))">
+                CS평가 완료 <strong>@Tenant.Rated.ToString("N0")</strong>건
+            </button>
+
+            <span class="bo2-cs-bar__total">전체 @Tenant.Total.ToString("N0")건</span>
+        }
+    </div>
+}
 
 @code {
     private Timer? _timer;
@@ -46,19 +96,78 @@
     protected override async Task OnInitializedAsync()
     {
         Counts.Changed += OnChanged;
+        Tenant.Changed += OnChanged;                       // 20261107작 갈래 B
+        Nav.LocationChanged += OnLocationChanged;          // 20261107작 갈래 B — 같은 바탕틀 안 이동
         await Counts.RefreshAsync();
+        await ApplyScopeAsync(Nav.Uri);                    // 처음 한 번
         // 60초 주기 — CS 는 사람이 보는 속도라 분 단위면 충분하다(1초 폴링은 서버만 깎는다).
-        _timer = new Timer(async _ => await Counts.RefreshAsync(), null,
+        // ⬛ 옛 줄(20261008): _timer = new Timer(async _ => await Counts.RefreshAsync(), null, ...)
+        // 🔴 C2 — 전체 다시 세기는 **언제나 계속**(사이드바 숫자가 멈추지 않는다) + 고객사 화면이면 그 한 벌도.
+        //   Tenant.RefreshAsync 는 고객사가 없으면 아무것도 안 한다.
+        //   3V-B2 — 시계 콜백은 스레드풀이라 InvokeAsync 로 화면 문맥에서 돌린다(고객사 한 벌 동시 쓰기 방지).
+        _timer = new Timer(_ => _ = TickAsync(), null,
                            TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+    }
+
+    private async Task TickAsync()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await Counts.RefreshAsync();
+                await Tenant.RefreshAsync();
+            });
+        }
+        catch (Exception ex)
+        {
+            // #15 — 화면이 닫힌 직후 시계가 한 번 더 돌면 여기로 온다. 다음 주기에 다시 센다.
+            Logger.LogWarning(ex, "CS 표시줄 — 60초 다시 세기 실패");
+        }
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    private void Go(string stage) => Nav.NavigateTo($"/admin/cs?stage={stage}");
+    // 사건 손잡이 — 예외가 새면 회로가 끊기므로 안에서 받는다(3V · #15).
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        try
+        {
+            await InvokeAsync(() => ApplyScopeAsync(e.Location));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "CS 표시줄 — 화면 이동 뒤 고객사를 다시 정하지 못했습니다");
+        }
+    }
+
+    // 상대 주소만 해석기에 넘긴다(호스트·터널 무관).
+    private async Task ApplyScopeAsync(string absoluteUri)
+    {
+        try
+        {
+            var scope = HitPan.Backoffice.Services.CsBarScope.Resolve(Nav.ToBaseRelativePath(absoluteUri));
+            await Tenant.SetTenantAsync(scope);
+        }
+        catch (Exception ex)
+        {
+            // #15 — 주소 해석이 실패해도 표시줄은 전체 한 벌로 남는다.
+            Logger.LogWarning(ex, "CS 표시줄 — 주소로 고객사를 정하지 못해 전체 숫자로 둡니다");
+            await Tenant.SetTenantAsync(null);
+        }
+    }
+
+    // ⬛ 옛 줄(20261008): private void Go(string stage) => Nav.NavigateTo($"/admin/cs?stage={stage}");
+    //   고객사 화면이면 그 고객사로 걸러진 창구로 간다(C3 — 주소 감싸기).
+    private void Go(string stage) => Nav.NavigateTo(Tenant.TenantId is null
+        ? $"/admin/cs?stage={stage}"
+        : $"/admin/cs?tenant={Uri.EscapeDataString(Tenant.TenantId)}&stage={stage}");
 
     public void Dispose()
     {
         Counts.Changed -= OnChanged;
+        Tenant.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
         _timer?.Dispose();
     }
 }

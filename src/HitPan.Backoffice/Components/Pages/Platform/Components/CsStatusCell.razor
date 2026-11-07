@@ -14,7 +14,17 @@
 <div @onclick:stopPropagation="true">
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.BottomLeft">
         <ActivatorContent>
+            @* ⬛ 옛 줄(20261013작2) — 열기 연결이 없어 안 펼쳐졌다(별건 P1 · 11/7)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
+            *@
+            @* 🔴 20261107작 갈래 A(PM 결정 3V-A1) — 같은 span 에 열기 연결 하나만 단다(ERP #691 알림 종 고침과 같은 꼴).
+                 · 단추로 감싸지 않는다: 9.3 이 이 칸을 키 손잡이를 가진 div(tabindex=0 · role=button)로 이미 감싼다
+                   → 단추를 넣으면 단추 안 단추 · 탭 정지 2 · 키 사건 + 클릭 사건 두 번 토글.
+                 · 키보드(탭 · 엔터 · 스페이스)는 그 감싼 div 가 맡는다 — 여기 키 손잡이 추가 0.
+                 · 전파 막음은 이 span 과 바깥 div 두 겹 — 행 클릭(상세 열기)으로 새지 않는다(약속 ③). *@
+            <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle"
+                  @onclick="@context.ToggleAsync"
+                  @onclick:stopPropagation="true">
                 @CsVocab.StatusLabel(Status)
                 <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
             </span>

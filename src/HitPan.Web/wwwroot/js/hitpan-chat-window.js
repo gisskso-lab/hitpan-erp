@@ -56,6 +56,41 @@ window.hitpanChat = {
         }
     },
 
+    /// 🔴 20261028작G1-1 (K35) — 알림을 눌러 **그 대화방**으로 채팅 창을 연다. (추가만 · 위 open 은 그대로)
+    ///
+    /// open 은 창이 이미 떠 있으면 focus 만 한다 — 알림을 누르면 그 방으로 **가야** 하므로 따로 둔다.
+    ///   ① 창이 살아 있으면 그 창을 url 로 보낸다 → focus → true.
+    ///      팝업 쪽 Blazor.navigateTo 가 있으면 그것(앱 재시작 없음 · .NET 8 WASM window.Blazor 공개 함수),
+    ///      없거나(아직 부팅 전) 실패하면 location.assign(url).
+    ///   ② 살아 있지 않으면 기존 open(url) 을 부른다 — 같은 크기·같은 창 이름 'hitpanChat'.
+    ///      본 창을 새로고침해 _win 을 잃어도 같은 이름이라 브라우저가 떠 있는 팝업을 재사용해 그 주소로 보낸다.
+    ///   팝업 차단·예외는 false — 화면이 안내하고 본 창으로 대체한다(조용한 실패 금지).
+    openRoom: function (url) {
+        try {
+            if (this._win && !this._win.closed) {
+                var moved = false;
+                try {
+                    var b = this._win.Blazor;
+                    if (b && typeof b.navigateTo === 'function') {
+                        b.navigateTo(url);
+                        moved = true;
+                    }
+                } catch (navErr) {
+                    console.error('[hitpanChat] 팝업 안 이동 실패 — 주소로 다시 엽니다', navErr);
+                }
+                if (!moved) this._win.location.assign(url);
+
+                this._win.focus();
+                return true;
+            }
+
+            return this.open(url);
+        } catch (e) {
+            console.error('[hitpanChat] 대화방 창을 열지 못했습니다', e);
+            return false;
+        }
+    },
+
     /// 열려 있는 채팅 창을 닫는다.
     close: function () {
         try {

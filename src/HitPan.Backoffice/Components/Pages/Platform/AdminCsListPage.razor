@@ -26,6 +26,10 @@
 @inject ISnackbar Snackbar
 @inject IDialogService Dialog
 @inject HitPan.Backoffice.Services.CsCountsService Counts
+@* 20261107작 갈래 B — 고객사로 걸러진 창구(?tenant=) · 표시줄과 같은 고객사 한 벌 *@
+@inject NavigationManager Nav
+@inject HitPan.Backoffice.Services.CsTenantCountsService TenantCounts
+@implements IDisposable
 @using HitPan.Backoffice.Components.Pages.Platform.Components
 
 <PageTitle>고객A/S창구 — 히트판 백오피스</PageTitle>
@@ -68,6 +72,19 @@
                    StartIcon="@Icons.Material.Filled.Search" OnClick="LoadAsync">조회</MudButton>
     </div>
 </BoFilterBar>
+
+@* 🔴 20261107작 갈래 B — 고객사로 걸러졌다는 표시 + 「전체 보기」(대표 확인 1 · 넣는다) *@
+@if (_tenantFilter is not null)
+{
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 12px 0;font-size:14px;">
+        <span>
+            고객사: <strong>@TenantHeadName</strong>
+            의 A/S 만 보는 중
+        </span>
+        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                   OnClick="ShowAllTenants">전체 보기</MudButton>
+    </div>
+}
 
 @* ── 좌우 2단(설계 R2) — 넓을 때 목록 7 / 상세 5 · 좁을 때 1단(상세가 목록 아래) ── *@
 <MudGrid Spacing="3">
@@ -246,14 +263,50 @@
     //      ⇒ 숫자가 바뀌어도 이 메서드가 돌지 않는다. 띠를 누른 것은 **사람의 가장 최신 뜻**이라 그게 이겨야 한다.
     //   🔴 띠·`CsStatusBar`·counts 서버식은 무접촉이다 — 받는 쪽만 고쳤다.
     //      빈값·목록 밖 값은 종전처럼 `NormalizeStage` 가 전체(`all`)로 떨어뜨린다(아는 척 금지).
+    // ══════════════════════════════════════════════════════════════════════
+    // 🔴 20261107작 갈래 B — `?tenant=` 를 받는다(고객사 고유값 거름 · 표시줄이 보낸다)
+    //   빈 값 · 공백 = 거름 없음(null). 서버로 넘길 때는 주소 감싸기(C3).
+    //   견주기 기준에 고객사도 넣는다 — 고객사만 바뀐 이동(A → B · 「전체 보기」)도 다시 조회한다.
+    // ══════════════════════════════════════════════════════════════════════
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantFromQuery { get; set; }
+
+    private string? _tenantFilter;
+    private int _loadSeq;   // 3V-B3 — 목록 요청 순번(늦은 답 버리기)
+
+    // 3V-B3 — 고객사 한 벌이 **지금 거른 고객사**의 답을 받았을 때만 회사명을 보인다. 아니면 「불러오는 중…」.
+    private string TenantHeadName =>
+        _tenantFilter is not null
+        && string.Equals(TenantCounts.TenantId, _tenantFilter, StringComparison.Ordinal)
+        && TenantCounts.Loaded && TenantCounts.Found && TenantCounts.CompanyName is not null
+            ? TenantCounts.CompanyName
+            : "불러오는 중…";
+
+    protected override void OnInitialized()
+    {
+        // 거름 표시줄의 회사명은 고객사 한 벌이 늦게 채운다 — 채워지면 다시 그린다.
+        TenantCounts.Changed += OnTenantCountsChanged;
+    }
+
+    private void OnTenantCountsChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => TenantCounts.Changed -= OnTenantCountsChanged;
+
+    // 「전체 보기」 — 지금 단계는 그대로 두고 고객사 거름만 푼다(표시줄도 주소를 보고 전체로 돌아간다).
+    private void ShowAllTenants() => Nav.NavigateTo($"/admin/cs?stage={Uri.EscapeDataString(_stageFilter)}");
+
     protected override async Task OnParametersSetAsync()
     {
         var incoming = NormalizeStage(StageFromQuery);
-        if (_firstLoadDone && string.Equals(incoming, _stageFilter, StringComparison.Ordinal))
+        var incomingTenant = string.IsNullOrWhiteSpace(TenantFromQuery) ? null : TenantFromQuery.Trim();
+        // ⬛ 옛 줄(20261013작1): if (_firstLoadDone && string.Equals(incoming, _stageFilter, StringComparison.Ordinal))
+        if (_firstLoadDone && string.Equals(incoming, _stageFilter, StringComparison.Ordinal)
+                           && string.Equals(incomingTenant, _tenantFilter, StringComparison.Ordinal))
         {
-            return;   // 이미 그 단계를 보고 있다 — 다시 조회할 것이 없다
+            return;   // 이미 그 단계 · 그 고객사를 보고 있다 — 다시 조회할 것이 없다
         }
         _stageFilter = incoming;
+        _tenantFilter = incomingTenant;
         _firstLoadDone = true;
         await LoadAsync();
     }
@@ -269,8 +322,22 @@
         try
         {
             var http = HttpFactory.CreateClient("backoffice-authed");
+            // ⬛ 옛 줄(20261013작1): 주소 = status·q·mine·stage 넷
+            //   20261107작 갈래 B — 고객사가 있을 때만 `&tenant=` 를 덧붙인다(주소 감싸기 · C3).
+            var tenantPart = _tenantFilter is null ? "" : $"&tenant={Uri.EscapeDataString(_tenantFilter)}";
+            // 3V-B3 — 요청 순번 · 고객사 · 단계를 잡아 두고, 답이 왔을 때 셋 중 하나라도 바뀌었으면 버린다
+            //   (A → B · 「전체 보기」 빠른 이동 때 앞 줄이 뒤 머리 아래 그려지는 꼴 차단).
+            var seq = ++_loadSeq;
+            var askedTenant = _tenantFilter;
+            var askedStage = _stageFilter;
             var res = await http.GetFromJsonAsync<ListResponse>(
-                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}&mine={(_mineOnly ? "true" : "false")}&stage={Uri.EscapeDataString(_stageFilter)}");
+                $"api/admin/cs?status={Uri.EscapeDataString(_statusFilter)}&q={Uri.EscapeDataString(_keyword)}&mine={(_mineOnly ? "true" : "false")}&stage={Uri.EscapeDataString(_stageFilter)}{tenantPart}");
+            if (seq != _loadSeq
+                || !string.Equals(askedTenant, _tenantFilter, StringComparison.Ordinal)
+                || !string.Equals(askedStage, _stageFilter, StringComparison.Ordinal))
+            {
+                return;   // 늦게 온 답 — 버린다(finally 가 _loading 을 내린다)
+            }
             _rows = res?.Data ?? new();
         }
         catch (Exception ex)
@@ -297,6 +364,7 @@
             await LoadAsync();
             // 하단 띠·사이드바 숫자가 함께 움직인다(오늘 거동)
             await Counts.RefreshAsync();
+            await TenantCounts.RefreshAsync();   // 20261107작 갈래 B — 고객사 화면이면 표시줄(고객사)도 · 아니면 아무것도 안 함
             Snackbar.Add("A/S 로 접수했습니다 — 목록 맨 위에 있습니다.", Severity.Success);
         }
     }
@@ -349,6 +417,7 @@
             _replyBody = null;
             // 상세를 여는 순간 서버가 「읽음」을 박는다 ⇒ 아래 띠·사이드바 숫자를 바로 다시 센다
             await Counts.RefreshAsync();
+            await TenantCounts.RefreshAsync();   // 20261107작 갈래 B
         }
         catch (Exception ex)
         {
@@ -414,6 +483,7 @@
                 await LoadAsync();
                 if (reopenDetail) await SelectAsync(new CsTicketRow { Id = id });
                 await Counts.RefreshAsync();
+                await TenantCounts.RefreshAsync();   // 20261107작 갈래 B
             }
             else
             {
@@ -470,6 +540,7 @@
                 await LoadAsync();
                 await SelectAsync(new CsTicketRow { Id = id });
                 await Counts.RefreshAsync();   // 단계가 바뀌었으면 아래 띠 숫자도 같이 움직인다
+                await TenantCounts.RefreshAsync();   // 20261107작 갈래 B
             }
             else
             {
