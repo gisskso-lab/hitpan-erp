@@ -13,14 +13,17 @@
     <link rel="stylesheet" href="app.css" />
     <link rel="stylesheet" href="HitPan.Backoffice.styles.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <HeadOutlet />
+    @* ⬛ 옛 줄(20261107작 F6) — 미리 그린 화면을 회로 연결 뒤 통째 교체 → 교체 전 입력 유실: <HeadOutlet /> *@
+    <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 </head>
 
 <body>
     @* @rendermode InteractiveServer — MudBlazor Provider(Popover·Dialog·Snackbar)를
        인터랙티브 회로로 렌더해야 다이얼로그·버튼이 동작. 미지정 시 정적 SSR로만 렌더되어
        'Missing MudPopoverProvider' 예외 → 회로 사망 → 버튼 무반응·전반 지연. (사장님 결재 2026-07-04) *@
-    <Routes @rendermode="InteractiveServer" />
+    @* 20261107작 F6 — 미리 그리기 끔: 미리 그린 화면을 회로 연결 뒤 통째 교체해 교체 전 입력이 사라짐(docs/검증/선행/20261107_1V_백오피스_미리그리기교체_입력유실.md) · Provider 는 그대로 회로 렌더 *@
+    @* ⬛ 옛 줄(20261107작 F6) — 미리 그린 화면을 회로 연결 뒤 통째 교체 → 교체 전 입력 유실: <Routes @rendermode="InteractiveServer" /> *@
+    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
     <script src="_framework/blazor.web.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
 </body>
