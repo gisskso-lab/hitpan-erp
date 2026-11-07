@@ -33,10 +33,14 @@
          · title 은 남는 속성 → 바깥 div(L5 @attributes) · 단추 위에 올리면 그대로 보인다.
          · 행 클릭으로 새지 않음 = 9.3 단추 자체 click 전파 끊음(<button> 이면 기본) + 바깥 div @onclick:stopPropagation(약속 ③). *@
     @* 🔴 20261107작 S4 E1-a — @ref="_menu" 한 줄만 끼웠다(기존 속성 줄 글자 무변) · Esc 로 닫을 때 CloseMenuAsync(L495) 를 부르는 참조. *@
+    @* ⬛ 옛 줄(20261107작 V2 ~ E1-a) — 아래 여는 태그의 Label 줄. 상태 값이 공백뿐이면 공백이 그대로 넘어가 단추가 숨었다([4] 2회차 T3).
+             Label="@CsVocab.StatusLabel(Status)"
+       🔴 20261107작 S4 T3 — 9.3 MudMenu.razor.cs L414 GetActivatorHidden = ActivatorContent null · IsNullOrWhiteSpace(Label) · IsNullOrWhiteSpace(Icon)
+         셋 다 참이면 L64 「mud-menu-button-hidden」 → 칸이 통째로 사라진다. Label 이 공백뿐이면 「-」(@code ActivatorLabel · CsVocab 무변). *@
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
              @ref="_menu"
              Class="@($"bo-status-menu {CsVocab.StatusChipClass(Status)}")"
-             Label="@CsVocab.StatusLabel(Status)"
+             Label="@ActivatorLabel"
              EndIcon="@Icons.Material.Filled.ArrowDropDown"
              Ripple="false"
              title="@PickTitle">
@@ -120,6 +124,11 @@
         CsVocab.StatusesFor(Channel).Count <= 2
             ? "손으로 적은 A/S — 접수·완료만 기록합니다"
             : "눌러서 상태를 바꿉니다";
+
+    // 🔴 20261107작 S4 T3 — 단추 글자. 9.3 L414 숨김 조건(IsNullOrWhiteSpace(Label))과 같은 검사로 「-」 를 세운다.
+    //    · CsVocab.StatusLabel 은 null · "" 만 「-」(공백은 그대로) — 세 곳 공용 사전이라 여기서만 거른다.
+    private string ActivatorLabel =>
+        string.IsNullOrWhiteSpace(CsVocab.StatusLabel(Status)) ? "-" : CsVocab.StatusLabel(Status);
 
     // 🔴 20261107작 S4 E1-a — 목록 닫기용 참조
     private MudMenu? _menu;
