@@ -103,16 +103,30 @@ public class BackofficeAuthController : Controller
     [HttpPost("signout")]
     public async Task<IActionResult> SignOutAsync()
     {
+        // 20261107작 2회차 ①(PM 결재 11/7): 이미 로그인 상태가 아니면(다른 탭에서 먼저 나감 · 화면을 열어 둔 채 쿠키 만료)
+        //   위조방지 확인 전에 안내 없이 로그인 화면으로 — 나갈 것이 없으니 「끝나지 않았습니다」 오발 0.
+        //   남은 쿠키 지우기 시도는 무해(지울 로그인이 없다 · 다른 출처가 눌러도 잃을 것 0).
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return LocalRedirect("/backoffice/login");
+        }
+
         // 봉합 2026-07-07: signin 과 동일 — 만료 토큰 400 대신 우아하게 로그인으로.
         try { await _antiforgery.ValidateRequestAsync(HttpContext); }
         // ⬛ 옛 줄(20261107작): catch (AntiforgeryValidationException) { return LocalRedirect("/backoffice/login"); }
         //    — 실패해도 로그인 화면이 떠 「나갔다」 로 믿는다(쿠키는 남음 · [1-V] #5 조용한 실패)
         // D1-c(PM 결재 11/7): 실패를 알린다 · 쿠키는 지우지 않는다(CSRF 방어 그대로) · 안내 글자는 고정(입력 반영 0 · 내부 정보 0)
+        // ⬛ 옛 줄(20261107작 1회차): _logger.LogWarning(ex, "[BackofficeAuth] signout 위조방지 만료/무효 → 쿠키 유지 · 로그아웃 미완료 안내");
+        // ⬛ 옛 줄(20261107작 1회차): return Redirect("/backoffice/login?error=" +
+        // ⬛ 옛 줄(20261107작 1회차):     Uri.EscapeDataString("로그아웃이 끝나지 않았습니다. 화면을 새로 고친 뒤 다시 눌러 주세요."));
+        //    — 로그인 화면에 다시 누를 로그아웃 단추가 없어 쿠키가 산 채로 끝남([3-V] P2) · ?error= 칸을 쓰지 않는다([3-V] P3(나) 별건)
+        // 20261107작 2회차 ②(PM 결재 11/7): 고정 표시 ?signout=retry → 로그인 화면이 고정 안내 + 「다시 로그아웃」 단추를 띄운다
+        //   (단추는 App.razor 정적 폼 bo-signout-form 을 제출 · 새 문서라 토큰이 새로 찍힌다). 로그 글자에 사용자 이름 · 내부 정보 0.
         catch (AntiforgeryValidationException ex)
         {
-            _logger.LogWarning(ex, "[BackofficeAuth] signout 위조방지 만료/무효 → 쿠키 유지 · 로그아웃 미완료 안내");
-            return Redirect("/backoffice/login?error=" +
-                Uri.EscapeDataString("로그아웃이 끝나지 않았습니다. 화면을 새로 고친 뒤 다시 눌러 주세요."));
+            _logger.LogWarning(ex, "[BackofficeAuth] signout 위조방지 만료/무효 → 쿠키 유지 · 다시 로그아웃 안내");
+            return LocalRedirect("/backoffice/login?signout=retry");
         }
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return LocalRedirect("/backoffice/login");

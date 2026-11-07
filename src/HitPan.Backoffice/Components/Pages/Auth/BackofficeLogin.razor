@@ -25,6 +25,17 @@
             <div class="bo-login-error">@Error</div>
         }
 
+        @* 20261107작 2회차 ②(PM 결재 11/7): 로그인 상태에서 로그아웃 위조방지 확인이 실패하면 컨트롤러가 ?signout=retry 로 보낸다.
+           값이 정확히 retry 일 때만 고정 안내(입력값을 화면에 반영하지 않음) + 「다시 로그아웃」 단추.
+           단추는 App.razor 정적 영역의 숨은 폼(bo-signout-form)을 form= 으로 제출 — 이 화면에도 있다 · 새 문서라 토큰이 새로 찍힘 · @onclick 없음 *@
+        @if (IsSignoutRetry)
+        {
+            <div class="bo-login-retry">
+                <p>로그아웃이 끝나지 않았습니다. 아래 단추를 눌러 다시 로그아웃해 주세요.</p>
+                <button type="submit" form="bo-signout-form" class="bo-login-retry-button">다시 로그아웃</button>
+            </div>
+        }
+
         <form method="post" action="/backoffice/auth/signin">
             <AntiforgeryToken />
             <input type="hidden" name="returnUrl" value="@ReturnUrl" />
@@ -106,6 +117,20 @@
         padding: 12px; border-radius: 8px;
         font-size: 13px; margin-bottom: 12px;
     }
+    .bo-login-retry {
+        background: #FEF3C7; color: #92400E;
+        padding: 12px; border-radius: 8px;
+        font-size: 13px; margin-bottom: 12px;
+    }
+    .bo-login-retry p { margin: 0 0 10px; }
+    .bo-login-retry-button {
+        width: 100%; padding: 10px;
+        background: #fff; color: #92400E;
+        border: 1.5px solid #92400E; border-radius: 8px;
+        font-size: 14px; font-weight: 700;
+        cursor: pointer;
+    }
+    .bo-login-retry-button:hover { background: #92400E; color: #fff; }
     .bo-login-help {
         text-align: center; margin-top: 16px;
         font-size: 12px; color: #6B7280;
@@ -140,4 +165,7 @@
 @code {
     [SupplyParameterFromQuery] public string? Error { get; set; }
     [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    // 20261107작 2회차 ②: 로그아웃 다시 누르기 표시 — 정확히 "retry" 만 인정(그 밖 값은 무시 · 화면 반영 0)
+    [SupplyParameterFromQuery] public string? Signout { get; set; }
+    private bool IsSignoutRetry => string.Equals(Signout, "retry", StringComparison.Ordinal);
 }
