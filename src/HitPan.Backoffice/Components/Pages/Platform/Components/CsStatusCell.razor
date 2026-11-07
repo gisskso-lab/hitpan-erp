@@ -17,8 +17,25 @@
          아래로 펼쳐, 화면 아래쪽 줄에서 연 목록이 위로 뒤집힌 뒤 화면 위로 당겨져 꼬리표를 덮었다(대표 실물 S4 반려 · 11/7).
        🔴 20261107작 S4 — 목록 왼쪽 위 = 꼬리표 오른쪽 위(TopRight / TopLeft). 9.3 의 위·아래 뒤집기 · 세로 당김은
          꼬리표와 가로로 떨어진 자리에서만 일어난다 · 오른쪽이 모자라면 꼬리표 왼쪽으로 뒤집힌다(약속 ④). *@
+    @* ⬛ 옛 줄(20261107작 V3) — 여는 줄. 자리(A1 · TopRight / TopLeft)는 아래 새 여는 줄에 그대로 옮겼다.
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft">
+    *@
+    @* 🔴 20261107작 S4 D4(V3 → V2 · 사유 M7) — ActivatorContent 를 쓰지 않고 9.3 내장 단추를 쓴다.
+         · 9.3 MudMenu.razor 의 ActivatorContent 없는 갈래(L47~65) = MudButton(Class="mud-menu-button-activator" · OnClick=ToggleMenuAsync) 하나.
+           키 손잡이를 단 감싼 div(L22~30 · HandleActivatorKeydown)가 없다 → 스페이스는 단추 click 한 번만 남아 「열렸다 닫힘」 길이 없다.
+         · 단추 클래스는 9.3 이 고정한다 → 색은 바깥 div(Class = MudMenu 맨 바깥 div · L6)에 상태 클래스를 주고 CSS 가 안쪽 단추를 칠한다.
+         · title 은 남는 속성 → 바깥 div(L5 @attributes) · 단추 위에 올리면 그대로 보인다.
+         · 행 클릭으로 새지 않음 = 9.3 단추 자체 click 전파 끊음(<button> 이면 기본) + 바깥 div @onclick:stopPropagation(약속 ③). *@
+    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
+             Class="@($"bo-status-menu {CsVocab.StatusChipClass(Status)}")"
+             Label="@CsVocab.StatusLabel(Status)"
+             EndIcon="@Icons.Material.Filled.ArrowDropDown"
+             Ripple="false"
+             title="@PickTitle">
+        @* ⬛ 옛 줄(20261107작 V3) — ActivatorContent 여는 줄. 감싼 div 키 손잡이(엔터·스페이스 keydown)와 단추 click 이 겹쳐
+             스페이스 누름 120ms 에서 「열렸다 닫힘」([4] 1회차 M7) → D4 로 V2 전환. 아래 옛 주석·줄은 지우지 않고 남긴다.
         <ActivatorContent>
+        *@
             @* ⬛ 옛 줄(20261013작2) — 열기 연결이 없어 안 펼쳐졌다(별건 P1 · 11/7)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
             *@
@@ -38,11 +55,12 @@
                 <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
             </span>
             *@
-            @* 🔴 20261107작 S4(PM 결정 D3 · V3) — 9.3 원문이 ActivatorContent 예로 든 꼴 그대로: MudButton OnClick=context.ToggleAsync.
+            @* ⬛ (옛 주석) 20261107작 S4(PM 결정 D3 · V3) — 9.3 원문이 ActivatorContent 예로 든 꼴 그대로: MudButton OnClick=context.ToggleAsync.
                  · 탭 정지 = 진짜 <button> 하나(MudButton 기본 type="button") · 꼬리표 모양은 안쪽 span 이 그대로 맡는다(CSS 는 단추 꾸밈만 지움).
                  · 엔터는 감싼 div 키 손잡이가 열고, 곧이은 단추 click 은 9.3 이 50ms 안이면 무시한다(이중 토글 0).
                  · 🔴 안쪽 꼬리표 span 에 @onclick · 전파 막음을 달지 않는다 — 단추 OnClick 까지 못 가 열기 0 이 된다.
                  · 전파 막음은 바깥 span(MudButton 은 컴포넌트라 직접 못 단다)과 바깥 div 두 겹(약속 ③). *@
+            @* ⬛ 옛 줄(20261107작 V3)
             <span class="bo-status-activator" @onclick:stopPropagation="true">
                 <MudButton Class="bo-status-btn" Ripple="false" title="@PickTitle"
                            OnClick="@context.ToggleAsync">
@@ -53,6 +71,7 @@
                 </MudButton>
             </span>
         </ActivatorContent>
+        *@
         <ChildContent>
             @if (CsVocab.IsLegacyStatus(Channel, Status))
             {
