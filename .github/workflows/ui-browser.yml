@@ -6,9 +6,17 @@
 # 🔴 CI 로 못 재는 것: 터널 경로 · 실제 크롬 팝업 차단 강도 → HQA 실측팀 몫(§2-4 · §0-10). 「CI 초록 = 실제 크롬에서 안 막힘」 아님.
 #
 # 트리거(개발명세서 §1-1 · §0-9 ② B안 순서 함정):
-#   pull_request + workflow_dispatch 를 두되 **잡 단위 if** 로 「이 갈래(H) 브랜치의 PR 이거나 수동 실행」일 때만 돈다.
-#   그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
-#   갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
+#   ⬛ [낡은 줄 · F-PR] pull_request + workflow_dispatch 를 두되 **잡 단위 if** 로 「이 갈래(H) 브랜치의 PR 이거나 수동 실행」일 때만 돈다.
+#   ⬛ [낡은 줄 · F-PR] 그 밖의 PR 에서는 잡이 **건너뛰어진다** → main 머지 뒤 다른 PR 이 「돈 시험 0건 = 빨강」에 걸리지 않는다.
+#   ⬛ [낡은 줄 · F-PR] 갈래 K(#691) 가 들어올 때 그 PR 에서 if 를 넓힌다(K 시험 본문과 같은 PR).
+#   🔴 K 연결(11/6 · 작업지시서 20261106작 #691 재기반 §5-4 · 대표 Q1 「화면·API 바뀐 PR만」 · PM A3 ㉯ · C3 · C4):
+#     거르기 잡(ui-changes)이 PR 합침 커밋의 첫 부모와 비교해 바뀐 파일을 범주로 센다(외부 액션 0 · 읽기 권한만 · 비밀값 0).
+#     ⬛ [낡은 줄 · 갈래 A 첫 꼴] 화면 · API(와 참조 프로젝트) · 출하 DDL · 장치 · 이 워크플로가 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
+#     ⬛ [낡은 줄 · 3V-1] 🔴 PM 결정 3V-1 — 문서(docs/ 아래 · .md) 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도(경로 허용 목록 0).
+#     🔴 PM 결정 4V-1 ① — 문서 = docs/ 아래만(.md 라도 docs/ 밖이면 돈다 · 제어 글자 든 이름 = 돈다). docs/ 밖 파일이 하나라도 바뀐 PR 이면 ui-k35 가 돈다 — 머지 뒤에도.
+#     잔여 한계: 이 워크플로 파일 자체도 PR 쪽 사본이다 — PR 이 이 파일을 바꾸면 거르기도 바뀐다(고정 「돈다」 가 걸리는 자리 · 리뷰로 본다).
+#     문서만 바꾼 PR 은 ui-k35 가 건너뛰어진다(런 결론은 success 로 보인다 · 「건너뜀 ≠ 초록」 = 읽는 규칙 · 머지 상신 잡별 결과표).
+#     거르기 오류 · 빈 출력 · 거르기 잡 실패 · 수동 실행 = 「돈다」(닫힌 쪽 = 도는 쪽).
 #   경로 거르기(paths)는 안 쓴다(§3-1). 필수 검사 지정 = 지금 안 함 · 조건 뒤 따로 결재(§0-10).
 #   🔴 F-PR(11/6 · PM 판단 C5): 자체시험 잡(ui-selftest)은 조건 없음 — 대상 PR 마다 · 수동 실행에서 돈다(짧은 잡 · 읽기 권한만).
 #
@@ -30,9 +38,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 🔴 K 연결 — 거르기 잡. 바뀐 파일 이름은 파일로만 넘긴다(식 · 셸 글자로 run 줄에 들어가는 자리 0).
+  #   체크아웃은 아래 잡들과 같은 꼴 + 비교에 필요한 깊이 2 만 더함(자격증명 보존 기본값은 별건 전수 · 이 잡 1칸 기록).
+  #   합침 커밋 첫 부모 = 기준 가지 머리 · 이름이 옮겨져도 옛 자리 · 새 자리 둘 다 센다(옮김 짝 맞추기 끔).
+  ui-changes:
+    name: ui-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.pick.outputs.run }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      # ⬛ [낡은 단계 · 갈래 A 첫 꼴] "[장치] 거르기 — 화면 · API · 장치 · 워크플로 바뀜"
+      #   git diff --no-renames --name-only -z → 규칙 스크립트(경로 허용 목록) → run 줄 grep → 출력 칸
+      # 🔴 PM 결정 3V-1(11/6) — 닫힌 쪽: 전부 문서일 때만 안 돈다 · 장치·워크플로 폴더가 바뀌면 스크립트 전에 고정 「돈다」
+      #   (스크립트는 PR 쪽 사본이라 그 판단만 믿지 않는다) · 출력 칸은 끝에 한 번만 · 예외 · 빈 목록 · 해석 못 함 = 돈다.
+      #   파일 이름은 로그에 찍지 않는다(범주별 수만).
+      - name: "[장치] 거르기 — 문서만 바뀐 PR 만 안 돈다"
+        id: pick
+        run: |
+          lst="$RUNNER_TEMP/ui-changed.lst"
+          out="$RUNNER_TEMP/ui-changes.out"
+          run="true"
+          if git -c core.quotePath=false diff -z --no-renames --name-only HEAD^1 HEAD > "$lst"; then
+            if grep -qzE '^(scripts/playwright-audit/ci/|\.github/workflows/)' "$lst"; then
+              echo "거르기: 장치 · 워크플로 폴더 바뀜 → 돈다(스크립트 판단 전 고정)"
+            elif node scripts/playwright-audit/ci/ui-changes.js < "$lst" > "$out"; then
+              grep -m1 -E '^거르기: ' "$out" || echo "거르기: 이유 줄 없음"
+              if [ "$(grep -c -x 'run=false' "$out")" = "1" ] && [ "$(grep -c '^run=' "$out")" = "1" ]; then run="false"; fi
+            else
+              echo "거르기: 규칙 스크립트 실패 → 돈다"
+            fi
+          else
+            echo "거르기: 바뀐 파일 목록 못 구함(비교 실패) → 돈다"
+          fi
+          echo "거르기 결론: run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   ui-k35:
     name: ui-k35
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-')
+    # ⬛ [낡은 줄 · F-PR] if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-')
+    # 🔴 K 연결 — 취소 아님 그리고 (수동 실행 · H 머리 가지 · 거르기 출력이 「안 돈다」가 아님). 빈 출력 · 거르기 잡 실패 = 돈다.
+    needs: ui-changes
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-') || needs.ui-changes.outputs.run != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -198,6 +253,10 @@ jobs:
       - name: "[시험] S8 K35 시험 (H 단계 = 장치 점검 + 대조 단언 · K 본문은 k35-*.js)"
         # 🔴 시험 러너를 끼우지 않는다 — 일반 node 가 표준출력에 가림 줄을 그대로 쓴다(§0-9 ⑫ⓐ).
         # 🔴 표준출력을 업로드 폴더에 tee 하지 않는다(⑫ⓑ).
+        # 🔴 K 연결 3차(PM 결정 4V-2 P2-a) — 단계 시간 상한(잡 30분 안). K 본문 자체 상한(전체 12분 · 경우 150초 · 화면 평가 10초)이 먼저 걸리게 둔다.
+        #   이 상한에 걸리면 단계 결론 = 실패(취소 아님 · 공개 문서 기준 · 실물 미측정) → 아래 S9·S10 은 `always()` 라 돈다 ·
+        #   S11 은 누출 검사 통과 + 표지 없음일 때만 — 표지가 없어도 업로드 자리엔 대조 지난 그림만 있다(K 가 임시 자리에서 찍고 옮김).
+        timeout-minutes: 20
         run: |
           set -uo pipefail
           rc=0
@@ -227,7 +286,11 @@ jobs:
         run: node scripts/playwright-audit/ci/leak-scan.js "$UI_OUT"
 
       - name: "[장치] S11 업로드 — 결과표·스크린샷·로그 (S10 통과분만 · 7일)"
-        if: always() && steps.leak.outcome == 'success'
+        # ⬛ [낡은 줄 · F-PR] if: always() && steps.leak.outcome == 'success'
+        # 🔴 K 연결 2차(보안상무 [3-V] P1-07 · PM 결정 3V-1) — K 의 N4 줄이 거짓이면(kit35 가 S8 에서 표지를 넘김) 올리지 않는다.
+        # 🔴 3차(PM 결정 3V-2) — 표지에만 기대지 않는다: K 그림은 업로드 자리 밖 임시 자리에서 찍고 직후 대조를 지난 것만 옮긴다.
+        #   그래서 K 가 죽거나 S8 이 시간 상한 · 취소로 끊겨 표지가 안 써져도 업로드 자리의 K 그림은 대조 지난 것뿐. 이 조건 줄은 자체시험 K-C24h 넷째 칸이 잠근다.
+        if: always() && steps.leak.outcome == 'success' && env.UI_N4_HIT != '1'
         uses: actions/upload-artifact@v5
         with:
           name: ui-k35-main
