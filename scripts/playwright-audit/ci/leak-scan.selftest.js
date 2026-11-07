@@ -2328,6 +2328,183 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       }
       check('K-C25g 시간 상한 도우미(상한 → KitStepError · 통과 · 거절 그대로) · K 전체 < S8 단계 < 잡 · 화면 평가 상한', ok, why);
     }
+    // ── 🔴 R1 · R2(11/7 · 작업지시서 20261107작 §6 · §9 P2 · P6) — 그림 전후 대조 등록 목록 시점 · 등록 대기 · 화면 예외 이름 찍는 시점 재소독 ──
+    //   K-C25i R1 칸 C0 · C1(대조군) · C2a · C2b · C3 · 오탐 대조군 · C5(찍는 중 대기 → 지움 · 대기 중 시작 → 안 찍음) · C5 대조군(대기 0 → 옮김) · n4Verdict regGrow
+    //   K-C25j R2 칸 D0(대조군) · D1 · D2 · 오탐 대조군 TypeError
+    //   자체시험 수 = 바닥 88fa8abb 로컬 실측 121 → 123(C5 칸은 K-C25i 안 · 새 검사 2). 못 재는 것(미측정): 실제 브라우저 촬영 창 안 갱신 응답 빈도 · 그림 픽셀 글자.
+    const kRegWorld = async (K) => {
+      const fs = require('fs');
+      const path = require('path');
+      const L2 = require(path.join(path.dirname(process.env.F_KIT), 'lib.js'));
+      const val = (tag) => `${process.env.K25I_VALUE}_${tag}`;
+      const clean = () => ({ text: '시험 나 · 새 메시지', vals: [], ph: [], pw: 0, pwOpen: 0 });
+      const show = (v) => ({ text: `화면 ${v}`, vals: [], ph: [], pw: 0, pwOpen: 0 });
+      const mkPage = (st) => ({
+        isClosed: () => false,
+        frames: () => [{ evaluate: async () => { st.calls += 1; return st.collect(st.calls); } }],
+        screenshot: async ({ path: f }) => st.shot(f),
+      });
+      const writePng = (f) => fs.writeFileSync(f, Buffer.from([0x89, 0x50, 0x4e, 0x47, 9]));
+      const mkKb = (st) => {
+        const page = mkPage(st);
+        return {
+          browser: 'chromium', plantN4: false, sealed: false, page,
+          context: { pages: () => [page] },
+          n4: { verified: 0, shots: 0, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, winDiff: 0, moveFail: 0, planted: false },
+        };
+      };
+      const up = K.shotsDir();
+      const stage = K.stageDir('chromium');
+      const has = (d, n) => fs.existsSync(path.join(d, n));
+      const rg = (kb) => kb.n4.regGrow || 0;
+      const moved = (ret, kb, n) => ret === true && has(up, `${n}-chromium.png`) && !has(stage, `${n}-chromium.png`) && kb.n4.verified === 1 && rg(kb) === 0;
+      const gone = (ret, kb, n) => ret === false && !has(up, `${n}-chromium.png`) && !has(stage, `${n}-chromium.png`) && kb.n4.removed === 1 && kb.n4.verified === 0;
+      const run = async (n, st, before) => {
+        const kb = mkKb(st);
+        if (before) before();
+        const ret = await K.guardedShot(kb, n);
+        return { ret, kb };
+      };
+      const out = {};
+      { // C0 깨끗 · 등록 없음 → 옮김
+        const { ret, kb } = await run('i0', { calls: 0, collect: clean, shot: writePng });
+        out.c0 = moved(ret, kb, 'i0');
+      }
+      { // C1 시작 전 등록 + 화면 → 안 찍음(대조군)
+        const v = val('C1');
+        const st = { calls: 0, collect: () => show(v), shot: writePng };
+        const { ret, kb } = await run('i1', st, () => L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v));
+        out.c1 = ret === false && !has(up, 'i1-chromium.png') && !has(stage, 'i1-chromium.png') && kb.n4.blocked === 1 && kb.n4.hits === 1 && rg(kb) === 0;
+      }
+      { // C2a 찍는 도중 등록 + 직후 화면에 남음 → 지움(다시 모은 목록으로 걸림)
+        const v = val('C2A');
+        const st = { calls: 0, collect: (k) => (k >= 2 ? show(v) : clean()), shot: (f) => { writePng(f); L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v); } };
+        const { ret, kb } = await run('i2a', st);
+        out.c2a = gone(ret, kb, 'i2a') && kb.n4.hits === 1;
+      }
+      { // C2b 찍는 도중 등록 + 직후 화면에서 사라짐 → 지움(등록 늘어남)
+        const v = val('C2B');
+        const st = { calls: 0, collect: clean, shot: (f) => { writePng(f); L2.maskAndRegister('TOKEN_REFRESH_K_BROWSER', v); } };
+        const { ret, kb } = await run('i2b', st);
+        out.c2b = gone(ret, kb, 'i2b') && kb.n4.hits === 0 && rg(kb) === 1;
+      }
+      { // C3 목록 만든 뒤 · 직전 대조 첫 evaluate 안에서 등록 → 지움(등록 늘어남)
+        const v = val('C3');
+        const st = { calls: 0, collect: (k) => { if (k === 1) L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v); return clean(); }, shot: writePng };
+        const { ret, kb } = await run('i3', st);
+        out.c3 = gone(ret, kb, 'i3') && rg(kb) === 1;
+      }
+      { // 오탐 대조군 — 등록 없이 도중 화면 글자만 바뀜 → 옮김 유지
+        const st = { calls: 0, collect: (k) => ({ ...clean(), text: `시험 화면 ${k}` }), shot: writePng };
+        const { ret, kb } = await run('i4', st);
+        out.noFalse = moved(ret, kb, 'i4');
+      }
+      // C5(P2) — 응답 손잡이(watchTokens)가 본문 읽기 await 중
+      const handlers = [];
+      K.watchTokens({ on: (ev, cb) => { if (ev === 'response') handlers.push(cb); } }, { access: null, masked: 0, deviceId: null });
+      const hold = () => {
+        let done = null;
+        const p = new Promise((r) => { done = r; });
+        return { p, done: () => done({}) };
+      };
+      const fire = (h) => handlers[0]({ url: () => 'http://127.0.0.1:18080/api/auth/refresh', json: () => h.p });
+      const settle = () => new Promise((r) => setTimeout(r, 20));
+      { // C5a 찍는 중 응답 도착(대기 중) → 직후 대조 뒤 대기 수 1 → 지움
+        const h = hold();
+        const st = { calls: 0, collect: clean, shot: (f) => { writePng(f); fire(h); } };
+        const { ret, kb } = await run('i5', st);
+        h.done();
+        await settle();
+        out.c5shot = gone(ret, kb, 'i5') && rg(kb) === 1;
+      }
+      { // C5b 대기 중 시작 → 직전 대조 앞에서 안 찍음
+        const h = hold();
+        fire(h);
+        const st = { calls: 0, collect: clean, shot: writePng };
+        const { ret, kb } = await run('i6', st);
+        h.done();
+        await settle();
+        out.c5pre = ret === false && st.calls === 0 && !has(up, 'i6-chromium.png') && !has(stage, 'i6-chromium.png') && kb.n4.blocked === 1 && rg(kb) === 1;
+      }
+      { // C5 대조군 — 대기 0(위 응답 끝난 뒤) → 옮김
+        const { ret, kb } = await run('i7', { calls: 0, collect: clean, shot: writePng });
+        out.c5zero = moved(ret, kb, 'i7');
+      }
+      const base = () => ({ verified: 2, shots: 2, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, winDiff: 0, moveFail: 0, planted: false });
+      const a = K.n4Verdict({ ...base(), regGrow: 1 }, 2);
+      const b = K.n4Verdict(base(), 2);
+      out.verdict = `${a.pass}/${a.why} ${b.pass}/${b.why}`;
+      return out;
+    };
+    { // K-C25i R1 그림 전후 대조 등록 목록 시점 · 등록 대기(C5)
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K && typeof K.guardedShot === 'function' && typeof K.watchTokens === 'function') {
+        const x = kChild('k25i', kRegWorld, { K25I_VALUE: `SELFTEST_K25I_${hex()}${hex()}` });
+        const v = x.v || {};
+        const names = ['c0', 'c1', 'c2a', 'c2b', 'c3', 'noFalse', 'c5shot', 'c5pre', 'c5zero'];
+        ok = !!x.v && names.every((n) => v[n] === true) && v.verdict === 'false/device true/null';
+        why = x.v ? `${names.map((n) => `${n} ${v[n]}`).join(' · ')} · 판정 ${v.verdict}` : `rc=${x.code} · 결과 줄 없음 ${x.err}`;
+      }
+      check('K-C25i R1 깨끗 → 옮김 · 시작 전 등록 → 안 찍음(대조군) · 찍는 도중 등록(화면 남음 · 사라짐) → 지움 · 직전 대조 중 등록 → 지움 · 등록 없는 화면 변화 → 옮김 · 응답 읽는 중 → 지움/안 찍음 · 대기 0 → 옮김 · regGrow → 대조 못 함', ok, why);
+    }
+    { // K-C25j R2 화면 예외 이름 — 받을 때 + 찍는 그 시점 재소독
+      const K = kKit();
+      let ok = false;
+      let why = '함수 없음';
+      if (K && typeof K.flushConsole === 'function') {
+        const fn = async (K2) => {
+          const path = require('path');
+          const L2 = require(path.join(path.dirname(process.env.F_KIT), 'lib.js'));
+          const b = process.env.K25J_VALUE;
+          const v0 = `${b}D0`;
+          const v1 = `${b}D1`;
+          const v2 = `${b}D2`;
+          const lines = [];
+          const orig = console.log;
+          console.log = (s) => { lines.push(String(s)); };
+          const handlers = {};
+          const fakePage = { on: (ev, cb) => { handlers[ev] = cb; } };
+          const kb = { browser: 'chromium', consoleLines: 0 };
+          K2.watchConsole({ pages: () => [fakePage], on: () => {} }, kb);
+          const mkErr = (n) => { const e = new Error('x'); e.name = n; return e; };
+          const tail = (a) => {
+            if (a.length !== 1) return `줄 ${a.length}`;
+            if (a[0].endsWith(' TypeError')) return 'TypeError';
+            return a[0].endsWith(' Error') ? 'Error' : '기타';
+          };
+          L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v0); // D0 등록 뒤 예외
+          handlers.pageerror(mkErr(v0));
+          K2.flushConsole(kb);
+          const d0 = lines.splice(0);
+          handlers.pageerror(mkErr(v1)); // D1 예외 뒤 등록 → 찍기
+          const heldRaw = kb.consoleBuf.length === 1 && kb.consoleBuf[0].name === v1; // 받을 때는 아직 모르는 값(대조)
+          L2.maskAndRegister('TOKEN_ACCESS_K_BROWSER', v1);
+          K2.flushConsole(kb);
+          const d1 = lines.splice(0);
+          handlers.console({ type: () => 'error', text: () => `tok ${v2} end` }); // D2 콘솔 본문 같은 순서
+          L2.maskAndRegister('TOKEN_REFRESH_K_BROWSER', v2);
+          K2.flushConsole(kb);
+          const d2 = lines.splice(0);
+          handlers.pageerror(mkErr('TypeError')); // 오탐 대조군
+          K2.flushConsole(kb);
+          const d3 = lines.splice(0);
+          console.log = orig;
+          return {
+            d0: tail(d0), d0Has: d0.some((s) => s.includes(v0)), heldRaw,
+            d1: tail(d1), d1Has: d1.some((s) => s.includes(v1)),
+            d2Masked: d2.some((s) => s.includes('***')), d2Has: d2.some((s) => s.includes(v2)), d3: tail(d3),
+          };
+        };
+        const x = kChild('k25j', fn, { K25J_VALUE: `SELFTEST_K25J_${hex()}` });
+        const v = x.v || {};
+        ok = !!x.v && v.d0 === 'Error' && v.d0Has === false && v.heldRaw === true && v.d1 === 'Error' && v.d1Has === false
+          && v.d2Masked === true && v.d2Has === false && v.d3 === 'TypeError';
+        why = x.v ? `D0 ${v.d0} · 값 ${v.d0Has} / D1 받을 때 원래 이름(대조) ${v.heldRaw} · 찍음 ${v.d1} · 값 ${v.d1Has} / D2 가림 ${v.d2Masked} · 값 ${v.d2Has} / 대조군 ${v.d3}` : `rc=${x.code} · 결과 줄 없음 ${x.err}`;
+      }
+      check('K-C25j R2 화면 예외 이름 · 등록 뒤 예외 → Error(대조군) · 예외 뒤 등록 → 찍을 때 Error · 콘솔 본문 같은 순서 → 가림 · 정상 이름 TypeError 그대로', ok, why);
+    }
     // ── 🔴 K 연결 4차(첫 K 런 뒤) — 종 길 진단 글(순수) ──
     //   K-C26a 사유 = 고정 낱말 + 가로막은 요소 태그·클래스만(원문 줄 0 · 제어 글자 0 · 길이 상한) · 숫자 = 정수만(글자 값 → ?)
     //   K-C26b 사유 소독 = 등록값 가림(자식 프로세스) · 항목 클릭 실패 뒤 다시 누르지 않음(글자 · 주석 뺀 줄)

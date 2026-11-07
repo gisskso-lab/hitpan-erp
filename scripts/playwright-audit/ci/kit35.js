@@ -133,7 +133,9 @@ function consoleLine(text, cap = 300) {
 function flushConsole(kb) {
   const buf = Array.isArray(kb.consoleBuf) ? kb.consoleBuf.splice(0) : [];
   for (const x of buf) {
-    if (x.kind === 'pageerror') console.log(`K 브라우저 화면 예외(${kb.browser}) ${x.name}`);
+    // ⬛ [낡은 줄 · R1/R2] if (x.kind === 'pageerror') console.log(`K 브라우저 화면 예외(${kb.browser}) ${x.name}`);
+    // 🔴 R2(11/7 · 작업지시서 20261107작 §5) — 받을 때 1회(watchConsole) + 찍는 그 시점 등록 목록으로 이름 한 번 더(받은 뒤 등록된 값과 같으면 Error).
+    if (x.kind === 'pageerror') console.log(`K 브라우저 화면 예외(${kb.browser}) ${L.errorName({ name: x.name })}`);
     else console.log(`K 브라우저 콘솔(오류 · ${kb.browser}) ${consoleLine(x.text)}`);
   }
   return buf.length;
@@ -253,10 +255,14 @@ async function blockExternal(context, r, tally) {
   });
 }
 
+// 🔴 R1 · P2(11/7 · 작업지시서 20261107작 §9 P2 · C5 창 「화면 먼저 · 등록 나중」) — 로그인·갱신 응답 본문을 아직 읽는 중인 손잡이 수(모듈 칸 · 값 0 · 수만).
+//   guardedShot 이 찍기 직전 대조 앞 · 찍은 직후 대조 뒤 두 번 보고 0 이 아니면 「대조 못 함」(그 응답의 토큰이 화면에 먼저 그려졌을 수 있다).
+let pendingTokenReads = 0;
 // ③ 로그인·갱신 응답 토큰 — 받는 즉시 가림·등록.
 function watchTokens(context, tok) {
   context.on('response', async (res) => {
     if (!/\/api\/auth\/(login|refresh)(\?|$)/i.test(res.url())) return;
+    pendingTokenReads += 1; // 🔴 P2 — 토큰 길의 첫 줄 · 첫 await 전(거른 응답은 위 줄에서 동기로 돌아가 셈과 무관)
     try {
       const j = await res.json();
       const access = j && (j.accessToken || j.AccessToken);
@@ -267,6 +273,8 @@ function watchTokens(context, tok) {
       if (dev) tok.deviceId = String(dev);
     } catch (e) {
       console.log(`K 토큰 가로채기: 본문 읽기 실패 (원문 생략 · ${L.errorName(e)})`);
+    } finally {
+      pendingTokenReads -= 1; // 🔴 P2 — 등록(또는 실패) 뒤에만 내린다
     }
   });
 }
@@ -634,6 +642,7 @@ async function guardedShot(kb, label) {
   const stage = stageDir(kb.browser);
   if (!stageOutside(stage)) throw new KitContractError('guardedShot: 임시 자리가 업로드 자리 안');
   const registered = registeredValues();
+  const reg0 = L.collectSecrets().length; // 🔴 R1 ①(§4-1) — 시작 등록 수(위 줄과 같은 동기 구간 · await 0 · 수만)
   // 측정 가지 표지(plant.flags 에 n4) — 등록값 하나를 본 창 글자로 심는다(값은 화면에만 · 출력 0). 기대 = 안 찍힘 · N4 거짓.
   if (kb.plantN4 && !n4.planted && page && !page.isClosed()) {
     const v = process.env.UI_PW_GA || '';
@@ -645,6 +654,13 @@ async function guardedShot(kb, label) {
       d.style.cssText = 'position:fixed;bottom:4px;left:4px;z-index:2147483647;background:#fff;';
       document.body.appendChild(d);
     }, v), EVAL_MS, 'N4 심기').then(() => { n4.planted = true; }, (e) => console.log(`K N4 심기 실패 ${L.errorName(e)}`));
+  }
+  // 🔴 P2(C5) — 찍기 직전 대조 앞: 토큰 응답 본문 읽는 중이면 안 찍음 · 「대조 못 함」(R1 ③ 과 같은 셈 regGrow · 로그는 수만).
+  if (pendingTokenReads > 0) {
+    n4.blocked += 1;
+    n4.regGrow = (n4.regGrow || 0) + 1;
+    console.log(`K 그림 안 찍음 ${label} — 등록 대기 중 ${pendingTokenReads} (대조 못 함)`);
+    return false;
   }
   const pre = await scanAll(context, registered);
   if (pre.hits > 0 || pre.pwOpen > 0 || pre.errs > 0 || pre.frames === 0) {
@@ -671,13 +687,20 @@ async function guardedShot(kb, label) {
       if (fs.existsSync(src) && !rmQuiet(src, '실패한 그림 지우기')) n4.delFail += 1;
     }
   }
-  const post = await scanAll(context, registered);
+  // ⬛ [낡은 줄 · R1/R2] const post = await scanAll(context, registered);
+  // 🔴 R1 ②(§4-2) — 직후 대조 목록은 지금 다시 모은다(찍는 도중 등록된 값도 대조 · C2).
+  const post = await scanAll(context, registeredValues());
+  // 🔴 R1 ③(§4-3) · P2 — 직후 대조 await 바로 다음 줄. 이 판정 뒤 이름 바꾸기까지 await 0 → 판정 뒤 등록은 이번 그림에 끼어들 수 없다.
+  const grew = L.collectSecrets().length > reg0;
+  const waitN = pendingTokenReads;
   const winSame = sameSet(pre.ids, shotIds) && sameSet(shotIds, post.ids);
-  const bad = post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0 || !winSame;
+  // ⬛ [낡은 줄 · R1/R2] const bad = post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0 || !winSame;
+  const bad = post.hits > 0 || post.pwOpen > 0 || post.errs > 0 || post.frames === 0 || !winSame || grew || waitN > 0;
   if (bad) {
     if (post.hits > 0 || post.pwOpen > 0) n4.hits += 1;
     if (post.errs > 0 || post.frames === 0) n4.errs += 1;
     if (!winSame) n4.winDiff += 1;
+    if (grew || waitN > 0) n4.regGrow = (n4.regGrow || 0) + 1; // 🔴 R1 ④ · P2 — 초깃값 없는 자리 대비(k35-popup.js 무접촉)
     let fail = 0;
     for (const s of staged) if (!rmQuiet(s.src, '그림 지우기')) fail += 1;
     if (fail > 0) {
@@ -689,7 +712,8 @@ async function guardedShot(kb, label) {
       }
     }
     n4.removed += 1;
-    console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 창 집합 ${winSame ? '같음' : '다름'} · 지우기 실패 ${fail} (업로드 자리 옮김 0)`);
+    // ⬛ [낡은 줄 · R1/R2] console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 창 집합 ${winSame ? '같음' : '다름'} · 지우기 실패 ${fail} (업로드 자리 옮김 0)`);
+    console.log(`K 그림 지움 ${label} — 찍은 직후 대조 걸림 ${post.hits} · 가림형 아닌 비밀번호 칸 ${post.pwOpen} · 예외 ${post.errs} · 창 집합 ${winSame ? '같음' : '다름'} · 지우기 실패 ${fail} (업로드 자리 옮김 0) · 대조 중 등록 늘어남 ${grew ? '예' : '아니오'} · 등록 대기 중 ${waitN}`);
     return false;
   }
   // 옮김 — 봉인 확인과 이름 바꾸기 사이에 기다림(await) 0
@@ -719,7 +743,9 @@ async function guardedShot(kb, label) {
 //   forced = 예외 길(프로세스 밖 예외 · 시간 상한 · 신호) — 셈과 무관하게 거짓.
 function n4Verdict(n4, masked, forced = false) {
   const leak = n4.hits > 0 || n4.delFail > 0;
-  const noCheck = masked === 0 || n4.verified === 0 || n4.errs > 0 || (n4.winDiff || 0) > 0;
+  // ⬛ [낡은 줄 · R1/R2] const noCheck = masked === 0 || n4.verified === 0 || n4.errs > 0 || (n4.winDiff || 0) > 0;
+  // 🔴 R1 ⑥(§4-6) · P2 — 대조 중 등록 늘어남 · 등록 대기 중(regGrow) 도 「대조 못 함(장치)」. 칸 없는 자리 = 0.
+  const noCheck = masked === 0 || n4.verified === 0 || n4.errs > 0 || (n4.winDiff || 0) > 0 || (n4.regGrow || 0) > 0;
   const pass = !forced && !leak && !noCheck;
   const why = pass ? null : (leak ? 'leak' : 'device');
   return { pass, why };
@@ -727,7 +753,9 @@ function n4Verdict(n4, masked, forced = false) {
 function n4Got(kb, v, forcedWhy) {
   const n4 = kb.n4;
   const head = v.pass ? 'N4 통과' : J.N4_WHY[v.why];
-  return `${head}${forcedWhy ? ` · 강제 거짓(${forcedWhy})` : ''} · 가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 창 집합 다름 ${n4.winDiff || 0} · 옮기기 실패 ${n4.moveFail || 0} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
+  // ⬛ [낡은 줄 · R1/R2] return `${head}${forcedWhy ? ` · 강제 거짓(${forcedWhy})` : ''} · 가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 창 집합 다름 ${n4.winDiff || 0} · 옮기기 실패 ${n4.moveFail || 0} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
+  // 🔴 R1 ⑥(§4-6) · P2 — 창 집합 다름 뒤에 한 칸(수만)
+  return `${head}${forcedWhy ? ` · 강제 거짓(${forcedWhy})` : ''} · 가린 K 토큰 ${kb.tok.masked} · 대조 통과 그림 묶음 ${n4.verified}(파일 ${n4.shots}) · 안 찍음 ${n4.blocked} · 찍고 지움 ${n4.removed} · 걸림 ${n4.hits} · 대조 예외 ${n4.errs} · 창 집합 다름 ${n4.winDiff || 0} · 대조 중 등록 늘어남/등록 대기 중 ${n4.regGrow || 0} · 옮기기 실패 ${n4.moveFail || 0} · 지우기 실패 ${n4.delFail}${n4.planted ? ' · 심은 값 있음(측정)' : ''} · 그림 픽셀 = 미측정`;
 }
 // 표지 쓰기 — 실패해도 던지지 않는다(뒤 기록이 이어지게 · 업로드 자리엔 이미 대조 지난 그림만 있다).
 function markN4Hit(where) {
