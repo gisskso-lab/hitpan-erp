@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace HitPan.Backoffice.Controllers;
 
@@ -25,12 +26,17 @@ public class BackofficeAuthController : Controller
     private readonly BackofficeService _bo;
     private readonly ILogger<BackofficeAuthController> _logger;
     private readonly IAntiforgery _antiforgery;
+    // 20261107작 3회차(PM 결재 11/8): 인증 쿠키 이름을 글자로 쓰지 않고 쿠키 인증 설정(Program.cs AddCookie)에서 읽는다.
+    private readonly IOptionsMonitor<CookieAuthenticationOptions> _cookieOptions;
 
-    public BackofficeAuthController(BackofficeService bo, ILogger<BackofficeAuthController> logger, IAntiforgery antiforgery)
+    // ⬛ 옛 줄(20261107작 3회차): public BackofficeAuthController(BackofficeService bo, ILogger<BackofficeAuthController> logger, IAntiforgery antiforgery)
+    public BackofficeAuthController(BackofficeService bo, ILogger<BackofficeAuthController> logger, IAntiforgery antiforgery,
+        IOptionsMonitor<CookieAuthenticationOptions> cookieOptions)
     {
         _bo = bo;
         _logger = logger;
         _antiforgery = antiforgery;
+        _cookieOptions = cookieOptions;
     }
 
     // 봉합 2026-07-07 (사장님 결재): antiforgery 토큰 만료/무효 시 400 dead-end 대신 로그인 재진입.
@@ -105,10 +111,19 @@ public class BackofficeAuthController : Controller
     {
         // 20261107작 2회차 ①(PM 결재 11/7): 이미 로그인 상태가 아니면(다른 탭에서 먼저 나감 · 화면을 열어 둔 채 쿠키 만료)
         //   위조방지 확인 전에 안내 없이 로그인 화면으로 — 나갈 것이 없으니 「끝나지 않았습니다」 오발 0.
+        // ⬛ 옛 주석(2회차) — 거짓으로 판명([4] 2회차 X: SameSite=Lax 라 다른 사이트 POST 에 쿠키가 안 실려 로그인한 사람도 비로그인으로 보인다):
         //   남은 쿠키 지우기 시도는 무해(지울 로그인이 없다 · 다른 출처가 눌러도 잃을 것 0).
+        // 20261107작 3회차(PM 결재 11/8): 바른 이유 — 「서버에 비로그인으로 보임」 ≠ 「실제로 비로그인」.
+        //   SameSite 는 보내기만 막고 받기는 막지 않는다 → 쿠키 없는 요청에 지우기를 실어 보내면 로그인한 사람의 쿠키가 지워진다(로그아웃 위조).
+        //   그래서 지우기는 요청에 인증 쿠키가 실제로 실렸을 때만 — 실렸는데 비로그인 = 토큰 만료로 OnValidatePrincipal 이 거절(이미 지움 ·
+        //   두 번 지워도 무해) 또는 풀 수 없는 쿠키 → 지우는 것이 맞다 · 안 실림 = 이 요청 안에 지울 것이 없다 → 지우기 응답 0.
+        //   쪼개진 쿠키도 기본 이름 칸(이름=chunks-N)이 늘 함께 간다(.NET 8 ChunkingCookieManager · 개발명세서 3회차 절).
         if (User.Identity?.IsAuthenticated != true)
         {
-            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            // ⬛ 옛 줄(20261107작 2회차): await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            var cookieName = _cookieOptions.Get(CookieAuthenticationDefaults.AuthenticationScheme).Cookie.Name;
+            if (!string.IsNullOrEmpty(cookieName) && Request.Cookies.ContainsKey(cookieName))
+                await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return LocalRedirect("/backoffice/login");
         }
 
