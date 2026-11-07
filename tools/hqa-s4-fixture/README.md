@@ -130,6 +130,8 @@ node tools/hqa-s4-fixture/proxy/delay-proxy.js 5800 150
 | `wwwroot/css/common/app.css` | `src/HitPan.Backoffice/wwwroot/app.css` | `e456e4f6…` | `73a69d6f6829d98de0cfe14f8f9179e7bc318232` |
 | `wwwroot/css/common/bootstrap.min.css` | `src/HitPan.Backoffice/wwwroot/lib/bootstrap/dist/css/bootstrap.min.css` | `e456e4f6…` | `39934146ffdc3af1e17b83657576b2d21f3cbecd` |
 
+- 두 `backoffice-dashboard.css` 의 머리 주석(2~3줄)에는 레포 금지어 목록에 든 낱말이 있다. 제품 원본의 글자이고(main 의 같은 파일에도 같은 줄), 해시 대조를 지키려고 바꾸지 않았다 — 동작과 무관한 주석이다. 제품 쪽 주석 정리는 S4 머지 뒤 별건으로 다룬다(지금 고치면 고친 꼴 해시가 바뀐다).
+
 대조 예:
 
 ```bash
