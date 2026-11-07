@@ -49,6 +49,8 @@ public class JsCacheTagGateTests
     {
         // 파일명, 기대 꼬리표, 기대 SHA256(줄바꿈 LF 정규화 후)
         { "storage.js", "20261024a", "9f4023cffda41ea8366d6a4102c05e279d241b362ab001d26a79f9e452c364a5" },
+        // 20261028작G1-1 (K35) — openRoom 추가. 꼬리표 없으면 옛 판이 남은 PC 는 알림이 팝업 대신 본 창으로만 간다([4] F1).
+        { "hitpan-chat-window.js", "20261028a", "1d1e4dcddb5304931c0075865bff1874784c5a6b1570c787d8625416680bf346" },
     };
 
     private static string WebRoot()
