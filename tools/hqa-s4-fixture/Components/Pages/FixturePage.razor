@@ -1,0 +1,160 @@
+@page "/before"
+@page "/after"
+@inject NavigationManager Nav
+@*
+    HQA 관문 ① 직접 실측용 화면 — 백오피스 AdminCsListPage.razor 의 목록 구획(좌 7 · 우 5 · MudDataGrid · 상태 칸)만 옮겼다.
+    · 데이터는 가짜(FixtureData.Build) · 상태를 고르면 이 화면 안 기록만 바뀐다(서버 저장 0 · DB 0).
+    · 행 클릭 = 오른쪽 「상세 열림」 표시 + 행 클릭 기록(상태 칸 누름이 행 클릭으로 새는지 재는 자리).
+    · 상태 칸은 Components/Before · Components/After 의 원문 컴포넌트를 그대로 쓴다.
+*@
+
+<PageTitle>HQA S4 — @(IsAfter ? "고친 꼴" : "고침 전")</PageTitle>
+
+<div id="fixture-root" data-variant="@Variant" style="padding:8px 16px; padding-left:@(PadL)px">
+    <div style="font-size:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+        <strong id="variant-label">@(IsAfter ? "고친 꼴" : "고침 전") · 원 커밋 @(IsAfter ? AfterSha : BeforeSha)</strong>
+        <span id="query-echo">rows=@Rows · pager=@(Pager ? 1 : 0) · rpp=@Rpp · special=@(Special ? 1 : 0) · md=@Md · padl=@PadL</span>
+        <button id="switch-variant" type="button" @onclick="SwitchVariant">@(IsAfter ? "고침 전으로" : "고친 꼴로")</button>
+    </div>
+    <button id="before" type="button" style="font-size:11px">앞 (초점 출발점)</button>
+
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="@Md">
+            <div class="bo-list-section">
+                <div class="bo-list-section__head">
+                    <span class="bo-list-section__title">고객A/S 목록 (가짜)</span>
+                    <span class="bo-list-section__count">가짜 <strong>@_rows.Count.ToString("N0")</strong>건</span>
+                </div>
+                <MudDataGrid T="FixtureRow" Items="_rows"
+                             Hover="true" Dense="true" SortMode="SortMode.Single"
+                             RowsPerPage="@Rpp"
+                             RowClick="@(e => OnRowClick(e.Item))">
+                    <Columns>
+                        <PropertyColumn Property="x => x.CompanyName" Title="고객사" />
+                        <TemplateColumn Title="분류">
+                            <CellTemplate>
+                                <span>@CsVocab.CategoryLabel(context.Item.Category)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="접수 경로">
+                            <CellTemplate>
+                                <span>@CsVocab.ChannelLabel(context.Item.Channel)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="응대유형">
+                            <CellTemplate>
+                                <span>@CsVocab.HandledViaTextFor(context.Item.Channel, context.Item.HandledVia)</span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="상태">
+                            <CellTemplate>
+                                <div data-row="@context.Item.Id" data-status-kind="@context.Item.StatusKind">
+                                    @if (IsAfter)
+                                    {
+                                        <HqaS4Fixture.Components.After.CsStatusCell Status="@(context.Item.Status!)" Channel="@context.Item.Channel"
+                                                                                     ReadAt="context.Item.ReadAt" Rating="context.Item.Rating"
+                                                                                     OnPick="@(s => OnPick(context.Item, s))" />
+                                    }
+                                    else
+                                    {
+                                        <HqaS4Fixture.Components.Before.CsStatusCell Status="@(context.Item.Status!)" Channel="@context.Item.Channel"
+                                                                                      ReadAt="context.Item.ReadAt" Rating="context.Item.Rating"
+                                                                                      OnPick="@(s => OnPick(context.Item, s))" />
+                                    }
+                                </div>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <PropertyColumn Property="x => x.ReceivedAt" Title="접수" Format="MM-dd HH:mm" />
+                        <PropertyColumn Property="x => x.ReplyCount" Title="답" />
+                    </Columns>
+                    <PagerContent>
+                        @if (Pager)
+                        {
+                            <MudDataGridPager T="FixtureRow" />
+                        }
+                    </PagerContent>
+                </MudDataGrid>
+            </div>
+        </MudItem>
+
+        <MudItem xs="12" md="@(12 - Md)">
+            <div class="bo-list-section" style="padding:12px">
+                @if (_detail is null)
+                {
+                    <div id="detail" data-open="0">상세 닫힘 — 왼쪽 목록에서 줄을 누르면 여기에 「상세 열림」이 뜬다.</div>
+                }
+                else
+                {
+                    <div id="detail" data-open="1" data-row="@_detail.Id">상세 열림 — #@_detail.Id @_detail.CompanyName · 상태 「@(_detail.Status ?? "(null)")」</div>
+                }
+                <div style="font-size:12px; margin-top:8px">
+                    <div>행 클릭 <span id="rowclick-count">@_rowClicks.Count</span>회 · 기록 <span id="rowclicks">@string.Join(",", _rowClicks)</span></div>
+                    <div>상태 고름 <span id="pick-count">@_picks.Count</span>회 · 기록 <span id="picks">@string.Join(",", _picks)</span></div>
+                </div>
+            </div>
+        </MudItem>
+    </MudGrid>
+
+    <div id="blank" style="height:200px">빈 자리 (바깥 누름용)</div>
+</div>
+
+@code {
+    const string BeforeSha = "b54732eb";
+    const string AfterSha = "e456e4f6";
+
+    /// <summary>줄 수(기본 24 · 1~2000).</summary>
+    [SupplyParameterFromQuery(Name = "rows")] public int? RowsQ { get; set; }
+    /// <summary>쪽 나눔(기본 1 = 백오피스와 같이 켬 · 0 = 끔 → 쪽당 줄 수 = 줄 수, 한 쪽에 다 보임).</summary>
+    [SupplyParameterFromQuery(Name = "pager")] public int? PagerQ { get; set; }
+    /// <summary>쪽당 줄 수(기본 10 = MudDataGrid 9.3 기본값 · pager=0 이면 무시).</summary>
+    [SupplyParameterFromQuery(Name = "rpp")] public int? RppQ { get; set; }
+    /// <summary>특수 줄(공백 · 빈 · null · 예전 기록) 넣기(기본 1).</summary>
+    [SupplyParameterFromQuery(Name = "special")] public int? SpecialQ { get; set; }
+    /// <summary>목록 칸 너비(MudItem md · 기본 7 = 백오피스와 같음 · 1~12).</summary>
+    [SupplyParameterFromQuery(Name = "md")] public int? MdQ { get; set; }
+    /// <summary>바깥 왼쪽 여백 px(기본 16 · 0~2000) — 목록이 오른쪽 끝에 붙는 자리 재기용.</summary>
+    [SupplyParameterFromQuery(Name = "padl")] public int? PadLQ { get; set; }
+
+    int Rows => Math.Clamp(RowsQ ?? 24, 1, 2000);
+    bool Pager => (PagerQ ?? 1) != 0;
+    int Rpp => Pager ? Math.Clamp(RppQ ?? 10, 1, 2000) : Rows;
+    bool Special => (SpecialQ ?? 1) != 0;
+    int Md => Math.Clamp(MdQ ?? 7, 1, 12);
+    int PadL => Math.Clamp(PadLQ ?? 16, 0, 2000);
+
+    bool IsAfter;
+    string Variant => IsAfter ? "after" : "before";
+
+    List<FixtureRow> _rows = new();
+    FixtureRow? _detail;
+    readonly List<int> _rowClicks = new();
+    readonly List<string> _picks = new();
+
+    protected override void OnInitialized()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath;
+        IsAfter = path.StartsWith("/after", StringComparison.OrdinalIgnoreCase);
+        _rows = FixtureData.Build(Rows, Special);
+    }
+
+    void OnRowClick(FixtureRow row)
+    {
+        _detail = row;
+        _rowClicks.Add(row.Id);
+    }
+
+    // 백오피스 PickStatusAsync 자리 — 여기서는 화면 안 값만 바꾼다(서버 · DB 0).
+    void OnPick(FixtureRow row, string status)
+    {
+        row.Status = status;
+        row.StatusKind = FixtureData.KindOf(row.Channel, status);
+        _picks.Add($"{row.Id}:{status}");
+    }
+
+    void SwitchVariant()
+    {
+        var uri = new Uri(Nav.Uri);
+        var target = (IsAfter ? "/before" : "/after") + uri.Query;
+        Nav.NavigateTo(target, forceLoad: true);
+    }
+}

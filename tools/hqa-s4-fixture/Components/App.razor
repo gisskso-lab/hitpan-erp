@@ -1,0 +1,36 @@
+@*
+    백오피스 App.razor 와 같은 순서로 같은 CSS 를 싣는다. 다른 점은 둘:
+      · 상태 칸 CSS(backoffice-dashboard.css)를 주소에 따라 고른다 — /after 는 고친 꼴 · 그 밖(/before · /)은 고침 전.
+      · 바깥 글꼴(Google Material Icons)과 범위 CSS 묶음(*.styles.css)은 싣지 않는다 — 바깥 망 의존 0 · 상태 칸 범위 CSS 0.
+    App 는 정적으로 한 번 그려진다 → 판을 바꿀 때는 주소를 새로 연다(화면 안 단추도 강제 새로고침으로 옮긴다).
+*@
+@{
+    var path = HttpContext?.Request.Path.Value ?? "";
+    var variant = path.StartsWith("/after", StringComparison.OrdinalIgnoreCase) ? "after" : "before";
+}
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="css/common/bootstrap.min.css" />
+    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="css/common/backoffice-v2.css" />
+    <link rel="stylesheet" href="css/@variant/backoffice-dashboard.css" data-fixture-css="@variant" />
+    <link rel="stylesheet" href="css/common/app.css" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+}

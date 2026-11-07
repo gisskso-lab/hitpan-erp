@@ -1,0 +1,12 @@
+@page "/"
+@inject NavigationManager Nav
+
+<PageTitle>HQA S4 시험 앱</PageTitle>
+
+<div style="padding:16px">
+    <h1 style="font-size:18px">HQA S4 시험 앱 (가짜 데이터 · 운영 아님)</h1>
+    <p style="font-size:13px">상태 칸 고침 전과 고친 꼴을 같은 가짜 목록 위에서 띄운다. 주소를 직접 열어도 된다.</p>
+    @* 판마다 CSS 가 다르다(App.razor 가 주소로 고른다) → 화면 안 이동이 아니라 새로 연다 *@
+    <button id="go-before" type="button" @onclick="@(() => Nav.NavigateTo("/before", forceLoad: true))">고침 전 (/before)</button>
+    <button id="go-after" type="button" @onclick="@(() => Nav.NavigateTo("/after", forceLoad: true))">고친 꼴 (/after)</button>
+</div>

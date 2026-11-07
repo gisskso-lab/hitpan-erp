@@ -1,0 +1,14 @@
+@* 백오피스 Routes.razor 와 같은 공급자 넷. 사이드바 · 머리줄(MainLayout)은 넣지 않는다(README 「운영과 다른 점」). *@
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" />
+    </Found>
+    <NotFound>
+        <p role="alert">페이지를 찾을 수 없습니다.</p>
+    </NotFound>
+</Router>

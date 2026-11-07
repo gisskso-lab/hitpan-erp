@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    HQA 관문 ① 직접 실측용 시험 앱 (가짜 데이터 · 운영 아님).
+    레포 루트 솔루션에 넣지 않는다 — CI 빌드 대상이 아니다. 단독으로 dotnet build / dotnet run 한다.
+    대상 틀 · 화면 꾸러미 판은 백오피스(src/HitPan.Backoffice)와 같게 둔다: net8.0 · MudBlazor 9.3.0.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HqaS4Fixture</RootNamespace>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" Version="9.3.0" />
+  </ItemGroup>
+
+</Project>
