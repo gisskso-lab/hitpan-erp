@@ -5,6 +5,12 @@
    방식: FocusOnNavigate 와 같은 기준(페이지 형식이 바뀔 때)을 쓴다 — 첫 렌더의 페이지 형식을 기억하고,
    다른 페이지 형식으로 한 번이라도 이동한 뒤부터 FocusOnNavigate 를 그린다. 그 뒤 동작은 FocusOnNavigate 원본 그대로.
    이벤트 구독 0(Router 가 매 이동마다 새 RouteData 로 이 구성요소를 다시 그린다) → 해제할 것 없음. *@
+@* 20261107작 F6 3회차(작업지시서 §16) — 「회로 안 이동이 있었나」 를 이 인스턴스가 스스로 판단하지 않고 Routes 에서 받는다(CircuitHasNavigated).
+   이유: 경로 없음(NotFound) 화면이 그려지면 이 인스턴스가 사라졌다가 정상 화면에서 새로 생겨 「회로 첫 렌더」 로 잘못 봤다
+   → 정상 화면으로 돌아와도 h1 초점이 안 옮겨짐([4] 2회차 2-5 ①). 인스턴스 수명 ≠ 회로 수명.
+   동작: (가) 이동 전 → 안 그림 · (나) 이동 뒤 이 인스턴스가 처음 매개변수를 받는 중(NotFound 뒤 다시 생김) → 바로 그림
+   · (다) 이동 뒤 페이지 형식이 바뀜 → 그림 / 같은 페이지 형식에 질의만 바뀜 → 안 그림. 한 번 그리기 시작하면 계속 그린다.
+   이 구성요소 자체는 여전히 이벤트 구독 0(구독 · 해제는 Routes). *@
 @if (_armed)
 {
     <FocusOnNavigate RouteData="RouteData" Selector="@Selector" />
@@ -17,8 +23,14 @@
     /// <summary>초점을 옮길 요소의 CSS 선택자 — FocusOnNavigate 에 그대로 넘긴다.</summary>
     [Parameter, EditorRequired] public string? Selector { get; set; }
 
-    private bool _seenFirstRender;
-    private Type? _firstPageType;
+    /// <summary>회로 안 화면 이동이 한 번이라도 있었나 — Routes(회로마다 하나)가 LocationChanged 로 기록해 넘긴다.</summary>
+    [Parameter, EditorRequired] public bool CircuitHasNavigated { get; set; }
+
+    // ⬛ 옛 줄(20261107작 F6 3회차) — 인스턴스 필드로 회로 첫 렌더를 판단 → NotFound 뒤 새 인스턴스가 첫 렌더로 오인:
+    // private bool _seenFirstRender;
+    // private Type? _firstPageType;
+    private bool _receivedParameters; // 이 인스턴스가 매개변수를 한 번이라도 받았나 — false 면 지금이 이 인스턴스의 첫 매개변수
+    private Type? _lastPageType;      // 아직 안 그리는 동안 마지막으로 받은 페이지 형식
     private bool _armed;
 
     protected override void OnParametersSet()
@@ -28,19 +40,51 @@
             throw new InvalidOperationException($"{nameof(FocusOnNavigateAfterFirst)} 에는 {nameof(RouteData)} 값이 있어야 합니다.");
         }
 
-        if (!_seenFirstRender)
+        // ⬛ 옛 줄(20261107작 F6 3회차):
+        // if (!_seenFirstRender)
+        // {
+        //     // 회로 첫 렌더(전체 문서 로드 직후) — 초점을 옮기지 않는다.
+        //     _seenFirstRender = true;
+        //     _firstPageType = RouteData.PageType;
+        //     return;
+        // }
+        //
+        // if (!_armed && RouteData.PageType != _firstPageType)
+        // {
+        //     // 회로 안 첫 화면 이동 — 여기서부터 FocusOnNavigate 를 그린다.
+        //     // 새로 만들어진 FocusOnNavigate 는 첫 OnParametersSet 에서 페이지 형식이 바뀐 것으로 보고 렌더 뒤 초점을 옮긴다.
+        //     _armed = true;
+        // }
+
+        if (_armed)
         {
-            // 회로 첫 렌더(전체 문서 로드 직후) — 초점을 옮기지 않는다.
-            _seenFirstRender = true;
-            _firstPageType = RouteData.PageType;
+            // 한 번 그리기 시작하면 계속 그린다 — 그 뒤 동작은 FocusOnNavigate 원본 그대로.
             return;
         }
 
-        if (!_armed && RouteData.PageType != _firstPageType)
+        if (!CircuitHasNavigated)
         {
-            // 회로 안 첫 화면 이동 — 여기서부터 FocusOnNavigate 를 그린다.
+            // (가) 회로 안 이동 전(회로 첫 렌더 · 전체 문서 로드 직후) — 초점을 옮기지 않는다.
+            _receivedParameters = true;
+            _lastPageType = RouteData.PageType;
+            return;
+        }
+
+        if (!_receivedParameters)
+        {
+            // (나) 이동은 있었고 이 인스턴스는 지금 처음 생김(NotFound 뒤 정상 화면 · 없는 주소 전체 로드 뒤 처음 정상 화면)
+            //      — 원본 FocusOnNavigate 도 이때 새 인스턴스라 초점을 옮긴다 → 바로 그린다.
+            _armed = true;
+        }
+        else if (RouteData.PageType != _lastPageType)
+        {
+            // (다) 이동 뒤 페이지 형식이 바뀜 — 여기서부터 FocusOnNavigate 를 그린다.
             // 새로 만들어진 FocusOnNavigate 는 첫 OnParametersSet 에서 페이지 형식이 바뀐 것으로 보고 렌더 뒤 초점을 옮긴다.
             _armed = true;
         }
+        // 같은 페이지 형식에 질의만 바뀐 이동 → 안 그림(원본도 초점을 안 옮긴다).
+
+        _receivedParameters = true;
+        _lastPageType = RouteData.PageType;
     }
 }

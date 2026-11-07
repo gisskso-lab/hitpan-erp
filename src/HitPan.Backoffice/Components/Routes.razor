@@ -1,3 +1,12 @@
+@* 20261107작 F6 3회차(작업지시서 §16) — 「회로 안에서 화면 이동이 한 번이라도 있었나」 는 회로 단위 사실이라
+   회로마다 하나 · Router 바깥 · 경로 없음(NotFound) 화면에도 살아 있는 이 구성요소가 기록해 FocusOnNavigateAfterFirst 에 넘긴다.
+   이유: 2회차는 이 사실을 FocusOnNavigateAfterFirst 인스턴스 필드에 담았는데, NotFound 가 그려지면 Found 안 인스턴스가 사라졌다가
+   정상 화면에서 새로 만들어져 「회로 첫 렌더」 로 잘못 보고 h1 초점을 안 옮겼다([4] 2회차 2-5 ① 12/12).
+   구독 순서: 이 구성요소의 OnInitialized 구독이 자식 Router 의 Attach 구독보다 먼저라(개발명세서 3회차 3-2)
+   이동 알림 때 이 처리기가 Router 의 다시 그리기보다 먼저 돈다. 구독 해제 = Dispose. *@
+@implements IDisposable
+@inject NavigationManager Nav
+
 <MudThemeProvider />
 <MudPopoverProvider />
 <MudDialogProvider />
@@ -7,7 +16,8 @@
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
         @* ⬛ 옛 줄(20261107작 F6 2회차) — 회로 첫 렌더 직후 초점을 h1 으로 끌어가 먼저 누른 입력칸 글자 유실: <FocusOnNavigate RouteData="routeData" Selector="h1" /> *@
-        <FocusOnNavigateAfterFirst RouteData="routeData" Selector="h1" />
+        @* ⬛ 옛 줄(20261107작 F6 3회차) — 회로 안 이동 여부를 인스턴스가 스스로 판단 → NotFound 뒤 새 인스턴스가 첫 렌더로 오인: <FocusOnNavigateAfterFirst RouteData="routeData" Selector="h1" /> *@
+        <FocusOnNavigateAfterFirst RouteData="routeData" Selector="h1" CircuitHasNavigated="_circuitHasNavigated" />
     </Found>
     <NotFound>
         <LayoutView Layout="typeof(Layout.MainLayout)">
@@ -15,3 +25,26 @@
         </LayoutView>
     </NotFound>
 </Router>
+
+@code {
+    // 회로 안 화면 이동(LocationChanged)이 한 번이라도 있었나 — 회로 첫 렌더(전체 문서 로드 직후) 동안은 false.
+    // Found 조각은 Router 가 그릴 때마다 이 필드를 그 시점 값으로 읽는다(조각 = 이 구성요소를 참조하는 람다).
+    private bool _circuitHasNavigated;
+
+    protected override void OnInitialized()
+    {
+        // 첫 렌더(자식 Router 생성) 전에 구독한다 — 구독 순서가 곧 알림 순서(NavigationManager 단일 멀티캐스트 대리자).
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        // 다시 그리기 요청 안 함 — 값은 이어서 도는 Router 의 다시 그리기가 Found 조각에서 읽어 간다.
+        _circuitHasNavigated = true;
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}
