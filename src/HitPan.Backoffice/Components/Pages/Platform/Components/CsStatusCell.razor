@@ -143,7 +143,10 @@
     private async Task OnCellKeyDownAsync(KeyboardEventArgs e)
     {
         await OnGapKeyAsync(e);   // 🔴 20261108작 S4 F13 — 끼운 한 줄(아래 Esc 길 글자 무변)
-        if (e.Key != "Escape" || _menu is null) return;
+        // ⬛ 20261108작 S4 F12 A2 — 옛 줄(닫힌 때도 아래 CloseAllMenusAsync 를 불러 단추 초점이 1 왕복 늦게 와 Tab 으로 옮긴 초점을 되끌었다 · [4] C1 · C1-b · C1-c 🔴):
+        // if (e.Key != "Escape" || _menu is null) return;
+        // 🔴 20261108작 S4 F12 A2 — 열렸을 때만 닫는다(_open = 9.3 OpenChanged 로 받은 열림 · 아래 F13 필드 재사용 · F13 지시서 D24). 닫혔으면 아무것도 안 함 = 고침 전과 같은 「JS 호출 0」.
+        if (e.Key != "Escape" || _menu is null || !_open) return;
         // ⬛ 20261108작 S4 F12 — 옛 줄(닫기만 · 초점 안 돌려놓음 → 키보드로 연 틈의 Esc 뒤 초점 BODY):
         // await _menu.CloseMenuAsync();
         // 🔴 20261108작 S4 F12 고침 A — 9.3 이 자기 Esc 길(MudMenu.razor.cs L1003)에서 부르는 같은 공개 메서드.
