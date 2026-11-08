@@ -9,26 +9,81 @@
       ② 지금 값이 목록 밖이면(예전부터 「처리중」으로 앉은 수기건) **그대로 보여주고 고르지 못하게** 한다.
          지우거나 다른 값으로 바꿔 적으면 사실이 사라진다(#1).
       ③ 메뉴를 누른 손이 **행 클릭(상세 열기)으로 새지 않는다** — `@onclick:stopPropagation`
+      ④ 목록은 꼬리표 옆에 펼쳐 꼬리표를 덮지 않는다(20261107작 S4)
 *@
 
+@* ⬛ 옛 줄(20261013작2 ~ 20261107작 V2) — 바깥 칸 여는 줄. 마우스로 연 목록에 Esc 가 닿지 않았다([4] 1회차 M12 무반응).
 <div @onclick:stopPropagation="true">
-    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.BottomLeft">
+*@
+@* 🔴 20261107작 S4 E1-a — 9.3 은 Esc 를 목록 쪽 키 가로채기로만 받는다(MudMenu.razor.cs L1071~1082 · L990~997).
+     마우스로 열고 초점이 칸 안 단추에 남으면 Esc 가 안 닿는다 → 바깥 칸에서 Esc 만 받아 닫는다(아래 @code OnCellKeyDownAsync).
+     · preventDefault · stopPropagation 0 — 칸 모든 키에 걸려 엔터·스페이스 열기 · Tab 이동이 죽는다(작업지시서 §12-3 ②). *@
+<div @onclick:stopPropagation="true" @onkeydown="OnCellKeyDownAsync">
+    @* ⬛ 옛 값(20261013작2 ~ 20261107작 갈래 A) — AnchorOrigin="Origin.BottomLeft"
+         아래로 펼쳐, 화면 아래쪽 줄에서 연 목록이 위로 뒤집힌 뒤 화면 위로 당겨져 꼬리표를 덮었다(대표 실물 S4 반려 · 11/7).
+       🔴 20261107작 S4 — 목록 왼쪽 위 = 꼬리표 오른쪽 위(TopRight / TopLeft). 9.3 의 위·아래 뒤집기 · 세로 당김은
+         꼬리표와 가로로 떨어진 자리에서만 일어난다 · 오른쪽이 모자라면 꼬리표 왼쪽으로 뒤집힌다(약속 ④). *@
+    @* ⬛ 옛 줄(20261107작 V3) — 여는 줄. 자리(A1 · TopRight / TopLeft)는 아래 새 여는 줄에 그대로 옮겼다.
+    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft">
+    *@
+    @* 🔴 20261107작 S4 D4(V3 → V2 · 사유 M7) — ActivatorContent 를 쓰지 않고 9.3 내장 단추를 쓴다.
+         · 9.3 MudMenu.razor 의 ActivatorContent 없는 갈래(L47~65) = MudButton(Class="mud-menu-button-activator" · OnClick=ToggleMenuAsync) 하나.
+           키 손잡이를 단 감싼 div(L22~30 · HandleActivatorKeydown)가 없다 → 스페이스는 단추 click 한 번만 남아 「열렸다 닫힘」 길이 없다.
+         · 단추 클래스는 9.3 이 고정한다 → 색은 바깥 div(Class = MudMenu 맨 바깥 div · L6)에 상태 클래스를 주고 CSS 가 안쪽 단추를 칠한다.
+         · title 은 남는 속성 → 바깥 div(L5 @attributes) · 단추 위에 올리면 그대로 보인다.
+         · 행 클릭으로 새지 않음 = 9.3 단추 자체 click 전파 끊음(<button> 이면 기본) + 바깥 div @onclick:stopPropagation(약속 ③). *@
+    @* 🔴 20261107작 S4 E1-a — @ref="_menu" 한 줄만 끼웠다(기존 속성 줄 글자 무변) · Esc 로 닫을 때 CloseMenuAsync(L495) 를 부르는 참조. *@
+    @* ⬛ 옛 줄(20261107작 V2 ~ E1-a) — 아래 여는 태그의 Label 줄. 상태 값이 공백뿐이면 공백이 그대로 넘어가 단추가 숨었다([4] 2회차 T3).
+             Label="@CsVocab.StatusLabel(Status)"
+       🔴 20261107작 S4 T3 — 9.3 MudMenu.razor.cs L414 GetActivatorHidden = ActivatorContent null · IsNullOrWhiteSpace(Label) · IsNullOrWhiteSpace(Icon)
+         셋 다 참이면 L64 「mud-menu-button-hidden」 → 칸이 통째로 사라진다. Label 이 공백뿐이면 「-」(@code ActivatorLabel · CsVocab 무변). *@
+    <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
+             @ref="_menu"
+             Class="@($"bo-status-menu {CsVocab.StatusChipClass(Status)}")"
+             Label="@ActivatorLabel"
+             EndIcon="@Icons.Material.Filled.ArrowDropDown"
+             Ripple="false"
+             title="@PickTitle">
+        @* ⬛ 옛 줄(20261107작 V3) — ActivatorContent 여는 줄. 감싼 div 키 손잡이(엔터·스페이스 keydown)와 단추 click 이 겹쳐
+             스페이스 누름 120ms 에서 「열렸다 닫힘」([4] 1회차 M7) → D4 로 V2 전환. 아래 옛 주석·줄은 지우지 않고 남긴다.
         <ActivatorContent>
+        *@
             @* ⬛ 옛 줄(20261013작2) — 열기 연결이 없어 안 펼쳐졌다(별건 P1 · 11/7)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle">
             *@
-            @* 🔴 20261107작 갈래 A(PM 결정 3V-A1) — 같은 span 에 열기 연결 하나만 단다(ERP #691 알림 종 고침과 같은 꼴).
+            @* ⬛ 옛 줄(20261107작 갈래 A) — 목록이 꼬리표를 덮으면 못 닫음 · 탭 정지 0
+                 바로 아래 주석의 「키보드는 그 감싼 div 가 맡는다」 는 전제가 틀렸다 — 9.3 의 감싼 div 는
+                 display:contents 라 초점을 못 받아 탭이 이 칸을 건너뛴다([1-V] 20261107 D1). 주석 · span 둘 다 지우지 않고 남긴다. *@
+            @* ⬛ (옛 주석) 20261107작 갈래 A(PM 결정 3V-A1) — 같은 span 에 열기 연결 하나만 단다(ERP #691 알림 종 고침과 같은 꼴).
                  · 단추로 감싸지 않는다: 9.3 이 이 칸을 키 손잡이를 가진 div(tabindex=0 · role=button)로 이미 감싼다
                    → 단추를 넣으면 단추 안 단추 · 탭 정지 2 · 키 사건 + 클릭 사건 두 번 토글.
                  · 키보드(탭 · 엔터 · 스페이스)는 그 감싼 div 가 맡는다 — 여기 키 손잡이 추가 0.
                  · 전파 막음은 이 span 과 바깥 div 두 겹 — 행 클릭(상세 열기)으로 새지 않는다(약속 ③). *@
+            @* ⬛ 옛 줄(20261107작 갈래 A)
             <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer" title="@PickTitle"
                   @onclick="@context.ToggleAsync"
                   @onclick:stopPropagation="true">
                 @CsVocab.StatusLabel(Status)
                 <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
             </span>
+            *@
+            @* ⬛ (옛 주석) 20261107작 S4(PM 결정 D3 · V3) — 9.3 원문이 ActivatorContent 예로 든 꼴 그대로: MudButton OnClick=context.ToggleAsync.
+                 · 탭 정지 = 진짜 <button> 하나(MudButton 기본 type="button") · 꼬리표 모양은 안쪽 span 이 그대로 맡는다(CSS 는 단추 꾸밈만 지움).
+                 · 엔터는 감싼 div 키 손잡이가 열고, 곧이은 단추 click 은 9.3 이 50ms 안이면 무시한다(이중 토글 0).
+                 · 🔴 안쪽 꼬리표 span 에 @onclick · 전파 막음을 달지 않는다 — 단추 OnClick 까지 못 가 열기 0 이 된다.
+                 · 전파 막음은 바깥 span(MudButton 은 컴포넌트라 직접 못 단다)과 바깥 div 두 겹(약속 ③). *@
+            @* ⬛ 옛 줄(20261107작 V3)
+            <span class="bo-status-activator" @onclick:stopPropagation="true">
+                <MudButton Class="bo-status-btn" Ripple="false" title="@PickTitle"
+                           OnClick="@context.ToggleAsync">
+                    <span class="bo-status-chip @CsVocab.StatusChipClass(Status)" style="cursor:pointer">
+                        @CsVocab.StatusLabel(Status)
+                        <MudIcon Icon="@Icons.Material.Filled.ArrowDropDown" Size="Size.Small" />
+                    </span>
+                </MudButton>
+            </span>
         </ActivatorContent>
+        *@
         <ChildContent>
             @if (CsVocab.IsLegacyStatus(Channel, Status))
             {
@@ -69,4 +124,21 @@
         CsVocab.StatusesFor(Channel).Count <= 2
             ? "손으로 적은 A/S — 접수·완료만 기록합니다"
             : "눌러서 상태를 바꿉니다";
+
+    // 🔴 20261107작 S4 T3 — 단추 글자. 9.3 L414 숨김 조건(IsNullOrWhiteSpace(Label))과 같은 검사로 「-」 를 세운다.
+    //    · CsVocab.StatusLabel 은 null · "" 만 「-」(공백은 그대로) — 세 곳 공용 사전이라 여기서만 거른다.
+    private string ActivatorLabel =>
+        string.IsNullOrWhiteSpace(CsVocab.StatusLabel(Status)) ? "-" : CsVocab.StatusLabel(Status);
+
+    // 🔴 20261107작 S4 E1-a — 목록 닫기용 참조
+    private MudMenu? _menu;
+
+    // 🔴 20261107작 S4 E1-a — Esc 만 받아 닫는다. Esc 외 키(엔터·스페이스·화살표·Tab)는 손대지 않는다(9.3 그대로).
+    //    · _menu.Open 으로 거르지 않는다 — 9.3 은 private _openState(L22 · L525 · L586)만 바꿔 Open 은 늘 false(§12-3 ④).
+    //    · 닫힌 때 불러도 L513 해제를 건너뛰고 닫힌 직후 값과 같다(L508~510 · L525).
+    private async Task OnCellKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape" || _menu is null) return;
+        await _menu.CloseMenuAsync();
+    }
 }

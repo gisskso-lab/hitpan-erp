@@ -369,3 +369,27 @@
 .bo-status-chip--expired { background: #FEE2E2; color: #B91C1C; }
 .bo-status-chip--terminated { background: #F3F4F6; color: #4B5563; }
 .bo-status-chip--neutral { background: #F3F4F6; color: #4B5563; }
+
+/* ⬛ V3 · 미사용(20261107작 D4 → V2) — .bo-status-btn 을 다는 요소가 없어 아래 5줄은 렌더에 닿지 않는다 · 지우지 않고 남긴다(규칙은 그대로) */
+/* 20261107작 S4 — 상태 칸 단추: 겉모습은 안쪽 .bo-status-chip 이 그대로 맡고 단추는 자리·초점·누름만 */
+.mud-button-root.bo-status-btn { padding: 0; min-width: 0; border-radius: 999px; background-color: transparent;
+    color: inherit; font: inherit; line-height: inherit; letter-spacing: normal; text-transform: none; }
+.mud-button-root.bo-status-btn:hover,
+.mud-button-root.bo-status-btn:active,
+.mud-button-root.bo-status-btn:focus-visible { background-color: transparent; }
+.mud-button-root.bo-status-btn:focus-visible { outline: 2px solid #1D4ED8; outline-offset: 2px; }
+
+/* 20261107작 S4 D4(V2) — 상태 칸 = 9.3 내장 단추(.mud-menu-button-activator · 클래스 고정).
+ * 색: 바깥 div(.mud-menu)가 .bo-status-chip--* 를 받아 바탕·글자색을 그대로 쓴다(값 복제 0) · 단추는 투명 + 글자색 이어받음.
+ * 모양: 단추는 .bo-status-chip 을 받을 길이 없다(Class = 바깥 div) → 꼬리표 틀(안쪽 여백·간격·글자·점)만 단추 쪽에 다시 적는다. */
+.bo-status-menu.mud-menu { border-radius: 999px; vertical-align: middle; }
+.bo-status-menu .mud-button-root.mud-menu-button-activator { padding: 3px 10px; min-width: 0; border-radius: 999px;
+    background-color: transparent; box-shadow: none; color: inherit; font-family: inherit; font-size: 12px; font-weight: 600;
+    line-height: 1.4; letter-spacing: normal; text-transform: none; }
+.bo-status-menu .mud-button-root.mud-menu-button-activator:hover,
+.bo-status-menu .mud-button-root.mud-menu-button-activator:active,
+.bo-status-menu .mud-button-root.mud-menu-button-activator:focus-visible { background-color: transparent; }
+.bo-status-menu .mud-menu-button-activator .mud-button-label { gap: 6px; }
+.bo-status-menu .mud-menu-button-activator .mud-button-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.bo-status-menu .mud-menu-button-activator .mud-button-label .mud-button-icon-end { margin: 0; }
+.bo-status-menu .mud-button-root.mud-menu-button-activator:focus-visible { outline: 2px solid #1D4ED8; outline-offset: 2px; }
