@@ -40,7 +40,10 @@
     @* 🔴 20261108작 S4 F13 — OpenChanged 속성 줄 하나만 끼웠다(기존 속성 줄 글자 무변) · Open 은 넘기지 않는다.
          · 9.3 이 열림을 바꿀 때(MudMenu.razor.cs L525 · L586 SetValueAsync) 알림만 받는다(L53~56 WithEventCallback).
          · 받는 쪽 없는 콜백(@code MenuOpenChangedNoRender) — 이 칸을 다시 그리지 않는다(F13 지시서 §4 · §5-1 B). *@
+    @* ⬛ 옛 줄(20261107작 S4 ~ 20261108작 F12 A2) — 여는 태그 첫 줄. 아래 새 여는 줄은 태그 이름만 바꿨다.
     <MudMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
+       🔴 20261109작 S4 F14 — 9.3 MudMenu 를 이어받은 CsStatusMenu(같은 폴더 .cs) · 그린 뒤 초점이 사라진 요소로 가면 그 한 번만 기록하고 넘긴다 · 속성 줄 글자 무변 *@
+    <CsStatusMenu ActivationEvent="@MouseEvent.LeftClick" Dense="true" AnchorOrigin="Origin.TopRight" TransformOrigin="Origin.TopLeft"
              @ref="_menu"
              OpenChanged="@MenuOpenChangedNoRender"
              Class="@($"bo-status-menu {CsVocab.StatusChipClass(Status)}")"
@@ -102,7 +105,8 @@
                 </MudMenuItem>
             }
         </ChildContent>
-    </MudMenu>
+    </CsStatusMenu>
+    @* ⬛ 옛 줄 — </MudMenu> · 🔴 20261109작 F14 태그 이름만 바꿈 *@
 
     @if (ReadAt is null)
     {
@@ -115,6 +119,8 @@
     }
 </div>
 
+@* 🔴 20261109작 S4 F14 — 아래 CloseAllMenusLoggedAsync 기록용(#15) *@
+@inject ILogger<CsStatusCell> Logger
 @code {
     [Parameter] public string Status { get; set; } = "";
     [Parameter] public string? Channel { get; set; }
@@ -153,7 +159,9 @@
         //    · L550 top.CloseMenuAsync() 로 닫고 L553 FocusActivatorAsync()(L1094~1096 단추 FocusAsync)로 초점을 단추에 돌려놓는다.
         //    · 늦은 첫 항목 초점은 L510 Clear() 뒤 L1023 Count > 0 에서 막힌다 → 「목록 제거 → 단추 초점」 순서(지연 크기 무관).
         //    · 🔴 9.3 판 올림 · 하위 메뉴 도입 시 재검 대상 — L495~554 · L1012~1029 의존(20261107작 지시서 §13).
-        await _menu.CloseAllMenusAsync();
+        // ⬛ 20261109작 S4 F14 — 옛 줄(연결 끊김 · 시한 예외가 손잡이 밖으로 나감 · [1-V] F14 §5):
+        // await _menu.CloseAllMenusAsync();
+        await CloseAllMenusLoggedAsync(_menu, "Esc");
     }
 
     // 🔴 20261108작 S4 F13 — 키보드로 연 직후 「틈」(9.3 L1020 래퍼 왕복 → L1026 첫 항목 초점) 의 다시 누름 · Tab 뒤처리.
@@ -176,7 +184,9 @@
         var restore = _openedByKey && _keyArmed;
         _openedByKey = false; _keyArmed = false;   // 🔴 await 전에 비운다 — 아래 호출이 이 손잡이를 다시 불러도 거기서 끝난다
         // 닫힌 뒤 부름 = L525 같은 값(전이 0 · 콜백 0) + L553 FocusActivatorAsync → 늦은 첫 항목 초점 → 목록 제거 → 단추 초점 순서.
-        if (restore && _menu is not null) await _menu.CloseAllMenusAsync();
+        // ⬛ 20261109작 S4 F14 — 옛 줄(F13-L179 둘째 줄 · [1-V] F13 §1-4):
+        // if (restore && _menu is not null) await _menu.CloseAllMenusAsync();
+        if (restore && _menu is not null) await CloseAllMenusLoggedAsync(_menu, "다시 누름");
     }
 
     private async Task OnGapKeyAsync(KeyboardEventArgs e)
@@ -184,6 +194,24 @@
         if (_menu is null) return;
         if (e.Key is "Enter" or " ") { _keyArmed = true; return; }
         // ② 키보드로 연 목록이 열린 채 단추에서 Tab · Shift+Tab — 9.3 목록 안 Tab 길(L986~988)과 같은 끝(닫힘 · 단추).
-        if (e.Key == "Tab" && _open && _openedByKey) await _menu.CloseAllMenusAsync();
+        // ⬛ 20261109작 S4 F14 — 옛 줄:
+        // if (e.Key == "Tab" && _open && _openedByKey) await _menu.CloseAllMenusAsync();
+        if (e.Key == "Tab" && _open && _openedByKey) await CloseAllMenusLoggedAsync(_menu, "Tab");
+    }
+
+    // 🔴 20261109작 S4 F14 — 위 세 곳(Esc · 다시 누름 · Tab)의 CloseAllMenusAsync 공통 감쌈([1-V] F13 후보 A).
+    //    · 잡는 것 = JSDisconnectedException(회로가 이미 끊김) · OperationCanceledException(JS 가 시한 안에 답 안 함 · TaskCanceledException 포함) 둘뿐.
+    //    · 9.3 FocusActivatorAsync(L1088~1114)는 JSException 만 잡고 이 둘은 통과 — 9.3 키 가로채기 해제가 같은 둘을 스스로 삼키는 꼴과 같다.
+    //    · 그 밖의 예외는 잡지 않는다 · 살아 있는 회로에선 이 둘이 나지 않아 정상 길은 고침 전과 같다.
+    private async Task CloseAllMenusLoggedAsync(MudMenu menu, string where)
+    {
+        try
+        {
+            await menu.CloseAllMenusAsync();
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "CS 상태 칸 — 목록 닫은 뒤 단추 초점을 돌리지 못함({Where})", where);
+        }
     }
 }
