@@ -1,10 +1,14 @@
 # HQA S4 시험 앱 — 백오피스 CS 상태 칸 고침 전 · 고친 꼴
 
+> **판: A′ (11/13)** — 고친 꼴 = 기능 가지 `feat/20261107-백오피스S4닫기` 머리 `16e88c01092d33eb643c6cac454703f00efa02ac`. 고침 전은 그대로 `b54732eb`.
+> ⬛낡음: 11/7 판 — 고친 꼴 = `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` (시험 앱 가지 머리 `8e7f3208` 까지).
+
 ## 1. 목적
 
 - **HQA 관문 ① 직접 실측용**이다. 외부 검증팀이 **자기 환경에서 직접 띄워** 백오피스 「고객A/S 목록」의 상태 칸(`CsStatusCell`)을 고침 전과 고친 꼴로 나란히 잰다.
 - **운영이 아니다.** 데이터는 전부 가짜이고, 인증 없음 · 서버 저장 0 · DB 접속 0 · 바깥 망 호출 0 이다.
-- 제품 코드(`src/`)는 이 묶음에서 한 줄도 바뀌지 않았다. 제품의 두 파일을 **원 커밋에서 글자 그대로 꺼내** 이 앱 안에 두었을 뿐이다(§8 해시 표).
+- 제품 코드(`src/`)는 이 묶음에서 한 줄도 바뀌지 않았다. 제품 파일을 **원 커밋에서 글자 그대로 꺼내** 이 앱 안에 두었을 뿐이다(§8 해시 표). A′ 판(11/13)에서 고친 꼴은 세 파일(상태 칸 · 상태 칸 CSS · 새 메뉴 파일 `CsStatusMenu.cs`)이다.
+  - ⬛낡음(11/7 판): 「제품의 두 파일을 원 커밋에서 글자 그대로 꺼내」
 - 측정 스크립트는 넣지 않았다 — HQA 가 자기 스크립트로 잰다.
 
 > 🔴 **이 앱 통과 = 전체 백오피스 통합 실측 아님.** 이 앱은 상태 칸과 그 칸을 품은 목록 한 구획만 옮겼다. 사이드바 · 머리줄 · 인증 · 실제 서버 응답 · 실제 데이터 양과 모양이 들어간 통합 화면의 동작은 이 앱으로 증명되지 않는다.
@@ -73,9 +77,10 @@ node tools/hqa-s4-fixture/proxy/delay-proxy.js 5800 150
 |---|---|
 | `/` | 두 화면으로 가는 단추 둘 |
 | `/before` | **고침 전** 상태 칸 — `b54732eb` 의 `CsStatusCell.razor` + `backoffice-dashboard.css` (운영 판과 같은 글자) |
-| `/after` | **고친 꼴** 상태 칸 — `e456e4f6` 의 같은 두 파일 |
+| `/after` | **고친 꼴(A′)** 상태 칸 — `16e88c01` 의 같은 두 파일 + 그 칸이 쓰는 메뉴 `CsStatusMenu.cs` |
+| ~~`/after`~~ ⬛낡음(11/7 판) | 고친 꼴 상태 칸 — `e456e4f6` 의 같은 두 파일 |
 
-두 화면은 같은 목록 · 같은 가짜 데이터 · 같은 공통 CSS 를 쓰고, **상태 칸 컴포넌트와 `backoffice-dashboard.css` 만 다르다.** CSS 는 `App.razor` 가 주소로 고르므로 판을 바꿀 때는 **주소를 새로 연다**(화면 안 「고친 꼴로 / 고침 전으로」 단추도 강제 새로고침으로 옮기고 쿼리를 그대로 넘긴다).
+두 화면은 같은 목록 · 같은 가짜 데이터 · 같은 공통 CSS 를 쓰고, **상태 칸 컴포넌트(고친 꼴은 그 칸이 쓰는 `CsStatusMenu` 포함)와 `backoffice-dashboard.css` 만 다르다.** (A′ 판의 `backoffice-dashboard.css` 는 `e456e4f6` 과 같은 블롭이다 — 두 화면 CSS 차이는 11/7 판과 같다.) CSS 는 `App.razor` 가 주소로 고르므로 판을 바꿀 때는 **주소를 새로 연다**(화면 안 「고친 꼴로 / 고침 전으로」 단추도 강제 새로고침으로 옮기고 쿼리를 그대로 넘긴다).
 
 화면 꼴(백오피스 `AdminCsListPage.razor` 목록 구획을 옮김):
 
@@ -129,15 +134,21 @@ node tools/hqa-s4-fixture/proxy/delay-proxy.js 5800 150
 
 ## 8. 원본 파일 해시
 
+**A′ 판(11/13)**: 고친 꼴 행의 원 커밋이 `16e88c01` 로 바뀌었다. 11/7 판 값은 표 아래쪽 ⬛낡음 행으로 남겼다.
+
 이 앱 안 원본 파일은 아래 커밋의 같은 경로에서 `git show <SHA>:<경로>` 로 꺼낸 바이트 그대로다(`.gitattributes` 의 `* -text` 로 줄끝 바꿈도 막았다). `git hash-object <파일>` 로 대조한다.
 
 | 이 앱 안 경로 | 원 경로 | 원 커밋 | git hash-object |
 |---|---|---|---|
 | `Components/Before/CsStatusCell.razor` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `b54732ebc767c9d1fafe57c7e8b9630a2d7d4265` (고침 전 · 운영 판과 같은 글자) | `1eef106a401e900283a4af7997f68585cdf9271d` |
 | `wwwroot/css/before/backoffice-dashboard.css` | `src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css` | `b54732ebc767c9d1fafe57c7e8b9630a2d7d4265` | `3f938234e1f776d1e917cd9f286ea72823da4034` |
-| `Components/After/CsStatusCell.razor` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` (고친 꼴 · 가지 코드 머리) | `644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138` |
-| `wwwroot/css/after/backoffice-dashboard.css` | `src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css` | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` | `0e922200fc29f057aff2d9b4b436c815c177bdc3` |
-| `Vocab/CsVocab.cs` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs` | `e456e4f6…` (`b54732eb` 와 같은 블롭 — 두 판 사이 무변) | `0ec65e70ef69b451458018cbdb749a98402c0cab` |
+| `Components/After/CsStatusCell.razor` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `16e88c01092d33eb643c6cac454703f00efa02ac` (고친 꼴 A′ · 기능 가지 머리) | `9c358a00d2320e2308ff56f2cec1030a0f582261` |
+| `wwwroot/css/after/backoffice-dashboard.css` | `src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css` | `16e88c01092d33eb643c6cac454703f00efa02ac` (`e456e4f6` 와 같은 블롭 — 11/7 판과 무변) | `0e922200fc29f057aff2d9b4b436c815c177bdc3` |
+| `Components/After/CsStatusMenu.cs` (A′ 새 파일) | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs` | `16e88c01092d33eb643c6cac454703f00efa02ac` | `1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a` |
+| `Vocab/CsVocab.cs` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs` | `16e88c01…` (`b54732eb` · `e456e4f6` 와 같은 블롭 — 세 판 사이 무변) | `0ec65e70ef69b451458018cbdb749a98402c0cab` |
+| ⬛낡음(11/7 판) `Components/After/CsStatusCell.razor` | 위와 같음 | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` (고친 꼴 · 그때 가지 코드 머리) | `644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138` |
+| ⬛낡음(11/7 판) `wwwroot/css/after/backoffice-dashboard.css` | 위와 같음 | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` | `0e922200fc29f057aff2d9b4b436c815c177bdc3` |
+| ⬛낡음(11/7 판) `Vocab/CsVocab.cs` | 위와 같음 | `e456e4f6…` (`b54732eb` 와 같은 블롭 — 두 판 사이 무변) | `0ec65e70ef69b451458018cbdb749a98402c0cab` |
 | `wwwroot/css/common/backoffice-v2.css` | `src/HitPan.Backoffice/wwwroot/css/backoffice-v2.css` | `e456e4f6…` (`b54732eb` 와 같은 블롭) | `9b7635789c9d8a8bf8e170d98b7f8d50f434005d` |
 | `wwwroot/css/common/app.css` | `src/HitPan.Backoffice/wwwroot/app.css` | `e456e4f6…` | `73a69d6f6829d98de0cfe14f8f9179e7bc318232` |
 | `wwwroot/css/common/bootstrap.min.css` | `src/HitPan.Backoffice/wwwroot/lib/bootstrap/dist/css/bootstrap.min.css` | `e456e4f6…` | `39934146ffdc3af1e17b83657576b2d21f3cbecd` |
@@ -148,14 +159,19 @@ node tools/hqa-s4-fixture/proxy/delay-proxy.js 5800 150
 
 ```bash
 git hash-object tools/hqa-s4-fixture/Components/After/CsStatusCell.razor
-git rev-parse e456e4f6a0b2dc36f14ef53f64106d455f363ecb:src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor
+git rev-parse 16e88c01092d33eb643c6cac454703f00efa02ac:src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor
+git hash-object tools/hqa-s4-fixture/Components/After/CsStatusMenu.cs
+git rev-parse 16e88c01092d33eb643c6cac454703f00efa02ac:src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs
 ```
+
+⬛낡음(11/7 판) 대조 예: `git rev-parse e456e4f6a0b2dc36f14ef53f64106d455f363ecb:src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor`
 
 ### 컴파일되게 한 감싸기 (원본 파일 밖에서만)
 
 | 감싸기 | 왜 |
 |---|---|
 | 고침 전 · 고친 꼴을 `Components/Before` · `Components/After` 두 폴더에 나눠 둠 | 같은 이름 `CsStatusCell` 두 개가 겹치지 않게 — 이름공간이 `HqaS4Fixture.Components.Before` / `.After` 가 된다(백오피스에서는 `HitPan.Backoffice.Components.Pages.Platform.Components`). 각 폴더의 `_Imports.razor` 는 설명 주석뿐이다. |
+| A′ 새 파일 `CsStatusMenu.cs` 는 `Components/After/` 에 두되 **namespace 까지 글자 그대로**(`HitPan.Backoffice.Components.Pages.Platform.Components`) 둠 | `.cs` 파일은 폴더 이름공간을 받지 않고 파일 안 namespace 를 쓴다. 상위 `Components/_Imports.razor` 가 그 이름공간을 이미 `@using` 으로 끌어오므로 고친 꼴 `CsStatusCell.razor` 의 `<CsStatusMenu>` 가 그대로 찾는다. 고침 전 칸은 이 메뉴를 쓰지 않는다. `Components/After/_Imports.razor` 는 설명 주석뿐이다(A′ 판으로 갱신 · 옛 첫 줄은 ⬛낡음으로 남김). |
 | `CsVocab.cs` 는 **대역이 아니라 레포 실제 파일**을 원래 이름공간(`HitPan.Backoffice.Components.Pages.Platform.Components`) 그대로 둠 | 상위 `Components/_Imports.razor` 가 그 이름공간을 `@using` 으로 끌어온다(백오피스 `_Imports.razor` 와 같은 줄). 백오피스 `_Imports.razor` 의 별칭 `Color` · `Size` · `Align` 도 같게 둠. |
 | 화면이 `Status="@(context.Item.Status!)"` 로 넘김 | 가짜 줄에 `null` 상태를 넣기 위해 줄 모델의 `Status` 를 `string?` 로 두었다. 상태 칸 매개변수는 `string` 이라 null 허용 경고를 끄는 `!` 만 붙였다(런타임 값은 그대로 null 이 넘어간다). |
 
@@ -192,7 +208,7 @@ tools/hqa-s4-fixture/
   Components/Pages/FixturePage.razor  /before · /after
   Components/Pages/FixtureData.cs     가짜 데이터
   Components/Before/             고침 전 원본 CsStatusCell.razor + 설명용 _Imports.razor
-  Components/After/              고친 꼴 원본 CsStatusCell.razor + 설명용 _Imports.razor
+  Components/After/              고친 꼴(A′) 원본 CsStatusCell.razor · CsStatusMenu.cs + 설명용 _Imports.razor
   Vocab/CsVocab.cs               레포 실제 파일(원본)
   wwwroot/css/common/            공통 CSS 원본 셋
   wwwroot/css/before|after/      상태 칸 CSS 원본 두 판
