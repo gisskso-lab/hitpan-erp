@@ -116,7 +116,7 @@ case "$EVENT_NAME" in
     if [ "$use_merge_base" -eq 1 ]; then
       # 기본 가지 자체의 첫·강제 푸시는 합류점이 자기 자신이 되어 「새 커밋 0」 으로 조용해진다 → 빨강
       if [ "$ref" = "refs/heads/${default_branch}" ]; then
-        fail "기본 가지(${default_branch}) 의 ${reason} — 합류점 기준을 쓸 수 없다. 전체 검사(수동 실행)로 확인할 것"
+        fail "기본 가지(${default_branch}) 의 ${reason} — 합류점 기준을 쓸 수 없다. 기본 가지는 규칙상 첫·강제 푸시가 없어야 한다 = 사고 — PM 보고"
       fi
       # 기준 참조는 완전 이름으로 SHA 하나로 고정한 뒤 그 SHA 만 쓴다
       main_sha="$(g rev-parse --verify --quiet "${main_ref}^{commit}")" || fail "기준 가지 참조(${main_ref}) 가 없다 — 전체 이력 checkout 확인"

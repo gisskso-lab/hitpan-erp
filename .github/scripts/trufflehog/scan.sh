@@ -83,6 +83,11 @@ args=(git file:///scan --fail --fail-on-scan-errors --no-update --json)
 [ -n "$BASE" ] && args+=(--since-commit "$BASE")
 [ -n "$HEAD" ] && args+=(--branch "$HEAD")
 net=()
+# [4] 🟡2: 판 고정 플래그가 실제 실행 인자에 들어 있는지 실행 때마다 확인한다(빠지면 검사 오류).
+# 자체시험은 망을 끊고 돌아 「갱신 시도」 가 조용히 실패하므로, 인자 자체를 잰다.
+for must in --no-update --fail-on-scan-errors; do
+  case " ${args[*]} " in *" ${must} "*) ;; *) scan_error "실행 인자에 ${must} 가 없다 — 판 고정·오류 판정이 깨진다" 0 0 ;; esac
+done
 
 # 규칙·제외 파일은 「그 파일이 든 폴더」 를 읽기 전용으로 붙이고 이름으로 넘긴다.
 # 파일이 없으면 엔진이 스스로 오류를 낸다(자체시험 S6 이 그 길을 잰다).
@@ -137,6 +142,10 @@ if [ "$rc" -eq 183 ] && [ "$count" -gt 0 ]; then
   exit 1
 fi
 
-# 그 밖 = 검사 오류. 엔진 기록 중 오류 줄만 짧게(최대 10줄 · 줄당 300자).
-grep -iE 'error|fatal' "$work/engine.log" | head -n 10 | cut -c1-300 || true
+# 그 밖 = 검사 오류. 공개 로그라 엔진 기록 원문(경로·커밋이 들 수 있다)은 찍지 않는다([4] 🟡1 · 설계서 §3-3).
+# 오류 「종류」(msg 칸)와 개수만 — 원문 확인은 로컬 재현에서.
+errkinds="$(jq -Rr 'fromjson? | select(((.level // "") | ascii_downcase | test("error|fatal"))) | (.msg // "(msg 없음)")' "$work/engine.log" 2>/dev/null | cut -c1-80 | sort | uniq -c | head -n 10 || true)"
+errtotal="$(grep -ciE 'error|fatal' "$work/engine.log" || true)"
+echo "엔진 기록 오류 줄 수: ${errtotal:-0} (원문은 찍지 않음)"
+[ -n "$errkinds" ] && printf '%s\n' "$errkinds"
 scan_error "엔진 종료 코드 ${rc} · 결과 ${count}줄" "$count" "$rc"
