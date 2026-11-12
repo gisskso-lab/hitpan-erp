@@ -1,6 +1,16 @@
 # P0 #2 (2026-05-14): TruffleHog 시크릿 스캔 (헌법 #23 5중 검증 ③ SAST)
 # AES 키·DB 비번·API 토큰·JWT 시크릿 등 평문 노출 차단
 # 트리거: 모든 push + PR (커밋 자체에서도 검사)
+#
+# ★ 20261113 비밀 탐지 설정 정상화 — 갈래 ㄱ
+#   설계: docs/설계/보안/20261113_비밀탐지설정정상화_설계서.md (§2 범위 · §4 판 고정 · §5 자체시험)
+#   지시: docs/운영기록/20261113작_비밀탐지설정정상화_작업지시서.md ㄱ-1~ㄱ-5 · [3-V] 병렬이슈 F1~F5
+#   - 액션 래퍼를 걷고 엔진 이미지를 digest 로 고정해 docker 로 직접 돌린다(아래 env).
+#   - 범위는 .github/scripts/trufflehog/range.sh 가 사건 JSON 을 읽어 정한다(안 B — 첫·강제 푸시 = 기본 가지와의 합류점).
+#   - 검사 이름을 사건별로 나눈다: PR = 「Scan secrets」 · push = 「Scan secrets (push)」 · 일정·수동 = 「Scan secrets (full)」.
+#   - 매 실행 첫 단계 = 자체시험(러너 임시 저장소). 실패 = 빨강.
+#   - 「찾음」 과 「검사 오류」 는 둘 다 빨강, 메시지가 다르다(scan.sh).
+#   - 일정·수동 전체 검사의 판정은 이 갈래에서 바꾸지 않는다(기존 후보 때문에 계속 빨강 — 기준선은 갈래 ㄴ).
 name: TruffleHog Secret Scan
 
 on:
@@ -17,6 +27,8 @@ on:
   #   ⇒ schedule 은 액션 소스상 BASE=""/HEAD="" → **전체 히스토리 스캔**이다(로그 실측:
   #      `elif [ "$EVENT" == "workflow_dispatch" ] || [ "$EVENT" == "schedule" ]; then BASE=""`).
   #      주 1회 전수 스캔이 있어야 G-3(진탐 미제외)가 실질적으로 성립한다.
+  #   ⬛ 대체됨 20261113 (위 「액션 소스상」 부분만): 액션 래퍼를 걷었다. 일정·수동 = 전체 이력은
+  #      range.sh 의 mode=full 이 같은 뜻으로 이어받는다. 주 1회 전수 스캔의 취지는 그대로 유효.
   schedule:
     - cron: '0 18 * * 0'  # 매주 월요일 03:00 KST (UTC 일 18:00) — 전체 히스토리 전수
   workflow_dispatch:      # 필요 시 수동 전수 스캔
@@ -24,50 +36,103 @@ on:
 permissions:
   contents: read
 
+env:
+  # 엔진 이미지 — digest 고정 (판 3.99.8 · 상류 범위 계산 수정 #5325 가 든 3.97.7 이상)
+  #   조회: ghcr.io 익명 pull 토큰 → GET /v2/trufflesecurity/trufflehog/manifests/3.99.8
+  #         의 Docker-Content-Digest (매니페스트 목록) · 2026-11-12T19:50:41Z UTC
+  #   갱신: 설계서 §4-2 (분기 1회 + 상류 보안 공지 때 · 갱신 PR 에서 자체시험 초록 확인)
+  TRUFFLEHOG_IMAGE: ghcr.io/trufflesecurity/trufflehog@sha256:674b2f187620a19df77f44cf9a7d77efcc581a5662accef2f2739cbb46ba4a3a
+
 jobs:
   trufflehog:
-    name: Scan secrets
+    # 사건별 검사 이름 — 필수 검사 후보는 PR 사건의 「Scan secrets」 하나(설계서 §2-2)
+    name: ${{ github.event_name == 'pull_request' && 'Scan secrets' || github.event_name == 'push' && 'Scan secrets (push)' || 'Scan secrets (full)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - name: Checkout (full history)
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0  # 전체 히스토리 — 과거 커밋에 포함된 시크릿도 탐지
+      # 가지·태그 삭제 사건: 지워진 ref 는 checkout 할 수 없다 → checkout 앞에서 갈라 초록으로 끝낸다
+      - name: Deleted ref (nothing to scan)
+        if: ${{ github.event_name == 'push' && github.event.deleted }}
+        run: echo "삭제 사건 — 검사할 커밋 없음"
 
-      - name: TruffleHog OSS scan
-        uses: trufflesecurity/trufflehog@main
+      - name: Checkout (full history)
+        if: ${{ !github.event.deleted }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1 (태그 v7.0.1 · v7 의 커밋과 대조 일치 2026-11-13)
         with:
-          path: ./
-          # ★ 봉합 20260731 (main 푸시 스캔 11건 전건 실패 — 7/21~7/31 성공 0):
-          #   종전 `base: {default_branch}`(=항상 'main') + `head: HEAD` 는
-          #   **main 에 푸시되는 순간 base == HEAD** 가 되어 액션이 스캔 전에 죽었다:
-          #     ##[error]BASE and HEAD commits are the same. TruffleHog won't scan anything.
-          #     ##[error]Process completed with exit code 1
-          #   즉 시크릿이 발견된 게 아니라 **스캔이 시작조차 못 했다.** 그런데 결과는 빨간 X 라
-          #   "늘 실패하는 체크"가 되어 아무도 안 보게 됐다 — 진짜 유출이 나도 못 알아본다.
-          #   종전 주석은 "push면 before..after"라 적혀 있었으나 코드는 그렇게 동작하지 않았다
-          #   (주석과 코드 불일치 — 아무도 반증하지 않았다).
-          #
-          #   ⇒ base·head 를 **비운다.** 액션 내부 스크립트가 이벤트별로 알아서 잡는다(로그 실측):
-          #       push         → BASE=$COMMIT_IDS 첫 커밋의 before / HEAD=after
-          #       pull_request → BASE=PR base / HEAD=PR head
-          #     값을 넣는 행위 자체가 그 자동 분기를 막고 있었다.
-          #   ※ fetch-depth: 0 을 유지해야 before 커밋이 로컬에 있어 diff 가 성립한다.
-          #
-          # 축 6-2 (2026-05-14): --config 로 히트판 자체 시크릿 룰셋 로드 (헌법 #23 ③ 보강).
-          # --only-verified는 custom 룰의 verified=false 결과를 누락시키므로 제거.
-          # OSS detectors는 verified 우선, custom은 regex 매칭만으로도 알림.
-          #
-          # ★ 봉합 20260731: --exclude-paths 추가.
-          #   base/head 봉합으로 스캔이 실제로 돌기 시작하자 **오탐 2건**이 드러났다 —
-          #   룰셋 파일이 자기 자신의 탐지 패턴에 매칭되고, 작업지시서 2건이 "이 룰을 만들라"며
-          #   그 regex 를 본문에 인용했다(실측: 세 파일 모두 키 본문 0건).
-          #   제외 목록은 별도 파일로 둔다 — 무엇을 왜 뺐는지가 추적돼야 하기 때문이다.
-          #   ⚠️ 진탐(installer/install.bat 의 고객 공통 DB 비번)은 **제외하지 않았다.**
-          #      그래서 이 스캔은 계속 실패로 뜬다. 덮지 않는 것이 의도다
-          #      (docs/설계/보안/20260731_시크릿스캔_정상화_설계서.md §5).
-          extra_args: >-
-            --config=.github/trufflehog-config.yaml
-            --exclude-paths=.github/trufflehog-exclude-paths.txt
+          fetch-depth: 0  # 전체 히스토리 — 합류점 계산·before 커밋이 로컬에 있어야 한다
+          persist-credentials: false  # 엔진 컨테이너에 붙는 작업 폴더에 토큰을 남기지 않는다
+
+      - name: Pull engine image (digest pinned)
+        if: ${{ !github.event.deleted }}
+        run: docker pull "$TRUFFLEHOG_IMAGE"
+
+      - name: Self-test (S1-S4, S6-S8)
+        if: ${{ !github.event.deleted }}
+        env:
+          CONFIG_FILE: ${{ github.workspace }}/.github/trufflehog-config.yaml
+          EXCLUDE_FILE: ${{ github.workspace }}/.github/trufflehog-exclude-paths.txt
+        run: bash .github/scripts/trufflehog/self-test.sh
+
+      - name: Compute scan range
+        id: range
+        if: ${{ !github.event.deleted }}
+        run: bash .github/scripts/trufflehog/range.sh
+
+      - name: Scan
+        if: ${{ !github.event.deleted && steps.range.outputs.mode != 'skip' }}
+        env:
+          REPO_DIR: ${{ github.workspace }}
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          CONFIG_FILE: ${{ github.workspace }}/.github/trufflehog-config.yaml
+          EXCLUDE_FILE: ${{ github.workspace }}/.github/trufflehog-exclude-paths.txt
+        run: bash .github/scripts/trufflehog/scan.sh
+
+      - name: Nothing new to scan
+        if: ${{ !github.event.deleted && steps.range.outputs.mode == 'skip' }}
+        env:
+          REASON: ${{ steps.range.outputs.reason }}
+        run: echo "검사 건너뜀 — ${REASON}"
+
+      # ⬛ 대체됨 20261113 — 아래는 걷어낸 래퍼 단계(`trufflesecurity/trufflehog` 액션)의 주석 이력이다.
+      #   범위 자동 분기 → range.sh(안 B) · extra_args(--config · --exclude-paths) → scan.sh 가 같은 두 파일을 넘긴다.
+      #   7/31 봉합의 근거(범위 오류로 「스캔이 시작조차 못 했다」 · 오탐 2건 제외 · 진탐 미제외)는 그대로 유효하다.
+      #
+      # - name: TruffleHog OSS scan
+      #     path: ./
+      #     # ★ 봉합 20260731 (main 푸시 스캔 11건 전건 실패 — 7/21~7/31 성공 0):
+      #     #   종전 `base: {default_branch}`(=항상 'main') + `head: HEAD` 는
+      #     #   **main 에 푸시되는 순간 base == HEAD** 가 되어 액션이 스캔 전에 죽었다:
+      #     #     ##[error]BASE and HEAD commits are the same. TruffleHog won't scan anything.
+      #     #     ##[error]Process completed with exit code 1
+      #     #   즉 시크릿이 발견된 게 아니라 **스캔이 시작조차 못 했다.** 그런데 결과는 빨간 X 라
+      #     #   "늘 실패하는 체크"가 되어 아무도 안 보게 됐다 — 진짜 유출이 나도 못 알아본다.
+      #     #   종전 주석은 "push면 before..after"라 적혀 있었으나 코드는 그렇게 동작하지 않았다
+      #     #   (주석과 코드 불일치 — 아무도 반증하지 않았다).
+      #     #
+      #     #   ⇒ base·head 를 **비운다.** 액션 내부 스크립트가 이벤트별로 알아서 잡는다(로그 실측):
+      #     #       push         → BASE=$COMMIT_IDS 첫 커밋의 before / HEAD=after
+      #     #       pull_request → BASE=PR base / HEAD=PR head
+      #     #     값을 넣는 행위 자체가 그 자동 분기를 막고 있었다.
+      #     #   ※ fetch-depth: 0 을 유지해야 before 커밋이 로컬에 있어 diff 가 성립한다.
+      #     #   ⬛ 대체됨 20261113: 그 자동 분기는 첫 푸시(before=0)에서 BASE 를 비워 전체 이력을 훑었다
+      #     #      (첫 푸시 56번 중 49번 빨강 — [1-V] N2). 이제 range.sh 가 합류점으로 정한다.
+      #     #
+      #     # 축 6-2 (2026-05-14): --config 로 히트판 자체 시크릿 룰셋 로드 (헌법 #23 ③ 보강).
+      #     # --only-verified는 custom 룰의 verified=false 결과를 누락시키므로 제거.
+      #     # OSS detectors는 verified 우선, custom은 regex 매칭만으로도 알림.
+      #     #
+      #     # ★ 봉합 20260731: --exclude-paths 추가.
+      #     #   base/head 봉합으로 스캔이 실제로 돌기 시작하자 **오탐 2건**이 드러났다 —
+      #     #   룰셋 파일이 자기 자신의 탐지 패턴에 매칭되고, 작업지시서 2건이 "이 룰을 만들라"며
+      #     #   그 regex 를 본문에 인용했다(실측: 세 파일 모두 키 본문 0건).
+      #     #   제외 목록은 별도 파일로 둔다 — 무엇을 왜 뺐는지가 추적돼야 하기 때문이다.
+      #     #   ⚠️ 진탐(installer/install.bat 의 고객 공통 DB 비번)은 **제외하지 않았다.**
+      #     #      그래서 이 스캔은 계속 실패로 뜬다. 덮지 않는 것이 의도다
+      #     #      (docs/설계/보안/20260731_시크릿스캔_정상화_설계서.md §5).
+      #     #   ⬛ 대체됨 20261113 (「계속 실패로 뜬다 = 의도」 부분): push·PR 은 범위가 좁아져 깨끗한 가지는 초록.
+      #     #      일정·수동 전체 검사는 갈래 ㄱ 에서도 계속 빨강 — 「기존 후보는 기록 · 새 후보만 빨강」 은 갈래 ㄴ(기준선).
+      #     extra_args: >-
+      #       --config=.github/trufflehog-config.yaml
+      #       --exclude-paths=.github/trufflehog-exclude-paths.txt
