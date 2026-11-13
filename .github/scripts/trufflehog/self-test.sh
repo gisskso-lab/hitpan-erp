@@ -237,27 +237,36 @@ else
 fi
 
 # ── S6 엔진 오류: 「검사 오류」 는 「0건」 과 구분된다 ────────────────────
-# 오류 길의 출력은 scan.sh 자기 문구 두 종류뿐이어야 한다(엔진 기록 글자 0 · 외부 예비 회신 #6846795334)
-s6_other() { grep -cvE '^(엔진 기록 오류 줄 수: [0-9]+ |\[검사 오류\] )' "${root}/scan.last" || true; }
-s6_count_line() { grep -cE '^엔진 기록 오류 줄 수: [0-9]+ ' "${root}/scan.last" || true; }
+# 오류 길의 출력은 scan.sh 자기 문구 두 줄과 「글자 그대로」 같아야 한다(엔진 기록 글자 0 · 외부 예비 회신 #6846795334)
+# [4] 재검증 V2-1: 줄 머리만 보면 꼬리·문구 안에 엔진 글자가 붙어도 통과한다 → 문구 끝까지 `$` 로 맞춘다.
+S6_LINE_COUNT='엔진 기록 오류 줄 수: [0-9]+ \(문구는 찍지 않음 — 로컬 재현으로 확인\)'
+S6_LINE_ERROR='\[검사 오류\] 엔진 종료 코드 [0-9]+ · 결과 [0-9]+줄 — 「찾음」 이 아니라 검사가 끝나지 않았다'
+# 셋 다 파일을 못 읽으면 실패 쪽 값(V2-5)
+s6_other()      { local n; n="$(grep -cvE "^(${S6_LINE_COUNT}|${S6_LINE_ERROR})\$" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-1}"; }
+s6_count_line() { local n; n="$(grep -cE "^${S6_LINE_COUNT}\$" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-0}"; }
+# 카나리(동작 대조): 엔진 오류 기록에 실제로 들어가는 글자가 출력에 0회여야 한다.
+#   (a) 없는 규칙 파일 이름 — 엔진 치명 오류 평문에 경로째 들어간다([4] 재검증 실측) · (b) 없는 기준 커밋 값
+s6_canary()     { local n; n="$(grep -cF -e "$1" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-1}"; }
 run_scan "$M3" "$F1" "${root}/no-such-config.yaml"          # (a) 시작 단계 치명 오류
 s6a="${s_state:-?}/${s_rc}"; s6a_ok=0; [ "$s_rc" -eq 2 ] && [ "$s_state" = "error" ] && s6a_ok=1
-s6_out="$(s6_other)"; s6_cnt="$(s6_count_line)"
-run_scan "$(openssl rand -hex 20)" "$F1"                      # (b) 검사 중 오류(없는 기준 커밋)
+s6_out="$(s6_other)"; s6_cnt="$(s6_count_line)"; s6_can="$(s6_canary no-such-config)"
+s6b_base="$(openssl rand -hex 20)"
+run_scan "$s6b_base" "$F1"                                   # (b) 검사 중 오류(없는 기준 커밋)
 # 엔진 자신이 비 0 으로 끝나야 한다(--fail-on-scan-errors) — 바깥 하한이 대신 잡은 것과 구분
 s6b="${s_state:-?}/${s_rc}/엔진${s_eng:-?}"; s6b_ok=0
 [ "$s_rc" -eq 2 ] && [ "$s_state" = "error" ] && [[ "$s_eng" =~ ^[0-9]+$ ]] && [ "$s_eng" -ne 0 ] && [ "$s_eng" -ne 183 ] && s6b_ok=1
-s6_out=$(( ${s6_out:-1} + $(s6_other) )); s6_cnt=$(( ${s6_cnt:-0} + $(s6_count_line) ))
-# (d) 출력 위생 — 두 오류 실행 모두 「오류 줄 수」 한 줄씩 + 그 밖의 줄 0 (대조: 옛 msg 출력이면 그 밖의 줄 ≥1 로 빨강)
-s6d_ok=0; [ "$s6_out" -eq 0 ] && [ "$s6_cnt" -eq 2 ] && s6d_ok=1
+s6_out=$(( s6_out + $(s6_other) )); s6_cnt=$(( s6_cnt + $(s6_count_line) )); s6_can=$(( s6_can + $(s6_canary "$s6b_base") ))
+# (d) 출력 위생 — 두 오류 실행 모두 「오류 줄 수」 한 줄씩 + 문구가 글자 그대로 다른 줄 0 + 카나리 0
+#     (대조: 옛 msg 출력 · 허용 줄 꼬리/문구 안 끼워 넣기 모두 빨강)
+s6d_ok=0; [ "$s6_out" -eq 0 ] && [ "$s6_cnt" -eq 2 ] && [ "$s6_can" -eq 0 ] && s6d_ok=1
 # (c) 음성 대조 — 제외 목록 경로만 고친 커밋: 엔진은 커밋마다 메타 조각을 훑으므로 「조각 0 하한」 이
 #     거짓 경보를 내지 않아야 한다(깨끗 · 종료 0). 하한이 서는 곳은 「엔진이 커밋을 하나도 안 걸은」 경우뿐.
 run_scan "$M3" "$EXCL"
 s6c="${s_state:-?}/${s_rc}"; s6c_ok=0; [ "$s_rc" -eq 0 ] && [ "$s_state" = "clean" ] && s6c_ok=1
 if [ $((s6a_ok + s6b_ok + s6c_ok + s6d_ok)) -eq 4 ]; then
-  pass "S6 엔진 오류 — 치명·비치명 모두 검사 오류(종료 2) · 제외 경로만 고친 커밋은 깨끗(하한 거짓 경보 0) · 오류 길 출력 = 자기 문구뿐"
+  pass "S6 엔진 오류 — 치명·비치명 모두 검사 오류(종료 2) · 제외 경로만 고친 커밋은 깨끗(하한 거짓 경보 0) · 오류 길 출력 = 자기 문구 그대로 · 카나리 0"
 else
-  miss "S6 엔진 오류 — 기대 「치명·비치명 error/2 · 제외만 clean/0 · 오류 길 그 밖의 줄 0 · 오류 줄 수 2」 · 실제 치명(${s6a}) 비치명(${s6b}) 제외만(${s6c}) 그 밖의 줄(${s6_out}) 오류 줄 수(${s6_cnt})"
+  miss "S6 엔진 오류 — 기대 「치명·비치명 error/2 · 제외만 clean/0 · 오류 길 다른 줄 0 · 오류 줄 수 2 · 카나리 0」 · 실제 치명(${s6a}) 비치명(${s6b}) 제외만(${s6c}) 다른 줄(${s6_out}) 오류 줄 수(${s6_cnt}) 카나리(${s6_can})"
 fi
 
 # ── S7 merge 뒤 첫 푸시: 이른 날짜의 가지 커밋을 놓치지 않는다([3-V] F2 · 엔진 범위 의미) ──
