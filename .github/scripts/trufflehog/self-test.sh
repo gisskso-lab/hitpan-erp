@@ -244,8 +244,9 @@ S6_LINE_ERROR='\[검사 오류\] 엔진 종료 코드 [0-9]+ · 결과 [0-9]+줄
 # 셋 다 파일을 못 읽으면 실패 쪽 값(V2-5)
 s6_other()      { local n; n="$(grep -cvE "^(${S6_LINE_COUNT}|${S6_LINE_ERROR})\$" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-1}"; }
 s6_count_line() { local n; n="$(grep -cE "^${S6_LINE_COUNT}\$" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-0}"; }
-# 카나리(동작 대조): 엔진 오류 기록에 실제로 들어가는 글자가 출력에 0회여야 한다.
-#   (a) 없는 규칙 파일 이름 — 엔진 치명 오류 평문에 경로째 들어간다([4] 재검증 실측) · (b) 없는 기준 커밋 값
+# 카나리(보조): 엔진 오류 기록에 든 글자가 출력에 0회여야 한다. 막는 힘의 본체는 위 「문구 끝까지 맞추기」.
+#   (a) 없는 규칙 파일 이름 — 엔진 치명 오류 평문에 경로째 들어간다(재검증 3: 그 줄을 찍는 변형에서 1 로 오름 = 동작)
+#   (b) 없는 기준 커밋 값 — 엔진 3.99.8 기록에는 들어가지 않는다(재검증 3 V3-1 실측 0회) → 지금 판에서 잡는 힘 0 · 판 올림 대비로만 둔다
 s6_canary()     { local n; n="$(grep -cF -e "$1" "${root}/scan.last" 2>/dev/null)" || true; echo "${n:-1}"; }
 run_scan "$M3" "$F1" "${root}/no-such-config.yaml"          # (a) 시작 단계 치명 오류
 s6a="${s_state:-?}/${s_rc}"; s6a_ok=0; [ "$s_rc" -eq 2 ] && [ "$s_state" = "error" ] && s6a_ok=1
