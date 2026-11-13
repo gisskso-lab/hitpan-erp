@@ -142,10 +142,9 @@ if [ "$rc" -eq 183 ] && [ "$count" -gt 0 ]; then
   exit 1
 fi
 
-# 그 밖 = 검사 오류. 공개 로그라 엔진 기록 원문(경로·커밋이 들 수 있다)은 찍지 않는다([4] 🟡1 · 설계서 §3-3).
-# 오류 「종류」(msg 칸)와 개수만 — 원문 확인은 로컬 재현에서.
-errkinds="$(jq -Rr 'fromjson? | select(((.level // "") | ascii_downcase | test("error|fatal"))) | (.msg // "(msg 없음)")' "$work/engine.log" 2>/dev/null | cut -c1-80 | sort | uniq -c | head -n 10 || true)"
+# 그 밖 = 검사 오류. 공개 로그라 엔진 기록의 글자는 한 자도 찍지 않는다(설계서 §3-3 · [4] 🟡1 · 외부 예비 회신 #6846795334).
+# msg 칸도 엔진이 판을 올리며 값을 끼워 넣을 수 있어 「고정 문구」 를 장담하지 못한다 → 개수만. 원문 확인은 로컬 재현에서.
+# 자체시험 S6 이 「이 길의 출력 = 이 스크립트 자기 문구 두 종류뿐」 을 잰다.
 errtotal="$(grep -ciE 'error|fatal' "$work/engine.log" || true)"
-echo "엔진 기록 오류 줄 수: ${errtotal:-0} (원문은 찍지 않음)"
-[ -n "$errkinds" ] && printf '%s\n' "$errkinds"
+echo "엔진 기록 오류 줄 수: ${errtotal:-0} (문구는 찍지 않음 — 로컬 재현으로 확인)"
 scan_error "엔진 종료 코드 ${rc} · 결과 ${count}줄" "$count" "$rc"
