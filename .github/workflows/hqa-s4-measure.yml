@@ -1,0 +1,186 @@
+# HQA S4 관문 ① — GitHub 서버 실측 장치
+# 근거: 작업지시서 20261116작_S4관문1_GitHub서버실측 · 설계서 20261116_S4관문1_GitHub서버실측 (§2 · §4-1 · §5 · §6)
+# 판정자 = HQA. 이 워크플로가 남기는 글자는 「장치 판독」 뿐이다.
+#
+# - 트리거: 장치 가지 · 심은빨강 가지 push 만 (태그 · PR · 예약 · 수동 0)
+# - 권한: 머리 permissions {} · measure = contents read · publish = contents write (이 잡 하나만)
+# - 외부 액션: 전체 커밋 SHA 고정 (태그 고정 금지 · 2026-11-16 gh api 로 확인)
+#     actions/checkout          v7 → 3d3c42e5aac5ba805825da76410c181273ba90b1
+#     actions/upload-artifact   v5 → 330a01c490aca151604b8cf639adc76d48f6c5d4
+#     actions/download-artifact v6 → 018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+# - 2단 점화: tools/hqa-s4-measure/MODE = rehearsal (항목 측정 0) → 발행 → armed:<D 전체 SHA>:r<n> (M0 이 단언)
+name: HQA S4 관문1 GitHub 서버 실측
+
+on:
+  push:
+    branches:
+      - 'hqa/20261116-S4-gh실측-장치'
+      - 'hqa/20261116-S4-gh실측-장치-심은빨강'
+
+permissions: {}
+
+concurrency:
+  group: hqa-s4-measure-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: '[장치] 측정'
+    runs-on: ubuntu-24.04
+    # ⚠️ 잠정값 — 리허설 실측 뒤 PM 이 정한다(작업지시서 A-1)
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.m0.outputs.mode }}
+    steps:
+      - name: '[장치] 작업 폴더'
+        run: |
+          raw="$RUNNER_TEMP/hqa-raw/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          work="$RUNNER_TEMP/hqa-work"
+          mkdir -p "$raw" "$work"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$work/started_utc.txt"
+          echo "HQA_RAW=$raw" >> "$GITHUB_ENV"
+          echo "HQA_WORK=$work" >> "$GITHUB_ENV"
+
+      - name: '[장치] 장치 커밋 받기'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: '[장치] M0 고정 단언'
+        id: m0
+        run: bash tools/hqa-s4-measure/m0-assert.sh "$HQA_RAW"
+
+      - name: '[장치] 자체시험 — 누출 · 가림'
+        id: stl
+        run: node tools/hqa-s4-measure/selftest-leak.js --out "$HQA_WORK/selftest-leak.json"
+
+      - name: '[장치] 자체시험 — 판독기'
+        id: stj
+        env:
+          MODE: ${{ steps.m0.outputs.mode }}
+        run: |
+          f=tools/hqa-s4-measure/selftest-judge.js
+          if [ -f "$f" ]; then
+            rc=0; node "$f" || rc=$?
+            echo "present rc=$rc" > "$HQA_WORK/selftest-judge.status.txt"
+            exit $rc
+          fi
+          echo "absent" > "$HQA_WORK/selftest-judge.status.txt"
+          if [ "$MODE" = "armed" ]; then echo "판독기 자체시험 파일 없음 — 장전 런은 빨강" >&2; exit 1; fi
+          echo "판독기 자체시험 파일 없음 — 리허설이라 계속"
+
+      - name: '[장치] M1 묶음 지문'
+        id: m1
+        timeout-minutes: 20
+        run: bash tools/hqa-s4-measure/boot.sh m1 "$HQA_RAW" "$HQA_WORK"
+
+      - name: '[장치] M2 꾸러미'
+        id: m2
+        timeout-minutes: 30
+        run: bash tools/hqa-s4-measure/boot.sh m2 "$HQA_RAW" "$HQA_WORK"
+
+      - name: '[장치] M3 브라우저'
+        id: m3
+        timeout-minutes: 20
+        run: bash tools/hqa-s4-measure/boot.sh m3 "$HQA_RAW" "$HQA_WORK"
+
+      - name: '[장치] M4 앱 기동'
+        id: m4
+        timeout-minutes: 5
+        run: bash tools/hqa-s4-measure/boot.sh m4 "$HQA_RAW" "$HQA_WORK"
+
+      # ---- 여기부터 장전(armed) 때만. 리허설은 항목 측정 0 ----
+      - name: '[측정] M5~M6 항목'
+        id: items
+        if: steps.m0.outputs.mode == 'armed'
+        run: |
+          f=tools/hqa-s4-measure/run-items.js
+          if [ ! -f "$f" ]; then echo "측정 스크립트 없음 — 표본 0 = 빨강" >&2; exit 1; fi
+          node "$f" --raw "$HQA_RAW" --base "$HQA_BASE_URL" --chrome "$HQA_CHROME" --pw "$HQA_PW_DIR" \
+            --proxy "$GITHUB_WORKSPACE/tools/hqa-s4-fixture/proxy/delay-proxy.js" \
+            --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json"
+
+      - name: '[판독] M7 장치 판독'
+        id: judge
+        if: always() && steps.m0.outputs.mode == 'armed' && steps.m0.outcome == 'success' && steps.items.outcome != 'skipped'
+        run: |
+          f=tools/hqa-s4-measure/judge.js
+          if [ ! -f "$f" ]; then echo "판독기 없음 — 빨강" >&2; exit 1; fi
+          node "$f" --raw "$HQA_RAW" --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json"
+
+      # ---- 어느 단계가 죽어도 원자료는 남긴다(M0 실패면 m0-assert.json 만) ----
+      - name: '[장치] run.json 조립 · 고정 머리 2회차'
+        if: always() && steps.m0.outcome == 'success'
+        env:
+          OUT_M0: ${{ steps.m0.outcome }}
+          OUT_SELFTEST_LEAK: ${{ steps.stl.outcome }}
+          OUT_SELFTEST_JUDGE: ${{ steps.stj.outcome }}
+          OUT_M1: ${{ steps.m1.outcome }}
+          OUT_M2: ${{ steps.m2.outcome }}
+          OUT_M3: ${{ steps.m3.outcome }}
+          OUT_M4: ${{ steps.m4.outcome }}
+          OUT_ITEMS: ${{ steps.items.outcome }}
+          OUT_JUDGE: ${{ steps.judge.outcome }}
+        run: bash tools/hqa-s4-measure/boot.sh runjson "$HQA_RAW" "$HQA_WORK"
+
+      - name: '[장치] M8 가림'
+        id: mask
+        if: always() && (steps.m0.outcome == 'success' || steps.m0.outcome == 'failure')
+        run: node tools/hqa-s4-measure/mask.js "$HQA_RAW"
+
+      - name: '[장치] M9 누출 검사'
+        id: leak
+        if: always() && (steps.m0.outcome == 'success' || steps.m0.outcome == 'failure')
+        env:
+          M0_OUTCOME: ${{ steps.m0.outcome }}
+        run: |
+          extra=""
+          if [ "$M0_OUTCOME" = "success" ]; then extra="--withheld-write"; fi
+          node tools/hqa-s4-measure/leak-scan.js "$HQA_RAW" --stage measure --remove $extra
+
+      - name: '[장치] M10 해시 목록'
+        if: always() && (steps.m0.outcome == 'success' || steps.m0.outcome == 'failure')
+        run: bash tools/hqa-s4-measure/publish.sh sums "$HQA_RAW"
+
+      - name: '[장치] 원자료 운반'
+        if: always() && (steps.m0.outcome == 'success' || steps.m0.outcome == 'failure')
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: hqa-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hqa-raw
+          retention-days: 90
+          if-no-files-found: error
+          include-hidden-files: false
+
+  publish:
+    name: '[장치] 원자료 커밋'
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    # ⚠️ 잠정값 — 리허설 실측 뒤 PM
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: '[장치] 장치 커밋 받기'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: '[장치] 원자료 받기'
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: hqa-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hqa-in
+
+      - name: '[장치] 누출 재검 · check-ignore · 원자료 가지 커밋'
+        env:
+          HQA_IN: ${{ runner.temp }}/hqa-in
+          HQA_PUSH_TOKEN: ${{ github.token }}
+          HQA_MEASURE_RESULT: ${{ needs.measure.result }}
+        run: bash tools/hqa-s4-measure/publish.sh commit
