@@ -1,0 +1,192 @@
+{
+  "stage": "PROBE",
+  "mode": "rehearsal",
+  "note": "judgement-free probe - selector presence / time / Tab reach / require only - item reading 0",
+  "rulesVersion": "s4gh-B-r1",
+  "node_path_set": true,
+  "playwright_require": {
+    "resolved": true,
+    "version": "1.62.1",
+    "ms": 220
+  },
+  "browser_launched": true,
+  "screens": [
+    {
+      "screen": "before",
+      "goto_ok": true,
+      "goto_ms": 120,
+      "selectors": [
+        {
+          "name": "readme",
+          "selector": "#before",
+          "found": true,
+          "ms": 69
+        },
+        {
+          "name": "readme",
+          "selector": "[data-row]",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "#detail",
+          "found": true,
+          "ms": 6
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclick-count",
+          "found": true,
+          "ms": 5
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclicks",
+          "found": true,
+          "ms": 4
+        },
+        {
+          "name": "readme",
+          "selector": "#pick-count",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#picks",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "#fixture-root",
+          "found": true,
+          "ms": 10
+        },
+        {
+          "name": "readme",
+          "selector": "link[data-fixture-css]",
+          "found": true,
+          "ms": 5
+        },
+        {
+          "name": "statusChip",
+          "selector": ".bo-status-chip",
+          "found": true,
+          "ms": 8
+        },
+        {
+          "name": "reconnect",
+          "note": "may be absent unless disconnected",
+          "selector": "#components-reconnect-modal",
+          "found": false,
+          "ms": 2001
+        }
+      ],
+      "tab_first_row": {
+        "reached": false,
+        "tabs": null,
+        "ms": 3414
+      },
+      "open_list_after_enter": null,
+      "errors": [
+        "tab: Tab 40회 안에 1번 줄 상태 단추에 못 감"
+      ]
+    },
+    {
+      "screen": "after",
+      "goto_ok": true,
+      "goto_ms": 104,
+      "selectors": [
+        {
+          "name": "readme",
+          "selector": "#before",
+          "found": true,
+          "ms": 31
+        },
+        {
+          "name": "readme",
+          "selector": "[data-row]",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#detail",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclick-count",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclicks",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#pick-count",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#picks",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#fixture-root",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "link[data-fixture-css]",
+          "found": true,
+          "ms": 21
+        },
+        {
+          "name": "statusChip",
+          "selector": ".bo-status-chip",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "reconnect",
+          "note": "may be absent unless disconnected",
+          "selector": "#components-reconnect-modal",
+          "found": false,
+          "ms": 2000
+        }
+      ],
+      "tab_first_row": {
+        "reached": true,
+        "tabs": 7,
+        "ms": 626
+      },
+      "open_list_after_enter": {
+        "selector": ".mud-popover.mud-popover-open",
+        "found": true,
+        "ms": 24
+      },
+      "errors": [],
+      "png_check": {
+        "screen": "after",
+        "input_before_shot": 0,
+        "taken": true,
+        "verdict": "pass",
+        "kinds": [],
+        "saved": "shots/probe.after.first.png"
+      }
+    }
+  ],
+  "errors": []
+}

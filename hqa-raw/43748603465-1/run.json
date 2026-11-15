@@ -1,0 +1,517 @@
+{
+  "run_id": "43748603465",
+  "run_attempt": "1",
+  "workflow": "HQA S4 관문1 GitHub 서버 실측",
+  "job": "measure",
+  "ref": "refs/heads/hqa/20261116-S4-gh실측-장치",
+  "device_commit": "e8533604e461d87e5b668bcd1de6f2458e935769",
+  "fixture_tree": "0b31f8692367ae28a6fac255d8eae5c931066d7b",
+  "mode": "rehearsal",
+  "runner": {
+    "image_os": "ubuntu24",
+    "image_version": "20261111.127.1",
+    "os": "Linux",
+    "arch": "X64"
+  },
+  "node": "v22.23.4",
+  "playwright": "1.62.1",
+  "browser": "151.0.7922.34",
+  "headless_shell": "not used",
+  "ldd_missing": [],
+  "started_utc": "2026-11-15T18:46:16Z",
+  "ended_utc": "2026-11-15T18:47:25.755Z",
+  "ls_remote_start": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "d939b0285c89116b0171945d1f6ed074d0715a43"
+    }
+  ],
+  "ls_remote_end": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "d939b0285c89116b0171945d1f6ed074d0715a43"
+    }
+  ],
+  "fixed_heads_unchanged": true,
+  "fixed_heads_assert": {
+    "lines_start": 3,
+    "lines_end": 3,
+    "feat_end_ok": true,
+    "fixture_end_ok": true,
+    "main_same": true,
+    "ok": true
+  },
+  "stage_outcomes": {
+    "M0": "success",
+    "SELFTEST_LEAK": "success",
+    "SELFTEST_JUDGE": "success",
+    "M1": "success",
+    "M2": "success",
+    "M3": "success",
+    "M4": "success",
+    "PROBE": "success",
+    "ITEMS": "skipped",
+    "JUDGE": "skipped"
+  },
+  "stage_results": {
+    "m1": {
+      "stage": "m1",
+      "ok": true,
+      "detail": "checks=5"
+    },
+    "m2": {
+      "stage": "m2",
+      "ok": true,
+      "detail": "tries=1"
+    },
+    "m3": {
+      "stage": "m3",
+      "ok": true,
+      "playwright": "1.62.1",
+      "browser": "151.0.7922.34",
+      "headless_shell": "not used",
+      "ldd_missing": [],
+      "detail": ""
+    },
+    "m4": {
+      "stage": "m4",
+      "ok": true,
+      "detail": "failed_step=none"
+    }
+  },
+  "selftest_leak": {
+    "ok": true,
+    "cases": 33,
+    "failed": [],
+    "results": [
+      {
+        "case": "content-long-token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "<가림:4>",
+        "expect": [
+          "runner-path"
+        ],
+        "kinds": [
+          "runner-path"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "<가림:5>",
+        "expect": [
+          "runner-path"
+        ],
+        "kinds": [
+          "runner-path"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-gh",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-cloud-id",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "<가림:6>",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-jwt",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-bearer",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-assign",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-cred-json-kv",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "<가림:7>",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "<가림:8>",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-b64-text",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-b64-json",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-hex64-unkeyed",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-hex40-text",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-banned-1",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-banned-2",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "content-banned-3",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-long-token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-cred-gh",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-banned",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-subdir-token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-hex64",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "name-bad-extension",
+        "expect": [
+          "extension"
+        ],
+        "kinds": [
+          "extension"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png-bad-signature",
+        "expect": [
+          "png-signature"
+        ],
+        "kinds": [
+          "png-signature"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png-text-chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png-itxt-chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png-ztxt-chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png-trailing",
+        "expect": [
+          "png-structure"
+        ],
+        "kinds": [
+          "png-structure"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "control-clean",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "remove-and-withheld",
+        "expect": [
+          "removed",
+          "name masked"
+        ],
+        "kinds": null,
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "mask-roundtrip",
+        "expect": [
+          "token masked",
+          "b64 masked",
+          "unkeyed hex masked",
+          "path masked",
+          "keyed sha kept"
+        ],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      }
+    ]
+  },
+  "selftest_judge": "present rc=0",
+  "probe": "see probe.json (rehearsal - judgement-free)",
+  "items": "rehearsal: item measurement 0",
+  "verdict": "device reading only - judgement = HQA",
+  "mask": {
+    "files": 8,
+    "paths_replaced": 10,
+    "tokens_replaced": 9,
+    "distinct_tokens": 8,
+    "json_broken": []
+  }
+}
