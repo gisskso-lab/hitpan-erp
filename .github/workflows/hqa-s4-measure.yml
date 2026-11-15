@@ -99,9 +99,11 @@ jobs:
         run: |
           f=tools/hqa-s4-measure/run-items.js
           if [ ! -f "$f" ]; then echo "측정 스크립트 없음 — 표본 0 = 빨강" >&2; exit 1; fi
-          node "$f" --raw "$HQA_RAW" --base "$HQA_BASE_URL" --chrome "$HQA_CHROME" --pw "$HQA_PW_DIR" \
-            --proxy "$GITHUB_WORKSPACE/tools/hqa-s4-fixture/proxy/delay-proxy.js" \
-            --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json"
+          # 합류 맞춤(PM): 갈래 B 계약 = 환경 변수(HQA_OUT_DIR · HQA_CHROME_PATH · HQA_FIXTURE_DIR) · playwright 는 require 로 푼다
+          HQA_OUT_DIR="$HQA_RAW" HQA_CHROME_PATH="$HQA_CHROME" \
+          HQA_FIXTURE_DIR="$GITHUB_WORKSPACE/tools/hqa-s4-fixture" \
+          NODE_PATH="$(dirname "$HQA_PW_DIR")" \
+            node "$f"
 
       - name: '[판독] M7 장치 판독'
         id: judge
@@ -109,7 +111,8 @@ jobs:
         run: |
           f=tools/hqa-s4-measure/judge.js
           if [ ! -f "$f" ]; then echo "판독기 없음 — 빨강" >&2; exit 1; fi
-          node "$f" --raw "$HQA_RAW" --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json"
+          node "$f" --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json" \
+            --samples "$HQA_RAW/samples.jsonl" --out "$HQA_RAW/verdict-device.json"
 
       # ---- 어느 단계가 죽어도 원자료는 남긴다(M0 실패면 m0-assert.json 만) ----
       - name: '[장치] run.json 조립 · 고정 머리 2회차'
