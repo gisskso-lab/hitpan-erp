@@ -3,7 +3,11 @@
 // N-1: 키보드로 목록 열기 → ↑ · ↓ 빠른 연타(간격 · 횟수 = rules.json device.n1) → 회로 신호 3종 · 목록 닫힘 · 초점 · 다른 줄 변화.
 // N-2: N-1 직후 같은 문맥에서 Enter 두 번 → #pick-count · #picks (관찰 칸 · 기록만).
 // 판독 글자(대조 무효 / 🔴 / 🟡)는 judge.js 가 정본 글자로만 매긴다.
+// 고침4 G1: N-2 는 계획에 붙은 칸에서만 — ctx.derivedItems(run-items 가 이 칸의 파생 항목을 넘김)에 N-2 가 없으면(N-1 의 a2 칸)
+//   N-2 입력(Enter 두 번) 0 · N-2 결과 0. derivedItems 가 없으면(옛 호출 · 자체시험) 옛 꼴 그대로 N-2 까지.
 const L = require('./_lib.js');
+
+function n2Planned(ctx) { return !Array.isArray(ctx.derivedItems) || ctx.derivedItems.includes('N-2'); }
 
 async function n1(ctx) {
   const d = ctx.rules.device;
@@ -14,7 +18,7 @@ async function n1(ctx) {
     // 고침2 N1-b: 못 갔으면 열기 0 · 연타 0 · N-2 입력 0 — 회로 신호 3종은 정착 시간 동안 기록(그림 0)
     const u = await L.unreached(ctx, row, reach, d.n1.settleExtraMs);
     const D = ctx.rules.deviceReading;
-    return [{
+    const outU = [{
       item: 'N-1',
       readings: {
         row, reachedByTab: false, tabsToReach: null, keyPressed: 0, opened: false, burstSent: 0,
@@ -30,6 +34,7 @@ async function n1(ctx) {
       circuit: L.circuitSince(ctx, ctx.inputAt),
       kbd: u.kbd
     }];
+    return n2Planned(ctx) ? outU : outU.slice(0, 1);
   }
   await L.press(ctx, 'Enter');
   const st1 = await L.waitOpen(ctx, true);
@@ -67,7 +72,8 @@ async function n1(ctx) {
     kbd: { reached: true, tabs: reach.tabs }
   }];
 
-  // N-2 — 같은 문맥 이어서(관찰 칸)
+  // N-2 — 같은 문맥 이어서(관찰 칸) · 고침4 G1: 이 칸에 N-2 계획이 없으면(a2) 여기서 끝(입력 0)
+  if (!n2Planned(ctx)) return out;
   const t2 = Date.now();
   await L.press(ctx, 'Enter');
   await L.wait(ctx, d.n2.gapMs);

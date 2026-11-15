@@ -10,6 +10,9 @@
 //      (같은 토큰 = 같은 n · 값은 메모리에만 · 어디에도 안 씀)
 //   ④ 텍스트 파일(.json · .jsonl · .txt)만 · PNG 는 leak-scan 이 머리 바이트 · 텍스트 덩어리를 본다(F6)
 //   가린 개수는 run.json 의 mask 칸에 수로만. 종료 코드 0 = 끝 · 1 = 처리 오류
+//   고침4 G7: ⑤ 판정 칸 스키마(rules.json judgeSchema · 파일 이름별)에 걸린 덩어리는 가리지 않는다 → judge_field_conflicts(값 0)
+//             (판독기는 같은 꼴을 미리 재서 그 표본을 「판정 칸 가림 충돌」 device_failure 로 · 남은 값은 leak-scan 이 파일째 보류)
+//             ⑥ 가림 기록 records = 파일 · 칸 경로 · 꼴 종류 · 길이(값 0 · 이름 조각이 꼴에 걸리면 <이름>)
 const fs = require('fs');
 const path = require('path');
 
@@ -108,11 +111,12 @@ function isB64Secret(tok) {
   return !pathLike(body);
 }
 
-// 가림 · 누출 공용 — 걸리는 덩어리 [{s, e, tok}] (앞에서부터)
+// 가림 · 누출 공용 — 걸리는 덩어리 [{s, e, tok, kind}] (앞에서부터)
+//   고침4 G7: kind(꼴 종류 · 가림 기록용 · 값 아님) 를 더함 — base64 · hex · long-token
 function findSecrets(text, allow, hctx) {
   const out = [];
   for (const m of text.matchAll(B64_RE)) {
-    if (isB64Secret(m[0]) && !allow.has(m[0])) out.push({ s: m.index, e: m.index + m[0].length, tok: m[0] });
+    if (isB64Secret(m[0]) && !allow.has(m[0])) out.push({ s: m.index, e: m.index + m[0].length, tok: m[0], kind: 'base64' });
   }
   for (const m of text.matchAll(TOKEN_RE)) {
     const s = m.index;
@@ -121,9 +125,92 @@ function findSecrets(text, allow, hctx) {
     const tok = m[0];
     if (allow.has(tok)) continue;
     if (HEX_RE.test(tok) && hexAllowedAt(text, s, tok, hctx)) continue;
-    out.push({ s, e, tok });
+    out.push({ s, e, tok, kind: HEX_RE.test(tok) ? 'hex' : 'long-token' });
   }
   return out.sort((a, b) => a.s - b.s);
+}
+
+// ── 고침4 G7 — 판정 칸 스키마(rules.json judgeSchema) · 칸 경로 ──────────────────────
+//   꼴 글자: 'kbd.path[].tag' · 'items.*.labels[]' — 점 = 객체 칸 · [] = 배열 아무 칸 · * = 아무 열쇠
+const IDX = { idx: true };
+const ANY = { any: true };
+function parsePattern(p) {
+  const out = [];
+  for (const seg of String(p).split('.')) {
+    let name = seg;
+    let n = 0;
+    while (name.endsWith('[]')) { name = name.slice(0, -2); n += 1; }
+    out.push(name === '*' ? ANY : name);
+    for (let i = 0; i < n; i++) out.push(IDX);
+  }
+  return out;
+}
+function matchPath(pathArr, pat) {
+  if (pathArr.length !== pat.length) return false;
+  return pat.every((t, i) => (t === IDX ? typeof pathArr[i] === 'number' : t === ANY ? typeof pathArr[i] === 'string' : pathArr[i] === t));
+}
+function inSchema(pathArr, pats) { return pats.some((p) => matchPath(pathArr, p)); }
+function schemaFor(rules, fileBase) {
+  const s = rules && rules.judgeSchema;
+  const list = s && Array.isArray(s[fileBase]) ? s[fileBase] : [];
+  return list.map(parsePattern);
+}
+// 칸 경로 글자(가림 기록용) — 열쇠가 긴 토큰 꼴이면 열쇠도 <키> 로(값 0)
+const KEY_LONG = /[A-Za-z0-9_+\/=-]{22,}/;
+function pathStr(pathArr) {
+  let o = '';
+  for (const k of pathArr) {
+    if (typeof k === 'number') o += '[' + k + ']';
+    else o += (o ? '.' : '') + (KEY_LONG.test(k) ? '<키>' : k);
+  }
+  return o || '(뿌리)';
+}
+// 객체에서 스키마 꼴에 맞는 [경로 배열, 값] 들(judge.js 가 표본 하나에 건다)
+function schemaValues(obj, pats) {
+  const out = [];
+  const walk = (v, p) => {
+    if (inSchema(p, pats)) out.push([p.slice(), v]);
+    if (v && typeof v === 'object') {
+      if (Array.isArray(v)) v.forEach((x, i) => walk(x, p.concat([i])));
+      else for (const k of Object.keys(v)) walk(v[k], p.concat([k]));
+    }
+  };
+  walk(obj, []);
+  return out;
+}
+// JSON · JSONL 원문의 글자 덩어리(따옴표 포함) 자리 → 칸 경로 [{s, e, path, key}] · jsonl 은 줄(line)도
+function jsonSpans(text) {
+  const spans = [];
+  const stack = [];
+  let line = 1;
+  const cur = () => stack.map((f) => (f.type === 'a' ? f.idx : f.key));
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') { if (text[j] === '\\') j++; j++; }
+      const top = stack[stack.length - 1];
+      if (top && top.type === 'o' && top.expectKey) {
+        let key = '';
+        try { key = JSON.parse(text.slice(i, j + 1)); } catch (e) { key = '<키>'; }
+        spans.push({ s: i, e: j + 1, path: cur().slice(0, -1).concat([key]), key: true, line });
+        top.key = key;
+        top.expectKey = false;
+      } else {
+        spans.push({ s: i, e: j + 1, path: cur(), key: false, line });
+      }
+      i = j + 1;
+      continue;
+    }
+    if (ch === '{') stack.push({ type: 'o', key: null, expectKey: true });
+    else if (ch === '[') stack.push({ type: 'a', idx: 0 });
+    else if (ch === '}' || ch === ']') stack.pop();
+    else if (ch === ',') { const top = stack[stack.length - 1]; if (top) { if (top.type === 'a') top.idx += 1; else top.expectKey = true; } }
+    else if (ch === '\n') line += 1;
+    i++;
+  }
+  return spans;
 }
 
 // 옛 호출 꼴(문맥 없는 낱말 판정) — 16진 40/64 는 문맥이 없으니 걸린다
@@ -151,13 +238,37 @@ function listFiles(dir) {
   return out.sort();
 }
 
-function maskText(text, paths, allow, tokenIndex, counts, hctx) {
+// 고침4 G7: opt = { file(상대 경로) · json(참이면 칸 경로) · schema(판정 칸 꼴) } — 없으면 옛 꼴 그대로
+//   판정 칸에 걸린 덩어리는 가리지 않고 counts.conflicts 에(값 0) · 그 밖은 가리고 counts.records 에(파일 · 칸 경로 · 꼴 · 길이)
+const RECORDS_MAX = 500;
+function maskText(text, paths, allow, tokenIndex, counts, hctx, opt) {
+  const o = opt || {};
   let t = text;
   for (const p of paths) {
     const parts = t.split(p);
     if (parts.length > 1) { counts.paths += parts.length - 1; t = parts.join('<러너>'); }
   }
-  const hits = findSecrets(t, allow, hctx);
+  const all = findSecrets(t, allow, hctx);
+  const spans = o.json ? jsonSpans(t) : null;
+  const where = (h) => {
+    if (spans) {
+      const sp = spans.find((x) => h.s >= x.s && h.e <= x.e);
+      if (sp) return { arr: sp.key ? null : sp.path, str: (o.jsonl ? 'L' + sp.line + ':' : '') + pathStr(sp.path) + (sp.key ? '(열쇠)' : '') };
+    }
+    const line = t.slice(0, h.s).split('\n').length;
+    return { arr: null, str: 'L' + line };
+  };
+  const hits = [];
+  for (const h of all) {
+    const w = where(h);
+    const rec = { file: o.file || null, path: w.str, kind: h.kind, length: h.tok.length };
+    if (o.schema && o.schema.length && w.arr && inSchema(w.arr, o.schema)) {
+      if (counts.conflicts) counts.conflicts.push(rec);
+      continue;
+    }
+    if (counts.records) { if (counts.records.length < RECORDS_MAX) counts.records.push(rec); else counts.records_dropped = (counts.records_dropped || 0) + 1; }
+    hits.push(h);
+  }
   for (const h of hits) if (!tokenIndex.has(h.tok)) tokenIndex.set(h.tok, tokenIndex.size + 1);
   for (let i = hits.length - 1; i >= 0; i--) {
     const h = hits[i];
@@ -167,15 +278,26 @@ function maskText(text, paths, allow, tokenIndex, counts, hctx) {
   return t;
 }
 
+function loadRulesSafe() {
+  const p = path.join(__dirname, 'rules.json');
+  try { return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null; } catch (e) { return null; }
+}
+
 function maskDir(dir, env) {
   const allow = loadAllow();
   const paths = runnerPaths(env);
   const tokenIndex = new Map();
-  const counts = { files: 0, paths: 0, tokens: 0, json_broken: [] };
+  const rules = loadRulesSafe();
+  const counts = { files: 0, paths: 0, tokens: 0, json_broken: [], records: [], conflicts: [] };
   for (const f of listFiles(dir)) {
     if (!TEXT_EXT.has(path.extname(f))) continue;
     const before = fs.readFileSync(f, 'utf8');
-    const after = maskText(before, paths, allow, tokenIndex, counts, hexCtx(env, path.basename(f)));
+    const base = path.basename(f);
+    const ext = path.extname(f);
+    // 가림 기록의 파일 이름도 값 0 — 이름 조각이 가림 꼴에 걸리면 <이름> 으로
+    const rel = path.relative(dir, f).split(path.sep).join('/').split('/').map((x) => (findSecrets(x, allow, hexCtx(env, null)).length ? '<이름>' : x)).join('/');
+    const opt = { file: rel, json: ext === '.json' || ext === '.jsonl', jsonl: ext === '.jsonl', schema: schemaFor(rules, base) };
+    const after = maskText(before, paths, allow, tokenIndex, counts, hexCtx(env, base), opt);
     counts.files += 1;
     if (after !== before) {
       fs.writeFileSync(f, after);
@@ -190,7 +312,11 @@ function maskDir(dir, env) {
       }
     }
   }
-  const summary = { files: counts.files, paths_replaced: counts.paths, tokens_replaced: counts.tokens, distinct_tokens: tokenIndex.size, json_broken: counts.json_broken };
+  // 고침4 G7: 가림 기록(파일 · 칸 경로 · 꼴 · 길이 · 값 0) · 판정 칸 가림 충돌(가리지 않음 → leak-scan 이 그 파일 보류)
+  const summary = {
+    files: counts.files, paths_replaced: counts.paths, tokens_replaced: counts.tokens, distinct_tokens: tokenIndex.size, json_broken: counts.json_broken,
+    records: counts.records, records_dropped: counts.records_dropped || 0, judge_field_conflicts: counts.conflicts
+  };
   const runJson = path.join(dir, 'run.json');
   if (fs.existsSync(runJson)) {
     const j = JSON.parse(fs.readFileSync(runJson, 'utf8'));
@@ -204,6 +330,7 @@ function maskDir(dir, env) {
 module.exports = {
   TEXT_EXT, TOKEN_RE, B64_RE, HEX_RE, HEX_KEYS, HEX_KV, KNOWN_HEX, FIXED_ALLOW, DEVICE_HEX_FILES, pathLike,
   loadAllow, knownHex, hexCtx, hexAllowedAt, isB64Secret, findSecrets, runnerPaths, isLongToken, listFiles, maskText, maskDir,
+  parsePattern, matchPath, inSchema, schemaFor, schemaValues, pathStr, jsonSpans,
 };
 
 if (require.main === module) {

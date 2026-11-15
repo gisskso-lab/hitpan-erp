@@ -67,10 +67,13 @@ commit() {
   elif [ "$lrc" != "0" ]; then die "누출 재검 오류 rc=$lrc"; fi
 
   # 5) 원자료 가지: 있으면 첫 부모 사슬에 장치 커밋이 있는지 단언 뒤 덧붙임 · 없으면 장치 커밋에서 새로
+  #    고침4 G8 ⑦(D-5 ⑦): 장전(armed) 원자료는 새 가지에만 — 가지가 이미 있으면 빨강(덧붙임 0 · M0 가 측정 전 같은 단언)
+  local pre_mode; pre_mode=$(node -e 'const fs=require("fs");const f=process.argv[1];let m="unknown";for(const n of ["run.json","m0-assert.json"]){if(fs.existsSync(f+"/"+n)){try{m=JSON.parse(fs.readFileSync(f+"/"+n,"utf8")).mode||m;}catch(e){m="unknown";}break;}}console.log(m)' "$src")
   cd "$repo" || die "레포 폴더 없음"
   git config push.followTags false
   local remote_tip
   remote_tip=$(git ls-remote origin "refs/heads/$branch" | cut -f1) || die "ls-remote 실패"
+  if [ "$pre_mode" = "armed" ] && [ -n "$remote_tip" ]; then die "장전 원자료인데 원자료 가지가 이미 있음(덧붙임 0)"; fi
   if [ -n "$remote_tip" ]; then
     git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/hqa-raw-target" || die "원자료 가지 받기 실패"
     git rev-list --first-parent refs/remotes/origin/hqa-raw-target | grep -qx "$GITHUB_SHA" || die "원자료 가지 첫 부모 사슬에 $GITHUB_SHA 없음(다른 회차)"

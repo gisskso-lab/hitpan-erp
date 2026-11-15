@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # M0 [장치] 고정 단언 — 설계 §4-1 M0 ①~⑤ · §6-5 장전(MODE) 단언 · 고침1 F7(고정 머리 값 단언) · F8(장전 때 HQA 회신 칸 확정 관문)
 #   세부 글자의 SHA 는 key=값 꼴로만 쓴다(가림 F5 — 알려진 칸만 16진 허용)
-#   사용: m0-assert.sh <원자료 폴더>
+#   사용: m0-assert.sh <원자료 폴더> [--guard-only]
 #   결과: <원자료 폴더>/m0-assert.json · GITHUB_OUTPUT 에 mode=rehearsal|armed|invalid
 #   종료 코드: 0 = 전부 통과 · 1 = 하나라도 다름(이후 단계 0 · 원자료는 이 파일만)
+#   고침4 G8(D-5 ① ⑤ ⑥ ⑦): ⑤ github.sha ≠ 체크아웃 HEAD → 측정 0(Actions 안이면 github.sha 없음도 0 · HEAD^ ≠ MODE 적힌 SHA 는 아래 장전 단언)
+#     ⑥ run_attempt > 1 → 측정 0(재실행 = 새 회차 아님 · 설계서 §6-6 「[장치] 빨강은 같은 커밋 재실행 1회」 대체됨)
+#     ⑦ 장전(armed) 때 원자료 가지가 이미 있으면 측정 0(이 잡 첫머리 ls-remote)
+#     ① 원자료(m0-assert.json)에 github_sha · run_id · run_attempt · mode_line(MODE 줄)
+#     --guard-only = ⑤ ⑥ 만 재고 끝(망 접속 0 · 파일 0 — selftest-judge.js 가 attempt 2 → 측정 0 을 동작으로 확인)
 set -u -o pipefail
 
-RAW="${1:?usage: m0-assert.sh <raw-dir>}"
+RAW="${1:?usage: m0-assert.sh <raw-dir> [--guard-only]}"
+GUARD_ONLY=0; [ "${2:-}" = "--guard-only" ] && GUARD_ONLY=1
 mkdir -p "$RAW"
 
 FIX_TREE=0b31f8692367ae28a6fac255d8eae5c931066d7b   # 시험 앱 나무(tools/hqa-s4-fixture)
@@ -42,8 +48,21 @@ rec() { # 이름 · 통과(1/0) · 세부
 }
 
 HEAD_SHA=$(git rev-parse HEAD 2>&1)
-if [ -n "${GITHUB_SHA:-}" ]; then
-  if [ "$HEAD_SHA" = "$GITHUB_SHA" ]; then rec head_is_event 1 "HEAD=$HEAD_SHA"; else rec head_is_event 0 "HEAD=$HEAD_SHA event=$GITHUB_SHA"; fi
+IN_ACTIONS=0; [ "${GITHUB_ACTIONS:-}" = "true" ] && IN_ACTIONS=1
+# 고침4 G8 ⑤: 옛 꼴 = GITHUB_SHA 가 있을 때만 대조 → Actions 안이면 반드시 대조(없으면 다름)
+if [ -n "${GITHUB_SHA:-}" ] || [ "$IN_ACTIONS" = "1" ]; then
+  if [ -n "${GITHUB_SHA:-}" ] && [ "$HEAD_SHA" = "$GITHUB_SHA" ]; then rec head_is_event 1 "HEAD=$HEAD_SHA"; else rec head_is_event 0 "HEAD=$HEAD_SHA event=${GITHUB_SHA:-none}"; fi
+fi
+# 고침4 G8 ⑥: 재실행(run_attempt > 1) = 측정 0
+if [ -n "${GITHUB_RUN_ATTEMPT:-}" ] || [ "$IN_ACTIONS" = "1" ]; then
+  if [ "${GITHUB_RUN_ATTEMPT:-}" = "1" ]; then rec run_attempt_one 1 "run_attempt=1"; else rec run_attempt_one 0 "run_attempt=${GITHUB_RUN_ATTEMPT:-none} want=1"; fi
+fi
+if [ "$GUARD_ONLY" = "1" ]; then
+  cut -f1,2 "$TSV" | sed 's/\t1$/ 통과/; s/\t0$/ 다름/'
+  rm -rf "$TMPD"
+  if [ "$fail" != "0" ]; then echo "[M0] 실행 사슬 단언 실패(--guard-only)" >&2; exit 1; fi
+  echo "[M0] 실행 사슬 통과(--guard-only)"
+  exit 0
 fi
 
 # ① 시험 앱 나무 해시
@@ -119,6 +138,13 @@ elif [[ "$mfirst" =~ ^armed:([0-9a-f]{40}):r([1-9][0-9]*)$ ]] && [ "$mlines" = "
   if [ "$ns" = "$(printf '1\t1')" ]; then rec armed_one_line 1 "1/1"; else rec armed_one_line 0 "numstat=$ns"; fi
   pm=$(git show "HEAD^:$MODE_PATH" 2>&1 | tr -d '\r')
   if [ "$pm" = "rehearsal" ]; then rec armed_prev_mode 1 "rehearsal"; else rec armed_prev_mode 0 "parent MODE=$pm"; fi
+  # 고침4 G8 ⑦: 장전 때 원자료 가지(publish.sh 와 같은 이름)가 이미 있으면 측정 0 — ls-remote 오류도 0
+  RAW_BRANCH="hqa/20261116-S4-gh실측-원자료-${HEAD_SHA:0:8}"
+  if git ls-remote origin "refs/heads/$RAW_BRANCH" > "$TMPD/rb" 2>"$TMPD/erb"; then
+    if [ -s "$TMPD/rb" ]; then rec armed_raw_branch_absent 0 "raw branch exists"; else rec armed_raw_branch_absent 1 "absent"; fi
+  else
+    rec armed_raw_branch_absent 0 "ls-remote error: $(cat "$TMPD/erb")"
+  fi
   # 고침1 F8: HQA 회신 대기 칸이 하나라도 확정 꼴이 아니면 여기(M0)서 장전 거부 — 필수 칸 목록은 hqa-gate.js 에 고정
   if git show "HEAD:tools/hqa-s4-measure/rules.json" > "$TMPD/rules.json" 2>"$TMPD/eg" \
      && git show "HEAD:tools/hqa-s4-measure/hqa-gate.js" > "$TMPD/hqa-gate.js" 2>>"$TMPD/eg"; then
@@ -131,9 +157,9 @@ else
   rec mode_value 0 "unknown MODE: $mfirst (lines=$mlines)"
 fi
 
-node - "$TSV" "$LS" "$BL" "$RAW/m0-assert.json" "$mode" "$HEAD_SHA" <<'NODE'
+node - "$TSV" "$LS" "$BL" "$RAW/m0-assert.json" "$mode" "$HEAD_SHA" "$mfirst" <<'NODE'
 const fs = require('fs');
-const [tsv, ls, bl, out, mode, head] = process.argv.slice(2);
+const [tsv, ls, bl, out, mode, head, modeLine] = process.argv.slice(2);
 const rows = (f) => fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim() !== '');
 const checks = rows(tsv).map((l) => { const [check, ok, detail] = l.split('\t'); return { check, ok: ok === '1', detail: detail || '' }; });
 const lsRemote = rows(ls).map((l) => { const [sha, ref] = l.split('\t'); return { ref, sha }; });
@@ -143,6 +169,9 @@ const doc = {
   ok: checks.every((c) => c.ok),
   mode,
   head,
+  // 고침4 G8 ①: github.sha · MODE 줄(첫 줄만 · 꼴 = rehearsal 또는 armed:<40자>:r<n> — 그 밖이면 앞 40자만)
+  github_sha: process.env.GITHUB_SHA || null,
+  mode_line: /^(rehearsal|armed:[0-9a-f]{40}:r[1-9][0-9]*)$/.test(modeLine || '') ? modeLine : (modeLine ? 'other:' + String(modeLine).slice(0, 40).replace(/[^A-Za-z0-9:._-]/g, '?') : null),
   run_id: process.env.GITHUB_RUN_ID || null,
   run_attempt: process.env.GITHUB_RUN_ATTEMPT || null,
   ref: process.env.GITHUB_REF || null,

@@ -4,6 +4,8 @@
 // · 입력 = page.keyboard · page.mouse · locator 동작만(items/_lib.js) · 시험 앱 스크립트 주입 0.
 // · 지연 단마다 시험 앱 나무의 proxy/delay-proxy.js 를 사본 없이 그대로 다시 띄운다(인자값은 표본마다 기록).
 // · 표본 오류는 그 표본 errors 칸 · 계속. 판독은 judge.js.
+// · 고침4 G1: 화면 이름 ↔ 주소 ↔ 기대 data-variant ↔ 기대 CSS 판 = rules.plan.screenTable(judge.js screenUrl · screenCheck) — 주소 글자 0 · 앞머리 판단 0
+// · 고침4 G6: 같은 지연 단 안 순서 = rules.plan.screenOrder · 표본마다 order · contextId
 //
 // 쓰는 법:
 //   node run-items.js --plan     계획 칸 수만 출력(브라우저 · 앱 0) — 리허설 · 자체시험용
@@ -19,7 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { buildPlan, kbdGate, groupKey } = require('./judge.js');
+const { buildPlan, kbdGate, groupKey, screenSpec, screenUrl, screenCheck, screenRankOf } = require('./judge.js');
 const L = require('./items/_lib.js');
 const ITEMS = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
 
@@ -65,10 +67,12 @@ function stopProxy(p) {
   });
 }
 
+// 고침4 G1 · G6: 표본마다 화면 이름(screen) · 주소(screenPath · 표 값) · 실측 판(variantMeasured · cssMeasured) · 전체 순번(order) · 문맥 순번(contextId)
 function baseRecord(cell, sampleNo, meta) {
   return {
-    item: cell.item, case: cell.case, screen: cell.screen, delay: cell.delay, window: cell.window, cell: cell.key,
-    sampleNo, ts: new Date().toISOString(), inputs: [], readings: null, circuit: null, shot: null,
+    item: cell.item, case: cell.case, screen: cell.screen, screenPath: meta.screenPathOf(cell.screen), variantMeasured: null, cssMeasured: null,
+    delay: cell.delay, window: cell.window, cell: cell.key,
+    sampleNo, order: null, contextId: null, ts: new Date().toISOString(), inputs: [], readings: null, circuit: null, shot: null,
     errors: [], valid: false, kbd: null, deviceReading: null, proxy: meta.proxy, playwrightVersion: meta.playwrightVersion, browserVersion: meta.browserVersion,
     rulesVersion: meta.rulesVersion
   };
@@ -85,7 +89,7 @@ function applyKbd(rules, rec, kbd, afterReach) {
   if (!g.valid) rec.errors.push(g.reason);
 }
 
-async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, afterReach) {
+async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, afterReach, nextContextId) {
   const d = rules.device;
   const cond = rules.hqaPending.browserCondition.value;
   const rec = baseRecord(cell, sampleNo, meta);
@@ -99,19 +103,26 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, aft
       deviceScaleFactor: cond.deviceScaleFactor,
       locale: cond.locale
     });
+    rec.contextId = nextContextId(); // 고침4 G6: 표본마다 새 문맥 · 문맥 순번
     context.setDefaultTimeout(d.actionTimeoutMs);
     const page = await context.newPage();
     sig = L.attachSignals(page, rules);
-    const ctx = { page, sig, rules, cell, sampleNo, outDir, inputs: rec.inputs, inputAt: null };
-    const url = `http://${d.host}:${d.proxyPort}/${cell.screen}${d.query}`;
+    // 고침4 G1: derivedItems = 이 칸에 붙은 파생 항목(N-1 의 a2 칸엔 N-2 없음 → n-items 가 N-2 입력을 안 보냄)
+    const ctx = { page, sig, rules, cell, sampleNo, outDir, inputs: rec.inputs, inputAt: null, derivedItems: derivedCells.map((c) => c.item) };
+    // 고침4 G1: 주소 = rules.plan.screenTable 값(옛 꼴 = `/${화면 이름}` · 화면 이름 = 주소 가정 대체)
+    const url = screenUrl(rules, cell.screen);
     await page.goto(url, { waitUntil: 'load', timeout: d.gotoTimeoutMs + 4 * cell.delay });
     const until = Date.now() + d.circuitWaitMs + 4 * cell.delay;
     while (sig.connectedAt === null && Date.now() < until) await page.waitForTimeout(d.pollMs);
     if (sig.connectedAt === null) throw new Error('회로(웹소켓 프레임) 연결 못 봄');
     await page.waitForTimeout(L.settleMs(rules, cell.delay));
     const st0 = await L.readState(ctx);
-    if (st0.variant !== cell.screen) throw new Error(`화면 판 불일치 data-variant=${st0.variant}`);
-    if (st0.cssVariant !== cell.screen) rec.errors.push(`상태 칸 CSS 판 불일치 data-fixture-css=${st0.cssVariant}`);
+    // 고침4 G1(C-3): 화면 확정 = data-variant 가 표 값과 같을 때만(다르면 throw) · CSS 판은 표 값과 다르면 오류 칸
+    //   (옛 꼴 = data-variant · data-fixture-css 둘 다 「화면 이름」 과 비교 — a2 는 CSS 가 after 라 표로 바꿈)
+    rec.variantMeasured = st0.variant;
+    rec.cssMeasured = st0.cssVariant;
+    const sc = screenCheck(rules, cell.screen, st0);
+    for (const e of sc.errors) rec.errors.push(e);
     const pre = L.circuitSince(ctx, sig.t0);
     if (pre.dead) throw new Error('입력 전 회로 죽음 신호');
     ctx.inputAt = Date.now();
@@ -132,6 +143,9 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, aft
       applyKbd(rules, r, o.kbd, afterReach);
       r.parentCell = cell.key;
       r.inputs = rec.inputs;
+      r.contextId = rec.contextId; // 같은 문맥 이어서
+      r.variantMeasured = rec.variantMeasured;
+      r.cssMeasured = rec.cssMeasured;
       extraRecs[dc.key] = r;
     }
   } catch (e) {
@@ -147,6 +161,7 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, aft
     if (extraRecs[dc.key]) { out.push(extraRecs[dc.key]); continue; }
     const r = baseRecord(dc, sampleNo, meta);
     r.parentCell = cell.key;
+    r.contextId = rec.contextId;
     r.errors.push(`앞 표본(${cell.item}) 실패로 못 잼`);
     out.push(r);
   }
@@ -216,19 +231,25 @@ async function main(argv) {
 
   fs.mkdirSync(path.join(outDir, 'shots'), { recursive: true });
   const samplesPath = path.join(outDir, 'samples.jsonl');
-  const write = (r) => fs.appendFileSync(samplesPath, JSON.stringify(r) + '\n', 'utf8');
+  let order = 0;
+  // 고침4 G6: 원자료 각 표본에 order(전체 순번 · 쓰는 순서) — judge.js orderCheck 가 지연 단 · 화면 순서를 다시 잰다
+  const write = (r) => { order += 1; r.order = order; fs.appendFileSync(samplesPath, JSON.stringify(r) + '\n', 'utf8'); };
+  let ctxSeq = 0;
+  const nextContextId = () => { ctxSeq += 1; return ctxSeq; };
   let count = 0;
   let valid = 0;
   const delays = Array.from(new Set(own.map((c) => c.delay))).sort((a, b) => a - b);
   // 고침2 N1-c: 같은 지연 단 안에서 /after 칸을 먼저 잰다 — /before 미도달 표본의 U3(같은 칸 /after 도달 ≥ 1)를 쓸 때 알 수 있게
-  const screenRank = (c) => (c.screen === 'after' ? 0 : 1);
+  // 고침4 G6(L-5): 순서를 rules.plan.screenOrder 에 고정(after → a2 → before) — 옛 꼴(after 먼저 · 나머지 뒤) 대체
+  const screenRank = (c) => screenRankOf(rules, c.screen);
   const afterReach = {};
   try {
     for (const delay of delays) {
       const proxy = await startProxy(rules, fixtureDir, delay);
       const meta = {
         proxy: { script: 'tools/hqa-s4-fixture/proxy/delay-proxy.js', args: proxy.args, unit: rules.hqaPending.delayUnit.value, started: proxy.ok },
-        playwrightVersion: pwVersion, browserVersion: bver, rulesVersion: rules.rulesVersion
+        playwrightVersion: pwVersion, browserVersion: bver, rulesVersion: rules.rulesVersion,
+        screenPathOf: (sc) => screenSpec(rules, sc).path
       };
       for (const cell of own.filter((c) => c.delay === delay).sort((a, b) => screenRank(a) - screenRank(b))) {
         for (let n = 1; n <= cell.samples; n++) {
@@ -237,7 +258,7 @@ async function main(argv) {
             recs = [baseRecord(cell, n, meta)].concat((plan.derived[cell.key] || []).map((dc) => baseRecord(dc, n, meta)));
             for (const r of recs) r.errors.push(`지연 단 실패: ${proxy.error}`);
           } else {
-            recs = await runSample(browser, rules, plan, cell, n, meta, outDir, afterReach);
+            recs = await runSample(browser, rules, plan, cell, n, meta, outDir, afterReach, nextContextId);
           }
           for (const r of recs) {
             if (r.screen === 'after' && r.kbd && r.kbd.reached === true) afterReach[groupKey(r)] = (afterReach[groupKey(r)] || 0) + 1;

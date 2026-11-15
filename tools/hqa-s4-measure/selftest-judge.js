@@ -24,10 +24,28 @@ const T = rules.readingText;
 const st = JSON.parse(JSON.stringify(rules));
 st.plan.items = ['N-1', 'N-2'];
 st.plan.nDelays = [300, 500];
+// 고침4: 옛 시험(① · ⑤)은 ㉠ 꼴(n1Contrast before · N-1 화면 before/after)과 정해진 표본 수 1(임시값)로 돈다
+//   — 정해진 수 1 이면 G4 「유효 < 정해진」 = 옛 「칸 유효 0 = 실패」 와 같은 뜻이라 옛 기대가 그대로 선다(samplesPerCell 값은 HQA 회신 뒤)
+st.n1Contrast = 'before';
+delete st.plan.itemSpecs['N-1'].screens;
+st.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
 const win = defaultWindow(st);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hqa-s4-selftest-'));
 const rulesPath = path.join(tmp, 'rules-selftest.json');
 fs.writeFileSync(rulesPath, JSON.stringify(st, null, 2), 'utf8');
+// 고침4 ㉡ 꼴(n1Contrast a2 · N-1 화면 before/after/a2 · 정해진 수 1 임시값)
+const st2 = JSON.parse(JSON.stringify(rules));
+st2.plan.items = ['N-1', 'N-2'];
+st2.plan.nDelays = [300, 500];
+st2.n1Contrast = 'a2';
+st2.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+const rulesPath2 = path.join(tmp, 'rules-selftest-a2.json');
+fs.writeFileSync(rulesPath2, JSON.stringify(st2, null, 2), 'utf8');
+// 고침4 G4 꼴(㉠ · 정해진 수 5 임시값)
+const st3 = JSON.parse(JSON.stringify(st));
+st3.hqaPending.samplesPerCell.value = { default: 5, 'N-1': 5 };
+const rulesPath3 = path.join(tmp, 'rules-selftest-n5.json');
+fs.writeFileSync(rulesPath3, JSON.stringify(st3, null, 2), 'utf8');
 
 function line(item, screen, delay, o) {
   const opt = o || {};
@@ -52,11 +70,23 @@ const sets = {
   'D_정상': [line('N-1', 'before', 300, { dead: true }), line('N-1', 'before', 500), line('N-1', 'after', 300), line('N-1', 'after', 500)].concat(n2all())
 };
 
-function runJudge(name) {
+// 고침4 G6: 원자료 표본엔 order(전체 순번) · contextId(문맥 순번)가 있다 — 손 표본에 순번이 하나도 없으면
+//   run-items.js 와 같은 순서(지연 단 오름 → 같은 단 안 screenOrder → 적은 순서)로 붙인다. 하나라도 있으면 손대지 않는다(G6 시험용).
+function canon(lines, r) {
+  const objs = lines.map((l) => JSON.parse(l));
+  if (objs.some((o) => o.order !== undefined || o.contextId !== undefined)) return objs;
+  const rank = (sc) => r.plan.screenOrder.indexOf(sc);
+  const idx = objs.map((o, i) => i).sort((a, b) => (objs[a].delay - objs[b].delay) || (rank(objs[a].screen) - rank(objs[b].screen)) || (a - b));
+  idx.forEach((i, pos) => { objs[i].order = pos + 1; objs[i].contextId = pos + 1; });
+  return objs;
+}
+const RULES_BY_PATH = { [rulesPath]: st, [rulesPath2]: st2, [rulesPath3]: st3 };
+function runJudge(name, rp) {
+  const rPath = rp || rulesPath;
   const sp = path.join(tmp, `${name}.jsonl`);
   const op = path.join(tmp, `${name}.json`);
-  fs.writeFileSync(sp, sets[name].join('\n') + '\n', 'utf8');
-  const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rulesPath, '--samples', sp, '--out', op], { encoding: 'utf8' });
+  fs.writeFileSync(sp, canon(sets[name], RULES_BY_PATH[rPath]).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+  const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rPath, '--samples', sp, '--out', op], { encoding: 'utf8' });
   const v = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
   return { code: r.status, v, stderr: (r.stderr || '').slice(0, 200) };
 }
@@ -82,13 +112,15 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   const n = v && v.items['N-1'];
   const cell = v && v.cells.find((c) => c.item === 'N-1' && c.screen === 'before' && c.delay === 300);
   check('C: 빨강 · 종료 1', v && v.red === true && code === 1, { code, reasons: v && v.redReasons });
-  check('C: 그 칸 = 장치 실패 · /before 표본 0', cell && cell.status === T.cellFail && cell.reason === T.beforeZeroReason, cell);
+  // 고침4 G4: 옛 기대(reason = 「/before 표본 0」) 대체 → reason = 「정해진 표본 수 모자람 0/1」 · 표본 0 글자는 zeroReason 칸
+  check('C: 그 칸 = 장치 실패 · 정해진 표본 수 모자람 0/1 · /before 표본 0(zeroReason)', cell && cell.status === T.cellFail && cell.reason === `${T.cellShortReason} 0/1` && cell.zeroReason === T.beforeZeroReason, cell);
   check('C: 「대조 무효」 와 구별(무효 글자 안 나옴)', n && !n.labels.includes(T['N-1'].contrastInvalid) && n.reading === T.cellFail, n && n.reading);
 }
 {
   const { code, v } = runJudge('C2_칸표본0_after');
   const cell = v && v.cells.find((c) => c.item === 'N-1' && c.screen === 'after' && c.delay === 500);
-  check('C2: after 칸 표본 0 → 빨강 · 칸 표본 0', v && v.red === true && code === 1 && cell && cell.reason === T.cellZeroReason, { code, cell });
+  // 고침4 G4: 옛 기대(reason = 「칸 표본 0」) 대체 → zeroReason 칸
+  check('C2: after 칸 표본 0 → 빨강 · 칸 표본 0(zeroReason)', v && v.red === true && code === 1 && cell && cell.zeroReason === T.cellZeroReason && cell.reason === `${T.cellShortReason} 0/1`, { code, cell });
 }
 {
   const { code, v } = runJudge('D_정상');
@@ -108,7 +140,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
 // ── ② 계획 꼴 · 정본 글자 ────────────────────────────────────────────
 {
   const plan = buildPlan(rules);
-  check('계획 칸 수 = 100(I 84 + N-1 8 + N-2 8)', plan.cells.length === 100, plan.cells.length);
+  // 고침4 G1: 옛 기대 100(I 84 + N-1 8 + N-2 8) 대체 → a2 는 N-1 에만 4칸 더함
+  check('계획 칸 수 = 104(I 84 + N-1 12 + N-2 8) · a2 칸 = N-1 4 · 다른 항목 a2 0', plan.cells.length === 104 && plan.cells.filter((c) => c.screen === 'a2').length === 4 && plan.cells.filter((c) => c.screen === 'a2').every((c) => c.item === 'N-1'), plan.cells.length);
   check('N-2 파생 칸 8 = N-1 칸마다 1', Object.keys(plan.derived).length === 8 && Object.values(plan.derived).every((a) => a.length === 1));
   check('I-9 = I 항목 지연 0/150/300', JSON.stringify(rules.plan.iDelays) === '[0,150,300]');
   check('N-1 지연 0/150/300/500 · 대조 단 300/500', JSON.stringify(rules.plan.nDelays) === '[0,150,300,500]' && JSON.stringify(rules.plan.n1ContrastDelays) === '[300,500]');
@@ -383,7 +416,7 @@ const cellOf = (v, item, screen, delay) => v && v.cells.find((c) => c.item === i
 }
 
 // ── ⑦ 고침2 N1-b 합성 시험 — 가짜 page(브라우저 0)로 미도달 표본에 키 입력 0 ─────────────
-async function mockRun(itemFn, cell, reachAt) {
+async function mockRun(itemFn, cell, reachAt, extra) {
   const r = JSON.parse(JSON.stringify(rules));
   Object.assign(r.device, { settle: { baseMs: 0, perDelayFactor: 0 }, pollMs: 1, keyGapMs: 0, openWaitMs: 3, maxTabsToRow: 4 });
   r.device.i1.tabs = 4; r.device.i6.maxTabs = 2; r.device.n1.count = 2; r.device.n1.settleExtraMs = 0;
@@ -409,7 +442,7 @@ async function mockRun(itemFn, cell, reachAt) {
     }
   };
   const sig = { t0: Date.now(), wsCloses: [], consoleMatches: [], reconnectSeen: [], pageErrors: [], navs: 0, navsAtConnect: 0, consoleErrors: 0 };
-  const ctx = { page, sig, rules: r, cell, sampleNo: 1, outDir: tmp, inputs: [], inputAt: Date.now() };
+  const ctx = Object.assign({ page, sig, rules: r, cell, sampleNo: 1, outDir: tmp, inputs: [], inputAt: Date.now() }, extra || {});
   const out = await itemFn(ctx);
   return { out, inputs: ctx.inputs };
 }
@@ -441,6 +474,15 @@ async function asyncChecks() {
   // 대조군 — 도달하면 키를 누른다(검사가 살아 있는지)
   const pos = await mockRun(ALL['I-2'], cellFor('I-2', 'enter-short', 'before'), 2);
   check('N1-b 합성 대조군: 도달 표본은 Tab 뒤 키 입력이 있다(검사 살아 있음)', keysAfterLastTab(pos.inputs) >= 1 && pos.out[0].kbd.reached === true, pos.inputs.map((x) => x.k + ':' + (x.key || '')));
+  // 고침4 G1: N-1 의 a2 칸엔 N-2 계획이 없다 → derivedItems 에 N-2 가 없으면 N-2 입력(Enter 두 번) 0 · 결과 0 / 대조군: 옛 호출(derivedItems 없음)은 N-2 까지
+  const enters = (inputs) => inputs.filter((x) => KEY_K.has(x.k) && x.key === 'Enter').length;
+  const a2Reach = await mockRun(ALL['N-1'], cellFor('N-1', 'arrows', 'a2'), 2, { derivedItems: [] });
+  const oldReach = await mockRun(ALL['N-1'], cellFor('N-1', 'arrows', 'before'), 2);
+  check('G4-G1 합성: a2 칸(N-2 계획 0) 도달 → N-1 결과만 · Enter 1(열기) · 대조군 옛 호출 = N-2 까지 Enter 3',
+    a2Reach.out.length === 1 && a2Reach.out[0].item === 'N-1' && enters(a2Reach.inputs) === 1 && oldReach.out.length === 2 && enters(oldReach.inputs) === 3,
+    { a2: a2Reach.out.length, a2Enter: enters(a2Reach.inputs), old: oldReach.out.length, oldEnter: enters(oldReach.inputs) });
+  const a2Un = await mockRun(ALL['N-1'], cellFor('N-1', 'arrows', 'a2'), 0, { derivedItems: [] });
+  check('G4-G1 합성: a2 칸 미도달 → N-1 결과만 · Tab 밖 키 0', a2Un.out.length === 1 && a2Un.inputs.filter((x) => KEY_K.has(x.k) && x.key !== 'Tab').length === 0, a2Un.out.length);
 }
 
 // ── ⑧ 고침2 N1-a probe 정적 검사(C1-4) + 심은 위반 대조군 ──────────────────────────
@@ -473,7 +515,8 @@ function checkProbe(src) {
   if (/\bL\s*\[/.test(src)) hits.push('L[...] 대괄호 접근');
   if (/=\s*L\b(?!\s*\.)/.test(src)) hits.push('L 별칭');
   const bareL = cntC(/(?<![.\w$])L\b(?!\s*\.)/g);
-  if (bareL !== 5) hits.push(`L 이름 쓰임 ${bareL} ≠ 5(매개변수 2 · 넘김 2 · 선언 1)`);
+  // 고침4 G10: 옛 기대 5(매개변수 2 · 넘김 2 · 선언 1) 대체 → a2Struct 매개변수 1 · 넘김 1 더해 7
+  if (bareL !== 7) hits.push(`L 이름 쓰임 ${bareL} ≠ 7(매개변수 3 · 넘김 3 · 선언 1)`);
   if (cnt(/_lib\b/g) !== 1) hits.push('items/_lib 참조 1 아님');
   // ③ 입력 함수 각 1회 · 자리 = distinguish 몸통 안 · 켜짐 확인(return null) 뒤
   if (cntC(/\btabTo\b/g) !== 1 || cntC(/\bL\.tabTo\s*\(/g) !== 1) hits.push(`tabTo ${cntC(/\btabTo\b/g)}회 ≠ 1`);
@@ -491,9 +534,25 @@ function checkProbe(src) {
   for (const m of src.matchAll(/\bwaitForTimeout\s*\(((?:[^()]|\([^()]*\))*)\)/g)) if (!WAIT_OK.has(m[1].trim())) hits.push(`waitForTimeout(${m[1].trim()}) 허용 밖`);
   for (const m of src.matchAll(/\bsettleMs\s*\(([^)]*)\)/g)) if (m[1].trim() !== 'RULES, PROBE_DELAY') hits.push(`settleMs(${m[1].trim()}) 지연 0 아님`);
   if (/\bset(?:Timeout|Interval)\s*\(/.test(src)) hits.push('타이머 직접');
-  // ⑥ 주소: goto 1회 · 인자 = base + '/' + screen · base = 시험 앱 직접(rules host:appPort 기본) 한 줄뿐
+  // ⑥ 주소: goto 1회 · base = 시험 앱 직접(rules host:appPort 기본) 한 줄뿐
+  //   고침4 G10: 옛 인자(base + '/' + screen) 대체 → base + SCREEN_TABLE[screen].path(주소 = rules 표 값 · 이 파일 안 주소 글자 0)
   if (cnt(/\.goto\s*\(/g) !== 1) hits.push(`goto ${cnt(/\.goto\s*\(/g)}회 ≠ 1`);
-  if (!/\.goto\(base \+ '\/' \+ screen, \{/.test(src)) hits.push('goto 인자 = base + / + screen 아님');
+  if (!/\.goto\(base \+ SCREEN_TABLE\[screen\]\.path, \{/.test(src)) hits.push('goto 인자 = base + SCREEN_TABLE[screen].path 아님');
+  if (!src.includes('const SCREEN_TABLE = RULES.plan.screenTable;') || cnt(/(?<![.\w$])SCREEN_TABLE\s*=(?!=)/g) !== 1) hits.push('SCREEN_TABLE 줄 바뀜');
+  if (/(['"`])\/(?:after|before)/.test(src) || /after-a2/.test(src)) hits.push('probe 안 주소 글자');
+  // ⑦ 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — a2 갈래 = 정착 기다림 + a2Struct 부름뿐 · a2Struct 몸통 = readRowStruct 하나 · 입력 0
+  if (!/if \(screen === 'a2'\) \{\s*(?:\/\/[^\n]*\n\s*)?await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.a2_check = await a2Struct\(ctx, out, L\);\s*\} else \{/.test(src)) hits.push('a2 갈래 = 정착 + a2Struct 부름 아님');
+  const a2b = fnBody(src, 'a2Struct');
+  if (!a2b) hits.push('a2Struct 몸통 없음');
+  else {
+    if (cnt(/\bL\.readRowStruct\s*\(/g) < 2 || !/\bL\.readRowStruct\s*\(/.test(a2b)) hits.push('a2Struct 안 readRowStruct 없음');
+    const a2bc = codeOnly(a2b);
+    for (const m of a2bc.matchAll(/\b(press|down|up|type|insertText|click|dblclick|tap|hover|fill|tabTo|rowClickControl|keyboard|mouse|touchscreen|distinguish|goto|waitForTimeout|locator|evaluate|screenshot)\b/g)) hits.push(`a2Struct 안 ${m[1]}`);
+    if ((a2bc.match(/\bL\.\w+/g) || []).length !== 1) hits.push('a2Struct 안 L 부름 1 아님');
+  }
+  const an = cntC(/(?<![.\w$])a2Struct\b/g);
+  if (an !== 2) hits.push(`a2Struct 이름 쓰임 ${an} ≠ 2`);
+  if (!src.includes("const PROBE_SCREENS = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);")) hits.push('PROBE_SCREENS 줄 바뀜');
   if (cnt(/(?<![.\w$])base\s*=(?!=)/g) !== 1 || !src.includes("const base = process.env.HQA_BASE_URL || ('http://' + RULES.device.host + ':' + RULES.device.appPort);")) hits.push('base 주소 줄 바뀜');
   if (cnt(/\bnewContext\s*\(/g) !== 1 || cnt(/\bnewPage\s*\(/g) !== 1) hits.push('newContext · newPage 1회 아님');
   return hits;
@@ -538,14 +597,211 @@ function checkProbe(src) {
     ['probe 대조군: newContext 프록시', "\nawait browser.newContext({ proxy: { server: base } });\n"],
     ['probe 대조군(바꿈): /after 갈래에서 distinguish', (s) => s.replace("if (screen === 'after') out.png_check = await pngCheck(page);", "if (screen === 'after') { out.png_check = await pngCheck(page); await distinguish(ctx, out, L, J); }")],
     ['probe 대조군(바꿈): 켜짐 확인 앞에서 tabTo', (s) => s.replace(/( {2}if \(!RULES\.device\.probe\.distinguish\) return null;\r?\n)([\s\S]*?)( {2}const reach = await L\.tabTo\(ctx, row\);\r?\n)/, '$3$1$2')],
-    ['probe 대조군(바꿈): goto 주소 프록시 포트', (s) => s.replace("page.goto(base + '/' + screen,", "page.goto(base.replace(/:\\d+$/, ':5800') + '/' + screen,")],
-    ['probe 대조군(바꿈): 정착 지연 300', (s) => s.replace('await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));', 'await page.waitForTimeout(L.settleMs(RULES, 300));')]
+    // 고침4 G10: 옛 바꿈 자리(page.goto(base + '/' + screen,)가 없어져 새 goto 줄로 대체
+    ['probe 대조군(바꿈): goto 주소 프록시 포트', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base.replace(/:\\d+$/, ':5800') + SCREEN_TABLE[screen].path,")],
+    ['probe 대조군(바꿈): 정착 지연 300', (s) => s.replace('await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));', 'await page.waitForTimeout(L.settleMs(RULES, 300));')],
+    // ── 고침4 G10 — a2 = R1 만(입력 0) · 주소 = 표 값 ──
+    ['probe 대조군(바꿈) G10: a2Struct 안 keyboard.press', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', "out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.keyboard.press('Tab');")],
+    ['probe 대조군(바꿈) G10: a2Struct 안 mouse.click', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', 'out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.mouse.click(5, 5);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 keyboard.press', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', "await page.keyboard.press('Enter'); doc.a2_check = await a2Struct(ctx, out, L);")],
+    ['probe 대조군(바꿈) G10: a2 갈래 mouse.click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await page.mouse.click(5, 5); doc.a2_check = await a2Struct(ctx, out, L);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 L.tabTo', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await L.tabTo(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 L.rowClickControl', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await L.rowClickControl(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 distinguish', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'doc.a2_check = await a2Struct(ctx, out, L); doc.k2 = await distinguish(ctx, out, L, J);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 locator click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', "await page.locator('#before').click(); doc.a2_check = await a2Struct(ctx, out, L);")],
+    ['probe 대조군(바꿈) G10: a2Struct 안 Tab 지연', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', 'out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.waitForTimeout(300);')],
+    ['probe 대조군(바꿈) G10: goto 주소 글자(/after-a2)', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base + (screen === 'a2' ? '/after-a2' : SCREEN_TABLE[screen].path),")],
+    ['probe 대조군(바꿈) G10: 주소 앞머리 글자', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base + '/' + screen,")]
   ];
   for (const [n, add] of plantedP) {
     const s2 = typeof add === 'function' ? add(src) : src + add;
     check(n + ' → 빨강', s2 !== src && checkProbe(s2).length > 0, typeof add === 'function' && s2 === src ? '바꿈 자리 못 찾음' : null);
   }
   check('probe 대조군 수 ≥ 24(원 5 + 재검증 19)', plantedP.length >= 24, plantedP.length);
+  // 고침4 G10
+  check('G4-G10 probe 정적: a2 는 n1Contrast = a2 일 때만 · R1 만 · 주소 = 표 값', /PROBE_SCREENS/.test(src) && /doc\.a2_check = await a2Struct\(/.test(src) && (src.match(/await a2Struct\(/g) || []).length === 1);
+  check('G4-G10 probe 대조군 수 = 고침4 11 더함(합 ≥ 44)', plantedP.filter((p) => / G10: /.test(p[0])).length === 11 && plantedP.length >= 44, plantedP.length);
+}
+
+// ── ⑨ 고침4 — G1 · G2 · G3 · G4 · G5 · G6 · G8 · C-2 (작업지시서 §7 G13 ①~⑥ · ⑨~⑪ · ⑦⑧ 은 selftest-leak.js) ──────────────
+{
+  const J = require('./judge.js');
+  const a2n1 = (delay, o) => kline('N-1', 'a2', delay, o); // a2 = N-1 에만(N-2 a2 칸 0)
+  // G13 ① a2 미도달(U 충족) + 회로 죽음 → 재현으로 안 셈 → 「대조 무효」 유지 · /before 회로 죽음은 기록만(G3)
+  sets['G4a_a2미도달_회로죽음'] = [].concat(pair('before', 300, { dead: true }), pair('before', 500), [a2n1(300, { ur: true, dead: true }), a2n1(500, { ur: true, dead: true })], pair('after', 300), pair('after', 500));
+  // G13 ② a2 도달 + 회로 죽음 → 재현 1
+  sets['G4b_a2도달_회로죽음'] = [].concat(pair('before', 300), pair('before', 500), [a2n1(300, { dead: true }), a2n1(500)], pair('after', 300), pair('after', 500));
+  // a2 칸 표본 0 → 정해진 표본 수 모자람 · A2 화면 표본 0
+  sets['G4c_a2칸0'] = [].concat(pair('before', 300), pair('before', 500), [a2n1(300, { dead: true })], pair('after', 300), pair('after', 500));
+  // N-2 a2 표본 → 계획 밖(다른 항목 a2 칸 0)
+  sets['G4d_N2a2계획밖'] = sets['G4b_a2도달_회로죽음'].concat([kline('N-2', 'a2', 300)]);
+  {
+    const { code, v } = runJudge('G4a_a2미도달_회로죽음', rulesPath2);
+    const n = v && v.items['N-1'];
+    const a2c = v && v.cells.filter((c) => c.screen === 'a2');
+    const bc = v && v.cells.filter((c) => c.item === 'N-1' && c.screen === 'before');
+    check('G4-①: a2 미도달 + 회로 죽음 → 재현 0 · 대조 무효 · 사유 「A2 화면 …」 · 빨강 아님',
+      n && n.contrastScreen === 'a2' && n.counts.beforeCircuitDead === 0 && n.counts.beforeKbdUnreachable === 2 && n.counts.beforeKuDead === 2 && n.labels.includes(T['N-1'].contrastInvalid) && n.contrastReason === D.n1ContrastReasonA2 && v.red === false && code === 0,
+      n && { labels: n.labels, c: n.counts, r: n.contrastReason, red: v.red, rr: v.redReasons });
+    check('G4-① G3: /before N-1 회로 죽음 = 기록만(재현 셈 0 · beforeRecordOnly 1) · /before N-1 칸 표지 「기록만 · 판정에 안 씀」',
+      n && n.beforeRecordOnly && n.beforeRecordOnly.circuitDead === 1 && n.beforeRecordOnly.text === T['N-1'].recordOnly && bc.length === 2 && bc.every((c) => c.n1Role === T['N-1'].recordOnly), n && n.beforeRecordOnly);
+    check('G4-① a2 칸 = keyboard_unreachable · 글자 「A2 화면 키보드 도달 0」', a2c && a2c.length === 2 && a2c.every((c) => c.deviceReading === 'keyboard_unreachable' && c.deviceReadingText === D.a2Unreachable), a2c);
+  }
+  {
+    const { code, v } = runJudge('G4b_a2도달_회로죽음', rulesPath2);
+    const n = v && v.items['N-1'];
+    check('G4-②: a2 도달 + 회로 죽음 1 → 재현 1 · 대조 무효 아님 · 빨강 아님', n && n.counts.beforeCircuitDead === 1 && !n.labels.includes(T['N-1'].contrastInvalid) && n.contrastReason === null && v.red === false && code === 0, n && { labels: n.labels, c: n.counts, rr: v.redReasons });
+  }
+  {
+    const { code, v } = runJudge('G4c_a2칸0', rulesPath2);
+    const c = cellOf(v, 'N-1', 'a2', 500);
+    check('G4 a2 칸 표본 0 → 장치 실패 · 정해진 표본 수 모자람 0/1 · A2 화면 표본 0 · 빨강', v && v.red === true && code === 1 && c && c.status === T.cellFail && c.reason === `${T.cellShortReason} 0/1` && c.zeroReason === T.a2ZeroReason, c);
+  }
+  {
+    const { code, v } = runJudge('G4d_N2a2계획밖', rulesPath2);
+    check('G4-G1: N-2 a2 표본 = 계획 밖 → 빨강(다른 항목 a2 칸 0)', v && v.red === true && code === 1 && v.totals.unplanned === 1, v && v.redReasons);
+  }
+  // G13 ⑪ a2 표본 판독 글자 · 사유 글자에 「/after」 0(C-4) — 판독기 칸 · N-1 사유 · kbdGate 결과 · 정해진 표본 수 모자람 사유
+  {
+    const texts = [];
+    for (const nm of ['G4a_a2미도달_회로죽음', 'G4b_a2도달_회로죽음', 'G4c_a2칸0']) {
+      const { v } = runJudge(nm, rulesPath2);
+      if (!v) { texts.push('/after(판독 파일 없음)'); continue; }
+      for (const c of v.cells.filter((x) => x.screen === 'a2')) texts.push(JSON.stringify(c));
+      for (const r of v.redReasons.filter((x) => x.includes('|a2|'))) texts.push(r);
+      const n = v.items['N-1'];
+      texts.push(String(n.contrastReason), JSON.stringify(n.labels), String(n.reading));
+    }
+    const ku = J.kbdGate(st2, JSON.parse(a2n1(300, { ur: true })), 1);
+    const kuMiss = J.kbdGate(st2, JSON.parse(a2n1(300, { ur: true, path: PATH_BODY })), 0);
+    texts.push(JSON.stringify(ku), JSON.stringify(kuMiss));
+    let scErr = '';
+    try { J.screenCheck(st2, 'a2', { variant: 'after', cssVariant: 'after' }); } catch (e) { scErr = String(e.message); }
+    texts.push(scErr, JSON.stringify(J.screenCheck(st2, 'a2', { variant: 'a2', cssVariant: 'before' }).errors));
+    const bad = texts.filter((x) => x.includes('/after'));
+    check('G4-⑪(C-4): a2 표본 판독 · 사유 글자 전부에서 「/after」 0', bad.length === 0 && texts.length >= 12 && kuMiss.reason.startsWith(D.a2Unreachable) && ku.valid === true, { bad: bad.slice(0, 3), n: texts.length, kuMiss: kuMiss.reason });
+  }
+  // G13 ⑩ a2 표본이 /after 로 가서 data-variant after → throw(C-3) · 대조군: a2 · CSS after = 정상 · CSS before = 오류 칸
+  {
+    let thrown = null;
+    try { J.screenCheck(st2, 'a2', { variant: 'after', cssVariant: 'after' }); } catch (e) { thrown = String(e.message); }
+    const ok = J.screenCheck(st2, 'a2', { variant: 'a2', cssVariant: 'after' });
+    const cssBad = J.screenCheck(st2, 'a2', { variant: 'a2', cssVariant: 'before' });
+    let bThrown = null;
+    try { J.screenCheck(st2, 'before', { variant: 'a2', cssVariant: 'after' }); } catch (e) { bThrown = String(e.message); }
+    check('G4-⑩(C-3): a2 표본 data-variant after → throw · a2/after = 정상 · a2/CSS before = 오류 1 · before 칸에 a2 화면 → throw',
+      thrown !== null && ok.errors.length === 0 && cssBad.errors.length === 1 && bThrown !== null, { thrown, ok: ok.errors, cssBad: cssBad.errors, bThrown });
+    const tbl = rules.plan.screenTable;
+    check('G4-G1 표: before → /before · before · before / after → /after · after · after / a2 → /after-a2 · a2 · after',
+      JSON.stringify(tbl.before) === JSON.stringify({ path: '/before', variant: 'before', css: 'before' }) && JSON.stringify(tbl.after) === JSON.stringify({ path: '/after', variant: 'after', css: 'after' }) && JSON.stringify(tbl.a2) === JSON.stringify({ path: ['', 'after-a2'].join('/'), variant: 'a2', css: 'after' }), tbl);
+    const u = J.screenUrl(rules, 'a2');
+    const riSrc = fs.readFileSync(path.join(HERE, 'run-items.js'), 'utf8');
+    check('G4-G1: 표본 주소 = 표 값(screenUrl) · run-items.js 에 「/${화면 이름}」 주소 꼴 0 · screenCheck 부름', u.endsWith(tbl.a2.path) && !/\$\{cell\.screen\}/.test(riSrc) && /screenUrl\(rules, cell\.screen\)/.test(riSrc) && /screenCheck\(rules, cell\.screen, st0\)/.test(riSrc), u);
+    // n1Contrast ↔ N-1 화면 어긋남 · a2 를 다른 항목에 넣음 → buildPlan 거부
+    const bad1 = JSON.parse(JSON.stringify(rules)); bad1.n1Contrast = 'before';
+    const bad2 = JSON.parse(JSON.stringify(rules)); bad2.plan.itemSpecs['I-1'].screens = ['before', 'after', 'a2'];
+    const bad3 = JSON.parse(JSON.stringify(rules)); delete bad3.plan.itemSpecs['N-1'].screens;
+    const throws = (r) => { try { buildPlan(r); return false; } catch (e) { return true; } };
+    check('G4-G1: 거부 3(㉠ 값인데 N-1 에 a2 · I-1 에 a2 · ㉡ 값인데 N-1 에 a2 없음) · 대조군 ㉠ 짝(st) = 통과', throws(bad1) && throws(bad2) && throws(bad3) && !throws(st));
+  }
+  // G13 ③ ④ 정해진 표본 수(임시 5) — 유효 4 → 장치 실패 · 5 → 정상
+  {
+    const five = (item, screen, delay, o, n) => { const out = []; for (let i = 1; i <= (n || 5); i++) out.push(kline(item, screen, delay, Object.assign({ no: i }, o || {}))); return out; };
+    const full = (shortCell) => [].concat(
+      five('N-1', 'before', 300, { dead: true }), five('N-2', 'before', 300), five('N-1', 'before', 500), five('N-2', 'before', 500),
+      five('N-1', 'after', 300), five('N-2', 'after', 300), five('N-1', 'after', 500, {}, shortCell ? 4 : 5), five('N-2', 'after', 500));
+    sets['G4e_5중4'] = full(true);
+    sets['G4f_5중5'] = full(false);
+    const r3 = runJudge('G4e_5중4', rulesPath3);
+    const c = cellOf(r3.v, 'N-1', 'after', 500);
+    check('G4-③: 정해진 5 · 유효 4 → 장치 실패 · 「정해진 표본 수 모자람 4/5」 · 빨강 · 종료 1', r3.v && r3.v.red === true && r3.code === 1 && c && c.status === T.cellFail && c.reason === `${T.cellShortReason} 4/5` && c.deviceReading === 'device_failure', c);
+    const r4 = runJudge('G4f_5중5', rulesPath3);
+    check('G4-④: 정해진 5 · 유효 5 → 칸 정상 · 빨강 아님', r4.v && r4.v.red === false && r4.code === 0 && r4.v.cells.every((x) => x.status === '표본 있음' && x.planned === 5 && x.valid === 5), r4.v && r4.v.redReasons);
+    const jsrc = fs.readFileSync(path.join(HERE, 'judge.js'), 'utf8');
+    check('G4-G4 원문: 칸 실패 = 유효 < 정해진 표본 수 · 옛 꼴(valid === 0 · length === 0 칸 실패) 0', /if \(valid < c\.samples\)/.test(jsrc) && /validOf\(c\.key\)\.length < c\.samples/.test(jsrc) && !/if \(valid === 0\) \{/.test(jsrc) && !/validOf\(c\.key\)\.length === 0/.test(jsrc));
+  }
+  // G13 ⑤ /after 미도달 건수 · 표본 번호 · Tab 경로(스키마 칸만) 기록
+  {
+    const { v } = runJudge('N1e5_after미도달1_나머지충족');
+    const a = cellOf(v, 'N-1', 'after', 300);
+    const keys = a && a.afterUnreachable && a.afterUnreachable.tabPath[0] && a.afterUnreachable.tabPath[0][0] ? Object.keys(a.afterUnreachable.tabPath[0][0]).sort() : null;
+    check('G4-⑤: /after 미도달 → afterUnreachable {count 1 · samples [1] · tabPath 1} · 경로 칸 = 스키마 칸만',
+      a && a.afterUnreachable && a.afterUnreachable.count === 1 && JSON.stringify(a.afterUnreachable.samples) === '[1]' && a.afterUnreachable.tabPath.length === 1 && JSON.stringify(keys) === JSON.stringify(['afterRef', 'body', 'i', 'inRef', 'isStatusActivator', 'role', 'row', 'tabIndex', 'tag']), a && a.afterUnreachable);
+    const b = cellOf(v, 'N-1', 'before', 300);
+    const a5 = cellOf(v, 'N-1', 'after', 500);
+    check('G4-⑤ 대조군: /before 칸엔 afterUnreachable 칸 없음 · /after 미도달 0 칸 = count 0', b && b.afterUnreachable === undefined && a5 && a5.afterUnreachable && a5.afterUnreachable.count === 0, a5 && a5.afterUnreachable);
+  }
+  // G13 ⑥ 순서 어긋난 원자료 → 빨강 · 순서 없음 · 문맥 겹침 → 빨강
+  {
+    const objs = canon(sets['D_정상'], st);
+    const swap = objs.map((o) => Object.assign({}, o));
+    const b300 = swap.find((o) => o.item === 'N-1' && o.screen === 'before' && o.delay === 300);
+    const a300 = swap.find((o) => o.item === 'N-1' && o.screen === 'after' && o.delay === 300);
+    const t = b300.order; b300.order = a300.order; a300.order = t;
+    sets['G4g_순서어긋남'] = swap.map((o) => JSON.stringify(o));
+    const r1 = runJudge('G4g_순서어긋남');
+    check('G4-⑥: 같은 단 안 before 가 after 보다 앞 → 빨강 · 「재는 순서 어긋남」', r1.v && r1.v.red === true && r1.code === 1 && r1.v.redReasons.some((x) => x.startsWith(D.orderBroken)), r1.v && r1.v.redReasons);
+    const late = objs.map((o) => Object.assign({}, o));
+    const d500 = late.find((o) => o.delay === 500);
+    d500.order = 0; // 0 = 순번 없음 꼴
+    sets['G4h_순서없음'] = late.map((o) => JSON.stringify(o));
+    const r2 = runJudge('G4h_순서없음');
+    check('G4-⑥: 순서 기록 없음 → 빨강', r2.v && r2.v.red === true && r2.v.redReasons.some((x) => x.startsWith(D.orderMissing)), r2.v && r2.v.redReasons);
+    const cx = objs.map((o) => Object.assign({}, o));
+    cx[1].contextId = cx[0].contextId;
+    sets['G4i_문맥겹침'] = cx.map((o) => JSON.stringify(o));
+    const r3 = runJudge('G4i_문맥겹침');
+    check('G4-⑥: 부모 표본 문맥 순번 겹침 → 빨강', r3.v && r3.v.red === true && r3.v.redReasons.some((x) => x.startsWith(D.contextBroken)), r3.v && r3.v.redReasons);
+    const back = objs.map((o) => Object.assign({}, o));
+    const lastD = back.filter((o) => o.delay === 500).sort((a, b) => a.order - b.order)[0];
+    const firstD300 = back.filter((o) => o.delay === 300).sort((a, b) => b.order - a.order)[0];
+    const t2 = lastD.order; lastD.order = firstD300.order; firstD300.order = t2;
+    sets['G4j_단거꾸로'] = back.map((o) => JSON.stringify(o));
+    const r4 = runJudge('G4j_단거꾸로');
+    check('G4-⑥: 지연 단 거꾸로(500 단 표본이 300 단보다 앞) → 빨강', r4.v && r4.v.red === true && r4.v.redReasons.some((x) => x.startsWith(D.orderBroken)), r4.v && r4.v.redReasons);
+    check('G4-⑥ 대조군: 순서 맞는 원자료(D) → 순서 문제 0', (() => { const { v } = runJudge('D_정상'); return v && v.totals.orderProblems === 0 && v.red === false; })());
+    check('G4-G6: 순서 표 = after → a2 → before(rules.plan.screenOrder)', JSON.stringify(rules.plan.screenOrder) === '["after","a2","before"]');
+  }
+  // G13 ⑨ G8 — attempt 2 → 측정 0(M0 실행 사슬 단언 · --guard-only = 망 접속 0)
+  {
+    const m0 = path.join(HERE, 'm0-assert.sh');
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: HERE, encoding: 'utf8' });
+    const sha = (head.stdout || '').trim();
+    const env0 = Object.assign({}, process.env);
+    for (const k of ['GITHUB_SHA', 'GITHUB_RUN_ATTEMPT', 'GITHUB_ACTIONS', 'GITHUB_OUTPUT', 'GITHUB_RUN_ID']) delete env0[k];
+    const g = (extra) => {
+      const d = fs.mkdtempSync(path.join(tmp, 'g-'));
+      const r = spawnSync('bash', [m0, d, '--guard-only'], { cwd: path.resolve(HERE, '..', '..'), env: Object.assign({}, env0, extra), encoding: 'utf8' });
+      return { rc: r.status, out: (r.stdout || '') + (r.stderr || ''), err: r.error ? String(r.error.message).slice(0, 80) : null, files: fs.readdirSync(d) };
+    };
+    const ok = g({ GITHUB_ACTIONS: 'true', GITHUB_SHA: sha, GITHUB_RUN_ATTEMPT: '1' });
+    const att2 = g({ GITHUB_ACTIONS: 'true', GITHUB_SHA: sha, GITHUB_RUN_ATTEMPT: '2' });
+    const other = g({ GITHUB_ACTIONS: 'true', GITHUB_SHA: 'f'.repeat(40), GITHUB_RUN_ATTEMPT: '1' });
+    const noSha = g({ GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1' });
+    check('G4-⑨ 대조군: github.sha = HEAD · attempt 1 → 실행 사슬 통과', /^[0-9a-f]{40}$/.test(sha) && ok.rc === 0 && /run_attempt_one 통과/.test(ok.out) && /head_is_event 통과/.test(ok.out), ok);
+    check('G4-⑨: run_attempt 2 → 측정 0(M0 빨강 · run_attempt_one 다름)', att2.rc === 1 && /run_attempt_one 다름/.test(att2.out), att2);
+    check('G4-G8: github.sha ≠ 체크아웃 HEAD → 측정 0', other.rc === 1 && /head_is_event 다름/.test(other.out), other);
+    check('G4-G8: Actions 안인데 github.sha 없음 → 측정 0', noSha.rc === 1 && /head_is_event 다름/.test(noSha.out), noSha);
+    const msrc = fs.readFileSync(m0, 'utf8');
+    check('G4-G8 원문: 장전 때 원자료 가지 있으면 측정 0(ls-remote · armed_raw_branch_absent) · 원자료에 github_sha · mode_line',
+      /armed_raw_branch_absent/.test(msrc) && /ls-remote origin "refs\/heads\/\$RAW_BRANCH"/.test(msrc) && /github_sha:/.test(msrc) && /mode_line:/.test(msrc));
+  }
+  // C-2(결-1 조건 ①): 장치 폴더 · 워크플로에 주소 앞머리 판단 0 — 꼴은 조각으로 만든다(이 파일이 스스로 걸리지 않게)
+  {
+    const SW = 'starts' + 'With';
+    const pats = [
+      new RegExp('[Ss]' + SW.slice(1) + '\\(\\s*[\'"`]\\/after'),
+      new RegExp('\\/\\^\\\\\\/' + 'after'),
+      new RegExp('Absolute' + 'Path')
+    ];
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+    const files = walk(HERE).concat([path.resolve(HERE, '..', '..', '.github', 'workflows', 'hqa-s4-measure.yml')]).filter((f) => fs.existsSync(f));
+    const found = [];
+    for (const f of files) { const s = fs.readFileSync(f, 'utf8'); for (const p of pats) if (p.test(s)) found.push(path.basename(f) + ':' + p); }
+    check('G4-C-2: 장치 폴더 + 워크플로에 주소 앞머리 판단 꼴 0', found.length === 0 && files.length >= 15, { found, files: files.length });
+    const ctrl = ['x.' + SW + "('/after')", 'p.' + SW[0].toUpperCase() + SW.slice(1) + '("/after"', '/^\\/after/', 'u.Absolute' + 'Path'];
+    check('G4-C-2 대조군: 꼴 4개를 심으면 전부 걸림', ctrl.every((s) => pats.some((p) => p.test(s))), ctrl.map((s) => pats.some((p) => p.test(s))));
+  }
 }
 
 // ── 결과─────────────────────────────────────────────────────────────

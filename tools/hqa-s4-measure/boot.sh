@@ -236,6 +236,8 @@ const doc = {
   workflow: e.GITHUB_WORKFLOW || null, job: e.GITHUB_JOB || null, ref: e.GITHUB_REF || null,
   device_commit: e.GITHUB_SHA || null, fixture_tree: '0b31f8692367ae28a6fac255d8eae5c931066d7b',
   mode: m0.mode || null,
+  // 고침4 G8 ①(D-5 ①): MODE 줄 · github.sha 를 run.json 에도(M0 가 거른 값 그대로)
+  mode_line: m0.mode_line || null, github_sha: m0.github_sha || null,
   runner: { image_os: e.ImageOS || null, image_version: e.ImageVersion || null, os: e.RUNNER_OS || null, arch: e.RUNNER_ARCH || null },
   node: process.version, playwright: m3.playwright || null, browser: m3.browser || null,
   headless_shell: 'not used', ldd_missing: m3.ldd_missing || null,

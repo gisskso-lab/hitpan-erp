@@ -10,6 +10,9 @@
 #     actions/download-artifact v6 → 018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
 # - 고침1: M0 가 고정 머리 값 · 장전 때 HQA 회신 칸 확정을 단언 · 리허설만 판정 무관 점검(probe) · publish 는 measure 시도 번호(raw_id)를 따른다
 # - 2단 점화: tools/hqa-s4-measure/MODE = rehearsal (항목 측정 0) → 발행 → armed:<D 전체 SHA>:r<n> (M0 이 단언)
+# - 고침4 G8(D-5 ① ⑤ ⑥ ⑦): 트리거 = push 하나 유지 · 재실행 0 — run_attempt > 1 · github.sha ≠ 체크아웃 HEAD ·
+#   HEAD^ ≠ MODE 적힌 SHA · (장전) 원자료 가지가 이미 있음 → M0 빨강 = 측정 0 (설계서 §6-6 「재실행 1회」 대체됨)
+#   M0 는 측정 잡 첫 단계(체크아웃 바로 뒤) · 원자료 run.json · m0-assert.json 에 github_sha · run_id · run_attempt · mode_line
 name: HQA S4 관문1 GitHub 서버 실측
 
 on:

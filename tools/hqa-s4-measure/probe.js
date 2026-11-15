@@ -14,10 +14,16 @@
 //   안 하는 일: 항목 판독 · 표본 · 판정 글자 · 그 밖의 그림 · 프록시 — 0
 //   환경: HQA_OUT_DIR(필수) · HQA_CHROME_PATH(필수) · HQA_BASE_URL(선택 · 기본 rules.device host:appPort) · NODE_PATH
 //   결과: <HQA_OUT_DIR>/probe.json · 종료 코드 0 = 파일 씀(점검 결과와 무관) · 1 = 파일 못 씀
+//   고침4 G10(S-4 · D-9 ⑦ · D-10): 리허설 4 — /before R1 · R2 · R3 그대로 · /after 칸 무변 ·
+//     n1Contrast = a2 이면 a2 화면 = R1(입력 0 구조 읽기)만: 줄 안 tabIndex ≥ 0 · 사각형 > 0 요소 수 · Tab · 키 · 누름 · 선택자 · 그림 0 · 지연 0
+//     → a2_check(요소 ≥ 1 → ㉡ 유지 / 0 → 「되돌림 규칙 해당(㉠)」 · 글자 = rules.json deviceReading a2Probe*)
+//     주소는 rules.plan.screenTable 에서 읽는다(이 파일 안 주소 글자 0 · 앞머리 판단 0)
 const fs = require('fs');
 const path = require('path');
 
 const RULES = JSON.parse(fs.readFileSync(path.join(__dirname, 'rules.json'), 'utf8'));
+const SCREEN_TABLE = RULES.plan.screenTable;
+const PROBE_SCREENS = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);
 const README_SEL = ['#before', '[data-row]', '#detail', '#rowclick-count', '#rowclicks', '#pick-count', '#picks', '#fixture-root', 'link[data-fixture-css]'];
 const PROBE_DELAY = 0;
 const errText = (e) => String(e && e.message ? e.message : e).split('\n')[0].slice(0, 160);
@@ -65,6 +71,15 @@ async function distinguish(ctx, out, L, J) {
   return { screen: 'before', delay: PROBE_DELAY, verdict: k.verdict, meaning: spec.meaning, conds: k.conds, rule_ref: 'rules.json kCheck' };
 }
 
+// 고침4 G10: a2 화면 R1 — 구조 읽기 하나뿐(입력 0). 값 = 1번 줄 안 초점 받을 보이는 요소 수 · 판독 글자(rules.json).
+async function a2Struct(ctx, out, L) {
+  const D = RULES.deviceReading;
+  out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);
+  const n = out.r1 && out.r1.present === true ? out.r1.focusableVisible : null;
+  const reading = n === null ? D.a2ProbeNoRow : (n === 0 ? D.a2ProbeZero : D.a2ProbeKeep);
+  return { screen: 'a2', delay: PROBE_DELAY, focusableVisible: n, reading, rule_ref: 'rules.json deviceReading a2Probe' };
+}
+
 async function probeScreen(browser, base, screen, L, J, doc) {
   const d = RULES.device;
   const cond = RULES.hqaPending.browserCondition.value;
@@ -76,20 +91,27 @@ async function probeScreen(browser, base, screen, L, J, doc) {
   const ctx = { page, rules: RULES, inputs: [], sig, cell: { delay: PROBE_DELAY } };
   try {
     const t = Date.now();
-    await page.goto(base + '/' + screen, { waitUntil: 'load', timeout: d.gotoTimeoutMs });
+    // 고침4 G10: 주소 = rules.plan.screenTable 값(옛 꼴 = base + '/' + 화면 이름)
+    await page.goto(base + SCREEN_TABLE[screen].path, { waitUntil: 'load', timeout: d.gotoTimeoutMs });
     out.goto_ok = true;
     out.goto_ms = Date.now() - t;
     const until = Date.now() + d.circuitWaitMs;
     while (sig.connectedAt === null && Date.now() < until) await page.waitForTimeout(d.pollMs);
     out.circuit_connected = sig.connectedAt !== null;
-    for (const sel of README_SEL) out.selectors.push(Object.assign({ name: 'readme' }, await findSel(page, sel, d.actionTimeoutMs)));
-    out.selectors.push(Object.assign({ name: 'statusChip' }, await findSel(page, d.sel.statusChip, d.actionTimeoutMs)));
-    // 재연결 표시는 끊겼을 때만 생길 수 있다 — 없음은 기록일 뿐(판정 아님)
-    out.selectors.push(Object.assign({ name: 'reconnect', note: 'may be absent unless disconnected' }, await findSel(page, d.sel.reconnect, 2000)));
-    if (screen === 'after') out.png_check = await pngCheck(page);
-    if (screen === 'before') {
+    if (screen === 'a2') {
+      // 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — 선택자 · 그림 · Tab · 키 · 누름 0
       await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));
-      doc.k_check = await distinguish(ctx, out, L, J);
+      doc.a2_check = await a2Struct(ctx, out, L);
+    } else {
+      for (const sel of README_SEL) out.selectors.push(Object.assign({ name: 'readme' }, await findSel(page, sel, d.actionTimeoutMs)));
+      out.selectors.push(Object.assign({ name: 'statusChip' }, await findSel(page, d.sel.statusChip, d.actionTimeoutMs)));
+      // 재연결 표시는 끊겼을 때만 생길 수 있다 — 없음은 기록일 뿐(판정 아님)
+      out.selectors.push(Object.assign({ name: 'reconnect', note: 'may be absent unless disconnected' }, await findSel(page, d.sel.reconnect, 2000)));
+      if (screen === 'after') out.png_check = await pngCheck(page);
+      if (screen === 'before') {
+        await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));
+        doc.k_check = await distinguish(ctx, out, L, J);
+      }
     }
   } catch (e) {
     out.errors.push(errText(e));
@@ -107,8 +129,8 @@ async function main() {
   const doc = {
     stage: 'PROBE', mode: 'rehearsal', note: 'judgement-free probe - selector presence / time / require / before-only distinguish check (delay 0) - item reading 0',
     rulesVersion: RULES.rulesVersion, node_path_set: !!process.env.NODE_PATH,
-    scope: { distinguish: RULES.device.probe.distinguish === true, screen: 'before', delay: PROBE_DELAY, inputs: '#before + Tab + R3 row click x1' },
-    playwright_require: { resolved: false, version: null, ms: null }, browser_launched: false, screens: [], k_check: null, errors: [],
+    scope: { distinguish: RULES.device.probe.distinguish === true, screen: 'before', delay: PROBE_DELAY, inputs: '#before + Tab + R3 row click x1', a2: PROBE_SCREENS.includes('a2') ? 'R1 structure read only - inputs 0' : 'not probed' },
+    playwright_require: { resolved: false, version: null, ms: null }, browser_launched: false, screens: [], k_check: null, a2_check: null, errors: [],
   };
   if (!outDir) { process.stderr.write('probe: HQA_OUT_DIR 필요\n'); return 1; }
   let pw = null;
@@ -128,7 +150,7 @@ async function main() {
     try {
       browser = await pw.chromium.launch({ executablePath: chromePath, headless: RULES.hqaPending.browserCondition.value.headless });
       doc.browser_launched = true;
-      for (const s of RULES.plan.screens) doc.screens.push(await probeScreen(browser, base, s, L, J, doc));
+      for (const s of PROBE_SCREENS) doc.screens.push(await probeScreen(browser, base, s, L, J, doc));
     } catch (e) {
       doc.errors.push('browser: ' + errText(e));
     } finally {
@@ -143,7 +165,7 @@ async function main() {
     process.stderr.write('probe: probe.json 쓰기 실패 ' + errText(e) + '\n');
     return 1;
   }
-  process.stdout.write('[probe] 기록 끝 · playwright ' + doc.playwright_require.resolved + ' · 화면 ' + doc.screens.length + ' · K ' + (doc.k_check ? doc.k_check.verdict : '-') + ' · 오류 ' + doc.errors.length + '\n');
+  process.stdout.write('[probe] 기록 끝 · playwright ' + doc.playwright_require.resolved + ' · 화면 ' + doc.screens.length + ' · K ' + (doc.k_check ? doc.k_check.verdict : '-') + ' · A2 ' + (doc.a2_check ? doc.a2_check.focusableVisible : '-') + ' · 오류 ' + doc.errors.length + '\n');
   return 0;
 }
 

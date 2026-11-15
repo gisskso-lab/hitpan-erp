@@ -2,7 +2,11 @@
 'use strict';
 // 장치 판독기(설계 §4-3 · M7) — samples.jsonl + rules.json → verdict-device.json.
 // · 판독 글자는 rules.json readingText(정본 글자)만 쓴다. 기대값을 새로 만들지 않는다. 판정자 = HQA.
-// · 잰 표본 0 = 빨강: 계획 칸마다 유효 표본 ≥ 1. /before 칸 표본 0 도 빨강(「대조 무효」 와 다름: 무효 = 표본 있음 · 재현 0).
+// · 고침4 G4(D-3): 칸 실패 = 유효 표본 수 < 정해진 표본 수(rules hqaPending.samplesPerCell) → 「장치 실패」 + 빨강 · 사유 「정해진 표본 수 모자람 유효/정해진」.
+//   /before 칸 표본 0 도 빨강(「대조 무효」 와 다름: 무효 = 표본 있음 · 재현 0). (옛 꼴 = 칸 유효 0 일 때만 실패 — 고침4 로 대체됨)
+// · 고침4 G1: 화면 = rules.plan.screenTable 의 이름(before · after · a2) · 가르기는 이름 같음 비교만(주소 앞머리 판단 0)
+// · 고침4 G3: rules.n1Contrast 화면을 N-1 대조로 읽는다(D-1 ⓒ) · 그것이 before 가 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀
+// · 고침4 G6 순서 · G7 판정 칸 가림 충돌 → 빨강
 // 쓰는 법: node judge.js [--rules <rules.json>] [--samples <samples.jsonl>] [--out <verdict-device.json>]
 //   기본: rules = 이 폴더 rules.json · samples/out = $HQA_OUT_DIR/samples.jsonl · $HQA_OUT_DIR/verdict-device.json
 // 종료 코드: 0 = 빨강 아님 · 1 = 빨강(판독 파일은 씀) · 2 = 인자 · 규칙 파일 오류(판독 파일 못 씀)
@@ -24,10 +28,60 @@ function samplesFor(rules, item) {
   return Object.prototype.hasOwnProperty.call(v, item) ? v[item] : v.default;
 }
 
+// ── 고침4 G1 — 화면 표(이름 ↔ 주소 ↔ 기대 data-variant ↔ 기대 CSS 판) · 화면 가르기 = 이름 같음 비교만 ──
+function screenSpec(rules, screen) {
+  const t = rules.plan && rules.plan.screenTable;
+  const s = t && typeof screen === 'string' && !screen.startsWith('_') && Object.prototype.hasOwnProperty.call(t, screen) ? t[screen] : null;
+  if (!s || typeof s.path !== 'string' || typeof s.variant !== 'string' || typeof s.css !== 'string') throw new Error(`plan.screenTable 에 화면 ${screen} 없음`);
+  return s;
+}
+// 그 항목이 재는 화면 목록(itemSpecs.screens · 없으면 plan.screens)
+function screensFor(rules, item) {
+  const spec = rules.plan.itemSpecs[item];
+  return (spec && Array.isArray(spec.screens)) ? spec.screens : rules.plan.screens;
+}
+function n1ContrastOf(rules) {
+  const c = rules.n1Contrast;
+  if (typeof c !== 'string' || !c) throw new Error('n1Contrast 없음');
+  return c;
+}
+// 같은 지연 단 안 재는 순서(rules.plan.screenOrder) — 목록 밖 화면은 -1
+function screenRankOf(rules, screen) { return (rules.plan.screenOrder || []).indexOf(screen); }
+// 표본 주소(주소 글자는 표에서만 · 장치 코드에 주소 글자 0)
+function screenUrl(rules, screen) {
+  const d = rules.device;
+  return `http://${d.host}:${d.proxyPort}${screenSpec(rules, screen).path}${d.query}`;
+}
+// 측정 첫 상태(st0)로 화면 확정 — data-variant 만으로 화면을 정하고(다르면 throw) · CSS 판은 다르면 오류 칸(C-3)
+function screenCheck(rules, screen, st0) {
+  const sp = screenSpec(rules, screen);
+  if (!st0 || st0.variant !== sp.variant) throw new Error(`화면 판 불일치 data-variant=${st0 ? st0.variant : null}`);
+  const errors = [];
+  if (st0.cssVariant !== sp.css) errors.push(`상태 칸 CSS 판 불일치 data-fixture-css=${st0.cssVariant}`);
+  return { errors, cssMeasured: st0.cssVariant, variantMeasured: st0.variant };
+}
+function checkScreens(rules) {
+  const P = rules.plan;
+  const contrast = n1ContrastOf(rules);
+  screenSpec(rules, contrast);
+  const used = new Set();
+  for (const item of P.items) {
+    for (const sc of screensFor(rules, item)) {
+      screenSpec(rules, sc);
+      used.add(sc);
+      // 화면 목록 밖 화면(a2)은 N-1 의 n1Contrast 하나만(다른 항목 a2 칸 0)
+      if (!P.screens.includes(sc) && !(item === 'N-1' && sc === contrast)) throw new Error(`${item} 의 화면 ${sc} 는 계획 밖(N-1 대조 화면만 허용)`);
+      if (screenRankOf(rules, sc) < 0) throw new Error(`plan.screenOrder 에 ${sc} 없음`);
+    }
+  }
+  if (P.items.includes('N-1') && !screensFor(rules, 'N-1').includes(contrast)) throw new Error(`n1Contrast=${contrast} 가 N-1 화면에 없음`);
+}
+
 function buildPlan(rules) {
   const P = rules.plan;
   const win = defaultWindow(rules);
   const cells = [];
+  checkScreens(rules);
   for (const item of P.items) {
     const spec = P.itemSpecs[item];
     if (!spec) throw new Error(`plan.itemSpecs 에 ${item} 없음`);
@@ -36,7 +90,8 @@ function buildPlan(rules) {
     const windows = (spec.windows || [{}]).map((w) => ({ w: w.w || win.w, h: w.h || win.h }));
     const n = samplesFor(rules, spec.derivedFrom || item);
     for (const kase of spec.cases) {
-      for (const screen of P.screens) {
+      // 고침4 G1: 옛 꼴 = P.screens 고정 → 항목별 화면 목록(screensFor)
+      for (const screen of screensFor(rules, item)) {
         for (const delay of delays) {
           for (const window of windows) {
             const c = { item, case: kase, screen, delay, window, samples: n, derivedFrom: spec.derivedFrom || null };
@@ -95,13 +150,17 @@ function uChecks(s, afterReached) {
 // 미도달 표본 하나 → { valid, reading, reason, u }
 //   /after 미도달 = 유효 표본에서 뺌(device_failure · 「/after 키보드 도달 0」) — keyboard_unreachable 로 바꾸지 않는다(C1-3)
 //   /before 미도달 = U1~U4 모두 참일 때만 keyboard_unreachable(유효) · 아니면 device_failure
+//   고침4 G2: a2 미도달 = /before 와 같은 U1~U4 문(옛 꼴 = before 아니면 모두 「/after …」 글자 → a2 를 따로 뺐다)
+//             a2 사유 글자 = 「A2 화면 키보드 도달 0 …」(주소 글자 0 · CTO C-4)
 function kbdGate(rules, s, afterReached) {
   const D = rules.deviceReading;
-  if (s.screen !== 'before') return { valid: false, reading: 'device_failure', reason: D.afterUnreachable, u: null };
+  if (s.screen === 'after') return { valid: false, reading: 'device_failure', reason: D.afterUnreachable, u: null };
+  if (s.screen !== 'before' && s.screen !== 'a2') return { valid: false, reading: 'device_failure', reason: '계획 밖 화면', u: null };
   const u = uChecks(s, afterReached);
   const miss = Object.keys(u).filter((x) => !u[x]);
   if (miss.length === 0) return { valid: true, reading: 'keyboard_unreachable', reason: null, u };
-  return { valid: false, reading: 'device_failure', reason: `/before 키보드 도달 0 · ${miss.join('·')} 결손`, u };
+  const head = s.screen === 'a2' ? D.a2Unreachable : '/before 키보드 도달 0';
+  return { valid: false, reading: 'device_failure', reason: `${head} · ${miss.join('·')} 결손`, u };
 }
 
 // 리허설 3 구분 점검(probe · /before · 지연 0): R1 구조 · R2 Tab 경로 · R3 행 클릭 양성 대조 → K-결함 / K-장치 / K-미결
@@ -122,15 +181,82 @@ function kCheck(r1, r2path, r3) {
   return { verdict, conds };
 }
 
+// ── 고침4 G7 — 판정 칸 가림 충돌: 표본의 판정 칸(rules.judgeSchema samples.jsonl)에 가림 꼴(mask.js findSecrets)이 걸리는가 ──
+//   돌려줌: [{ path, kind, length }] (값 0)
+function maskConflictCtx(rules) {
+  const M = require('./mask.js');
+  return { M, pats: M.schemaFor(rules, 'samples.jsonl'), allow: M.loadAllow(), hctx: M.hexCtx(process.env, 'samples.jsonl') };
+}
+function maskConflicts(rules, s, mc) {
+  const c = mc || maskConflictCtx(rules);
+  const out = [];
+  if (!s || typeof s !== 'object' || !c.pats.length) return out;
+  for (const [p, v] of c.M.schemaValues(s, c.pats)) {
+    const str = typeof v === 'string' ? v : (v && typeof v === 'object' ? JSON.stringify(v) : null);
+    if (str === null) continue;
+    for (const h of c.M.findSecrets(str, c.allow, c.hctx)) out.push({ path: c.M.pathStr(p), kind: h.kind, length: h.tok.length });
+  }
+  return out;
+}
+
+// 고침4 G5: Tab 경로 한 칸을 스키마 칸만으로(태그 · role · 줄 번호 · 참거짓 · tabIndex · 순번)
+const PATH_KEYS = ['i', 'row', 'tag', 'role', 'tabIndex', 'inRef', 'isStatusActivator', 'afterRef', 'body'];
+function pathOnly(p) {
+  if (!Array.isArray(p)) return [];
+  return p.map((x) => { const o = {}; for (const k of PATH_KEYS) o[k] = x && Object.prototype.hasOwnProperty.call(x, k) ? x[k] : null; return o; });
+}
+
+// ── 고침4 G6 — 재는 순서 · 문맥 순번 점검(rules.plan.screenOrder) ──
+//   전체 순번(order) 순으로 늘어놓았을 때 지연 단은 오름 · 같은 단 안 화면 순서는 screenOrder 대로(after → a2 → before)
+//   문맥 순번(contextId): 부모 표본(parentCell 없음)끼리 겹침 0 · 파생 표본은 부모와 같은 문맥
+function orderCheck(rules, samples) {
+  const D = rules.deviceReading;
+  const xs = samples.filter((s) => s && typeof s === 'object');
+  const problems = [];
+  const missing = xs.filter((s) => !Number.isInteger(s.order) || s.order < 1).length;
+  if (missing) problems.push(`${D.orderMissing} ${missing}건`);
+  const withOrder = xs.filter((s) => Number.isInteger(s.order) && s.order >= 1).sort((a, b) => a.order - b.order);
+  let dup = 0;
+  let broken = 0;
+  for (let i = 1; i < withOrder.length; i++) {
+    const a = withOrder[i - 1];
+    const b = withOrder[i];
+    if (a.order === b.order) { dup += 1; continue; }
+    if (b.delay < a.delay || (b.delay === a.delay && screenRankOf(rules, b.screen) < screenRankOf(rules, a.screen))) broken += 1;
+  }
+  if (dup || broken) problems.push(`${D.orderBroken} ${dup + broken}건`);
+  const ownCtx = new Map();
+  let ctxBad = 0;
+  for (const s of xs) {
+    if (s.parentCell || s.contextId === null || s.contextId === undefined) continue;
+    if (ownCtx.has(s.contextId)) ctxBad += 1;
+    else ownCtx.set(s.contextId, s);
+  }
+  for (const s of xs) {
+    if (!s.parentCell || s.contextId === null || s.contextId === undefined) continue;
+    const p = ownCtx.get(s.contextId);
+    if (!p || p.cell !== s.parentCell || p.sampleNo !== s.sampleNo) ctxBad += 1;
+  }
+  if (ctxBad) problems.push(`${D.contextBroken} ${ctxBad}건`);
+  return problems;
+}
+
 // judge 쪽 유효 판단(표본의 valid 를 그대로 믿지 않고 미도달 표본은 kbdGate 로 다시 잰다)
+//   고침4 G7: 판정 칸 가림 충돌 표본 = device_failure(사유 「판정 칸 가림 충돌」) — 다른 판단보다 먼저
 function effective(rules, samples) {
   const afterReach = {};
   for (const s of samples) {
     if (s && s.screen === 'after' && s.kbd && s.kbd.reached === true) afterReach[groupKey(s)] = (afterReach[groupKey(s)] || 0) + 1;
   }
   const eff = new Map();
+  const mc = maskConflictCtx(rules);
   for (const s of samples) {
     if (!s) continue;
+    const conf = maskConflicts(rules, s, mc);
+    if (conf.length) {
+      eff.set(s, { valid: false, reading: 'device_failure', reason: rules.deviceReading.maskConflict, mismatch: false, maskConflicts: conf });
+      continue;
+    }
     if (s.kbd && s.kbd.reached === false) {
       const g = kbdGate(rules, s, afterReach[groupKey(s)] || 0);
       eff.set(s, { valid: g.valid, reading: g.reading, reason: g.reason, mismatch: (s.valid === true) !== g.valid });
@@ -169,28 +295,40 @@ function judge(rules, samples, extra) {
   }
   const validOf = (key) => byCell[key].filter(isValid);
   const redReasons = [];
+  const contrast = n1ContrastOf(rules);
 
   const cells = plan.cells.map((c) => {
     const all = byCell[c.key];
     const valid = all.filter(isValid).length;
     const out = { key: c.key, item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, planned: c.samples, got: all.length, valid, invalid: all.length - valid };
-    // 고침2 N1-d: 칸 판독 — device_failure(유효 표본 0 · 빨강 · 기존 규칙 그대로) ↔ keyboard_unreachable(/before 유효 표본 · 판정 = HQA)
+    // 고침2 N1-d: 칸 판독 — device_failure(빨강) ↔ keyboard_unreachable(/before · a2 유효 표본 · 판정 = HQA)
     out.kbdUnreachable = all.filter(isKu).length;
     out.afterUnreachExcl = all.filter(isAfterUr).length;
-    if (valid === 0) {
+    // 고침4 G5(L-2): /after 미도달 표본 — 유효에서 빼는 규칙 그대로 + 건수 · 표본 번호 · Tab 경로(스키마 칸만) 기록 · 판정 = HQA
+    if (c.screen === 'after') {
+      const ur = all.filter(isAfterUr);
+      out.afterUnreachable = { count: ur.length, samples: ur.map((s) => s.sampleNo), tabPath: ur.map((s) => pathOnly(s.kbd && s.kbd.path)) };
+    }
+    // 고침4 G3(D-2): n1Contrast 가 before 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀
+    if (c.item === 'N-1' && c.screen === 'before' && contrast !== 'before') out.n1Role = T['N-1'].recordOnly;
+    // 고침4 G4(D-3): 칸 실패 = 유효 < 정해진 표본 수(옛 꼴 「유효 0 일 때만」 대체)
+    if (valid < c.samples) {
       out.status = T.cellFail;
-      out.reason = c.screen === 'before' ? T.beforeZeroReason : T.cellZeroReason;
+      out.reason = `${T.cellShortReason} ${valid}/${c.samples}`;
+      if (valid === 0) out.zeroReason = c.screen === 'before' ? T.beforeZeroReason : (c.screen === 'a2' ? T.a2ZeroReason : T.cellZeroReason);
       if (out.afterUnreachExcl > 0) out.reason += ' · ' + D.afterUnreachable;
       out.deviceReading = 'device_failure';
       redReasons.push(`${out.reason}: ${c.key}`);
     } else {
       out.status = '표본 있음';
       out.deviceReading = out.kbdUnreachable > 0 ? 'keyboard_unreachable' : null;
-      if (out.kbdUnreachable > 0) out.deviceReadingText = `${D.keyboard_unreachable} · ${D.sameShapeD1}`;
+      // 고침4 G2: a2 칸 글자 = 「A2 화면 키보드 도달 0」(주소 글자 0 · C-4)
+      if (out.kbdUnreachable > 0) out.deviceReadingText = c.screen === 'a2' ? D.a2Unreachable : `${D.keyboard_unreachable} · ${D.sameShapeD1}`;
     }
     return out;
   });
-  const cellFailed = (c) => validOf(c.key).length === 0;
+  // 고침4 G4: 옛 꼴(유효 0 이면 실패) → 정해진 표본 수 모자람
+  const cellFailed = (c) => validOf(c.key).length < c.samples;
   const cellsOf = (item, pred) => plan.cells.filter((c) => c.item === item && (!pred || pred(c)));
   const flat = (cs) => cs.reduce((a, c) => a.concat(validOf(c.key)), []);
   const R = (s) => s.readings || {};
@@ -199,10 +337,12 @@ function judge(rules, samples, extra) {
   const has = (item) => rules.plan.items.includes(item);
 
   // N-1 — 11/13 §6 판정 글자 그대로
+  //   고침4 G1 · G3(D-1 ⓒ): 대조 칸 = rules.n1Contrast 화면(㉡ a2 · ㉠ before). 아래 before… 셈 이름은 「대조 칸」 자리다
+  //   (D-1 ⓒ — N-1 에 한해 /before 를 A2 화면으로 읽는다 · 읽기 규칙 = rules.json readingText.N-1.contrastReadRule)
   if (has('N-1')) {
     const t = T['N-1'];
     const cd = rules.plan.n1ContrastDelays;
-    const bCells = cellsOf('N-1', (c) => c.screen === 'before' && cd.includes(c.delay));
+    const bCells = cellsOf('N-1', (c) => c.screen === contrast && cd.includes(c.delay));
     const aCells = cellsOf('N-1', (c) => c.screen === 'after');
     const fail = bCells.concat(aCells).filter(cellFailed).map((c) => c.key);
     const bValid = flat(bCells);
@@ -221,12 +361,23 @@ function judge(rules, samples, extra) {
       if (afterDead > 0 || afterOther > 0) labels.push(t.red);
       if (afterFocusOff > 0) labels.push(t.yellow);
     }
+    // 고침4 G3: 대조가 before 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀(셈 · 판정 글자 무관 · 칸 장치 실패 빨강은 그대로)
+    const recCells = contrast !== 'before' ? cellsOf('N-1', (c) => c.screen === 'before') : [];
+    const recValid = flat(recCells);
     items['N-1'] = {
       source: t.source, ruleText: t.ruleText, expectedAfter: t.expectedAfter, expectedBefore: t.expectedBefore,
+      contrastScreen: contrast, contrastReadRuleRef: contrast !== 'before' ? 'rules.json readingText.N-1.contrastReadRule' : null,
       deviceFail: fail.length > 0, failCells: fail,
       labels,
-      // 고침2 N1-d: 「대조 무효」 글자는 그대로 · 사유 칸만 붙인다(/before 키보드로 못 연 표본이 있을 때)
-      contrastReason: fail.length === 0 && reproduced === 0 && bKu > 0 ? D.n1ContrastReason : null,
+      // 고침2 N1-d: 「대조 무효」 글자는 그대로 · 사유 칸만 붙인다(대조 화면을 키보드로 못 연 표본이 있을 때) · 고침4 G2: a2 면 「A2 화면 …」 글자
+      contrastReason: fail.length === 0 && reproduced === 0 && bKu > 0 ? (contrast === 'a2' ? D.n1ContrastReasonA2 : D.n1ContrastReason) : null,
+      beforeRecordOnly: contrast !== 'before' ? {
+        text: t.recordOnly,
+        valid: recValid.length,
+        circuitDead: recValid.filter((s) => s.circuit && s.circuit.dead).length,
+        kbdUnreachable: recValid.filter(isKu).length,
+        failCells: recCells.filter(cellFailed).map((c) => c.key)
+      } : null,
       reading: fail.length > 0 ? T.cellFail : (labels.length ? labels.join(' · ') : T.record),
       counts: {
         beforeContrastValid: bValid.length, beforeCircuitDead: reproduced,
@@ -238,9 +389,15 @@ function judge(rules, samples, extra) {
         afterUnreachExcl: aCells.reduce((a, c) => a + byCell[c.key].filter(isAfterUr).length, 0)
       },
       byDelay: rules.plan.nDelays.map((d) => {
-        const b = flat(cellsOf('N-1', (c) => c.screen === 'before' && c.delay === d));
+        const b = flat(cellsOf('N-1', (c) => c.screen === contrast && c.delay === d));
         const a = flat(cellsOf('N-1', (c) => c.screen === 'after' && c.delay === d));
-        return { delay: d, beforeValid: b.length, beforeDead: b.filter((s) => s.circuit && s.circuit.dead).length, afterValid: a.length, afterDead: a.filter((s) => s.circuit && s.circuit.dead).length };
+        const row = { delay: d, beforeValid: b.length, beforeDead: b.filter((s) => s.circuit && s.circuit.dead).length, afterValid: a.length, afterDead: a.filter((s) => s.circuit && s.circuit.dead).length };
+        if (contrast !== 'before') {
+          const r = flat(cellsOf('N-1', (c) => c.screen === 'before' && c.delay === d));
+          row.recordOnlyBeforeValid = r.length;
+          row.recordOnlyBeforeDead = r.filter((s) => s.circuit && s.circuit.dead).length;
+        }
+        return row;
       }),
       judgedBy: 'HQA'
     };
@@ -301,6 +458,17 @@ function judge(rules, samples, extra) {
 
   const mism = samples.filter((s) => eff.get(s) && eff.get(s).mismatch).length;
   if (mism) redReasons.push(`${D.validMismatch} ${mism}건`);
+  // 고침4 G7: 판정 칸 가림 충돌(값 0 · 칸 경로 · 꼴 · 길이만)
+  const conflicts = [];
+  for (const s of samples) {
+    const e = eff.get(s);
+    if (e && e.maskConflicts) for (const x of e.maskConflicts) conflicts.push(Object.assign({ cell: s.cell || null, sampleNo: s.sampleNo || null }, x));
+  }
+  const conflictSamples = samples.filter((s) => eff.get(s) && eff.get(s).maskConflicts).length;
+  if (conflictSamples) redReasons.push(`${D.maskConflict} ${conflictSamples}건`);
+  // 고침4 G6: 재는 순서 · 문맥 순번
+  const orderProblems = orderCheck(rules, samples);
+  for (const p of orderProblems) redReasons.push(p);
   if (unplanned.length) redReasons.push(`계획 밖 표본 ${unplanned.length}건`);
   const bad = (extra && extra.badLines) || [];
   if (bad.length) redReasons.push(`읽지 못한 줄 ${bad.length}건`);
@@ -314,11 +482,15 @@ function judge(rules, samples, extra) {
     rulesSha256: (extra && extra.rulesSha256) || null,
     totals: {
       planned: plan.cells.length, samples: samples.length, valid: samples.filter(isValid).length, unplanned: unplanned.length, badLines: bad.length,
-      kbdUnreachable: samples.filter(isKu).length, afterUnreachExcl: samples.filter(isAfterUr).length, validMismatch: mism
+      kbdUnreachable: samples.filter(isKu).length, afterUnreachExcl: samples.filter(isAfterUr).length, validMismatch: mism,
+      maskConflictSamples: conflictSamples, orderProblems: orderProblems.length
     },
     deviceReadingText: { device_failure: D.device_failure, keyboard_unreachable: D.keyboard_unreachable },
+    n1Contrast: contrast,
     red: redReasons.length > 0,
     redReasons,
+    maskConflicts: conflicts,
+    orderProblems,
     hqaPendingOpen: pending,
     notMeasured: rules.plan.notMeasured,
     items,
@@ -363,6 +535,10 @@ function main(argv) {
   return verdict.red ? 1 : 0;
 }
 
-module.exports = { buildPlan, cellKey, judge, parseJsonl, defaultWindow, groupKey, kStructDefect, uChecks, kbdGate, kCheck, effective };
+module.exports = {
+  buildPlan, cellKey, judge, parseJsonl, defaultWindow, groupKey, kStructDefect, uChecks, kbdGate, kCheck, effective,
+  // 고침4
+  screenSpec, screensFor, n1ContrastOf, screenRankOf, screenUrl, screenCheck, checkScreens, maskConflicts, orderCheck, pathOnly
+};
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

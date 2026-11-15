@@ -87,6 +87,9 @@ V.y2nd = 'QZab' + rnd(8, LET) + '+' + rnd(8, LET) + '/' + rnd(8, LET); // 숫자
 V.y1v = rndNonHex(10);
 V.y1s = rnd(5, 'ghijkmnpqrstuvwxyz');
 V.y3h = hex(40);
+// 고침4 G7 심은 값 — 자동 id 꼴(판정 칸 밖) · 22자 토큰(판정 칸 안)
+V.g7id = rnd(24, 'abcdefghijklmnopqrstuvwxyz0123456789');
+V.g7tok = rndNonHex(22);
 const K1 = J('pass', 'word');
 const K2 = J('access', 'Tok', 'en');
 const K3 = J('client_', 'sec', 'ret');
@@ -269,12 +272,56 @@ try {
     const pass = m.status === 0 && m.tokens === 0 && r.status === 0 && kept && !r.echoed && !m.echoed;
     results.push({ case: name, expect: [], kinds: r.parsed ? r.parsed.files : null, status: r.status, echoed_value: r.echoed, pass });
   });
+
+  // 고침4 G7 — 판정 칸 스키마(rules.json judgeSchema) 합성 대조군 2(작업지시서 §7 G13 ⑦ ⑧)
+  //   ⑦ 자동 id 꼴 초점 기술(readings.focusAfter.id · 판정 칸 밖) → 판독기 충돌 0 · 가림은 가림대로(기록 = 칸 경로 · 꼴 · 길이 · 값 0) · 누출 0
+  //   ⑧ 판정 칸(kbd.path[0].tag)에 심은 22자 토큰 → 판독기 「판정 칸 가림 충돌」 device_failure + 빨강 · 가림은 그 칸을 안 가림(충돌 기록 · 값 0) → 누출 검사가 파일째 잡음
+  {
+    const Jd = require('./judge.js');
+    const rules = JSON.parse(fs.readFileSync(path.join(HERE, 'rules.json'), 'utf8'));
+    const base = (o) => Object.assign({
+      item: 'N-1', case: 'arrows', screen: 'after', delay: 300, window: { w: 1280, h: 720 }, cell: 'N-1|arrows|after|d300|1280x720', sampleNo: 1, order: 1, contextId: 1,
+      valid: true, errors: [], deviceReading: null,
+      circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false, detail: { reconnectSeenAtMs: [], wsCloseAtMs: [], fromMs: 10 } },
+      kbd: { reached: true, tabs: 3, path: [{ i: 1, row: '1', tag: 'button', role: null, tabIndex: 0, inRef: true, isStatusActivator: true, afterRef: false, body: false }] },
+      readings: { opened: true, listClosed: true, focusSameRowBtn: true, otherRowsChanged: false, focusAfter: { tag: 'div', id: null, role: 'button', row: '1', isStatusActivator: true, inOpenList: false, text: null } }
+    }, o || {});
+    const runCase = (name, sample, want) => {
+      const dir = path.join(root, name);
+      fs.mkdirSync(dir);
+      writeCase(dir, { 'run.json': '{}\n', 'samples.jsonl': JSON.stringify(sample) + '\n' });
+      const conf = Jd.maskConflicts(rules, sample);
+      const v = Jd.judge(rules, [sample]);
+      const m = spawnSync(process.execPath, [MASK, dir], { env: ENV, encoding: 'utf8' });
+      const runJ = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+      const after = fs.readFileSync(path.join(dir, 'samples.jsonl'), 'utf8');
+      const r = runLeak(dir);
+      const recTxt = JSON.stringify(runJ.mask || {}) + JSON.stringify(v.maskConflicts) + JSON.stringify(v.redReasons);
+      const noVal = !leaksValue(recTxt) && !leaksValue(m.stdout + m.stderr) && !r.echoed;
+      return want({ conf, v, m, mask: runJ.mask || {}, after, r, noVal });
+    };
+    const D = rules.deviceReading;
+    const p7 = runCase('g7a', base({ readings: Object.assign(base().readings, { focusAfter: Object.assign(base().readings.focusAfter, { id: 'mudmenu-' + V.g7id }) }) }), (x) =>
+      x.conf.length === 0 && !x.v.redReasons.some((t) => t.startsWith(D.maskConflict)) && x.v.totals.maskConflictSamples === 0
+      && x.m.status === 0 && x.mask.tokens_replaced >= 1 && x.mask.judge_field_conflicts.length === 0
+      && x.mask.records.some((rr) => rr.file === 'samples.jsonl' && rr.path === 'L1:readings.focusAfter.id' && rr.length === ('mudmenu-' + V.g7id).length && typeof rr.kind === 'string')
+      && !x.after.includes(V.g7id) && x.r.status === 0 && x.noVal);
+    results.push({ case: 'g7.autoid.schema', expect: ['conflict 0', 'masked', 'record path'], kinds: null, status: 0, echoed_value: false, pass: !!p7 });
+    const planted = base({ kbd: Object.assign(base().kbd, { path: [Object.assign({}, base().kbd.path[0], { tag: V.g7tok })] }) });
+    const p8 = runCase('g7b', planted, (x) =>
+      x.conf.length === 1 && x.conf[0].path === 'kbd.path[0].tag' && x.conf[0].length === 22
+      && x.v.red === true && x.v.redReasons.some((t) => t.startsWith(D.maskConflict)) && x.v.totals.maskConflictSamples === 1 && x.v.maskConflicts[0].path === 'kbd.path[0].tag'
+      && x.m.status === 0 && x.mask.judge_field_conflicts.length === 1 && x.mask.judge_field_conflicts[0].path === 'L1:kbd.path[0].tag'
+      && x.after.includes(V.g7tok) && x.r.status === 2 && x.noVal);
+    results.push({ case: 'g7.planted.red', expect: ['device_failure', 'red', 'not masked', 'leak catches'], kinds: null, status: 0, echoed_value: false, pass: !!p8 });
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
 results.push({ case: 'names.short', expect: ['< 22'], kinds: null, status: 0, echoed_value: false, pass: results.every((r) => !/[A-Za-z0-9_-]{22,}/.test(r.case)) });
 
-const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 1 && results.every((r) => r.pass);
+// 고침4 G7: 옛 기대 수(CASES + 2 + Y2C + Y2D + 1)에 합성 대조군 2 를 더함
+const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 2 + 1 && results.every((r) => r.pass);
 const doc = { ok, cases: results.length, failed: results.filter((r) => !r.pass).map((r) => r.case), results };
 const oi = process.argv.indexOf('--out');
 if (oi >= 0 && process.argv[oi + 1]) fs.writeFileSync(process.argv[oi + 1], JSON.stringify(doc, null, 2) + '\n');

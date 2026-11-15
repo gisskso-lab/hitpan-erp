@@ -44,7 +44,9 @@
       "note": "I-8 T3 정의 확인(고침1 F9 · [4] C2) — 정의 후보 있음: 16e88c01 docs/운영기록/20261107작_백오피스CS상태칸_S4덮임_키보드_고침_작업지시서.md L306 「상태 값이 공백뿐이면 상태 칸이 통째로 사라짐 → -」(공백 상태 칸). 같은 날 다른 뜻의 T3(20261107_830배포_대표실물결과_S4반려.md L23 · CS 표시줄)도 있어 HQA 확인 대기. 장치에 T3 측정 코드 0 — 정의가 확정돼도 측정 코드는 별도 작업(새 회차)."
     }
   },
-  "mask_allow_표지": "가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
+  "n1Contrast_표지": "고침4 G1(CTO D-1 ⓒ · 대표 11/16 ㉡) — N-1 대조로 읽는 화면 이름. ㉡ = \"a2\" · ㉠(HQA ⓑ 거절 · 되돌림) = \"before\". 이 값은 G-값 커밋에서 확정한다(지금 값 = ㉡ 기본). ㉠ 으로 갈 때는 이 값과 plan.itemSpecs.N-1.screens 의 a2 를 함께 뺀다(judge.js buildPlan 이 둘의 어긋남을 거부).",
+  "n1Contrast": "a2",
+  "mask_allow_표지":"가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
   "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends"],
   "device": {
     "_표지": "장치 선택값 — 정본에 없는 실행 값을 장치가 정함(기대값 아님 · 판독 글자 아님). 장전 전 고정 · HQA 의심 제기 대상.",
@@ -87,8 +89,17 @@
     "probe": { "distinguish": true, "_표지": "고침2 N1 — 리허설 3 한 번만 /before 구분 점검(R1 · R2 · R3 · 지연 0). 그 뒤 리허설은 false(= /before R1 구조 읽기만 · 입력 0)" }
   },
   "plan": {
-    "_표지": "계획 칸 = 항목 × 경우 × 화면 × 지연 × 창. 칸마다 유효 표본 ≥ 1 아니면 그 칸 「장치 실패」 + 빨강(설계 §4-3). /before 칸 표본 0 도 빨강(「대조 무효」 와 다름).",
+    "_표지": "계획 칸 = 항목 × 경우 × 화면 × 지연 × 창. 고침4 G4(D-3): 칸마다 유효 표본 수 < 정해진 표본 수(hqaPending.samplesPerCell) 면 그 칸 「장치 실패」 + 빨강 · 사유 「정해진 표본 수 모자람 유효/정해진」. /before 칸 표본 0 도 빨강(「대조 무효」 와 다름).",
+    "_표지_대체됨_고침4": "옛 칸 실패 규칙(고침3까지 · 설계 §4-3 · §7-2: 칸 유효 표본 0 일 때만 실패)은 고침4 G4 로 대체됨 — 위 _표지 가 정본.",
     "screens": ["before", "after"],
+    "screenTable": {
+      "_표지": "고침4 G1(CTO C-3) — 화면 이름 ↔ 주소 ↔ 기대 data-variant ↔ 기대 data-fixture-css 판을 이 표 하나로. 장치 · 판독기는 화면을 이름 같음 비교로만 가른다(주소 앞머리 판단 0 · PM 조건 ①). run-items.js 는 주소를 이 표에서 읽고, data-variant 가 표 값과 다르면 그 표본을 버린다(throw) · CSS 판이 다르면 오류 칸에 남긴다. 원자료 표본마다 화면 이름(screen) · 주소(screenPath) · 실측 CSS 판(cssMeasured)을 따로 기록.",
+      "before": { "path": "/before", "variant": "before", "css": "before" },
+      "after": { "path": "/after", "variant": "after", "css": "after" },
+      "a2": { "path": "/after-a2", "variant": "a2", "css": "after" }
+    },
+    "screenOrder_표지": "고침4 G6(L-5) — 같은 지연 단 안 재는 순서. after 먼저(U3 계산 유지) → a2(죽은 회로가 같은 단 /after 표본보다 뒤) → before. 표본마다 새 문맥. 원자료 각 표본에 order(전체 순번) · contextId(문맥 순번). judge.js 가 순서 어긋남을 빨강으로.",
+    "screenOrder": ["after", "a2", "before"],
     "iDelays": [0, 150, 300],
     "nDelays": [0, 150, 300, 500],
     "n1ContrastDelays": [300, 500],
@@ -101,7 +112,7 @@
       "I-5": { "cases": ["tab", "shift-tab"], "delays": "iDelays" },
       "I-6": { "cases": ["esc", "enter"], "delays": "iDelays" },
       "I-7": { "cases": ["row-cell"], "delays": "iDelays" },
-      "N-1": { "cases": ["arrows"], "delays": "nDelays" },
+      "N-1": { "cases": ["arrows"], "delays": "nDelays", "screens": ["before", "after", "a2"], "_screens_표지": "고침4 G1 — a2 칸은 N-1 에만(다른 항목 a2 칸 0 · N-2 도 0). 화면 목록 밖 화면은 N-1 의 n1Contrast 하나만 허용(buildPlan 거부)." },
       "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
     },
     "notMeasured": [
@@ -116,10 +127,20 @@
     "cellFail": "장치 실패",
     "cellZeroReason": "칸 표본 0",
     "beforeZeroReason": "/before 표본 0",
+    "cellShortReason": "정해진 표본 수 모자람",
+    "a2ZeroReason": "A2 화면 표본 0",
+    "_글자구분": {
+      "_표지": "고침4 G11(CTO 위험) — 발행 전 고정. 아래 둘을 섞지 않는다.",
+      "대조 불가 ≠ 대조 무효": "대조 불가 = 그 칸이 「장치 실패」(정해진 표본 수 모자람 · 표본 0 · 판정 칸 가림 충돌 · 순서 어긋남 등) → 대조 자체를 못 함 · 장치 빨강. 대조 무효 = 표본은 정해진 수만큼 있는데 대조 화면이 결함을 재현 못 함(정본 판정 글자 · 통과로 안 셈 · 장치 빨강 아님).",
+      "장치 글자 ≠ 판정 글자": "장치 글자 = deviceReading · 칸 status · reason · 「판독값 기록 · 판정 = HQA」 — 장치가 잰 사실. 판정 글자 = readingText 의 정본 글자(대조 무효 · 🔴 · 🟡) — 정본 조건에 맞을 때 장치가 옮겨 적을 뿐 · 판정자 = HQA."
+    },
     "N-1": {
       "source": "16e88c01:docs/검증/외부/20261113_4X대상재결정_S4_A프라임_3인.md §6",
       "expectedAfter": "회로 삶 · 목록 닫힘 · 초점 = 같은 줄 상태 단추 · 다른 줄 변화 0",
       "expectedBefore": "회로 죽음(재연결 표시)이 1회 이상 재현",
+      "contrastReadRule": "N-1 에 한해 `/before` 를 A2 화면(화면 이름 `a2` · 주소 `/after-a2`)으로 읽는다 · 11/7 항목의 `/before` 는 운영 판 그대로 (CTO D-1 ⓒ 대체 글자 · 대표 11/16 ㉡ · 판정 글자 무변)",
+      "recordOnly": "기록만 · 판정에 안 씀",
+      "recordOnlyRule": "n1Contrast 가 before 가 아니면 /before N-1 칸은 계속 재되(결-3) 「기록만 · 판정에 안 씀」 — 대조 · 🔴 · 🟡 셈에 안 들어간다(D-2). 칸 「장치 실패」 빨강은 그대로.",
       "contrastInvalid": "대조 무효",
       "red": "🔴",
       "yellow": "🟡",
@@ -157,10 +178,42 @@
     "n2ParentNotOpened": "부모 칸 열기 불가",
     "n1ContrastReason": "/before 키보드로 열기 불가(I-1 과 같은 모양) — 재현 시도 0",
     "sameShapeD1": "11/7 D1 과 같은 모양 · 판정 = HQA",
-    "validMismatch": "표본 유효 판단 불일치(run-items ↔ judge)"
+    "validMismatch": "표본 유효 판단 불일치(run-items ↔ judge)",
+    "_고침4_표지": "고침4 G2 · G6 · G7 · G10 — 아래 칸 더함(위 글자 무변 · 대체 0). a2 미도달 = /before 와 같은 U1~U4 문 · a2 표본의 판독 · 사유 글자에 주소 글자 0(CTO C-4 · 「A2 화면 …」 으로만).",
+    "a2Unreachable": "A2 화면 키보드 도달 0",
+    "n1ContrastReasonA2": "A2 화면 키보드로 열기 불가 — 재현 시도 0",
+    "maskConflict": "판정 칸 가림 충돌",
+    "orderBroken": "재는 순서 어긋남",
+    "orderMissing": "순서 기록 없음",
+    "contextBroken": "문맥 순번 어긋남",
+    "a2ProbeKeep": "A2 화면 줄 안 초점 받을 보이는 요소 ≥ 1 → ㉡ 유지",
+    "a2ProbeZero": "되돌림 규칙 해당(㉠)",
+    "a2ProbeNoRow": "A2 화면 1번 줄 없음 — 구조 읽기 불가"
+  },
+  "judgeSchema": {
+    "_표지": "고침4 G7(S-1 · CTO 보탬) — 판정 칸 스키마(발행 전 고정). 회로 = 상태 · 시각 · 재연결 표시 여부 / 초점 = 역할 · 태그 · 줄 번호 · 알려진 data 속성(data-row)만 — 자동 id · 회로 ID 원문 0 / valid · 판독 글자 · github.sha · 런 ID. 이 칸에 가림 규칙(mask.js findSecrets)이 걸리면: judge.js = 그 표본 device_failure(사유 「판정 칸 가림 충돌」) · 빨강 / mask.js = 그 칸은 가리지 않고 가림 기록에 충돌로 남김(값 0 → leak-scan 이 그 파일을 보류). 가림 기록 = 파일 · 칸 경로 · 꼴 종류 · 길이(값 0). 꼴: 점 = 객체 칸 · [] = 배열 아무 칸 · * = 아무 열쇠.",
+    "samples.jsonl": [
+      "item", "case", "screen", "delay", "cell", "sampleNo", "order", "contextId", "valid", "deviceReading",
+      "circuit.dead", "circuit.reconnectVisible", "circuit.wsClosedNotNav", "circuit.consoleCircuitError",
+      "circuit.detail.reconnectSeenAtMs[]", "circuit.detail.wsCloseAtMs[]", "circuit.detail.fromMs",
+      "kbd.reached", "kbd.path[].i", "kbd.path[].row", "kbd.path[].tag", "kbd.path[].role", "kbd.path[].tabIndex",
+      "kbd.path[].inRef", "kbd.path[].isStatusActivator", "kbd.path[].afterRef", "kbd.path[].body",
+      "kbd.row1.present", "kbd.row1.focusableVisible", "kbd.row1.activator.present", "kbd.row1.activator.display", "kbd.row1.activator.rects",
+      "kbd.rowClick.ok",
+      "readings.opened", "readings.listClosed", "readings.focusSameRowBtn", "readings.otherRowsChanged",
+      "readings.maxOpenCount", "readings.rowclickDelta", "readings.changedOtherRows[].row", "readings.pickDelta",
+      "readings.focusAfter.role", "readings.focusAfter.tag", "readings.focusAfter.row", "readings.focusAfter.isStatusActivator", "readings.focusAfter.inOpenList"
+    ],
+    "verdict-device.json": [
+      "marker", "red", "redReasons[]", "items.*.reading", "items.*.labels[]", "items.*.contrastReason",
+      "cells[].status", "cells[].reason", "cells[].deviceReading", "cells[].valid", "totals.valid"
+    ],
+    "run.json": ["device_commit", "run_id", "run_attempt", "mode", "mode_line", "verdict"],
+    "m0-assert.json": ["github_sha", "head", "run_id", "run_attempt", "mode", "mode_line", "ok", "checks[].ok"]
   },
   "keyboardGate": {
     "_표지": "고침2 N1-c — /before 미도달 표본을 「키보드 도달 0(측정됨)」 으로 셀 조건. 넷 다 채울 때만 유효(valid=true) · 하나라도 빠지면 「장치 실패」. 판정 함수 = judge.js kbdGate(run-items.js 와 judge.js 가 같은 함수). 리허설 3 푸시 전 커밋(C2-2).",
+    "_고침4_표지": "고침4 G2(D-4 · N-A) — 같은 U1~U4 문을 a2 미도달 표본에도 건다(U3 = 같은 런 · 같은 칸의 /after 도달 · 화면 이름만 다름). a2 의 keyboard_unreachable 표본은 N-1 재현 셈에서 뺀다 · 사유 글자 = deviceReading.a2Unreachable.",
     "U1": "측정 전 회로 연결(웹소켓 프레임 · 입력 전 죽음 신호 0 — 못 채우면 표본이 항목 코드에 안 감) + 미도달 뒤 그 줄 첫 칸 행 클릭 1회로 #rowclick-count 증가(README §5 · 키 입력 0)",
     "U2": "Tab 경로의 초점이 움직였고 1번 줄 상태 칸보다 문서 순서상 뒤 요소(BODY 아님)에 1회 이상 도달",
     "U3": "같은 런 · 같은 항목 · 경우 · 지연 · 창의 /after 칸에서 도달 ≥ 1(판정 함수 양성 대조)",
