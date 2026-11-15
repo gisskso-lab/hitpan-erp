@@ -1,0 +1,242 @@
+#!/usr/bin/env node
+'use strict';
+// 항목 측정 실행기(설계 §4-1 M5 · M6) — 계획 칸(rules.json plan)을 돌며 표본마다 새 브라우저 문맥으로 잰다.
+// · 입력 = page.keyboard · page.mouse · locator 동작만(items/_lib.js) · 시험 앱 스크립트 주입 0.
+// · 지연 단마다 시험 앱 나무의 proxy/delay-proxy.js 를 사본 없이 그대로 다시 띄운다(인자값은 표본마다 기록).
+// · 표본 오류는 그 표본 errors 칸 · 계속. 판독은 judge.js.
+//
+// 쓰는 법:
+//   node run-items.js --plan     계획 칸 수만 출력(브라우저 · 앱 0) — 리허설 · 자체시험용
+//   node run-items.js            MODE 를 읽어 rehearsal 이면 항목 0 으로 끝 · armed:… 이면 측정
+// 환경 변수:
+//   HQA_OUT_DIR      (필수) 출력 폴더 — samples.jsonl · shots/*.png 를 쓴다
+//   HQA_CHROME_PATH  (필수) 릴리스 크롬 실행 파일 경로(executablePath) · 브라우저 내려받기 0
+//   HQA_FIXTURE_DIR  (선택) 시험 앱 폴더 · 기본 = 이 폴더의 ../hqa-s4-fixture
+// 전제: 시험 앱이 127.0.0.1:5799 에 떠 있음(갈래 A boot.sh · M4).
+// 종료 코드: 0 = 끝(rehearsal 항목 0 포함 · 표본 오류가 있어도 0 — 빨강 여부는 judge.js)
+//           2 = MODE · 환경 변수 · 규칙 오류 · 3 = Playwright/브라우저 판 불일치 · 실행 실패
+//           4 = HQA 회신 대기 칸이 남아 장전 측정 거부(작업지시서 §9 P3)
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const { buildPlan } = require('./judge.js');
+const L = require('./items/_lib.js');
+const ITEMS = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
+
+function loadRules() {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, 'rules.json'), 'utf8'));
+}
+
+function readMode() {
+  const p = path.join(__dirname, 'MODE');
+  if (!fs.existsSync(p)) return null;
+  return fs.readFileSync(p, 'utf8').trim();
+}
+
+function pendingKeys(rules) {
+  return Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_') && String(rules.hqaPending[k].status).includes('HQA 회신 대기'));
+}
+
+function startProxy(rules, fixtureDir, delay) {
+  const d = rules.device;
+  const script = path.join(fixtureDir, 'proxy', 'delay-proxy.js');
+  const args = [String(d.proxyPort), String(delay), String(d.appPort), d.host];
+  return new Promise((resolve) => {
+    if (!fs.existsSync(script)) { resolve({ ok: false, args, error: '프록시 파일 없음(시험 앱 나무 proxy/delay-proxy.js)' }); return; }
+    const child = spawn(process.execPath, [script].concat(args), { stdio: ['ignore', 'pipe', 'pipe'] });
+    let done = false;
+    let errText = '';
+    const finish = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+    const timer = setTimeout(() => finish({ ok: false, child, args, error: `프록시 ${d.proxyStartTimeoutMs}ms 안 안 뜸 ${errText.slice(0, 200)}` }), d.proxyStartTimeoutMs);
+    child.stdout.on('data', (b) => { if (String(b).includes('listen ')) finish({ ok: true, child, args }); });
+    child.stderr.on('data', (b) => { errText += String(b); });
+    child.on('error', (e) => finish({ ok: false, child, args, error: `프록시 실행 오류 ${L.errText(e)}` }));
+    child.on('exit', (code) => finish({ ok: false, child: null, args, error: `프록시 일찍 끝남 code=${code} ${errText.slice(0, 200)}` }));
+  });
+}
+
+function stopProxy(p) {
+  return new Promise((resolve) => {
+    if (!p || !p.child || p.child.exitCode !== null) { resolve(); return; }
+    const t = setTimeout(resolve, 3000);
+    p.child.once('exit', () => { clearTimeout(t); resolve(); });
+    p.child.kill();
+  });
+}
+
+function baseRecord(cell, sampleNo, meta) {
+  return {
+    item: cell.item, case: cell.case, screen: cell.screen, delay: cell.delay, window: cell.window, cell: cell.key,
+    sampleNo, ts: new Date().toISOString(), inputs: [], readings: null, circuit: null, shot: null,
+    errors: [], valid: false, proxy: meta.proxy, playwrightVersion: meta.playwrightVersion, browserVersion: meta.browserVersion,
+    rulesVersion: meta.rulesVersion
+  };
+}
+
+async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir) {
+  const d = rules.device;
+  const cond = rules.hqaPending.browserCondition.value;
+  const rec = baseRecord(cell, sampleNo, meta);
+  const derivedCells = plan.derived[cell.key] || [];
+  const extraRecs = {};
+  let context = null;
+  let sig = null;
+  try {
+    context = await browser.newContext({
+      viewport: { width: cell.window.w, height: cell.window.h },
+      deviceScaleFactor: cond.deviceScaleFactor,
+      locale: cond.locale
+    });
+    context.setDefaultTimeout(d.actionTimeoutMs);
+    const page = await context.newPage();
+    sig = L.attachSignals(page, rules);
+    const ctx = { page, sig, rules, cell, sampleNo, outDir, inputs: rec.inputs, inputAt: null };
+    const url = `http://${d.host}:${d.proxyPort}/${cell.screen}${d.query}`;
+    await page.goto(url, { waitUntil: 'load', timeout: d.gotoTimeoutMs + 4 * cell.delay });
+    const until = Date.now() + d.circuitWaitMs + 4 * cell.delay;
+    while (sig.connectedAt === null && Date.now() < until) await page.waitForTimeout(d.pollMs);
+    if (sig.connectedAt === null) throw new Error('회로(웹소켓 프레임) 연결 못 봄');
+    await page.waitForTimeout(L.settleMs(rules, cell.delay));
+    const st0 = await L.readState(ctx);
+    if (st0.variant !== cell.screen) throw new Error(`화면 판 불일치 data-variant=${st0.variant}`);
+    if (st0.cssVariant !== cell.screen) rec.errors.push(`상태 칸 CSS 판 불일치 data-fixture-css=${st0.cssVariant}`);
+    const pre = L.circuitSince(ctx, sig.t0);
+    if (pre.dead) throw new Error('입력 전 회로 죽음 신호');
+    ctx.inputAt = Date.now();
+    const outcomes = await ITEMS[cell.item](ctx);
+    const own = outcomes.find((o) => !o.item || o.item === cell.item);
+    rec.readings = own.readings;
+    rec.circuit = own.circuit;
+    rec.shot = own.shot || null;
+    rec.valid = true;
+    for (const o of outcomes) {
+      if (!o.item || o.item === cell.item) continue;
+      const dc = derivedCells.find((c) => c.item === o.item);
+      if (!dc) { rec.errors.push(`계획 밖 파생 결과 ${o.item}`); continue; }
+      const r = baseRecord(dc, sampleNo, meta);
+      r.readings = o.readings;
+      r.circuit = o.circuit;
+      r.shot = o.shot || null;
+      r.valid = true;
+      r.parentCell = cell.key;
+      r.inputs = rec.inputs;
+      extraRecs[dc.key] = r;
+    }
+  } catch (e) {
+    rec.errors.push(L.errText(e));
+  } finally {
+    if (sig) sig.ending = true;
+    if (context) {
+      try { await context.close(); } catch (e) { rec.errors.push(`문맥 닫기 오류 ${L.errText(e)}`); }
+    }
+  }
+  const out = [rec];
+  for (const dc of derivedCells) {
+    if (extraRecs[dc.key]) { out.push(extraRecs[dc.key]); continue; }
+    const r = baseRecord(dc, sampleNo, meta);
+    r.parentCell = cell.key;
+    r.errors.push(`앞 표본(${cell.item}) 실패로 못 잼`);
+    out.push(r);
+  }
+  return out;
+}
+
+async function main(argv) {
+  let rules;
+  let plan;
+  try {
+    rules = loadRules();
+    plan = buildPlan(rules);
+  } catch (e) {
+    process.stderr.write(`run-items: 규칙 오류 ${L.errText(e)}\n`);
+    return 2;
+  }
+  const own = plan.cells.filter((c) => !c.derivedFrom);
+  const planned = plan.cells.reduce((a, c) => a + c.samples, 0);
+  if (argv.includes('--plan')) {
+    process.stdout.write(JSON.stringify({ rulesVersion: rules.rulesVersion, cells: plan.cells.length, ownCells: own.length, plannedSamples: planned, hqaPendingOpen: pendingKeys(rules) }) + '\n');
+    return 0;
+  }
+  const mode = readMode();
+  if (mode === null) { process.stderr.write('run-items: MODE 파일 없음\n'); return 2; }
+  if (mode.startsWith('rehearsal')) {
+    process.stdout.write('run-items: MODE=rehearsal — 항목 측정 0 (설계 §4-1 · M4 뒤 끝)\n');
+    return 0;
+  }
+  if (!mode.startsWith('armed:')) { process.stderr.write('run-items: MODE 꼴 모름\n'); return 2; }
+  const pending = pendingKeys(rules);
+  if (pending.length) {
+    process.stderr.write(`run-items: HQA 회신 대기 칸 남음(${pending.join(', ')}) — 장전 측정 거부(작업지시서 §9 P3)\n`);
+    return 4;
+  }
+  const outDir = process.env.HQA_OUT_DIR;
+  const chromePath = process.env.HQA_CHROME_PATH;
+  const fixtureDir = process.env.HQA_FIXTURE_DIR || path.resolve(__dirname, '..', 'hqa-s4-fixture');
+  if (!outDir || !chromePath) { process.stderr.write('run-items: HQA_OUT_DIR · HQA_CHROME_PATH 필요\n'); return 2; }
+
+  let pw;
+  let pwVersion = null;
+  try {
+    pw = require('playwright');
+    pwVersion = require('playwright/package.json').version;
+  } catch (e) {
+    process.stderr.write(`run-items: playwright 불러오기 실패 ${L.errText(e)}\n`);
+    return 3;
+  }
+  if (pwVersion !== rules.device.playwrightVersion) {
+    process.stderr.write(`run-items: playwright 판 ${pwVersion} ≠ ${rules.device.playwrightVersion}\n`);
+    return 3;
+  }
+  const cond = rules.hqaPending.browserCondition.value;
+  let browser;
+  try {
+    browser = await pw.chromium.launch({ executablePath: chromePath, headless: cond.headless });
+  } catch (e) {
+    process.stderr.write(`run-items: 브라우저 실행 실패 ${L.errText(e)}\n`);
+    return 3;
+  }
+  const bver = browser.version();
+  if (bver !== rules.device.expectedBrowserVersion) {
+    process.stderr.write(`run-items: 브라우저 판 ${bver} ≠ ${rules.device.expectedBrowserVersion}\n`);
+    await browser.close();
+    return 3;
+  }
+
+  fs.mkdirSync(path.join(outDir, 'shots'), { recursive: true });
+  const samplesPath = path.join(outDir, 'samples.jsonl');
+  const write = (r) => fs.appendFileSync(samplesPath, JSON.stringify(r) + '\n', 'utf8');
+  let count = 0;
+  let valid = 0;
+  const delays = Array.from(new Set(own.map((c) => c.delay))).sort((a, b) => a - b);
+  try {
+    for (const delay of delays) {
+      const proxy = await startProxy(rules, fixtureDir, delay);
+      const meta = {
+        proxy: { script: 'tools/hqa-s4-fixture/proxy/delay-proxy.js', args: proxy.args, unit: rules.hqaPending.delayUnit.value, started: proxy.ok },
+        playwrightVersion: pwVersion, browserVersion: bver, rulesVersion: rules.rulesVersion
+      };
+      for (const cell of own.filter((c) => c.delay === delay)) {
+        for (let n = 1; n <= cell.samples; n++) {
+          let recs;
+          if (!proxy.ok) {
+            recs = [baseRecord(cell, n, meta)].concat((plan.derived[cell.key] || []).map((dc) => baseRecord(dc, n, meta)));
+            for (const r of recs) r.errors.push(`지연 단 실패: ${proxy.error}`);
+          } else {
+            recs = await runSample(browser, rules, plan, cell, n, meta, outDir);
+          }
+          for (const r of recs) { write(r); count += 1; if (r.valid) valid += 1; }
+        }
+      }
+      await stopProxy(proxy);
+    }
+  } finally {
+    await browser.close();
+  }
+  process.stdout.write(JSON.stringify({ samples: count, valid, invalid: count - valid, plannedSamples: planned }) + '\n');
+  return 0;
+}
+
+main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => {
+  process.stderr.write(`run-items: 예외 ${L.errText(e)}\n`);
+  process.exitCode = 3;
+});

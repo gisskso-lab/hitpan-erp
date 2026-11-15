@@ -1,0 +1,139 @@
+{
+  "rulesVersion": "s4gh-B-r0",
+  "_표지": "장치 원문 — 측정 · 판독 규칙 한 곳(설계 §4-3 · §4-4). 장전 뒤 1글자라도 바뀌면 새 회차(설계 §6-6). 판정자 = HQA. 장치 글자는 「장치 판독」 일 뿐 판정이 아니다.",
+  "hqaPending": {
+    "_표지": "HQA 회신 대기(#850 댓글 6896955850) — 아래 value 는 장치가 돌게 둔 임시 기본값이다(정해진 값 아님). status 에 「HQA 회신 대기」 가 하나라도 남아 있으면 run-items.js 는 장전(armed) 측정을 거부한다(작업지시서 §9 P3). 회신이 오면 value 를 고치고 status 를 「HQA 회신 반영 · 댓글 ID」 로 바꾼 뒤 리허설부터 다시.",
+    "S1toS4": {
+      "ref": "①",
+      "status": "HQA 회신 대기",
+      "value": null,
+      "note": "HQA 이름표 S1~S4 ↔ 장치 항목 대응 — MAPPING.md 표 마지막 칸. 장치는 정본 항목(11/7 · 11/13 §6) 이름으로만 잰다."
+    },
+    "rawFormat": {
+      "ref": "②",
+      "status": "HQA 회신 대기 · 임시 기본값",
+      "value": "samples.jsonl(표본 1줄) · verdict-device.json · shots/*.png — 설계 §5 꼴"
+    },
+    "samplesPerCell": {
+      "ref": "③",
+      "status": "HQA 회신 대기 · 임시 기본값",
+      "value": { "default": 3, "N-1": 5 }
+    },
+    "delayUnit": {
+      "ref": "④",
+      "status": "HQA 회신 대기 · 임시 기본값",
+      "value": "per-direction-ms",
+      "note": "임시: 「지연 N」 = delay-proxy.js 둘째 인자(방향당 ms) 에 N 을 그대로 넣음 · 왕복으로는 약 2N 이 더해짐. 지연 0 도 프록시를 거침(인자 0)."
+    },
+    "browserCondition": {
+      "ref": "⑤",
+      "status": "HQA 회신 대기 · 임시 기본값",
+      "value": {
+        "headless": true,
+        "headlessShell": false,
+        "viewport": { "width": 1280, "height": 720 },
+        "deviceScaleFactor": 1,
+        "locale": "ko-KR"
+      },
+      "note": "임시: 릴리스 크롬(chrome-linux64)을 executablePath 로 헤드리스 실행 · 헤드리스 셸 안 씀(설계 §4-1 M3). 창 너비는 모든 칸 1280 · 창 높이는 I-3 만 330/200, 나머지 720."
+    }
+  },
+  "device": {
+    "_표지": "장치 선택값 — 정본에 없는 실행 값을 장치가 정함(기대값 아님 · 판독 글자 아님). 장전 전 고정 · HQA 의심 제기 대상.",
+    "playwrightVersion": "1.62.1",
+    "expectedBrowserVersion": "151.0.7922.34",
+    "host": "127.0.0.1",
+    "appPort": 5799,
+    "proxyPort": 5800,
+    "query": "",
+    "proxyStartTimeoutMs": 5000,
+    "gotoTimeoutMs": 30000,
+    "actionTimeoutMs": 10000,
+    "circuitWaitMs": 20000,
+    "settle": { "baseMs": 600, "perDelayFactor": 4 },
+    "pollMs": 150,
+    "keyGapMs": 80,
+    "openWaitMs": 3000,
+    "maxTabsToRow": 40,
+    "sel": {
+      "_표지": "statusChip · openList · reconnect 는 시험 앱 README §5 밖 선택자(MudBlazor 9.3 · blazor 기본 꼴) — 장치 선택. 나머지 읽기는 README §5 선택자(#before · [data-row] · #detail · #rowclick-count · #rowclicks · #pick-count · #picks · #fixture-root · link[data-fixture-css]).",
+      "statusChip": ".bo-status-chip",
+      "openList": ".mud-popover.mud-popover-open",
+      "reconnect": "#components-reconnect-modal"
+    },
+    "circuit": {
+      "wsPathPart": "_blazor",
+      "consolePattern": "circuit|connection\\b.*\\b(closed|disconnected|lost)|websocket\\b.*\\b(closed|failed)",
+      "rule": "재연결 표시 요소 보임 · 페이지 이동 아닌 웹소켓 닫힘 · 회로 종료 꼴 콘솔 오류 — 셋 따로 기록 · 하나라도 = 죽음(설계 §4-3). 입력 전 신호는 그 표본 무효(오류 칸)."
+    },
+    "i1": { "tabs": 12 },
+    "i2": { "row": 1, "longPress": { "firstDelayMs": 500, "repeats": 15, "intervalMs": 33 } },
+    "i3": { "row": 10 },
+    "i4": { "row": 1 },
+    "i5": { "row": 1 },
+    "i6": { "row": 1, "maxTabs": 20 },
+    "i7": { "row": 1, "otherRow": 2 },
+    "n1": { "row": 1, "keys": ["ArrowDown", "ArrowUp"], "count": 24, "intervalMs": 0, "settleExtraMs": 1500 },
+    "n2": { "gapMs": 120 }
+  },
+  "plan": {
+    "_표지": "계획 칸 = 항목 × 경우 × 화면 × 지연 × 창. 칸마다 유효 표본 ≥ 1 아니면 그 칸 「장치 실패」 + 빨강(설계 §4-3). /before 칸 표본 0 도 빨강(「대조 무효」 와 다름).",
+    "screens": ["before", "after"],
+    "iDelays": [0, 150, 300],
+    "nDelays": [0, 150, 300, 500],
+    "n1ContrastDelays": [300, 500],
+    "items": ["I-1", "I-2", "I-3", "I-4", "I-5", "I-6", "I-7", "N-1", "N-2"],
+    "itemSpecs": {
+      "I-1": { "cases": ["tab-walk"], "delays": "iDelays" },
+      "I-2": { "cases": ["enter-short", "space-short", "enter-long", "space-long"], "delays": "iDelays" },
+      "I-3": { "cases": ["bottom-row"], "delays": "iDelays", "windows": [{ "h": 330 }, { "h": 200 }] },
+      "I-4": { "cases": ["mouse-open", "kbd-open"], "delays": "iDelays" },
+      "I-5": { "cases": ["tab", "shift-tab"], "delays": "iDelays" },
+      "I-6": { "cases": ["esc", "enter"], "delays": "iDelays" },
+      "I-7": { "cases": ["row-cell"], "delays": "iDelays" },
+      "N-1": { "cases": ["arrows"], "delays": "nDelays" },
+      "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
+    },
+    "notMeasured": [
+      { "item": "I-8", "name": "T3", "text": "미측정 · 정의 없음" },
+      { "item": "WebKit/Firefox", "text": "미측정" }
+    ]
+  },
+  "readingText": {
+    "_표지": "판독 글자 = 정본 글자만(11/13 §6 · 11/7 §3 · §5). 정본에 기대값 글자가 없는 항목은 「판독값 기록 · 판정 = HQA」. 장치는 기대값을 새로 만들지 않는다.",
+    "marker": "장치 판독 — 판정 아님 · 판정 = HQA",
+    "record": "판독값 기록 · 판정 = HQA",
+    "cellFail": "장치 실패",
+    "cellZeroReason": "칸 표본 0",
+    "beforeZeroReason": "/before 표본 0",
+    "N-1": {
+      "source": "16e88c01:docs/검증/외부/20261113_4X대상재결정_S4_A프라임_3인.md §6",
+      "expectedAfter": "회로 삶 · 목록 닫힘 · 초점 = 같은 줄 상태 단추 · 다른 줄 변화 0",
+      "expectedBefore": "회로 죽음(재연결 표시)이 1회 이상 재현",
+      "contrastInvalid": "대조 무효",
+      "red": "🔴",
+      "yellow": "🟡",
+      "ruleText": "`/before` 가 300 · 500 단 어디에서도 재현 못 하면 그 항목 **대조 무효**(통과로 안 셈) · `/after` 가 한 번이라도 회로 죽음 또는 다른 줄 변화면 **🔴** · 초점이 같은 줄 상태 단추가 아니면 **🟡**(기록 · K2 입력)"
+    },
+    "N-2": {
+      "source": "16e88c01:docs/검증/외부/20261113_4X대상재결정_S4_A프라임_3인.md §6",
+      "expected": "첫 항목 골라짐(9.3 기본 길)",
+      "afterText": "**관찰 칸 — 합불 기준 아님.** 미리 적은 예상: 「첫 항목 골라짐(9.3 기본 길)」",
+      "beforeText": "기록만",
+      "ruleText": "결과는 K2 별건 입력. A′ 판정에 쓰지 않는다"
+    },
+    "I-6": {
+      "source": "16e88c01:docs/검증/외부/20261107_4X대상확인_S4_3인.md §3-2",
+      "expected": "두 목록 동시 열림 0",
+      "contrastInvalid": "대조 무효",
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」"
+    },
+    "I-7": {
+      "source": "16e88c01:docs/검증/외부/20261107_4X대상확인_S4_3인.md §4 C5 · §3-3",
+      "expected": "행 클릭 0",
+      "expectedF10": "연 줄뿐 · 다른 줄 0",
+      "contrastInvalid": "대조 무효",
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」"
+    }
+  }
+}
