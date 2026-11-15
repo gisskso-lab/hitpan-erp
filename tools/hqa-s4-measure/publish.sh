@@ -101,7 +101,7 @@ commit() {
   local msg; msg=$(mktemp)
   {
     printf 'hqa-raw: S4 관문1 GitHub 서버 실측 원자료 %s\n\n' "$id"
-    printf 'run: %s\nmode: %s\ndevice-commit: %s\nfixture-tree: 0b31f8692367ae28a6fac255d8eae5c931066d7b\nmeasure-job: %s\npublish-withheld: %s\npublish-attempt: %s\n' \
+    printf 'run: %s\nmode: %s\ndevice-commit: %s\nfixture-tree: 47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8\nmeasure-job: %s\npublish-withheld: %s\npublish-attempt: %s\n' \
       "$id" "$mode" "$GITHUB_SHA" "${HQA_MEASURE_RESULT:-unknown}" "$red" "$GITHUB_RUN_ATTEMPT"
   } > "$msg"
   git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -F "$msg" || die "커밋 실패"

@@ -12,9 +12,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(git -C "$HERE" rev-parse --show-toplevel)"
 mkdir -p "$RAW" "$WORK/stages"
 
-REL_URL="https://github.com/gisskso-lab/hitpan-erp/releases/download/hqa-s4-fixture-01161edb"
-APP_TGZ=hqa-s4-fixture-linux-x64-01161edb.tar.gz
-SRC_TGZ=hqa-s4-fixture-src-01161edb.tar.gz
+# 고침4 G9(G-값 · F′): 릴리스 · 자산 이름 = F′ 앞 8자(옛 …-01161edb 대체)
+REL_URL="https://github.com/gisskso-lab/hitpan-erp/releases/download/hqa-s4-fixture-b967b1b0"
+APP_TGZ=hqa-s4-fixture-linux-x64-b967b1b0.tar.gz
+SRC_TGZ=hqa-s4-fixture-src-b967b1b0.tar.gz
 CHROME_ZIP=chrome-linux64.zip
 ASSETS=(chrome-headless-shell-linux64.zip "$CHROME_ZIP" "$APP_TGZ" "$SRC_TGZ")
 PORT=5799
@@ -50,10 +51,10 @@ m1() {
     printf 'sha256\t%s\t%s\tgot=%s expected=%s release=%s\n' "$f" "$m" "$got" "$exp" "$rel" >> "$tsv"
   done
   # 소스 tar ↔ 나무 blob (파일별 git blob 해시)
-  local sx="$WORK/src" root="$WORK/src/hqa-s4-fixture-src-01161edb/tools/hqa-s4-fixture"
+  local sx="$WORK/src" root="$WORK/src/hqa-s4-fixture-src-b967b1b0/tools/hqa-s4-fixture"
   rm -rf "$sx"; mkdir -p "$sx"
   if [ -f "$dl/$SRC_TGZ" ] && tar -xzf "$dl/$SRC_TGZ" -C "$sx" 2> "$WORK/m1-tar.err"; then
-    local outside; outside=$(tar -tzf "$dl/$SRC_TGZ" | grep -v '^hqa-s4-fixture-src-01161edb/' | head -5 | tr '\n' ' ')
+    local outside; outside=$(tar -tzf "$dl/$SRC_TGZ" | grep -v '^hqa-s4-fixture-src-b967b1b0/' | head -5 | tr '\n' ' ')
     if [ -n "$outside" ]; then printf 'src_prefix\t-\t0\t%s\n' "$outside" >> "$tsv"; fail=1; fi
     # 고침2 I-c: tar 안 정규 파일 · 폴더가 아닌 항목(링크 · 장치 등) 수 — 0 이 아니면 빨강(find -type f 가 조용히 건너뛰던 것)
     local nonreg; nonreg=$(tar -tvzf "$dl/$SRC_TGZ" | awk '{c=substr($1,1,1); if (c!="-" && c!="d") n++} END{print n+0}')
@@ -175,7 +176,8 @@ m4() {
   fi
   if [ -z "$failed" ]; then
     local p code bad=0
-    for p in / /before /after \
+    # 고침4 G9(CTO C-3 · §9 M4): 점검 목록에 A2 화면 주소 더함(기대 200)
+    for p in / /before /after /after-a2 \
       /css/common/app.css /css/common/backoffice-v2.css /css/common/bootstrap.min.css \
       /css/before/backoffice-dashboard.css /css/after/backoffice-dashboard.css \
       /_content/MudBlazor/MudBlazor.min.css /_content/MudBlazor/MudBlazor.min.js /_framework/blazor.web.js; do
@@ -224,7 +226,8 @@ const R_MAIN = 'refs/heads/main', R_FEAT = 'refs/heads/feat/20261107-백오피�
 const headsAssert = {
   lines_start: ls1.length, lines_end: ls2.length,
   feat_end_ok: shaOf(ls2, R_FEAT) === '16e88c01092d33eb643c6cac454703f00efa02ac',
-  fixture_end_ok: shaOf(ls2, R_FIX) === '01161edb5618b5e34ea2c5e655dcaaf2333d3a68',
+  // 고침4 G9: 시험 앱 머리 = F′(옛 01161edb 대체)
+  fixture_end_ok: shaOf(ls2, R_FIX) === 'b967b1b007fb519d9a91537fbef911e818e950de',
   main_same: !!shaOf(ls1, R_MAIN) && shaOf(ls1, R_MAIN) === shaOf(ls2, R_MAIN),
 };
 headsAssert.ok = ls1.length === 3 && ls2.length === 3 && headsAssert.feat_end_ok && headsAssert.fixture_end_ok && headsAssert.main_same;
@@ -234,7 +237,7 @@ for (const s of stageNames) outcomes[s] = e['OUT_' + s] || null;
 const doc = {
   run_id: e.GITHUB_RUN_ID || null, run_attempt: e.GITHUB_RUN_ATTEMPT || null,
   workflow: e.GITHUB_WORKFLOW || null, job: e.GITHUB_JOB || null, ref: e.GITHUB_REF || null,
-  device_commit: e.GITHUB_SHA || null, fixture_tree: '0b31f8692367ae28a6fac255d8eae5c931066d7b',
+  device_commit: e.GITHUB_SHA || null, fixture_tree: '47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8', // 고침4 G9: F′ 나무(옛 0b31f869 대체)
   mode: m0.mode || null,
   // 고침4 G8 ①(D-5 ①): MODE 줄 · github.sha 를 run.json 에도(M0 가 거른 값 그대로)
   mode_line: m0.mode_line || null, github_sha: m0.github_sha || null,
