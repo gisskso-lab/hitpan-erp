@@ -141,7 +141,18 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
 {
   const plan = buildPlan(rules);
   // 고침4 G1: 옛 기대 100(I 84 + N-1 8 + N-2 8) 대체 → a2 는 N-1 에만 4칸 더함
-  check('계획 칸 수 = 104(I 84 + N-1 12 + N-2 8) · a2 칸 = N-1 4 · 다른 항목 a2 0', plan.cells.length === 104 && plan.cells.filter((c) => c.screen === 'a2').length === 4 && plan.cells.filter((c) => c.screen === 'a2').every((c) => c.item === 'N-1'), plan.cells.length);
+  // 고침4 보탬(PM F-6 ②): 옛 기대 104(N-1 12 · a2 4칸) 대체 → a2 는 대조 단 300 · 500 두 칸만 → 102(I 84 + N-1 10 + N-2 8)
+  const a2cells = plan.cells.filter((c) => c.screen === 'a2');
+  const sumSamples = plan.cells.reduce((n, c) => n + c.samples, 0);
+  check('계획 칸 수 = 102(I 84 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(임시 3/5) 342', plan.cells.length === 102 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 342, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
+  {
+    const throwsP = (r) => { try { buildPlan(r); return null; } catch (e) { return String(e.message); } };
+    const noSd = JSON.parse(JSON.stringify(rules)); delete noSd.plan.itemSpecs['N-1'].screenDelays;
+    const allSd = JSON.parse(JSON.stringify(rules)); allSd.plan.itemSpecs['N-1'].screenDelays.a2 = 'nDelays';
+    const e1 = throwsP(noSd); const e2 = throwsP(allSd);
+    check('보탬②: buildPlan 이 a2 의 0 · 150 계획 거부(screenDelays 뺌 · a2 = nDelays 둘 다) · 대조군 지금 rules = 통과',
+      e1 !== null && /지연 0 · 150 는 계획 밖/.test(e1) && e2 !== null && /지연 0 · 150 는 계획 밖/.test(e2) && throwsP(rules) === null, { e1, e2 });
+  }
   check('N-2 파생 칸 8 = N-1 칸마다 1', Object.keys(plan.derived).length === 8 && Object.values(plan.derived).every((a) => a.length === 1));
   check('I-9 = I 항목 지연 0/150/300', JSON.stringify(rules.plan.iDelays) === '[0,150,300]');
   check('N-1 지연 0/150/300/500 · 대조 단 300/500', JSON.stringify(rules.plan.nDelays) === '[0,150,300,500]' && JSON.stringify(rules.plan.n1ContrastDelays) === '[300,500]');
@@ -541,12 +552,21 @@ function checkProbe(src) {
   if (!src.includes('const SCREEN_TABLE = RULES.plan.screenTable;') || cnt(/(?<![.\w$])SCREEN_TABLE\s*=(?!=)/g) !== 1) hits.push('SCREEN_TABLE 줄 바뀜');
   if (/(['"`])\/(?:after|before)/.test(src) || /after-a2/.test(src)) hits.push('probe 안 주소 글자');
   // ⑦ 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — a2 갈래 = 정착 기다림 + a2Struct 부름뿐 · a2Struct 몸통 = readRowStruct 하나 · 입력 0
-  if (!/if \(screen === 'a2'\) \{\s*(?:\/\/[^\n]*\n\s*)?await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.a2_check = await a2Struct\(ctx, out, L\);\s*\} else \{/.test(src)) hits.push('a2 갈래 = 정착 + a2Struct 부름 아님');
+  //   고침4 보탬(PM F-6 ④): 옛 부름 a2Struct(ctx, out, L) 대체 → J 를 넘김(a2VariantCheck)
+  if (!/if \(screen === 'a2'\) \{\s*(?:\/\/[^\n]*\n\s*)?await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.a2_check = await a2Struct\(ctx, out, L, J\);\s*\} else \{/.test(src)) hits.push('a2 갈래 = 정착 + a2Struct 부름 아님');
   const a2b = fnBody(src, 'a2Struct');
   if (!a2b) hits.push('a2Struct 몸통 없음');
   else {
     if (cnt(/\bL\.readRowStruct\s*\(/g) < 2 || !/\bL\.readRowStruct\s*\(/.test(a2b)) hits.push('a2Struct 안 readRowStruct 없음');
-    const a2bc = codeOnly(a2b);
+    // 고침4 보탬(PM F-6 ④): 허용 = 화면 판 속성 둘 getAttribute 읽기만(글자 그대로 각 1회) — 그 자리를 뺀 나머지에 아래 금지 낱말 검사
+    const ATTR_READ = ["ctx.page.locator('#fixture-root').first().getAttribute('data-variant')", "ctx.page.locator('link[data-fixture-css]').first().getAttribute('data-fixture-css')"];
+    let a2s = a2b;
+    for (const r of ATTR_READ) {
+      if (a2b.split(r).length - 1 !== 1) hits.push(`a2Struct 안 속성 읽기 1 아님: ${r}`);
+      a2s = a2s.split(r).join('ATTR_READ_OK');
+    }
+    if (!/J\.a2VariantCheck\(RULES, variant, css\)/.test(a2b)) hits.push('a2Struct 안 화면 판 기대 대조(J.a2VariantCheck) 없음');
+    const a2bc = codeOnly(a2s);
     for (const m of a2bc.matchAll(/\b(press|down|up|type|insertText|click|dblclick|tap|hover|fill|tabTo|rowClickControl|keyboard|mouse|touchscreen|distinguish|goto|waitForTimeout|locator|evaluate|screenshot)\b/g)) hits.push(`a2Struct 안 ${m[1]}`);
     if ((a2bc.match(/\bL\.\w+/g) || []).length !== 1) hits.push('a2Struct 안 L 부름 1 아님');
   }
@@ -603,15 +623,20 @@ function checkProbe(src) {
     // ── 고침4 G10 — a2 = R1 만(입력 0) · 주소 = 표 값 ──
     ['probe 대조군(바꿈) G10: a2Struct 안 keyboard.press', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', "out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.keyboard.press('Tab');")],
     ['probe 대조군(바꿈) G10: a2Struct 안 mouse.click', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', 'out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.mouse.click(5, 5);')],
-    ['probe 대조군(바꿈) G10: a2 갈래 keyboard.press', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', "await page.keyboard.press('Enter'); doc.a2_check = await a2Struct(ctx, out, L);")],
-    ['probe 대조군(바꿈) G10: a2 갈래 mouse.click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await page.mouse.click(5, 5); doc.a2_check = await a2Struct(ctx, out, L);')],
-    ['probe 대조군(바꿈) G10: a2 갈래 L.tabTo', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await L.tabTo(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L);')],
-    ['probe 대조군(바꿈) G10: a2 갈래 L.rowClickControl', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'await L.rowClickControl(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L);')],
-    ['probe 대조군(바꿈) G10: a2 갈래 distinguish', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', 'doc.a2_check = await a2Struct(ctx, out, L); doc.k2 = await distinguish(ctx, out, L, J);')],
-    ['probe 대조군(바꿈) G10: a2 갈래 locator click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L);', "await page.locator('#before').click(); doc.a2_check = await a2Struct(ctx, out, L);")],
+    ['probe 대조군(바꿈) G10: a2 갈래 keyboard.press', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', "await page.keyboard.press('Enter'); doc.a2_check = await a2Struct(ctx, out, L, J);")],
+    ['probe 대조군(바꿈) G10: a2 갈래 mouse.click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', 'await page.mouse.click(5, 5); doc.a2_check = await a2Struct(ctx, out, L, J);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 L.tabTo', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', 'await L.tabTo(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L, J);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 L.rowClickControl', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', 'await L.rowClickControl(ctx, 1); doc.a2_check = await a2Struct(ctx, out, L, J);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 distinguish', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', 'doc.a2_check = await a2Struct(ctx, out, L, J); doc.k2 = await distinguish(ctx, out, L, J);')],
+    ['probe 대조군(바꿈) G10: a2 갈래 locator click', (s) => s.replace('doc.a2_check = await a2Struct(ctx, out, L, J);', "await page.locator('#before').click(); doc.a2_check = await a2Struct(ctx, out, L, J);")],
     ['probe 대조군(바꿈) G10: a2Struct 안 Tab 지연', (s) => s.replace('out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);', 'out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow); await ctx.page.waitForTimeout(300);')],
     ['probe 대조군(바꿈) G10: goto 주소 글자(/after-a2)', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base + (screen === 'a2' ? '/after-a2' : SCREEN_TABLE[screen].path),")],
-    ['probe 대조군(바꿈) G10: 주소 앞머리 글자', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base + '/' + screen,")]
+    ['probe 대조군(바꿈) G10: 주소 앞머리 글자', (s) => s.replace('page.goto(base + SCREEN_TABLE[screen].path,', "page.goto(base + '/' + screen,")],
+    // ── 고침4 보탬(PM F-6 ④) — a2 속성 읽기 자리는 getAttribute 만 · 기대 대조 있음 ──
+    ['probe 대조군(바꿈) 보탬④: data-variant 읽기 자리에 click', (s) => s.replace(".first().getAttribute('data-variant')", '.first().click()')],
+    ['probe 대조군(바꿈) 보탬④: data-fixture-css 읽기 자리에 click', (s) => s.replace(".first().getAttribute('data-fixture-css')", '.first().click()')],
+    ['probe 대조군(바꿈) 보탬④: 속성 읽기를 evaluate 로', (s) => s.replace("ctx.page.locator('#fixture-root').first().getAttribute('data-variant')", "ctx.page.evaluate(() => document.querySelector('#fixture-root').getAttribute('data-variant'))")],
+    ['probe 대조군(바꿈) 보탬④: 기대 대조(a2VariantCheck) 뺌', (s) => s.replace('const vc = J.a2VariantCheck(RULES, variant, css);', 'const vc = { variant, css };')]
   ];
   for (const [n, add] of plantedP) {
     const s2 = typeof add === 'function' ? add(src) : src + add;
@@ -621,6 +646,20 @@ function checkProbe(src) {
   // 고침4 G10
   check('G4-G10 probe 정적: a2 는 n1Contrast = a2 일 때만 · R1 만 · 주소 = 표 값', /PROBE_SCREENS/.test(src) && /doc\.a2_check = await a2Struct\(/.test(src) && (src.match(/await a2Struct\(/g) || []).length === 1);
   check('G4-G10 probe 대조군 수 = 고침4 11 더함(합 ≥ 44)', plantedP.filter((p) => / G10: /.test(p[0])).length === 11 && plantedP.length >= 44, plantedP.length);
+  // 고침4 보탬(PM F-6 ④): a2 화면 판 속성 — 읽기만(정적) · 기대와 다르면 장치 빨강(동작)
+  check('보탬④ probe 대조군 수 = 4(합 48)', plantedP.filter((p) => / 보탬④: /.test(p[0])).length === 4 && plantedP.length === 48, plantedP.length);
+  {
+    const J = require('./judge.js');
+    const ok = J.a2VariantCheck(rules, 'a2', 'after');
+    const wrongV = J.a2VariantCheck(rules, 'after', 'after');
+    const wrongC = J.a2VariantCheck(rules, 'a2', 'before');
+    const none = J.a2VariantCheck(rules, null, null);
+    check('보탬④: a2_check variant a2 · css after = 장치 정상 / data-variant after · CSS before · 둘 다 없음 = 장치 빨강(사유 글자에 주소 글자 0)',
+      ok.device === 'ok' && ok.deviceReason === null && ok.variant === 'a2' && ok.css === 'after' && ok.expected.variant === 'a2' && ok.expected.css === 'after' &&
+      [wrongV, wrongC, none].every((x) => x.device === 'red' && x.deviceReason.startsWith(rules.deviceReading.a2ProbeVariantDiff) && !x.deviceReason.includes('/after')),
+      { ok, wrongV, wrongC, none });
+    check('보탬④ 원문: probe 가 a2 장치 빨강이면 종료 코드 2 · a2_check 에 variant · css 를 넘김', /if \(doc\.a2_check && doc\.a2_check\.device === 'red'\) \{[\s\S]{0,120}return 2;/.test(src) && /Object\.assign\(\{ screen: 'a2'[^\n]*\}, vc\)/.test(src));
+  }
 }
 
 // ── ⑨ 고침4 — G1 · G2 · G3 · G4 · G5 · G6 · G8 · C-2 (작업지시서 §7 G13 ①~⑥ · ⑨~⑪ · ⑦⑧ 은 selftest-leak.js) ──────────────
@@ -656,6 +695,25 @@ function checkProbe(src) {
     const { code, v } = runJudge('G4c_a2칸0', rulesPath2);
     const c = cellOf(v, 'N-1', 'a2', 500);
     check('G4 a2 칸 표본 0 → 장치 실패 · 정해진 표본 수 모자람 0/1 · A2 화면 표본 0 · 빨강', v && v.red === true && code === 1 && c && c.status === T.cellFail && c.reason === `${T.cellShortReason} 0/1` && c.zeroReason === T.a2ZeroReason, c);
+  }
+  // 고침4 보탬(PM F-6 ③): 「기록만」 /before N-1 칸 장치 실패 = 빨강 그대로 + 「장치 건강 · 판정 무관」 표지(원자료 · verdict) · 다른 칸 표지 0
+  {
+    sets['B3_기록만칸빔'] = [].concat([kline('N-2', 'before', 300)], pair('before', 500), [a2n1(300, { dead: true }), a2n1(500)], pair('after', 300), pair('after', 500));
+    const { code, v } = runJudge('B3_기록만칸빔', rulesPath2);
+    const b = cellOf(v, 'N-1', 'before', 300);
+    const others = v ? v.cells.filter((x) => !(x.item === 'N-1' && x.screen === 'before' && x.delay === 300)) : [];
+    const tag = T['N-1'].recordOnlyHealth;
+    const n = v && v.items['N-1'];
+    check('보탬③: 기록만 칸 장치 실패 → 빨강 그대로 · 칸 healthOnly 「장치 건강 · 판정 무관」 · redReasons 머리 표지 · beforeRecordOnly.failTag · 다른 칸 표지 0 · N-1 판정 셈 무관(deviceFail 거짓)',
+      v && v.red === true && code === 1 && tag === '장치 건강 · 판정 무관' && b && b.status === T.cellFail && b.healthOnly === tag && b.n1Role === T['N-1'].recordOnly &&
+      v.redReasons.some((x) => x.startsWith(tag + ' — ') && x.endsWith(b.key)) && v.redReasons.filter((x) => x.startsWith(tag)).length === 1 &&
+      others.every((x) => x.healthOnly === undefined) && n && n.beforeRecordOnly && n.beforeRecordOnly.failTag === tag && n.deviceFail === false,
+      v && { red: v.redReasons, b, rec: n && n.beforeRecordOnly });
+    const cb = { item: 'N-1', screen: 'before' };
+    const tagA = J.recordOnlyTag(st2, cb);
+    check('보탬③ 원자료: recordOnlyTag ㉡ /before N-1 = {기록만 · 장치 건강} · a2 칸 · N-2 /before · ㉠ = 표지 0 · run-items.js 가 표본에 붙임',
+      tagA && tagA.role === T['N-1'].recordOnly && tagA.failTag === tag && J.recordOnlyTag(st2, { item: 'N-1', screen: 'a2' }) === null && J.recordOnlyTag(st2, { item: 'N-2', screen: 'before' }) === null && J.recordOnlyTag(st, cb) === null &&
+      /const ro = recordOnlyTag\(rules, cell\);\s*if \(ro\) rec\.recordOnly = ro;/.test(fs.readFileSync(path.join(HERE, 'run-items.js'), 'utf8')), tagA);
   }
   {
     const { code, v } = runJudge('G4d_N2a2계획밖', rulesPath2);

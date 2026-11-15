@@ -18,6 +18,8 @@
 //     n1Contrast = a2 이면 a2 화면 = R1(입력 0 구조 읽기)만: 줄 안 tabIndex ≥ 0 · 사각형 > 0 요소 수 · Tab · 키 · 누름 · 선택자 · 그림 0 · 지연 0
 //     → a2_check(요소 ≥ 1 → ㉡ 유지 / 0 → 「되돌림 규칙 해당(㉠)」 · 글자 = rules.json deviceReading a2Probe*)
 //     주소는 rules.plan.screenTable 에서 읽는다(이 파일 안 주소 글자 0 · 앞머리 판단 0)
+//   고침4 보탬(PM F-6 ④): a2 R1 이 화면 판 속성 둘을 getAttribute 로 읽기만(입력 0) → a2_check.variant · css · device
+//     기대(screenTable.a2)와 다르면 장치 빨강 — 종료 코드 2(probe.json 은 씀 · 옛 「0 = 파일 씀(점검 결과와 무관)」 의 예외 하나)
 const fs = require('fs');
 const path = require('path');
 
@@ -72,12 +74,17 @@ async function distinguish(ctx, out, L, J) {
 }
 
 // 고침4 G10: a2 화면 R1 — 구조 읽기 하나뿐(입력 0). 값 = 1번 줄 안 초점 받을 보이는 요소 수 · 판독 글자(rules.json).
-async function a2Struct(ctx, out, L) {
+// 고침4 보탬(PM F-6 ④): 화면 판 속성 둘(#fixture-root data-variant · link data-fixture-css)을 getAttribute 로 읽기만(입력 0)
+//   → a2_check 에 variant · css · 기대(rules.plan.screenTable.a2) · device(ok/red) 기록 · 다르면 장치 빨강(되돌림 판단과 별개 · judge.js a2VariantCheck)
+async function a2Struct(ctx, out, L, J) {
   const D = RULES.deviceReading;
   out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);
   const n = out.r1 && out.r1.present === true ? out.r1.focusableVisible : null;
   const reading = n === null ? D.a2ProbeNoRow : (n === 0 ? D.a2ProbeZero : D.a2ProbeKeep);
-  return { screen: 'a2', delay: PROBE_DELAY, focusableVisible: n, reading, rule_ref: 'rules.json deviceReading a2Probe' };
+  const variant = await ctx.page.locator('#fixture-root').first().getAttribute('data-variant').catch((e) => { out.errors.push('a2 data-variant: ' + errText(e)); return null; });
+  const css = await ctx.page.locator('link[data-fixture-css]').first().getAttribute('data-fixture-css').catch((e) => { out.errors.push('a2 data-fixture-css: ' + errText(e)); return null; });
+  const vc = J.a2VariantCheck(RULES, variant, css);
+  return Object.assign({ screen: 'a2', delay: PROBE_DELAY, focusableVisible: n, reading, rule_ref: 'rules.json deviceReading a2Probe' }, vc);
 }
 
 async function probeScreen(browser, base, screen, L, J, doc) {
@@ -101,7 +108,7 @@ async function probeScreen(browser, base, screen, L, J, doc) {
     if (screen === 'a2') {
       // 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — 선택자 · 그림 · Tab · 키 · 누름 0
       await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));
-      doc.a2_check = await a2Struct(ctx, out, L);
+      doc.a2_check = await a2Struct(ctx, out, L, J);
     } else {
       for (const sel of README_SEL) out.selectors.push(Object.assign({ name: 'readme' }, await findSel(page, sel, d.actionTimeoutMs)));
       out.selectors.push(Object.assign({ name: 'statusChip' }, await findSel(page, d.sel.statusChip, d.actionTimeoutMs)));
@@ -166,6 +173,11 @@ async function main() {
     return 1;
   }
   process.stdout.write('[probe] 기록 끝 · playwright ' + doc.playwright_require.resolved + ' · 화면 ' + doc.screens.length + ' · K ' + (doc.k_check ? doc.k_check.verdict : '-') + ' · A2 ' + (doc.a2_check ? doc.a2_check.focusableVisible : '-') + ' · 오류 ' + doc.errors.length + '\n');
+  // 고침4 보탬(PM F-6 ④): a2 화면 판 속성이 기대와 다르면 장치 빨강 = 종료 코드 2(probe.json 은 이미 씀)
+  if (doc.a2_check && doc.a2_check.device === 'red') {
+    process.stderr.write('[probe] ' + doc.a2_check.deviceReason + '\n');
+    return 2;
+  }
   return 0;
 }
 

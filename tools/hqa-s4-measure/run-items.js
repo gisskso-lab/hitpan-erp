@@ -21,7 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { buildPlan, kbdGate, groupKey, screenSpec, screenUrl, screenCheck, screenRankOf } = require('./judge.js');
+const { buildPlan, kbdGate, groupKey, screenSpec, screenUrl, screenCheck, screenRankOf, recordOnlyTag } = require('./judge.js');
 const L = require('./items/_lib.js');
 const ITEMS = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
 
@@ -93,6 +93,9 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, aft
   const d = rules.device;
   const cond = rules.hqaPending.browserCondition.value;
   const rec = baseRecord(cell, sampleNo, meta);
+  // 고침4 보탬(PM F-6 ③): 「기록만」 칸 표본에 표지(그 칸의 장치 실패 = 장치 건강 · 판정 무관) — judge.js recordOnlyTag 와 같은 함수
+  const ro = recordOnlyTag(rules, cell);
+  if (ro) rec.recordOnly = ro;
   const derivedCells = plan.derived[cell.key] || [];
   const extraRecs = {};
   let context = null;

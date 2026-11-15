@@ -76,6 +76,39 @@ function checkScreens(rules) {
   }
   if (P.items.includes('N-1') && !screensFor(rules, 'N-1').includes(contrast)) throw new Error(`n1Contrast=${contrast} 가 N-1 화면에 없음`);
 }
+// 고침4 보탬(PM F-6 ②): 칸의 지연 목록 = itemSpecs.screenDelays[화면](있으면) · 없으면 itemSpecs.delays
+//   화면 목록 밖 화면(a2)은 판정 대조 단(n1ContrastDelays)만 — 그 밖 단(0 · 150)이 하나라도 있으면 거부
+function delaysFor(rules, item, screen) {
+  const P = rules.plan;
+  const spec = P.itemSpecs[item];
+  const sd = spec.screenDelays;
+  const name = sd && Object.prototype.hasOwnProperty.call(sd, screen) ? sd[screen] : spec.delays;
+  const delays = P[name];
+  if (!Array.isArray(delays)) throw new Error(`plan.${name} 없음`);
+  if (!P.screens.includes(screen)) {
+    const cd = P.n1ContrastDelays;
+    if (!Array.isArray(cd)) throw new Error('plan.n1ContrastDelays 없음');
+    const out = delays.filter((d) => !cd.includes(d));
+    if (out.length) throw new Error(`${item} 의 화면 ${screen} 지연 ${out.join(' · ')} 는 계획 밖(대조 단 ${cd.join(' · ')} 만)`);
+  }
+  return delays;
+}
+// 고침4 보탬(PM F-6 ③): 「기록만」 칸(n1Contrast ≠ before 일 때 /before N-1) — 원자료 · verdict 표지(그 칸의 장치 실패 = 장치 건강 신호 · 판정 무관)
+function recordOnlyTag(rules, cell) {
+  if (!cell || cell.item !== 'N-1' || cell.screen !== 'before' || n1ContrastOf(rules) === 'before') return null;
+  const t = rules.readingText['N-1'];
+  return { role: t.recordOnly, failTag: t.recordOnlyHealth };
+}
+// 고침4 보탬(PM F-6 ④): probe a2 R1 이 읽은 화면 판 속성(data-variant · data-fixture-css) ↔ plan.screenTable.a2 — 다르면 장치 빨강(되돌림 판단과 별개)
+function a2VariantCheck(rules, variant, css) {
+  const sp = screenSpec(rules, 'a2');
+  const red = variant !== sp.variant || css !== sp.css;
+  return {
+    variant, css, expected: { variant: sp.variant, css: sp.css },
+    device: red ? 'red' : 'ok',
+    deviceReason: red ? `${rules.deviceReading.a2ProbeVariantDiff} data-variant=${variant} · data-fixture-css=${css}` : null
+  };
+}
 
 function buildPlan(rules) {
   const P = rules.plan;
@@ -85,14 +118,13 @@ function buildPlan(rules) {
   for (const item of P.items) {
     const spec = P.itemSpecs[item];
     if (!spec) throw new Error(`plan.itemSpecs 에 ${item} 없음`);
-    const delays = P[spec.delays];
-    if (!Array.isArray(delays)) throw new Error(`plan.${spec.delays} 없음`);
     const windows = (spec.windows || [{}]).map((w) => ({ w: w.w || win.w, h: w.h || win.h }));
     const n = samplesFor(rules, spec.derivedFrom || item);
     for (const kase of spec.cases) {
       // 고침4 G1: 옛 꼴 = P.screens 고정 → 항목별 화면 목록(screensFor)
       for (const screen of screensFor(rules, item)) {
-        for (const delay of delays) {
+        // 고침4 보탬(PM F-6 ②): 옛 꼴 = 항목 지연 목록 하나(P[spec.delays]) → 화면별 지연 목록(delaysFor · a2 = 대조 단만)
+        for (const delay of delaysFor(rules, item, screen)) {
           for (const window of windows) {
             const c = { item, case: kase, screen, delay, window, samples: n, derivedFrom: spec.derivedFrom || null };
             c.key = cellKey(c);
@@ -310,7 +342,8 @@ function judge(rules, samples, extra) {
       out.afterUnreachable = { count: ur.length, samples: ur.map((s) => s.sampleNo), tabPath: ur.map((s) => pathOnly(s.kbd && s.kbd.path)) };
     }
     // 고침4 G3(D-2): n1Contrast 가 before 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀
-    if (c.item === 'N-1' && c.screen === 'before' && contrast !== 'before') out.n1Role = T['N-1'].recordOnly;
+    const ro = recordOnlyTag(rules, c);
+    if (ro) out.n1Role = ro.role;
     // 고침4 G4(D-3): 칸 실패 = 유효 < 정해진 표본 수(옛 꼴 「유효 0 일 때만」 대체)
     if (valid < c.samples) {
       out.status = T.cellFail;
@@ -318,7 +351,9 @@ function judge(rules, samples, extra) {
       if (valid === 0) out.zeroReason = c.screen === 'before' ? T.beforeZeroReason : (c.screen === 'a2' ? T.a2ZeroReason : T.cellZeroReason);
       if (out.afterUnreachExcl > 0) out.reason += ' · ' + D.afterUnreachable;
       out.deviceReading = 'device_failure';
-      redReasons.push(`${out.reason}: ${c.key}`);
+      // 고침4 보탬(PM F-6 ③): 「기록만」 칸의 장치 실패 빨강은 그대로 · 「장치 건강 · 판정 무관」 표지로 판정 빨강과 글자로 가른다
+      if (ro) out.healthOnly = ro.failTag;
+      redReasons.push(ro ? `${ro.failTag} — ${out.reason}: ${c.key}` : `${out.reason}: ${c.key}`);
     } else {
       out.status = '표본 있음';
       out.deviceReading = out.kbdUnreachable > 0 ? 'keyboard_unreachable' : null;
@@ -376,7 +411,8 @@ function judge(rules, samples, extra) {
         valid: recValid.length,
         circuitDead: recValid.filter((s) => s.circuit && s.circuit.dead).length,
         kbdUnreachable: recValid.filter(isKu).length,
-        failCells: recCells.filter(cellFailed).map((c) => c.key)
+        failCells: recCells.filter(cellFailed).map((c) => c.key),
+        failTag: recCells.some(cellFailed) ? t.recordOnlyHealth : null
       } : null,
       reading: fail.length > 0 ? T.cellFail : (labels.length ? labels.join(' · ') : T.record),
       counts: {
@@ -538,7 +574,9 @@ function main(argv) {
 module.exports = {
   buildPlan, cellKey, judge, parseJsonl, defaultWindow, groupKey, kStructDefect, uChecks, kbdGate, kCheck, effective,
   // 고침4
-  screenSpec, screensFor, n1ContrastOf, screenRankOf, screenUrl, screenCheck, checkScreens, maskConflicts, orderCheck, pathOnly
+  screenSpec, screensFor, n1ContrastOf, screenRankOf, screenUrl, screenCheck, checkScreens, maskConflicts, orderCheck, pathOnly,
+  // 고침4 보탬(PM F-6 ② ③ ④)
+  delaysFor, recordOnlyTag, a2VariantCheck
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

@@ -18,7 +18,7 @@
 | I-7 | 열린 채 다른 줄 위 바깥 누름 → 행 클릭 0 (11/7 §4 C5) · F10 「연 줄뿐 · 다른 줄 0」 (11/7 §3-3) | `I-7` | A 줄(1) 칩 locator 누름으로 열고 → B 줄(2) 첫 칸 가운데 좌표를 `page.mouse.click` | `#rowclick-count` 차이 · `#rowclicks` · `#detail[data-open]` 앞뒤 · 바뀐 줄 · 다른 줄 바뀜 · 누른 점이 목록 상자 안인지 | 행 클릭 또는 다른 줄 바뀜 재현 여부 | 기대값 「행 클릭 0」 · 「연 줄뿐 · 다른 줄 0」 에 어긋난 `/after` 표본 수 · `/before` 재현 0 이면 「대조 무효」 · 판정 = HQA | **HQA 회신 대기** |
 | I-8 | T3 (11/7 §3-2) | 없음 | **정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기 → 측정 코드 0** | — | — | **미측정 · 정의 후보 있음 · HQA 확인 대기** (회신 대기 ⑥ T3 · 확정 전 장전 거부) | **HQA 회신 대기** |
 | I-9 | 지연 0/150/300 (11/7 §3-2) | `run-items.js` 지연 단 | I-1 ~ I-7 을 세 단에서(단마다 프록시 새로 띄움) | 위와 같음 + 프록시 인자(표본 `proxy.args`) | — | 위 항목별 | **HQA 회신 대기** |
-| N-1 | 화살표 빠른 연타 · 0/150/300/500 (11/13 §6) | `items/n-items.js` `N-1` | Tab 으로 상태 단추 → Enter 로 열기 → ↓ · ↑ 번갈아 `device.n1.count` 회 · 간격 `device.n1.intervalMs` | 회로 신호 3종 · 목록 닫힘 · 초점 = 같은 줄 상태 단추 여부 · 다른 줄 `data-status-kind`/칩 글자 바뀜 · `#picks` 다른 줄 새 줄 · PNG `shots/N-1.*.n1-end.png` | 300 · 500 단 회로 죽음 재현 여부 · (고침4 G1 · G3 · D-1 ⓒ) 대조 화면 = `rules.n1Contrast`(㉡ = A2 화면 · 화면 이름 `a2` · 주소 `/after-a2` · 기대 data-variant `a2` · 기대 CSS `after` / ㉠ = `/before`) · ㉡ 이면 `/before` N-1 칸은 계속 재되 **「기록만 · 판정에 안 씀」**(`beforeRecordOnly` · 칸 `n1Role`) · a2 미도달 = `/before` 와 같은 U1~U4 · 키보드 도달 0 표본은 재현 셈에서 뺌(사유 「A2 화면 키보드 도달 0」) | 정본 §6 글자 그대로: `/before` 300 · 500 재현 0 → **대조 무효** · `/after` 회로 죽음 또는 다른 줄 변화 1회라도 → **🔴** · 초점이 같은 줄 상태 단추 아님 → **🟡** · 셋 다 아니면 「판독값 기록 · 판정 = HQA」 | **HQA 회신 대기** |
+| N-1 | 화살표 빠른 연타 · 0/150/300/500 (11/13 §6) | `items/n-items.js` `N-1` | Tab 으로 상태 단추 → Enter 로 열기 → ↓ · ↑ 번갈아 `device.n1.count` 회 · 간격 `device.n1.intervalMs` | 회로 신호 3종 · 목록 닫힘 · 초점 = 같은 줄 상태 단추 여부 · 다른 줄 `data-status-kind`/칩 글자 바뀜 · `#picks` 다른 줄 새 줄 · PNG `shots/N-1.*.n1-end.png` | 300 · 500 단 회로 죽음 재현 여부 · (고침4 G1 · G3 · D-1 ⓒ) 대조 화면 = `rules.n1Contrast`(㉡ = A2 화면 · 화면 이름 `a2` · 주소 `/after-a2` · 기대 data-variant `a2` · 기대 CSS `after` / ㉠ = `/before`) · ㉡ 이면 `/before` N-1 칸은 계속 재되 **「기록만 · 판정에 안 씀」**(`beforeRecordOnly` · 칸 `n1Role`) · 그 칸의 「장치 실패」 빨강은 그대로 두고 **「장치 건강 · 판정 무관」** 표지(원자료 `recordOnly` · 칸 `healthOnly` · `redReasons` 머리 · `beforeRecordOnly.failTag` — 고침4 보탬 PM F-6 ③) · a2 칸 = 지연 300 · 500 두 단만(PM F-6 ② · 0 · 150 계획 = buildPlan 거부) · a2 미도달 = `/before` 와 같은 U1~U4 · 키보드 도달 0 표본은 재현 셈에서 뺌(사유 「A2 화면 키보드 도달 0」) | 정본 §6 글자 그대로: `/before` 300 · 500 재현 0 → **대조 무효** · `/after` 회로 죽음 또는 다른 줄 변화 1회라도 → **🔴** · 초점이 같은 줄 상태 단추 아님 → **🟡** · 셋 다 아니면 「판독값 기록 · 판정 = HQA」 | **HQA 회신 대기** |
 | N-2 | 되끌린 단추 Enter 두 번 (11/13 §6 · 관찰) | `N-2`(N-1 같은 문맥 이어서) | N-1 직후 Enter · `device.n2.gapMs` · Enter | `#pick-count` 차이 · `#picks` 새 줄 · 초점 | 기록만 | 관찰 칸 — 합불 기준 아님 · 판독값 기록 · 판정 = HQA | **HQA 회신 대기** |
 | — | Chromium 외 WebKit/Firefox | 없음 | 재지 않음 | — | — | **미측정** | — |
 
@@ -39,7 +39,7 @@
 |---|---|---|
 | ① S1~S4 | HQA 이름표 ↔ 위 표 행 | 없음(위 표 마지막 칸 비움) |
 | ② 원자료 형식 | JSONL · JSON · PNG 안 | `samples.jsonl` · `verdict-device.json` · `shots/*.png`(설계 §5 꼴) |
-| ③ 칸별 표본 수 | 칸마다 몇 번 | 기본 3 · N-1(과 N-2) 5 → 계획 표본 352(고침4 G1: a2 N-1 4칸 × 5 더함 · 옛 값 332 대체) · 이 수가 G4 「정해진 표본 수」 |
+| ③ 칸별 표본 수 | 칸마다 몇 번 | 기본 3 · N-1(과 N-2) 5 → 계획 칸 102 · 계획 표본 342(고침4 보탬 PM F-6 ②: a2 N-1 칸 = 대조 단 300 · 500 두 칸 × 5 · ~~고침4 G1 의 352(a2 4칸 × 5) · 칸 104~~ **대체됨** · 그 전 옛 값 332) · 이 수가 G4 「정해진 표본 수」 |
 | ④ 「지연 N」 단위 | 프록시 방향당 인자인가 왕복인가 | 방향당 인자 = N(왕복 약 2N 추가) · 지연 0 도 프록시 경유(인자 0) |
 | ⑤ 헤드리스 셸 · 창 등 조건 | 실행 조건 | 릴리스 크롬 헤드리스(헤드리스 셸 안 씀) · 창 1280×720(I-3 만 높이 330/200) · 배율 1 · ko-KR |
 | ⑥ T3 정의 | I-8 T3 가 무엇인지 — 후보: 11/7 작업지시서 L306(공백 상태 칸 → `-`) · 다른 뜻 후보: 11/7 830배포 결과 L23(CS 표시줄) | 없음 · 측정 코드 0(정의 확정 뒤에도 측정은 별도 작업 · 새 회차) |
@@ -78,6 +78,7 @@
 - 그림 검사 1건(PM 결정): `/after` 첫 화면을 입력 없이 한 장 찍어 F6 검사(PNG 서명 · 텍스트 덩어리 0)만 돌린 결과 = `probe.json` `png_check`(통과/보류 · 덩어리 종류 이름만 · 값 0). 통과면 `shots/probe.after.first.png` 로 원자료에 · 보류면 그림 파일 0. 장전 런 그림이 F6 에 전부 보류되는 위험을 리허설에서 미리 보려는 것.
 - 남기지 않는 것 = 항목 판독 · 표본 · 판정 글자 · 회로 신호 · 그 밖의 그림 · 프록시. 항목 결과를 보지 않으므로 설계 §6 「발행 전 고정 · 결과 본 뒤 변경 = 새 회차」 와 충돌하지 않는다. 쓰임은 「선택자가 맞나」 확인뿐.
 - (고침4 G10 · S-4 · D-9 ⑦ · D-10) 리허설 4: `/before` R1 · R2 · R3 그대로 · `/after` 칸 무변 · `n1Contrast = a2` 이면 **a2 화면 = R1(입력 0 구조 읽기)만** — 1번 줄 안 `tabIndex ≥ 0` · 사각형 > 0 요소 수(`a2_check.focusableVisible`) · Tab · 키 · 누름 · 선택자 · 그림 · 지연 단 0. 주소는 `plan.screenTable` 값(probe 안 주소 글자 0). 판독: 요소 수 > 0 → 「A2 화면 줄 안 초점 받을 보이는 요소 ≥ 1 → ㉡ 유지」 / 0 → **「되돌림 규칙 해당(㉠)」** (어느 쪽이 나올지는 기대값으로 정하지 않음). 정적 검사 + 심은 위반 11(a2 에 `keyboard.press` · `mouse.click` · `tabTo` · `rowClickControl` · 주소 글자 등) 전부 빨강.
+- (고침4 보탬 PM F-6 ④ · §9 M4) a2 R1 은 화면 판 속성 둘 — `#fixture-root[data-variant]` · `link[data-fixture-css]` — 을 `getAttribute` 로 **읽기만**(입력 0) 해서 `a2_check.variant` · `a2_check.css` · `expected` · `device`(ok/red) 에 기록 · 기대(`plan.screenTable.a2` = `a2` · `after`)와 다르면 **장치 빨강**(`deviceReading.a2ProbeVariantDiff` · probe 종료 코드 2 · 되돌림 판단과 별개 · 판정 함수 `judge.js a2VariantCheck`). 정적 검사 허용 = 두 속성 읽기 글자 그대로 각 1회 · 심은 위반 4(읽기 자리에 click 2 · evaluate 로 바꿈 · 기대 대조 뺌) 전부 빨강.
 
 ## 7. 판정 칸 스키마 · 판독 글자 · 읽기 규칙 (고침4 G11 · 발행 전 고정 · 정본 = `rules.json`)
 
@@ -92,6 +93,8 @@
 | 장치 실패 · 정해진 표본 수 모자람 유효/정해진 · /before 표본 0 · A2 화면 표본 0 · 칸 표본 0 | 장치 글자(칸) | `readingText.cellFail` · `cellShortReason` · `*ZeroReason` |
 | 키보드 도달 0(측정됨) · /after 키보드 도달 0 · **A2 화면 키보드 도달 0** · A2 화면 키보드로 열기 불가 — 재현 시도 0 | 장치 글자(표본 · 칸) | `deviceReading` |
 | 기록만 · 판정에 안 씀 | 장치 글자(`/before` N-1 칸 · ㉡) | `readingText.N-1.recordOnly` |
+| 장치 건강 · 판정 무관 | 장치 글자(「기록만」 칸의 장치 실패 표지 · 판정 빨강과 가름) | `readingText.N-1.recordOnlyHealth` |
+| A2 화면 판 속성 불일치 — 장치 빨강(되돌림 판단과 별개) | 장치 글자(리허설 probe · a2 판 속성) | `deviceReading.a2ProbeVariantDiff` |
 | 판정 칸 가림 충돌 · 재는 순서 어긋남 · 순서 기록 없음 · 문맥 순번 어긋남 | 장치 글자(빨강 사유) | `deviceReading` |
 | ㉡ 유지 · 되돌림 규칙 해당(㉠) · A2 화면 1번 줄 없음 | 장치 글자(리허설 probe) | `deviceReading.a2Probe*` |
 

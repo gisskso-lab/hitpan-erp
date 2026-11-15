@@ -112,7 +112,7 @@
       "I-5": { "cases": ["tab", "shift-tab"], "delays": "iDelays" },
       "I-6": { "cases": ["esc", "enter"], "delays": "iDelays" },
       "I-7": { "cases": ["row-cell"], "delays": "iDelays" },
-      "N-1": { "cases": ["arrows"], "delays": "nDelays", "screens": ["before", "after", "a2"], "_screens_표지": "고침4 G1 — a2 칸은 N-1 에만(다른 항목 a2 칸 0 · N-2 도 0). 화면 목록 밖 화면은 N-1 의 n1Contrast 하나만 허용(buildPlan 거부)." },
+      "N-1": { "cases": ["arrows"], "delays": "nDelays", "screens": ["before", "after", "a2"], "_screens_표지": "고침4 G1 — a2 칸은 N-1 에만(다른 항목 a2 칸 0 · N-2 도 0). 화면 목록 밖 화면은 N-1 의 n1Contrast 하나만 허용(buildPlan 거부).", "screenDelays": { "a2": "n1ContrastDelays" }, "_screenDelays_표지": "고침4 보탬(PM F-6 ②) — a2 칸은 판정 대조 단(n1ContrastDelays = 300 · 500) 두 단만 계획(0 · 150 = 쓰지 않는 표본 · 필요한 만큼). 화면 목록 밖 화면(a2)의 지연이 n1ContrastDelays 밖이면 buildPlan 거부. 계획 칸 104 → 102 · 계획 표본(임시 표본 수 기준) 352 → 342." },
       "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
     },
     "notMeasured": [
@@ -140,6 +140,8 @@
       "expectedBefore": "회로 죽음(재연결 표시)이 1회 이상 재현",
       "contrastReadRule": "N-1 에 한해 `/before` 를 A2 화면(화면 이름 `a2` · 주소 `/after-a2`)으로 읽는다 · 11/7 항목의 `/before` 는 운영 판 그대로 (CTO D-1 ⓒ 대체 글자 · 대표 11/16 ㉡ · 판정 글자 무변)",
       "recordOnly": "기록만 · 판정에 안 씀",
+      "recordOnlyHealth": "장치 건강 · 판정 무관",
+      "_recordOnlyHealth_표지": "고침4 보탬(PM F-6 ③) — 「기록만」 /before N-1 칸의 「장치 실패」 빨강은 그대로 두되(장치 건강 신호를 숨기지 않음) 원자료(samples.jsonl recordOnly 칸) · verdict(cells[].healthOnly · redReasons 머리 · beforeRecordOnly.failTag)에 이 글자를 붙여 판정 빨강과 글자로 가른다.",
       "recordOnlyRule": "n1Contrast 가 before 가 아니면 /before N-1 칸은 계속 재되(결-3) 「기록만 · 판정에 안 씀」 — 대조 · 🔴 · 🟡 셈에 안 들어간다(D-2). 칸 「장치 실패」 빨강은 그대로.",
       "contrastInvalid": "대조 무효",
       "red": "🔴",
@@ -188,7 +190,9 @@
     "contextBroken": "문맥 순번 어긋남",
     "a2ProbeKeep": "A2 화면 줄 안 초점 받을 보이는 요소 ≥ 1 → ㉡ 유지",
     "a2ProbeZero": "되돌림 규칙 해당(㉠)",
-    "a2ProbeNoRow": "A2 화면 1번 줄 없음 — 구조 읽기 불가"
+    "a2ProbeNoRow": "A2 화면 1번 줄 없음 — 구조 읽기 불가",
+    "_a2ProbeVariant_표지": "고침4 보탬(PM F-6 ④) — probe a2 R1 이 #fixture-root[data-variant] · link[data-fixture-css] 두 속성을 읽기만(getAttribute · 입력 0) · a2_check 에 variant · css 기록 · 기대(plan.screenTable.a2 의 variant · css)와 다르면 장치 빨강(probe 종료 코드 2 · 되돌림 판단과 별개).",
+    "a2ProbeVariantDiff": "A2 화면 판 속성 불일치 — 장치 빨강(되돌림 판단과 별개)"
   },
   "judgeSchema": {
     "_표지": "고침4 G7(S-1 · CTO 보탬) — 판정 칸 스키마(발행 전 고정). 회로 = 상태 · 시각 · 재연결 표시 여부 / 초점 = 역할 · 태그 · 줄 번호 · 알려진 data 속성(data-row)만 — 자동 id · 회로 ID 원문 0 / valid · 판독 글자 · github.sha · 런 ID. 이 칸에 가림 규칙(mask.js findSecrets)이 걸리면: judge.js = 그 표본 device_failure(사유 「판정 칸 가림 충돌」) · 빨강 / mask.js = 그 칸은 가리지 않고 가림 기록에 충돌로 남김(값 0 → leak-scan 이 그 파일을 보류). 가림 기록 = 파일 · 칸 경로 · 꼴 종류 · 길이(값 0). 꼴: 점 = 객체 칸 · [] = 배열 아무 칸 · * = 아무 열쇠.",
