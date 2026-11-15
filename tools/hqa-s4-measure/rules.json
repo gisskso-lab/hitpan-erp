@@ -47,7 +47,9 @@
   "n1Contrast_표지": "고침4 G1(CTO D-1 ⓒ · 대표 11/16 ㉡) — N-1 대조로 읽는 화면 이름. ㉡ = \"a2\" · ㉠(HQA ⓑ 거절 · 되돌림) = \"before\". 이 값은 G-값 커밋에서 확정한다(지금 값 = ㉡ 기본). ㉠ 으로 갈 때는 이 값과 plan.itemSpecs.N-1.screens 의 a2 를 함께 뺀다(judge.js buildPlan 이 둘의 어긋남을 거부).",
   "n1Contrast": "a2",
   "mask_allow_표지":"가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
-  "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends"],
+  "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends",
+    "fixture/Components/A2/CsStatusCell", "fixture/Components/A2/", "fixture/Components/After/", "fixture/Components/Before/",
+    "fixture/Components/Pages/FixturePageA2", "fixture/Components/Pages/", "Components/A2/CsStatusCell", "Components/Pages/FixturePageA2"],
   "device": {
     "_표지": "장치 선택값 — 정본에 없는 실행 값을 장치가 정함(기대값 아님 · 판독 글자 아님). 장전 전 고정 · HQA 의심 제기 대상.",
     "playwrightVersion": "1.62.1",
