@@ -7,7 +7,8 @@
 //        존재 여부 · 찾는 데 걸린 ms
 //     ③ Tab 으로 첫 줄 상태 단추 도달 여부 · Tab 수 · ms(측정 코드와 같은 함수 items/_lib.js tabTo)
 //     ④ 첫 줄에서 Enter 뒤 열린 목록 선택자가 나타나는지 · ms → Escape
-//   안 하는 일: 항목 판독 · 표본 · 판정 글자 · 회로 신호 기록 · 그림 · 프록시 — 0
+//     ⑤ (PM 결정) /after 첫 화면 그림 1장 — 입력 0 · 판독 0 · F6 검사(PNG 서명 · 텍스트 덩어리) 결과만 · 보류면 그림 파일 0
+//   안 하는 일: 항목 판독 · 표본 · 판정 글자 · 회로 신호 기록 · 그 밖의 그림 · 프록시 — 0
 //   이 결과는 「선택자가 맞나」 만 본다. 항목 결과를 보지 않으므로 설계 §6 의 「발행 전 고정 · 결과 본 뒤 변경 = 새 회차」 와 충돌 없음.
 //   환경: HQA_OUT_DIR(필수) · HQA_CHROME_PATH(필수) · HQA_BASE_URL(선택 · 기본 rules.device host:appPort) · NODE_PATH
 //   결과: <HQA_OUT_DIR>/probe.json · 종료 코드 0 = 파일 씀(점검 결과와 무관) · 1 = 파일 못 씀
@@ -28,6 +29,25 @@ async function findSel(page, sel, timeout) {
   }
 }
 
+async function pngCheck(page) {
+  const res = { screen: 'after', input_before_shot: 0, taken: false, verdict: null, kinds: [], saved: null };
+  try {
+    const buf = await page.screenshot();
+    res.taken = true;
+    res.kinds = require('./leak-scan.js').pngKinds(buf);
+    res.verdict = res.kinds.length ? 'withheld' : 'pass';
+    if (res.verdict === 'pass') {
+      fs.mkdirSync(path.join(process.env.HQA_OUT_DIR, 'shots'), { recursive: true });
+      fs.writeFileSync(path.join(process.env.HQA_OUT_DIR, 'shots', 'probe.after.first.png'), buf);
+      res.saved = 'shots/probe.after.first.png';
+    }
+  } catch (e) {
+    res.verdict = 'error';
+    res.error = errText(e);
+  }
+  return res;
+}
+
 async function probeScreen(browser, base, screen, L) {
   const d = RULES.device;
   const cond = RULES.hqaPending.browserCondition.value;
@@ -44,7 +64,10 @@ async function probeScreen(browser, base, screen, L) {
     out.selectors.push(Object.assign({ name: 'statusChip' }, await findSel(page, d.sel.statusChip, d.actionTimeoutMs)));
     // 재연결 표시는 끊겼을 때만 생길 수 있다 — 없음은 기록일 뿐(판정 아님)
     out.selectors.push(Object.assign({ name: 'reconnect', note: 'may be absent unless disconnected' }, await findSel(page, d.sel.reconnect, 2000)));
-    const ctx = { page, rules: RULES, inputs: [], sig: { t0: Date.now() }, cell: { delay: 0 } };
+    // 고침1 F10 추가(PM 결정): /after 첫 화면 그림 1장 — 입력 0(Tab · 누름 전) · 판독 0 · F6 검사(leak-scan pngKinds)만
+    //   기록 = 통과/보류 · 덩어리 종류 이름만(값 0) · 통과면 shots/probe.after.first.png 로 원자료에 · 보류면 파일 0
+    if (screen === 'after') out.png_check = await pngCheck(page);
+    const ctx ={ page, rules: RULES, inputs: [], sig: { t0: Date.now() }, cell: { delay: 0 } };
     const t2 = Date.now();
     try {
       const r = await L.tabTo(ctx, 1);
