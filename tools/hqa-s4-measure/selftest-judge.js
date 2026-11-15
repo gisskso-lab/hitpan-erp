@@ -157,6 +157,46 @@ const EVAL_BODY_BAN = [
   /\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon|postMessage/, /\blocation\b/, /classList\.(add|remove|toggle)/, /\.style\.\w+\s*=[^=]/
 ];
 
+// 주석 · 글자 덩어리(따옴표 안)를 비운 코드 — 이름 셈 전용
+function codeOnly(src) {
+  let o = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    const nx = src[i + 1];
+    if (ch === '/' && nx === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (ch === '/' && nx === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 2; continue; }
+    if (ch === '\'' || ch === '"' || ch === '`') {
+      const q = ch;
+      i++;
+      while (i < src.length && src[i] !== q) { if (src[i] === '\\') i++; i++; }
+      i++;
+      o += q + q;
+      continue;
+    }
+    o += ch;
+    i++;
+  }
+  return o;
+}
+// 함수 몸통(첫 { 부터 짝 } 까지 · 따옴표 안 괄호는 셈하지 않음)
+function fnBody(src, name) {
+  const m = new RegExp('function\\s+' + name + '\\s*\\(').exec(src);
+  if (!m) return null;
+  let i = src.indexOf('{', m.index + m[0].length);
+  if (i < 0) return null;
+  const start = i + 1;
+  let depth = 1;
+  let q = null;
+  for (i = start; i < src.length && depth > 0; i++) {
+    const ch = src[i];
+    if (q) { if (ch === '\\') i++; else if (ch === q) q = null; continue; }
+    if (ch === '\'' || ch === '"' || ch === '`') q = ch;
+    else if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+  }
+  return src.slice(start, i - 1);
+}
 // evaluate( … ) 의 괄호 안 원문을 뽑는다(따옴표 안 괄호는 셈하지 않음)
 function evalBodies(src) {
   const out = [];
@@ -254,14 +294,17 @@ function kline(item, screen, delay, o) {
   base.readings = ur
     ? (item === 'N-1' ? { opened: false, reachedByTab: false, keyPressed: 0, listClosed: null, focusSameRowBtn: null, otherRowsChanged: null } : { parentOpened: false, keyPressed: 0, pickDelta: null })
     : (item === 'N-1' ? { opened: true, listClosed: true, focusSameRowBtn: true, otherRowsChanged: false } : { pickDelta: 1 });
-  base.circuit = { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false };
+  base.circuit = { dead: !!opt.dead, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false };
   if (ur) base.deviceReading = base.valid ? 'keyboard_unreachable' : 'device_failure';
   return JSON.stringify(Object.assign(c, base));
 }
 // 한 묶음: N-1 · N-2 를 같은 꼴로(파생 칸은 부모 kbd 를 물려받는다)
 const pair = (screen, delay, o) => [kline('N-1', screen, delay, o), kline('N-2', screen, delay, o)];
 const KSETS = {
-  'N1e1_before미도달_U충족': [].concat(pair('before', 300, { ur: true }), pair('before', 500, { ur: true }), pair('after', 300), pair('after', 500)),
+  // 고침3 N-A: 미도달(U 충족) + 회로 죽음 → 재현으로 안 셈 → 「대조 무효」 유지 / 대조군: 도달 + 회로 죽음 1 → 재현 1
+  'N1eA_before미도달_회로죽음': [].concat(pair('before', 300, { ur: true, dead: true }), pair('before', 500, { ur: true, dead: true }), pair('after', 300), pair('after', 500)),
+  'N1eB_미도달죽음1_도달죽음1': [].concat(pair('before', 300, { ur: true, dead: true }), pair('before', 500, { dead: true }), pair('after', 300), pair('after', 500)),
+  'N1e1_before미도달_U충족':[].concat(pair('before', 300, { ur: true }), pair('before', 500, { ur: true }), pair('after', 300), pair('after', 500)),
   'N1e2_before미도달_U2결손': [].concat(pair('before', 300, { ur: true, path: PATH_BODY, valid: false }), pair('before', 500, { ur: true, path: PATH_BODY, valid: false }), pair('after', 300), pair('after', 500)),
   'N1e3_before미도달_U3결손': [].concat(pair('before', 300, { ur: true, valid: false }), pair('before', 500, { ur: true, valid: false }), pair('after', 300, { ur: true, valid: false }), pair('after', 500, { ur: true, valid: false })),
   'N1e4_after미도달_빠짐': [].concat(pair('before', 300), pair('before', 500), pair('after', 300, { ur: true, valid: false }), pair('after', 500)),
@@ -270,6 +313,18 @@ const KSETS = {
 };
 for (const k of Object.keys(KSETS)) sets[k] = KSETS[k];
 const cellOf = (v, item, screen, delay) => v && v.cells.find((c) => c.item === item && c.screen === screen && c.delay === delay);
+{
+  // 고침3 N-A (재검증 rv2 n1dead.js 꼴): 미도달 표본에 회로 죽음만 켜도 재현 0 · 「대조 무효」 · 사유 칸 그대로
+  const { code, v } = runJudge('N1eA_before미도달_회로죽음');
+  const n = v && v.items['N-1'];
+  check('N-A: 키보드 도달 0 + 회로 죽음 → 재현으로 안 셈(beforeCircuitDead 0 · 따로 센 수 2)', n && n.counts.beforeCircuitDead === 0 && n.counts.beforeKbdUnreachable === 2 && n.counts.beforeKuDead === 2, n && n.counts);
+  check('N-A: → 「대조 무효」 + 사유 칸 · 빨강 아님 · 종료 0', n && n.labels.includes(T['N-1'].contrastInvalid) && n.contrastReason === D.n1ContrastReason && v.red === false && code === 0, n && { labels: n.labels, r: n.contrastReason, red: v.red });
+}
+{
+  const { v } = runJudge('N1eB_미도달죽음1_도달죽음1');
+  const n = v && v.items['N-1'];
+  check('N-A 대조군: 도달 표본 회로 죽음 1 → 재현 1 · 「대조 무효」 안 나옴(빼기가 도달 표본까지 먹지 않음)', n && n.counts.beforeCircuitDead === 1 && n.counts.beforeKuDead === 1 && !n.labels.includes(T['N-1'].contrastInvalid) && n.contrastReason === null, n && { labels: n.labels, c: n.counts });
+}
 {
   const { code, v } = runJudge('N1e1_before미도달_U충족');
   const n = v && v.items['N-1'];
@@ -396,14 +451,51 @@ function checkProbe(src) {
   if (/\.keyboard\b|\.mouse\b/.test(src)) hits.push('page.keyboard/mouse 직접 사용');
   const QK = new RegExp('([\'"`])(?:Enter|NumpadEnter|Escape|Esc|Space|Spacebar| |Arrow(?:Up|Down|Left|Right)|Home|End|PageUp|PageDown)\\1');
   if (QK.test(src)) hits.push('금지 키 글자');
-  for (const m of src.matchAll(/\b(press|down|up|type|insertText|sendCharacter)\s*\(([^)]*)\)/g)) {
-    if (!/^(?:ctx\s*,\s*)?(['"`])Tab\1$/.test(m[2].trim())) hits.push(`키 호출 ${m[1]} 인자 Tab 아님`);
+  // 고침3 N-B: 키 호출은 probe.js 에 직접 0 — Tab 은 L.tabTo 안에서만(Tab 인자여도 직접 호출이면 빨강)
+  for (const m of src.matchAll(/\b(press|down|up|type|insertText|sendCharacter|pressSequentially)\s*\(([^)]*)\)/g)) {
+    hits.push(/^(?:ctx\s*,\s*)?(['"`])Tab\1$/.test(m[2].trim()) ? `키 호출 ${m[1]} 직접(Tab 은 L.tabTo 안에서만)` : `키 호출 ${m[1]} 인자 Tab 아님`);
   }
   for (const m of src.matchAll(/\bPROBE_DELAY\s*=\s*([^;\n]+)/g)) if (m[1].trim() !== '0') hits.push('지연 값 0 아님');
   for (const m of src.matchAll(/\bdelay\s*:\s*([A-Za-z0-9_.]+)/g)) if (m[1] !== '0' && m[1] !== 'PROBE_DELAY') hits.push(`지연 값 0 아님 ${m[1]}`);
-  if (/proxyPort|delay-proxy/.test(src)) hits.push('프록시 사용');
+  if (/proxyPort|delay-proxy|proxy/i.test(src)) hits.push('프록시 사용');
   const ALLOWED_L = new Set(['readRowStruct', 'rowClickControl', 'tabTo', 'attachSignals', 'settleMs']);
-  for (const m of src.matchAll(/\bL\.(\w+)\s*\(/g)) if (!ALLOWED_L.has(m[1])) hits.push(`L.${m[1]} 허용 목록 밖`);
+  for (const m of src.matchAll(/\bL\.(\w+)/g)) if (!ALLOWED_L.has(m[1])) hits.push(`L.${m[1]} 허용 목록 밖`);
+  // ── 고침3 N-B: 허용 입력 목록 = #before 누름 1 + Tab(둘 다 L.tabTo 1회 안) · R3 행 클릭 1회(L.rowClickControl 1회) — 이것뿐 ──
+  const cnt = (re) => (src.match(re) || []).length;
+  const code = codeOnly(src); // 이름 셈은 주석 · 글자 덩어리를 뺀 코드에서(설명 글자의 낱말이 섞이지 않게)
+  const cntC = (re) => (code.match(re) || []).length;
+  if (/[\w)\]]\s*\[\s*['"`]/.test(src)) hits.push('글자 대괄호 접근(obj[\'이름\'])');
+  // ① 마우스 · 위치자 · 페이지 동작 금지(probe.js 직접 입력 0)
+  const ACT = /\.(click|dblclick|tap|hover|fill|selectOption|check|uncheck|setChecked|dragTo|dragAndDrop|setInputFiles|clear|selectText|scrollIntoViewIfNeeded|reload|goBack|goForward|bringToFront)\s*\(/g;
+  for (const m of src.matchAll(ACT)) hits.push(`동작 ${m[1]}() 직접`);
+  if (/\.touchscreen\b/.test(src)) hits.push('touchscreen 직접');
+  // ② L 은 이름 그대로만(별칭 · 대괄호 · 통째 넘기기 금지) · _lib 은 한 번만 require
+  if (/\bL\s*\[/.test(src)) hits.push('L[...] 대괄호 접근');
+  if (/=\s*L\b(?!\s*\.)/.test(src)) hits.push('L 별칭');
+  const bareL = cntC(/(?<![.\w$])L\b(?!\s*\.)/g);
+  if (bareL !== 5) hits.push(`L 이름 쓰임 ${bareL} ≠ 5(매개변수 2 · 넘김 2 · 선언 1)`);
+  if (cnt(/_lib\b/g) !== 1) hits.push('items/_lib 참조 1 아님');
+  // ③ 입력 함수 각 1회 · 자리 = distinguish 몸통 안 · 켜짐 확인(return null) 뒤
+  if (cntC(/\btabTo\b/g) !== 1 || cntC(/\bL\.tabTo\s*\(/g) !== 1) hits.push(`tabTo ${cntC(/\btabTo\b/g)}회 ≠ 1`);
+  if (cntC(/\browClickControl\b/g) !== 1 || cntC(/\bL\.rowClickControl\s*\(/g) !== 1) hits.push(`rowClickControl ${cntC(/\browClickControl\b/g)}회 ≠ 1`);
+  const body = fnBody(src, 'distinguish');
+  const guard = body ? body.indexOf('if (!RULES.device.probe.distinguish) return null;') : -1;
+  if (!body || guard < 0) hits.push('distinguish 몸통 · 켜짐 확인 없음');
+  else for (const f of ['L.rowClickControl(', 'L.tabTo(']) if (body.indexOf(f) < guard) hits.push(`${f} 자리 = distinguish 켜짐 확인 뒤 아님`);
+  // ④ distinguish 는 정의 1 + 부름 1(/before 갈래 안) — 별칭 · 두 번째 부름 · /after 부름 금지
+  const dn = cntC(/(?<![.\w$])distinguish\b(?!\s*:)/g);
+  if (dn !== 2) hits.push(`distinguish 이름 쓰임 ${dn} ≠ 2`);
+  if (!/if \(screen === 'before'\) \{\s*await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.k_check = await distinguish\(ctx, out, L, J\);\s*\}/.test(src)) hits.push('distinguish 부름 자리 = /before 갈래 아님');
+  // ⑤ 지연: waitForTimeout 인자 = d.pollMs(회로 붙기 기다림) · L.settleMs(RULES, PROBE_DELAY) 만 · settleMs 인자 고정 · 타이머 0
+  const WAIT_OK = new Set(['d.pollMs', 'L.settleMs(RULES, PROBE_DELAY)']);
+  for (const m of src.matchAll(/\bwaitForTimeout\s*\(((?:[^()]|\([^()]*\))*)\)/g)) if (!WAIT_OK.has(m[1].trim())) hits.push(`waitForTimeout(${m[1].trim()}) 허용 밖`);
+  for (const m of src.matchAll(/\bsettleMs\s*\(([^)]*)\)/g)) if (m[1].trim() !== 'RULES, PROBE_DELAY') hits.push(`settleMs(${m[1].trim()}) 지연 0 아님`);
+  if (/\bset(?:Timeout|Interval)\s*\(/.test(src)) hits.push('타이머 직접');
+  // ⑥ 주소: goto 1회 · 인자 = base + '/' + screen · base = 시험 앱 직접(rules host:appPort 기본) 한 줄뿐
+  if (cnt(/\.goto\s*\(/g) !== 1) hits.push(`goto ${cnt(/\.goto\s*\(/g)}회 ≠ 1`);
+  if (!/\.goto\(base \+ '\/' \+ screen, \{/.test(src)) hits.push('goto 인자 = base + / + screen 아님');
+  if (cnt(/(?<![.\w$])base\s*=(?!=)/g) !== 1 || !src.includes("const base = process.env.HQA_BASE_URL || ('http://' + RULES.device.host + ':' + RULES.device.appPort);")) hits.push('base 주소 줄 바뀜');
+  if (cnt(/\bnewContext\s*\(/g) !== 1 || cnt(/\bnewPage\s*\(/g) !== 1) hits.push('newContext · newPage 1회 아님');
   return hits;
 }
 {
@@ -418,9 +510,42 @@ function checkProbe(src) {
     ['probe 대조군: L.press Enter', "\nawait L.press(ctx, 'Enter');\n"],
     ['probe 대조군: Space(글자 공백) 누름', "\nawait L.press(ctx, ' ');\n"],
     ['probe 대조군: 화살표', "\nawait L.down(ctx, 'ArrowDown');\n"],
-    ['probe 대조군: 지연 300', "\nconst c2 = { delay: 300 };\n"]
+    ['probe 대조군: 지연 300', "\nconst c2 = { delay: 300 };\n"],
+    // 고침3 N-B — 재검증(rv2 pp.js) 19건 꼴 + 더함
+    ['probe 대조군: 두 번째 rowClickControl', "\nout.r3b = await L.rowClickControl(ctx, row);\n"],
+    ['probe 대조군: 두 번째 tabTo', "\nawait L.tabTo(ctx, row);\n"],
+    ['probe 대조군: 위치자 click(상태 칩)', "\nawait page.locator('.bo-status-chip').first().click();\n"],
+    ['probe 대조군: page.click', "\nawait page.click('.bo-status-chip');\n"],
+    ['probe 대조군: dblclick', "\nawait page.locator('x').dblclick();\n"],
+    ['probe 대조군: tap', "\nawait page.locator('x').tap();\n"],
+    ['probe 대조군: hover', "\nawait page.hover('x');\n"],
+    ['probe 대조군: fill', "\nawait page.fill('x','y');\n"],
+    ['probe 대조군: 변수로 만든 키', "\nconst K=['En','ter'].join('');await page.locator('x').press(K);\n"],
+    ['probe 대조군: 글자 코드로 Enter', "\nawait ctx.page.keyboard.press(String.fromCharCode(13));\n"],
+    ['probe 대조군: selectOption', "\nawait page.selectOption('x','y');\n"],
+    ['probe 대조군: check()', "\nawait page.locator('x').check();\n"],
+    ['probe 대조군: 프록시 포트로 goto', "\nawait page.goto(base + ':5800/before');\n"],
+    ['probe 대조군: waitForTimeout 300', "\nawait page.waitForTimeout(300);\n"],
+    ['probe 대조군: settleMs 300', "\nawait page.waitForTimeout(L.settleMs(RULES, 300));\n"],
+    ['probe 대조군: /after 에서 tabTo', "\nif (screen === 'after') await L.tabTo(ctx, 1);\n"],
+    ['probe 대조군: 별칭으로 distinguish 를 /after 에서', "\nconst dd = distinguish; if (screen==='after') doc.k2 = await dd(ctx,out,L,J);\n"],
+    ['probe 대조군: L 별칭', "\nconst LL=L; await LL.press(ctx,'x');\n"],
+    ['probe 대조군: L 대괄호', "\nawait L['locatorClick'](ctx,'.bo-status-chip');\n"],
+    ['probe 대조군: 위치자 press Tab(직접 Tab)', "\nawait page.locator('#before').press('Tab');\n"],
+    ['probe 대조군: L.mouseClick.call', "\nawait L.mouseClick.call(null, ctx, 10, 10);\n"],
+    ['probe 대조군: _lib 직접 require', "\nawait require('./items/_lib.js').locatorClick(ctx, '#before');\n"],
+    ['probe 대조군: 타이머 지연', "\nawait new Promise((r) => setTimeout(r, 300));\n"],
+    ['probe 대조군: newContext 프록시', "\nawait browser.newContext({ proxy: { server: base } });\n"],
+    ['probe 대조군(바꿈): /after 갈래에서 distinguish', (s) => s.replace("if (screen === 'after') out.png_check = await pngCheck(page);", "if (screen === 'after') { out.png_check = await pngCheck(page); await distinguish(ctx, out, L, J); }")],
+    ['probe 대조군(바꿈): 켜짐 확인 앞에서 tabTo', (s) => s.replace(/( {2}if \(!RULES\.device\.probe\.distinguish\) return null;\r?\n)([\s\S]*?)( {2}const reach = await L\.tabTo\(ctx, row\);\r?\n)/, '$3$1$2')],
+    ['probe 대조군(바꿈): goto 주소 프록시 포트', (s) => s.replace("page.goto(base + '/' + screen,", "page.goto(base.replace(/:\\d+$/, ':5800') + '/' + screen,")],
+    ['probe 대조군(바꿈): 정착 지연 300', (s) => s.replace('await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));', 'await page.waitForTimeout(L.settleMs(RULES, 300));')]
   ];
-  for (const [n, add] of plantedP) check(n + ' → 빨강', checkProbe(src + add).length > 0);
+  for (const [n, add] of plantedP) {
+    const s2 = typeof add === 'function' ? add(src) : src + add;
+    check(n + ' → 빨강', s2 !== src && checkProbe(s2).length > 0, typeof add === 'function' && s2 === src ? '바꿈 자리 못 찾음' : null);
+  }
+  check('probe 대조군 수 ≥ 24(원 5 + 재검증 19)', plantedP.length >= 24, plantedP.length);
 }
 
 // ── 결과─────────────────────────────────────────────────────────────

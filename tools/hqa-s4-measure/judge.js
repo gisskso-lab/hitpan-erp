@@ -207,7 +207,10 @@ function judge(rules, samples, extra) {
     const fail = bCells.concat(aCells).filter(cellFailed).map((c) => c.key);
     const bValid = flat(bCells);
     const aValid = flat(aCells);
-    const reproduced = bValid.filter((s) => s.circuit && s.circuit.dead).length;
+    // 고침3 N-A: 「키보드 도달 0(측정됨)」 표본은 화살표 입력 0 → 재현 시도가 아니다 → 재현 셈에서 뺀다(I-6 의 !isKu 와 같은 방식)
+    //   그 표본의 회로 죽음은 beforeKuDead 로 따로 센다(기록만 · 판정 글자 무관)
+    const reproduced = bValid.filter((s) => !isKu(s) && s.circuit && s.circuit.dead).length;
+    const bKuDead = bValid.filter((s) => isKu(s) && s.circuit && s.circuit.dead).length;
     const afterDead = aValid.filter((s) => s.circuit && s.circuit.dead).length;
     const afterOther = aValid.filter((s) => R(s).otherRowsChanged === true).length;
     const afterFocusOff = aValid.filter((s) => R(s).focusSameRowBtn === false).length;
@@ -231,7 +234,7 @@ function judge(rules, samples, extra) {
         afterListNotClosed: aValid.filter((s) => R(s).listClosed === false).length,
         afterNotOpened: aValid.filter((s) => R(s).opened === false).length,
         beforeNotOpened: bValid.filter((s) => R(s).opened === false).length,
-        beforeKbdUnreachable: bKu,
+        beforeKbdUnreachable: bKu, beforeKuDead: bKuDead,
         afterUnreachExcl: aCells.reduce((a, c) => a + byCell[c.key].filter(isAfterUr).length, 0)
       },
       byDelay: rules.plan.nDelays.map((d) => {
