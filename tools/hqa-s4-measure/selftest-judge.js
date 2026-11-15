@@ -120,7 +120,7 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   // 고침1 F8: 장전 관문(hqa-gate.js) — 필수 칸 목록 고정 · 확정 꼴만 통과 · 대조군 1 + 우회 꼴 6
   {
     const G = require('./hqa-gate.js');
-    const conf = (r) => { const c = JSON.parse(JSON.stringify(r)); for (const k of G.REQUIRED) { c.hqaPending[k].status = 'HQA 회신 반영 · 댓글 1234567890'; if (c.hqaPending[k].value === null) c.hqaPending[k].value = 'x'; } return c; };
+    const conf = (r) => { const c = JSON.parse(JSON.stringify(r)); for (const k of G.REQUIRED) { c.hqaPending[k].status = 'HQA 회신 반영 · 댓글 1234567890'; if (c.hqaPending[k].value === null) c.hqaPending[k].value = 'x'; } c.plan.notMeasured.find((x) => x.item === 'I-8').approval = '미측정 허용 결재 · 댓글 1234567890'; return c; };
     check('관문: 지금 rules = 거부(회신 대기 남음)', !G.check(rules).ok);
     check('관문: 필수 칸 = 6 · T3 포함', G.REQUIRED.length === 6 && G.REQUIRED.includes('T3'));
     const all = conf(rules);
@@ -131,6 +131,16 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
     const ext = conf(rules); ext.hqaPending.extra = { status: 'HQA 회신 반영 · 댓글 1234567890', value: 1 }; check('관문: 목록 밖 칸 = 거부', !G.check(ext).ok);
     const suf = conf(rules); suf.hqaPending.delayUnit.status += ' (임시)'; check('관문: 꼬리 붙은 글자 = 거부', !G.check(suf).ok);
     const pre = conf(rules); pre.hqaPending.T3.status = 'HQA 회신 대기 · HQA 회신 반영 · 댓글 1234567890'; check('관문: 앞 덧붙임 = 거부', !G.check(pre).ok);
+    // 고침2 C4 ① 칸별 값 꼴 · C2 T3 확정이면 측정 코드 또는 미측정 허용 결재
+    const z = conf(rules); z.hqaPending.S1toS4.value = 0; check('관문 C4: 값 0(숫자 단독) = 거부', !G.check(z).ok);
+    const f = conf(rules); f.hqaPending.T3.value = false; check('관문 C4: 값 false = 거부', !G.check(f).ok);
+    const sp = conf(rules); sp.hqaPending.samplesPerCell.value = { default: 0 }; check('관문 C4: 표본 수 0 = 거부', !G.check(sp).ok);
+    const du = conf(rules); du.hqaPending.delayUnit.value = 'ms'; check('관문 C4: 지연 방식 목록 밖 = 거부', !G.check(du).ok);
+    const bc = conf(rules); bc.hqaPending.browserCondition.value = { headless: 'yes' }; check('관문 C4: 브라우저 조건 꼴 틀림 = 거부', !G.check(bc).ok);
+    const na = conf(rules); delete na.plan.notMeasured.find((x) => x.item === 'I-8').approval; check('관문 C2: T3 확정 + 측정 코드 0 + 결재 0 = 거부', !G.check(na).ok && G.check(na).problems.some((p) => p.why === 'no-code-or-approval'));
+    const pc = conf(rules); pc.plan.items = pc.plan.items.concat(['I-8']); pc.plan.itemSpecs['I-8'] = { cases: ['blank'], delays: 'iDelays' };
+    check('관문 C2: I-8 계획했는데 항목 코드 없음 = 거부', !G.check(pc, { itemsHave: ['I-1'] }).ok);
+    check('관문 C2 대조군: I-8 계획 + 항목 코드 있음 = 통과', G.check(pc, { itemsHave: ['I-8'] }).ok, G.check(pc, { itemsHave: ['I-8'] }).problems);
   }
 }
 

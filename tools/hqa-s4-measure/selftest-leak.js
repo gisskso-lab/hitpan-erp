@@ -49,6 +49,7 @@ function png(opt) {
   const o = opt || {};
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(1, 0); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 0;
   const parts = [Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr)];
+  if (o.extra) for (const t of o.extra) parts.push(chunk(t, crypto.randomBytes(4)));
   if (o.text) parts.push(chunk(o.text, Buffer.from('Comment\0' + rnd(8), 'latin1')));
   parts.push(chunk('IDAT', zlib.deflateSync(Buffer.from([0, 0]))), chunk('IEND', Buffer.alloc(0)));
   if (o.trailing) parts.push(crypto.randomBytes(16));
@@ -79,6 +80,13 @@ const V = {
   envPath: runnerTemp + '/x/' + rnd(6, 'abcdefgh') + '.txt',
   genPath: J('/home/', 'runner', '/work/', rnd(8, 'abcdefgh')),
 };
+// 고침2 Y2 · Y1 · Y3 심은 값(런 안 난수 · 원문에 꼴 글자 0)
+const LET = B62.slice(0, 52);
+V.y2b = b64std();
+V.y2nd = 'QZab' + rnd(8, LET) + '+' + rnd(8, LET) + '/' + rnd(8, LET); // 숫자 없는 base64(+ / 포함)
+V.y1v = rndNonHex(10);
+V.y1s = rnd(5, 'ghijkmnpqrstuvwxyz');
+V.y3h = hex(40);
 const K1 = J('pass', 'word');
 const K2 = J('access', 'Tok', 'en');
 const K3 = J('client_', 'sec', 'ret');
@@ -119,6 +127,17 @@ const CASES = [
   ['png-itxt-chunk', { [path.join('shots', 'x3.png')]: png({ text: 'iTXt' }) }, ['png-text']],
   ['png-ztxt-chunk', { [path.join('shots', 'x4.png')]: png({ text: 'zTXt' }) }, ['png-text']],
   ['png-trailing', { [path.join('shots', 'x5.png')]: png({ trailing: true }) }, ['png-structure']],
+  // 고침2 Y1 — 이스케이프된 JSON 키-값 · 5자 이하 값은 수용(기록 · 안 잡힘)
+  ['y1-esc-json', { 'a.json': JSON.stringify(JSON.stringify({ [K1]: V.y1v })) }, ['credential']],
+  ['y1-short-ok', { 'a.json': JSON.stringify({ [K2]: V.y1s }) }, []],
+  // 고침2 Y3 — 16진 허용 칸은 장치 파일에서만
+  ['y3-fixture-kv', { 'm4-stdout.txt': 'x-main=' + V.y3h + '\n' }, ['long-token']],
+  ['y3-device-kv', { 'm1-bundle.json': JSON.stringify({ detail: 'got=' + V.y3h }) }, []],
+  // 고침2 Y4 — PNG 덩어리 허용 목록
+  ['y4-exif', { [path.join('shots', 'y1.png')]: png({ extra: ['eXIf'] }) }, ['png-chunk']],
+  ['y4-iccp', { [path.join('shots', 'y2.png')]: png({ extra: ['iCCP'] }) }, ['png-chunk']],
+  ['y4-private', { [path.join('shots', 'y3.png')]: png({ extra: ['prVt'] }) }, ['png-chunk']],
+  ['y4-allowed', { [path.join('shots', 'y4.png')]: png({ extra: ['sRGB', 'gAMA', 'pHYs'] }) }, []],
   ['control-clean', {
     'run.json': JSON.stringify({
       sha: hex(40), head: hex(40), device_commit: knownSha, sha256: hex(64), tree_blob: hex(40),
@@ -154,6 +173,27 @@ function runLeak(dir, extra) {
   return { status: r.status, parsed, echoed: leaksValue((r.stdout || '') + (r.stderr || '')) };
 }
 
+// 고침2 Y2-c · Y2-d — 잡혀야 7(leak long-token · mask 가림 >= 1 · 결과 파일에 값 0) · 안 잡혀야 7(가림 0 · leak 0)
+const Y2C = [
+  ['y2.k.eq', 'k=' + V.y2b],
+  ['y2.sig.amp', 'GET /x?sig=' + V.y2b + '&n=1'],
+  ['y2.key.dot', 'key.' + V.y2b],
+  ['y2.id.dash', 'id-' + V.y2b],
+  ['y2.colon', 'v:' + V.y2b],
+  ['y2.nodigit', 'v ' + V.y2nd],
+  ['y2.esc.json', JSON.stringify(JSON.stringify({ v: V.y2b }))],
+];
+const Y2D = [
+  ['y2n.css', 'GET /css/common/backoffice-v2.css 200'],
+  ['y2n.content', 'GET /_content/MudBlazor/MudBlazor.min.js 200 /_content/MudBlazor/MudBlazor.min.css'],
+  ['y2n.sel', 'sel .mud-popover.mud-popover-open #components-reconnect-modal .bo-status-chip [data-row="1"]'],
+  ['y2n.shot', 'shots/N-1.before.d500.w1280h720.arrows.s5.n1-end.png'],
+  ['y2n.hex', null],
+  ['y2n.ver', 'chrome 151.0.7922.34'],
+  ['y2n.runner', 'src ' + runnerTemp + '/hqa-work/Components/After/CsStatusCell.razor'],
+];
+// 고침2 I-a: 사례 이름은 22자 미만 · 점으로 잇기(원자료에 이름이 가림으로 지워지지 않게)
+const shortName = (n) => n.replace(/^content-/, 'c.').replace(/^name-/, 'n.').replace(/-/g, '.');
 const results = [];
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hqa-st-'));
 try {
@@ -165,7 +205,7 @@ try {
     const kinds = r.parsed && Array.isArray(r.parsed.files) ? [...new Set(r.parsed.files.flatMap((f) => f.kinds))].sort() : null;
     const wantStatus = expect.length ? 2 : 0;
     const pass = r.status === wantStatus && kinds !== null && JSON.stringify(kinds) === JSON.stringify([...expect].sort()) && !r.echoed;
-    results.push({ case: name, expect, kinds, status: r.status, echoed_value: r.echoed, pass });
+    results.push({ case: shortName(name), expect, kinds, status: r.status, echoed_value: r.echoed, pass });
   });
 
   // --remove · withheld.json: 이름이 걸린 파일은 지워지고 withheld.json 에 값 0
@@ -177,7 +217,7 @@ try {
     const left = fs.readdirSync(dir).sort();
     const w = fs.existsSync(path.join(dir, 'withheld.json')) ? fs.readFileSync(path.join(dir, 'withheld.json'), 'utf8') : '';
     const pass = r.status === 2 && JSON.stringify(left) === JSON.stringify(['keep.json', 'withheld.json']) && w.includes('<이름 가림:1>') && !leaksValue(w) && !r.echoed;
-    results.push({ case: 'remove-and-withheld', expect: ['removed', 'name masked'], kinds: null, status: r.status, echoed_value: r.echoed, pass });
+    results.push({ case: 'remove.withheld', expect: ['removed', 'name masked'], kinds: null, status: r.status, echoed_value: r.echoed, pass });
   }
 
   // 가림 왕복: mask.js 뒤에는 긴 토큰 · base64 · 문맥 없는 16진 · 러너 경로가 안 남고 알려진 칸의 SHA 는 남는다
@@ -185,22 +225,56 @@ try {
     const dir = path.join(root, 'mask');
     fs.mkdirSync(dir);
     const sha = hex(40);
-    writeCase(dir, { 'run.json': '{}\n', 'm4-stdout.txt': 'root ' + V.envPath + ' id ' + V.longTok + ' tree=' + sha + ' again ' + V.longTok + ' b ' + V.b64 + ' x ' + V.hex64 + '\n' });
+    const sha2 = hex(40);
+    // 고침2 Y3: 열쇠 붙은 SHA 는 장치 파일(m0-assert.json)에서만 남고 · 시험 앱 기록(m4-stdout) 안 x-main= 은 가림
+    writeCase(dir, { 'run.json': '{}\n', 'm0-assert.json': JSON.stringify({ head: sha }) + '\n', 'm4-stdout.txt': 'root ' + V.envPath + ' id ' + V.longTok + ' x-main=' + sha2 + ' again ' + V.longTok + ' b ' + V.b64 + ' x ' + V.hex64 + '\n' });
     const m = spawnSync(process.execPath, [MASK, dir], { env: ENV, encoding: 'utf8' });
     const after = fs.readFileSync(path.join(dir, 'm4-stdout.txt'), 'utf8');
     const runJ = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
     const r = runLeak(dir);
-    const pass = m.status === 0 && r.status === 0 && after.includes(sha) && !after.includes(V.longTok) && !after.includes(runnerTemp)
+    const pass = m.status === 0 && r.status === 0 && fs.readFileSync(path.join(dir, 'm0-assert.json'), 'utf8').includes(sha) && !after.includes(sha2) && !after.includes(V.longTok) && !after.includes(runnerTemp)
       && !after.includes(V.b64) && !after.includes(V.hex64)
-      && (after.match(/<가림:1>/g) || []).length === 2 && after.includes('<러너>') && runJ.mask && runJ.mask.distinct_tokens === 3
+      && (after.match(/<가림:1>/g) || []).length === 2 && after.includes('<러너>') && runJ.mask && runJ.mask.distinct_tokens === 4
       && !leaksValue(m.stdout + m.stderr) && !r.echoed;
     results.push({ case: 'mask-roundtrip', expect: ['token masked', 'b64 masked', 'unkeyed hex masked', 'path masked', 'keyed sha kept'], kinds: r.parsed ? r.parsed.files : null, status: r.status, echoed_value: r.echoed, pass });
   }
+
+  const maskRun = (dir) => {
+    const m = spawnSync(process.execPath, [MASK, dir], { env: ENV, encoding: 'utf8' });
+    const j = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+    return { status: m.status, tokens: j.mask ? j.mask.tokens_replaced : -1, echoed: leaksValue((m.stdout || '') + (m.stderr || '')) };
+  };
+  Y2C.forEach(([name, text], i) => {
+    const dir = path.join(root, 'y2c' + i);
+    fs.mkdirSync(dir);
+    const fname = name === 'y2.esc.json' ? 'a.json' : 'a.txt';
+    writeCase(dir, { 'run.json': '{}\n', [fname]: text + (fname === 'a.txt' ? '\n' : '') });
+    const before = runLeak(dir);
+    const kinds = before.parsed && Array.isArray(before.parsed.files) ? [...new Set(before.parsed.files.flatMap((f) => f.kinds))].sort() : [];
+    const m = maskRun(dir);
+    const after = fs.readFileSync(path.join(dir, fname), 'utf8');
+    const val = name === 'y2.nodigit' ? V.y2nd : V.y2b;
+    const pass = kinds.includes('long-token') && m.status === 0 && m.tokens >= 1 && !after.includes(val) && !before.echoed && !m.echoed;
+    results.push({ case: name, expect: ['long-token', 'masked'], kinds, status: before.status, echoed_value: before.echoed || m.echoed, pass });
+  });
+  Y2D.forEach(([name, text], i) => {
+    const dir = path.join(root, 'y2d' + i);
+    fs.mkdirSync(dir);
+    const h = hex(40);
+    if (text === null) writeCase(dir, { 'run.json': JSON.stringify({ head: h }) + '\n' });
+    else writeCase(dir, { 'run.json': '{}\n', 'm4-stdout.txt': text + '\n' });
+    const m = maskRun(dir);
+    const r = runLeak(dir);
+    const kept = text === null ? fs.readFileSync(path.join(dir, 'run.json'), 'utf8').includes(h) : true;
+    const pass = m.status === 0 && m.tokens === 0 && r.status === 0 && kept && !r.echoed && !m.echoed;
+    results.push({ case: name, expect: [], kinds: r.parsed ? r.parsed.files : null, status: r.status, echoed_value: r.echoed, pass });
+  });
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
+results.push({ case: 'names.short', expect: ['< 22'], kinds: null, status: 0, echoed_value: false, pass: results.every((r) => !/[A-Za-z0-9_-]{22,}/.test(r.case)) });
 
-const ok = results.length === CASES.length + 2 && results.every((r) => r.pass);
+const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 1 && results.every((r) => r.pass);
 const doc = { ok, cases: results.length, failed: results.filter((r) => !r.pass).map((r) => r.case), results };
 const oi = process.argv.indexOf('--out');
 if (oi >= 0 && process.argv[oi + 1]) fs.writeFileSync(process.argv[oi + 1], JSON.stringify(doc, null, 2) + '\n');

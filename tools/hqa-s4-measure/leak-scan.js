@@ -2,7 +2,7 @@
 // M9 [장치] 누출 검사 — 설계 §5 (measure 잡 · publish 잡에서 다시)
 //   사용: node leak-scan.js <폴더> [--stage measure|publish] [--remove] [--withheld-write] [--json]
 //   검사: 파일 내용(.json · .jsonl · .txt · SHA256SUMS.raw) + 파일 · 폴더 이름(전부)
-//   꼴 종류: runner-path · long-token · credential · banned-word · extension · png-signature · png-text · png-structure
+//   꼴 종류: runner-path · long-token · credential · banned-word · extension · png-signature · png-text · png-chunk · png-structure
 //   고침1: F3 JSON 키-값 자격증명 · F4 표준 base64 · F5 알려진 칸 밖 16진 40/64 · F6 PNG 머리 바이트 · 텍스트 덩어리
 //   걸린 파일: --remove 면 지움(공개 · 운반 0) · withheld.json 에 이름 · 꼴 종류만(값 0 · 이름이 걸리면 이름도 가림)
 //   출력에 걸린 값은 절대 안 찍는다. 종료 코드: 0 = 깨끗 · 2 = 걸림 · 1 = 처리 오류
@@ -25,8 +25,8 @@ const CREDENTIAL_RES = [
   new RegExp(J('e', 'yJ', '[A-Za-z0-9_-]{8,}\\.', 'e', 'yJ', '[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}')),
   new RegExp(J('[Bb]ear', 'er\\s+[A-Za-z0-9._~+/-]{20,}')),
   new RegExp(J('xo', 'x[baprs]-[A-Za-z0-9-]{10,}')),
-  // 고침1 F3: 키 뒤 따옴표 허용 — JSON 키-값("키": "값") 꼴
-  new RegExp(J('(?:pass', 'word|pwd|sec', 'ret|to', 'ken|api[_-]?key)["\']?\\s*[=:]\\s*["\']?[^\\s"\';,]{6,}'), 'i'),
+  // 고침1 F3: 키 뒤 따옴표 허용 — JSON 키-값("키": "값") 꼴 · 고침2 Y1: 이스케이프된 JSON(\"키\":\"값\") 꼴도 · 5자 이하 값은 수용(기록)
+  new RegExp(J('(?:pass', 'word|pwd|sec', 'ret|to', 'ken|api[_-]?key)(?:\\\\?["\'])?\\s*[=:]\\s*(?:\\\\?["\'])?[^\\s"\';,\\\\]{6,}'), 'i'),
 ];
 // 금지어(헌법 #23) — 글자 번호로 만든다
 const C = (...n) => String.fromCharCode(...n);
@@ -62,6 +62,8 @@ function kindsInText(text, env, allow, withPaths, fileBase) {
 // 고침1 F6: PNG 는 이름이 아니라 머리 바이트(서명 8바이트)로 · 텍스트 덩어리(tEXt · iTXt · zTXt) 0 · IEND 로 끝남 · 뒤 덧붙임 0
 const PNG_SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const PNG_TEXT = new Set(['tEXt', 'iTXt', 'zTXt']);
+// 고침2 Y4: 덩어리 허용 목록 — 그 밖(eXIf · iCCP · 사설 덩어리 등) = png-chunk(보류)
+const PNG_OK = new Set(['IHDR', 'IDAT', 'IEND', 'PLTE', 'tRNS', 'sRGB', 'gAMA', 'pHYs']);
 function pngKinds(buf) {
   if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIG)) return ['png-signature'];
   const kinds = new Set();
@@ -72,6 +74,7 @@ function pngKinds(buf) {
     const type = buf.toString('latin1', off + 4, off + 8);
     if (off + 12 + len > buf.length) { kinds.add('png-structure'); return [...kinds]; }
     if (PNG_TEXT.has(type)) kinds.add('png-text');
+    else if (!PNG_OK.has(type)) kinds.add('png-chunk');
     off += 12 + len;
     if (type === 'IEND') { end = true; break; }
   }
@@ -129,7 +132,7 @@ function main(argv, env) {
   return hits.length ? 2 : 0;
 }
 
-module.exports = { scan, kindsInText, pngKinds, CREDENTIAL_RES, BANNED_RES };
+module.exports = { scan, kindsInText, pngKinds, CREDENTIAL_RES, BANNED_RES, PNG_OK };
 
 if (require.main === module) {
   let rc;

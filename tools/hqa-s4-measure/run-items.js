@@ -35,7 +35,7 @@ function readMode() {
 
 function pendingKeys(rules) {
   // 고침1 F8: M0 와 같은 관문(필수 칸 목록 고정 · 확정 꼴만) — 키 삭제 · 다른 글자로 우회 못 함
-  return require('./hqa-gate.js').check(rules).problems.map((p) => p.key + ':' + p.why);
+  return require('./hqa-gate.js').check(rules, { itemsHave: Object.keys(ITEMS) }).problems.map((p) => p.key + ':' + p.why);
 }
 
 function startProxy(rules, fixtureDir, delay) {

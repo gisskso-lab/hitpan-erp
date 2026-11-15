@@ -15,8 +15,12 @@ const path = require('path');
 
 const TEXT_EXT = new Set(['.json', '.jsonl', '.txt']);
 const TOKEN_RE = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{22,}(?![A-Za-z0-9_-])/g;
-// 표준 base64: 앞뒤에 base64 글자 · 점 · '-' · '_' 가 붙지 않은 덩어리(경로 · 주소는 점 · '-' 에서 끊긴다)
-const B64_RE = /(?<![A-Za-z0-9+/=._-])[A-Za-z0-9+/]{22,}={0,2}(?![A-Za-z0-9+/=._-])/g;
+// 표준 base64: 고침2 Y2-a — 앞쪽 금지 = base64 몸 글자만 · 뒤쪽 금지 = 몸 글자 + '=' (= . - _ : ? & 뒤에서도 시작)
+const B64_RE = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{22,}={0,2}(?![A-Za-z0-9+/=])/g;
+// 고침2 Y2-b 오탐 경계: '/' 만으로 자격을 얻은 덩어리 중 낱말 경로 꼴(Components/After/CsStatusCell · content/MudBlazor/MudBlazor)은 뺀다
+const PATH_SEG_RE = /^(?:[a-z]+|[A-Z][a-z]+)(?:[A-Z][a-z]+)*$/;
+// 고침2 Y3: 16진 허용 칸은 장치가 쓰는 파일에서만(시험 앱 기록 안 x-main= 등은 가림)
+const DEVICE_HEX_FILES = new Set(['m0-assert.json', 'run.json', 'SHA256SUMS.raw']);
 const HEX_RE = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 // 공개된 고정 이름만(릴리스 자산 · 꾸러미 · 환경 변수 이름). 값이 아니라 이름이다.
 const FIXED_ALLOW = [
@@ -71,11 +75,13 @@ function knownHex(env) {
 
 // fileBase: 파일 이름(SHA256SUMS.raw 줄머리 판단용) · 이름 검사 때는 null
 function hexCtx(env, fileBase) {
-  return { known: knownHex(env), sumsFile: fileBase === 'SHA256SUMS.raw' };
+  const deviceFile = typeof fileBase === 'string' && (DEVICE_HEX_FILES.has(fileBase) || fileBase.startsWith('m1-'));
+  return { known: knownHex(env), sumsFile: fileBase === 'SHA256SUMS.raw', deviceFile };
 }
 
 function hexAllowedAt(text, idx, tok, hctx) {
   if (hctx.known.has(tok.toLowerCase())) return true;
+  if (!hctx.deviceFile) return false;
   const pre = text.slice(Math.max(0, idx - 64), idx);
   let m = /"([A-Za-z0-9_]+)"\s*:\s*"$/.exec(pre);
   if (m && HEX_KEYS.has(m[1])) return true;
@@ -86,11 +92,20 @@ function hexAllowedAt(text, idx, tok, hctx) {
   return false;
 }
 
+function pathLike(body) {
+  const segs = body.split('/');
+  return segs.length >= 2 && segs.every((x) => x.length >= 2 && PATH_SEG_RE.test(x));
+}
+
+// 고침2 Y2-b: 길이 >= 22 · 대 · 소 둘 다 · (숫자 또는 몸 안 + / 또는 끝 = 패딩) — '/' 만으로 자격이면 낱말 경로 꼴은 뺀다
 function isB64Secret(tok) {
   const body = tok.replace(/=+$/, '');
+  const padded = body.length !== tok.length;
   if (body.length < 22) return false;
-  if (!/[+/]/.test(body) && body.length === tok.length) return false; // 순수 영숫자는 TOKEN_RE 몫
-  return /[A-Z]/.test(body) && /[a-z]/.test(body) && /[0-9]/.test(body);
+  if (!/[+/]/.test(body) && !padded) return false; // 순수 영숫자는 TOKEN_RE 몫
+  if (!/[A-Z]/.test(body) || !/[a-z]/.test(body)) return false;
+  if (/[0-9]/.test(body) || body.includes('+') || padded) return true;
+  return !pathLike(body);
 }
 
 // 가림 · 누출 공용 — 걸리는 덩어리 [{s, e, tok}] (앞에서부터)
@@ -187,7 +202,7 @@ function maskDir(dir, env) {
 }
 
 module.exports = {
-  TEXT_EXT, TOKEN_RE, B64_RE, HEX_RE, HEX_KEYS, HEX_KV, KNOWN_HEX, FIXED_ALLOW,
+  TEXT_EXT, TOKEN_RE, B64_RE, HEX_RE, HEX_KEYS, HEX_KV, KNOWN_HEX, FIXED_ALLOW, DEVICE_HEX_FILES, pathLike,
   loadAllow, knownHex, hexCtx, hexAllowedAt, isB64Secret, findSecrets, runnerPaths, isLongToken, listFiles, maskText, maskDir,
 };
 

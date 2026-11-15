@@ -55,6 +55,9 @@ m1() {
   if [ -f "$dl/$SRC_TGZ" ] && tar -xzf "$dl/$SRC_TGZ" -C "$sx" 2> "$WORK/m1-tar.err"; then
     local outside; outside=$(tar -tzf "$dl/$SRC_TGZ" | grep -v '^hqa-s4-fixture-src-01161edb/' | head -5 | tr '\n' ' ')
     if [ -n "$outside" ]; then printf 'src_prefix\t-\t0\t%s\n' "$outside" >> "$tsv"; fail=1; fi
+    # 고침2 I-c: tar 안 정규 파일 · 폴더가 아닌 항목(링크 · 장치 등) 수 — 0 이 아니면 빨강(find -type f 가 조용히 건너뛰던 것)
+    local nonreg; nonreg=$(tar -tvzf "$dl/$SRC_TGZ" | awk '{c=substr($1,1,1); if (c!="-" && c!="d") n++} END{print n+0}')
+    if [ "$nonreg" != "0" ]; then printf 'src_nonregular\t-\t0\tcount=%s\n' "$nonreg" >> "$tsv"; fail=1; else printf 'src_nonregular\t-\t1\tcount=0\n' >> "$tsv"; fi
     # 고침1 F1: 경로 기준 대조 — 옛 꼴은 나무 목록만 「해시 경로」 줄째 정렬(=해시순) · tar 목록은 경로순이라 diff 가 엇갈렸다
     #   해시 2벌: 원 바이트(--no-filters) · 레포 속성 적용(--path · autocrlf 끔 = 러너와 같은 조건) · 판정 = 속성 적용 해시
     #   파일별 값은 원자료 m1-src-hashes.json(정규화로만 같아진 파일 수 = filter_only_match)
