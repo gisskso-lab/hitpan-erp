@@ -72,6 +72,6 @@
 ## 4. 리허설 점검(probe) — 고침1 F10 (판정 무관)
 
 - MODE = rehearsal 이고 M4 가 통과한 런에서만 `probe.js` 가 돈다(장전 런 0).
-- 남기는 것 = `probe.json` 하나: NODE_PATH 로 playwright 풀림(참/거짓 · 판 · ms) · `/before` · `/after` 마다 README §5 선택자 + 상태 칩 · 재연결 표시의 존재 여부와 찾은 ms · Tab 으로 첫 줄 상태 단추 도달 여부(Tab 수 · ms) · Enter 뒤 열린 목록 선택자 존재 여부(ms).
+- 남기는 것 = `probe.json` 하나: NODE_PATH 로 playwright 풀림(참/거짓 · 판 · ms) · `/before` · `/after` 마다 README §5 선택자 + 상태 칩 · 재연결 표시의 존재 여부와 찾은 ms · (고침2 N1-a) `/before` 만 · 지연 0 단만: R1 1번 줄 구조(태그 · role · tabindex · display · 사각형 수 · mud-/bo- 클래스만 · 입력 0) — `device.probe.distinguish = true` 인 리허설 3 한 번만 R3 행 클릭 양성 대조 · R2 Tab 경로 · 구분 판정 `k_check`(K-결함 / K-장치 / K-미결 · 글자 = rules.json `kCheck`)를 더한다. 고침1 의 Tab 도달 · 목록 열림 확인 칸은 뺐다(고침2 N2 · 항목 결과와 같은 모양의 정보). 입력 = `#before` 누름 + Tab + 행 클릭 1회 뿐 · `/after` 입력 0.
 - 그림 검사 1건(PM 결정): `/after` 첫 화면을 입력 없이 한 장 찍어 F6 검사(PNG 서명 · 텍스트 덩어리 0)만 돌린 결과 = `probe.json` `png_check`(통과/보류 · 덩어리 종류 이름만 · 값 0). 통과면 `shots/probe.after.first.png` 로 원자료에 · 보류면 그림 파일 0. 장전 런 그림이 F6 에 전부 보류되는 위험을 리허설에서 미리 보려는 것.
 - 남기지 않는 것 = 항목 판독 · 표본 · 판정 글자 · 회로 신호 · 그 밖의 그림 · 프록시. 항목 결과를 보지 않으므로 설계 §6 「발행 전 고정 · 결과 본 뒤 변경 = 새 회차」 와 충돌하지 않는다. 쓰임은 「선택자가 맞나」 확인뿐.

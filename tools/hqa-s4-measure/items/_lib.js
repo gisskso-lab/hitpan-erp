@@ -74,6 +74,7 @@ function circuitSince(ctx, fromAt) {
 // ── 읽기(읽기 전용) ─────────────────────────────────────────────────
 async function readState(ctx) {
   const s = ctx.rules.device.sel;
+  const refRow = String(ctx.rules.device.kbd.refRow);
   const st = await ctx.page.evaluate((a) => {
     const q = (x) => document.querySelector(x);
     const txt = (el) => (el ? String(el.textContent || '').trim() : null);
@@ -84,9 +85,16 @@ async function readState(ctx) {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     };
+    // 고침2 N1: afterRef = 기준 줄(1번) 상태 칸보다 문서 순서상 뒤(그 안은 아님 · 요소 목록 순번 비교) · body = 초점이 문서 몸에 머묾 · tabIndex = el.tabIndex
+    const ref = q('[data-row="' + a.refRow + '"]');
+    const afterRefOf = (el) => {
+      if (!ref || el === ref || ref.contains(el)) return false;
+      const all = Array.from(document.querySelectorAll('*'));
+      return all.indexOf(el) > all.indexOf(ref);
+    };
     const describe = (el) => {
       if (!el || el === document.body || el === document.documentElement) {
-        return { tag: el ? el.tagName.toLowerCase() : null, id: null, role: null, row: null, inOpenList: false, isStatusActivator: false, text: null };
+        return { tag: el ? el.tagName.toLowerCase() : null, id: null, role: null, row: null, inOpenList: false, isStatusActivator: false, text: null, afterRef: false, body: true, tabIndex: null };
       }
       const rowEl = el.closest('[data-row]');
       const role = el.getAttribute('role');
@@ -99,7 +107,10 @@ async function readState(ctx) {
         row: rowEl ? rowEl.getAttribute('data-row') : null,
         inOpenList: !!el.closest(a.openList),
         isStatusActivator: !!rowEl && (tag === 'button' || role === 'button'),
-        text: t ? t.slice(0, 60) : null
+        text: t ? t.slice(0, 60) : null,
+        afterRef: afterRefOf(el),
+        body: false,
+        tabIndex: typeof el.tabIndex === 'number' ? el.tabIndex : null
       };
     };
     const open = Array.from(document.querySelectorAll(a.openList)).filter(vis);
@@ -126,9 +137,34 @@ async function readState(ctx) {
       reconnect: rc ? { present: true, visible: vis(rc), cls: String(rc.className || '').slice(0, 120) } : { present: false, visible: false, cls: '' },
       viewport: { w: window.innerWidth, h: window.innerHeight }
     };
-  }, { openList: s.openList, chip: s.statusChip, reconnect: s.reconnect });
+  }, { openList: s.openList, chip: s.statusChip, reconnect: s.reconnect, refRow });
   if (st.reconnect.visible) ctx.sig.reconnectSeen.push({ at: Date.now() });
   return st;
+}
+
+// 고침2 N1 R1 — 줄 안 후보 요소 구조(읽기만 · 입력 0). 값 = 태그 · role · tabindex 속성 · tabIndex · display · 사각형 수 · mud-/bo- 클래스 이름만.
+async function readRowStruct(ctx, rowId) {
+  return ctx.page.evaluate((a) => {
+    const cell = document.querySelector('[data-row="' + a.row + '"]');
+    if (!cell) return { row: a.row, present: false, candidates: [], focusableVisible: null, activator: { present: false, display: null, rects: null } };
+    const info = (el) => ({
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute('role'),
+      tabindexAttr: el.getAttribute('tabindex'),
+      tabIndex: typeof el.tabIndex === 'number' ? el.tabIndex : null,
+      display: getComputedStyle(el).display,
+      rects: el.getClientRects().length,
+      cls: Array.from(el.classList).filter((c) => c.indexOf('mud-') === 0 || c.indexOf('bo-') === 0).slice(0, 8)
+    });
+    const cand = Array.from(cell.querySelectorAll('button, [role=button], [tabindex], .mud-menu-activator')).slice(0, 20).map(info);
+    const focusableVisible = Array.from(cell.querySelectorAll('*')).filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0).length;
+    const act = cell.querySelector('.mud-menu-activator');
+    const actInfo = act ? info(act) : null;
+    return {
+      row: a.row, present: true, candidates: cand, focusableVisible,
+      activator: act ? { present: true, display: actInfo.display, rects: actInfo.rects } : { present: false, display: null, rects: null }
+    };
+  }, { row: String(rowId) });
 }
 
 async function readRects(ctx) {
@@ -227,18 +263,61 @@ async function waitOpen(ctx, wantOpen) {
   return st;
 }
 
+// Tab 경로 한 칸(원자료 · 값 0 — 태그 · role · 줄 번호 · 참거짓 · tabIndex 만)
+function pathStep(i, f, rowId) {
+  return {
+    i, row: f.row, tag: f.tag, role: f.role, tabIndex: f.tabIndex,
+    inRef: f.row === String(rowId), isStatusActivator: f.isStatusActivator, afterRef: f.afterRef, body: f.body
+  };
+}
+
 // #before 를 마우스로 누른 뒤 Tab 만으로 그 줄 상태 단추까지 간다.
+// 고침2 N1-b: 못 가도 throw 하지 않는다 — { reached:false, cause:'keyboard-unreachable', tabs, path } 를 돌려준다.
+//   부르는 쪽은 reached=false 면 그 뒤 키 입력을 하지 않는다(unreached() 로 기록만).
 async function tabTo(ctx, rowId) {
   await locatorClick(ctx, '#before');
   const path = [];
-  for (let i = 1; i <= ctx.rules.device.maxTabsToRow; i++) {
+  const max = ctx.rules.device.maxTabsToRow;
+  for (let i = 1; i <= max; i++) {
     await press(ctx, 'Tab');
     await wait(ctx, ctx.rules.device.keyGapMs);
     const st = await readState(ctx);
-    path.push({ i, row: st.focus.row, tag: st.focus.tag, role: st.focus.role });
-    if (st.focus.row === String(rowId) && st.focus.isStatusActivator) return { tabs: i, path };
+    path.push(pathStep(i, st.focus, rowId));
+    if (st.focus.row === String(rowId) && st.focus.isStatusActivator) return { reached: true, cause: null, tabs: i, path };
   }
-  throw new Error(`Tab ${ctx.rules.device.maxTabsToRow}회 안에 ${rowId}번 줄 상태 단추에 못 감`);
+  return { reached: false, cause: 'keyboard-unreachable', tabs: max, path };
+}
+
+// 고침2 N1 U1 — 회로 연결 양성 대조: 그 줄 첫 칸을 마우스로 1회 눌러 #rowclick-count 가 늘었는가(README §5).
+//   키 입력 0. 미도달 표본에서만(도달 표본의 절차는 바꾸지 않는다).
+async function rowClickControl(ctx, rowId) {
+  const st0 = await readState(ctx);
+  const rects = await readRects(ctx);
+  const cell = rects.rows[String(rowId)] ? rects.rows[String(rowId)].firstCell : null;
+  if (!cell) return { clicked: false, before: st0.rowclickCount, after: st0.rowclickCount, ok: false };
+  await mouseClick(ctx, Math.round(cell.x + cell.w / 2), Math.round(cell.y + cell.h / 2));
+  const end = Date.now() + ctx.rules.device.openWaitMs;
+  let st = await readState(ctx);
+  while (st.rowclickCount <= st0.rowclickCount && Date.now() < end) {
+    await wait(ctx, ctx.rules.device.pollMs);
+    st = await readState(ctx);
+  }
+  return { clicked: true, before: st0.rowclickCount, after: st.rowclickCount, ok: st.rowclickCount > st0.rowclickCount };
+}
+
+// 고침2 N1-b: 미도달 뒤 — 구조 읽기(입력 0) → 행 클릭 양성 대조(마우스 1회) → 정착 시간 동안 회로 신호 관찰. 키 입력 0.
+//   돌려줌: kbd(원자료 · U 판정은 judge.js kbdGate) · 정착 뒤 상태
+async function unreached(ctx, rowId, reach, settleExtra) {
+  const row1 = await readRowStruct(ctx, rowId);
+  const rowClick = await rowClickControl(ctx, rowId);
+  const s = await settle(ctx, settleMs(ctx.rules, ctx.cell.delay, settleExtra));
+  return {
+    kbd: {
+      reached: false, cause: reach.cause || 'keyboard-unreachable', tabs: reach.tabs, path: reach.path,
+      row1, rowClick, keyPressedAfter: 0, note: ctx.rules.deviceReading.noInput
+    },
+    state: s.state, maxOpen: s.maxOpen
+  };
 }
 
 function shotName(cell, sampleNo, suffix) {
@@ -255,5 +334,6 @@ async function shot(ctx, suffix) {
 
 module.exports = {
   errText, settleMs, attachSignals, circuitSince, readState, readRects, slim, rowsDiff, newPicks,
-  overlapArea, press, down, up, mouseClick, locatorClick, wait, settle, waitOpen, tabTo, shot, shotName
+  overlapArea, press, down, up, mouseClick, locatorClick, wait, settle, waitOpen, tabTo, shot, shotName,
+  readRowStruct, rowClickControl, unreached, pathStep
 };

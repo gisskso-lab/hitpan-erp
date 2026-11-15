@@ -19,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { buildPlan } = require('./judge.js');
+const { buildPlan, kbdGate, groupKey } = require('./judge.js');
 const L = require('./items/_lib.js');
 const ITEMS = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
 
@@ -69,12 +69,23 @@ function baseRecord(cell, sampleNo, meta) {
   return {
     item: cell.item, case: cell.case, screen: cell.screen, delay: cell.delay, window: cell.window, cell: cell.key,
     sampleNo, ts: new Date().toISOString(), inputs: [], readings: null, circuit: null, shot: null,
-    errors: [], valid: false, proxy: meta.proxy, playwrightVersion: meta.playwrightVersion, browserVersion: meta.browserVersion,
+    errors: [], valid: false, kbd: null, deviceReading: null, proxy: meta.proxy, playwrightVersion: meta.playwrightVersion, browserVersion: meta.browserVersion,
     rulesVersion: meta.rulesVersion
   };
 }
 
-async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir) {
+// 고침2 N1-c: 키보드 미도달 표본의 유효 여부 — judge.js kbdGate(U1~U4) 와 같은 함수 · U3 = 같은 런 같은 칸 /after 도달 수
+function applyKbd(rules, rec, kbd, afterReach) {
+  rec.kbd = kbd || null;
+  if (!kbd || kbd.reached !== false) { rec.valid = true; return; }
+  const g = kbdGate(rules, rec, afterReach[groupKey(rec)] || 0);
+  rec.kbd.u = g.u;
+  rec.valid = g.valid;
+  rec.deviceReading = g.reading;
+  if (!g.valid) rec.errors.push(g.reason);
+}
+
+async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir, afterReach) {
   const d = rules.device;
   const cond = rules.hqaPending.browserCondition.value;
   const rec = baseRecord(cell, sampleNo, meta);
@@ -109,7 +120,7 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir) {
     rec.readings = own.readings;
     rec.circuit = own.circuit;
     rec.shot = own.shot || null;
-    rec.valid = true;
+    applyKbd(rules, rec, own.kbd, afterReach);
     for (const o of outcomes) {
       if (!o.item || o.item === cell.item) continue;
       const dc = derivedCells.find((c) => c.item === o.item);
@@ -118,7 +129,7 @@ async function runSample(browser, rules, plan, cell, sampleNo, meta, outDir) {
       r.readings = o.readings;
       r.circuit = o.circuit;
       r.shot = o.shot || null;
-      r.valid = true;
+      applyKbd(rules, r, o.kbd, afterReach);
       r.parentCell = cell.key;
       r.inputs = rec.inputs;
       extraRecs[dc.key] = r;
@@ -209,6 +220,9 @@ async function main(argv) {
   let count = 0;
   let valid = 0;
   const delays = Array.from(new Set(own.map((c) => c.delay))).sort((a, b) => a - b);
+  // 고침2 N1-c: 같은 지연 단 안에서 /after 칸을 먼저 잰다 — /before 미도달 표본의 U3(같은 칸 /after 도달 ≥ 1)를 쓸 때 알 수 있게
+  const screenRank = (c) => (c.screen === 'after' ? 0 : 1);
+  const afterReach = {};
   try {
     for (const delay of delays) {
       const proxy = await startProxy(rules, fixtureDir, delay);
@@ -216,16 +230,19 @@ async function main(argv) {
         proxy: { script: 'tools/hqa-s4-fixture/proxy/delay-proxy.js', args: proxy.args, unit: rules.hqaPending.delayUnit.value, started: proxy.ok },
         playwrightVersion: pwVersion, browserVersion: bver, rulesVersion: rules.rulesVersion
       };
-      for (const cell of own.filter((c) => c.delay === delay)) {
+      for (const cell of own.filter((c) => c.delay === delay).sort((a, b) => screenRank(a) - screenRank(b))) {
         for (let n = 1; n <= cell.samples; n++) {
           let recs;
           if (!proxy.ok) {
             recs = [baseRecord(cell, n, meta)].concat((plan.derived[cell.key] || []).map((dc) => baseRecord(dc, n, meta)));
             for (const r of recs) r.errors.push(`지연 단 실패: ${proxy.error}`);
           } else {
-            recs = await runSample(browser, rules, plan, cell, n, meta, outDir);
+            recs = await runSample(browser, rules, plan, cell, n, meta, outDir, afterReach);
           }
-          for (const r of recs) { write(r); count += 1; if (r.valid) valid += 1; }
+          for (const r of recs) {
+            if (r.screen === 'after' && r.kbd && r.kbd.reached === true) afterReach[groupKey(r)] = (afterReach[groupKey(r)] || 0) + 1;
+            write(r); count += 1; if (r.valid) valid += 1;
+          }
         }
       }
       await stopProxy(proxy);

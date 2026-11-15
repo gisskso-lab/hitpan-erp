@@ -82,7 +82,9 @@
     "i6": { "row": 1, "maxTabs": 20 },
     "i7": { "row": 1, "otherRow": 2 },
     "n1": { "row": 1, "keys": ["ArrowDown", "ArrowUp"], "count": 24, "intervalMs": 0, "settleExtraMs": 1500 },
-    "n2": { "gapMs": 120 }
+    "n2": { "gapMs": 120 },
+    "kbd": { "refRow": 1, "_표지": "고침2 N1 — Tab 경로 기록 · 구조 읽기(R1) · U2/K 의 「1번 줄」 기준 줄 번호" },
+    "probe": { "distinguish": true, "_표지": "고침2 N1 — 리허설 3 한 번만 /before 구분 점검(R1 · R2 · R3 · 지연 0). 그 뒤 리허설은 false(= /before R1 구조 읽기만 · 입력 0)" }
   },
   "plan": {
     "_표지": "계획 칸 = 항목 × 경우 × 화면 × 지연 × 창. 칸마다 유효 표본 ≥ 1 아니면 그 칸 「장치 실패」 + 빨강(설계 §4-3). /before 칸 표본 0 도 빨강(「대조 무효」 와 다름).",
@@ -143,5 +145,31 @@
       "contrastInvalid": "대조 무효",
       "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」"
     }
+  },
+  "deviceReading": {
+    "_표지": "고침2 N1(설계 §12-1 (3)) — 장치 판독 글자(판정 글자 아님 · 정본 readingText 와 따로). keyboard_unreachable 은 /before 칸에만 · /after 미도달 표본은 유효 표본에서 빼고 device_failure(완화 금지 · C1-3). 「결함 재현」 이라는 판정 글자는 장치가 쓰지 않는다.",
+    "device_failure": "장치 실패",
+    "keyboard_unreachable": "키보드 도달 0(측정됨)",
+    "noInput": "입력 안 함(도달 0)",
+    "afterUnreachable": "/after 키보드 도달 0",
+    "kbdOpenNoEsc": "키보드로 열기 불가 — Esc 측정 0",
+    "n1NoBurst": "키보드로 열기 불가 — 연타 시도 0",
+    "n2ParentNotOpened": "부모 칸 열기 불가",
+    "n1ContrastReason": "/before 키보드로 열기 불가(I-1 과 같은 모양) — 재현 시도 0",
+    "sameShapeD1": "11/7 D1 과 같은 모양 · 판정 = HQA",
+    "validMismatch": "표본 유효 판단 불일치(run-items ↔ judge)"
+  },
+  "keyboardGate": {
+    "_표지": "고침2 N1-c — /before 미도달 표본을 「키보드 도달 0(측정됨)」 으로 셀 조건. 넷 다 채울 때만 유효(valid=true) · 하나라도 빠지면 「장치 실패」. 판정 함수 = judge.js kbdGate(run-items.js 와 judge.js 가 같은 함수). 리허설 3 푸시 전 커밋(C2-2).",
+    "U1": "측정 전 회로 연결(웹소켓 프레임 · 입력 전 죽음 신호 0 — 못 채우면 표본이 항목 코드에 안 감) + 미도달 뒤 그 줄 첫 칸 행 클릭 1회로 #rowclick-count 증가(README §5 · 키 입력 0)",
+    "U2": "Tab 경로의 초점이 움직였고 1번 줄 상태 칸보다 문서 순서상 뒤 요소(BODY 아님)에 1회 이상 도달",
+    "U3": "같은 런 · 같은 항목 · 경우 · 지연 · 창의 /after 칸에서 도달 ≥ 1(판정 함수 양성 대조)",
+    "U4": "같은 표본 1번 줄 R1 구조가 K-결함 R1 조건과 같음(.mud-menu-activator 가 display:contents 또는 사각형 0 · 줄 안 tabIndex ≥ 0 이고 사각형 > 0 인 요소 0)"
+  },
+  "kCheck": {
+    "_표지": "고침2 N1(설계 §12-1 (2)) — 리허설 3 구분 점검 판정(장치 구분 · 항목 판독 0 · 판정 글자 0). /before 만 · 지연 0 단만. 입력 = #before 누름 + Tab + R3 행 클릭 1회. 판정 함수 = judge.js kCheck · 결과 = probe.json k_check. 리허설 3 푸시 전 커밋(C2-2).",
+    "K-결함": { "meaning": "(나) /before 결함 D1 재현", "rule": "R1 의 .mud-menu-activator 가 display:contents 또는 클라이언트 사각형 0 이고 · 1번 줄 안에 tabIndex ≥ 0 이면서 사각형 > 0 인 요소 0 이고 · R2 에서 초점이 1번 줄을 지나 뒤로 넘어감(뒤 요소 1회 이상 · BODY 만 머문 경로 아님) 이고 · R3 연결 확인" },
+    "K-장치": { "meaning": "(가) 판정 함수가 그 꼴을 못 잡음", "rule": "R2 에서 초점이 1번 줄 안 tabIndex ≥ 0 요소에 한 번이라도 갔는데 isStatusActivator=false" },
+    "K-미결": { "meaning": "장전 금지 · HQA 확인 · PM 보고", "rule": "위 둘 다 아님(초점이 안 움직임 · 연결 실패 · R1 이 G1 과 다름 등) · 둘 다 맞아도 K-미결" }
   }
 }

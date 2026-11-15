@@ -96,7 +96,7 @@ jobs:
         timeout-minutes: 5
         run: bash tools/hqa-s4-measure/boot.sh m4 "$HQA_RAW" "$HQA_WORK"
 
-      # ---- 리허설만: 판정 무관 점검(probe) — 고침1 F10 · 선택자 존재 · 시간 · Tab 도달 · NODE_PATH 만 · 항목 판독 0 ----
+      # ---- 리허설만: 판정 무관 점검(probe) — 고침1 F10 · 고침2 N1-a · 선택자 존재 · 시간 · NODE_PATH · /before 구분 점검(R1~R3 · 지연 0)만 · 항목 판독 0 ----
       - name: '[장치] 리허설 점검(probe · 판정 무관)'
         id: probe
         if: steps.m0.outputs.mode == 'rehearsal' && steps.m4.outcome == 'success'

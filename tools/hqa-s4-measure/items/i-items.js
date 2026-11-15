@@ -6,6 +6,17 @@ const L = require('./_lib.js');
 
 const chipOf = (ctx, row) => `[data-row="${row}"] ${ctx.rules.device.sel.statusChip}`;
 
+// 고침2 N1-b: Tab 으로 못 간 표본 — 그 뒤 키 입력 0 · 「입력 안 함(도달 0)」 · 유효 여부는 run-items.js(judge.js kbdGate · U1~U4)
+async function notReached(ctx, row, reach, extraReadings) {
+  const u = await L.unreached(ctx, row, reach);
+  return [{
+    readings: Object.assign({ reachedByTab: false, tabsToReach: null, keyPressed: 0, opened: false, noInput: ctx.rules.deviceReading.noInput }, extraReadings || {}, { final: L.slim(u.state) }),
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd: u.kbd
+  }];
+}
+const reachedKbd = (reach) => ({ reached: true, tabs: reach.tabs });
+
 // I-1 키보드 탭 도달 — #before 초점 → Tab 반복 · 초점 요소 설명
 async function i1(ctx) {
   const d = ctx.rules.device;
@@ -17,8 +28,16 @@ async function i1(ctx) {
     const st = await L.readState(ctx);
     path.push({ i, focus: st.focus, openCount: st.openCount });
   }
-  const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
   const hits = path.filter((p) => p.focus.isStatusActivator);
+  // 고침2 N1: 12회 경로는 그대로. 상태 단추 0 이면 구조 읽기 + 행 클릭 양성 대조(키 입력 0) — 「키보드 도달 0(측정됨)」 은 U1~U4 충족 때만
+  let kbd = { reached: hits.length > 0, tabs: hits.length ? hits[0].i : null };
+  if (!hits.length) {
+    const reach = { cause: 'keyboard-unreachable', tabs: d.i1.tabs, path: path.map((p) => L.pathStep(p.i, p.focus, d.kbd.refRow)) };
+    const row1 = await L.readRowStruct(ctx, d.kbd.refRow);
+    const rowClick = await L.rowClickControl(ctx, d.kbd.refRow);
+    kbd = { reached: false, cause: reach.cause, tabs: reach.tabs, path: reach.path, row1, rowClick, keyPressedAfter: 0, note: ctx.rules.deviceReading.noInput };
+  }
+  const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
   return [{
     readings: {
       path,
@@ -27,7 +46,8 @@ async function i1(ctx) {
       maxOpenSeen: Math.max(s.maxOpen, ...path.map((p) => p.openCount)),
       final: L.slim(s.state)
     },
-    circuit: L.circuitSince(ctx, ctx.inputAt)
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd
   }];
 }
 
@@ -38,6 +58,7 @@ async function i2(ctx) {
   const key = ctx.cell.case.startsWith('enter') ? 'Enter' : 'Space';
   const long = ctx.cell.case.endsWith('long');
   const reach = await L.tabTo(ctx, row);
+  if (!reach.reached) return notReached(ctx, row, reach, { key, long });
   const st0 = await L.readState(ctx);
   if (long) {
     const lp = d.i2.longPress;
@@ -63,7 +84,8 @@ async function i2(ctx) {
       changedRows: L.rowsDiff(st0, s.state),
       final: L.slim(s.state)
     },
-    circuit: L.circuitSince(ctx, ctx.inputAt)
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd: reachedKbd(reach)
   }];
 }
 
@@ -112,6 +134,7 @@ async function i4(ctx) {
     await L.locatorClick(ctx, chipOf(ctx, row));
   } else {
     reach = await L.tabTo(ctx, row);
+    if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEsc });
     await L.press(ctx, 'Enter');
   }
   const st1 = await L.waitOpen(ctx, true);
@@ -126,7 +149,8 @@ async function i4(ctx) {
       focusOnSameRowBtn: s.state.focus.row === row && s.state.focus.isStatusActivator && !s.state.focus.inOpenList,
       final: L.slim(s.state)
     },
-    circuit: L.circuitSince(ctx, ctx.inputAt)
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd: reach ? reachedKbd(reach) : null
   }];
 }
 
@@ -134,6 +158,7 @@ async function i4(ctx) {
 async function i5(ctx) {
   const row = String(ctx.rules.device.i5.row);
   const reach = await L.tabTo(ctx, row);
+  if (!reach.reached) return notReached(ctx, row, reach, { kbdCase: ctx.cell.case });
   await L.press(ctx, 'Enter');
   const st1 = await L.waitOpen(ctx, true);
   await L.press(ctx, ctx.cell.case === 'tab' ? 'Tab' : 'Shift+Tab');
@@ -148,7 +173,8 @@ async function i5(ctx) {
       focusAfterKey: s.state.focus,
       final: L.slim(s.state)
     },
-    circuit: L.circuitSince(ctx, ctx.inputAt)
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd: reachedKbd(reach)
   }];
 }
 
@@ -157,6 +183,7 @@ async function i6(ctx) {
   const d = ctx.rules.device;
   const rowA = String(d.i6.row);
   const reach = await L.tabTo(ctx, rowA);
+  if (!reach.reached) return notReached(ctx, rowA, reach, { rowA, maxOpenCount: null });
   await L.press(ctx, 'Enter');
   const st1 = await L.waitOpen(ctx, true);
   let maxOpen = st1.openCount;
@@ -184,7 +211,8 @@ async function i6(ctx) {
       focusAfter: s.state.focus,
       final: L.slim(s.state)
     },
-    circuit: L.circuitSince(ctx, ctx.inputAt)
+    circuit: L.circuitSince(ctx, ctx.inputAt),
+    kbd: reachedKbd(reach)
   }];
 }
 

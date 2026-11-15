@@ -10,6 +10,27 @@ async function n1(ctx) {
   const row = String(d.n1.row);
   const st0 = await L.readState(ctx);
   const reach = await L.tabTo(ctx, row);
+  if (!reach.reached) {
+    // 고침2 N1-b: 못 갔으면 열기 0 · 연타 0 · N-2 입력 0 — 회로 신호 3종은 정착 시간 동안 기록(그림 0)
+    const u = await L.unreached(ctx, row, reach, d.n1.settleExtraMs);
+    const D = ctx.rules.deviceReading;
+    return [{
+      item: 'N-1',
+      readings: {
+        row, reachedByTab: false, tabsToReach: null, keyPressed: 0, opened: false, burstSent: 0,
+        noInput: D.noInput, burstNote: D.n1NoBurst,
+        listClosed: null, focusSameRowBtn: null, otherRowsChanged: null,
+        final: L.slim(u.state)
+      },
+      circuit: L.circuitSince(ctx, ctx.inputAt),
+      kbd: u.kbd
+    }, {
+      item: 'N-2',
+      readings: { startedAfterN1: false, parentOpened: false, keyPressed: 0, pickDelta: null, note: D.n2ParentNotOpened, final: L.slim(u.state) },
+      circuit: L.circuitSince(ctx, ctx.inputAt),
+      kbd: u.kbd
+    }];
+  }
   await L.press(ctx, 'Enter');
   const st1 = await L.waitOpen(ctx, true);
   const burstStart = Date.now();
@@ -42,7 +63,8 @@ async function n1(ctx) {
       final: L.slim(st2)
     },
     circuit: circuitN1,
-    shot: shotN1
+    shot: shotN1,
+    kbd: { reached: true, tabs: reach.tabs }
   }];
 
   // N-2 — 같은 문맥 이어서(관찰 칸)
@@ -65,7 +87,8 @@ async function n1(ctx) {
       focusAfter: st3.focus,
       final: L.slim(st3)
     },
-    circuit: L.circuitSince(ctx, t2)
+    circuit: L.circuitSince(ctx, t2),
+    kbd: { reached: true, tabs: reach.tabs }
   });
   return out;
 }
