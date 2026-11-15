@@ -1,8 +1,8 @@
 {
-  "rulesVersion": "s4gh-B-r0",
+  "rulesVersion": "s4gh-B-r1",
   "_표지": "장치 원문 — 측정 · 판독 규칙 한 곳(설계 §4-3 · §4-4). 장전 뒤 1글자라도 바뀌면 새 회차(설계 §6-6). 판정자 = HQA. 장치 글자는 「장치 판독」 일 뿐 판정이 아니다.",
   "hqaPending": {
-    "_표지": "HQA 회신 대기(#850 댓글 6896955850) — 아래 value 는 장치가 돌게 둔 임시 기본값이다(정해진 값 아님). status 에 「HQA 회신 대기」 가 하나라도 남아 있으면 run-items.js 는 장전(armed) 측정을 거부한다(작업지시서 §9 P3). 회신이 오면 value 를 고치고 status 를 「HQA 회신 반영 · 댓글 ID」 로 바꾼 뒤 리허설부터 다시.",
+    "_표지": "HQA 회신 대기(#850 댓글 6896955850) — 아래 value 는 장치가 돌게 둔 임시 기본값이다(정해진 값 아님). 장전(armed) 때 M0 가 hqa-gate.js 로 거부한다: 필수 6칸(S1toS4 · rawFormat · samplesPerCell · delayUnit · browserCondition · T3 — 목록은 hqa-gate.js 에 고정)이 모두 status 「HQA 회신 반영 · 댓글 <숫자>」 꼴 · value 비지 않음 · 목록 밖 칸 0 일 때만 통과(고침1 F8). run-items.js 도 같은 관문으로 다시 거부. 회신이 오면 value 를 고치고 status 를 바꾼 뒤 리허설부터 다시.",
     "S1toS4": {
       "ref": "①",
       "status": "HQA 회신 대기",
@@ -36,8 +36,16 @@
         "locale": "ko-KR"
       },
       "note": "임시: 릴리스 크롬(chrome-linux64)을 executablePath 로 헤드리스 실행 · 헤드리스 셸 안 씀(설계 §4-1 M3). 창 너비는 모든 칸 1280 · 창 높이는 I-3 만 330/200, 나머지 720."
+    },
+    "T3": {
+      "ref": "⑥",
+      "status": "HQA 회신 대기",
+      "value": null,
+      "note": "I-8 T3 정의 확인(고침1 F9 · [4] C2) — 정의 후보 있음: 16e88c01 docs/운영기록/20261107작_백오피스CS상태칸_S4덮임_키보드_고침_작업지시서.md L306 「상태 값이 공백뿐이면 상태 칸이 통째로 사라짐 → -」(공백 상태 칸). 같은 날 다른 뜻의 T3(20261107_830배포_대표실물결과_S4반려.md L23 · CS 표시줄)도 있어 HQA 확인 대기. 장치에 T3 측정 코드 0 — 정의가 확정돼도 측정 코드는 별도 작업(새 회차)."
     }
   },
+  "mask_allow_표지": "가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
+  "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends"],
   "device": {
     "_표지": "장치 선택값 — 정본에 없는 실행 값을 장치가 정함(기대값 아님 · 판독 글자 아님). 장전 전 고정 · HQA 의심 제기 대상.",
     "playwrightVersion": "1.62.1",
@@ -95,7 +103,7 @@
       "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
     },
     "notMeasured": [
-      { "item": "I-8", "name": "T3", "text": "미측정 · 정의 없음" },
+      { "item": "I-8", "name": "T3", "text": "미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기", "hqaPending": "T3" },
       { "item": "WebKit/Firefox", "text": "미측정" }
     ]
   },

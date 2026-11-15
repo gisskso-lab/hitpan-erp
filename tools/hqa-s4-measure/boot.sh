@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [장치] 묶음 · 꾸러미 · 브라우저 · 앱 기동 · run.json 조립 — 설계 §4-1 M1~M4 · §5
+# [장치] 묶음 · 꾸러미 · 브라우저 · 앱 기동 · run.json 조립 — 설계 §4-1 M1~M4 · §5 · 고침1 F1(소스 ↔ 나무 경로 기준 대조) · F7(고정 머리 2회차 단언)
 #   사용: boot.sh <m1|m2|m3|m4|runjson> <원자료 폴더> <작업 폴더>
 #   작업 폴더 = 원자료 밖(러너 임시 폴더) · 원자료 폴더 = 공개될 파일만
 #   종료 코드: 0 = 통과 · 1 = 그 단계 실패(실패 사실 · 오류 글자는 원자료 파일에 남김)
@@ -55,14 +55,17 @@ m1() {
   if [ -f "$dl/$SRC_TGZ" ] && tar -xzf "$dl/$SRC_TGZ" -C "$sx" 2> "$WORK/m1-tar.err"; then
     local outside; outside=$(tar -tzf "$dl/$SRC_TGZ" | grep -v '^hqa-s4-fixture-src-01161edb/' | head -5 | tr '\n' ' ')
     if [ -n "$outside" ]; then printf 'src_prefix\t-\t0\t%s\n' "$outside" >> "$tsv"; fail=1; fi
-    git -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture | awk -F'\t' '{split($1,a," "); print a[3]" "$2}' | LC_ALL=C sort > "$WORK/m1-tree.txt"
+    # 고침1 F1: 경로 기준 대조 — 옛 꼴은 나무 목록만 「해시 경로」 줄째 정렬(=해시순) · tar 목록은 경로순이라 diff 가 엇갈렸다
+    #   해시 2벌: 원 바이트(--no-filters) · 레포 속성 적용(--path · autocrlf 끔 = 러너와 같은 조건) · 판정 = 속성 적용 해시
+    #   파일별 값은 원자료 m1-src-hashes.json(정규화로만 같아진 파일 수 = filter_only_match)
+    git -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture | awk -F'\t' '{split($1,a," "); print $2"\t"a[3]}' | LC_ALL=C sort > "$WORK/m1-tree.tsv"
     ( cd "$root" && find . -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r p; do
-        printf '%s %s\n' "$(git hash-object --no-filters -- "$p")" "$p"; done ) > "$WORK/m1-tar.txt"
-    local nt na diffs
-    nt=$(wc -l < "$WORK/m1-tree.txt"); na=$(wc -l < "$WORK/m1-tar.txt")
-    diffs=$(diff "$WORK/m1-tree.txt" "$WORK/m1-tar.txt" | grep '^[<>]' | awk '{print $1" "$3}' | head -50 | tr '\n' ';')
-    if [ -z "$diffs" ]; then m=1; else m=0; fail=1; fi
-    printf 'src_vs_tree\t-\t%s\ttree_files=%s tar_files=%s diff=%s\n' "$m" "$nt" "$na" "$diffs" >> "$tsv"
+        printf '%s\t%s\t%s\n' "$p" "$(git hash-object --no-filters -- "$p")" \
+          "$(git -c core.autocrlf=false -C "$REPO" hash-object --path="tools/hqa-s4-fixture/$p" -- "$root/$p")"; done ) > "$WORK/m1-tar.tsv"
+    local crc
+    node "$HERE/m1-compare.js" "$WORK/m1-tree.tsv" "$WORK/m1-tar.tsv" "$RAW/m1-src-hashes.json" > "$WORK/m1-cmp.txt" 2>&1; crc=$?
+    if [ "$crc" = "0" ]; then m=1; else m=0; fail=1; fi
+    printf 'src_vs_tree\t-\t%s\t%s\n' "$m" "$(tr '\t\r\n' '   ' < "$WORK/m1-cmp.txt" | cut -c1-400)" >> "$tsv"
     to_env HQA_SRC_DIR "$root"
   else
     printf 'src_extract\t-\t0\t%s\n' "$(tr '\t\r\n' '   ' < "$WORK/m1-tar.err" 2>/dev/null | cut -c1-300)" >> "$tsv"; fail=1
@@ -212,7 +215,17 @@ const m3 = readJson(work + '/stages/m3.json') || {};
 const ls2 = lines(work + '/ls2.txt').map((l) => { const [sha, ref] = l.split('\t'); return { ref, sha }; });
 const ls1 = m0.ls_remote_start || [];
 const same = ls1.length === 3 && ls2.length === 3 && ls1.every((a) => ls2.some((b) => b.ref === a.ref && b.sha === a.sha));
-const stageNames = ['M0', 'SELFTEST_LEAK', 'SELFTEST_JUDGE', 'M1', 'M2', 'M3', 'M4', 'ITEMS', 'JUDGE'];
+// 고침1 F7: 2회차 단언 — 기능 · 시험 앱 머리 = 고정값 · main = 시작과 같음 · 줄 수 3/3 (다르면 이 단계 빨강)
+const shaOf = (l, r) => { const x = l.find((a) => a.ref === r); return x ? x.sha : null; };
+const R_MAIN = 'refs/heads/main', R_FEAT = 'refs/heads/feat/20261107-백오피스S4닫기', R_FIX = 'refs/heads/hqa/20261107-S4-시험앱';
+const headsAssert = {
+  lines_start: ls1.length, lines_end: ls2.length,
+  feat_end_ok: shaOf(ls2, R_FEAT) === '16e88c01092d33eb643c6cac454703f00efa02ac',
+  fixture_end_ok: shaOf(ls2, R_FIX) === '01161edb5618b5e34ea2c5e655dcaaf2333d3a68',
+  main_same: !!shaOf(ls1, R_MAIN) && shaOf(ls1, R_MAIN) === shaOf(ls2, R_MAIN),
+};
+headsAssert.ok = ls1.length === 3 && ls2.length === 3 && headsAssert.feat_end_ok && headsAssert.fixture_end_ok && headsAssert.main_same;
+const stageNames = ['M0', 'SELFTEST_LEAK', 'SELFTEST_JUDGE', 'M1', 'M2', 'M3', 'M4', 'PROBE', 'ITEMS', 'JUDGE'];
 const outcomes = {};
 for (const s of stageNames) outcomes[s] = e['OUT_' + s] || null;
 const doc = {
@@ -224,15 +237,17 @@ const doc = {
   node: process.version, playwright: m3.playwright || null, browser: m3.browser || null,
   headless_shell: 'not used', ldd_missing: m3.ldd_missing || null,
   started_utc: lines(work + '/started_utc.txt')[0] || null, ended_utc: new Date().toISOString(),
-  ls_remote_start: ls1, ls_remote_end: ls2, fixed_heads_unchanged: same,
+  ls_remote_start: ls1, ls_remote_end: ls2, fixed_heads_unchanged: same, fixed_heads_assert: headsAssert,
   stage_outcomes: outcomes,
   stage_results: Object.fromEntries(['m1', 'm2', 'm3', 'm4'].map((s) => [s, readJson(work + '/stages/' + s + '.json')])),
   selftest_leak: readJson(work + '/selftest-leak.json'),
   selftest_judge: lines(work + '/selftest-judge.status.txt').join(' ') || null,
+  probe: fs.existsSync(raw + '/probe.json') ? 'see probe.json (rehearsal - judgement-free)' : null,
   items: m0.mode === 'armed' ? 'see samples.jsonl / verdict-device.json' : 'rehearsal: item measurement 0',
   verdict: 'device reading only - judgement = HQA',
 };
 fs.writeFileSync(raw + '/run.json', JSON.stringify(doc, null, 2) + '\n');
+if (!headsAssert.ok) { process.stderr.write('[run.json] 고정 머리 2회차 단언 실패 ' + JSON.stringify(headsAssert) + '\n'); process.exit(1); }
 NODE
 }
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# M0 [장치] 고정 단언 — 설계 §4-1 M0 ①~⑤ · §6-5 장전(MODE) 단언
+# M0 [장치] 고정 단언 — 설계 §4-1 M0 ①~⑤ · §6-5 장전(MODE) 단언 · 고침1 F7(고정 머리 값 단언) · F8(장전 때 HQA 회신 칸 확정 관문)
+#   세부 글자의 SHA 는 key=값 꼴로만 쓴다(가림 F5 — 알려진 칸만 16진 허용)
 #   사용: m0-assert.sh <원자료 폴더>
 #   결과: <원자료 폴더>/m0-assert.json · GITHUB_OUTPUT 에 mode=rehearsal|armed|invalid
 #   종료 코드: 0 = 전부 통과 · 1 = 하나라도 다름(이후 단계 0 · 원자료는 이 파일만)
@@ -42,15 +43,15 @@ rec() { # 이름 · 통과(1/0) · 세부
 
 HEAD_SHA=$(git rev-parse HEAD 2>&1)
 if [ -n "${GITHUB_SHA:-}" ]; then
-  if [ "$HEAD_SHA" = "$GITHUB_SHA" ]; then rec head_is_event 1 "$HEAD_SHA"; else rec head_is_event 0 "HEAD=$HEAD_SHA event=$GITHUB_SHA"; fi
+  if [ "$HEAD_SHA" = "$GITHUB_SHA" ]; then rec head_is_event 1 "HEAD=$HEAD_SHA"; else rec head_is_event 0 "HEAD=$HEAD_SHA event=$GITHUB_SHA"; fi
 fi
 
 # ① 시험 앱 나무 해시
 got=$(git rev-parse "HEAD:tools/hqa-s4-fixture" 2>&1)
-if [ "$got" = "$FIX_TREE" ]; then rec m0_1_fixture_tree 1 "$got"; else rec m0_1_fixture_tree 0 "got=$got want=$FIX_TREE"; fi
+if [ "$got" = "$FIX_TREE" ]; then rec m0_1_fixture_tree 1 "tree=$got"; else rec m0_1_fixture_tree 0 "got=$got want=$FIX_TREE"; fi
 
 # ② 01161edb 가 HEAD 조상
-if git merge-base --is-ancestor "$BASE" HEAD 2>"$TMPD/e2"; then rec m0_2_base_ancestor 1 "$BASE"
+if git merge-base --is-ancestor "$BASE" HEAD 2>"$TMPD/e2"; then rec m0_2_base_ancestor 1 "base=$BASE"
 else rec m0_2_base_ancestor 0 "not ancestor: $(cat "$TMPD/e2")"; fi
 
 # ③ diff ⊆ 허용 목록 (이름 바꾸기 감지 끔 — 옮긴 파일의 옛 경로도 드러나게)
@@ -69,8 +70,16 @@ else
 fi
 
 # ④ 고정 머리 3개 ls-remote (1회차 · 2회차는 run.json 조립 때)
+#   고침1 F7: 기록만이 아니라 단언 — 줄 수 = 3 · 기능 머리 = FEAT · 시험 앱 머리 = BASE · main 은 값 기록(시작/끝 같음은 runjson 이 단언)
 if git ls-remote origin "${HEADS[@]}" > "$LS" 2>"$TMPD/e4"; then
-  rec m0_4_ls_remote 1 "lines=$(wc -l < "$LS")"
+  nl=$(grep -c . "$LS")
+  if [ "$nl" = "3" ]; then rec m0_4_ls_remote_lines 1 "lines=3"; else rec m0_4_ls_remote_lines 0 "lines=$nl want=3"; fi
+  gm=$(awk -F'\t' -v r="${HEADS[0]}" '$2==r {print $1}' "$LS")
+  gf=$(awk -F'\t' -v r="${HEADS[1]}" '$2==r {print $1}' "$LS")
+  gb=$(awk -F'\t' -v r="${HEADS[2]}" '$2==r {print $1}' "$LS")
+  if [ "$gf" = "$FEAT" ]; then rec m0_4_feat_head 1 "feat=$gf"; else rec m0_4_feat_head 0 "feat=${gf:-none} want=$FEAT"; fi
+  if [ "$gb" = "$BASE" ]; then rec m0_4_fixture_head 1 "fixture=$gb"; else rec m0_4_fixture_head 0 "fixture=${gb:-none} want=$BASE"; fi
+  if [[ "$gm" =~ ^[0-9a-f]{40}$ ]]; then rec m0_4_main_recorded 1 "main=$gm"; else rec m0_4_main_recorded 0 "main=${gm:-none}"; fi
 else
   rec m0_4_ls_remote 0 "ls-remote error: $(cat "$TMPD/e4")"
 fi
@@ -103,13 +112,21 @@ elif [[ "$mfirst" =~ ^armed:([0-9a-f]{40}):r([1-9][0-9]*)$ ]] && [ "$mlines" = "
   parents=$(git rev-list --parents -n1 HEAD | wc -w)
   if [ "$parents" = "2" ]; then rec armed_one_parent 1 "1"; else rec armed_one_parent 0 "parents=$((parents-1))"; fi
   par=$(git rev-parse HEAD^ 2>&1)
-  if [ "$par" = "$want_parent" ]; then rec armed_parent_is_D 1 "$par"; else rec armed_parent_is_D 0 "parent=$par mode=$want_parent"; fi
+  if [ "$par" = "$want_parent" ]; then rec armed_parent_is_D 1 "parent=$par"; else rec armed_parent_is_D 0 "parent=$par mode=$want_parent"; fi
   dn=$(git diff --no-renames --name-only HEAD^ HEAD 2>&1)
   if [ "$dn" = "$MODE_PATH" ]; then rec armed_diff_only_mode 1 "$dn"; else rec armed_diff_only_mode 0 "diff=$dn"; fi
   ns=$(git diff --no-renames --numstat HEAD^ HEAD -- "$MODE_PATH" 2>&1 | cut -f1,2)
   if [ "$ns" = "$(printf '1\t1')" ]; then rec armed_one_line 1 "1/1"; else rec armed_one_line 0 "numstat=$ns"; fi
   pm=$(git show "HEAD^:$MODE_PATH" 2>&1 | tr -d '\r')
   if [ "$pm" = "rehearsal" ]; then rec armed_prev_mode 1 "rehearsal"; else rec armed_prev_mode 0 "parent MODE=$pm"; fi
+  # 고침1 F8: HQA 회신 대기 칸이 하나라도 확정 꼴이 아니면 여기(M0)서 장전 거부 — 필수 칸 목록은 hqa-gate.js 에 고정
+  if git show "HEAD:tools/hqa-s4-measure/rules.json" > "$TMPD/rules.json" 2>"$TMPD/eg" \
+     && git show "HEAD:tools/hqa-s4-measure/hqa-gate.js" > "$TMPD/hqa-gate.js" 2>>"$TMPD/eg"; then
+    gate=$(node "$TMPD/hqa-gate.js" "$TMPD/rules.json" 2>&1); grc=$?
+    if [ "$grc" = "0" ]; then rec armed_hqa_confirmed 1 "$gate"; else rec armed_hqa_confirmed 0 "rc=$grc $gate"; fi
+  else
+    rec armed_hqa_confirmed 0 "read error: $(cat "$TMPD/eg")"
+  fi
 else
   rec mode_value 0 "unknown MODE: $mfirst (lines=$mlines)"
 fi
@@ -131,6 +148,7 @@ const doc = {
   ref: process.env.GITHUB_REF || null,
   fixture_tree_expected: '0b31f8692367ae28a6fac255d8eae5c931066d7b',
   base_expected: '01161edb5618b5e34ea2c5e655dcaaf2333d3a68',
+  feat_expected: '16e88c01092d33eb643c6cac454703f00efa02ac',
   checks,
   ls_remote_start: lsRemote,
   blobs,

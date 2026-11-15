@@ -8,6 +8,7 @@
 #     actions/checkout          v7 → 3d3c42e5aac5ba805825da76410c181273ba90b1
 #     actions/upload-artifact   v5 → 330a01c490aca151604b8cf639adc76d48f6c5d4
 #     actions/download-artifact v6 → 018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+# - 고침1: M0 가 고정 머리 값 · 장전 때 HQA 회신 칸 확정을 단언 · 리허설만 판정 무관 점검(probe) · publish 는 measure 시도 번호(raw_id)를 따른다
 # - 2단 점화: tools/hqa-s4-measure/MODE = rehearsal (항목 측정 0) → 발행 → armed:<D 전체 SHA>:r<n> (M0 이 단언)
 name: HQA S4 관문1 GitHub 서버 실측
 
@@ -33,8 +34,10 @@ jobs:
       contents: read
     outputs:
       mode: ${{ steps.m0.outputs.mode }}
+      raw_id: ${{ steps.dirs.outputs.raw_id }}
     steps:
       - name: '[장치] 작업 폴더'
+        id: dirs
         run: |
           raw="$RUNNER_TEMP/hqa-raw/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           work="$RUNNER_TEMP/hqa-work"
@@ -42,6 +45,7 @@ jobs:
           date -u +%Y-%m-%dT%H:%M:%SZ > "$work/started_utc.txt"
           echo "HQA_RAW=$raw" >> "$GITHUB_ENV"
           echo "HQA_WORK=$work" >> "$GITHUB_ENV"
+          echo "raw_id=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: '[장치] 장치 커밋 받기'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -92,6 +96,16 @@ jobs:
         timeout-minutes: 5
         run: bash tools/hqa-s4-measure/boot.sh m4 "$HQA_RAW" "$HQA_WORK"
 
+      # ---- 리허설만: 판정 무관 점검(probe) — 고침1 F10 · 선택자 존재 · 시간 · Tab 도달 · NODE_PATH 만 · 항목 판독 0 ----
+      - name: '[장치] 리허설 점검(probe · 판정 무관)'
+        id: probe
+        if: steps.m0.outputs.mode == 'rehearsal' && steps.m4.outcome == 'success'
+        timeout-minutes: 5
+        run: |
+          HQA_OUT_DIR="$HQA_RAW" HQA_CHROME_PATH="$HQA_CHROME" \
+          NODE_PATH="$(dirname "$HQA_PW_DIR")" \
+            node tools/hqa-s4-measure/probe.js
+
       # ---- 여기부터 장전(armed) 때만. 리허설은 항목 측정 0 ----
       - name: '[측정] M5~M6 항목'
         id: items
@@ -127,6 +141,7 @@ jobs:
           OUT_M4: ${{ steps.m4.outcome }}
           OUT_ITEMS: ${{ steps.items.outcome }}
           OUT_JUDGE: ${{ steps.judge.outcome }}
+          OUT_PROBE: ${{ steps.probe.outcome }}
         run: bash tools/hqa-s4-measure/boot.sh runjson "$HQA_RAW" "$HQA_WORK"
 
       - name: '[장치] M8 가림'
@@ -178,7 +193,8 @@ jobs:
       - name: '[장치] 원자료 받기'
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
-          name: hqa-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          # 고침1 F11: 실패한 잡만 다시 돌려도 measure 가 올린 이름을 받는다
+          name: hqa-raw-${{ needs.measure.outputs.raw_id }}
           path: ${{ runner.temp }}/hqa-in
 
       - name: '[장치] 누출 재검 · check-ignore · 원자료 가지 커밋'
@@ -186,4 +202,5 @@ jobs:
           HQA_IN: ${{ runner.temp }}/hqa-in
           HQA_PUSH_TOKEN: ${{ github.token }}
           HQA_MEASURE_RESULT: ${{ needs.measure.result }}
+          HQA_RAW_ID: ${{ needs.measure.outputs.raw_id }}
         run: bash tools/hqa-s4-measure/publish.sh commit

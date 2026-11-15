@@ -112,10 +112,25 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   check('I-9 = I 항목 지연 0/150/300', JSON.stringify(rules.plan.iDelays) === '[0,150,300]');
   check('N-1 지연 0/150/300/500 · 대조 단 300/500', JSON.stringify(rules.plan.nDelays) === '[0,150,300,500]' && JSON.stringify(rules.plan.n1ContrastDelays) === '[300,500]');
   const i8 = rules.plan.notMeasured.find((x) => x.item === 'I-8');
-  check('I-8 T3 = 「미측정 · 정의 없음」 · 계획에 없음', i8 && i8.text === '미측정 · 정의 없음' && !rules.plan.items.includes('I-8'));
+  check('I-8 T3 = 「미측정 · 정의 후보 있음 · HQA 확인 대기」 · 계획에 없음 · 측정 코드 0', i8 && i8.text === '미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기' && !rules.plan.items.includes('I-8') && !Object.keys(Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'))).includes('I-8'));
   check('N-1 판정 글자 = 대조 무효 / 🔴 / 🟡', T['N-1'].contrastInvalid === '대조 무효' && T['N-1'].red === '🔴' && T['N-1'].yellow === '🟡');
   const pend = Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_'));
-  check('HQA 회신 대기 5칸 표지', pend.length === 5 && pend.every((k) => String(rules.hqaPending[k].status).includes('HQA 회신 대기')), pend);
+  check('HQA 회신 대기 6칸 표지(T3 포함)', pend.length === 6 && pend.includes('T3') && pend.every((k) => String(rules.hqaPending[k].status).includes('HQA 회신 대기')), pend);
+  // 고침1 F8: 장전 관문(hqa-gate.js) — 필수 칸 목록 고정 · 확정 꼴만 통과 · 대조군 1 + 우회 꼴 6
+  {
+    const G = require('./hqa-gate.js');
+    const conf = (r) => { const c = JSON.parse(JSON.stringify(r)); for (const k of G.REQUIRED) { c.hqaPending[k].status = 'HQA 회신 반영 · 댓글 1234567890'; if (c.hqaPending[k].value === null) c.hqaPending[k].value = 'x'; } return c; };
+    check('관문: 지금 rules = 거부(회신 대기 남음)', !G.check(rules).ok);
+    check('관문: 필수 칸 = 6 · T3 포함', G.REQUIRED.length === 6 && G.REQUIRED.includes('T3'));
+    const all = conf(rules);
+    check('관문: 6칸 모두 확정 꼴 = 통과(대조군)', G.check(all).ok, G.check(all).problems);
+    const del = conf(rules); delete del.hqaPending.T3; check('관문: 칸 삭제 = 거부', !G.check(del).ok);
+    const tmp = conf(rules); tmp.hqaPending.rawFormat.status = '임시'; check('관문: 다른 글자(임시) = 거부', !G.check(tmp).ok);
+    const emp = conf(rules); emp.hqaPending.S1toS4.value = null; check('관문: 빈 값 = 거부', !G.check(emp).ok);
+    const ext = conf(rules); ext.hqaPending.extra = { status: 'HQA 회신 반영 · 댓글 1234567890', value: 1 }; check('관문: 목록 밖 칸 = 거부', !G.check(ext).ok);
+    const suf = conf(rules); suf.hqaPending.delayUnit.status += ' (임시)'; check('관문: 꼬리 붙은 글자 = 거부', !G.check(suf).ok);
+    const pre = conf(rules); pre.hqaPending.T3.status = 'HQA 회신 대기 · HQA 회신 반영 · 댓글 1234567890'; check('관문: 앞 덧붙임 = 거부', !G.check(pre).ok);
+  }
 }
 
 // ── ③ 정적 검사 — 신뢰 입력만 ─────────────────────────────────────────

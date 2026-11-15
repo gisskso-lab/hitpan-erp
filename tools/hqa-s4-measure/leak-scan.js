@@ -2,12 +2,13 @@
 // M9 [장치] 누출 검사 — 설계 §5 (measure 잡 · publish 잡에서 다시)
 //   사용: node leak-scan.js <폴더> [--stage measure|publish] [--remove] [--withheld-write] [--json]
 //   검사: 파일 내용(.json · .jsonl · .txt · SHA256SUMS.raw) + 파일 · 폴더 이름(전부)
-//   꼴 종류: runner-path · long-token · credential · banned-word · extension
+//   꼴 종류: runner-path · long-token · credential · banned-word · extension · png-signature · png-text · png-structure
+//   고침1: F3 JSON 키-값 자격증명 · F4 표준 base64 · F5 알려진 칸 밖 16진 40/64 · F6 PNG 머리 바이트 · 텍스트 덩어리
 //   걸린 파일: --remove 면 지움(공개 · 운반 0) · withheld.json 에 이름 · 꼴 종류만(값 0 · 이름이 걸리면 이름도 가림)
 //   출력에 걸린 값은 절대 안 찍는다. 종료 코드: 0 = 깨끗 · 2 = 걸림 · 1 = 처리 오류
 const fs = require('fs');
 const path = require('path');
-const { HEX_RE, TOKEN_RE, loadAllow, isLongToken, listFiles } = require('./mask.js');
+const { loadAllow, listFiles, findSecrets, hexCtx } = require('./mask.js');
 
 const CONTENT_EXT = new Set(['.json', '.jsonl', '.txt']);
 const ALLOWED_EXT = new Set(['.json', '.jsonl', '.txt', '.png']);
@@ -24,7 +25,8 @@ const CREDENTIAL_RES = [
   new RegExp(J('e', 'yJ', '[A-Za-z0-9_-]{8,}\\.', 'e', 'yJ', '[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}')),
   new RegExp(J('[Bb]ear', 'er\\s+[A-Za-z0-9._~+/-]{20,}')),
   new RegExp(J('xo', 'x[baprs]-[A-Za-z0-9-]{10,}')),
-  new RegExp(J('(?:pass', 'word|pwd|sec', 'ret|to', 'ken|api[_-]?key)\\s*[=:]\\s*["\']?[^\\s"\';,]{6,}'), 'i'),
+  // 고침1 F3: 키 뒤 따옴표 허용 — JSON 키-값("키": "값") 꼴
+  new RegExp(J('(?:pass', 'word|pwd|sec', 'ret|to', 'ken|api[_-]?key)["\']?\\s*[=:]\\s*["\']?[^\\s"\';,]{6,}'), 'i'),
 ];
 // 금지어(헌법 #23) — 글자 번호로 만든다
 const C = (...n) => String.fromCharCode(...n);
@@ -44,17 +46,37 @@ function envRunnerPaths(env) {
     .map((k) => env[k]).filter((v) => typeof v === 'string' && v.length >= 5 && v !== '/');
 }
 
-function kindsInText(text, env, allow, withPaths) {
+function kindsInText(text, env, allow, withPaths, fileBase) {
   const kinds = new Set();
   if (withPaths) {
     for (const p of envRunnerPaths(env)) if (text.includes(p)) kinds.add('runner-path');
     for (const re of GENERIC_RUNNER_RES) if (re.test(text)) kinds.add('runner-path');
   }
-  const toks = text.match(TOKEN_RE) || [];
-  for (const t of toks) if (isLongToken(t, allow)) { kinds.add('long-token'); break; }
+  // 고침1 F4 · F5: 표준 base64 · 알려진 칸 밖 16진 40/64 도 긴 토큰(가림과 같은 판정 함수 findSecrets)
+  if (findSecrets(text, allow, hexCtx(env, fileBase || null)).length) kinds.add('long-token');
   for (const re of CREDENTIAL_RES) if (re.test(text)) { kinds.add('credential'); break; }
   for (const re of BANNED_RES) if (re.test(text)) { kinds.add('banned-word'); break; }
   return kinds;
+}
+
+// 고침1 F6: PNG 는 이름이 아니라 머리 바이트(서명 8바이트)로 · 텍스트 덩어리(tEXt · iTXt · zTXt) 0 · IEND 로 끝남 · 뒤 덧붙임 0
+const PNG_SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const PNG_TEXT = new Set(['tEXt', 'iTXt', 'zTXt']);
+function pngKinds(buf) {
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIG)) return ['png-signature'];
+  const kinds = new Set();
+  let off = 8;
+  let end = false;
+  while (off + 12 <= buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('latin1', off + 4, off + 8);
+    if (off + 12 + len > buf.length) { kinds.add('png-structure'); return [...kinds]; }
+    if (PNG_TEXT.has(type)) kinds.add('png-text');
+    off += 12 + len;
+    if (type === 'IEND') { end = true; break; }
+  }
+  if (!end || off !== buf.length) kinds.add('png-structure');
+  return [...kinds];
 }
 
 function scan(dir, env) {
@@ -73,8 +95,9 @@ function scan(dir, env) {
     if (base !== SUMS_NAME && !ALLOWED_EXT.has(ext)) kinds.add('extension');
     if (base === SUMS_NAME || CONTENT_EXT.has(ext)) {
       const text = fs.readFileSync(f, 'utf8');
-      for (const x of kindsInText(text, env, allow, true)) kinds.add(x);
+      for (const x of kindsInText(text, env, allow, true, base)) kinds.add(x);
     }
+    if (ext === '.png') for (const x of pngKinds(fs.readFileSync(f))) kinds.add(x);
     if (kinds.size) hits.push({ file: f, rel, nameHit, kinds: [...kinds].sort() });
   }
   return hits;
@@ -106,7 +129,7 @@ function main(argv, env) {
   return hits.length ? 2 : 0;
 }
 
-module.exports = { scan, kindsInText, CREDENTIAL_RES, BANNED_RES };
+module.exports = { scan, kindsInText, pngKinds, CREDENTIAL_RES, BANNED_RES };
 
 if (require.main === module) {
   let rc;
