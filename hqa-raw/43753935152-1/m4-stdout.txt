@@ -1,0 +1,94 @@
+warn: HqaS4Fixture[0]
+      환경이 Production 입니다. ASPNETCORE_ENVIRONMENT=Development 로 띄우십시오 — 아니면 MudBlazor 정적 파일이 404 납니다.
+info: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[62]
+      User profile is available. Using '<러너>/.aspnet/DataProtection-Keys' as key repository; keys will not be encrypted at rest.
+info: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[58]
+      Creating key {<가림:1>} with creation date 2026-11-15 19:43:35Z, activation date 2026-11-15 19:43:35Z, and expiration date 2027-02-13 19:43:35Z.
+warn: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[35]
+      No XML encryptor configured. Key {<가림:1>} may be persisted to storage in unencrypted form.
+info: Microsoft.AspNetCore.DataProtection.Repositories.<가림:2>[39]
+      Writing data to file '<러너>/.aspnet/DataProtection-Keys/<가림:3>.xml'.
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://127.0.0.1:5799
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: <러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/ - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/ (/)'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/ (/)'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/before - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/before (/before)'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/ - 200 - text/html;+charset=utf-8 130.1098ms
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/before (/before)'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/after - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint '/after (/after)'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/before - 200 - text/html;+charset=utf-8 155.6642ms
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint '/after (/after)'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/after - 200 - text/html;+charset=utf-8 15.6616ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/css/common/app.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/css/common/app.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/css/common/app.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/css/common/app.css - 200 2841 text/css 5.3107ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/css/common/backoffice-v2.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/css/common/backoffice-v2.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/css/common/backoffice-v2.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/css/common/backoffice-v2.css - 200 14053 text/css 2.7463ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/css/common/bootstrap.min.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/css/common/bootstrap.min.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/css/common/bootstrap.min.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/css/common/bootstrap.min.css - 200 232803 text/css 0.6728ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/css/before/backoffice-dashboard.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/css/before/backoffice-dashboard.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/css/before/backoffice-dashboard.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/css/before/backoffice-dashboard.css - 200 12455 text/css 0.2482ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/css/after/backoffice-dashboard.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/css/after/backoffice-dashboard.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/css/after/backoffice-dashboard.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/css/after/backoffice-dashboard.css - 200 14782 text/css 0.2469ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/_content/MudBlazor/MudBlazor.min.css - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/_content/MudBlazor/MudBlazor.min.css'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/_content/MudBlazor/MudBlazor.min.css'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/_content/MudBlazor/MudBlazor.min.css - 200 608259 text/css 3.8743ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/_content/MudBlazor/MudBlazor.min.js - - -
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/_content/MudBlazor/MudBlazor.min.js'. Physical path: '<러너>/hqa-work/app/hqa-s4-fixture-linux-x64-01161edb/wwwroot/_content/MudBlazor/MudBlazor.min.js'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/_content/MudBlazor/MudBlazor.min.js - 200 65657 text/javascript 0.2856ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:5799/_framework/blazor.web.js - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware[2]
+      Sending file. Request path: '/_framework/blazor.web.js'. Physical path: 'N/A'
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'Blazor web static files'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:5799/_framework/blazor.web.js - 200 187457 text/javascript 1.8755ms

@@ -1,0 +1,888 @@
+{
+  "stage": "PROBE",
+  "mode": "rehearsal",
+  "note": "judgement-free probe - selector presence / time / require / before-only distinguish check (delay 0) - item reading 0",
+  "rulesVersion": "s4gh-B-r1",
+  "node_path_set": true,
+  "scope": {
+    "distinguish": true,
+    "screen": "before",
+    "delay": 0,
+    "inputs": "#before + Tab + R3 row click x1"
+  },
+  "playwright_require": {
+    "resolved": true,
+    "version": "1.62.1",
+    "ms": 212
+  },
+  "browser_launched": true,
+  "screens": [
+    {
+      "screen": "before",
+      "delay": 0,
+      "goto_ok": true,
+      "goto_ms": 105,
+      "circuit_connected": true,
+      "selectors": [
+        {
+          "name": "readme",
+          "selector": "#before",
+          "found": true,
+          "ms": 34
+        },
+        {
+          "name": "readme",
+          "selector": "[data-row]",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "#detail",
+          "found": true,
+          "ms": 4
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclick-count",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclicks",
+          "found": true,
+          "ms": 4
+        },
+        {
+          "name": "readme",
+          "selector": "#pick-count",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "#picks",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#fixture-root",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "link[data-fixture-css]",
+          "found": true,
+          "ms": 4
+        },
+        {
+          "name": "statusChip",
+          "selector": ".bo-status-chip",
+          "found": true,
+          "ms": 4
+        },
+        {
+          "name": "reconnect",
+          "note": "may be absent unless disconnected",
+          "selector": "#components-reconnect-modal",
+          "found": false,
+          "ms": 2000
+        }
+      ],
+      "errors": [],
+      "r1": {
+        "row": "1",
+        "present": true,
+        "candidates": [
+          {
+            "tag": "div",
+            "role": "button",
+            "tabindexAttr": "0",
+            "tabIndex": 0,
+            "display": "contents",
+            "rects": 0,
+            "cls": [
+              "mud-menu-activator"
+            ]
+          }
+        ],
+        "focusableVisible": 0,
+        "activator": {
+          "present": true,
+          "display": "contents",
+          "rects": 0
+        }
+      },
+      "r3": {
+        "clicked": true,
+        "before": 0,
+        "after": 1,
+        "ok": true
+      },
+      "r2": {
+        "reached": false,
+        "tabs": 40,
+        "ms": 3367,
+        "path": [
+          {
+            "i": 1,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 2,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 3,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 4,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 5,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 6,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 7,
+            "row": null,
+            "tag": "div",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 8,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 9,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 10,
+            "row": null,
+            "tag": "body",
+            "role": null,
+            "tabIndex": null,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": true
+          },
+          {
+            "i": 11,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 12,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 13,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 14,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 15,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 16,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 17,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 18,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 19,
+            "row": null,
+            "tag": "div",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 20,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 21,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 22,
+            "row": null,
+            "tag": "body",
+            "role": null,
+            "tabIndex": null,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": true
+          },
+          {
+            "i": 23,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 24,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 25,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 26,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 27,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 28,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 29,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 30,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 31,
+            "row": null,
+            "tag": "div",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 32,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 33,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": true,
+            "body": false
+          },
+          {
+            "i": 34,
+            "row": null,
+            "tag": "body",
+            "role": null,
+            "tabIndex": null,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": true
+          },
+          {
+            "i": 35,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 36,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 37,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 38,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 39,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          },
+          {
+            "i": 40,
+            "row": null,
+            "tag": "button",
+            "role": null,
+            "tabIndex": 0,
+            "inRef": false,
+            "isStatusActivator": false,
+            "afterRef": false,
+            "body": false
+          }
+        ]
+      },
+      "inputs": [
+        {
+          "k": "mouse.click",
+          "key": null,
+          "selector": null
+        },
+        {
+          "k": "locator.click",
+          "key": null,
+          "selector": "#before"
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        },
+        {
+          "k": "press",
+          "key": "Tab",
+          "selector": null
+        }
+      ]
+    },
+    {
+      "screen": "after",
+      "delay": 0,
+      "goto_ok": true,
+      "goto_ms": 93,
+      "circuit_connected": true,
+      "selectors": [
+        {
+          "name": "readme",
+          "selector": "#before",
+          "found": true,
+          "ms": 16
+        },
+        {
+          "name": "readme",
+          "selector": "[data-row]",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#detail",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclick-count",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#rowclicks",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#pick-count",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "readme",
+          "selector": "#picks",
+          "found": true,
+          "ms": 1
+        },
+        {
+          "name": "readme",
+          "selector": "#fixture-root",
+          "found": true,
+          "ms": 3
+        },
+        {
+          "name": "readme",
+          "selector": "link[data-fixture-css]",
+          "found": true,
+          "ms": 1
+        },
+        {
+          "name": "statusChip",
+          "selector": ".bo-status-chip",
+          "found": true,
+          "ms": 2
+        },
+        {
+          "name": "reconnect",
+          "note": "may be absent unless disconnected",
+          "selector": "#components-reconnect-modal",
+          "found": false,
+          "ms": 2000
+        }
+      ],
+      "errors": [],
+      "png_check": {
+        "screen": "after",
+        "input_before_shot": 0,
+        "taken": true,
+        "verdict": "pass",
+        "kinds": [],
+        "saved": "shots/probe.after.first.png"
+      },
+      "inputs": []
+    }
+  ],
+  "k_check": {
+    "screen": "before",
+    "delay": 0,
+    "verdict": "K-결함",
+    "meaning": "(나) /before 결함 D1 재현",
+    "conds": {
+      "r1StructDefect": true,
+      "r2PassedRow1": true,
+      "r2BodyOnly": false,
+      "r3Connected": true,
+      "r2MissedInRow1": false,
+      "r2Reached": false
+    },
+    "rule_ref": "rules.json kCheck"
+  },
+  "errors": []
+}

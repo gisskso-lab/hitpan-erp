@@ -1,0 +1,109 @@
+{
+  "stage": "M0",
+  "ok": true,
+  "mode": "rehearsal",
+  "head": "c2b2b0de48cae45c07a0a9779cfb61431ef2b7ea",
+  "run_id": "43753935152",
+  "run_attempt": "1",
+  "ref": "refs/heads/hqa/20261116-S4-gh실측-장치",
+  "fixture_tree_expected": "0b31f8692367ae28a6fac255d8eae5c931066d7b",
+  "base_expected": "01161edb5618b5e34ea2c5e655dcaaf2333d3a68",
+  "feat_expected": "16e88c01092d33eb643c6cac454703f00efa02ac",
+  "checks": [
+    {
+      "check": "head_is_event",
+      "ok": true,
+      "detail": "HEAD=c2b2b0de48cae45c07a0a9779cfb61431ef2b7ea"
+    },
+    {
+      "check": "m0_1_fixture_tree",
+      "ok": true,
+      "detail": "tree=0b31f8692367ae28a6fac255d8eae5c931066d7b"
+    },
+    {
+      "check": "m0_2_base_ancestor",
+      "ok": true,
+      "detail": "base=01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "check": "m0_3_diff_allowed",
+      "ok": true,
+      "detail": "changed=20"
+    },
+    {
+      "check": "m0_4_ls_remote_lines",
+      "ok": true,
+      "detail": "lines=3"
+    },
+    {
+      "check": "m0_4_feat_head",
+      "ok": true,
+      "detail": "feat=16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "check": "m0_4_fixture_head",
+      "ok": true,
+      "detail": "fixture=01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "check": "m0_4_main_recorded",
+      "ok": true,
+      "detail": "main=d939b0285c89116b0171945d1f6ed074d0715a43"
+    },
+    {
+      "check": "m0_5_blobs",
+      "ok": true,
+      "detail": "4 pairs"
+    },
+    {
+      "check": "mode_value",
+      "ok": true,
+      "detail": "rehearsal"
+    }
+  ],
+  "ls_remote_start": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "d939b0285c89116b0171945d1f6ed074d0715a43"
+    }
+  ],
+  "blobs": [
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusCell.razor",
+      "fixture_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "match": true
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusMenu.cs",
+      "fixture_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs",
+      "src_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "match": true
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Vocab/CsVocab.cs",
+      "fixture_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs",
+      "src_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "match": true
+    }
+  ],
+  "generated_utc": "2026-11-15T19:42:58.548Z"
+}
