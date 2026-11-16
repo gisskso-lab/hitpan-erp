@@ -69,8 +69,8 @@ trap 'rm -rf "$work"' EXIT
 
 is_sha() { [[ "$1" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; }
 
-# 탐지기 이름 허용 목록 — 초기 값 = 관측 2개(작업지시서 §9 K1 · PM 승인). 늘리려면 PR.
-ALLOWED_DETECTORS=(CustomRegex SQLServer)
+# 탐지기 이름 허용 목록 — 초기 값 = 관측 3개(작업지시서 §9 K1 · PM 승인 · 자체시험 S1 진짜 엔진 PrivateKey 포함 · P-6). 늘리려면 PR.
+ALLOWED_DETECTORS=(CustomRegex SQLServer PrivateKey)
 # 표준 입력 = @json 한 줄씩(names.raw) → 표준 출력 = 허용 이름 또는 「기타」 한 줄씩. 원문은 내보내지 않는다.
 # 모양 검사는 C 지역(범위 [A-Z] 가 지역 글자로 넓어지지 않게) · 목록 대조는 글자 그대로 같음(대소문자·비슷한 글자 불허).
 map_detector_names() {
@@ -139,7 +139,8 @@ scanned="${scanned}commits=${commits:-?}"
 # ── 결과 파일 엄격 해석(ㄱ′-3) ─────────────────────────────────────────
 # 공백 아닌 모든 줄이 JSON 객체여야 한다. 하나라도 아니면 검사 오류(줄 내용은 찍지 않는다 · 숫자만).
 # 공백 판정은 grep(C 지역) 과 jq 가 같은 ASCII 공백 6종을 쓴다 — 어긋나면 objects 가 모자라 검사 오류 쪽으로 닫힌다.
-nonempty="$(LC_ALL=C grep -cv '^[[:space:]]*$' "$work/results.jsonl" 2>/dev/null)" || true
+# -a = NUL 이 든 줄도 글자로 본다(보안상무 P2-1 · P-6) — 없으면 이진 판정으로 NUL 줄이 공백 줄로 셈에서 빠져 「깨끗」 으로 새는 방향을 닫는다(S10f).
+nonempty="$(LC_ALL=C grep -acv '^[[:space:]]*$' "$work/results.jsonl" 2>/dev/null)" || true
 [[ "$nonempty" =~ ^[0-9]+$ ]] || scan_error "엔진 결과 줄 수를 세지 못했다(종료 코드 ${rc})" 0 "$rc"
 objects=0
 bad=0

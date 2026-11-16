@@ -412,10 +412,11 @@ canary2="$(openssl rand -hex 8)"
 { obj CustomRegex; obj SQLServer; printf '%s\n' "{\"DetectorName\":\"${canary2}"; } > "$s10_in"; s10_one d 183 2 error
 s10d_can="$(fcnt 1 -F -e "$canary2")"
 printf '   \n\t\n' > "$s10_in"; s10_one e 0 0 clean                         # 빈 줄 허용 — 과잉 차단 대조
-if [ "$s10_ok" -eq 5 ] && [ "$s10d_can" -eq 0 ]; then
-  pass "S10 엄격 해석 — 글자·null·배열·깨진 줄 = 검사 오류(종료 2) · 깨진 줄 글자 0 · 공백 줄만 = 깨끗"
+printf '\000  \n' > "$s10_in"; s10_one f 0 2 error                     # NUL+공백 한 줄(실행 때 만듦) — grep -a 없으면 공백 줄로 빠져 깨끗 0 (P-6 · 보안상무 P2-1)
+if [ "$s10_ok" -eq 6 ] && [ "$s10d_can" -eq 0 ]; then
+  pass "S10 엄격 해석 — 글자·null·배열·깨진 줄·NUL 든 줄 = 검사 오류(종료 2) · 깨진 줄 글자 0 · 공백 줄만 = 깨끗"
 else
-  miss "S10 엄격 해석 — 기대 「a~d error/2 · e clean/0 · 깨진 줄 글자 0」 · 실제 ${s10}깨진줄글자(${s10d_can})"
+  miss "S10 엄격 해석 — 기대 「a~d error/2 · e clean/0 · f error/2 · 깨진 줄 글자 0」 · 실제 ${s10}깨진줄글자(${s10d_can})"
 fi
 
 # ── 로그 위생: 가짜 비밀 내용이 하위 출력 어디에도 0회 ─────────────────────
@@ -433,4 +434,4 @@ if [ "$fails" -ne 0 ]; then
   echo "::error title=비밀 탐지 자체시험::${fails}개 실패 — 검사 장치를 믿을 수 없으므로 잡을 빨강으로 끝낸다"
   exit 1
 fi
-echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10 · 로그 위생 모두 통과"
+echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · 로그 위생 모두 통과"
