@@ -326,6 +326,7 @@ async function readHqaFocusRow(ctx) {
 //   지금 식 = 같은 줄(device.i4.row) · 상태 단추 · 열린 목록 밖 / HQA 식 = readHqaFocusRow === 줄 번호 글자
 //   각 식이 처음 참인 시각(maxMs 안만) · polledMs(메뉴 0 부터 마지막 읽기까지) · 끝 상태 · 메뉴 0 못 보면 menuZeroObserved=false(polling 0)
 //   시각 = sig.t0 기준 ms · 두 식이 모두 참이 되면 일찍 끝
+//   J1-B 정정([4] ④): 위 「끝 상태」 = 멈춘 시각 값(일찍 끝나면 그 읽기 · 3초 끝 값 아님) · maxOpen = Esc 뒤 첫 읽기부터 멈춘 시각까지 최댓값 — 코드 · 판정 무변
 async function pollAfterEsc(ctx, pollMs, maxMs) {
   const M = lib();
   const t0 = ctx.sig.t0;

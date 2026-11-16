@@ -1148,8 +1148,31 @@ function checkProbe(src) {
     const shapeOk = (e) => typeof e.screen === 'string' && typeof e.shapeText === 'string' && e.shapeText.includes(e.item + ' · ' + e.screen + (e.delay === undefined ? '' : ' · ' + e.delay));
     const bad = all.filter((e) => !same(e)).map((e) => e.no || '(no 없음)').concat((rules.exposure || []).filter((e) => !shapeOk(e)).map((e) => 'shape:' + e.no));
     const covered = new Set(all.map((e) => e.no));
-    check('고침5-B ① · 고침6(옛 단언 11행 → 13행 · 노12 · 노13 더함): MAPPING §10 노1~노13 ↔ rules exposure ∪ exposureNonCell 글자 일치(칸 꼴 · 출처 · 노출 내용 · Q4ⓒ) · 11행 전부 짝 · 항목 칸 행 = 화면 칸 있음 · 칸 꼴 글자에 항목 · 화면 · 지연',
-      Object.keys(mrows).length === 13 && bad.length === 0 && Object.keys(mrows).every((k) => covered.has(k)) && covered.size === 13, { rows: Object.keys(mrows).length, bad });
+    // J1-B([3-V] 사소): 제목 「11행 전부 짝」 → 실제 값 13 · J1-B 노14(참고 행)를 더해서 이 단언은 노1~노13 범위로 셈(뜻 무변) · 노14 는 아래 새 단언
+    const upTo13 = (k) => /^노([1-9]|1[0-3])$/.test(k);
+    const m13 = Object.keys(mrows).filter(upTo13);
+    const c13 = new Set(Array.from(covered).filter(upTo13));
+    check('고침5-B ① · 고침6(옛 단언 11행 → 13행 · 노12 · 노13 더함): MAPPING §10 노1~노13 ↔ rules exposure ∪ exposureNonCell 글자 일치(칸 꼴 · 출처 · 노출 내용 · Q4ⓒ) · 13행 전부 짝 · 항목 칸 행 = 화면 칸 있음 · 칸 꼴 글자에 항목 · 화면 · 지연',
+      m13.length === 13 && bad.length === 0 && m13.every((k) => c13.has(k)) && c13.size === 13, { rows: m13.length, bad });
+    // J1-B([4] ①): 노14(/after kbd-open 참고 행) · 노12 출처 글자 정정 · 칸별 알려진 결과 · 옛 글자 보존 · 전체 14행 짝
+    const N14_TXT = '/after kbd-open(I-4 · 방향당 0·150·300) — 같은 칸 노출 없음. 가족 참고: 11/8 수정안 A 사본(`644e27eb`+1줄 · 레포 미커밋) HQA 절차 36/36 🟢 · 기다림 훑기(방향당 300 · 0~1800) 24/24 🟢. `9c358a00`(A′)은 A2 가드 · F13 · F14 를 더한 다른 글자. A′ 자체의 HQA 700ms 칸 측정 = 찾지 못함';
+    const KNOWN12 = { 0: '방향당 0 🟢 12/12(복원)', 150: '방향당 150 🟢 12/12(복원)', 300: '방향당 300 🔴 0/12(끝 초점 BODY)' };
+    const j1bExpo = (R) => {
+      const allR = (R.exposure || []).concat(R.exposureNonCell || []);
+      const cov = new Set(allR.map((e) => e.no));
+      const n14 = (R.exposureNonCell || []).filter((e) => e.no === '노14');
+      const r12 = (R.exposure || []).filter((e) => e.no === '노12');
+      return n14.length === 1 && n14[0].exposedText === N14_TXT && same(n14[0]) && !(R.exposure || []).some((e) => e.no === '노14') && Object.keys(mrows).length === 14 && cov.size === 14 && Object.keys(mrows).every((k) => cov.has(k))
+        && r12.length === 3 && r12.every((e) => same(e) && e.source.startsWith('11/8 근본원인 §2 묶음 A(지금 판') && e.rawSource.startsWith('11/8 근본원인 §2 묶음 A(지금 판') && e.rawSource.includes('방향당 0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY')
+          && e.knownResult === KNOWN12[e.delay] && typeof e._source_옛값_J1B === 'string' && e._source_옛값_J1B.startsWith('11/8 근본원인 §2 A(') && typeof e._rawSource_옛값_J1B === 'string' && e._rawSource_옛값_J1B.startsWith('11/8 근본원인 §2 A('));
+    };
+    check('J1-B ①: 노14 참고 행(exposureNonCell 하나 · 노출 내용 글자 그대로 · 판독기 표지 0) · MAPPING 14행 전부 짝 · 노12 출처 「11/8 근본원인 §2 묶음 A(지금 판)」 + 칸별 알려진 결과(0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY) · 옛 글자 보존',
+      j1bExpo(rules), { rows: Object.keys(mrows).length, r12: (rules.exposure || []).filter((e) => e.no === '노12').map((e) => e.knownResult) });
+    const RX1 = JSON.parse(JSON.stringify(rules));
+    for (const e of RX1.exposure) if (e.no === '노12') { e.source = e._source_옛값_J1B; e.rawSource = e._rawSource_옛값_J1B; delete e.knownResult; }
+    const RX2 = JSON.parse(JSON.stringify(rules)); RX2.exposureNonCell = RX2.exposureNonCell.filter((e) => e.no !== '노14');
+    const RX3 = JSON.parse(JSON.stringify(rules)); for (const e of RX3.exposure) if (e.no === '노12' && e.delay === 300) e.knownResult = KNOWN12[0];
+    plant('J1-B ① 심은 위반: 노12 를 옛 출처 글자로 되돌린 사본 · 노14 뺀 사본 · 300 칸 결과를 0 칸 글자로 바꾼 사본 → 셋 다 빨강', !j1bExpo(RX1) && !j1bExpo(RX2) && !j1bExpo(RX3));
     const RE = JSON.parse(JSON.stringify(rules));
     RE.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
     const expo = (r) => {
@@ -1624,13 +1647,57 @@ function checkProbe(src) {
     const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
     const va = f6Run(R, rd);
     const vb = f6Run(Rn, rd);
-    const ex = va.cells.filter((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'e1t3' && c.exposed && c.exposed.source.some((s) => s.startsWith('11/8 근본원인 §2 A'))).map((c) => c.delay);
+    // J1-B ①: 노12 출처 글자 정정(「§2 A」 → 「§2 묶음 A(지금 판)」 · 옛 글자 = rules _source_옛값_J1B)에 맞춤 — 단언 뜻(세 칸에 노12 표지) 무변
+    // ⬛ 옛 줄: c.exposed.source.some((s) => s.startsWith('11/8 근본원인 §2 A'))
+    const ex = va.cells.filter((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'e1t3' && c.exposed && c.exposed.source.some((s) => s.startsWith('11/8 근본원인 §2 묶음 A(지금 판'))).map((c) => c.delay);
     check('고침6 T10: 노출 표 넣은 · 뺀 두 verdict = 표지 밖 같음 · e1t3 kbd-open 0 · 150 · 300 세 칸에 노12 표지 · I-4 독립성 글자',
       JSON.stringify(strip(va)) === JSON.stringify(strip(vb)) && JSON.stringify(ex) === '[0,150,300]' && va.items['I-4'].independenceNote === F5x.independenceNote && va.items['I-4'].contrastByCase['kbd-open'].state === F5x.contrastHolds, { ex });
     const mj = mutantJudge((s) => s.replace('    const ccs = cs.filter(isCc);', '    const ccs = cs.filter(isCc).filter((c) => exposureOf(rules, c).length === 0);'));
     const vm = mj ? f6Run(R, rd, mj) : null;
     const vmn = mj ? f6Run(Rn, rd, mj) : null;
     plant('고침6 T10 심은 위반: 노출 칸을 대조에서 빼는 judge 사본(표지가 판정값을 바꿈) → 두 벌 다름 → 빨강', !!vm && JSON.stringify(strip(vm)) !== JSON.stringify(strip(vmn)));
+  }
+  // J1-B(반려 [3-V] 2-b) 판독기 — 머리 escWait 없음 · 값 깨짐 = 장치 빨강 / I-4/kbd-open 초점 판독값 참거짓 아님 = 표본 device_failure
+  {
+    const DRx = rules.deviceReading;
+    const rdOk = (c) => ({ openCountAfterEsc: c.screen === 'before' ? 1 : 0, focusOnSameRowBtn: true });
+    const hasEw = (v) => v.redReasons.includes(DRx.i4EscWaitMissing);
+    const v0 = f6Run(onlyI4(1), rdOk);
+    const HB = [
+      ['escWaitMs 없음(머리 null)', (r) => { delete r.device.i4.escWaitMs; }, (v) => v.escWait === null],
+      ['pollAfterEscMaxMs 없음', (r) => { delete r.device.i4.pollAfterEscMaxMs; }, (v) => !!v.escWait && v.escWait.pollAfterEscMaxMs === null],
+      ['openPollMs 0', (r) => { r.device.i4.openPollMs = 0; }, (v) => !!v.escWait],
+      ['menuZeroFailCases 글자', (r) => { r.device.i4.menuZeroFailCases = 'kbd-open'; }, (v) => !!v.escWait && v.escWait.menuZeroFailCases === null]
+    ];
+    const hbRun = (jm) => HB.map(([name, f, shape]) => { const R = onlyI4(1); f(R); const v = f6Run(R, rdOk, jm); return { name, ok: v.red === true && hasEw(v) && shape(v), red: v.red }; });
+    const hb = hbRun();
+    const Rn = JSON.parse(JSON.stringify(rules)); Rn.plan.items = ['I-1']; Rn.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 }; delete Rn.device.i4.escWaitMs;
+    const vn = f6Run(Rn, () => ({}));
+    check('J1-B 2-b 판독기: I-4 칸 계획 + 머리 escWait 없음 · 값 깨짐(4꼴) → 장치 빨강(사유 「I-4 칸 계획 있음 · verdict 머리 escWait 없음 …」) · 대조군 = 온전한 rules 엔 그 사유 0 · I-4 칸 없는 계획엔 그 사유 0',
+      hb.every((x) => x.ok) && !hasEw(v0) && !!v0.escWait && !hasEw(vn), { hb: hb.filter((x) => !x.ok), v0: v0.redReasons.slice(0, 3) });
+    const mjE = mutantJudge((s) => s.replace("  if (plan.cells.some((c) => c.item === 'I-4') && escWaitHeadBad(verdict.escWait)) {", '  if (false) {'));
+    const hbm = mjE ? hbRun(mjE) : null;
+    plant('J1-B 2-b 판독기 심은 위반: 머리 escWait 검사 뺀 judge 사본 → 4꼴 모두 그 사유 없음 → 빨강', !!hbm && hbm.every((x) => !x.ok), hbm && hbm.map((x) => x.red));
+    // focusOnSameRowBtn 참/거짓 아님 — /after kbd-open 300 칸 표본 하나에 null · 빠짐 · 글자 「false」 · 숫자 0
+    const target = (c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'after' && c.delay === 300;
+    const BADF = [['null', null], ['빠짐', undefined], ['글자 false', 'false'], ['숫자 0', 0]];
+    const fnbRun = (jm) => BADF.map(([name, val]) => {
+      const v = f6Run(onlyI4(1), (c) => {
+        if (target(c)) { const r = { openCountAfterEsc: 0 }; if (val !== undefined) r.focusOnSameRowBtn = val; return r; }
+        if (c.case === 'mouse-open' && c.screen === 'after') return { openCountAfterEsc: 1, focusOnSameRowBtn: null }; // mouse-open 메뉴 0 못 봄 = 유효(구현 판단 · 무변)
+        return rdOk(c);
+      }, jm);
+      const cell = v.cells.find((c) => target(c));
+      const mo = v.cells.filter((c) => c.item === 'I-4' && c.case === 'mouse-open' && c.screen === 'after');
+      return { name, ok: v.red === true && cell.valid === 0 && cell.excluded.deviceFailure === 1 && v.redReasons.includes(`${DRx.i4FocusNotBool} 1건`), moValid: mo.every((c) => c.valid === 1), valid: cell.valid };
+    });
+    const fb = fnbRun();
+    const c0 = v0.cells.find((c) => target(c));
+    check('J1-B 2-b 판독기: I-4/kbd-open 표본 focusOnSameRowBtn 이 참/거짓 아님(null · 빠짐 · 「false」 · 0) → 그 표본 device_failure(칸 유효 0 · 제외 1 · 빨강 사유) · mouse-open null 은 유효 그대로 · 대조군 참 = 유효',
+      fb.every((x) => x.ok && x.moValid) && c0.valid === 1 && !v0.redReasons.some((r) => r.startsWith(DRx.i4FocusNotBool)), { fb: fb.filter((x) => !x.ok || !x.moValid) });
+    const mjF = mutantJudge((s) => s.replace("      && typeof (s.readings || {}).focusOnSameRowBtn !== 'boolean') {", '      && false) {'));
+    const fbm = mjF ? fnbRun(mjF) : null;
+    plant('J1-B 2-b 판독기 심은 위반: 참거짓 검사 뺀 judge 사본 → 4꼴 모두 유효로 셈(통과로 샘) → 빨강', !!fbm && fbm.every((x) => !x.ok && x.valid === 1), fbm && fbm.map((x) => x.valid));
   }
 }
 
@@ -1651,9 +1718,12 @@ function mutantI4(mutate) {
 // 가짜 세계: 여는 키(Enter · Space 뗌 · 칩 누름) 뒤 openLatMs 에 목록 열림 · Esc 뒤 closeLatMs 에 메뉴 0 · 메뉴 0 뒤 restoreAfterZeroMs 에 초점 복원
 //   null = 그 일이 안 일어남. hqaSame=false 면 HQA 식만 거짓(두 식이 갈리는 꼴).
 function fakeWorld(opt) {
-  const o = Object.assign({ openLatMs: 137, closeLatMs: 120, restoreAfterZeroMs: 200, hqaSame: true }, opt || {});
-  const w = { t: F6.T0, openAt: null, zeroAt: null, restoreAt: null, escAt: null, keyAt: null, opens: 0 };
-  const isOpen = () => w.openAt !== null && w.t >= w.openAt && !(w.zeroAt !== null && w.t >= w.zeroAt);
+  // J1-B: selfCloseAfterOpenMs = 열린 뒤 그 ms 에 Esc 없이 저절로 닫힘 · reopenAfterMs = 닫힌 뒤 그 ms 에 다시 열림(null = 안 열림) — 기본 null(옛 세계 그대로)
+  //   읽기 상한(maxReads) — 규칙 값이 깨진 돌연변이가 끝없이 돌지 않게(넘으면 예외 · 시험은 빨강으로 셈)
+  const o = Object.assign({ openLatMs: 137, closeLatMs: 120, restoreAfterZeroMs: 200, hqaSame: true, selfCloseAfterOpenMs: null, reopenAfterMs: null, maxReads: 20000 }, opt || {});
+  const w = { t: F6.T0, openAt: null, zeroAt: null, restoreAt: null, escAt: null, keyAt: null, opens: 0, reads: 0 };
+  const inDip = () => o.selfCloseAfterOpenMs !== null && w.openAt !== null && w.t >= w.openAt + o.selfCloseAfterOpenMs && (o.reopenAfterMs === null || w.t < w.openAt + o.selfCloseAfterOpenMs + o.reopenAfterMs);
+  const isOpen = () => w.openAt !== null && w.t >= w.openAt && !(w.zeroAt !== null && w.t >= w.zeroAt) && !inDip();
   const restored = () => w.restoreAt !== null && w.t >= w.restoreAt;
   w.state = () => ({
     openCount: isOpen() ? 1 : 0,
@@ -1671,7 +1741,7 @@ function fakeWorld(opt) {
   w.fakes = {
     nowMs: () => w.t,
     wait: async (ctx, ms) => { w.t += ms; },
-    readState: async () => { w.t += F6.READ_COST; return w.state(); },
+    readState: async () => { w.reads += 1; if (w.reads > o.maxReads) throw new Error('가짜 세계 읽기 상한'); w.t += F6.READ_COST; return w.state(); },
     readHqaFocusRow: async () => { w.t += F6.READ_COST; return restored() && o.hqaSame ? '1' : null; },
     press: async (ctx, key) => { rec(ctx, 'press', key); if (key === 'Enter') openKey(); if (key === 'Escape') esc(); w.t += 2; },
     down: async (ctx, key) => { rec(ctx, 'down', key); w.t += 2; },
@@ -1710,7 +1780,9 @@ async function fix6Checks() {
   const t2m = await runFakeI4(i4, fakeWorld({ openLatMs: 49 }), f6Cell('mouse-open', 'before', 0));
   check('고침6 T2: 기다림 — rules escWaitMs 700 · openPollMs 50 · 열림 관측 → Esc 사이 [700, 700+읽기] · 실제 열림 → Esc 사이 [700, 750+읽기] · kbd-open · mouse-open 모두',
     d4.escWaitMs === 700 && d4.openPollMs === 50 && /6709803008/.test(d4.escWaitRef) && inT2(t2k) && inT2(t2m), { k: t2k.R && t2k.R.actualWaitMs, kOpen: t2k.escMinusOpen, m: t2m.R && t2m.R.actualWaitMs, mOpen: t2m.escMinusOpen, err: t2k.err || t2m.err });
-  const m0 = mutantI4((s) => s.replace('  if (restMs > 0) await L.wait(ctx, restMs);\n', ''));
+  // J1-B: 기다림 줄이 관측 loop 로 바뀜 → 같은 돌연변이(escWaitMs 무시)를 새 줄에(옛 글자 = 아래 주석)
+  // ⬛ 옛 돌연변이: s.replace('  if (restMs > 0) await L.wait(ctx, restMs);\n', '')
+  const m0 = mutantI4((s) => s.replace('  const holdEnd = L.nowMs() + Math.max(0, restMs);\n', '  const holdEnd = L.nowMs();\n'));
   const t2z = m0 ? await runFakeI4(m0, fakeWorld(), f6Cell('kbd-open', 'after', 300)) : null;
   plant('고침6 T2 심은 위반: escWaitMs 무시(기다림 줄 뺀 사본) → 기다림 단언 빨강', !!m0 && !t2z.err && t2z.escs === 1 && !inT2(t2z), t2z && { wait: t2z.R && t2z.R.actualWaitMs, err: t2z.err });
   const m1 = mutantI4((s) => s.replace('  const ob = await L.waitOpenObserved(ctx, d4.openPollMs);\n', '  const tStart = L.nowMs() - ctx.sig.t0;\n  const ob = await L.waitOpenObserved(ctx, d4.openPollMs);\n')
@@ -1721,7 +1793,10 @@ async function fix6Checks() {
   const t3 = await runFakeI4(i4, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150));
   const t3ok = (x) => !!x && x.escs === 0 && !!x.err && x.err.startsWith(DR.i4OpenNotObserved) && x.out === null;
   check('고침6 T3: 열림 미관측 → Esc 누름 0 · 표본 = 장치 실패(예외 · 사유 「열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립」)', DR.i4OpenNotObserved === '열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립' && t3ok(t3), { err: t3.err, escs: t3.escs });
-  const m3 = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, ''));
+  // J1-B: 기다림 관측(2-a)이 두 번째로 막아 관측 단언만 뺀 사본은 Esc 를 안 누름 → 옛 꼴(미관측인데 Esc)을 재현하려고 기다림 관측 단언 줄도 함께 뺌
+  //   (관측 단언만 뺀 사본 = 아래 「J1-B 이중 막음」 새 단언)
+  // ⬛ 옛 돌연변이: s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, '')
+  const m3 = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, '').replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, ''));
   const t3b = m3 ? await runFakeI4(m3, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150)) : null;
   plant('고침6 T3 심은 위반: 미관측인데 Esc 누름(관측 단언 줄 뺀 사본) → 빨강', !!m3 && t3b.escs === 1 && !t3ok(t3b), t3b && { escs: t3b.escs, err: t3b.err });
   // T3 판독기 쪽: 그 꼴 표본(valid=false · errors = 사유) 이 든 칸 → 장치 실패 · 대조 불가(통과로 안 샘)
@@ -1778,6 +1853,7 @@ async function fix6Checks() {
   const w6 = m6 ? await waits(m6) : null;
   plant('고침6 T6 심은 위반: 코드가 e1t3 화면만 기다림 0(돌연변이 사본) → 그 칸 빨강', !!w6 && w6.every((x) => x.ran) && w6.some((x) => !x.ok) && w6.filter((x) => !x.ok).every((x) => x.key.includes('|e1t3|')), w6 && w6.filter((x) => !x.ok).length);
   await fix6PollChecks(i4);
+  await fix6bChecks(i4); // J1-B 반려 고침 — 700ms 유지 관측 · 규칙 값 단언
 }
 // 고침6 c3 — T4 polling 판독 · T5 메뉴 0 미관측 · 결-12 두 식 · mouse-open 열림 남음(구현 판단 지킴)
 async function fix6PollChecks(i4) {
@@ -1828,6 +1904,76 @@ async function fix6PollChecks(i4) {
   check('고침6 결-12 원문: _lib readHqaFocusRow 의 evaluate 식 = HQA 원문 L47 식 글자 그대로 · rules 표지에 같은 식 · 소스 대조 근거(FixturePage L51 · 팝오버 칸 밖 · #detail)',
     !!hb && hb.includes(HQA_EXPR) && evalBodies(hb).length === 1 && rules.device.i4._hqaFocusRow1_표지_고침6.includes(HQA_EXPR + " === '1'") && /FixturePage\.razor L51/.test(rules.device.i4._hqaFocusRow1_표지_고침6) && /#detail/.test(rules.device.i4._hqaFocusRow1_표지_고침6));
   plant('고침6 결-12 원문 대조군: 식을 [data-row] 로 바꾼 사본 → 원문 식 단언 빨강', !!hb && !(fnBody(libSrc.replace("closest('[data-status-kind]')?.getAttribute('data-row')", "closest('[data-row]')?.getAttribute('data-row')"), 'readHqaFocusRow') || '').includes(HQA_EXPR));
+}
+
+// ── J1-B(반려 고침 · [3-V] 2-a · 2-b) — I-4 700ms 유지 관측 · 규칙 값 단언 (가짜 L · 돌연변이 사본 · 브라우저 · 망 0) ──
+async function fix6bChecks(i4) {
+  const d4 = rules.device.i4;
+  const DR = rules.deviceReading;
+  // 2-a 정상 세계: 기다리는 동안 간격 관측 · Esc 직전 읽기 · 새 칸 openCountAtEsc · 옛 칸 openCountBeforeEsc 그대로
+  const minReads = Math.floor(d4.escWaitMs / (d4.openPollMs + F6.READ_COST));
+  const holdOk = (x) => !!x && !x.err && x.escs === 1 && x.R.openCountAtEsc === 1 && x.R.openCountBeforeEsc === 1 && typeof x.R.holdReads === 'number' && x.R.holdReads >= minReads;
+  const hk = await runFakeI4(i4, fakeWorld(), f6Cell('kbd-open', 'after', 300));
+  const hm = await runFakeI4(i4, fakeWorld(), f6Cell('mouse-open', 'before', 0));
+  const keyLen = ['i4OpenNotHeld', 'i4RuleBad', 'i4EscWaitMissing', 'i4FocusNotBool'].every((k) => k.length <= 21 && typeof DR[k] === 'string' && DR[k].length > 0);
+  check(`J1-B 2-a: 700ms 기다림 = 간격 ${d4.openPollMs}ms 관측 — Esc 직전 열린 목록 1(openCountAtEsc) · 기다리는 동안 읽기 ≥ ${minReads} · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자`,
+    holdOk(hk) && holdOk(hm) && keyLen, { k: hk.R && [hk.R.openCountAtEsc, hk.R.holdReads], m: hm.R && [hm.R.openCountAtEsc, hm.R.holdReads], err: hk.err || hm.err });
+  // 2-a 실패 세계: 열린 뒤 300ms 에 Esc 없이 닫힘(그대로 · 또는 100ms 뒤 다시 열림) → Esc 누름 0 · 표본 = 장치 실패(예외 · 사유 i4OpenNotHeld)
+  const closeOk = (x) => !!x && x.out === null && x.escs === 0 && !!x.err && x.err.startsWith(DR.i4OpenNotHeld);
+  const W_CLOSE = { selfCloseAfterOpenMs: 300 };
+  const W_DIP = { selfCloseAfterOpenMs: 300, reopenAfterMs: 100 };
+  const ck = await runFakeI4(i4, fakeWorld(W_CLOSE), f6Cell('kbd-open', 'e1t3', 300));
+  const cm = await runFakeI4(i4, fakeWorld(W_CLOSE), f6Cell('mouse-open', 'before', 0));
+  const cd = await runFakeI4(i4, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150));
+  check('J1-B 2-a: 기다리는 동안 메뉴 닫힘(그대로 · 100ms 닫혔다 다시 열림) → Esc 누름 0 · 표본 = 장치 실패(예외 · 「Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 …」) · kbd-open · mouse-open',
+    closeOk(ck) && closeOk(cm) && closeOk(cd), { k: ck.err, m: cm.err, d: cd.err, escs: [ck.escs, cm.escs, cd.escs] });
+  const mh = mutantI4((s) => s.replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, ''));
+  const ckm = mh ? await runFakeI4(mh, fakeWorld(W_CLOSE), f6Cell('kbd-open', 'e1t3', 300)) : null;
+  plant('J1-B 2-a 심은 위반: 기다림 관측 단언 줄 뺀 사본 → 닫힌 메뉴에 Esc 누름 · 표본 판독 → 빨강', !!mh && !ckm.err && ckm.escs === 1 && !closeOk(ckm), ckm && { escs: ckm.escs, err: ckm.err });
+  const m1r = mutantI4((s) => s.replace('    if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));\n', '    if (left > 0) await L.wait(ctx, left);\n'));
+  const cdm = m1r ? await runFakeI4(m1r, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150)) : null;
+  plant('J1-B 2-a 심은 위반: 기다림 끝에 한 번만 읽는 사본(간격 관측 0) → 100ms 닫힘을 못 봄 → Esc 누름 → 빨강', !!m1r && !cdm.err && cdm.escs === 1 && !closeOk(cdm), cdm && { escs: cdm.escs, err: cdm.err });
+  // J1-B 이중 막음: 열림 관측 단언만 뺀 사본(옛 T3 돌연변이) → 기다림 관측이 Esc 를 막음(Esc 0 · 사유 i4OpenNotHeld)
+  const m3o = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, ''));
+  const t3o = m3o ? await runFakeI4(m3o, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150)) : null;
+  check('J1-B 이중 막음: 열림 관측 단언만 뺀 사본 + 열림 0 세계 → 기다림 관측이 Esc 를 막음(Esc 0 · 장치 실패)', !!m3o && closeOk(t3o), t3o && { escs: t3o.escs, err: t3o.err });
+  // 2-b 규칙 값 단언 — 키 셋 · 배열을 하나씩 빼거나 깨뜨린 rules 사본마다 입력 0 · 표본 = 장치 실패(사유 i4RuleBad)
+  const BRK = [
+    ['escWaitMs 없음', (r) => { delete r.device.i4.escWaitMs; }],
+    ['openPollMs 없음', (r) => { delete r.device.i4.openPollMs; }],
+    ['pollAfterEscMaxMs 없음', (r) => { delete r.device.i4.pollAfterEscMaxMs; }],
+    ['menuZeroFailCases 없음', (r) => { delete r.device.i4.menuZeroFailCases; }],
+    ['escWaitMs 글자', (r) => { r.device.i4.escWaitMs = '700'; }],
+    ['escWaitMs 무한', (r) => { r.device.i4.escWaitMs = Infinity; }],
+    ['openPollMs 0', (r) => { r.device.i4.openPollMs = 0; }],
+    ['pollAfterEscMaxMs 음수', (r) => { r.device.i4.pollAfterEscMaxMs = -5; }],
+    ['menuZeroFailCases 글자', (r) => { r.device.i4.menuZeroFailCases = 'kbd-open'; }]
+  ];
+  const ruleOk = (x) => !!x && x.out === null && !!x.err && x.err.startsWith(DR.i4RuleBad) && x.inputs.length === 0;
+  const brkRun = async (fn, kase) => {
+    const out = [];
+    for (const [name, f] of BRK) {
+      const r = JSON.parse(JSON.stringify(rules));
+      f(r);
+      const x = await runFakeI4(fn, fakeWorld(), f6Cell(kase, kase === 'mouse-open' ? 'before' : 'after', 150), r);
+      out.push({ name, ok: ruleOk(x), err: x.err ? x.err.slice(0, 60) : null, inputs: x.inputs.length });
+    }
+    return out;
+  };
+  const bk = await brkRun(i4, 'kbd-open');
+  const bm = await brkRun(i4, 'mouse-open');
+  const iSrc = fs.readFileSync(F6.I, 'utf8');
+  const codeOnly = iSrc.split(/\r?\n/).filter((ln) => !/^\s*\/\//.test(ln)).join('\n');
+  check(`J1-B 2-b: 규칙 값 ${BRK.length}꼴(키 셋 · 배열 빠짐 · 글자 · 무한 · 0 · 음수) 하나씩 깬 rules 사본 → 입력 0 · 표본 = 장치 실패(「I-4 규칙 값 빠짐 · 깨짐 …」) · 두 경우 · 코드에 「menuZeroFailCases || []」 0`,
+    bk.every((x) => x.ok) && bm.every((x) => x.ok) && !/menuZeroFailCases \|\| \[\]/.test(codeOnly), { bad: bk.concat(bm).filter((x) => !x.ok) });
+  const ma = mutantI4((s) => s.replace(/  if \(ruleBad\.length\) throw new Error\([^\n]*\n/, ''));
+  const bka = ma ? await brkRun(ma, 'kbd-open') : null;
+  plant(`J1-B 2-b 심은 위반: 규칙 단언 줄 뺀 사본 → ${BRK.length}꼴 모두 단언 빨강(진행하거나 엉뚱한 예외)`, !!ma && bka.every((x) => !x.ok), bka && bka.map((x) => [x.name, x.err]));
+  const mo = mutantI4((s) => s.replace('  if (!pa.menuZeroObserved && d4.menuZeroFailCases.includes(ctx.cell.case)) {', '  if (!pa.menuZeroObserved && (d4.menuZeroFailCases || []).includes(ctx.cell.case)) {')
+    .replace(/  if \(ruleBad\.length\) throw new Error\([^\n]*\n/, ''));
+  const rNo = JSON.parse(JSON.stringify(rules)); delete rNo.device.i4.menuZeroFailCases;
+  const lk = mo ? await runFakeI4(mo, fakeWorld({ closeLatMs: null }), f6Cell('kbd-open', 'e1t3', 300), rNo) : null;
+  plant('J1-B 2-b 대조군(옛 꼴 「|| []」 + 단언 0 사본): 목록 빠진 rules · kbd-open 메뉴 안 닫힘 → 장치 실패 없이 판독값이 나옴(새는 길 재현)', !!mo && !lk.err && !!lk.R && lk.R.menuZeroObserved === false, lk && { err: lk.err });
 }
 
 // ── 결과─────────────────────────────────────────────────────────────

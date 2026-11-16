@@ -126,8 +126,20 @@ async function i3(ctx) {
   }];
 }
 
+// J1-B(반려 [3-V] 2-b) — I-4 규칙 값 단언: 기다림 · 관측 간격 · polling 상한 = 양의 유한수 · 메뉴 0 실패 경우 = 배열.
+//   빠지거나 깨진 칸 이름 목록을 돌려준다(빈 목록 = 정상). 기본값으로 메우지 않는다(값이 빠진 채 진행하면 HQA 절차가 아닌 것을 잰다).
+function i4RuleBadKeys(d4) {
+  if (!d4 || typeof d4 !== 'object') return ['device.i4'];
+  const pos = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const bad = ['escWaitMs', 'openPollMs', 'pollAfterEscMaxMs'].filter((k) => !pos(d4[k]));
+  if (!Array.isArray(d4.menuZeroFailCases)) bad.push('menuZeroFailCases');
+  return bad;
+}
+
 // I-4 Esc — 마우스로 연 뒤 · 키보드로 연 뒤 · 닫힌 뒤 초점
 async function i4(ctx) {
+  const ruleBad = i4RuleBadKeys(ctx.rules.device.i4); // J1-B(2-b): 첫 일 = 규칙 값 단언 · 깨지면 입력 0 으로 표본 = 장치 실패
+  if (ruleBad.length) throw new Error(`${ctx.rules.deviceReading.i4RuleBad} · ${ruleBad.join('·')} · 입력 0`);
   const row = String(ctx.rules.device.i4.row);
   let reach = null;
   if (ctx.cell.case === 'mouse-open') {
@@ -146,7 +158,20 @@ async function i4(ctx) {
   if (!ob.observed) throw new Error(`${ctx.rules.deviceReading.i4OpenNotObserved} · Esc 누름 0 · 관측 간격 ${d4.openPollMs}ms · 상한 ${ctx.rules.device.openWaitMs + 2 * ctx.cell.delay}ms`);
   const st1 = ob.state;
   const restMs = d4.escWaitMs - (L.nowMs() - ctx.sig.t0 - ob.observedAtMs);
-  if (restMs > 0) await L.wait(ctx, restMs);
+  // ⬛ 옛 줄(J1 c2 ~ c6 · 기다리는 동안 읽기 0 → 「700ms 유지」 미확인 · 반려 [3-V] 2-a):
+  // if (restMs > 0) await L.wait(ctx, restMs);
+  // 🔴 J1-B(2-a) — 기다림 = openPollMs 간격 관측 · Esc 직전 읽기 최소 1 · 그 사이 열린 목록 0 을 한 번이라도 보면 Esc 누름 0 · 장치 실패
+  const holdEnd = L.nowMs() + Math.max(0, restMs);
+  let stEsc = null;
+  let holdReads = 0;
+  for (;;) {
+    const left = holdEnd - L.nowMs();
+    if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));
+    stEsc = await L.readState(ctx);
+    holdReads += 1;
+    if (stEsc.openCount === 0) throw new Error(`${ctx.rules.deviceReading.i4OpenNotHeld} · Esc 누름 0 · 관측 뒤 ${L.nowMs() - ctx.sig.t0 - ob.observedAtMs}ms · 기다림 ${d4.escWaitMs}ms · 간격 ${d4.openPollMs}ms`);
+    if (L.nowMs() >= holdEnd) break;
+  }
   const escPressedAtMs = L.nowMs() - ctx.sig.t0;
   await L.press(ctx, 'Escape');
   // ⬛ 옛 줄(고침6 c2 까지 · 고정 settle 뒤 마지막 상태 하나):
@@ -154,14 +179,20 @@ async function i4(ctx) {
   // focusOnSameRowBtn: s.state.focus.row === row && s.state.focus.isStatusActivator && !s.state.focus.inOpenList,
   // 🔴 고침6 c3(결-5 · 결-12) — Esc → 메뉴 0 관측 → 최대 pollAfterEscMaxMs polling · 두 식(지금 식 · HQA 원문 식) 각각 기록
   const pa = await L.pollAfterEsc(ctx, d4.openPollMs, d4.pollAfterEscMaxMs);
-  if (!pa.menuZeroObserved && (d4.menuZeroFailCases || []).includes(ctx.cell.case)) {
+  // ⬛ 옛 줄(J1 c3 · 목록 칸이 빠지면 빈 목록으로 메움 → kbd-open 메뉴 0 못 봄이 통과로 샘 · 반려 [3-V] 2-b):
+  // if (!pa.menuZeroObserved && (d4.menuZeroFailCases || []).includes(ctx.cell.case)) {
+  if (!pa.menuZeroObserved && d4.menuZeroFailCases.includes(ctx.cell.case)) {
     throw new Error(`${ctx.rules.deviceReading.i4MenuZeroNotObserved} · 열린 목록 ${pa.state.openCount} · 상한 ${ctx.rules.device.openWaitMs + 2 * ctx.cell.delay}ms · Esc ${escPressedAtMs}ms`);
   }
   const s = { state: pa.state }; // 같은 줄 번호(row)는 pollAfterEsc 가 rules device.i4.row 로 읽는다(같은 값)
   return [{
     readings: {
       openPath: ctx.cell.case, tabsToReach: reach ? reach.tabs : null,
+      // 옛 이름 그대로 · 뜻 = 「열린 메뉴 관측 시점」 의 열린 목록 수(Esc 직전 아님 · 이름만 Before) — rules device.i4._openCountAtEsc_표지_J1B
       openCountBeforeEsc: st1.openCount,
+      // J1-B(2-a): Esc 직전 마지막 읽기의 열린 목록 수(기다림 관측이 통과했으니 ≥ 1) · 기다리는 동안 읽은 수
+      openCountAtEsc: stEsc.openCount, holdReads,
+      // openCountAfterEsc · focusAfterEsc · maxOpenAfterEsc = pollAfterEsc 가 멈춘 시각 값(두 식 모두 참이면 3초 전에 멈춤 · 3초 끝 값 아님) — J1-B [4] ④
       openCountAfterEsc: s.state.openCount,
       focusAfterEsc: s.state.focus,
       focusOnSameRowBtn: pa.menuZeroObserved ? pa.restoredAtMs !== null : null,

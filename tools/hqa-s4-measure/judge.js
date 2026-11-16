@@ -426,6 +426,13 @@ function effective(rules, samples) {
       eff.set(s, { valid: false, reading: 'device_failure', reason: rules.readingText.h4.i8InputViolation, mismatch: false, inputViolation: Array.isArray(s.inputs) ? s.inputs.length : null });
       continue;
     }
+    // J1-B(반려 [3-V] 2-b): I-4/kbd-open 표본(미도달 아님)의 초점 판독값이 참/거짓이 아니면 device_failure —
+    //   실패 꼴 「focusOnSameRowBtn === false」 가 null · 빠짐 · 글자를 「실패 아님」 으로 읽어 통과로 새는 길을 막는다
+    if (s.item === 'I-4' && s.case === 'kbd-open' && s.valid === true && !(s.kbd && s.kbd.reached === false) && s.deviceReading !== 'keyboard_unreachable'
+      && typeof (s.readings || {}).focusOnSameRowBtn !== 'boolean') {
+      eff.set(s, { valid: false, reading: 'device_failure', reason: rules.deviceReading.i4FocusNotBool, mismatch: false, focusNotBool: true });
+      continue;
+    }
     if (s.kbd && s.kbd.reached === false) {
       const g = kbdGate(rules, s, afterReach[groupKey(s)] || 0);
       eff.set(s, { valid: g.valid, reading: g.reading, reason: g.reason, mismatch: (s.valid === true) !== g.valid });
@@ -877,7 +884,11 @@ function judge(rules, samples, extra) {
     afterUnreachable: sum((c) => c.excluded.afterUnreachable), deviceFailure: sum((c) => c.excluded.deviceFailure),
     outOfPlan: unplanned.length, maskConflict: sum((c) => c.excluded.maskConflict), maskedRead: sum((c) => c.excluded.maskedRead)
   };
-  return {
+  // J1-B(반려 [3-V] 2-b): I-4/kbd-open 초점 판독값이 참/거짓이 아닌 표본 수(표본 device_failure 와 따로 빨강 사유)
+  const focusNotBool = samples.filter((s) => eff.get(s) && eff.get(s).focusNotBool).length;
+  if (focusNotBool) redReasons.push(`${D.i4FocusNotBool} ${focusNotBool}건`);
+  // ⬛ 옛 줄(J1 c6 까지 · verdict 를 바로 돌려줌 · 머리 escWait 검사 0): return {
+  const verdict = {
     marker: T.marker,
     rulesVersion: rules.rulesVersion,
     rulesSha256: (extra && extra.rulesSha256) || null,
@@ -921,6 +932,17 @@ function judge(rules, samples, extra) {
     items,
     cells
   };
+  // J1-B(반려 [3-V] 2-b): I-4 칸이 계획에 있는데 머리 escWait 가 null 이거나 값이 깨졌으면 장치 빨강(규칙 값이 빠진 채 잰 회차를 통과로 안 셈)
+  if (plan.cells.some((c) => c.item === 'I-4') && escWaitHeadBad(verdict.escWait)) {
+    verdict.redReasons.push(D.i4EscWaitMissing);
+    verdict.red = true;
+  }
+  return verdict;
+}
+// 머리 escWait 검사 — null · 기다림 · 관측 간격 · polling 상한이 양의 유한수 아님 · 메뉴 0 실패 경우가 배열 아님 = 깨짐
+function escWaitHeadBad(h) {
+  const pos = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  return !h || !pos(h.ms) || !pos(h.openPollMs) || !pos(h.pollAfterEscMaxMs) || !Array.isArray(h.menuZeroFailCases);
 }
 
 function argOf(argv, name) {

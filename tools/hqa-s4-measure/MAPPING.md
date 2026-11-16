@@ -56,6 +56,7 @@
 | 길게 누름 = 첫 지연 500ms · 반복 15회 · 간격 33ms | `device.i2.longPress` | 합성 키 반복이 실제 키 반복과 같은지는 HQA 판단(설계 §10) |
 | N-1 연타 = ↓ · ↑ 번갈아 24회 · 간격 0 · 연타 뒤 기다림 = 600 + 4×지연 + 1500ms | `device.n1` · `device.settle` | 고침6 11/16: 지연 = 방향당 ms · settle 식 무변(결-6 · 갈래 B `dd64098b` 방향당 시절 식) |
 | I-4 Esc = 열린 메뉴 관측(간격 50ms) → 700ms 유지 → Esc → 메뉴 0 관측 → 최대 3000ms polling(간격 50ms) · 옛 settle 안 씀 | `device.i4` escWaitMs · openPollMs · pollAfterEscMaxMs · menuZeroFailCases | 고침6 11/16(결-2 · 결-3 · 결-5 · 결-7) — 700 = HQA 원문 · 50 = 개발팀 사전 고정 · 메뉴 0 못 봄 = kbd-open 만 장치 실패(구현 판단 · PM 확인 대기) · I-6 esc = HQA 기다림 절차 없음 · 그대로 |
+| J1-B 11/17: 700ms 기다림 = 간격 50ms 관측(Esc 직전 읽기 최소 1 · 그 사이 열린 목록 0 = Esc 누름 0 · 장치 실패) · 규칙 값 단언(양의 유한수 · 배열 · 아니면 입력 0) · menuZeroFailCases = kbd-open 만 **PM 승인** | `device.i4` `_openCountAtEsc_표지_J1B` · `_ruleAssert_표지_J1B` · `_menuZeroFailCases_표지_J1B` · `deviceReading` i4OpenNotHeld · i4RuleBad | 위 줄 「PM 확인 대기」 닫힘. mouse-open 판독 창 = 옛 settle(600 + 4×지연) → 메뉴 0 상한(3000 + 2×지연) — HQA 절차(메뉴 0 관측)를 따른 것 · 공개 묶음 「공개 기준 변경 이력」 몫(장치 코드 무변) |
 | N-2 Enter 사이 120ms | `device.n2` | |
 | 회로 연결 기다림 = `_blazor` 웹소켓 첫 프레임 · 그 뒤 600 + 4×지연 ms | `run-items.js` · `device.settle` | 미리 그리기 켬(README §9) — 붙기 전 입력 0 · 고침6 11/16: 지연 = 방향당 ms(식 무변) |
 | 콘솔 꼴 = circuit · 「connection … closed/disconnected/lost」 · 「websocket … closed/failed」 중 하나(대소문자 무시) | `device.circuit.consolePattern` | 신호 정의의 맞음은 `/before` 재현으로 드러남 |
@@ -237,6 +238,10 @@
 | (H1-7 제외 판독) | `/after` 칸 `cells[].exclusionReview{count, ofGot, sameShapeAsD1, reading}` · 머리 `hiddenDefectSuspect` | `judge.js` | 제외 표본이 결함을 숨기는지 판독 도움 · 판정 = HQA |
 | `totals.planned`(옛 · 칸 수) | `totals.plannedSamples` · `gotSamples` · `missingSamples` · `excluded{afterUnreachable · deviceFailure · outOfPlan · maskConflict · maskedRead}` · `withheldFiles` · 칸 `missing` · `excluded` | `judge.js` | 분모 · 제외 수(H1-1) |
 | `run.json` `round_line.round` · `red`(옛: verdict 보류 · 없음이면 null) | **고침5-B ⓒ**: 장전 · verdict 없음 → `round{state: 「판정 불가/미통과」, reasons: [보류 또는 없음 글자], red: true}` · `red: true` · `round_from` / **ⓑ** `verdict_file` · `verdict_sha256` · `verdict_holds` | `boot.sh round` | 분모 · 제외 수 · 은폐 판독은 verdict 안(SHA 목록 안) — run.json 은 verdict 파일 이름 · SHA 만 가리킴 · 리허설은 null 그대로 |
+| `openCountBeforeEsc`(옛 이름 · 그대로) | `cells` 표본 `readings.openCountBeforeEsc` | `items/i-items.js` i4 | **J1-B 정정**: 뜻 = 「열린 메뉴 관측 시점」 의 열린 목록 수(Esc 직전 아님 · 이름만 Before) |
+| (J1-B 새 칸) | `readings.openCountAtEsc` · `readings.holdReads` | `items/i-items.js` i4 | Esc 직전 마지막 읽기의 열린 목록 수(≥ 1) · 700ms 기다리는 동안 간격 50ms 로 읽은 수 — 그 사이 0 을 보면 표본 = 장치 실패(`deviceReading.i4OpenNotHeld`) |
+| 「Esc 뒤 끝 상태」 · `maxOpenAfterEsc`(3초 끝 값으로 읽힐 수 있던 글자) | `readings.openCountAfterEsc` · `focusAfterEsc` · `hqaFocusRowEnd` · `maxOpenAfterEsc` · `final` | `items/_lib.js` pollAfterEsc | **J1-B 정정([4] ④)**: 「멈춘 시각 값」 — 두 식이 모두 참이면 3초 전에 멈춤 · 아니면 3초 끝 · 메뉴 0 못 봄이면 메뉴 0 상한 끝. `maxOpenAfterEsc` = Esc 뒤 첫 읽기부터 멈춘 시각까지의 최댓값. 이름 · 판정 무변 |
+| (J1-B 판독기) | `redReasons` 의 `deviceReading.i4EscWaitMissing` · `i4FocusNotBool` · 표본 `device_failure` | `judge.js` | I-4 칸이 계획에 있는데 머리 `escWait` 없음 · 값 깨짐 = 장치 빨강 · I-4/kbd-open 표본의 `focusOnSameRowBtn` 이 참/거짓 아님 = 그 표본 device_failure(실패 꼴 `=== false` 로 통과로 새는 길 막음) |
 
 ## 10. 노출 칸 목록 (고침5 H3 §9-2 · 장전 전 공개 · 판정 · 표본 · 기대값 변경 0)
 
@@ -257,10 +262,12 @@
 | 노9 | N-1 · a2 · 0 · (구조 읽기 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐) | 리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1` | A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0 | 목록 밖 |
 | 노10 | (항목 칸 아님) after 첫 화면 | 리허설 2 · 3 · 4 `shots/probe.after.first.png` · `png_check` | `/after` 첫 화면 그림(입력 0) | 목록 밖(항목 결과 아님) |
 | 노11 | (항목 칸 아님) 선택자 존재 | 리허설 2 · 3 · 4 `screens[].selectors`(화면마다 11) | README 선택자 · 상태 칩 · 재연결 표시의 존재 · 찾은 ms | 목록 밖(항목 결과 아님) |
-| 노12 | I-4 · e1t3 · 0 · kbd-open / I-4 · e1t3 · 150 · kbd-open / I-4 · e1t3 · 300 · kbd-open | 11/8 근본원인 §2 A(시험 앱 `8e7f3208` After = e1t3 · 열림 뒤 700ms · Enter/Space 4꼴 × 3 · 공개 나무 `16e88c01`) · HQA #850 댓글 6709803008(방향당 300 · 4표본) | e1t3(= `8e7f3208` After) 키보드로 연 뒤 Esc → 초점 복원 — 방향당 0 · 150 = 복원(12/12 · 12/12) · 방향당 300 = 복원 실패(0/12) · HQA 11/7 방향당 300 4표본 실패 — 결과가 알려짐 | **목록 밖**(Q4ⓒ 독립성 제약 — e1t3 대조가 노출 칸 하나로 설 수 있음) |
+| 노12 | I-4 · e1t3 · 0 · kbd-open / I-4 · e1t3 · 150 · kbd-open / I-4 · e1t3 · 300 · kbd-open | 11/8 근본원인 §2 묶음 A(지금 판 · 시험 앱 `8e7f3208` After = e1t3 · 열림 뒤 700ms · Enter/Space 4꼴 × 3 · 공개 나무 `16e88c01`) — 칸별 알려진 결과: 방향당 0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY · HQA #850 댓글 6709803008(방향당 300 · 4표본) | e1t3(= `8e7f3208` After) 키보드로 연 뒤 Esc → 초점 복원 — 방향당 0 · 150 = 복원(12/12 · 12/12) · 방향당 300 = 복원 실패(0/12) · HQA 11/7 방향당 300 4표본 실패 — 결과가 알려짐 | **목록 밖**(Q4ⓒ 독립성 제약 — e1t3 대조가 노출 칸 하나로 설 수 있음) |
 | 노13 | (항목 칸 아님) a2 · 방향당 0 · 150 · 300 · 500 · 마우스로 연 뒤 Esc | 11/10 내부 F14 측정(Windows · Edge · `16e88c01` `20261110_1V_F14…` §3 · 11/10 리뷰서 L13) | A2 화면에서 마우스로 연 뒤 Esc 결과(개발팀 내부) · N-1 칸(화살표 연타)의 결과는 아님 | 목록 밖(참고 · 같은 화면 · 다른 행동) |
+| 노14 | (항목 칸 아님 · 참고) I-4 · after · 방향당 0 · 150 · 300 · kbd-open 의 가족 글자 | 11/8 수정안 A 사본(`644e27eb`+1줄 · 레포 미커밋) HQA 절차 측정 · 기다림 훑기 · `9c358a00`(A′) 글자 대조 | /after kbd-open(I-4 · 방향당 0·150·300) — 같은 칸 노출 없음. 가족 참고: 11/8 수정안 A 사본(`644e27eb`+1줄 · 레포 미커밋) HQA 절차 36/36 🟢 · 기다림 훑기(방향당 300 · 0~1800) 24/24 🟢. `9c358a00`(A′)은 A2 가드 · F13 · F14 를 더한 다른 글자. A′ 자체의 HQA 700ms 칸 측정 = 찾지 못함 | 목록 밖(참고 · 같은 칸 노출 없음 · 가족 글자 결과) |
 
 - 노출 칸 표본 수는 다른 칸과 같다(결-1 · 「노출 결과에 맞춘 표본 조정 금지」). 노출 칸을 판정에 어떻게 쓸지(독립성 대책)는 대표 안건 ② — 이 표는 사실 목록이다.
 - ~~지연 150 · 300 · 500 칸 · 창 330/200 칸 · I-3 · I-4 mouse-open · I-7 row-cell · N-2 = 노출 0(위 원천 3곳 기준).~~ (고침6 11/16 정정 — 노12 가 e1t3 kbd-open 150 · 300 칸을 덮음)
 - 지연 150 · 300 · 500 칸(노12 의 e1t3 kbd-open 150 · 300 빼고) · 창 330/200 칸 · I-3 · I-4 mouse-open · I-7 row-cell · N-2 = 노출 0(위 원천 3곳 + 11/8 근본원인 · HQA 11/7 기준).
 - 고침6 11/16(J1-6 · 결-9): 노12 = rules `exposure` 3행(지연 0 · 150 · 300 · 여는 키 칸 없음 = 모든 여는 키) · 노13 = rules `exposureNonCell`. `88085da1` `/after` 가 11/8 수정안 A′ blob 인지(U4)는 [4] 확인 뒤 공개 묶음 v3 에 반영 — 이 표엔 아직 안 넣음.
+- J1-B 11/17([4] ① · 판정 · 표본 · 기대값 무변): 노12 출처 글자 「§2 A」 → 「11/8 근본원인 §2 묶음 A(지금 판)」 + 칸별 알려진 결과(rules `exposure` 노12 행마다 `knownResult` · 옛 글자 `_source_옛값_J1B` · `_rawSource_옛값_J1B`). 노14 = `/after` kbd-open 참고 행(rules `exposureNonCell` · 판독기 표지 0 · 같은 칸 노출 없음 · 가족 글자 결과만).
