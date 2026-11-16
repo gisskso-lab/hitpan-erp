@@ -173,7 +173,7 @@
     },
     "beforeFailShape": {
       "_표지": "고침5 H1-4 — 항목별 /before 실패 꼴(정본 인용 있는 것만 defined=true · 꼴 함수 = judge.js BEFORE_FAIL). defined=false 면 그 항목 contrastState = 「대조 기준 미정」. 기대 글자 아님(대조 성립 여부만).",
-      "I-1": { "defined": true, "shape": "/before 키보드 미도달(D1 · keyboard_unreachable 표본)", "source": "A §3-4 · 11/7 작업지시서 §7-2 M6" },
+      "I-1": { "defined": true, "shape": "/before 키보드 미도달(D1 · keyboard_unreachable 표본)", "source": "A §3-2 항목 「키보드 탭 도달」 의 부정 · 참고 = 11/7 작업지시서 §7-2 M6(기대 채택 아님 · PM 대응 E-5)" },
       "I-2": { "defined": false, "shape": null, "source": null, "note": "확인 필요 — 정본 인용 대기(H3 · 설계) · 못 찾으면 「대조 기준 미정」 그대로" },
       "I-3": { "defined": true, "shape": "목록이 꼬리표를 덮음(readings.overlapAny)", "source": "A §2 검증팀장 1 · 11/7 작업지시서 M3" },
       "I-4": { "defined": true, "shape": "Esc 뒤 목록 열림 남음(readings.openCountAfterEsc ≥ 1)", "source": "A §3-2 · §4 코드 원문 대조 Esc 원인 문장" },
