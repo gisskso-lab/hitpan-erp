@@ -1,0 +1,75 @@
+{
+  "stage": "M4",
+  "ok": true,
+  "failed_step": null,
+  "exit_code": null,
+  "base_url": "http://127.0.0.1:5799",
+  "environment": "Production",
+  "waited_seconds": 1,
+  "content_root_ok": true,
+  "urls": [
+    {
+      "path": "/",
+      "code": 200,
+      "bytes": 14873
+    },
+    {
+      "path": "/before",
+      "code": 200,
+      "bytes": 45991
+    },
+    {
+      "path": "/after",
+      "code": 200,
+      "bytes": 47183
+    },
+    {
+      "path": "/after-a2",
+      "code": 200,
+      "bytes": 47188
+    },
+    {
+      "path": "/css/common/app.css",
+      "code": 200,
+      "bytes": 2841
+    },
+    {
+      "path": "/css/common/backoffice-v2.css",
+      "code": 200,
+      "bytes": 14053
+    },
+    {
+      "path": "/css/common/bootstrap.min.css",
+      "code": 200,
+      "bytes": 232803
+    },
+    {
+      "path": "/css/before/backoffice-dashboard.css",
+      "code": 200,
+      "bytes": 12455
+    },
+    {
+      "path": "/css/after/backoffice-dashboard.css",
+      "code": 200,
+      "bytes": 14782
+    },
+    {
+      "path": "/_content/MudBlazor/MudBlazor.min.css",
+      "code": 200,
+      "bytes": 608259
+    },
+    {
+      "path": "/_content/MudBlazor/MudBlazor.min.js",
+      "code": 200,
+      "bytes": 65657
+    },
+    {
+      "path": "/_framework/blazor.web.js",
+      "code": 200,
+      "bytes": 187457
+    }
+  ],
+  "stdout_lines_total": 102,
+  "stdout_tail_file": "m4-stdout.txt",
+  "stdout_tail_max": 200
+}

@@ -1,0 +1,141 @@
+{
+  "stage": "M0",
+  "ok": true,
+  "mode": "rehearsal",
+  "head": "79a0e3555b9266ce1c7c4cd5347e7feb328e7148",
+  "github_sha": "79a0e3555b9266ce1c7c4cd5347e7feb328e7148",
+  "mode_line": "rehearsal",
+  "run_id": "43823114738",
+  "run_attempt": "1",
+  "ref": "refs/heads/hqa/20261116-S4-gh실측-장치",
+  "fixture_tree_expected": "47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8",
+  "base_expected": "b967b1b007fb519d9a91537fbef911e818e950de",
+  "feat_expected": "16e88c01092d33eb643c6cac454703f00efa02ac",
+  "checks": [
+    {
+      "check": "head_is_event",
+      "ok": true,
+      "detail": "HEAD=79a0e3555b9266ce1c7c4cd5347e7feb328e7148"
+    },
+    {
+      "check": "run_attempt_one",
+      "ok": true,
+      "detail": "run_attempt=1"
+    },
+    {
+      "check": "m0_1_fixture_tree",
+      "ok": true,
+      "detail": "tree=47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8"
+    },
+    {
+      "check": "m0_2_base_ancestor",
+      "ok": true,
+      "detail": "base=b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "check": "m0_2_parent_ancestor",
+      "ok": true,
+      "detail": "parent=01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "check": "m0_3_diff_allowed",
+      "ok": true,
+      "detail": "changed=20"
+    },
+    {
+      "check": "m0_4_ls_remote_lines",
+      "ok": true,
+      "detail": "lines=3"
+    },
+    {
+      "check": "m0_4_feat_head",
+      "ok": true,
+      "detail": "feat=16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "check": "m0_4_fixture_head",
+      "ok": true,
+      "detail": "fixture=b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "check": "m0_4_main_recorded",
+      "ok": true,
+      "detail": "main=9b42d9c343a8a7ca44afcc616062f84854f83a37"
+    },
+    {
+      "check": "m0_5_blobs",
+      "ok": true,
+      "detail": "6 pairs"
+    },
+    {
+      "check": "mode_value",
+      "ok": true,
+      "detail": "rehearsal"
+    }
+  ],
+  "ls_remote_start": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "9b42d9c343a8a7ca44afcc616062f84854f83a37"
+    }
+  ],
+  "blobs": [
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusCell.razor",
+      "fixture_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusMenu.cs",
+      "fixture_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs",
+      "src_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Vocab/CsVocab.cs",
+      "fixture_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs",
+      "src_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/A2/CsStatusCell.razor",
+      "fixture_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "match": true,
+      "commit": "2a6a0ee10fcc3c79791f49747070009b25290fec"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "2a6a0ee10fcc3c79791f49747070009b25290fec"
+    }
+  ],
+  "generated_utc": "2026-11-16T07:20:33.444Z"
+}
