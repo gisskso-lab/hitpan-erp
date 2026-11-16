@@ -80,10 +80,14 @@ node tools/hqa-s4-fixture/proxy/delay-proxy.js 5800 150
 | `/after` | **고친 꼴(A′)** 상태 칸 — `16e88c01` 의 같은 두 파일 + 그 칸이 쓰는 메뉴 `CsStatusMenu.cs` |
 | ~~`/after`~~ ⬛낡음(11/7 판) | 고친 꼴 상태 칸 — `e456e4f6` 의 같은 두 파일 |
 | `/after-a2` (A2 · 11/16 더함) | **A2(고침 직전 중간판)** 상태 칸 — 화면 이름 `a2` · 주소 `/after-a2` · `2a6a0ee1` 의 `CsStatusCell.razor` + after 판 상태 칸 CSS(A2 원본 CSS 와 같은 블롭) · 홈(`/`) 단추 없음 — 주소를 직접 연다 |
+| `/after-e1t3` (E1T3 · 11/16 더함) | **E1T3(I-4 키보드 비교판)** 상태 칸 — 화면 이름 `e1t3` · 주소 `/after-e1t3` · `e456e4f6` 의 `CsStatusCell.razor` + after 판 상태 칸 CSS(원판 CSS 와 같은 블롭) · 홈(`/`) 단추 없음 — 주소를 직접 연다 |
+| `/after-v2` (V2 · 11/16 더함) | **V2(T3 비교판)** 상태 칸 — 화면 이름 `v2` · 주소 `/after-v2` · `74a76c58` 의 `CsStatusCell.razor` + after 판 상태 칸 CSS(원판 CSS 와 같은 블롭) · 홈(`/`) 단추 없음 — 주소를 직접 연다 |
 
 두 화면은 같은 목록 · 같은 가짜 데이터 · 같은 공통 CSS 를 쓰고, **상태 칸 컴포넌트(고친 꼴은 그 칸이 쓰는 `CsStatusMenu` 포함)와 `backoffice-dashboard.css` 만 다르다.** (A′ 판의 `backoffice-dashboard.css` 는 `e456e4f6` 과 같은 블롭이다 — 두 화면 CSS 차이는 11/7 판과 같다.) CSS 는 `App.razor` 가 주소로 고르므로 판을 바꿀 때는 **주소를 새로 연다**(화면 안 「고친 꼴로 / 고침 전으로」 단추도 강제 새로고침으로 옮기고 쿼리를 그대로 넘긴다).
 
 A2 화면(11/16 · 乙 확정) CSS 까닭 — A2 화면 주소 `/after-a2` 는 `App.razor` L9 규칙으로 after CSS 를 싣는다 · A2 원본 CSS blob = after CSS blob `0e922200`(`2a6a0ee1` 의 `src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css` = 이 앱 `wwwroot/css/after/backoffice-dashboard.css`). A2 화면(`Components/Pages/FixturePageA2.razor`)은 주소를 읽지 않는다 — 화면 판은 상수 `a2` 하나 · 화면 안 단추 「고친 꼴로」 = `/after` 로 옮김.
+
+비교 화면 E1T3 · V2(11/16) CSS 까닭 — `/after-e1t3` · `/after-v2` 는 `App.razor` L9 규칙으로 after CSS 를 싣는다 · 두 원판 CSS blob = `0e922200`(`e456e4f6` · `74a76c58` 의 `src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css` = 이 앱 `wwwroot/css/after/backoffice-dashboard.css`). 두 화면(`Components/Pages/FixturePageE1T3.razor` · `FixturePageV2.razor`)은 주소를 읽지 않는다 — 화면 판은 상수 `e1t3` · `v2` 하나씩 · 화면 안 단추 「고친 꼴로」 = `/after` 로 옮김.
 
 화면 꼴(백오피스 `AdminCsListPage.razor` 목록 구획을 옮김):
 
@@ -98,6 +102,8 @@ A2 화면(11/16 · 乙 확정) CSS 까닭 — A2 화면 주소 `/after-a2` 는 `
 | `#fixture-root[data-variant]` | `before` / `after` |
 | `link[data-fixture-css]` | 실린 상태 칸 CSS 판 (`before` / `after`) |
 | `#fixture-root[data-variant]` (A2 화면 · 11/16 더함) | `a2` — 화면 이름 `a2` · 주소 `/after-a2` · 이때 `link[data-fixture-css]` = `after` |
+| `#fixture-root[data-variant]` (E1T3 화면 · 11/16 더함) | `e1t3` — 화면 이름 `e1t3` · 주소 `/after-e1t3` · 이때 `link[data-fixture-css]` = `after` |
+| `#fixture-root[data-variant]` (V2 화면 · 11/16 더함) | `v2` — 화면 이름 `v2` · 주소 `/after-v2` · 이때 `link[data-fixture-css]` = `after` |
 | `[data-row="<번호>"]` | 상태 칸을 감싼 div · `data-status-kind` = `normal` · `legacy` · `blank` · `empty` · `null` |
 | `#detail` | 상세 열림 표시 (`data-open` 0/1 · `data-row`) |
 | `#rowclick-count` · `#rowclicks` | 행 클릭 횟수 · 줄 번호 기록(쉼표) |
@@ -151,6 +157,8 @@ A2 화면(11/16 · 乙 확정) CSS 까닭 — A2 화면 주소 `/after-a2` 는 `
 | `Components/After/CsStatusMenu.cs` (A′ 새 파일) | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs` | `16e88c01092d33eb643c6cac454703f00efa02ac` | `1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a` |
 | `Vocab/CsVocab.cs` | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs` | `16e88c01…` (`b54732eb` · `e456e4f6` 와 같은 블롭 — 세 판 사이 무변) | `0ec65e70ef69b451458018cbdb749a98402c0cab` |
 | `Components/A2/CsStatusCell.razor` (A2 · 11/16 새 파일) | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `2a6a0ee10fcc3c79791f49747070009b25290fec` (A2 · 고침 직전 중간판) | `49d7502d48f934bfe1d443ae347c5f2e082c82fc` |
+| `Components/E1T3/CsStatusCell.razor` (E1T3 · 11/16 새 파일) | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` (E1T3 · I-4 키보드 비교판) | `644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138` |
+| `Components/V2/CsStatusCell.razor` (V2 · 11/16 새 파일) | `src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor` | `74a76c58f3005dcc92be0a2043918dcc483e6220` (V2 · T3 비교판) | `8830faf15f302549bba16005ea688472979c60ae` |
 | ⬛낡음(11/7 판) `Components/After/CsStatusCell.razor` | 위와 같음 | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` (고친 꼴 · 그때 가지 코드 머리) | `644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138` |
 | ⬛낡음(11/7 판) `wwwroot/css/after/backoffice-dashboard.css` | 위와 같음 | `e456e4f6a0b2dc36f14ef53f64106d455f363ecb` | `0e922200fc29f057aff2d9b4b436c815c177bdc3` |
 | ⬛낡음(11/7 판) `Vocab/CsVocab.cs` | 위와 같음 | `e456e4f6…` (`b54732eb` 와 같은 블롭 — 두 판 사이 무변) | `0ec65e70ef69b451458018cbdb749a98402c0cab` |
@@ -212,10 +220,14 @@ tools/hqa-s4-fixture/
   Components/Pages/Home.razor    /
   Components/Pages/FixturePage.razor  /before · /after
   Components/Pages/FixturePageA2.razor  /after-a2 (A2 화면 · FixturePage 사본 · 주소 판단 0)
+  Components/Pages/FixturePageE1T3.razor  /after-e1t3 (E1T3 화면 · FixturePageA2 사본 · 주소 판단 0)
+  Components/Pages/FixturePageV2.razor  /after-v2 (V2 화면 · FixturePageA2 사본 · 주소 판단 0)
   Components/Pages/FixtureData.cs     가짜 데이터
   Components/Before/             고침 전 원본 CsStatusCell.razor + 설명용 _Imports.razor
   Components/After/              고친 꼴(A′) 원본 CsStatusCell.razor · CsStatusMenu.cs + 설명용 _Imports.razor
   Components/A2/                 A2(고침 직전 중간판) 원본 CsStatusCell.razor + 설명용 _Imports.razor
+  Components/E1T3/               E1T3(I-4 키보드 비교판) 원본 CsStatusCell.razor + 설명용 _Imports.razor
+  Components/V2/                 V2(T3 비교판) 원본 CsStatusCell.razor + 설명용 _Imports.razor
   Vocab/CsVocab.cs               레포 실제 파일(원본)
   wwwroot/css/common/            공통 CSS 원본 셋
   wwwroot/css/before|after/      상태 칸 CSS 원본 두 판
