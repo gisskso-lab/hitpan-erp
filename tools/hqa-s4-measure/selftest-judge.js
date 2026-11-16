@@ -1721,7 +1721,8 @@ function fakeWorld(opt) {
   // J1-B: selfCloseAfterOpenMs = 열린 뒤 그 ms 에 Esc 없이 저절로 닫힘 · reopenAfterMs = 닫힌 뒤 그 ms 에 다시 열림(null = 안 열림) — 기본 null(옛 세계 그대로)
   //   읽기 상한(maxReads) — 규칙 값이 깨진 돌연변이가 끝없이 돌지 않게(넘으면 예외 · 시험은 빨강으로 셈)
   const o = Object.assign({ openLatMs: 137, closeLatMs: 120, restoreAfterZeroMs: 200, hqaSame: true, selfCloseAfterOpenMs: null, reopenAfterMs: null, maxReads: 20000 }, opt || {});
-  const w = { t: F6.T0, openAt: null, zeroAt: null, restoreAt: null, escAt: null, keyAt: null, opens: 0, reads: 0 };
+  // J1-C: readLog = readState 마다 읽기 시작 시각(가짜 시계) — 「기다림 동안 readState 0 · Esc 직전 한 번」 을 동작으로 재려고(옛 칸 무변)
+  const w = { t: F6.T0, openAt: null, zeroAt: null, restoreAt: null, escAt: null, keyAt: null, opens: 0, reads: 0, readLog: [] };
   const inDip = () => o.selfCloseAfterOpenMs !== null && w.openAt !== null && w.t >= w.openAt + o.selfCloseAfterOpenMs && (o.reopenAfterMs === null || w.t < w.openAt + o.selfCloseAfterOpenMs + o.reopenAfterMs);
   const isOpen = () => w.openAt !== null && w.t >= w.openAt && !(w.zeroAt !== null && w.t >= w.zeroAt) && !inDip();
   const restored = () => w.restoreAt !== null && w.t >= w.restoreAt;
@@ -1741,7 +1742,7 @@ function fakeWorld(opt) {
   w.fakes = {
     nowMs: () => w.t,
     wait: async (ctx, ms) => { w.t += ms; },
-    readState: async () => { w.reads += 1; if (w.reads > o.maxReads) throw new Error('가짜 세계 읽기 상한'); w.t += F6.READ_COST; return w.state(); },
+    readState: async () => { w.reads += 1; if (w.reads > o.maxReads) throw new Error('가짜 세계 읽기 상한'); w.readLog.push(w.t); w.t += F6.READ_COST; return w.state(); },
     readHqaFocusRow: async () => { w.t += F6.READ_COST; return restored() && o.hqaSame ? '1' : null; },
     press: async (ctx, key) => { rec(ctx, 'press', key); if (key === 'Enter') openKey(); if (key === 'Escape') esc(); w.t += 2; },
     down: async (ctx, key) => { rec(ctx, 'down', key); w.t += 2; },
@@ -1796,7 +1797,9 @@ async function fix6Checks() {
   // J1-B: 기다림 관측(2-a)이 두 번째로 막아 관측 단언만 뺀 사본은 Esc 를 안 누름 → 옛 꼴(미관측인데 Esc)을 재현하려고 기다림 관측 단언 줄도 함께 뺌
   //   (관측 단언만 뺀 사본 = 아래 「J1-B 이중 막음」 새 단언)
   // ⬛ 옛 돌연변이: s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, '')
-  const m3 = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, '').replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, ''));
+  // J1-C: 기다림 관측 단언 줄이 loop 안(들여쓰기 4) → loop 밖 한 줄(들여쓰기 2 · 줄 머리 고정 /m — 옛 줄 주석에 안 걸리게)
+  // ⬛ J1-B 돌연변이: ….replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, '')
+  const m3 = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, '').replace(/^  if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/m, ''));
   const t3b = m3 ? await runFakeI4(m3, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150)) : null;
   plant('고침6 T3 심은 위반: 미관측인데 Esc 누름(관측 단언 줄 뺀 사본) → 빨강', !!m3 && t3b.escs === 1 && !t3ok(t3b), t3b && { escs: t3b.escs, err: t3b.err });
   // T3 판독기 쪽: 그 꼴 표본(valid=false · errors = 사유) 이 든 칸 → 장치 실패 · 대조 불가(통과로 안 샘)
@@ -1911,13 +1914,41 @@ async function fix6bChecks(i4) {
   const d4 = rules.device.i4;
   const DR = rules.deviceReading;
   // 2-a 정상 세계: 기다리는 동안 간격 관측 · Esc 직전 읽기 · 새 칸 openCountAtEsc · 옛 칸 openCountBeforeEsc 그대로
+  // ⬛ J1-B 기대(간격 관측 · 읽기 ≥ minReads): const holdOk = (x) => … && x.R.holdReads >= minReads;
+  //   J1-C(PM 결정 · 관찰자 영향 줄이기): 기다림 중 읽기 0 · Esc 직전 한 번 → holdReads === 1. minReads 는 아래 (다) 돌연변이 기대값(polling 사본 읽기 수 하한)으로 씀
   const minReads = Math.floor(d4.escWaitMs / (d4.openPollMs + F6.READ_COST));
-  const holdOk = (x) => !!x && !x.err && x.escs === 1 && x.R.openCountAtEsc === 1 && x.R.openCountBeforeEsc === 1 && typeof x.R.holdReads === 'number' && x.R.holdReads >= minReads;
+  const holdOk = (x) => !!x && !x.err && x.escs === 1 && !!x.R && x.R.openCountAtEsc === 1 && x.R.openCountBeforeEsc === 1 && x.R.holdReads === 1;
+  // J1-C 동작 잼(가짜 시계 readLog): 첫 열림 관측(그 읽기 끝) 뒤 ~ Esc 사이 읽기 = 기다림 중 읽기(Esc 직전 읽기 제외) · Esc 직전 읽기(끝 = Esc 누른 시각)
+  const holdTrace = (x) => {
+    if (!x || !x.R || x.w.escAt === null || typeof x.R.openObservedAtMs !== 'number') return null;
+    const obsT = F6.T0 + x.R.openObservedAtMs;
+    const between = x.w.readLog.filter((t) => t >= obsT && t < x.w.escAt);
+    return { duringWait: between.filter((t) => t + F6.READ_COST < x.w.escAt).length, preEsc: between.filter((t) => t + F6.READ_COST === x.w.escAt).length };
+  };
+  const quietOk = (x) => { const h = holdTrace(x); return !!h && h.duringWait === 0 && h.preEsc === 1; };
   const hk = await runFakeI4(i4, fakeWorld(), f6Cell('kbd-open', 'after', 300));
   const hm = await runFakeI4(i4, fakeWorld(), f6Cell('mouse-open', 'before', 0));
   const keyLen = ['i4OpenNotHeld', 'i4RuleBad', 'i4EscWaitMissing', 'i4FocusNotBool'].every((k) => k.length <= 21 && typeof DR[k] === 'string' && DR[k].length > 0);
-  check(`J1-B 2-a: 700ms 기다림 = 간격 ${d4.openPollMs}ms 관측 — Esc 직전 열린 목록 1(openCountAtEsc) · 기다리는 동안 읽기 ≥ ${minReads} · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자`,
+  // ⬛ J1-B 제목: `J1-B 2-a: 700ms 기다림 = 간격 ${d4.openPollMs}ms 관측 — Esc 직전 열린 목록 1(openCountAtEsc) · 기다리는 동안 읽기 ≥ ${minReads} · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자`
+  check('J1-B 2-a · J1-C: 700ms 기다림 = 읽기 0 · Esc 직전 한 번 읽기 — Esc 직전 열린 목록 1(openCountAtEsc) · holdReads 1 · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자',
     holdOk(hk) && holdOk(hm) && keyLen, { k: hk.R && [hk.R.openCountAtEsc, hk.R.holdReads], m: hm.R && [hm.R.openCountAtEsc, hm.R.holdReads], err: hk.err || hm.err });
+  // J1-C (다): 기다림 동안 readState 호출 0 · Esc 직전 읽기 1(읽기 끝 = Esc 시각) — 가짜 시계 readLog 로 잼 · 두 경우 + 계획 I-4 칸 전부
+  const allI4 = buildPlan(rules).cells.filter((c) => c.item === 'I-4');
+  const qAll = [];
+  for (const c of allI4) qAll.push({ key: c.key, ok: quietOk(await runFakeI4(i4, fakeWorld(), f6Cell(c.case, c.screen, c.delay, c.openKey))) });
+  check('J1-C (다): 기다림 동안 readState 호출 0 · Esc 직전 한 번(그 읽기 끝 = Esc 누른 시각) — 두 경우 · 계획 I-4 칸 전부(관찰자 영향 회피 · HQA 원 절차에 없는 읽기 0)',
+    quietOk(hk) && quietOk(hm) && qAll.length === allI4.length && qAll.length > 0 && qAll.every((x) => x.ok), { k: holdTrace(hk), m: holdTrace(hm), bad: qAll.filter((x) => !x.ok).slice(0, 3) });
+  // (다) 심은 위반: polling 사본(기다림을 openPollMs 간격 읽기로 쪼갬 · J1-B 꼴의 읽기) → 기다림 중 읽기 > 0 → 빨강
+  const mp = mutantI4((s) => s.replace(/^  if \(left > 0\) await L\.wait\(ctx, left\);\n/m,
+    '  for (let rem = left; rem > 0; rem = holdEnd - L.nowMs()) { await L.wait(ctx, Math.min(d4.openPollMs, rem)); await L.readState(ctx); }\n'));
+  const pk = mp ? await runFakeI4(mp, fakeWorld(), f6Cell('kbd-open', 'after', 300)) : null;
+  plant('J1-C (다) 심은 위반: 기다림을 간격 읽기로 쪼갠 polling 사본 → 기다림 중 readState > 0 → 빨강', !!mp && !pk.err && pk.escs === 1 && !!holdTrace(pk) && holdTrace(pk).duringWait >= minReads - 1 && !quietOk(pk), pk && { trace: holdTrace(pk), err: pk.err });
+  // (라) 심은 위반: Esc 직전 한 번 읽기를 뺀 사본(관측 시점 값 재사용) → Esc 직전 읽기 0 · 닫힌 세계에서도 Esc 누름 → 빨강
+  const mr = mutantI4((s) => s.replace(/^  const stEsc = await L\.readState\(ctx\);\n/m, '  const stEsc = st1;\n'));
+  const rk = mr ? await runFakeI4(mr, fakeWorld(), f6Cell('kbd-open', 'after', 300)) : null;
+  const rc = mr ? await runFakeI4(mr, fakeWorld({ selfCloseAfterOpenMs: 300 }), f6Cell('kbd-open', 'e1t3', 300)) : null;
+  plant('J1-C (라) 심은 위반: Esc 직전 한 번 읽기 뺀 사본 → Esc 직전 읽기 0 · 기다리는 중 닫힌 메뉴에 Esc 누름 → 빨강', !!mr && !rk.err && !quietOk(rk) && holdTrace(rk).preEsc === 0 && !rc.err && rc.escs === 1,
+    rk && { trace: holdTrace(rk), closedEscs: rc && rc.escs, err: rc && rc.err });
   // 2-a 실패 세계: 열린 뒤 300ms 에 Esc 없이 닫힘(그대로 · 또는 100ms 뒤 다시 열림) → Esc 누름 0 · 표본 = 장치 실패(예외 · 사유 i4OpenNotHeld)
   const closeOk = (x) => !!x && x.out === null && x.escs === 0 && !!x.err && x.err.startsWith(DR.i4OpenNotHeld);
   const W_CLOSE = { selfCloseAfterOpenMs: 300 };
@@ -1925,14 +1956,28 @@ async function fix6bChecks(i4) {
   const ck = await runFakeI4(i4, fakeWorld(W_CLOSE), f6Cell('kbd-open', 'e1t3', 300));
   const cm = await runFakeI4(i4, fakeWorld(W_CLOSE), f6Cell('mouse-open', 'before', 0));
   const cd = await runFakeI4(i4, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150));
-  check('J1-B 2-a: 기다리는 동안 메뉴 닫힘(그대로 · 100ms 닫혔다 다시 열림) → Esc 누름 0 · 표본 = 장치 실패(예외 · 「Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 …」) · kbd-open · mouse-open',
-    closeOk(ck) && closeOk(cm) && closeOk(cd), { k: ck.err, m: cm.err, d: cd.err, escs: [ck.escs, cm.escs, cd.escs] });
-  const mh = mutantI4((s) => s.replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, ''));
+  // ⬛ J1-B 단언(셋 다 장치 실패 기대): check('J1-B 2-a: 기다리는 동안 메뉴 닫힘(그대로 · 100ms 닫혔다 다시 열림) → Esc 누름 0 · 표본 = 장치 실패(…) · kbd-open · mouse-open',
+  //     closeOk(ck) && closeOk(cm) && closeOk(cd), …);
+  //   J1-C: 지우지 않고 둘로 — (가) 끝까지 닫힌 세계 = 장치 실패 유지(Esc 직전 한 번 읽기가 막음) · (나) 100ms 닫혔다 다시 열림 = 관측 안 함(기대 바뀜 · 공개)
+  check('J1-B 2-a · J1-C (가): 기다리는 동안 메뉴 닫혀 끝까지 닫힘 → Esc 직전 한 번 읽기가 막음 · Esc 누름 0 · 표본 = 장치 실패(예외 · 「Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 …」) · kbd-open · mouse-open',
+    closeOk(ck) && closeOk(cm), { k: ck.err, m: cm.err, escs: [ck.escs, cm.escs] });
+  // ⬛ J1-B 기대(cd = 100ms 닫혔다 다시 열림 → closeOk(cd) · 장치 실패)
+  check('J1-C (나): 기다림 중 순간 닫힘(300ms 에 닫혀 100ms 뒤 다시 열림)은 관측 안 함(관찰자 영향 회피) · 공개 — Esc 누름 1 · 장치 실패 0 · holdReads 1 · Esc 직전 열린 목록 1 · 기다림 중 읽기 0',
+    !!cd && !cd.err && cd.escs === 1 && !!cd.R && cd.R.holdReads === 1 && cd.R.openCountAtEsc === 1 && quietOk(cd), { err: cd.err, escs: cd.escs, trace: holdTrace(cd) });
+  // J1-C: 단언 줄이 loop 밖 들여쓰기 2 로 바뀜 → 줄 머리 고정 /m(옛 줄 주석에 안 걸리게)
+  // ⬛ J1-B 돌연변이: s.replace(/    if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/, '')
+  const mh = mutantI4((s) => s.replace(/^  if \(stEsc\.openCount === 0\) throw new Error\([^\n]*\n/m, ''));
   const ckm = mh ? await runFakeI4(mh, fakeWorld(W_CLOSE), f6Cell('kbd-open', 'e1t3', 300)) : null;
   plant('J1-B 2-a 심은 위반: 기다림 관측 단언 줄 뺀 사본 → 닫힌 메뉴에 Esc 누름 · 표본 판독 → 빨강', !!mh && !ckm.err && ckm.escs === 1 && !closeOk(ckm), ckm && { escs: ckm.escs, err: ckm.err });
-  const m1r = mutantI4((s) => s.replace('    if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));\n', '    if (left > 0) await L.wait(ctx, left);\n'));
-  const cdm = m1r ? await runFakeI4(m1r, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150)) : null;
-  plant('J1-B 2-a 심은 위반: 기다림 끝에 한 번만 읽는 사본(간격 관측 0) → 100ms 닫힘을 못 봄 → Esc 누름 → 빨강', !!m1r && !cdm.err && cdm.escs === 1 && !closeOk(cdm), cdm && { escs: cdm.escs, err: cdm.err });
+  // ⬛ J1-B 심은 위반(지금 코드가 바로 그 꼴이 되어 뜻이 뒤집힘 → (나) 공개 단언 · (다) polling 사본 심은 위반으로 옮김):
+  // const m1r = mutantI4((s) => s.replace('    if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));\n', '    if (left > 0) await L.wait(ctx, left);\n'));
+  // const cdm = m1r ? await runFakeI4(m1r, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150)) : null;
+  // plant('J1-B 2-a 심은 위반: 기다림 끝에 한 번만 읽는 사본(간격 관측 0) → 100ms 닫힘을 못 봄 → Esc 누름 → 빨강', !!m1r && !cdm.err && cdm.escs === 1 && !closeOk(cdm), …);
+  // J1-C 대신: J1-B 꼴(간격 관측 + 닫힘 단언) 사본은 100ms 닫힘을 봄 → (나) 공개 단언이 그 사본에서 빨강 = 기대가 바뀐 것을 동작으로 확인
+  const mj = mutantI4((s) => s.replace(/^  if \(left > 0\) await L\.wait\(ctx, left\);\n/m,
+    '  for (let rem = left; rem > 0; rem = holdEnd - L.nowMs()) { await L.wait(ctx, Math.min(d4.openPollMs, rem)); const sp = await L.readState(ctx); if (sp.openCount === 0) throw new Error(`${ctx.rules.deviceReading.i4OpenNotHeld} · 돌연변이`); }\n'));
+  const cdj = mj ? await runFakeI4(mj, fakeWorld(W_DIP), f6Cell('kbd-open', 'after', 150)) : null;
+  plant('J1-C (나) 심은 위반: J1-B 꼴(간격 관측 + 닫힘 단언) 사본 → 100ms 닫힘을 봄 · Esc 0 · 장치 실패 → (나) 기대 빨강', !!mj && closeOk(cdj), cdj && { escs: cdj.escs, err: cdj.err });
   // J1-B 이중 막음: 열림 관측 단언만 뺀 사본(옛 T3 돌연변이) → 기다림 관측이 Esc 를 막음(Esc 0 · 사유 i4OpenNotHeld)
   const m3o = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, ''));
   const t3o = m3o ? await runFakeI4(m3o, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150)) : null;

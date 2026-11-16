@@ -160,18 +160,29 @@ async function i4(ctx) {
   const restMs = d4.escWaitMs - (L.nowMs() - ctx.sig.t0 - ob.observedAtMs);
   // ⬛ 옛 줄(J1 c2 ~ c6 · 기다리는 동안 읽기 0 → 「700ms 유지」 미확인 · 반려 [3-V] 2-a):
   // if (restMs > 0) await L.wait(ctx, restMs);
+  // ⬛ 옛 줄(J1-B c7 · 기다림 = openPollMs 간격 관측 loop · 700ms 동안 읽기 약 14회 = HQA 원 절차(6709803008 「열린 메뉴 관측 → 700ms 유지 → Esc」)에 없는 읽기
+  //   → 메인 스레드에 끼어들어 e1t3 의 렌더 뒤 틈 경쟁(재려는 결함 자체)을 흔들 수 있음 · 관찰자 영향 · PM 결정 11/17 J1-C):
   // 🔴 J1-B(2-a) — 기다림 = openPollMs 간격 관측 · Esc 직전 읽기 최소 1 · 그 사이 열린 목록 0 을 한 번이라도 보면 Esc 누름 0 · 장치 실패
+  // const holdEnd = L.nowMs() + Math.max(0, restMs);
+  // let stEsc = null;
+  // let holdReads = 0;
+  // for (;;) {
+  //   const left = holdEnd - L.nowMs();
+  //   if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));
+  //   stEsc = await L.readState(ctx);
+  //   holdReads += 1;
+  //   if (stEsc.openCount === 0) throw new Error(`${ctx.rules.deviceReading.i4OpenNotHeld} · Esc 누름 0 · 관측 뒤 ${L.nowMs() - ctx.sig.t0 - ob.observedAtMs}ms · 기다림 ${d4.escWaitMs}ms · 간격 ${d4.openPollMs}ms`);
+  //   if (L.nowMs() >= holdEnd) break;
+  // }
+  // 🔴 J1-C(관찰자 영향 줄이기) — 기다림 = 읽기 0 · L.wait 로 끝 시각(첫 열림 관측 시각 + escWaitMs)까지 · Esc 직전 딱 한 번 readState
+  //   → 열린 목록 0 이면 Esc 누름 0 · 장치 실패(사유 i4OpenNotHeld). holdReads = 1(Esc 직전 한 번).
+  //   남는 위험(공개 · 부록 §J1-C Y1): 기다림 중 순간 닫혔다 다시 열림은 관측 안 함 · Esc 직전 읽기와 Esc 사이 틈
   const holdEnd = L.nowMs() + Math.max(0, restMs);
-  let stEsc = null;
-  let holdReads = 0;
-  for (;;) {
-    const left = holdEnd - L.nowMs();
-    if (left > 0) await L.wait(ctx, Math.min(d4.openPollMs, left));
-    stEsc = await L.readState(ctx);
-    holdReads += 1;
-    if (stEsc.openCount === 0) throw new Error(`${ctx.rules.deviceReading.i4OpenNotHeld} · Esc 누름 0 · 관측 뒤 ${L.nowMs() - ctx.sig.t0 - ob.observedAtMs}ms · 기다림 ${d4.escWaitMs}ms · 간격 ${d4.openPollMs}ms`);
-    if (L.nowMs() >= holdEnd) break;
-  }
+  const left = holdEnd - L.nowMs();
+  if (left > 0) await L.wait(ctx, left);
+  const stEsc = await L.readState(ctx);
+  const holdReads = 1;
+  if (stEsc.openCount === 0) throw new Error(`${ctx.rules.deviceReading.i4OpenNotHeld} · Esc 누름 0 · 관측 뒤 ${L.nowMs() - ctx.sig.t0 - ob.observedAtMs}ms · 기다림 ${d4.escWaitMs}ms · 기다림 중 읽기 0 · Esc 직전 읽기 1`);
   const escPressedAtMs = L.nowMs() - ctx.sig.t0;
   await L.press(ctx, 'Escape');
   // ⬛ 옛 줄(고침6 c2 까지 · 고정 settle 뒤 마지막 상태 하나):
@@ -191,6 +202,7 @@ async function i4(ctx) {
       // 옛 이름 그대로 · 뜻 = 「열린 메뉴 관측 시점」 의 열린 목록 수(Esc 직전 아님 · 이름만 Before) — rules device.i4._openCountAtEsc_표지_J1B
       openCountBeforeEsc: st1.openCount,
       // J1-B(2-a): Esc 직전 마지막 읽기의 열린 목록 수(기다림 관측이 통과했으니 ≥ 1) · 기다리는 동안 읽은 수
+      // J1-C: holdReads = 1(기다림 중 읽기 0 · Esc 직전 한 번) · openCountAtEsc = 그 한 번 읽기 값(≥ 1)
       openCountAtEsc: stEsc.openCount, holdReads,
       // openCountAfterEsc · focusAfterEsc · maxOpenAfterEsc = pollAfterEsc 가 멈춘 시각 값(두 식 모두 참이면 3초 전에 멈춤 · 3초 끝 값 아님) — J1-B [4] ④
       openCountAfterEsc: s.state.openCount,
