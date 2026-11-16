@@ -137,7 +137,17 @@ async function i4(ctx) {
     if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEscV5 }); // 고침5 H1-10: 옛 글자 kbdOpenNoEsc(「Esc 측정 0」) 대체 — 미측정과 혼동 막기(판독 글자만)
     await L.press(ctx, 'Enter');
   }
-  const st1 = await L.waitOpen(ctx, true);
+  // ⬛ 옛 줄(고침5까지 · 열림을 못 봐도 바로 Esc · 기다림 0):
+  // const st1 = await L.waitOpen(ctx, true);
+  // await L.press(ctx, 'Escape');
+  // 🔴 고침6 c2(결-2 · 결-3 · 결-4 · 결-7) — HQA 절차: 열린 메뉴 관측 → escWaitMs 유지 → Esc. 두 경우 · 모든 화면 같은 값(화면별 칸 0)
+  const d4 = ctx.rules.device.i4;
+  const ob = await L.waitOpenObserved(ctx, d4.openPollMs);
+  if (!ob.observed) throw new Error(`${ctx.rules.deviceReading.i4OpenNotObserved} · Esc 누름 0 · 관측 간격 ${d4.openPollMs}ms · 상한 ${ctx.rules.device.openWaitMs + 2 * ctx.cell.delay}ms`);
+  const st1 = ob.state;
+  const restMs = d4.escWaitMs - (L.nowMs() - ctx.sig.t0 - ob.observedAtMs);
+  if (restMs > 0) await L.wait(ctx, restMs);
+  const escPressedAtMs = L.nowMs() - ctx.sig.t0;
   await L.press(ctx, 'Escape');
   const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
   return [{
@@ -147,6 +157,9 @@ async function i4(ctx) {
       openCountAfterEsc: s.state.openCount,
       focusAfterEsc: s.state.focus,
       focusOnSameRowBtn: s.state.focus.row === row && s.state.focus.isStatusActivator && !s.state.focus.inOpenList,
+      // 고침6 c2: 기다림 기록(결-3) — 시각 = sig.t0 기준 ms
+      escWaitMs: d4.escWaitMs, openPollMs: d4.openPollMs,
+      openObserved: true, openObservedAtMs: ob.observedAtMs, escPressedAtMs, actualWaitMs: escPressedAtMs - ob.observedAtMs,
       final: L.slim(s.state)
     },
     circuit: L.circuitSince(ctx, ctx.inputAt),

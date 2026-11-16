@@ -291,6 +291,28 @@ async function waitOpen(ctx, wantOpen) {
   return st;
 }
 
+// ── 고침6 c2(결-2 · 결-3 · 결-4 · PM 결재 11/16) — I-4 HQA 절차(#850 댓글 6709803008 L46): 새 함수만 ──
+//   옛 waitOpen · settle · settleMs 의 시그니처 · 본문은 무변(자체시험이 소스 글자 · 반사로 부름).
+//   시계 · 읽기 · 기다림은 모듈 칸(module.exports.nowMs · readState · wait)으로 부른다 —
+//   자체시험이 이 칸에 가짜 시계 · 읽기 순서를 끼워 i4 를 실제로 돌린다(브라우저 · 망 0 · 「게이트는 글자가 아니라 동작」).
+function nowMs() { return Date.now(); }
+function lib() { return module.exports; }
+
+// 열린 메뉴 관측(원문 「열린 메뉴 관측」) — 간격 pollMs 로 읽다가 처음 열린 목록이 보인 때를 돌려준다.
+//   상한 = openWaitMs + 2×지연(옛 waitOpen 과 같은 상한) · 못 보면 observed=false(부르는 쪽이 Esc 를 누르지 않는다 · 결-4)
+//   observedAtMs = 그 읽기가 끝난 시각(sig.t0 기준 ms)
+async function waitOpenObserved(ctx, pollMs) {
+  const M = lib();
+  const end = M.nowMs() + ctx.rules.device.openWaitMs + 2 * ctx.cell.delay;
+  let st = await M.readState(ctx);
+  while (st.openCount === 0 && M.nowMs() < end) {
+    await M.wait(ctx, pollMs);
+    st = await M.readState(ctx);
+  }
+  const observed = st.openCount > 0;
+  return { state: st, observed, observedAtMs: observed ? M.nowMs() - ctx.sig.t0 : null };
+}
+
 // Tab 경로 한 칸(원자료 · 값 0 — 태그 · role · 줄 번호 · 참거짓 · tabIndex 만)
 function pathStep(i, f, rowId) {
   return {
@@ -365,5 +387,7 @@ module.exports = {
   overlapArea, press, down, up, mouseClick, locatorClick, wait, settle, waitOpen, tabTo, shot, shotName,
   readRowStruct, rowClickControl, unreached, pathStep,
   // H4
-  readBlankRows
+  readBlankRows,
+  // 고침6
+  nowMs, waitOpenObserved
 };

@@ -507,6 +507,7 @@ async function asyncChecks() {
   const a2Un = await mockRun(ALL['N-1'], cellFor('N-1', 'arrows', 'a2'), 0, { derivedItems: [] });
   check('G4-G1 합성: a2 칸 미도달 → N-1 결과만 · Tab 밖 키 0', a2Un.out.length === 1 && a2Un.inputs.filter((x) => KEY_K.has(x.k) && x.key !== 'Tab').length === 0, a2Un.out.length);
   await probeContrastChecks();
+  await fix6Checks(); // 고침6 J1 — I-4 HQA 절차 동작 시험(가짜 L)
 }
 
 // ── ⑧-2 S4 보탬(4_재검증_H4GB ③): probe 비교 화면 대조의 「동작」 시험 — 브라우저 0 · probe.js 무변
@@ -1518,6 +1519,150 @@ function checkProbe(src) {
   const longKeys = (src) => Array.from(src.matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*):\s/gm)).map((m) => m[1]).filter((k) => M.findSecrets(k, allow, hn).length > 0);
   check('G-2: boot.sh 객체 칸 이름 = 가림 꼴 0 · browser_cond_status 있음 · 옛 24자 이름 0', longKeys(bootSrc).length === 0 && /\bbrowser_cond_status:/.test(bootSrc) && !bootSrc.includes('browser_' + 'condition_status'), longKeys(bootSrc));
   plant('G-2 대조군: 옛 이름으로 되돌린 사본 → 걸림 1', longKeys(bootSrc.replace('browser_cond_status:', 'browser_' + 'condition_status:')).length === 1);
+}
+
+// ── 고침6 J1(작업지시서 20261116작 S4관문1 장치고침6 §8) — I-4 HQA 절차 동작 시험 ──
+//   가짜 L: _lib 모듈 칸(nowMs · wait · readState · press · …)에 가짜 시계 · 읽기 순서를 끼우고 i4 를 실제로 돌린다(브라우저 · 망 0).
+//   page = null 이라 가짜가 덮지 않은 _lib 함수가 page 를 부르면 바로 예외 → 가짜가 덮은 길만 돈다.
+//   심은 위반 = i-items.js 원문을 바꾼 돌연변이 사본(임시 파일) · rules 사본 — 걸려야(빨강이어야) ok.
+const F6 = { LIB: path.join(HERE, 'items', '_lib.js'), I: path.join(HERE, 'items', 'i-items.js'), seq: 0, T0: 1000, READ_COST: 3 };
+function mutantI4(mutate) {
+  const src = fs.readFileSync(F6.I, 'utf8').split(String.fromCharCode(13)).join(''); // 줄 끝 LF 로 맞춤(돌연변이 글자가 줄 끝에 안 걸리게)
+  const out = mutate(src);
+  if (out === src) return null; // 돌연변이가 안 걸림 = 시험이 죽은 것 → 부르는 쪽이 빨강
+  F6.seq += 1;
+  const p = path.join(tmp, 'i-items-mut-' + F6.seq + '.js');
+  fs.writeFileSync(p, out.split("require('./_lib.js')").join('require(' + JSON.stringify(F6.LIB) + ')'), 'utf8');
+  return require(p)['I-4'];
+}
+// 가짜 세계: 여는 키(Enter · Space 뗌 · 칩 누름) 뒤 openLatMs 에 목록 열림 · Esc 뒤 closeLatMs 에 메뉴 0 · 메뉴 0 뒤 restoreAfterZeroMs 에 초점 복원
+//   null = 그 일이 안 일어남. hqaSame=false 면 HQA 식만 거짓(두 식이 갈리는 꼴).
+function fakeWorld(opt) {
+  const o = Object.assign({ openLatMs: 137, closeLatMs: 120, restoreAfterZeroMs: 200, hqaSame: true }, opt || {});
+  const w = { t: F6.T0, openAt: null, zeroAt: null, restoreAt: null, escAt: null, keyAt: null, opens: 0 };
+  const isOpen = () => w.openAt !== null && w.t >= w.openAt && !(w.zeroAt !== null && w.t >= w.zeroAt);
+  const restored = () => w.restoreAt !== null && w.t >= w.restoreAt;
+  w.state = () => ({
+    openCount: isOpen() ? 1 : 0,
+    focus: restored() ? { tag: 'button', id: null, role: null, row: '1', inOpenList: false, isStatusActivator: true, text: null, afterRef: false, body: false, tabIndex: 0 }
+      : (isOpen() ? { tag: 'div', id: null, role: 'menu', row: null, inOpenList: true, isStatusActivator: false, text: null, afterRef: true, body: false, tabIndex: -1 }
+        : { tag: 'body', id: null, role: null, row: null, inOpenList: false, isStatusActivator: false, text: null, afterRef: false, body: true, tabIndex: null }),
+    pickCount: 0, picks: '', rowclickCount: 0, rowclicks: '', detailOpen: null, detailRow: null, rows: {}, reconnect: { present: false, visible: false, cls: '' }
+  });
+  const openKey = () => { w.keyAt = w.t; w.opens += 1; if (o.openLatMs !== null) w.openAt = w.t + o.openLatMs; };
+  const esc = () => {
+    w.escAt = w.t;
+    if (w.openAt !== null && o.closeLatMs !== null) { w.zeroAt = w.t + o.closeLatMs; if (o.restoreAfterZeroMs !== null) w.restoreAt = w.zeroAt + o.restoreAfterZeroMs; }
+  };
+  const rec = (ctx, k, key) => ctx.inputs.push({ atMs: w.t - ctx.sig.t0, k, key });
+  w.fakes = {
+    nowMs: () => w.t,
+    wait: async (ctx, ms) => { w.t += ms; },
+    readState: async () => { w.t += F6.READ_COST; return w.state(); },
+    readHqaFocusRow: async () => { w.t += F6.READ_COST; return restored() && o.hqaSame ? '1' : null; },
+    press: async (ctx, key) => { rec(ctx, 'press', key); if (key === 'Enter') openKey(); if (key === 'Escape') esc(); w.t += 2; },
+    down: async (ctx, key) => { rec(ctx, 'down', key); w.t += 2; },
+    up: async (ctx, key) => { rec(ctx, 'up', key); if (key === 'Space') openKey(); w.t += 2; },
+    locatorClick: async (ctx, sel) => { rec(ctx, 'locator.click', sel); openKey(); w.t += 2; },
+    tabTo: async () => ({ reached: true, cause: null, tabs: 3, path: [] }),
+    settle: async (ctx, ms) => { w.t += ms; const s = w.state(); return { state: s, maxOpen: s.openCount }; },
+    circuitSince: () => ({ dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false, detail: {} })
+  };
+  return w;
+}
+async function runFakeI4(fn, w, cell, r) {
+  const L = require('./items/_lib.js');
+  const saved = {};
+  for (const k of Object.keys(w.fakes)) { saved[k] = Object.prototype.hasOwnProperty.call(L, k) ? { v: L[k] } : null; L[k] = w.fakes[k]; }
+  const ctx = { page: null, sig: { t0: F6.T0 }, rules: r || rules, cell, sampleNo: 1, outDir: tmp, inputs: [], inputAt: F6.T0 };
+  let out = null;
+  let err = null;
+  try { out = await fn(ctx); } catch (e) { err = String(e && e.message ? e.message : e); } finally {
+    for (const k of Object.keys(saved)) { if (saved[k]) L[k] = saved[k].v; else delete L[k]; }
+  }
+  const R4 = out && out[0] ? out[0].readings : null;
+  const escs = ctx.inputs.filter((x) => x.key === 'Escape').length;
+  return { out, err, R: R4, inputs: ctx.inputs, w, escs, escMinusOpen: w.escAt !== null && w.openAt !== null ? w.escAt - w.openAt : null };
+}
+const f6Cell = (kase, screen, delay, openKey) => Object.assign({ item: 'I-4', case: kase, screen, delay, window: win, key: 'f6' }, openKey ? { openKey } : {});
+async function fix6Checks() {
+  const ALL = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
+  const i4 = ALL['I-4'];
+  const d4 = rules.device.i4;
+  const DR = rules.deviceReading;
+  // T2 기다림 — 기준점 = 열린 메뉴 관측 · Esc − 관측 ∈ [700, 700 + 읽기 1회] · Esc − 실제 열림 ∈ [700, 700 + 관측 간격 + 읽기 1회]
+  const inT2 = (x) => !!x && !x.err && x.escs === 1 && x.R && x.R.actualWaitMs >= d4.escWaitMs && x.R.actualWaitMs <= d4.escWaitMs + F6.READ_COST
+    && x.escMinusOpen >= d4.escWaitMs && x.escMinusOpen <= d4.escWaitMs + d4.openPollMs + F6.READ_COST && x.R.escWaitMs === d4.escWaitMs && x.R.openObserved === true;
+  const t2k = await runFakeI4(i4, fakeWorld(), f6Cell('kbd-open', 'after', 300));
+  const t2m = await runFakeI4(i4, fakeWorld({ openLatMs: 49 }), f6Cell('mouse-open', 'before', 0));
+  check('고침6 T2: 기다림 — rules escWaitMs 700 · openPollMs 50 · 열림 관측 → Esc 사이 [700, 700+읽기] · 실제 열림 → Esc 사이 [700, 750+읽기] · kbd-open · mouse-open 모두',
+    d4.escWaitMs === 700 && d4.openPollMs === 50 && /6709803008/.test(d4.escWaitRef) && inT2(t2k) && inT2(t2m), { k: t2k.R && t2k.R.actualWaitMs, kOpen: t2k.escMinusOpen, m: t2m.R && t2m.R.actualWaitMs, mOpen: t2m.escMinusOpen, err: t2k.err || t2m.err });
+  const m0 = mutantI4((s) => s.replace('  if (restMs > 0) await L.wait(ctx, restMs);\n', ''));
+  const t2z = m0 ? await runFakeI4(m0, fakeWorld(), f6Cell('kbd-open', 'after', 300)) : null;
+  plant('고침6 T2 심은 위반: escWaitMs 무시(기다림 줄 뺀 사본) → 기다림 단언 빨강', !!m0 && !t2z.err && t2z.escs === 1 && !inT2(t2z), t2z && { wait: t2z.R && t2z.R.actualWaitMs, err: t2z.err });
+  const m1 = mutantI4((s) => s.replace('  const ob = await L.waitOpenObserved(ctx, d4.openPollMs);\n', '  const tStart = L.nowMs() - ctx.sig.t0;\n  const ob = await L.waitOpenObserved(ctx, d4.openPollMs);\n')
+    .replace('const restMs = d4.escWaitMs - (L.nowMs() - ctx.sig.t0 - ob.observedAtMs);', 'const restMs = d4.escWaitMs - (L.nowMs() - ctx.sig.t0 - tStart);'));
+  const t2b = m1 ? await runFakeI4(m1, fakeWorld(), f6Cell('kbd-open', 'after', 300)) : null;
+  plant('고침6 T2 심은 위반: 기다림을 열림 관측 전(여는 키)부터 셈 → 실제 열림 → Esc < 700 → 빨강', !!m1 && !t2b.err && t2b.escs === 1 && t2b.escMinusOpen < d4.escWaitMs && !inT2(t2b), t2b && { escMinusOpen: t2b.escMinusOpen, err: t2b.err });
+  // T3 열림 미관측 — Esc 누름 0 · 표본 장치 실패(예외 → run-items 가 errors 칸 · valid=false) · 사유 글자 = rules 새 키
+  const t3 = await runFakeI4(i4, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150));
+  const t3ok = (x) => !!x && x.escs === 0 && !!x.err && x.err.startsWith(DR.i4OpenNotObserved) && x.out === null;
+  check('고침6 T3: 열림 미관측 → Esc 누름 0 · 표본 = 장치 실패(예외 · 사유 「열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립」)', DR.i4OpenNotObserved === '열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립' && t3ok(t3), { err: t3.err, escs: t3.escs });
+  const m3 = mutantI4((s) => s.replace(/  if \(!ob\.observed\) throw new Error\([^\n]*\n/, ''));
+  const t3b = m3 ? await runFakeI4(m3, fakeWorld({ openLatMs: null }), f6Cell('kbd-open', 'e1t3', 150)) : null;
+  plant('고침6 T3 심은 위반: 미관측인데 Esc 누름(관측 단언 줄 뺀 사본) → 빨강', !!m3 && t3b.escs === 1 && !t3ok(t3b), t3b && { escs: t3b.escs, err: t3b.err });
+  // T3 판독기 쪽: 그 꼴 표본(valid=false · errors = 사유) 이 든 칸 → 장치 실패 · 대조 불가(통과로 안 샘)
+  {
+    const R6 = JSON.parse(JSON.stringify(rules));
+    R6.plan.items = ['I-4'];
+    R6.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+    const p6 = buildPlan(R6);
+    const rank = (sc) => R6.plan.screenOrder.indexOf(sc);
+    const xs = p6.cells.slice().sort((a, b) => a.delay - b.delay || rank(a.screen) - rank(b.screen)).map((c, i) => ({
+      item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: 1, valid: true, errors: [], deviceReading: null, order: i + 1, contextId: i + 1,
+      readings: { openCountAfterEsc: c.screen === 'before' ? 1 : 0, focusOnSameRowBtn: c.screen !== 'e1t3' }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false },
+      kbd: c.case === 'kbd-open' ? (c.screen === 'before' ? null : { reached: true, tabs: 3 }) : null
+    }));
+    for (const s of xs) if (s.case === 'kbd-open' && s.screen === 'before') { s.readings = { noInput: 'x' }; }
+    const okv = require('./judge.js').judge(R6, xs, {});
+    const bad = JSON.parse(JSON.stringify(xs));
+    const hit = bad.find((s) => s.case === 'kbd-open' && s.screen === 'e1t3' && s.delay === 300);
+    hit.valid = false; hit.readings = null; hit.kbd = null; hit.errors = [t3.err];
+    const bv = require('./judge.js').judge(R6, bad, {});
+    const bc = bv.items['I-4'].contrastByCase['kbd-open'];
+    check('고침6 T3 판독기: 열림 미관측 표본 1 → 그 칸 장치 실패 · I-4 kbd-open 대조 = null(대조 불가) · 항목 state null · 빨강 / 대조군 = 성립',
+      bv.red === true && bc.state === null && bc.reason === T.fix5.contrastDeviceFail && bv.items['I-4'].contrastState.state === null && okv.items['I-4'].contrastByCase['kbd-open'].state === T.fix5.contrastHolds,
+      { bad: bc, ok: okv.items['I-4'].contrastByCase['kbd-open'].state });
+  }
+  // T6 모든 화면 같게 — 계획 I-4 칸 전부(before · after · e1t3 · 두 경우) 같은 기다림 · 규칙에 화면별 · 경우별 덮어쓰기 칸 0
+  const I4_SPEC_OK = new Set(['cases', 'delays', 'caseScreens', '_caseScreens_표지', 'caseKeys', '_caseKeys_표지']);
+  const SCREEN_RE = /before|after|e1t3|a2|v2|screen|case|kbd|mouse/i;
+  const sameRule = (r) => {
+    const i4r = r.device.i4;
+    const extra = Object.keys(i4r).filter((k) => !k.startsWith('_') && SCREEN_RE.test(k) && k !== 'menuZeroFailCases');
+    const specExtra = Object.keys(r.plan.itemSpecs['I-4']).filter((k) => !I4_SPEC_OK.has(k));
+    return typeof i4r.escWaitMs === 'number' && extra.length === 0 && specExtra.length === 0;
+  };
+  const allCells = buildPlan(rules).cells.filter((c) => c.item === 'I-4');
+  const waits = async (fn) => {
+    const out = [];
+    for (const c of allCells) {
+      const x = await runFakeI4(fn, fakeWorld(), f6Cell(c.case, c.screen, c.delay, c.openKey));
+      out.push({ key: c.key, ok: inT2(x), ran: !x.err && x.escs === 1, wait: x.R ? x.R.actualWaitMs : null });
+    }
+    return out;
+  };
+  const wAll = await waits(i4);
+  const scr = new Set(allCells.map((c) => c.screen + '/' + c.case));
+  check('고침6 T6: 계획 I-4 칸 전부(화면 before · after · e1t3 × 두 경우) 기다림 같음(700) · rules 에 화면별 · 경우별 덮어쓰기 칸 0',
+    sameRule(rules) && wAll.length === allCells.length && wAll.every((x) => x.ok) && ['before/mouse-open', 'after/mouse-open', 'before/kbd-open', 'after/kbd-open', 'e1t3/kbd-open'].every((k) => scr.has(k)),
+    { n: wAll.length, bad: wAll.filter((x) => !x.ok).slice(0, 3) });
+  const rs1 = JSON.parse(JSON.stringify(rules)); rs1.device.i4.escWaitMsE1t3 = 0;
+  const rs2 = JSON.parse(JSON.stringify(rules)); rs2.plan.itemSpecs['I-4'].escWaitMs = { e1t3: 0 };
+  plant('고침6 T6 심은 위반: rules 에 화면별 덮어쓰기 칸 하나(device.i4 · itemSpecs.I-4 각각) → 빨강', !sameRule(rs1) && !sameRule(rs2));
+  const m6 = mutantI4((s) => s.replace('const restMs = d4.escWaitMs - (', "const restMs = (ctx.cell.screen === 'e1t3' ? 0 : d4.escWaitMs) - ("));
+  const w6 = m6 ? await waits(m6) : null;
+  plant('고침6 T6 심은 위반: 코드가 e1t3 화면만 기다림 0(돌연변이 사본) → 그 칸 빨강', !!w6 && w6.every((x) => x.ran) && w6.some((x) => !x.ok) && w6.filter((x) => !x.ok).every((x) => x.key.includes('|e1t3|')), w6 && w6.filter((x) => !x.ok).length);
 }
 
 // ── 결과─────────────────────────────────────────────────────────────
