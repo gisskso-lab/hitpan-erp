@@ -25,6 +25,18 @@ verify_list() {
   [ "$listed" = "$actual" ]
 }
 
+# 고침5 H2-5: 기대 파일 상태 — present(있음 · 해시 목록에 있음) · withheld(withheld.json 에 이름) · absent · no-run(run.json 없음 = M0 실패 등)
+expected_file_state() {
+  local d="$1" name="$2"
+  [ -f "$d/run.json" ] || { echo no-run; return; }
+  if [ -f "$d/$name" ]; then
+    if awk '{ sub(/^[0-9a-f]{64} [ *]/, ""); print }' "$d/$SUMS" | grep -qxF "$name"; then echo present; else echo present-unlisted; fi
+    return
+  fi
+  if [ -f "$d/withheld.json" ] && node -e 'const w=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit((w.files||[]).some((x)=>x&&x.name===process.argv[2])?0:1)' "$d/withheld.json" "$name"; then echo withheld; return; fi
+  echo absent
+}
+
 sums() {
   local raw="${1:?raw dir}" tmp
   [ -d "$raw" ] || die "원자료 폴더 없음"
@@ -45,7 +57,7 @@ commit() {
   local src="$HQA_IN/$id"
   local branch="hqa/20261116-S4-gh실측-원자료-${GITHUB_SHA:0:8}"
   local repo; repo="$(git -C "$HERE" rev-parse --show-toplevel)"
-  local red=0
+  local red=0 stj_red=0
 
   # 1) 운반 산출물 꼴: 이 런 · 이 시도 폴더 하나뿐
   [ -d "$src" ] || die "운반 산출물에 $id 폴더 없음"
@@ -65,6 +77,13 @@ commit() {
   local lrc=$?
   if [ "$lrc" = "2" ]; then red=1; sums "$src"; echo "[publish] 누출 재검에 걸린 파일을 뺐다(잡 빨강)" >&2
   elif [ "$lrc" != "0" ]; then die "누출 재검 오류 rc=$lrc"; fi
+
+  # 4-1) 고침5 H2-5(Q-B · K-1): 기대 파일 selftest-judge.json — 해시 목록 대상(2 · verify_list) · 누출 재검(4) 은 위에서 같이 ·
+  #      run.json 이 있는데 이 파일이 없고 보류 목록에도 없으면: 장전 = 빨강 · 리허설 = 알림만(판독기 쪽 K-1 이 아직 없는 나무)
+  local stj_state; stj_state=$(expected_file_state "$src" selftest-judge.json)
+  echo "[publish] 기대 파일 selftest-judge.json: $stj_state"
+  local pre_mode0; pre_mode0=$(node -e 'const fs=require("fs");const f=process.argv[1]+"/run.json";let m="none";if(fs.existsSync(f)){try{m=JSON.parse(fs.readFileSync(f,"utf8")).mode||"unknown";}catch(e){m="unknown";}}console.log(m)' "$src")
+  if [ "$stj_state" = "absent" ] && [ "$pre_mode0" = "armed" ]; then stj_red=1; echo "[publish] 장전 원자료에 selftest-judge.json 없음(보류도 아님) — 잡 빨강" >&2; fi
 
   # 5) 원자료 가지: 있으면 첫 부모 사슬에 장치 커밋이 있는지 단언 뒤 덧붙임 · 없으면 장치 커밋에서 새로
   #    고침4 G8 ⑦(D-5 ⑦): 장전(armed) 원자료는 새 가지에만 — 가지가 이미 있으면 빨강(덧붙임 0 · M0 가 측정 전 같은 단언)
@@ -101,8 +120,8 @@ commit() {
   local msg; msg=$(mktemp)
   {
     printf 'hqa-raw: S4 관문1 GitHub 서버 실측 원자료 %s\n\n' "$id"
-    printf 'run: %s\nmode: %s\ndevice-commit: %s\nfixture-tree: 47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8\nmeasure-job: %s\npublish-withheld: %s\npublish-attempt: %s\n' \
-      "$id" "$mode" "$GITHUB_SHA" "${HQA_MEASURE_RESULT:-unknown}" "$red" "$GITHUB_RUN_ATTEMPT"
+    printf 'run: %s\nmode: %s\ndevice-commit: %s\nfixture-tree: 47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8\nmeasure-job: %s\npublish-withheld: %s\npublish-attempt: %s\nexpected-file-red: %s\n' \
+      "$id" "$mode" "$GITHUB_SHA" "${HQA_MEASURE_RESULT:-unknown}" "$red" "$GITHUB_RUN_ATTEMPT" "$stj_red"
   } > "$msg"
   git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -F "$msg" || die "커밋 실패"
   local new; new=$(git rev-parse HEAD)
@@ -124,9 +143,10 @@ commit() {
       echo "- 커밋: \`$new\`"
       echo "- 경로: \`hqa-raw/$id/\` · 로그인 없이: ${link}run.json (리허설 M0 실패면 ${link}m0-assert.json)"
       echo "- measure 잡: ${HQA_MEASURE_RESULT:-unknown} · publish 누출 재검 보류: $red"
+      echo "- 기대 파일 selftest-judge.json: $stj_state · 빨강: $stj_red"
     } >> "$GITHUB_STEP_SUMMARY"
   fi
-  [ "$red" = "0" ]
+  [ "$red" = "0" ] && [ "$stj_red" = "0" ]
 }
 
 case "$CMD" in

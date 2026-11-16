@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # [장치] 묶음 · 꾸러미 · 브라우저 · 앱 기동 · run.json 조립 — 설계 §4-1 M1~M4 · §5 · 고침1 F1(소스 ↔ 나무 경로 기준 대조) · F7(고정 머리 2회차 단언)
-#   사용: boot.sh <m1|m2|m3|m4|runjson> <원자료 폴더> <작업 폴더>
+#   사용: boot.sh <m1|m2|m3|m4|runjson|round> <원자료 폴더> <작업 폴더>
+#   고침5 H2: runjson 에 selftest_judge_counts(K-1) · rules_sha256 · judge_sha256 · browser_condition(결-7 · S8) / round = verdict 뒤 회차 줄(결-6 甲)
 #   작업 폴더 = 원자료 밖(러너 임시 폴더) · 원자료 폴더 = 공개될 파일만
 #   종료 코드: 0 = 통과 · 1 = 그 단계 실패(실패 사실 · 오류 글자는 원자료 파일에 남김)
 set -u -o pipefail
 
-STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson> <raw> <work>}"
+STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
 RAW="${2:?raw dir}"
 WORK="${3:?work dir}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -210,9 +211,10 @@ NODE
 runjson() {
   local ls2="$WORK/ls2.txt"
   git -C "$REPO" ls-remote origin "refs/heads/main" "refs/heads/feat/20261107-백오피스S4닫기" "refs/heads/hqa/20261107-S4-시험앱" > "$ls2" 2> "$WORK/ls2.err" || echo "ls-remote error" >> "$WORK/ls2.err"
-  RAWD="$RAW" WORKD="$WORK" node <<'NODE'
+  RAWD="$RAW" WORKD="$WORK" HERED="$HERE" node <<'NODE'
 const fs = require('fs');
-const raw = process.env.RAWD, work = process.env.WORKD, e = process.env;
+const crypto = require('crypto');
+const raw = process.env.RAWD, work = process.env.WORKD, here = process.env.HERED, e = process.env;
 const readJson = (f) => { if (!fs.existsSync(f)) return null; try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (err) { return { parse_error: String(err.message).slice(0, 200) }; } };
 const lines = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()) : [];
 const m0 = readJson(raw + '/m0-assert.json') || {};
@@ -234,6 +236,26 @@ headsAssert.ok = ls1.length === 3 && ls2.length === 3 && headsAssert.feat_end_ok
 const stageNames = ['M0', 'SELFTEST_LEAK', 'SELFTEST_JUDGE', 'M1', 'M2', 'M3', 'M4', 'PROBE', 'ITEMS', 'JUDGE'];
 const outcomes = {};
 for (const s of stageNames) outcomes[s] = e['OUT_' + s] || null;
+// 고침5 H2-1(K-1): 판독기 자체시험 숫자 — selftest-judge.js --out 이 쓴 JSON(작업 폴더) · 꼴이 맞으면 원자료에 사본(selftest-judge.json)
+const STJ_KEYS = ['passed', 'failed', 'total', 'plantedRed', 'plantedTotal'];
+const stjFile = work + '/selftest-judge.json';
+let stjCounts = null;
+if (fs.existsSync(stjFile)) {
+  const j = readJson(stjFile);
+  const okShape = j && !j.parse_error && typeof j === 'object' && !Array.isArray(j) && STJ_KEYS.every((k) => Number.isInteger(j[k]) && j[k] >= 0);
+  if (okShape) {
+    stjCounts = Object.fromEntries(STJ_KEYS.map((k) => [k, j[k]]));
+    stjCounts.sum_ok = j.passed + j.failed === j.total && j.plantedRed <= j.plantedTotal;
+    stjCounts.file = 'selftest-judge.json';
+    fs.copyFileSync(stjFile, raw + '/selftest-judge.json');
+  } else {
+    stjCounts = { error: 'shape — 필요 칸 ' + STJ_KEYS.join(' · ') + ' (음 아닌 정수)', file: null };
+  }
+}
+// 고침5 H2-2(결-7 · S8): 판독 규칙 · 판독기 sha256(가림 전 · 나무 파일 바이트 · mask.js knownHex 와 같은 셈) · 브라우저 조건 값 사본
+const sha256Of = (f) => (fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : null);
+const rulesDoc = readJson(here + '/rules.json') || {};
+const bc = rulesDoc.hqaPending && rulesDoc.hqaPending.browserCondition ? rulesDoc.hqaPending.browserCondition : null;
 const doc = {
   run_id: e.GITHUB_RUN_ID || null, run_attempt: e.GITHUB_RUN_ATTEMPT || null,
   workflow: e.GITHUB_WORKFLOW || null, job: e.GITHUB_JOB || null, ref: e.GITHUB_REF || null,
@@ -250,6 +272,15 @@ const doc = {
   stage_results: Object.fromEntries(['m1', 'm2', 'm3', 'm4'].map((s) => [s, readJson(work + '/stages/' + s + '.json')])),
   selftest_leak: readJson(work + '/selftest-leak.json'),
   selftest_judge: lines(work + '/selftest-judge.status.txt').join(' ') || null,
+  // 고침5 H2-1: 옛 selftest_judge 상태 줄은 그대로 · 숫자는 새 칸(없으면 null = --out 파일 없음)
+  selftest_judge_counts: stjCounts,
+  // 고침5 H2-2: 판독 규칙 공개(리허설 포함)
+  rules_sha256: sha256Of(here + '/rules.json'),
+  judge_sha256: sha256Of(here + '/judge.js'),
+  judge_rules_source: 'rules = tools/hqa-s4-measure/rules.json · judge = tools/hqa-s4-measure/judge.js — both in the tree of this raw commit (parent chain = device commit) · sha256 of tree file bytes before masking',
+  browser_condition: bc ? (bc.value === undefined ? null : bc.value) : null,
+  browser_condition_status: bc && typeof bc.status === 'string' ? bc.status : null,
+  stage_outcomes_note: 'JUDGE runs after M8/M9 (fix5 order) - see round_line.stage_outcomes_late',
   probe: fs.existsSync(raw + '/probe.json') ? 'see probe.json (rehearsal - judgement-free)' : null,
   items: m0.mode === 'armed' ? 'see samples.jsonl / verdict-device.json' : 'rehearsal: item measurement 0',
   verdict: 'device reading only - judgement = HQA',
@@ -259,11 +290,53 @@ if (!headsAssert.ok) { process.stderr.write('[run.json] 고정 머리 2회차 �
 NODE
 }
 
+# 고침5 H2-3(결-6 甲): M7 판독 · verdict 만 M8′ · M9′ 뒤 run.json 에 회차 줄 덧붙임(옛 칸 덮어쓰기 0 · 새 칸 round_line 하나)
+#   verdict 의 round(판독기 H1-5 칸) · red 를 그대로 옮긴다 · 장치는 판정 글자를 새로 만들지 않는다
+#   단 장전인데 verdict 가 없으면(판독기 미실행 · M9′ 보류) device_note 에 「verdict 없음」 사실만 · run.json 이 M9 에 보류됐으면 아무것도 안 씀
+round() {
+  RAWD="$RAW" node <<'NODE'
+const fs = require('fs');
+const raw = process.env.RAWD, e = process.env;
+const runJson = raw + '/run.json';
+if (!fs.existsSync(runJson)) { console.log('[round] run.json 없음(보류 또는 M0 실패) — 회차 줄 0'); process.exit(0); }
+const readJson = (f) => { if (!fs.existsSync(f)) return null; try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (err) { return { parse_error: String(err.message).slice(0, 200) }; } };
+const doc = readJson(runJson);
+if (!doc || doc.parse_error) { console.error('[round] run.json 읽기 실패'); process.exit(1); }
+const v = readJson(raw + '/verdict-device.json');
+const w = readJson(raw + '/withheld.json');
+const wStages = w && w.stages && typeof w.stages === 'object' ? w.stages : {};
+const listed = (st) => Array.isArray(wStages[st]) ? wStages[st].map((x) => x && x.name).filter((x) => typeof x === 'string') : [];
+const vPresent = !!(v && !v.parse_error);
+const vWithheld = listed('verdict').includes('verdict-device.json') || listed('measure').includes('verdict-device.json');
+const late = {};
+for (const s of ['M8', 'M9', 'JUDGE', 'M8V', 'M9V']) late[s] = e['OUT_' + s] || null;
+let note = null;
+if (!vPresent) {
+  if (doc.mode === 'armed') note = 'armed: verdict-device.json absent (' + (vWithheld ? 'withheld by leak scan' : 'judge not run or no output') + ') - device reading 0 for this round';
+  else note = 'rehearsal: judge not run (item measurement 0)';
+}
+doc.round_line = {
+  source: 'verdict-device.json',
+  order: 'measure > run.json > M8 > M9 > M7(reads masked samples) > M8prime/M9prime(verdict only) > round_line > M10',
+  verdict_present: vPresent,
+  verdict_withheld: vWithheld,
+  round: vPresent && v.round !== undefined ? v.round : null,
+  red: vPresent && typeof v.red === 'boolean' ? v.red : null,
+  device_note: note,
+  withheld_files: w && Array.isArray(w.files) ? w.files.length : 0,
+  stage_outcomes_late: late,
+};
+fs.writeFileSync(runJson, JSON.stringify(doc, null, 2) + '\n');
+console.log('[round] 회차 줄 ' + JSON.stringify({ verdict_present: vPresent, verdict_withheld: vWithheld, has_round: doc.round_line.round !== null }));
+NODE
+}
+
 case "$STAGE" in
   m1) m1 ;;
   m2) m2 ;;
   m3) m3 ;;
   m4) m4 ;;
   runjson) runjson ;;
+  round) round ;;
   *) echo "unknown stage: $STAGE" >&2; exit 2 ;;
 esac
