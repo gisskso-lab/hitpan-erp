@@ -1,0 +1,831 @@
+{
+  "run_id": "43812697138",
+  "run_attempt": "1",
+  "workflow": "HQA S4 관문1 GitHub 서버 실측",
+  "job": "measure",
+  "ref": "refs/heads/hqa/20261116-S4-gh실측-장치",
+  "device_commit": "28cb86936c1113d2ec10997728498b7e46fbd4c1",
+  "fixture_tree": "47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8",
+  "mode": "rehearsal",
+  "mode_line": "rehearsal",
+  "github_sha": "28cb86936c1113d2ec10997728498b7e46fbd4c1",
+  "runner": {
+    "image_os": "ubuntu24",
+    "image_version": "20261111.127.1",
+    "os": "Linux",
+    "arch": "X64"
+  },
+  "node": "v22.23.4",
+  "playwright": "1.62.1",
+  "browser": "151.0.7922.34",
+  "headless_shell": "not used",
+  "ldd_missing": [],
+  "started_utc": "2026-11-16T05:49:21Z",
+  "ended_utc": "2026-11-16T05:50:30.686Z",
+  "ls_remote_start": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "dd9cb8065afc74684898fbb27b90848262346aa0"
+    }
+  ],
+  "ls_remote_end": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "dd9cb8065afc74684898fbb27b90848262346aa0"
+    }
+  ],
+  "fixed_heads_unchanged": true,
+  "fixed_heads_assert": {
+    "lines_start": 3,
+    "lines_end": 3,
+    "feat_end_ok": true,
+    "fixture_end_ok": true,
+    "main_same": true,
+    "ok": true
+  },
+  "stage_outcomes": {
+    "M0": "success",
+    "SELFTEST_LEAK": "success",
+    "SELFTEST_JUDGE": "success",
+    "M1": "success",
+    "M2": "success",
+    "M3": "success",
+    "M4": "success",
+    "PROBE": "success",
+    "ITEMS": "skipped",
+    "JUDGE": "skipped"
+  },
+  "stage_results": {
+    "m1": {
+      "stage": "m1",
+      "ok": true,
+      "detail": "checks=6"
+    },
+    "m2": {
+      "stage": "m2",
+      "ok": true,
+      "detail": "tries=1"
+    },
+    "m3": {
+      "stage": "m3",
+      "ok": true,
+      "playwright": "1.62.1",
+      "browser": "151.0.7922.34",
+      "headless_shell": "not used",
+      "ldd_missing": [],
+      "detail": ""
+    },
+    "m4": {
+      "stage": "m4",
+      "ok": true,
+      "detail": "failed_step=none"
+    }
+  },
+  "selftest_leak": {
+    "ok": true,
+    "cases": 58,
+    "failed": [],
+    "results": [
+      {
+        "case": "c.long.token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.runner.path.env",
+        "expect": [
+          "runner-path"
+        ],
+        "kinds": [
+          "runner-path"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.runner.path.generic",
+        "expect": [
+          "runner-path"
+        ],
+        "kinds": [
+          "runner-path"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.gh",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.cloud.id",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.key.header",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.jwt",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.bearer",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.assign",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.json.kv",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.json.kv.camel",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.cred.json.kv.snake",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.b64.text",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.b64.json",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.hex64.unkeyed",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.hex40.text",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.banned.1",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.banned.2",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "c.banned.3",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.long.token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.cred.gh",
+        "expect": [
+          "credential",
+          "long-token"
+        ],
+        "kinds": [
+          "credential",
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.banned",
+        "expect": [
+          "banned-word"
+        ],
+        "kinds": [
+          "banned-word"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.subdir.token",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.hex64",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "n.bad.extension",
+        "expect": [
+          "extension"
+        ],
+        "kinds": [
+          "extension"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png.bad.signature",
+        "expect": [
+          "png-signature"
+        ],
+        "kinds": [
+          "png-signature"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png.text.chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png.itxt.chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png.ztxt.chunk",
+        "expect": [
+          "png-text"
+        ],
+        "kinds": [
+          "png-text"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "png.trailing",
+        "expect": [
+          "png-structure"
+        ],
+        "kinds": [
+          "png-structure"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y1.esc.json",
+        "expect": [
+          "credential"
+        ],
+        "kinds": [
+          "credential"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y1.short.ok",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y3.fixture.kv",
+        "expect": [
+          "long-token"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y3.device.kv",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y4.exif",
+        "expect": [
+          "png-chunk"
+        ],
+        "kinds": [
+          "png-chunk"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y4.iccp",
+        "expect": [
+          "png-chunk"
+        ],
+        "kinds": [
+          "png-chunk"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y4.private",
+        "expect": [
+          "png-chunk"
+        ],
+        "kinds": [
+          "png-chunk"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y4.allowed",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "control.clean",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "remove.withheld",
+        "expect": [
+          "removed",
+          "name masked"
+        ],
+        "kinds": null,
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "mask-roundtrip",
+        "expect": [
+          "token masked",
+          "b64 masked",
+          "unkeyed hex masked",
+          "path masked",
+          "keyed sha kept"
+        ],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.k.eq",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.sig.amp",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.key.dot",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.id.dash",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.colon",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.nodigit",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2.esc.json",
+        "expect": [
+          "long-token",
+          "masked"
+        ],
+        "kinds": [
+          "long-token"
+        ],
+        "status": 2,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.css",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.content",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.sel",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.shot",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.hex",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.ver",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "y2n.runner",
+        "expect": [],
+        "kinds": [],
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "g7.autoid.schema",
+        "expect": [
+          "conflict 0",
+          "masked",
+          "record path"
+        ],
+        "kinds": null,
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "g7.planted.red",
+        "expect": [
+          "device_failure",
+          "red",
+          "not masked",
+          "leak catches"
+        ],
+        "kinds": null,
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      },
+      {
+        "case": "names.short",
+        "expect": [
+          "< 22"
+        ],
+        "kinds": null,
+        "status": 0,
+        "echoed_value": false,
+        "pass": true
+      }
+    ]
+  },
+  "selftest_judge": "present rc=0",
+  "probe": "see probe.json (rehearsal - judgement-free)",
+  "items": "rehearsal: item measurement 0",
+  "verdict": "device reading only - judgement = HQA",
+  "mask": {
+    "files": 8,
+    "paths_replaced": 10,
+    "tokens_replaced": 7,
+    "distinct_tokens": 6,
+    "json_broken": [],
+    "records": [
+      {
+        "file": "m4-stdout.txt",
+        "path": "L6",
+        "kind": "long-token",
+        "length": 36
+      },
+      {
+        "file": "m4-stdout.txt",
+        "path": "L8",
+        "kind": "long-token",
+        "length": 36
+      },
+      {
+        "file": "m4-stdout.txt",
+        "path": "L9",
+        "kind": "long-token",
+        "length": 23
+      },
+      {
+        "file": "m4-stdout.txt",
+        "path": "L10",
+        "kind": "long-token",
+        "length": 40
+      },
+      {
+        "file": "probe.json",
+        "path": "screens[2].r1.candidates[0].cls[3]",
+        "kind": "long-token",
+        "length": 23
+      },
+      {
+        "file": "probe.json",
+        "path": "screens[2].r1.candidates[0].cls[4]",
+        "kind": "long-token",
+        "length": 27
+      },
+      {
+        "file": "probe.json",
+        "path": "screens[2].r1.candidates[0].cls[5]",
+        "kind": "long-token",
+        "length": 25
+      }
+    ],
+    "records_dropped": 0,
+    "judge_field_conflicts": []
+  }
+}
