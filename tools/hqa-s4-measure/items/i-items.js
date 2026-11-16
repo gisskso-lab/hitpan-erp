@@ -149,17 +149,31 @@ async function i4(ctx) {
   if (restMs > 0) await L.wait(ctx, restMs);
   const escPressedAtMs = L.nowMs() - ctx.sig.t0;
   await L.press(ctx, 'Escape');
-  const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
+  // ⬛ 옛 줄(고침6 c2 까지 · 고정 settle 뒤 마지막 상태 하나):
+  // const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
+  // focusOnSameRowBtn: s.state.focus.row === row && s.state.focus.isStatusActivator && !s.state.focus.inOpenList,
+  // 🔴 고침6 c3(결-5 · 결-12) — Esc → 메뉴 0 관측 → 최대 pollAfterEscMaxMs polling · 두 식(지금 식 · HQA 원문 식) 각각 기록
+  const pa = await L.pollAfterEsc(ctx, d4.openPollMs, d4.pollAfterEscMaxMs);
+  if (!pa.menuZeroObserved && (d4.menuZeroFailCases || []).includes(ctx.cell.case)) {
+    throw new Error(`${ctx.rules.deviceReading.i4MenuZeroNotObserved} · 열린 목록 ${pa.state.openCount} · 상한 ${ctx.rules.device.openWaitMs + 2 * ctx.cell.delay}ms · Esc ${escPressedAtMs}ms`);
+  }
+  const s = { state: pa.state }; // 같은 줄 번호(row)는 pollAfterEsc 가 rules device.i4.row 로 읽는다(같은 값)
   return [{
     readings: {
       openPath: ctx.cell.case, tabsToReach: reach ? reach.tabs : null,
       openCountBeforeEsc: st1.openCount,
       openCountAfterEsc: s.state.openCount,
       focusAfterEsc: s.state.focus,
-      focusOnSameRowBtn: s.state.focus.row === row && s.state.focus.isStatusActivator && !s.state.focus.inOpenList,
+      focusOnSameRowBtn: pa.menuZeroObserved ? pa.restoredAtMs !== null : null,
       // 고침6 c2: 기다림 기록(결-3) — 시각 = sig.t0 기준 ms
       escWaitMs: d4.escWaitMs, openPollMs: d4.openPollMs,
       openObserved: true, openObservedAtMs: ob.observedAtMs, escPressedAtMs, actualWaitMs: escPressedAtMs - ob.observedAtMs,
+      // 고침6 c3: Esc 뒤 판독 기록(결-5) · 두 식(결-12) — 메뉴 0 못 본 mouse-open = 열림 남음 판독값 · 초점 polling 0(null)
+      menuZeroObserved: pa.menuZeroObserved, menuZeroAtMs: pa.menuZeroAtMs, pollAfterEscMaxMs: d4.pollAfterEscMaxMs,
+      restoredAtMs: pa.restoredAtMs, hqaRestoredAtMs: pa.hqaRestoredAtMs, polledMs: pa.polledMs, pollReads: pa.reads,
+      hqaFocusRow1Restored: pa.menuZeroObserved ? pa.hqaRestoredAtMs !== null : null, hqaFocusRowEnd: pa.hqaFocusRowEnd,
+      maxOpenAfterEsc: pa.maxOpen,
+      menuNotClosedNote: pa.menuZeroObserved ? null : ctx.rules.deviceReading.i4MenuNotClosedRead,
       final: L.slim(s.state)
     },
     circuit: L.circuitSince(ctx, ctx.inputAt),

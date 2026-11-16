@@ -313,6 +313,58 @@ async function waitOpenObserved(ctx, pollMs) {
   return { state: st, observed, observedAtMs: observed ? M.nowMs() - ctx.sig.t0 : null };
 }
 
+// ── 고침6 c3(결-5 · 결-12) — Esc 뒤 판독 = HQA 꼴 ──
+// HQA 판독 식(#850 댓글 6709803008 L47 원문 그대로 · 읽기만) — 초점 요소가 든 상태 칸의 data-row(없으면 null)
+async function readHqaFocusRow(ctx) {
+  return ctx.page.evaluate(() => {
+    const r = document.activeElement?.closest('[data-status-kind]')?.getAttribute('data-row');
+    return r === undefined ? null : r;
+  });
+}
+
+// Esc → 메뉴 0 관측(상한 openWaitMs + 2×지연 · 간격 pollMs) → 최대 maxMs 동안 간격 pollMs 로 두 식을 읽음
+//   지금 식 = 같은 줄(device.i4.row) · 상태 단추 · 열린 목록 밖 / HQA 식 = readHqaFocusRow === 줄 번호 글자
+//   각 식이 처음 참인 시각(maxMs 안만) · polledMs(메뉴 0 부터 마지막 읽기까지) · 끝 상태 · 메뉴 0 못 보면 menuZeroObserved=false(polling 0)
+//   시각 = sig.t0 기준 ms · 두 식이 모두 참이 되면 일찍 끝
+async function pollAfterEsc(ctx, pollMs, maxMs) {
+  const M = lib();
+  const t0 = ctx.sig.t0;
+  const row = String(ctx.rules.device.i4.row);
+  const zEnd = M.nowMs() + ctx.rules.device.openWaitMs + 2 * ctx.cell.delay;
+  let st = await M.readState(ctx);
+  let maxOpen = st.openCount;
+  while (st.openCount > 0 && M.nowMs() < zEnd) {
+    await M.wait(ctx, pollMs);
+    st = await M.readState(ctx);
+    if (st.openCount > maxOpen) maxOpen = st.openCount;
+  }
+  if (st.openCount > 0) {
+    return { menuZeroObserved: false, menuZeroAtMs: null, restoredAtMs: null, hqaRestoredAtMs: null, polledMs: 0, reads: 0, state: st, maxOpen, hqaFocusRowEnd: null };
+  }
+  const z = M.nowMs();
+  let hq = await M.readHqaFocusRow(ctx);
+  let devAt = null;
+  let hqAt = null;
+  let reads = 1;
+  for (;;) {
+    const t = M.nowMs();
+    const inWin = t - z <= maxMs;
+    if (inWin && devAt === null && st.focus.row === row && st.focus.isStatusActivator && !st.focus.inOpenList) devAt = t;
+    if (inWin && hqAt === null && hq === row) hqAt = t;
+    if ((devAt !== null && hqAt !== null) || t - z >= maxMs) break;
+    await M.wait(ctx, pollMs);
+    st = await M.readState(ctx);
+    if (st.openCount > maxOpen) maxOpen = st.openCount;
+    hq = await M.readHqaFocusRow(ctx);
+    reads += 1;
+  }
+  return {
+    menuZeroObserved: true, menuZeroAtMs: z - t0,
+    restoredAtMs: devAt === null ? null : devAt - t0, hqaRestoredAtMs: hqAt === null ? null : hqAt - t0,
+    polledMs: M.nowMs() - z, reads, state: st, maxOpen, hqaFocusRowEnd: hq
+  };
+}
+
 // Tab 경로 한 칸(원자료 · 값 0 — 태그 · role · 줄 번호 · 참거짓 · tabIndex 만)
 function pathStep(i, f, rowId) {
   return {
@@ -389,5 +441,5 @@ module.exports = {
   // H4
   readBlankRows,
   // 고침6
-  nowMs, waitOpenObserved
+  nowMs, waitOpenObserved, readHqaFocusRow, pollAfterEsc
 };

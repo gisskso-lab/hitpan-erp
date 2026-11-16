@@ -101,7 +101,12 @@
     "i2": { "row": 1, "longPress": { "firstDelayMs": 500, "repeats": 15, "intervalMs": 33 } },
     "i3": { "row": 10 },
     "i4": { "row": 1, "escWaitMs": 700, "openPollMs": 50, "escWaitRef": "HQA #850 댓글 6709803008 · 열린 메뉴 관측 → 700ms 유지 → Esc",
-      "_escWait_표지_고침6": "고침6 결-2 · 결-3 · 결-4 · 결-7(PM 결재 11/16 23:20 · 대표 결정 ①) — I-4 두 경우(mouse-open · kbd-open) × 모든 화면(before · after · e1t3) 같은 값 하나(화면별 · 경우별 덮어쓰기 칸 0). 기준점 = 열린 메뉴 관측(원문) · 열림 관측 간격 openPollMs 50 = 개발팀 사전 고정(HQA 글자 없음 · 전역 pollMs 150 무변). 열림을 못 보면 Esc 를 누르지 않고 그 표본 = 장치 실패(사유 deviceReading.i4OpenNotObserved). 표본 readings 에 openObservedAtMs · escPressedAtMs · actualWaitMs. I-6 esc = HQA 기다림 절차 없음 · 그대로." },
+      "_escWait_표지_고침6": "고침6 결-2 · 결-3 · 결-4 · 결-7(PM 결재 11/16 23:20 · 대표 결정 ①) — I-4 두 경우(mouse-open · kbd-open) × 모든 화면(before · after · e1t3) 같은 값 하나(화면별 · 경우별 덮어쓰기 칸 0). 기준점 = 열린 메뉴 관측(원문) · 열림 관측 간격 openPollMs 50 = 개발팀 사전 고정(HQA 글자 없음 · 전역 pollMs 150 무변). 열림을 못 보면 Esc 를 누르지 않고 그 표본 = 장치 실패(사유 deviceReading.i4OpenNotObserved). 표본 readings 에 openObservedAtMs · escPressedAtMs · actualWaitMs. I-6 esc = HQA 기다림 절차 없음 · 그대로.",
+      "pollAfterEscMaxMs": 3000,
+      "_pollAfterEsc_표지_고침6": "고침6 결-5(PM 결재 11/16) — Esc 뒤 판독 = HQA 꼴: Esc → 메뉴 0 관측(상한 openWaitMs + 2×지연 · 간격 openPollMs) → 최대 pollAfterEscMaxMs 동안 간격 openPollMs 로 두 식을 읽음 → 각 식이 처음 참인 시각 기록. readings.focusOnSameRowBtn = 지금 식(같은 줄 · 상태 단추 · 열린 목록 밖)이 3초 안 한 번이라도 참 · readings.hqaFocusRow1Restored = HQA 원문 L47 식(document.activeElement?.closest('[data-status-kind]')?.getAttribute('data-row') === '1')이 3초 안 한 번이라도 참. 판정 기준 글자(정본 B §6) · judge.js 실패 꼴 글자 무변(값 출처만 바뀜). I-4 는 옛 settle 안 씀(다른 항목 무변).",
+      "_hqaFocusRow1_표지_고침6": "고침6 결-12(PM 결재 11/16 · 두 식 기록 · 소스 대조) — HQA 식 = document.activeElement?.closest('[data-status-kind]')?.getAttribute('data-row') === '1'(#850 댓글 6709803008 L47) · 지금 식 = 초점 요소의 closest('[data-row]') 가 1 · 단추 · 열린 목록 밖. 시험 앱 88085da1 소스(읽기만 · 실행 0) 대조 결과 = 두 식 같은 뜻: ① 상태 칸 div 하나가 data-row 와 data-status-kind 를 함께 가짐(Pages/FixturePage.razor L51 · FixturePageA2 L50 · FixturePageE1T3 L50 · FixturePageV2 L50) → closest('[data-row]') 와 closest('[data-status-kind]') 가 칸 안에서 같은 요소 ② 칸 안 초점 받는 요소 = MudBlazor 9.3 내장 MudButton(button) 하나(After · E1T3 CsStatusCell 에 ActivatorContent 없음 · 칩 span 은 초점 0) → 「상태 단추」 조건이 칸 안에서 늘 참 ③ 목록(팝오버)은 칸 DOM 밖(After CsStatusCell 주석 「목록(팝오버)은 칸 DOM 밖」) → 칸 안 요소의 「열린 목록 밖」 조건이 늘 참 ④ data-row 만 있고 data-status-kind 없는 #detail(FixturePage L88)은 초점 요소 0. 남은 것: MudBlazor 9.3 컴파일된 마크업 원문은 직접 안 읽음(시험 앱 주석 인용으로만) · 두 식 값이 실제로 갈리면 표본 readings 에 둘 다 남아 HQA 가 본다. 판독 식 바꿈 = 대표 재상신(설계 결-12) — 바꾸지 않음.",
+      "menuZeroFailCases": ["kbd-open"],
+      "_menuZeroFailCases_표지_고침6": "고침6 결-5 「메뉴 0 못 봄 = 장치 실패」 를 거는 경우 목록. [3] 구현 판단(PM 확인 대기 · 개발명세 부록 M 「작업지시서와 다르게 한 것」) — kbd-open 만: kbd-open 의 판독 = Esc 뒤 초점(I-4/kbd-open 실패 꼴)이라 메뉴 0 이 전제. mouse-open 의 /before 실패 꼴 = 「Esc 뒤 목록 열림 남음」(readingText.beforeFailShape.I-4 · openCountAfterEsc ≥ 1)이라 메뉴 0 못 봄이 곧 판독값 — 여기에 장치 실패를 걸면 /before 마우스 Esc 대조가 늘 대조 불가가 되어 판정 기준 글자(§0 고정 조건)를 깬다. mouse-open 에서 메뉴 0 못 봄 = 표본 유효 · openCountAfterEsc = 마지막 읽기 · 초점 polling 안 함(focusOnSameRowBtn · hqaFocusRow1Restored = null · 사유 deviceReading.i4MenuNotClosedRead). PM 이 ★ 글자 그대로를 고르면 이 목록에 mouse-open 을 더한다(코드 무변)." },
     "i5": { "row": 1 },
     "i6": { "row": 1, "maxTabs": 20 },
     "i8": { "kinds": ["blank", "empty", "null"], "itemKind": "blank", "_itemKind_표지": "H4-G-B(대표 결정 ⓑ · 작업지시서 §7-2) — t3ReadUnit = item 일 때 항목 판정에 쓰는 꼴 하나(공백). 나머지 꼴 = 기록만. 장치 선택 아님 · 결정 글자 그대로.", "hiddenSel": ".mud-menu-button-hidden", "_표지": "H4 §7-2 — I-8 이 읽는 줄 = [data-row] 의 data-status-kind 가 이 목록 값인 줄(줄 번호는 화면에서 읽음 · 코드에 적지 않음). 값 출처 = 시험 앱 b967b1b0 FixtureData.KindOf(null → null · 길이 0 → empty · 공백뿐 → blank). 숨김 클래스 = 11/7 리뷰서 L151 의 mud-menu-button-hidden. 장치 선택 · 기대값 아님." },
@@ -328,7 +333,9 @@
     "contrastVariantDiff": "비교 화면 판 속성 불일치 — 장치 빨강",
     "v2ProbeChecked": "V2 화면 확인만(판 속성 둘) — 줄 읽기 0",
     "_i4_표지_고침6": "고침6 결-4(PM 결재 11/16) — I-4 HQA 절차 전제(열린 메뉴 관측) 불성립 사유 글자. 이 글자로 표본을 버린다(run-items.js 가 표본 errors 칸에 남김 · valid=false · 판독기는 device_failure 로 셈) — 통과로 새지 않음.",
-    "i4OpenNotObserved": "열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립"
+    "i4OpenNotObserved": "열린 메뉴 관측 안 됨 — HQA 절차 전제 불성립",
+    "i4MenuZeroNotObserved": "Esc 뒤 메뉴 0 관측 안 됨 — HQA 절차 전제 불성립",
+    "i4MenuNotClosedRead": "Esc 뒤 메뉴 0 관측 안 됨 — 열림 남음 판독값 · 초점 polling 안 함"
   },
   "judgeSchema": {
     "_표지": "고침4 G7(S-1 · CTO 보탬) — 판정 칸 스키마(발행 전 고정). 회로 = 상태 · 시각 · 재연결 표시 여부 / 초점 = 역할 · 태그 · 줄 번호 · 알려진 data 속성(data-row)만 — 자동 id · 회로 ID 원문 0 / valid · 판독 글자 · github.sha · 런 ID. 이 칸에 가림 규칙(mask.js findSecrets)이 걸리면: judge.js = 그 표본 device_failure(사유 「판정 칸 가림 충돌」) · 빨강 / mask.js = 그 칸은 가리지 않고 가림 기록에 충돌로 남김(값 0 → leak-scan 이 그 파일을 보류). 가림 기록 = 파일 · 칸 경로 · 꼴 종류 · 길이(값 0). 꼴: 점 = 객체 칸 · [] = 배열 아무 칸 · * = 아무 열쇠.",
