@@ -59,6 +59,10 @@
   },
   "n1Contrast_표지": "고침4 G1(CTO D-1 ⓒ · 대표 11/16 ㉡) — N-1 대조로 읽는 화면 이름. ㉡ = \"a2\" · ㉠(HQA ⓑ 거절 · 되돌림) = \"before\". 이 값은 G-값 커밋에서 확정한다(지금 값 = ㉡ 기본). ㉠ 으로 갈 때는 이 값과 plan.itemSpecs.N-1.screens 의 a2 를 함께 뺀다(judge.js buildPlan 이 둘의 어긋남을 거부).",
   "n1Contrast": "a2",
+  "contrastScreen_표지": "H4 §7-1(PM 결재 11/16 · 결-H1 甲 · 결-H2 · 결-H5) — 항목(경우)별 대조 화면 표. 열쇠 = 「항목/경우」 또는 「항목」 · 찾는 순서 = 항목/경우 → 항목 → before. 근거: N-1 = 대표 11/16 ㉡(n1Contrast 와 같아야 함 · buildPlan 단언) · I-4/mouse-open = /before(11/7 리뷰서 L51 · 작업지시서 §2 S3) · I-4/kbd-open = e1t3(11/8 근본원인 L27 · S4) · I-8 = v2(11/7 리뷰서 L151 · S6). A2 의 I-4 사용 = 되돌림(결-H1 甲 · A2 는 Esc 고침 뒤 판). 화면 목록(plan.screens) 밖 화면은 이 표가 가리키는 항목(경우) 칸에만 둔다(다른 칸 = buildPlan 거부). 대조 화면이 before 아닌 항목(경우)의 /before 칸 = 기록만 · 판정에 안 씀. HQA 불수락 화면은 G-값 커밋에서 표에서 빼고 그 칸 = 대조 무효(대표 결정 ⓐ 되돌림).",
+  "contrastScreen": { "N-1": "a2", "I-4/mouse-open": "before", "I-4/kbd-open": "e1t3", "I-8": "v2" },
+  "t3ReadUnit_표지": "H4 §7-1 · 대표 결정 ⓑ — T3(I-8) 대조 판독 단위. item = 같은 항목의 어느 상태 꼴(공백 · 빈 · null) 하나라도 대조 화면에서 실패 꼴 재현이면 항목 대조 성립 · cell = 세 꼴 모두 재현일 때만 성립. 한 값만 판독에 쓴다(두 단위 동시 계산 · 고르기 0). HQA 이의면 G-값 커밋에서 cell 로.",
+  "t3ReadUnit": "item",
   "mask_allow_표지":"가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
   "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends",
     "fixture/Components/A2/CsStatusCell", "fixture/Components/A2/", "fixture/Components/After/", "fixture/Components/Before/",
@@ -97,11 +101,12 @@
     "i4": { "row": 1 },
     "i5": { "row": 1 },
     "i6": { "row": 1, "maxTabs": 20 },
-    "i7": { "row": 1, "otherRow": 2, "belowGapPx": 12, "_belowGapPx_표지": "고침5 결-10 甲 — F10 「목록 밑」 누름 점 = 열린 목록 아래 끝 + 12px(장치 선택 · 결과 보기 전 고정 · 기대값 아님)" },
+    "i8": { "kinds": ["blank", "empty", "null"], "hiddenSel": ".mud-menu-button-hidden", "_표지": "H4 §7-2 — I-8 이 읽는 줄 = [data-row] 의 data-status-kind 가 이 목록 값인 줄(줄 번호는 화면에서 읽음 · 코드에 적지 않음). 값 출처 = 시험 앱 b967b1b0 FixtureData.KindOf(null → null · 길이 0 → empty · 공백뿐 → blank). 숨김 클래스 = 11/7 리뷰서 L151 의 mud-menu-button-hidden. 장치 선택 · 기대값 아님." },
+    "i7": { "row": 1, "otherRow": 2, "belowGapPx": 12,"_belowGapPx_표지": "고침5 결-10 甲 — F10 「목록 밑」 누름 점 = 열린 목록 아래 끝 + 12px(장치 선택 · 결과 보기 전 고정 · 기대값 아님)" },
     "n1": { "row": 1, "keys": ["ArrowDown", "ArrowUp"], "count": 24, "intervalMs": 0, "settleExtraMs": 1500 },
     "n2": { "gapMs": 120 },
     "kbd": { "refRow": 1, "_표지": "고침2 N1 — Tab 경로 기록 · 구조 읽기(R1) · U2/K 의 「1번 줄」 기준 줄 번호" },
-    "probe": { "distinguish": true, "_표지": "고침2 N1 — 리허설 3 한 번만 /before 구분 점검(R1 · R2 · R3 · 지연 0). 그 뒤 리허설은 false(= /before R1 구조 읽기만 · 입력 0)" }
+    "probe": { "contrastModes": { "e1t3": "r1", "v2": "variantOnly" }, "_contrastModes_표지_H4": "H4 §7-3 — probe 비교 화면 꼴: e1t3 = R1 만(1번 줄 · 입력 0) · v2 = 화면 확인만(줄 읽기 0 · T3 미리 노출 막기). 표에 없는 비교 화면 = probe 장치 빨강.", "distinguish":true, "_표지": "고침2 N1 — 리허설 3 한 번만 /before 구분 점검(R1 · R2 · R3 · 지연 0). 그 뒤 리허설은 false(= /before R1 구조 읽기만 · 입력 0)" }
   },
   "plan": {
     "_표지": "계획 칸 = 항목 × 경우 × 화면 × 지연 × 창. 고침4 G4(D-3): 칸마다 유효 표본 수 < 정해진 표본 수(hqaPending.samplesPerCell) 면 그 칸 「장치 실패」 + 빨강 · 사유 「정해진 표본 수 모자람 유효/정해진」. /before 칸 표본 0 도 빨강(「대조 무효」 와 다름).",
@@ -111,27 +116,34 @@
       "_표지": "고침4 G1(CTO C-3) — 화면 이름 ↔ 주소 ↔ 기대 data-variant ↔ 기대 data-fixture-css 판을 이 표 하나로. 장치 · 판독기는 화면을 이름 같음 비교로만 가른다(주소 앞머리 판단 0 · PM 조건 ①). run-items.js 는 주소를 이 표에서 읽고, data-variant 가 표 값과 다르면 그 표본을 버린다(throw) · CSS 판이 다르면 오류 칸에 남긴다. 원자료 표본마다 화면 이름(screen) · 주소(screenPath) · 실측 CSS 판(cssMeasured)을 따로 기록.",
       "before": { "path": "/before", "variant": "before", "css": "before" },
       "after": { "path": "/after", "variant": "after", "css": "after" },
-      "a2": { "path": "/after-a2", "variant": "a2", "css": "after" }
+      "a2": { "path": "/after-a2", "variant": "a2", "css": "after" },
+      "e1t3": { "path": "/after-e1t3", "variant": "e1t3", "css": "after" },
+      "v2": { "path": "/after-v2", "variant": "v2", "css": "after" },
+      "_표지_H4": "H4 결-H10(PM 결재 11/16) — 비교 화면 2 더함(e1t3 = I-4 키보드로 연 뒤 대조 · v2 = I-8 T3 대조). 주소는 /after 로 시작(시험 앱 App.razor L9 규칙 · after css) · 화면 가르기는 이름 같음 비교만. 화면 목록 밖 화면은 contrastScreen 값 화면이 그 항목(경우)에만(buildPlan 거부)."
     },
     "screenOrder_표지": "고침4 G6(L-5) — 같은 지연 단 안 재는 순서. after 먼저(U3 계산 유지) → a2(죽은 회로가 같은 단 /after 표본보다 뒤) → before. 표본마다 새 문맥. 원자료 각 표본에 order(전체 순번) · contextId(문맥 순번). judge.js 가 순서 어긋남을 빨강으로.",
-    "screenOrder": ["after", "a2", "before"],
+    "_screenOrder_옛값_H4": ["after", "a2", "before"],
+    "_screenOrder_표지_H4": "H4 §7-1 — after 먼저(U3 유지) → a2 → e1t3 → v2 → before(끝). 옛 값 = _screenOrder_옛값_H4(판독기는 안 읽음).",
+    "screenOrder": ["after", "a2", "e1t3", "v2", "before"],
     "iDelays": [0, 150, 300],
     "nDelays": [0, 150, 300, 500],
     "n1ContrastDelays": [300, 500],
-    "items": ["I-1", "I-2", "I-3", "I-4", "I-5", "I-6", "I-7", "N-1", "N-2"],
+    "_items_옛값_H4": ["I-1", "I-2", "I-3", "I-4", "I-5", "I-6", "I-7", "N-1", "N-2"],
+    "items": ["I-1", "I-2", "I-3", "I-4", "I-5", "I-6", "I-7", "N-1", "N-2", "I-8"],
     "itemSpecs": {
       "I-1": { "cases": ["tab-walk"], "delays": "iDelays" },
       "I-2": { "cases": ["enter-short", "space-short", "enter-long", "space-long"], "delays": "iDelays" },
       "I-3": { "cases": ["bottom-row"], "delays": "iDelays", "windows": [{ "h": 330 }, { "h": 200 }] },
-      "I-4": { "cases": ["mouse-open", "kbd-open"], "delays": "iDelays" },
+      "I-4": { "cases": ["mouse-open", "kbd-open"], "delays": "iDelays", "caseScreens": { "kbd-open": ["e1t3"] }, "_caseScreens_표지": "H4 결-H2 · 결-H3(PM 결재 11/16) — 키보드로 연 뒤 경우에만 비교 화면 e1t3 칸(지연 = iDelays 전부 · 결과로 단을 고르지 않음). 마우스로 연 뒤 = /before 그대로(대조 화면 표 contrastScreen). 계획 칸 108 → 111(I-8 9 칸 더해 120)." },
       "I-5": { "cases": ["tab", "shift-tab"], "delays": "iDelays" },
       "I-6": { "cases": ["esc", "enter"], "delays": "iDelays" },
       "I-7": { "cases": ["row-cell", "below-list"], "delays": "iDelays", "_cases_표지": "고침5 결-10 甲(PM 11/16 · 조건부 · CTO 범위 확인) — F10 전용 경우 below-list 더함(옛 꼴 = [\"row-cell\"] · 반려면 이 커밋만 되돌림). 계획 칸 102 → 108 · 계획 표본(3/5) 342 → 360." },
       "N-1": { "cases": ["arrows"], "delays": "nDelays", "screens": ["before", "after", "a2"], "_screens_표지": "고침4 G1 — a2 칸은 N-1 에만(다른 항목 a2 칸 0 · N-2 도 0). 화면 목록 밖 화면은 N-1 의 n1Contrast 하나만 허용(buildPlan 거부).", "screenDelays": { "a2": "n1ContrastDelays" }, "_screenDelays_표지": "고침4 보탬(PM F-6 ②) — a2 칸은 판정 대조 단(n1ContrastDelays = 300 · 500) 두 단만 계획(0 · 150 = 쓰지 않는 표본 · 필요한 만큼). 화면 목록 밖 화면(a2)의 지연이 n1ContrastDelays 밖이면 buildPlan 거부. 계획 칸 104 → 102 · 계획 표본(임시 표본 수 기준) 352 → 342." },
-      "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
+      "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" },
+      "I-8": { "cases": ["blank-rows"], "delays": "iDelays", "screens": ["before", "after", "v2"], "inputZero": true, "_표지": "H4 §7-2 · 결-H5 ~ 결-H7(PM 결재 11/16) — T3 = 입력 0 구조 읽기만(키 · 누름 · 초점 이동 0 · 표본에 입력 기록 1 이상 = 그 표본 장치 실패). 대조 화면 = v2(contrastScreen) · /before 칸 = 기록만 · 판정에 안 씀. 계획 칸 3 화면 × 3 지연 = 9 · 표본 수 = samplesPerCell 기본." }
     },
     "notMeasured": [
-      { "item": "I-8", "name": "T3", "text": "미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기", "hqaPending": "T3" },
+      { "item": "I-8", "name": "T3", "text": "미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기", "hqaPending": "T3", "superseded": "H4 I-8 측정", "_superseded_표지": "H4 §7-1 — 이 줄은 지우지 않는다(#1). superseded 표지가 있는 줄은 판독기 · 관문이 미측정으로 세지 않는다(I-8 은 plan.items 에서 잰다)." },
       { "item": "WebKit/Firefox", "text": "미측정" }
     ]
   },
@@ -176,6 +188,26 @@
       "roundVerdictWithheld": "판독 결과 파일(verdict-device.json) 보류 — 누출 검사",
       "roundVerdictAbsent": "판독 결과 파일(verdict-device.json) 없음 — 판독기 미실행 또는 출력 0"
     },
+    "h4": {
+      "_표지": "H4(작업지시서 §7 · §3-PM · PM 결재 11/16) — 대조 화면 표 · 경우별 대조 · T3 판독 글자. 위 글자는 무변 · 이 묶음은 더하기만. 판정 = HQA.",
+      "recordOnly": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "recordOnlyHealth": "장치 건강 · 판정 무관",
+      "contrastZeroReason": "비교 화면 표본 0",
+      "contrastByCaseRule": "경우별 대조 — 항목 contrastState 는 모든 경우가 성립일 때만 성립(I-4 · 결-H4) · 어느 경우든 대조 칸 장치 실패면 state null(대조 불가)",
+      "contrastByCaseRuleI7": "경우별 대조(보탬 G-3) — 경우마다 그 경우 대조 칸만으로 판독 · 한 경우의 장치 실패가 다른 경우 대조 칸을 덮지 않음 · 항목 contrastState(옛 묶음 판독)는 그대로",
+      "t3KindInvalid": "대조 무효(어느 판에서도 실패 꼴 없음)",
+      "t3UnitItem": "항목 단위(같은 항목의 어느 꼴이든 대조 화면에서 재현이면 성립)",
+      "t3UnitCell": "칸 단위(공백 · 빈 · null 세 꼴 모두 재현일 때만 성립)",
+      "t3NoKindRows": "그 꼴 줄 0 — 읽은 줄 없음(장치 실패)",
+      "i8InputViolation": "I-8 입력 기록 있음 — 입력 0 구조 읽기 위반"
+    },
+    "I-8": {
+      "source": "16e88c01:docs/운영기록/20261107작_백오피스CS상태칸_S4덮임_키보드_고침_작업지시서.md L306(T3 글자) · 11/7 리뷰서 L151(실패 꼴)",
+      "expected": "공백 · 빈 · null 줄 모두 상태 칸이 사라지지 않음(L306 「통째로 사라짐」 의 부정) — 구조 기준: 단추 ≥ 1 · 크기 > 0 · 숨김 클래스 0 · 탭 정지 1",
+      "contrastInvalid": "대조 무효",
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」",
+      "_표지": "H4 §7-2 — 기대 글자 출처 = L306 + L151 의 부정뿐(3회차 결과표 L235~241 인용 0 · 고침5 §12 ① 甲 출처 제한). 대조 화면 = contrastScreen I-8(v2)."
+    },
     "beforeFailShape": {
       "_표지": "고침5 H1-4 — 항목별 /before 실패 꼴(정본 인용 있는 것만 defined=true · 꼴 함수 = judge.js BEFORE_FAIL). defined=false 면 그 항목 contrastState = 「대조 기준 미정」. 기대 글자 아님(대조 성립 여부만).",
       "I-1": { "defined": true, "shape": "/before 키보드 미도달(D1 · keyboard_unreachable 표본)", "source": "A §3-2 항목 「키보드 탭 도달」 의 부정 · 참고 = 11/7 작업지시서 §7-2 M6(기대 채택 아님 · PM 대응 E-5)" },
@@ -185,6 +217,8 @@
       "I-5": { "defined": false, "shape": null, "source": null, "note": "확인 필요 — 정본 인용 대기(H3 · 설계) · 못 찾으면 「대조 기준 미정」 그대로" },
       "I-6": { "defined": true, "shape": "두 목록 동시 열림(readings.maxOpenCount ≥ 2)", "source": "A §3-2" },
       "I-7": { "defined": true, "shape": "행 클릭 · 다른 줄 변화(readings.rowclickDelta > 0 · changedOtherRows ≥ 1)", "source": "A §4 C5 · §3-3" },
+      "I-4/kbd-open": { "defined": true, "shape": "Esc 뒤 끝 초점이 같은 줄 상태 단추 아님(BODY 등 · readings.focusOnSameRowBtn = false)", "source": "A §3-2 「닫힌 뒤 초점」 의 부정 · 출처 11/8 근본원인 L27(실패 꼴 인용만 · 기대 글자 아님)", "_표지_H4": "H4 결-H2(PM 결재 11/16) — I-4 키보드로 연 뒤 경우 전용 실패 꼴(대조 화면 e1t3). I-4 옛 꼴(열림 남음)은 위 줄 그대로 · 마우스로 연 뒤 경우가 쓴다." },
+      "I-8": { "defined": true, "shape": "공백 줄 상태 칸 숨김(mud-menu-button-hidden 또는 단추 0×0 또는 탭 정지 0)", "source": "11/7 리뷰서 L151(실패 꼴 인용만 · 기대 글자 아님)", "_표지_H4": "H4 §7-1 — I-8 대조 화면 v2 에서 이 꼴이 재현되면 그 꼴(공백 · 빈 · null) 대조 성립. 판독 단위 = t3ReadUnit." },
       "N-1": { "defined": true, "shape": "회로 죽음(circuit.dead · 대조 화면 = n1Contrast · 300 · 500 단)", "source": "B §6" }
     },
     "_글자구분": {
@@ -239,10 +273,13 @@
     { "item": "I-4", "screen": "before", "case": "kbd-open", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
     { "item": "I-5", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
     { "item": "I-6", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
-    { "item": "N-1", "screen": "a2", "source": "리허설 4 b02aad72(a2 R1)", "content": "A2 화면 1번 줄 구조(요소 1)", "no": "노9", "shapeText": "N-1 · a2 · (지연 0 구조 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐)", "rawSource": "리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1`", "exposedText": "A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0", "q4cList": "목록 밖" },
+    { "item": "N-1", "screen": "a2", "delay": 0, "_delay_표지_H4": "보탬 G-3(PM 결재 11/16 · [4] 재검증) — 칸 꼴 「지연 0 구조 · 칸 꼴 밖」 대로 지연 칸 보탬. 옛 행(지연 칸 없음 = a2 300 · 500 두 칸 모두 노출로 셈) = exposure_옛행_H4.", "source": "리허설 4 b02aad72(a2 R1)", "content": "A2 화면 1번 줄 구조(요소 1)", "no": "노9","_shapeText_옛값_H4": "N-1 · a2 · (지연 0 구조 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐)", "shapeText": "N-1 · a2 · 0 · (구조 읽기 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐)", "rawSource": "리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1`", "exposedText": "A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0", "q4cList": "목록 밖" },
     { "item": "I-5", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(열기 단계만)", "no": "노6", "shapeText": "I-5 · after · 0 · tab · shift-tab / I-6 · after · 0 · esc · enter", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "같은 꼴의 열기 단계(1번 줄 · Tab → Enter → 열림)만 · 그 뒤 키 결과 노출 0", "q4cList": "**목록 밖**(같은 필드가 이 칸의 첫 동작과 같음 · 새로 셈)" },
     { "item": "I-6", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(열기 단계만)", "no": "노6", "shapeText": "I-5 · after · 0 · tab · shift-tab / I-6 · after · 0 · esc · enter", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "같은 꼴의 열기 단계(1번 줄 · Tab → Enter → 열림)만 · 그 뒤 키 결과 노출 0", "q4cList": "**목록 밖**(같은 필드가 이 칸의 첫 동작과 같음 · 새로 셈)" },
     { "item": "N-1", "screen": "before", "case": "arrows", "delay": 0, "source": "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" }
+  ],
+  "exposure_옛행_H4": [
+    { "_표지": "보탬 G-3 전 노9 행 — 지연 칸 없음(a2 300 · 500 두 칸 모두 표지). 판독기는 안 읽음.", "row": { "item": "N-1", "screen": "a2", "source": "리허설 4 b02aad72(a2 R1)", "content": "A2 화면 1번 줄 구조(요소 1)" } }
   ],
   "exposure_옛행_고침5B": [
     { "_표지": "고침5-B 전 노4 행 — 화면 칸 없음(두 화면 모두 표지). MAPPING §10 노4 「화면 = after」 와 반대 사실이라 exposure 에서 뺌(지우지 않음 · 판독기 안 읽음)", "row": { "item": "I-4", "case": "kbd-open", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(화면 표기 없음 → 두 화면 모두 표지)" } }
@@ -277,7 +314,14 @@
     "a2ProbeZero": "되돌림 규칙 해당(㉠)",
     "a2ProbeNoRow": "A2 화면 1번 줄 없음 — 구조 읽기 불가",
     "_a2ProbeVariant_표지": "고침4 보탬(PM F-6 ④) — probe a2 R1 이 #fixture-root[data-variant] · link[data-fixture-css] 두 속성을 읽기만(getAttribute · 입력 0) · a2_check 에 variant · css 기록 · 기대(plan.screenTable.a2 의 variant · css)와 다르면 장치 빨강(probe 종료 코드 2 · 되돌림 판단과 별개).",
-    "a2ProbeVariantDiff": "A2 화면 판 속성 불일치 — 장치 빨강(되돌림 판단과 별개)"
+    "a2ProbeVariantDiff": "A2 화면 판 속성 불일치 — 장치 빨강(되돌림 판단과 별개)",
+    "_contrastProbe_표지_H4": "H4 §7-3 — probe 비교 화면: e1t3 = R1(1번 줄 · 입력 0 · tabIndex ≥ 0 · 사각형 > 0 요소 수)만 · v2 = 화면 확인(data-variant · data-fixture-css)만 · 줄 읽기 0. 아래 글자에 주소 글자 0.",
+    "contrastUnreachable": "비교 화면 키보드 도달 0",
+    "e1t3ProbeKeep": "E1T3 화면 줄 안 초점 받을 보이는 요소 ≥ 1 → 유지",
+    "e1t3ProbeZero": "되돌림 규칙 해당(I-4 키보드로 연 뒤 대조 무효)",
+    "e1t3ProbeNoRow": "E1T3 화면 1번 줄 없음 — 구조 읽기 불가",
+    "contrastProbeVariantDiff": "비교 화면 판 속성 불일치 — 장치 빨강",
+    "v2ProbeChecked": "V2 화면 확인만(판 속성 둘) — 줄 읽기 0"
   },
   "judgeSchema": {
     "_표지": "고침4 G7(S-1 · CTO 보탬) — 판정 칸 스키마(발행 전 고정). 회로 = 상태 · 시각 · 재연결 표시 여부 / 초점 = 역할 · 태그 · 줄 번호 · 알려진 data 속성(data-row)만 — 자동 id · 회로 ID 원문 0 / valid · 판독 글자 · github.sha · 런 ID. 이 칸에 가림 규칙(mask.js findSecrets)이 걸리면: judge.js = 그 표본 device_failure(사유 「판정 칸 가림 충돌」) · 빨강 / mask.js = 그 칸은 가리지 않고 가림 기록에 충돌로 남김(값 0 → leak-scan 이 그 파일을 보류). 가림 기록 = 파일 · 칸 경로 · 꼴 종류 · 길이(값 0). 꼴: 점 = 객체 칸 · [] = 배열 아무 칸 · * = 아무 열쇠.",

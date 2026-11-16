@@ -25,7 +25,13 @@ const path = require('path');
 
 const RULES = JSON.parse(fs.readFileSync(path.join(__dirname, 'rules.json'), 'utf8'));
 const SCREEN_TABLE = RULES.plan.screenTable;
-const PROBE_SCREENS = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);
+const PROBE_SCREENS_OLD = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);
+// H4 §7-3: 점검 화면 = 옛 목록 + rules.contrastScreen 값 화면(before · after · a2 밖 · 이 파일에 화면 이름 글자 0)
+//   비교 화면 점검 꼴 = rules.device.probe.contrastModes[화면] — r1(1번 줄 구조 읽기만) · variantOnly(판 속성 둘만 · 줄 읽기 0) · 없으면 장치 빨강
+const PROBE_SCREENS = PROBE_SCREENS_OLD.concat(Array.from(new Set(Object.keys(RULES.contrastScreen || {})
+  .filter((k) => !k.startsWith('_')).map((k) => RULES.contrastScreen[k])))
+  .filter((s) => typeof s === 'string' && !PROBE_SCREENS_OLD.includes(s)));
+const CONTRAST_MODES = (RULES.device.probe && RULES.device.probe.contrastModes) || {};
 const README_SEL = ['#before', '[data-row]', '#detail', '#rowclick-count', '#rowclicks', '#pick-count', '#picks', '#fixture-root', 'link[data-fixture-css]'];
 const PROBE_DELAY = 0;
 const errText = (e) => String(e && e.message ? e.message : e).split('\n')[0].slice(0, 160);
@@ -87,6 +93,28 @@ async function a2Struct(ctx, out, L, J) {
   return Object.assign({ screen: 'a2', delay: PROBE_DELAY, focusableVisible: n, reading, rule_ref: 'rules.json deviceReading a2Probe' }, vc);
 }
 
+// H4 §7-3: 비교 화면 판 속성 둘(getAttribute · 입력 0) ↔ rules.plan.screenTable — 다르면 장치 빨강
+async function contrastVariant(ctx, out, J, screen) {
+  const variant = await ctx.page.locator('#fixture-root').first().getAttribute('data-variant').catch((e) => { out.errors.push(screen + ' data-variant: ' + errText(e)); return null; });
+  const css = await ctx.page.locator('link[data-fixture-css]').first().getAttribute('data-fixture-css').catch((e) => { out.errors.push(screen + ' data-fixture-css: ' + errText(e)); return null; });
+  const sp = J.screenSpec(RULES, screen);
+  const red = variant !== sp.variant || css !== sp.css;
+  return { variant, css, expected: { variant: sp.variant, css: sp.css }, device: red ? 'red' : 'ok', deviceReason: red ? `${RULES.deviceReading.contrastProbeVariantDiff} ${screen} data-variant=${variant} · data-fixture-css=${css}` : null };
+}
+// H4 §7-3: r1 꼴 — 1번 줄 구조 읽기 하나뿐(입력 0) · 값 = 줄 안 초점 받을 보이는 요소 수
+async function contrastR1(ctx, out, L, J, screen) {
+  const D = RULES.deviceReading;
+  out.r1 = await L.readRowStruct(ctx, RULES.device.kbd.refRow);
+  const n = out.r1 && out.r1.present === true ? out.r1.focusableVisible : null;
+  const reading = n === null ? D[screen + 'ProbeNoRow'] : (n === 0 ? D[screen + 'ProbeZero'] : D[screen + 'ProbeKeep']);
+  return Object.assign({ screen, mode: 'r1', delay: PROBE_DELAY, focusableVisible: n, reading: reading || null }, await contrastVariant(ctx, out, J, screen));
+}
+// H4 §7-3: variantOnly 꼴 — 판 속성 둘만 · 줄 읽기 0(리허설에서 T3 줄을 미리 읽지 않음)
+async function contrastVariantOnly(ctx, out, J, screen) {
+  const reading = RULES.deviceReading[screen + 'ProbeChecked'] || null;
+  return Object.assign({ screen, mode: 'variantOnly', delay: PROBE_DELAY, reading }, await contrastVariant(ctx, out, J, screen));
+}
+
 async function probeScreen(browser, base, screen, L, J, doc) {
   const d = RULES.device;
   const cond = RULES.hqaPending.browserCondition.value;
@@ -109,6 +137,14 @@ async function probeScreen(browser, base, screen, L, J, doc) {
       // 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — 선택자 · 그림 · Tab · 키 · 누름 0
       await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));
       doc.a2_check = await a2Struct(ctx, out, L, J);
+    } else if (!RULES.plan.screens.includes(screen)) {
+      // H4 §7-3: 비교 화면(a2 밖) — 꼴 표(contrastModes)대로만 · 선택자 · 그림 · Tab · 키 · 누름 0
+      await page.waitForTimeout(L.settleMs(RULES, PROBE_DELAY));
+      const mode = CONTRAST_MODES[screen];
+      doc.contrast_checks = doc.contrast_checks || {};
+      if (mode === 'r1') doc.contrast_checks[screen] = await contrastR1(ctx, out, L, J, screen);
+      else if (mode === 'variantOnly') doc.contrast_checks[screen] = await contrastVariantOnly(ctx, out, J, screen);
+      else doc.contrast_checks[screen] = { screen, mode: null, device: 'red', deviceReason: `contrastModes 에 ${screen} 없음` };
     } else {
       for (const sel of README_SEL) out.selectors.push(Object.assign({ name: 'readme' }, await findSel(page, sel, d.actionTimeoutMs)));
       out.selectors.push(Object.assign({ name: 'statusChip' }, await findSel(page, d.sel.statusChip, d.actionTimeoutMs)));
@@ -173,6 +209,12 @@ async function main() {
     return 1;
   }
   process.stdout.write('[probe] 기록 끝 · playwright ' + doc.playwright_require.resolved + ' · 화면 ' + doc.screens.length + ' · K ' + (doc.k_check ? doc.k_check.verdict : '-') + ' · A2 ' + (doc.a2_check ? doc.a2_check.focusableVisible : '-') + ' · 오류 ' + doc.errors.length + '\n');
+  // H4 §7-3: 비교 화면 점검 빨강(판 속성 불일치 · 꼴 표에 없음) = 종료 코드 2(a2 와 같은 꼴 · probe.json 은 이미 씀)
+  const cRed = Object.values(doc.contrast_checks || {}).filter((c) => c && c.device === 'red');
+  if (cRed.length) {
+    for (const c of cRed) process.stderr.write('[probe] ' + c.deviceReason + '\n');
+    return 2;
+  }
   // 고침4 보탬(PM F-6 ④): a2 화면 판 속성이 기대와 다르면 장치 빨강 = 종료 코드 2(probe.json 은 이미 씀)
   if (doc.a2_check && doc.a2_check.device === 'red') {
     process.stderr.write('[probe] ' + doc.a2_check.deviceReason + '\n');

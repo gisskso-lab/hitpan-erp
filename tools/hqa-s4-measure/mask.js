@@ -234,6 +234,38 @@ const MUD_CLASS_ALLOW = [
   'mud-typography-subtitle2',
 ];
 
+// 보탬 G-1(PM 결재 11/16 · 리허설 5 🟡 ①) — MudBlazor 단추가 그릴 때 붙이는 조합 클래스(CSS 에 규칙이 없어 위 641 목록 밖) · 경로 한정 정확 일치
+//   출처(결과 전 자료 · 리허설 원자료 값을 보고 넣지 않음): 위와 같은 릴리스 자산(sha256 ed3a6141…d230)
+//     ① 안의 MudBlazor.dll(sha256 e05ef5f3cc5f7bd431b625ed889ee889b379992e71094f8dd59e1401724c8517) 사용자 문자열 「mud-button-」 · 「-size-」 = 단추 조합 꼴
+//        mud-button-{변형}-{색} · mud-button-{변형}-size-{크기}
+//     ② 변형 · 색 · 크기 낱말 = 같은 자산 MudBlazor.min.css 의 mud-button-(text|filled|outlined)-… 클래스에 나온 낱말
+//        + medium(같은 CSS mud-button-icon-size-medium · 같은 DLL Description 문자열)
+//   위 낱말의 곱 중 22자 이상 · 641 목록 밖 이름만(목록 지문 = MUD_CLS_GEN_SHA256 · selftest-judge.js 「G-1」 단언)
+//   경로 한정: JSON 칸 「"cls": [ … ]」 배열 안 문자열일 때만 허용(clsAllowedAt) — 다른 자리의 같은 글자 = 가림 그대로
+const MUD_CLS_GEN_PARTS = {
+  variants: ['text', 'filled', 'outlined'],
+  colors: ['default', 'inherit', 'primary', 'secondary', 'tertiary', 'info', 'success', 'warning', 'error', 'dark'],
+  sizes: ['small', 'medium', 'large']
+};
+const MUD_CLS_GEN = (() => {
+  const base = new Set(MUD_CLASS_ALLOW);
+  const out = [];
+  for (const v of MUD_CLS_GEN_PARTS.variants) {
+    for (const c of MUD_CLS_GEN_PARTS.colors) out.push(`mud-button-${v}-${c}`);
+    for (const z of MUD_CLS_GEN_PARTS.sizes) out.push(`mud-button-${v}-size-${z}`);
+  }
+  return Array.from(new Set(out)).filter((n) => n.length >= 22 && !base.has(n)).sort();
+})();
+const MUD_CLS_GEN_SET = new Set(MUD_CLS_GEN);
+const MUD_CLS_GEN_SHA256 = crypto.createHash('sha256').update(MUD_CLS_GEN.join('\n') + '\n').digest('hex');
+// 토큰 앞 글자가 「"cls": [ "…", "…", "」 꼴(같은 배열 안 앞 문자열은 따옴표 · 클래스 글자만)일 때만 참
+const CLS_ARRAY_PRE = /"cls"\s*:\s*\[\s*(?:"[A-Za-z0-9_-]*"\s*,\s*)*"$/;
+function clsAllowedAt(text, idx, tok) {
+  if (!MUD_CLS_GEN_SET.has(tok)) return false;
+  if (text[idx + tok.length] !== '"') return false;
+  return CLS_ARRAY_PRE.test(text.slice(Math.max(0, idx - 800), idx));
+}
+
 function loadAllow() {
   const allow = new Set(FIXED_ALLOW);
   for (const s of MUD_CLASS_ALLOW) allow.add(s);
@@ -323,6 +355,8 @@ function findSecrets(text, allow, hctx) {
     const tok = m[0];
     if (allow.has(tok)) continue;
     if (HEX_RE.test(tok) && hexAllowedAt(text, s, tok, hctx)) continue;
+    // 보탬 G-1: MudBlazor 단추 조합 클래스 — 「"cls": [ … ]」 배열 안에서만(경로 한정 정확 일치)
+    if (clsAllowedAt(text, s, tok)) continue;
     out.push({ s, e, tok, kind: HEX_RE.test(tok) ? 'hex' : 'long-token' });
   }
   return out.sort((a, b) => a.s - b.s);
@@ -543,6 +577,7 @@ function maskDir(dir, env, opts) {
 module.exports = {
   TEXT_EXT, TOKEN_RE, B64_RE, HEX_RE, HEX_KEYS, HEX_KV, KNOWN_HEX, FIXED_ALLOW, DEVICE_HEX_FILES, pathLike,
   MUD_CLASS_ALLOW, MUD_CLASS_ALLOW_SHA256, ruleFileShas, RULE_FILES, onlyTarget,
+  MUD_CLS_GEN, MUD_CLS_GEN_PARTS, MUD_CLS_GEN_SHA256, clsAllowedAt, CLS_ARRAY_PRE,
   loadAllow, knownHex, hexCtx, hexAllowedAt, isB64Secret, findSecrets, runnerPaths, isLongToken, listFiles, maskText, maskDir,
   parsePattern, matchPath, inSchema, schemaFor, schemaValues, pathStr, jsonSpans,
 };

@@ -252,7 +252,7 @@
 | 노6 | I-5 · after · 0 · tab · shift-tab / I-6 · after · 0 · esc · enter | 리허설 2 `screens[1].open_list_after_enter` | 같은 꼴의 열기 단계(1번 줄 · Tab → Enter → 열림)만 · 그 뒤 키 결과 노출 0 | **목록 밖**(같은 필드가 이 칸의 첫 동작과 같음 · 새로 셈) |
 | 노7 | I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows | 리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check` | `/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐 | **목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개) |
 | 노8 | I-7 · before · 0 · (목록 닫힌 채 · 칸 꼴 밖) | 리허설 3 · 4 `screens[0].r3`(clicked true · before 0 → after 1) | 목록 닫힌 채 행 누름 1회에 행 클릭 셈이 1 오름(양성 대조) · 열린 목록 상태가 아니므로 I-7 칸(열린 채 B 줄 누름) 결과 아님 | 목록 밖(참고) |
-| 노9 | N-1 · a2 · (지연 0 구조 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐) | 리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1` | A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0 | 목록 밖 |
+| 노9 | N-1 · a2 · 0 · (구조 읽기 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐) | 리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1` | A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0 | 목록 밖 |
 | 노10 | (항목 칸 아님) after 첫 화면 | 리허설 2 · 3 · 4 `shots/probe.after.first.png` · `png_check` | `/after` 첫 화면 그림(입력 0) | 목록 밖(항목 결과 아님) |
 | 노11 | (항목 칸 아님) 선택자 존재 | 리허설 2 · 3 · 4 `screens[].selectors`(화면마다 11) | README 선택자 · 상태 칩 · 재연결 표시의 존재 · 찾은 ms | 목록 밖(항목 결과 아님) |
 

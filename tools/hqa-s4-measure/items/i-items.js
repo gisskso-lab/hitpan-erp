@@ -287,4 +287,15 @@ async function i7Below(ctx) {
   }];
 }
 
-module.exports = { 'I-1': i1, 'I-2': i2, 'I-3': i3, 'I-4': i4, 'I-5': i5, 'I-6': i6, 'I-7': i7 };
+// H4 §7-2 — I-8(T3) 공백 상태 칸: 입력 0 구조 읽기만(키 · 누름 · 초점 이동 0). 허용 호출 = L.settle · L.readBlankRows · L.circuitSince
+//   (selftest-judge.js 정적 검사가 이 함수 원문의 L.* 호출을 허용 목록과 대조 · 심은 위반 = 빨강)
+async function i8(ctx) {
+  const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
+  const rows = await L.readBlankRows(ctx);
+  return [{
+    readings: { blankRows: rows, rowsRead: rows.length, final: L.slim(s.state) },
+    circuit: L.circuitSince(ctx, ctx.inputAt)
+  }];
+}
+
+module.exports = { 'I-1': i1, 'I-2': i2, 'I-3': i3, 'I-4': i4, 'I-5': i5, 'I-6': i6, 'I-7': i7, 'I-8': i8 };

@@ -167,6 +167,34 @@ async function readRowStruct(ctx, rowId) {
   }, { row: String(rowId) });
 }
 
+// H4 §7-2 — I-8(T3) 줄 읽기(읽기만 · 입력 0). 줄 = [data-row] 의 data-status-kind 가 rules.device.i8.kinds 값인 줄(줄 번호는 화면에서 읽음).
+//   줄마다: 상태 칸 안 단추 수 · 보이는 단추 수(사각형 > 0 · 넓이 > 0) · 가장 큰 단추 넓이 · 숨김 클래스 요소 수 · 탭 정지(tabIndex ≥ 0 · 보임) 수 · 칩 글자
+//   클래스 이름 · id 는 남기지 않는다(수 · 참거짓만)
+async function readBlankRows(ctx) {
+  const d = ctx.rules.device;
+  return ctx.page.evaluate((a) => {
+    const txt = (el) => (el ? (el.textContent || '').trim() : null);
+    const area = (el) => { const r = el.getBoundingClientRect(); return el.getClientRects().length > 0 ? Math.round(r.width * r.height) : 0; };
+    const out = [];
+    for (const r of document.querySelectorAll('[data-row]')) {
+      const kind = r.getAttribute('data-status-kind');
+      if (!a.kinds.includes(kind)) continue;
+      const btns = Array.from(r.querySelectorAll('button, [role=button]'));
+      const areas = btns.map(area);
+      out.push({
+        row: r.getAttribute('data-row'), kind,
+        buttons: btns.length,
+        visibleButtons: areas.filter((x) => x > 0).length,
+        maxButtonArea: areas.length ? Math.max.apply(null, areas) : 0,
+        hidden: r.querySelectorAll(a.hiddenSel).length,
+        tabStops: Array.from(r.querySelectorAll('*')).filter((el) => el.tabIndex >= 0 && area(el) > 0).length,
+        chip: txt(r.querySelector(a.chip))
+      });
+    }
+    return out;
+  }, { kinds: d.i8.kinds, hiddenSel: d.i8.hiddenSel, chip: d.sel.statusChip });
+}
+
 async function readRects(ctx) {
   const s = ctx.rules.device.sel;
   return ctx.page.evaluate((a) => {
@@ -335,5 +363,7 @@ async function shot(ctx, suffix) {
 module.exports = {
   errText, settleMs, attachSignals, circuitSince, readState, readRects, slim, rowsDiff, newPicks,
   overlapArea, press, down, up, mouseClick, locatorClick, wait, settle, waitOpen, tabTo, shot, shotName,
-  readRowStruct, rowClickControl, unreached, pathStep
+  readRowStruct, rowClickControl, unreached, pathStep,
+  // H4
+  readBlankRows
 };

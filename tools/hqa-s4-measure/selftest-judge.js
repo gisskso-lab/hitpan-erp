@@ -29,6 +29,8 @@ st.plan.nDelays = [300, 500];
 // 고침4: 옛 시험(① · ⑤)은 ㉠ 꼴(n1Contrast before · N-1 화면 before/after)과 정해진 표본 수 1(임시값)로 돈다
 //   — 정해진 수 1 이면 G4 「유효 < 정해진」 = 옛 「칸 유효 0 = 실패」 와 같은 뜻이라 옛 기대가 그대로 선다(samplesPerCell 값은 HQA 회신 뒤)
 st.n1Contrast = 'before';
+// H4: 대조 화면 표의 N-1 칸도 ㉠ 짝으로(buildPlan 단언 n1Contrast === contrastScreen["N-1"])
+st.contrastScreen = Object.assign({}, st.contrastScreen, { 'N-1': 'before' });
 delete st.plan.itemSpecs['N-1'].screens;
 st.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
 const win = defaultWindow(st);
@@ -147,7 +149,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   const a2cells = plan.cells.filter((c) => c.screen === 'a2');
   const sumSamples = plan.cells.reduce((n, c) => n + c.samples, 0);
   // 고침5 결-10 甲: 옛 기대 102 · 342 대체 → I-7 below-list(F10) 6칸 더함 → 108(I 90 + N-1 10 + N-2 8) · 표본 360
-  check('계획 칸 수 = 108(I 90 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(3/5) 360', plan.cells.length === 108 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 360, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
+  // H4 §7-1: 옛 기대 108 · 360 대체 → I-4 kbd-open e1t3 3칸 + I-8 9칸 → 120(I 90 + e1t3 3 + I-8 9 + N-1 10 + N-2 8) · 표본 396
+  check('계획 칸 수 = 120(I 90 + e1t3 3 + I-8 9 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(3/5) 396', plan.cells.length === 120 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 396, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
   {
     const throwsP = (r) => { try { buildPlan(r); return null; } catch (e) { return String(e.message); } };
     const noSd = JSON.parse(JSON.stringify(rules)); delete noSd.plan.itemSpecs['N-1'].screenDelays;
@@ -160,7 +163,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   check('I-9 = I 항목 지연 0/150/300', JSON.stringify(rules.plan.iDelays) === '[0,150,300]');
   check('N-1 지연 0/150/300/500 · 대조 단 300/500', JSON.stringify(rules.plan.nDelays) === '[0,150,300,500]' && JSON.stringify(rules.plan.n1ContrastDelays) === '[300,500]');
   const i8 = rules.plan.notMeasured.find((x) => x.item === 'I-8');
-  check('I-8 T3 = 「미측정 · 정의 후보 있음 · HQA 확인 대기」 · 계획에 없음 · 측정 코드 0', i8 && i8.text === '미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기' && !rules.plan.items.includes('I-8') && !Object.keys(Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'))).includes('I-8'));
+  // H4 §7-1: 옛 기대(계획에 없음 · 측정 코드 0) 대체 → 옛 미측정 줄 글자 그대로 + superseded 표지 · 계획 · 측정 코드에 I-8
+  check('I-8 T3 = 옛 미측정 줄 글자 그대로 + superseded 「H4 I-8 측정」 · 계획에 I-8 · 측정 코드 I-8', i8 && i8.text === '미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기' && i8.superseded === 'H4 I-8 측정' && rules.plan.items.includes('I-8') && Object.keys(Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'))).includes('I-8'));
   check('N-1 판정 글자 = 대조 무효 / 🔴 / 🟡', T['N-1'].contrastInvalid === '대조 무효' && T['N-1'].red === '🔴' && T['N-1'].yellow === '🟡');
   const pend = Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_'));
   // 고침5 H1-12: 옛 단언(6칸 모두 「HQA 회신 대기」) 대체 → 칸 6 그대로 · ①② = HQA 회신 반영 꼴 · ③④⑤ = 사전 고정 꼴(댓글 자리표) · ⑥ T3 = 「HQA 회신 대기」 그대로(대표 자리)
@@ -188,7 +192,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
     const sp = conf(rules); sp.hqaPending.samplesPerCell.value = { default: 0 }; check('관문 C4: 표본 수 0 = 거부', !G.check(sp).ok);
     const du = conf(rules); du.hqaPending.delayUnit.value = 'ms'; check('관문 C4: 지연 방식 목록 밖 = 거부', !G.check(du).ok);
     const bc = conf(rules); bc.hqaPending.browserCondition.value = { headless: 'yes' }; check('관문 C4: 브라우저 조건 꼴 틀림 = 거부', !G.check(bc).ok);
-    const na = conf(rules); delete na.plan.notMeasured.find((x) => x.item === 'I-8').approval; check('관문 C2: T3 확정 + 측정 코드 0 + 결재 0 = 거부', !G.check(na).ok && G.check(na).problems.some((p) => p.why === 'no-code-or-approval'));
+    // H4: I-8 이 계획에 들어갔으므로 「측정 코드 0」 꼴은 계획에서 I-8 을 뺀 사본으로 잰다(관문 T3 줄 무변)
+    const na = conf(rules); na.plan.items = na.plan.items.filter((x) => x !== 'I-8'); delete na.plan.itemSpecs['I-8']; delete na.plan.notMeasured.find((x) => x.item === 'I-8').approval; check('관문 C2: T3 확정 + 측정 코드 0 + 결재 0 = 거부', !G.check(na).ok && G.check(na).problems.some((p) => p.why === 'no-code-or-approval'));
     const pc = conf(rules); pc.plan.items = pc.plan.items.concat(['I-8']); pc.plan.itemSpecs['I-8'] = { cases: ['blank'], delays: 'iDelays' };
     check('관문 C2: I-8 계획했는데 항목 코드 없음 = 거부', !G.check(pc, { itemsHave: ['I-1'] }).ok);
     check('관문 C2 대조군: I-8 계획 + 항목 코드 있음 = 통과', G.check(pc, { itemsHave: ['I-8'] }).ok, G.check(pc, { itemsHave: ['I-8'] }).problems);
@@ -534,7 +539,8 @@ function checkProbe(src) {
   if (/=\s*L\b(?!\s*\.)/.test(src)) hits.push('L 별칭');
   const bareL = cntC(/(?<![.\w$])L\b(?!\s*\.)/g);
   // 고침4 G10: 옛 기대 5(매개변수 2 · 넘김 2 · 선언 1) 대체 → a2Struct 매개변수 1 · 넘김 1 더해 7
-  if (bareL !== 7) hits.push(`L 이름 쓰임 ${bareL} ≠ 7(매개변수 3 · 넘김 3 · 선언 1)`);
+  // H4 §7-3: 옛 기대 7 대체 → contrastR1 매개변수 1 · 넘김 1 더해 9
+  if (bareL !== 9) hits.push(`L 이름 쓰임 ${bareL} ≠ 9(매개변수 4 · 넘김 4 · 선언 1)`);
   if (cnt(/_lib\b/g) !== 1) hits.push('items/_lib 참조 1 아님');
   // ③ 입력 함수 각 1회 · 자리 = distinguish 몸통 안 · 켜짐 확인(return null) 뒤
   if (cntC(/\btabTo\b/g) !== 1 || cntC(/\bL\.tabTo\s*\(/g) !== 1) hits.push(`tabTo ${cntC(/\btabTo\b/g)}회 ≠ 1`);
@@ -560,7 +566,7 @@ function checkProbe(src) {
   if (/(['"`])\/(?:after|before)/.test(src) || /after-a2/.test(src)) hits.push('probe 안 주소 글자');
   // ⑦ 고침4 G10: a2 = R1(입력 0 구조 읽기)만 — a2 갈래 = 정착 기다림 + a2Struct 부름뿐 · a2Struct 몸통 = readRowStruct 하나 · 입력 0
   //   고침4 보탬(PM F-6 ④): 옛 부름 a2Struct(ctx, out, L) 대체 → J 를 넘김(a2VariantCheck)
-  if (!/if \(screen === 'a2'\) \{\s*(?:\/\/[^\n]*\n\s*)?await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.a2_check = await a2Struct\(ctx, out, L, J\);\s*\} else \{/.test(src)) hits.push('a2 갈래 = 정착 + a2Struct 부름 아님');
+  if (!/if \(screen === 'a2'\) \{\s*(?:\/\/[^\n]*\n\s*)?await page\.waitForTimeout\(L\.settleMs\(RULES, PROBE_DELAY\)\);\s*doc\.a2_check = await a2Struct\(ctx, out, L, J\);\s*\} else (?:if \(!RULES\.plan\.screens\.includes\(screen\)\) )?\{/.test(src)) hits.push('a2 갈래 = 정착 + a2Struct 부름 아님');
   const a2b = fnBody(src, 'a2Struct');
   if (!a2b) hits.push('a2Struct 몸통 없음');
   else {
@@ -579,7 +585,16 @@ function checkProbe(src) {
   }
   const an = cntC(/(?<![.\w$])a2Struct\b/g);
   if (an !== 2) hits.push(`a2Struct 이름 쓰임 ${an} ≠ 2`);
-  if (!src.includes("const PROBE_SCREENS = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);")) hits.push('PROBE_SCREENS 줄 바뀜');
+  // H4 §7-3: 옛 줄은 PROBE_SCREENS_OLD 로 이름만 바뀜(글자 그대로) · 새 목록 = 옛 + contrastScreen 값
+  if (!src.includes("const PROBE_SCREENS_OLD = RULES.plan.screens.concat(RULES.n1Contrast === 'a2' ? ['a2'] : []);") || !src.includes('const PROBE_SCREENS = PROBE_SCREENS_OLD.concat(')) hits.push('PROBE_SCREENS 줄 바뀜');
+  // H4 §7-3: 비교 화면 — contrastVariantOnly 몸통 L.* 0 · 줄 읽기 0 / contrastR1 몸통 L.* = readRowStruct 하나 · 두 몸통 입력 0
+  const cvo = fnBody(src, 'contrastVariantOnly');
+  const cr1 = fnBody(src, 'contrastR1');
+  const cvb = fnBody(src, 'contrastVariant');
+  const INPUT_RE = /\.(press|click|dblclick|tap|type|fill|focus|hover|check|selectOption|dispatchEvent)\s*\(|\bkeyboard\b|\bmouse\b|\btabTo\b|\blocatorClick\b|\browClickControl\b/;
+  if (!cvo || /\bL\./.test(cvo) || /readRowStruct|readBlankRows|readState|data-row/.test(cvo) || INPUT_RE.test(cvo)) hits.push('contrastVariantOnly 줄 읽기 · 입력');
+  if (!cr1 || (cr1.match(/\bL\.[A-Za-z]+/g) || []).some((x) => x !== 'L.readRowStruct') || INPUT_RE.test(cr1)) hits.push('contrastR1 허용 밖');
+  if (!cvb || /\bL\./.test(cvb) || INPUT_RE.test(cvb)) hits.push('contrastVariant 허용 밖');
   if (cnt(/(?<![.\w$])base\s*=(?!=)/g) !== 1 || !src.includes("const base = process.env.HQA_BASE_URL || ('http://' + RULES.device.host + ':' + RULES.device.appPort);")) hits.push('base 주소 줄 바뀜');
   if (cnt(/\bnewContext\s*\(/g) !== 1 || cnt(/\bnewPage\s*\(/g) !== 1) hits.push('newContext · newPage 1회 아님');
   return hits;
@@ -825,7 +840,8 @@ function checkProbe(src) {
     const r4 = runJudge('G4j_단거꾸로');
     check('G4-⑥: 지연 단 거꾸로(500 단 표본이 300 단보다 앞) → 빨강', r4.v && r4.v.red === true && r4.v.redReasons.some((x) => x.startsWith(D.orderBroken)), r4.v && r4.v.redReasons);
     check('G4-⑥ 대조군: 순서 맞는 원자료(D) → 순서 문제 0', (() => { const { v } = runJudge('D_정상'); return v && v.totals.orderProblems === 0 && v.red === false; })());
-    check('G4-G6: 순서 표 = after → a2 → before(rules.plan.screenOrder)', JSON.stringify(rules.plan.screenOrder) === '["after","a2","before"]');
+    // H4 §7-1: 옛 기대 after → a2 → before 대체(옛 값 = _screenOrder_옛값_H4)
+    check('G4-G6: 순서 표 = after → a2 → e1t3 → v2 → before(rules.plan.screenOrder) · 옛 값 보존', JSON.stringify(rules.plan.screenOrder) === '["after","a2","e1t3","v2","before"]' && JSON.stringify(rules.plan._screenOrder_옛값_H4) === '["after","a2","before"]');
   }
   // G13 ⑨ G8 — attempt 2 → 측정 0(M0 실행 사슬 단언 · --guard-only = 망 접속 0)
   {
@@ -961,7 +977,8 @@ function checkProbe(src) {
     plant('고침5 H1-4: I-1 /before 미도달(D1 = 실패 꼴) → 성립 · 대조군(도달) → 대조 무효', run(R5, zs).items['I-1'].contrastState.state === F5.contrastHolds && u['I-1'].contrastState.state === F5.contrastInvalid);
     const es = base(R5);
     es.find((s) => s.item === 'I-4' && s.screen === 'before' && s.case === 'mouse-open').readings.openCountAfterEsc = 1;
-    plant('고침5 H1-4: I-4 /before Esc 뒤 열림 남음 → 성립 · 대조군(닫힘) → 대조 무효', run(R5, es).items['I-4'].contrastState.state === F5.contrastHolds && u['I-4'].contrastState.state === F5.contrastInvalid);
+    // H4 결-H4: I-4 항목 contrastState 는 경우별(두 경우 성립일 때만) — 고침5 옛 판독(before 칸 · 항목 꼴)은 contrastStateFix5 에 그대로
+    plant('고침5 H1-4: I-4 /before Esc 뒤 열림 남음 → 성립 · 대조군(닫힘) → 대조 무효 (H4: 옛 판독 칸 contrastStateFix5)', run(R5, es).items['I-4'].contrastStateFix5.state === F5.contrastHolds && u['I-4'].contrastStateFix5.state === F5.contrastInvalid);
     const f6 = run(R5, base(R5).filter((s) => !(s.item === 'I-6' && s.screen === 'before' && s.case === 'esc'))).items['I-6'];
     plant('고침5 H1-3: 대조 칸 장치 실패 → contrastState.state null(대조 불가 사유) · deviceFailure 칸 · 사유 따로 · 미측정 아님',
       f6.contrastState.state === null && f6.contrastState.reason === F5.contrastDeviceFail && f6.deviceFailure.flag === true && f6.deviceFailure.cells.length === 1 && String(f6.deviceFailure.reasons[0]).startsWith(T.cellShortReason) && f6.notMeasured.flag === false, f6);
@@ -1131,8 +1148,9 @@ function checkProbe(src) {
     const va = run(R5, base(R5));
     const vb = run(Rn, base(Rn));
     check('고침5 ⑥: 노출 표 넣은 · 뺀 두 verdict 가 표지 밖 같음(판정 · 표본 · 셈 무변)', JSON.stringify(strip(va)) === JSON.stringify(strip(vb)));
-    plant('고침5 ⑥ 대조군: 넣은 쪽에만 표지(I-4 kbd-open /before 0 · N-1 a2 · 항목 독립성 글자) · 뺀 쪽 0',
-      va.cells.some((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'before' && c.exposed) && va.cells.filter((c) => c.item === 'N-1' && c.screen === 'a2').every((c) => c.exposed && c.exposed.source.length >= 1)
+    // 보탬 G-3: 노9 지연 칸(0) 보탬 → N-1 a2 칸(300 · 500) 노출 표지 0 (옛 기대 = 두 칸 모두 표지 · 옛 행 = exposure_옛행_H4)
+    plant('고침5 ⑥ 대조군: 넣은 쪽에만 표지(I-4 kbd-open /before 0 · 항목 독립성 글자) · N-1 a2 칸 표지 0(G-3) · 뺀 쪽 0',
+      va.cells.some((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'before' && c.exposed) && va.cells.filter((c) => c.item === 'N-1' && c.screen === 'a2').every((c) => !c.exposed)
       && va.items['I-4'].independenceNote === F5.independenceNote && vb.cells.every((c) => !c.exposed) && !vb.items['I-4'].independenceNote);
   }
   // H1-8 I-4 닫힌 뒤 초점
@@ -1235,6 +1253,139 @@ function checkProbe(src) {
   check('결-10 F10 원문: i7Below 가 누르기 전에 「목록 상자 밖 · 아래」 를 단언(아니면 throw · 누름 0) · row-cell 길은 i7 그대로', g0 && /if \(ctx\.cell\.case === 'below-list'\) return i7Below\(ctx\);/.test(src));
   const cut = src.replace(/  if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error\([^\n]*\n/, '');
   plant('결-10 F10 원문 대조군: 단언 줄을 뺀 원문 → 검사 빨강', cut !== src && !(/if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error/.test(cut)));
+}
+
+// ── H4 §7-4 ①~⑪ · 보탬 G-1 ~ G-3 (작업지시서 H4 · PM 결재 11/16) — 새 시험마다 대조군(돌연변이 사본 = 빨강) ──
+{
+  const J = require('./judge.js');
+  const M = require('./mask.js');
+  const G = require('./hqa-gate.js');
+  const H = T.h4;
+  const F5 = T.fix5;
+  const cp = () => JSON.parse(JSON.stringify(rules));
+  const thr = (r) => { try { J.buildPlan(r); return null; } catch (e) { return String(e.message); } };
+  // ① contrastScreen ↔ n1Contrast
+  const b1 = cp(); b1.contrastScreen['N-1'] = 'before';
+  check('H4 ①: 지금 rules = buildPlan 통과(대조군)', thr(rules) === null, thr(rules));
+  plant('H4 ①: contrastScreen N-1 ≠ n1Contrast → 거부', /n1Contrast/.test(thr(b1) || ''), thr(b1));
+  // ② ③ 비교 화면이 남의 항목(경우)에
+  const b2 = cp(); b2.plan.itemSpecs['I-4'].caseScreens = { 'mouse-open': ['e1t3'], 'kbd-open': ['e1t3'] };
+  const b2b = cp(); b2b.plan.itemSpecs['I-1'].screens = ['before', 'after', 'e1t3'];
+  plant('H4 ②: e1t3 칸이 I-4 kbd-open 밖(I-4 mouse-open · I-1) → 거부', /계획 밖/.test(thr(b2) || '') && /계획 밖/.test(thr(b2b) || ''), [thr(b2), thr(b2b)]);
+  const b3 = cp(); b3.plan.itemSpecs['I-6'].screens = ['before', 'after', 'v2'];
+  plant('H4 ③: v2 칸이 I-8 밖(I-6) → 거부', /계획 밖/.test(thr(b3) || ''), thr(b3));
+  const b3b = cp(); b3b.plan.itemSpecs['I-8'].screens = ['before', 'after'];
+  plant('H4 ③b: 표가 가리킨 대조 화면 v2 가 I-8 계획에 없음 → 거부', /칸이 계획에 없음/.test(thr(b3b) || ''), thr(b3b));
+  // 독립 반증: after css 화면 = 주소 /after 로 시작(시험 앱 App.razor L9) — e1t3 를 /e1t3 로 두면 빨강
+  const cssRule = (r) => Object.keys(r.plan.screenTable).filter((k) => !k.startsWith('_')).every((k) => (r.plan.screenTable[k].css === 'after') === (r.plan.screenTable[k].path.slice(0, 6) === '/' + 'after'));
+  const pe = cp(); pe.plan.screenTable.e1t3.path = '/e1t3';
+  check('H4 반증: screenTable after css 화면 = 주소 앞머리 /after(시험 쪽 규칙 · 장치 코드 판단 0)', cssRule(rules));
+  plant('H4 반증 대조군: e1t3 주소 /e1t3 → 빨강(before css 실림 조용한 실패)', !cssRule(pe));
+  // 판독 — I-4 · I-8 만 · 지연 0 · 표본 1
+  const RH = cp(); RH.plan.items = ['I-4', 'I-8']; RH.plan.iDelays = [0]; RH.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+  const RHc = JSON.parse(JSON.stringify(RH)); RHc.t3ReadUnit = 'cell';
+  const okRow = (kind, row) => ({ row, kind, buttons: 1, visibleButtons: 1, maxButtonArea: 100, hidden: 0, tabStops: 1, chip: '-' });
+  const failRow = (kind, row) => ({ row, kind, buttons: 1, visibleButtons: 0, maxButtonArea: 0, hidden: 1, tabStops: 0, chip: '' });
+  const mkH = (tweak, R) => {
+    const RR = R || RH;
+    const xs = J.buildPlan(RR).cells.map((c) => ({ item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: 1, valid: true, errors: [], deviceReading: null,
+      inputs: c.item === 'I-8' ? [] : [{ k: 'press', key: 'Escape' }],
+      readings: c.item === 'I-8' ? { blankRows: [okRow('blank', '3'), okRow('empty', '4'), okRow('null', '6'), okRow('blank', '8')] } : { openCountAfterEsc: 0, focusOnSameRowBtn: true },
+      circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }));
+    const rank = (sc) => RR.plan.screenOrder.indexOf(sc);
+    xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
+    if (tweak) tweak(xs);
+    return J.judge(RR, xs, {});
+  };
+  const fx = (xs, item, kase, screen) => xs.find((s) => s.item === item && s.case === kase && s.screen === screen);
+  const v0 = mkH();
+  check('H4 판독 대조군: 정상 손 표본 → 빨강 아님 · I-8 · e1t3 칸 있음', v0.red === false && v0.cells.some((c) => c.screen === 'e1t3') && !!v0.items['I-8'], v0.redReasons);
+  // ④ 두 경우 모두 성립일 때만
+  const v4 = mkH((xs) => { fx(xs, 'I-4', 'mouse-open', 'before').readings.openCountAfterEsc = 1; });
+  const v4b = mkH((xs) => { fx(xs, 'I-4', 'mouse-open', 'before').readings.openCountAfterEsc = 1; fx(xs, 'I-4', 'kbd-open', 'e1t3').readings.focusOnSameRowBtn = false; });
+  check('H4 ④ 대조군: 두 경우 재현 → 항목 성립', v4b.items['I-4'].contrastState.state === F5.contrastHolds, v4b.items['I-4'].contrastByCase);
+  plant('H4 ④: mouse-open 성립 + kbd-open 대조 무효 → 항목 성립 아님', v4.items['I-4'].contrastByCase['mouse-open'].state === F5.contrastHolds && v4.items['I-4'].contrastByCase['kbd-open'].state === F5.contrastInvalid && v4.items['I-4'].contrastState.state === F5.contrastInvalid, v4.items['I-4'].contrastByCase);
+  // ⑤ /before kbd-open = 기록만(재현해도 대조에 안 들어감)
+  const v5 = mkH((xs) => { fx(xs, 'I-4', 'kbd-open', 'before').readings.focusOnSameRowBtn = false; });
+  const c5 = v5.cells.find((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'before');
+  const c5m = v5.cells.find((c) => c.item === 'I-4' && c.case === 'mouse-open' && c.screen === 'before');
+  plant('H4 ⑤: I-4 /before kbd-open 재현 → 기록만 · 경우 대조 = 무효 그대로 · mouse-open /before 표지 0', c5.recordOnlyRole === H.recordOnly && !c5m.recordOnlyRole && v5.items['I-4'].contrastByCase['kbd-open'].state === F5.contrastInvalid, c5);
+  // ⑥ T3 항목 · 칸 단위
+  const t3 = (xs) => { fx(xs, 'I-8', 'blank-rows', 'v2').readings.blankRows = [failRow('blank', '3'), okRow('empty', '4'), okRow('null', '6'), failRow('blank', '8')]; };
+  const v6 = mkH(t3);
+  const v6c = mkH(t3, RHc);
+  const k6 = (v, k) => v.items['I-8'].contrastState.kinds.find((x) => x.kind === k);
+  check('H4 ⑥: I-8 공백 재현 + 빈 · null 무재현 → item 단위 성립 · 빈 · null 꼴 = 대조 무효 표지', v6.items['I-8'].contrastState.state === F5.contrastHolds && v6.items['I-8'].contrastState.unit === 'item' && k6(v6, 'blank').contrast === F5.contrastHolds && k6(v6, 'empty').contrast === H.t3KindInvalid && k6(v6, 'null').contrast === H.t3KindInvalid, v6.items['I-8'].contrastState);
+  plant('H4 ⑥ 대조군: 같은 원자료 · cell 단위 → 대조 무효', v6c.items['I-8'].contrastState.state === F5.contrastInvalid && v6c.items['I-8'].contrastState.unit === 'cell');
+  const Rbad = JSON.parse(JSON.stringify(RH)); Rbad.t3ReadUnit = 'both';
+  plant('H4 ⑥b: t3ReadUnit 목록 밖 → 규칙 오류(두 단위 동시 0)', (() => { try { mkH(null, Rbad); return false; } catch (e) { return /t3ReadUnit/.test(e.message); } })());
+  // ⑦ After 숨김 → 어긋남 판독
+  const v7 = mkH((xs) => { fx(xs, 'I-8', 'blank-rows', 'after').readings.blankRows = [failRow('blank', '3'), okRow('empty', '4'), okRow('null', '6'), okRow('blank', '8')]; });
+  plant('H4 ⑦: I-8 After 공백 줄 숨김 → afterByKind blank 어긋남 1 · 대조군 0', v7.items['I-8'].afterByKind.find((k) => k.kind === 'blank').afterShapeMismatch === 1 && v0.items['I-8'].afterByKind.every((k) => k.afterShapeMismatch === 0));
+  // ⑧ superseded 표지 → 미측정 셈 0
+  const r8 = cp(); delete r8.plan.notMeasured.find((x) => x.item === 'I-8').superseded;
+  const r8v = (() => { const R = JSON.parse(JSON.stringify(RH)); R.plan.notMeasured = r8.plan.notMeasured; return mkH(null, R); })();
+  check('H4 ⑧: notMeasured I-8 대체 표지 → notMeasuredOpen 에 I-8 0 · 옛 notMeasured 칸 그대로', v0.notMeasuredOpen.every((x) => x.item !== 'I-8') && v0.notMeasured.some((x) => x.item === 'I-8'));
+  plant('H4 ⑧ 대조군: 대체 표지 뺌 → I-8 미측정으로 셈', r8v.notMeasuredOpen.some((x) => x.item === 'I-8'));
+  // ⑨ I-8 입력 기록 → 빨강 · 원문 정적 검사
+  const v9 = mkH((xs) => { fx(xs, 'I-8', 'blank-rows', 'v2').inputs = [{ k: 'press', key: 'Tab' }]; });
+  plant('H4 ⑨: I-8 표본에 입력 기록 → 그 칸 장치 실패 · 빨강', v9.red === true && v9.cells.find((c) => c.item === 'I-8' && c.screen === 'v2').status === T.cellFail, v9.redReasons);
+  const I8 = require('./items/i-items.js')['I-8'].toString();
+  const LB = require('./items/_lib.js').readBlankRows.toString();
+  const INPUT = /\.(press|click|dblclick|tap|type|fill|focus|hover|check|selectOption|dispatchEvent|down|up)\s*\(|\bkeyboard\b|\bmouse\b|\btabTo\b|\blocatorClick\b|\browClickControl\b|\bmouseClick\b/;
+  const i8ok = (src) => (src.match(/\bL\.[A-Za-z]+/g) || []).every((x) => ['L.settle', 'L.settleMs', 'L.readBlankRows', 'L.circuitSince', 'L.slim'].includes(x)) && !INPUT.test(src);
+  check('H4 ⑨ 정적: i8 원문 L.* = 허용 목록만 · readBlankRows 원문 입력 0', i8ok(I8) && !INPUT.test(LB));
+  plant('H4 ⑨ 정적 대조군: i8 원문에 L.press 심음 → 빨강', !i8ok(I8.replace('const rows', "await L.press(ctx, 'Tab');\n  const rows")));
+  // ⑩ 비교 화면 글자에 「/after」 0
+  const txts = (r) => ['contrastUnreachable', 'e1t3ProbeKeep', 'e1t3ProbeZero', 'e1t3ProbeNoRow', 'contrastProbeVariantDiff', 'v2ProbeChecked'].map((k) => r.deviceReading[k]).concat(Object.values(r.readingText.h4).filter((x) => typeof x === 'string'));
+  const noAfter = (r) => txts(r).every((x) => typeof x === 'string' && !x.includes('/after'));
+  const z10 = mkH((xs) => { xs.splice(xs.findIndex((s) => s.screen === 'e1t3'), 1); });
+  const zc = z10.cells.find((c) => c.screen === 'e1t3');
+  check('H4 ⑩: 비교 화면 판독 글자 · 사유에 「/after」 0 · e1t3 표본 0 사유 = 비교 화면 표본 0', noAfter(rules) && zc.zeroReason === H.contrastZeroReason && !JSON.stringify(zc).includes('/after'), zc);
+  const n10 = cp(); n10.deviceReading.contrastUnreachable = '/after' + '-e1t3 키보드 도달 0';
+  plant('H4 ⑩ 대조군: 글자에 「/after」 심음 → 빨강', !noAfter(n10));
+  // ⑪ hqaPendingOpen T3 = G-값 전 1 · 뒤 0
+  const g1 = cp(); g1.hqaPending.T3.status = 'HQA 회신 반영 · 댓글 1234567890'; g1.hqaPending.T3.value = '11/7 작업지시서 L306 글자 고정 · 항목 단위';
+  check('H4 ⑪: hqaPendingOpen T3 = G-값 전 1 · 뒤 0 · 관문 T3 = 계획 · 측정 코드 있으면 통과', G.openKeys(rules).includes('T3') && !G.openKeys(g1).includes('T3') && !G.check(g1, { itemsHave: ['I-8'] }).problems.some((p) => p.key === 'T3'));
+  plant('H4 ⑪ 대조군: T3 확정 · 측정 코드 목록에 I-8 없음 → 관문 거부', G.check(g1, { itemsHave: ['I-1'] }).problems.some((p) => p.why === 'no-code-or-approval'));
+  // probe 비교 화면 심은 위반
+  const psrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+  const pm1 = psrc.replace("const reading = RULES.deviceReading[screen + 'ProbeChecked'] || null;", "out.rows = await ctx.page.evaluate(() => document.querySelectorAll('[data-row]').length);\n  const reading = RULES.deviceReading[screen + 'ProbeChecked'] || null;");
+  const pm2 = psrc.replace("return Object.assign({ screen, mode: 'r1'", "await L.press(ctx, 'Tab');\n  return Object.assign({ screen, mode: 'r1'");
+  plant('H4 probe 대조군: v2(variantOnly) 줄 읽기 · e1t3(r1) 키 입력 심음 → 정적 검사 빨강', pm1 !== psrc && pm2 !== psrc && checkProbe(pm1).includes('contrastVariantOnly 줄 읽기 · 입력') && checkProbe(pm2).includes('contrastR1 허용 밖'));
+  // 보탬 G-3 ① — I-7 below-list 장치 실패가 row-cell 대조 칸을 덮지 않음
+  const R7 = cp(); R7.plan.items = ['I-7']; R7.plan.iDelays = [0]; R7.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+  const mk7 = (drop) => {
+    const xs = J.buildPlan(R7).cells.filter((c) => !(drop && c.case === 'below-list' && c.screen === 'before')).map((c) => ({ item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: 1, valid: true, errors: [], deviceReading: null,
+      readings: { rowclickDelta: 0, changedOtherRows: [] }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }));
+    const rank = (sc) => R7.plan.screenOrder.indexOf(sc);
+    xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
+    return J.judge(R7, xs, {});
+  };
+  const a7 = mk7(false);
+  const b7 = mk7(true);
+  check('G-3 ① 대조군: 옛 묶음 판독(contrastState) = below-list 실패에 먹힘(가름 전 꼴 · 옛 칸 무변)', a7.items['I-7'].contrastState.state === F5.contrastInvalid && b7.items['I-7'].contrastState.state === null);
+  plant('G-3 ①: below-list /before 장치 실패 → contrastByCase row-cell = 대조 무효 그대로 · below-list = 대조 불가(null)', b7.items['I-7'].contrastByCase['row-cell'].state === F5.contrastInvalid && b7.items['I-7'].contrastByCase['below-list'].state === null && a7.items['I-7'].contrastByCase['below-list'].state === F5.contrastInvalid, b7.items['I-7'].contrastByCase);
+  // 보탬 G-3 ② — 노9 지연 칸
+  const no9 = (r) => J.exposureOf(r, { item: 'N-1', screen: 'a2', delay: 300, case: 'arrows' }).length + J.exposureOf(r, { item: 'N-1', screen: 'a2', delay: 500, case: 'arrows' }).length;
+  const r9 = cp(); r9.exposure = r9.exposure.map((e) => (e.no === '노9' ? Object.assign({}, rules.exposure_옛행_H4[0].row) : e));
+  check('G-3 ②: 노9 지연 0 → a2 300 · 500 칸 노출 표지 0', no9(rules) === 0);
+  plant('G-3 ② 대조군: 옛 노9 행(지연 칸 없음) → 두 칸 모두 표지', no9(r9) === 2);
+  // 보탬 G-1 — 단추 조합 클래스 · 「"cls": [ … ]」 경로 한정
+  const allow = M.loadAllow();
+  const hx = M.hexCtx({}, 'probe.json');
+  check('G-1: 조합 클래스 목록 6 · 지문 고정 · 641 목록과 겹침 0 · 22자 이상', M.MUD_CLS_GEN.length === 6 && M.MUD_CLS_GEN_SHA256 === '3c6e50b359cdbbd5655ef1cb5ce17bf598d8ddcbd9f6dad650eb6a0524a29979' && M.MUD_CLS_GEN.every((n) => n.length >= 22 && !M.MUD_CLASS_ALLOW.includes(n)), M.MUD_CLS_GEN);
+  const inCls = JSON.stringify({ r1: { candidates: [{ tag: 'button', cls: ['mud-button-root', 'mud-button-text-default', 'mud-button-text-size-medium'] }] } }, null, 2);
+  check('G-1: 「"cls": [ … ]」 안 조합 클래스 = 가림 0(줄바꿈 꼴 · 한 줄 꼴)', M.findSecrets(inCls, allow, hx).length === 0 && M.findSecrets(JSON.stringify(JSON.parse(inCls)), allow, hx).length === 0);
+  plant('G-1 대조군: 경로 밖 같은 글자 → 가림 그대로', M.findSecrets(JSON.stringify({ note: 'mud-button-text-default', other: ['mud-button-text-size-medium'] }), allow, hx).length === 2);
+  const fake = ['mud', 'Ab12', 'Cd34', 'Ef56', 'Gh78'].join('-');
+  plant('G-1 대조군: cls 안 하이픈 낀 비밀 꼴 · 목록 이웃 꼴(끝 글자 더함) · 소문자 낱말 꼴 → 가림 3', M.findSecrets(JSON.stringify({ cls: ['mud-button-text-default', fake, 'mud-button-text-default' + 'x', ['mud', 'qwrtzp', 'lkjhgf', 'mnbvcx'].join('-')] }), allow, hx).length === 3);
+  // 보탬 G-2 — run.json 칸 이름 21자 이하
+  const bootSrc = fs.readFileSync(path.join(HERE, 'boot.sh'), 'utf8');
+  const hn = M.hexCtx({}, null);
+  const longKeys = (src) => Array.from(src.matchAll(/^\s+([A-Za-z_][A-Za-z0-9_]*):\s/gm)).map((m) => m[1]).filter((k) => M.findSecrets(k, allow, hn).length > 0);
+  check('G-2: boot.sh 객체 칸 이름 = 가림 꼴 0 · browser_cond_status 있음 · 옛 24자 이름 0', longKeys(bootSrc).length === 0 && /\bbrowser_cond_status:/.test(bootSrc) && !bootSrc.includes('browser_' + 'condition_status'), longKeys(bootSrc));
+  plant('G-2 대조군: 옛 이름으로 되돌린 사본 → 걸림 1', longKeys(bootSrc.replace('browser_cond_status:', 'browser_' + 'condition_status:')).length === 1);
 }
 
 // ── 결과─────────────────────────────────────────────────────────────

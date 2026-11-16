@@ -178,7 +178,8 @@ m4() {
   if [ -z "$failed" ]; then
     local p code bad=0
     # 고침4 G9(CTO C-3 · §9 M4): 점검 목록에 A2 화면 주소 더함(기대 200)
-    for p in / /before /after /after-a2 \
+    # H4 §7-3: 비교 화면 주소 2 더함(기대 200 · F″ 시험 앱부터 있음)
+    for p in / /before /after /after-a2 /after-e1t3 /after-v2 \
       /css/common/app.css /css/common/backoffice-v2.css /css/common/bootstrap.min.css \
       /css/before/backoffice-dashboard.css /css/after/backoffice-dashboard.css \
       /_content/MudBlazor/MudBlazor.min.css /_content/MudBlazor/MudBlazor.min.js /_framework/blazor.web.js; do
@@ -279,7 +280,8 @@ const doc = {
   judge_sha256: sha256Of(here + '/judge.js'),
   judge_rules_source: 'rules = tools/hqa-s4-measure/rules.json · judge = tools/hqa-s4-measure/judge.js — both in the tree of this raw commit (parent chain = device commit) · sha256 of tree file bytes before masking',
   browser_condition: bc ? (bc.value === undefined ? null : bc.value) : null,
-  browser_condition_status: bc && typeof bc.status === 'string' ? bc.status : null,
+  // 보탬 G-2(PM 결재 11/16): 옛 칸 이름(24자)이 가림 꼴(22자 이상 토큰)에 걸려 열쇠가 가려짐 → 21자 이하 이름으로(값 · 뜻 무변)
+  browser_cond_status: bc && typeof bc.status === 'string' ? bc.status : null,
   stage_outcomes_note: 'JUDGE runs after M8/M9 (fix5 order) - see round_line.stage_outcomes_late',
   probe: fs.existsSync(raw + '/probe.json') ? 'see probe.json (rehearsal - judgement-free)' : null,
   items: m0.mode === 'armed' ? 'see samples.jsonl / verdict-device.json' : 'rehearsal: item measurement 0',
