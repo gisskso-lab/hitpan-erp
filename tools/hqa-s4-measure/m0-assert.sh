@@ -16,23 +16,33 @@ GUARD_ONLY=0; [ "${2:-}" = "--guard-only" ] && GUARD_ONLY=1
 mkdir -p "$RAW"
 
 # 고침4 G9(G-값 · F′): 옛 값 FIX_TREE=0b31f869… · BASE=01161edb… 대체 → F′(b967b1b0 · A2 화면 더한 판 · 부모 01161edb)
-FIX_TREE=47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8   # 시험 앱 나무(tools/hqa-s4-fixture) — F′ 나무
-BASE=b967b1b007fb519d9a91537fbef911e818e950de       # 시험 앱 가지 고정 머리 — F′
-BASE_PARENT=01161edb5618b5e34ea2c5e655dcaaf2333d3a68 # F′ 의 부모(옛 고정 머리) — 조상 단언 유지
+# H4-G 값(F″): 옛 값 FIX_TREE=47566f04… · BASE=b967b1b0… 대체 → F″(88085da1 · 비교 화면 e1t3 · v2 더한 판 · 부모 b967b1b0 · 그 부모 01161edb)
+FIX_TREE=47a909c8e7f7d11c89f455d8ff28ca2b9e8fc8e2   # 시험 앱 나무(tools/hqa-s4-fixture) — F″ 나무(파일 41)
+BASE=88085da1d797b915b8e8be314517af180d0b9939       # 시험 앱 가지 고정 머리 — F″
+BASE_PARENT=b967b1b007fb519d9a91537fbef911e818e950de # F″ 의 부모(F′ · 옛 고정 머리) — 조상 단언(H4-G 더함)
+BASE_ROOT=01161edb5618b5e34ea2c5e655dcaaf2333d3a68   # F′ 의 부모(첫 고정 머리) — 조상 단언 유지
 FEAT=16e88c01092d33eb643c6cac454703f00efa02ac       # 기능 가지 고정 머리(고친 꼴 A')
 A2SRC=2a6a0ee10fcc3c79791f49747070009b25290fec      # A2 원 커밋(⑤ 쌍 ⑤ · ⑥ 의 원 경로 쪽 · 고침4 G9 결-4)
+E1T3SRC=e456e4f6a0b2dc36f14ef53f64106d455f363ecb    # 비교 화면 e1t3 원 커밋(⑤ 쌍 ⑦ · ⑧ · 결-H2 · 결-H9)
+V2SRC=74a76c58f3005dcc92be0a2043918dcc483e6220      # 비교 화면 v2 원 커밋(⑤ 쌍 ⑨ · ⑩ · 결-H9)
 WF=.github/workflows/hqa-s4-measure.yml
 MDIR=tools/hqa-s4-measure/
 MODE_PATH=tools/hqa-s4-measure/MODE
 HEADS=("refs/heads/main" "refs/heads/feat/20261107-백오피스S4닫기" "refs/heads/hqa/20261107-S4-시험앱")
 # ⑤ blob 6쌍 — 시험 앱 경로 ↔ 원 커밋 원 경로 (README_BUNDLE §1-2 표 · 1~4 = 16e88c01 이 원 커밋인 고친 꼴 파일)
 #   고침4 G9(결-4): 옛 4쌍 → 6쌍 — 쌍 5 = A2 칸 ↔ 2a6a0ee1 원 경로(49d7502d…) · 쌍 6 = 2a6a0ee1 원 CSS ↔ F′ css/after(둘 다 0e922200… · 乙 전제를 기계로)
+#   H4-G 값(결-H9): 6쌍 → 10쌍 — 쌍 7 = E1T3 칸 ↔ e456e4f6 원 경로(644e27eb…) · 쌍 8 = e456e4f6 원 CSS ↔ F″ css/after(0e922200…)
+#     · 쌍 9 = V2 칸 ↔ 74a76c58 원 경로(8830faf1…) · 쌍 10 = 74a76c58 원 CSS ↔ F″ css/after(0e922200…) · 쌍 1~6 그대로
 BLOB_FIX=(
   "tools/hqa-s4-fixture/Components/After/CsStatusCell.razor"
   "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css"
   "tools/hqa-s4-fixture/Components/After/CsStatusMenu.cs"
   "tools/hqa-s4-fixture/Vocab/CsVocab.cs"
   "tools/hqa-s4-fixture/Components/A2/CsStatusCell.razor"
+  "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css"
+  "tools/hqa-s4-fixture/Components/E1T3/CsStatusCell.razor"
+  "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css"
+  "tools/hqa-s4-fixture/Components/V2/CsStatusCell.razor"
   "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css"
 )
 BLOB_SRC=(
@@ -42,9 +52,13 @@ BLOB_SRC=(
   "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs"
   "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor"
   "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css"
+  "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor"
+  "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css"
+  "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor"
+  "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css"
 )
 # 쌍마다 원 경로를 읽을 커밋(SHA 로만 · 태그 0)
-BLOB_REV=("$FEAT" "$FEAT" "$FEAT" "$FEAT" "$A2SRC" "$A2SRC")
+BLOB_REV=("$FEAT" "$FEAT" "$FEAT" "$FEAT" "$A2SRC" "$A2SRC" "$E1T3SRC" "$E1T3SRC" "$V2SRC" "$V2SRC")
 
 TMPD=$(mktemp -d)
 TSV="$TMPD/checks.tsv"; LS="$TMPD/ls1.txt"; BL="$TMPD/blobs.tsv"
@@ -79,11 +93,13 @@ fi
 got=$(git rev-parse "HEAD:tools/hqa-s4-fixture" 2>&1)
 if [ "$got" = "$FIX_TREE" ]; then rec m0_1_fixture_tree 1 "tree=$got"; else rec m0_1_fixture_tree 0 "got=$got want=$FIX_TREE"; fi
 
-# ② 시험 앱 고정 머리(F′) 가 HEAD 조상 · F′ 의 부모 01161edb 도 HEAD 조상(고침4 G9 — 둘 다 유지)
+# ② 시험 앱 고정 머리(F″) 가 HEAD 조상 · F″ 의 부모 b967b1b0 · 그 부모 01161edb 도 HEAD 조상(H4-G 값 — 셋 다 · 옛 둘은 유지)
 if git merge-base --is-ancestor "$BASE" HEAD 2>"$TMPD/e2"; then rec m0_2_base_ancestor 1 "base=$BASE"
 else rec m0_2_base_ancestor 0 "not ancestor: $(cat "$TMPD/e2")"; fi
 if git merge-base --is-ancestor "$BASE_PARENT" HEAD 2>"$TMPD/e2p"; then rec m0_2_parent_ancestor 1 "parent=$BASE_PARENT"
 else rec m0_2_parent_ancestor 0 "not ancestor: $(cat "$TMPD/e2p")"; fi
+if git merge-base --is-ancestor "$BASE_ROOT" HEAD 2>"$TMPD/e2r"; then rec m0_2_root_ancestor 1 "parent=$BASE_ROOT"
+else rec m0_2_root_ancestor 0 "not ancestor: $(cat "$TMPD/e2r")"; fi
 
 # ③ diff ⊆ 허용 목록 (이름 바꾸기 감지 끔 — 옮긴 파일의 옛 경로도 드러나게)
 bad=""; n=0
@@ -115,21 +131,21 @@ else
   rec m0_4_ls_remote 0 "ls-remote error: $(cat "$TMPD/e4")"
 fi
 
-# ⑤ blob 6쌍 — 원 커밋(기능 머리 · A2 원 커밋)이 없으면 SHA 로만 받는다(태그 0)
-for rv in "$FEAT" "$A2SRC"; do
+# ⑤ blob 10쌍 — 원 커밋(기능 머리 · A2 · E1T3 · V2 원 커밋)이 없으면 SHA 로만 받는다(태그 0)
+for rv in "$FEAT" "$A2SRC" "$E1T3SRC" "$V2SRC"; do
   if ! git cat-file -e "${rv}^{commit}" 2>/dev/null; then
     git fetch --no-tags --depth=1 origin "$rv" >> "$TMPD/f5" 2>&1 || true
   fi
 done
 b_ok=1
-for i in 0 1 2 3 4 5; do
+for i in 0 1 2 3 4 5 6 7 8 9; do
   a=$(git rev-parse "HEAD:${BLOB_FIX[$i]}" 2>&1)
   s=$(git rev-parse "${BLOB_REV[$i]}:${BLOB_SRC[$i]}" 2>&1)
   if [ "$a" = "$s" ]; then m=1; else m=0; b_ok=0; fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${BLOB_FIX[$i]}" "$a" "${BLOB_SRC[$i]}" "$s" "$m" "${BLOB_REV[$i]}" | one_line >> "$BL"
   printf '\n' >> "$BL"
 done
-rec m0_5_blobs "$b_ok" "6 pairs"
+rec m0_5_blobs "$b_ok" "10 pairs"
 
 # 장전 단언 (설계 §6-5)
 mode=invalid
@@ -177,7 +193,7 @@ const [tsv, ls, bl, out, mode, head, modeLine] = process.argv.slice(2);
 const rows = (f) => fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim() !== '');
 const checks = rows(tsv).map((l) => { const [check, ok, detail] = l.split('\t'); return { check, ok: ok === '1', detail: detail || '' }; });
 const lsRemote = rows(ls).map((l) => { const [sha, ref] = l.split('\t'); return { ref, sha }; });
-// 고침4 G9: 쌍마다 원 경로 커밋(commit · 16e88c01 또는 2a6a0ee1)
+// 고침4 G9 · H4-G 값: 쌍마다 원 경로 커밋(commit · 16e88c01 · 2a6a0ee1 · e456e4f6 · 74a76c58)
 const blobs = rows(bl).map((l) => { const c = l.split(/\s+/); return { fixture_path: c[0], fixture_blob: c[1], src_path: c[2], src_blob: c[3], match: c[4] === '1', commit: c[5] || null }; });
 const doc = {
   stage: 'M0',
@@ -190,9 +206,9 @@ const doc = {
   run_id: process.env.GITHUB_RUN_ID || null,
   run_attempt: process.env.GITHUB_RUN_ATTEMPT || null,
   ref: process.env.GITHUB_REF || null,
-  // 고침4 G9: F′ 값(옛 0b31f869… · 01161edb… 대체 · 부모 01161edb 조상 단언은 checks m0_2_parent_ancestor)
-  fixture_tree_expected: '47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8',
-  base_expected: 'b967b1b007fb519d9a91537fbef911e818e950de',
+  // H4-G 값: F″ 값(옛 47566f04… · b967b1b0… 대체 · 조상 단언은 checks m0_2_parent_ancestor(b967b1b0) · m0_2_root_ancestor(01161edb))
+  fixture_tree_expected: '47a909c8e7f7d11c89f455d8ff28ca2b9e8fc8e2',
+  base_expected: '88085da1d797b915b8e8be314517af180d0b9939',
   feat_expected: '16e88c01092d33eb643c6cac454703f00efa02ac',
   checks,
   ls_remote_start: lsRemote,

@@ -1,4 +1,4 @@
 3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14  chrome-headless-shell-linux64.zip
 ae8736ac28bc69278551500f219fc749575648263c43ec5990749eff43b9fcf8  chrome-linux64.zip
-ed3a6141b8bff77e7969f212a50153b8b6b07ad91d2790a276739cb59435d230  hqa-s4-fixture-linux-x64-b967b1b0.tar.gz
-c2cd4ed148bd52819903fc553722c70fda1bdd61522519d1673290c9fa3e48fd  hqa-s4-fixture-src-b967b1b0.tar.gz
+c137b436af20dcc5a8375067af1be1d53757a500e3707d83cf9e3b3aff05343e  hqa-s4-fixture-linux-x64-88085da1.tar.gz
+58a705516419dfd3de5c8b6f659d323db4903b9a17244e96e8d2e92b2f2ebacf  hqa-s4-fixture-src-88085da1.tar.gz

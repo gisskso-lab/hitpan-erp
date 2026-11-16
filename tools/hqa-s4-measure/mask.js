@@ -34,10 +34,10 @@ const HEX_RE = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 // 공개된 고정 이름만(릴리스 자산 · 꾸러미 · 환경 변수 이름). 값이 아니라 이름이다.
 const FIXED_ALLOW = [
   'chrome-headless-shell-linux64',
-  // 고침4 G9(PM F-6 ⑤): F′ 판 릴리스 · 자산 이름(옛 …-01161edb 대체)
-  'hqa-s4-fixture-b967b1b0',
-  'hqa-s4-fixture-linux-x64-b967b1b0',
-  'hqa-s4-fixture-src-b967b1b0',
+  // H4-G 값: F″ 판 릴리스 · 자산 이름(옛 …-b967b1b0 대체 · G-1 출처 주석의 b967b1b0 자산 이름은 출처 기록이라 그대로)
+  'hqa-s4-fixture-88085da1',
+  'hqa-s4-fixture-linux-x64-88085da1',
+  'hqa-s4-fixture-src-88085da1',
   'fonts-noto-color-emoji',
   'ASPNETCORE_ENVIRONMENT',
   'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD',
@@ -52,7 +52,10 @@ const HEX_KV = new Set([
 ]);
 // 장치 원문에 이미 공개된 고정 SHA(시험 앱 나무 · 시험 앱 머리 · 기능 머리)
 //   고침4 G9(PM F-6 ⑤): 시험 앱 나무 · 머리 = F′ 값(옛 0b31f869 대체) · 01161edb = F′ 의 부모(m0 조상 단언 유지)
+//   H4-G 값: F″ 나무 · F″ 머리 더함 · 옛 F′ 나무 · F′ 머리는 남김(F′ = F″ 의 부모 · m0 조상 단언 m0_2_parent_ancestor 가 씀)
 const KNOWN_HEX = [
+  '47a909c8e7f7d11c89f455d8ff28ca2b9e8fc8e2',
+  '88085da1d797b915b8e8be314517af180d0b9939',
   '47566f04d18ac9fc617a6bfc0dd0ff7c93efb5f8',
   'b967b1b007fb519d9a91537fbef911e818e950de',
   '01161edb5618b5e34ea2c5e655dcaaf2333d3a68',
