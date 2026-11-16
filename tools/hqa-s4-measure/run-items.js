@@ -41,7 +41,9 @@ function pendingKeys(rules) {
 }
 
 // 고침5 H1-11(결-2 乙): 「지연 N」 = 왕복 N ms → delay-proxy.js 둘째 인자(방향당 ms) = N/2
-//   옛 꼴(per-direction-ms · 인자 = N 그대로)은 delayUnit 값이 per-direction-ms 일 때만 남는다(되돌림용 · 지금 rules = round-trip-ms)
+//   ~~옛 꼴(per-direction-ms · 인자 = N 그대로)은 delayUnit 값이 per-direction-ms 일 때만 남는다(되돌림용 · 지금 rules = round-trip-ms)~~ (고침6 11/16 정정)
+// 고침6 결-1(PM 결재 11/16 · 대표 결정 ①): 지금 rules = per-direction-ms(HQA 집행 단위 · #850 댓글 6709803008) → 인자 = N 그대로 · 왕복 약 2N.
+//   round-trip-ms 갈래는 고침5 시절 값(rules _옛값_고침5)의 되돌림용으로 남는다. 아래 함수 코드는 무변(두 단위 갈래 모두 그대로).
 function proxyDelayArg(rules, delay) {
   const unit = rules.hqaPending.delayUnit.value;
   if (unit === 'round-trip-ms') return { unit, roundTripMs: delay, perDirectionMs: delay / 2 };

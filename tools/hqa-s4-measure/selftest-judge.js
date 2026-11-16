@@ -1240,7 +1240,7 @@ function checkProbe(src) {
     plant('고침5 ⑤ K-2: 보류 목록 깨짐 → 종료 2 · 판독 파일 0(보류 0 으로 착각 0)', d.code === 2 && d.v === null, d.code);
     const jsha = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(HERE, 'judge.js'))).digest('hex');
     check('고침5 H1-2: verdict 머리 judgeSha256 = 판독기 파일 SHA-256 · rulesSha256 · devicePlan · browserCondition · delayUnit 사본',
-      c0.v.judgeSha256 === jsha && /^[0-9a-f]{64}$/.test(c0.v.rulesSha256) && c0.v.devicePlan.cells === c0.v.totals.cells && JSON.stringify(c0.v.browserCondition) === JSON.stringify(R5.hqaPending.browserCondition.value) && c0.v.delayUnit === 'round-trip-ms', { j: c0.v.judgeSha256 });
+      c0.v.judgeSha256 === jsha && /^[0-9a-f]{64}$/.test(c0.v.rulesSha256) && c0.v.devicePlan.cells === c0.v.totals.cells && JSON.stringify(c0.v.browserCondition) === JSON.stringify(R5.hqaPending.browserCondition.value) && c0.v.delayUnit === R5.hqaPending.delayUnit.value && c0.v.delayUnit === 'per-direction-ms', { j: c0.v.judgeSha256 }); // 고침6 결-1: 옛 단언 「delayUnit === 'round-trip-ms'」 → 사본 = rules 값 · 방향당(옛 → 새 표 = 개발명세 부록 M)
   }
   // ⑥ 노출 표지 — 판정값 무변
   {
@@ -1311,9 +1311,18 @@ function checkProbe(src) {
     const m = riSrc5.match(/function proxyDelayArg\(rules, delay\) \{[\s\S]*?\r?\n\}/);
     const fnP = m ? new Function('return ' + m[0])() : null;
     const rr = (u) => ({ hqaPending: { delayUnit: { value: u } } });
-    check('고침5 H1-11: 왕복 150 → 방향당 75 · 500 → 250 · rules 단위 = round-trip-ms · 프록시 인자 = perDirectionMs · 표본 proxy 칸에 둘 다',
-      !!fnP && fnP(rr('round-trip-ms'), 150).perDirectionMs === 75 && fnP(rr('round-trip-ms'), 500).perDirectionMs === 250 && fnP(rr('round-trip-ms'), 0).perDirectionMs === 0
-      && rules.hqaPending.delayUnit.value === 'round-trip-ms' && /String\(proxyDelayArg\(rules, delay\)\.perDirectionMs\)/.test(riSrc5) && /started: proxy\.ok \}, proxyDelayArg\(rules, delay\)\)/.test(riSrc5));
+    // 고침6 결-1(T1): 옛 단언(고침5 H1-11 · 「rules 단위 = round-trip-ms」)은 아래 「고침5 시절」 대조군으로 옮김 — rules 값 단언만 새 단위로(옛 → 새 표 = 개발명세 부록 M)
+    const srcUse = /String\(proxyDelayArg\(rules, delay\)\.perDirectionMs\)/.test(riSrc5) && /started: proxy\.ok \}, proxyDelayArg\(rules, delay\)\)/.test(riSrc5);
+    const unitPerDir = (r) => !!fnP && r.hqaPending.delayUnit.value === 'per-direction-ms' && fnP(r, 300).perDirectionMs === 300 && fnP(r, 300).roundTripMs === 600 && fnP(r, 150).perDirectionMs === 150 && fnP(r, 0).perDirectionMs === 0;
+    check('고침6 T1: rules 단위 = per-direction-ms(HQA 집행 단위) · 방향당 300 → 프록시 인자 300 · 왕복 기록 600 · 프록시 인자 = perDirectionMs · 표본 proxy 칸에 둘 다',
+      unitPerDir(rules) && srcUse, { unit: rules.hqaPending.delayUnit.value });
+    check('고침6 T1: 옛 값 보존 — _옛값_고침5 = round-trip-ms(고침5 note 그대로) · _옛값_고침4 = per-direction-ms · 상태 글자 자리표 그대로',
+      rules.hqaPending.delayUnit._옛값_고침5 && rules.hqaPending.delayUnit._옛값_고침5.value === 'round-trip-ms' && /같은 나무 유일 글자/.test(rules.hqaPending.delayUnit._옛값_고침5.note)
+      && rules.hqaPending.delayUnit._옛값_고침4.value === 'per-direction-ms' && rules.hqaPending.delayUnit.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>');
+    check('고침5 시절 대조군(T1 · 옛 단언 보존): 왕복 150 → 방향당 75 · 500 → 250 · 0 → 0(round-trip-ms 갈래 코드 무변)',
+      !!fnP && fnP(rr('round-trip-ms'), 150).perDirectionMs === 75 && fnP(rr('round-trip-ms'), 500).perDirectionMs === 250 && fnP(rr('round-trip-ms'), 0).perDirectionMs === 0);
+    const rtCopy = JSON.parse(JSON.stringify(rules)); rtCopy.hqaPending.delayUnit.value = 'round-trip-ms';
+    plant('고침6 T1 심은 위반: rules 를 round-trip-ms 로 되돌린 사본 → 「단위 = 방향당」 단언 빨강(인자 150)', !unitPerDir(rtCopy) && fnP(rtCopy, 300).perDirectionMs === 150);
     plant('고침5 H1-11 대조군: 옛 단위(per-direction-ms) → 인자 = N 그대로 · 목록 밖 단위 = throw', !!fnP && fnP(rr('per-direction-ms'), 150).perDirectionMs === 150 && (() => { try { fnP(rr('ms'), 1); return false; } catch (e) { return true; } })());
   }
   // ⑩ K-1 — --out 숫자 = 표준 출력 숫자(안쪽 실행은 이 시험을 건너뜀)
