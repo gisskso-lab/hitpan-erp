@@ -13,6 +13,9 @@
 # - 고침4 G8(D-5 ① ⑤ ⑥ ⑦): 트리거 = push 하나 유지 · 재실행 0 — run_attempt > 1 · github.sha ≠ 체크아웃 HEAD ·
 #   HEAD^ ≠ MODE 적힌 SHA · (장전) 원자료 가지가 이미 있음 → M0 빨강 = 측정 0 (설계서 §6-6 「재실행 1회」 대체됨)
 #   M0 는 측정 잡 첫 단계(체크아웃 바로 뒤) · 원자료 run.json · m0-assert.json 에 github_sha · run_id · run_attempt · mode_line
+# - 고침5 H2(작업지시서 20261116작 §8 · §3-PM 결-6 · 결-7 · 결-9 · §11 K-1 · K-2): 트리거 · 권한 · 외부 액션 SHA 무변
+#   판독기 자체시험 --out(K-1) · M7 을 M8 · M9 뒤로(결-6 甲 · --withheld = K-2) · verdict 만 M8′ · M9′ · run.json 회차 줄
+#   run.json 의 stage_outcomes.JUDGE 는 이제 비어 있다(M7 이 run.json 조립 뒤) → round_line.stage_outcomes_late 를 본다
 name: HQA S4 관문1 GitHub 서버 실측
 
 on:
@@ -71,7 +74,8 @@ jobs:
         run: |
           f=tools/hqa-s4-measure/selftest-judge.js
           if [ -f "$f" ]; then
-            rc=0; node "$f" || rc=$?
+            # 고침5 H2-1(K-1): --out = 통과 · 실패 · 총수 · 심은 빨강 수 JSON(boot.sh runjson 이 run.json 에 싣고 원자료에 사본) · 옛 상태 줄 유지
+            rc=0; node "$f" --out "$HQA_WORK/selftest-judge.json" || rc=$?
             echo "present rc=$rc" > "$HQA_WORK/selftest-judge.status.txt"
             exit $rc
           fi
@@ -122,15 +126,8 @@ jobs:
           NODE_PATH="$(dirname "$HQA_PW_DIR")" \
             node "$f"
 
-      - name: '[판독] M7 장치 판독'
-        id: judge
-        if: always() && steps.m0.outputs.mode == 'armed' && steps.m0.outcome == 'success' && steps.items.outcome != 'skipped'
-        run: |
-          f=tools/hqa-s4-measure/judge.js
-          if [ ! -f "$f" ]; then echo "판독기 없음 — 빨강" >&2; exit 1; fi
-          node "$f" --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json" \
-            --samples "$HQA_RAW/samples.jsonl" --out "$HQA_RAW/verdict-device.json"
-
+      # ---- 고침5 H2-3(결-6 甲): 측정 → run.json → M8 가림 → M9 누출 → M7 판독(가린 · 공개되는 표본만 읽음) → verdict 만 M8′ · M9′ → 회차 줄 → M10 ----
+      #      옛 순서(M7 → run.json → M8 → M9)는 누출 검사가 표본을 지워도 verdict 가 남았다(V1 2 · S2) — 이제 판독 근거 = 공개 표본
       # ---- 어느 단계가 죽어도 원자료는 남긴다(M0 실패면 m0-assert.json 만) ----
       - name: '[장치] run.json 조립 · 고정 머리 2회차'
         if: always() && steps.m0.outcome == 'success'
@@ -161,6 +158,38 @@ jobs:
           extra=""
           if [ "$M0_OUTCOME" = "success" ]; then extra="--withheld-write"; fi
           node tools/hqa-s4-measure/leak-scan.js "$HQA_RAW" --stage measure --remove $extra
+
+      - name: '[판독] M7 장치 판독'
+        id: judge
+        if: always() && steps.m0.outputs.mode == 'armed' && steps.m0.outcome == 'success' && steps.items.outcome != 'skipped'
+        run: |
+          f=tools/hqa-s4-measure/judge.js
+          if [ ! -f "$f" ]; then echo "판독기 없음 — 빨강" >&2; exit 1; fi
+          # 고침5 H2-3(K-2): --withheld = M9 가 보류한 파일 목록 · 판독에 쓰는 파일이 보류됐으면 판독기가 회차 글자로
+          node "$f" --rules "$GITHUB_WORKSPACE/tools/hqa-s4-measure/rules.json" \
+            --samples "$HQA_RAW/samples.jsonl" --out "$HQA_RAW/verdict-device.json" \
+            --withheld "$HQA_RAW/withheld.json"
+
+      - name: '[장치] M8′ 가림 — verdict 만'
+        id: maskv
+        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped'
+        run: node tools/hqa-s4-measure/mask.js "$HQA_RAW" --only verdict-device.json --summary-key mask_verdict
+
+      - name: '[장치] M9′ 누출 검사 — verdict 만'
+        id: leakv
+        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped'
+        run: node tools/hqa-s4-measure/leak-scan.js "$HQA_RAW" --stage verdict --only verdict-device.json --remove
+
+      - name: '[장치] run.json 회차 줄 덧붙임'
+        id: round
+        if: always() && steps.m0.outcome == 'success'
+        env:
+          OUT_M8: ${{ steps.mask.outcome }}
+          OUT_M9: ${{ steps.leak.outcome }}
+          OUT_JUDGE: ${{ steps.judge.outcome }}
+          OUT_M8V: ${{ steps.maskv.outcome }}
+          OUT_M9V: ${{ steps.leakv.outcome }}
+        run: bash tools/hqa-s4-measure/boot.sh round "$HQA_RAW" "$HQA_WORK"
 
       - name: '[장치] M10 해시 목록'
         if: always() && (steps.m0.outcome == 'success' || steps.m0.outcome == 'failure')

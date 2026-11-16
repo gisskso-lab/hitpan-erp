@@ -90,6 +90,14 @@ V.y3h = hex(40);
 // 고침4 G7 심은 값 — 자동 id 꼴(판정 칸 밖) · 22자 토큰(판정 칸 안)
 V.g7id = rnd(24, 'abcdefghijklmnopqrstuvwxyz0123456789');
 V.g7tok = rndNonHex(22);
+// 고침5 H2 심은 값 — 같은 길이 무작위 토큰(23 · 27 · 25 = 리허설 4 늘어난 3 의 길이 · 값 아님) · mud- + 22자 · verdict / 표본 토큰 · 무작위 64 16진
+V.h2a = rndNonHex(23);
+V.h2b = rndNonHex(27);
+V.h2c = rndNonHex(25);
+V.h2m = 'mud-' + rndNonHex(22, 'abcdefghijklmnopqrstuvwxyz0123456789');
+V.h2x = rndNonHex(26);
+V.h2y = rndNonHex(24);
+V.h2r = hex(64);
 const K1 = J('pass', 'word');
 const K2 = J('access', 'Tok', 'en');
 const K3 = J('client_', 'sec', 'ret');
@@ -315,13 +323,134 @@ try {
       && x.after.includes(V.g7tok) && x.r.status === 2 && x.noVal);
     results.push({ case: 'g7.planted.red', expect: ['device_failure', 'red', 'not masked', 'leak catches'], kinds: null, status: 0, echoed_value: false, pass: !!p8 });
   }
+  // ── 고침5 H2 (작업지시서 20261116작 §8 · 결-6 甲 · 결-7 · 결-9 甲) — 새 시험 8 · 시험마다 대조군(일부러 틀린 입력 = 빨강) ──
+  {
+    const Mk = require('./mask.js');
+    const H2 = [];
+    const push = (name, expect, pass) => { H2.push(name); results.push({ case: name, expect, kinds: null, status: 0, echoed_value: false, pass: !!pass }); };
+    const shaHex = (s) => crypto.createHash('sha256').update(s).digest('hex');
+    // ① 목록 지문 · 개수(결-9 甲 출처 고정) — 대조군: 한 이름만 바꾼 목록은 지문이 달라야
+    {
+      const list = Mk.MUD_CLASS_ALLOW;
+      const good = list.length === 641 && new Set(list).size === 641 && shaHex(list.join('\n') + '\n') === Mk.MUD_CLASS_ALLOW_SHA256
+        && list.every((n) => /^mud-[a-z0-9_-]+$/.test(n) && n.length >= 22);
+      const bent = list.slice(); bent[0] = bent[0] + 'x';
+      push('h2.mud.sha', ['641', 'sha', 'control differs'], good && shaHex(bent.join('\n') + '\n') !== Mk.MUD_CLASS_ALLOW_SHA256);
+    }
+    // ② 목록 이름 전부 = 가림 0 · 누출 0
+    {
+      const dir = path.join(root, 'h2n'); fs.mkdirSync(dir);
+      writeCase(dir, { 'run.json': '{}\n', 'probe.json': JSON.stringify({ screens: [{ r1: { candidates: [{ cls: Mk.MUD_CLASS_ALLOW }] } }] }) + '\n' });
+      const m = maskRun(dir);
+      const r = runLeak(dir);
+      push('h2.mud.names', ['mask 0', 'leak 0'], m.status === 0 && m.tokens === 0 && r.status === 0 && !r.echoed && !m.echoed);
+    }
+    // ③ 같은 길이 무작위 토큰(대조군) = 가림 · 누출이 잡음
+    {
+      const dir = path.join(root, 'h2r'); fs.mkdirSync(dir);
+      writeCase(dir, { 'probe.json': JSON.stringify({ cls: ['mud-button-root', V.h2a, V.h2b, V.h2c] }) + '\n' });
+      const r = runLeak(dir);
+      fs.writeFileSync(path.join(dir, 'run.json'), '{}\n');
+      const m = maskRun(dir);
+      const after = fs.readFileSync(path.join(dir, 'probe.json'), 'utf8');
+      push('h2.mud.rndlen', ['leak', 'masked 3'], r.status === 2 && m.status === 0 && m.tokens === 3 && ![V.h2a, V.h2b, V.h2c].some((x) => after.includes(x)) && !r.echoed && !m.echoed);
+    }
+    // ④ mud- + 22자 무작위(목록 밖) = 가림 — 꼴 허용이 아님(대조군)
+    {
+      const dir = path.join(root, 'h2m'); fs.mkdirSync(dir);
+      writeCase(dir, { 'probe.json': JSON.stringify({ cls: [V.h2m] }) + '\n' });
+      const r = runLeak(dir);
+      fs.writeFileSync(path.join(dir, 'run.json'), '{}\n');
+      const m = maskRun(dir);
+      const after = fs.readFileSync(path.join(dir, 'probe.json'), 'utf8');
+      push('h2.mud.prefix', ['not in list', 'leak', 'masked'], !Mk.MUD_CLASS_ALLOW.includes(V.h2m) && r.status === 2 && m.status === 0 && m.tokens === 1 && !after.includes(V.h2m) && !r.echoed && !m.echoed);
+    }
+    // ⑤ mask --only(M8′): 그 파일만 · 옛 mask 칸 무변 · 번호는 앞 회차 다음 — 대조군: --summary-key mask · 폴더 밖 경로 = 거부(rc 1)
+    {
+      const dir = path.join(root, 'h2o'); fs.mkdirSync(dir);
+      const prevMask = { files: 2, tokens_replaced: 3, distinct_tokens: 3 };
+      writeCase(dir, { 'run.json': JSON.stringify({ mode: 'armed', mask: prevMask }) + '\n', 'verdict-device.json': JSON.stringify({ note: V.h2x }) + '\n', 'samples.jsonl': JSON.stringify({ x: V.h2y }) + '\n' });
+      const m = spawnSync(process.execPath, [MASK, dir, '--only', 'verdict-device.json', '--summary-key', 'mask_verdict'], { env: ENV, encoding: 'utf8' });
+      const runJ = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+      const vAfter = fs.readFileSync(path.join(dir, 'verdict-device.json'), 'utf8');
+      const sAfter = fs.readFileSync(path.join(dir, 'samples.jsonl'), 'utf8');
+      const bad1 = spawnSync(process.execPath, [MASK, dir, '--only', 'verdict-device.json', '--summary-key', 'mask'], { env: ENV, encoding: 'utf8' });
+      const bad2 = spawnSync(process.execPath, [MASK, dir, '--only', '../x.json'], { env: ENV, encoding: 'utf8' });
+      const runJ2 = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+      push('h2.only.mask', ['only file', 'mask kept', 'index base', 'refuse 2'], m.status === 0 && !vAfter.includes(V.h2x) && vAfter.includes('<가림:4>') && sAfter.includes(V.h2y)
+        && JSON.stringify(runJ.mask) === JSON.stringify(prevMask) && runJ.mask_verdict && runJ.mask_verdict.tokens_replaced === 1 && runJ.mask_verdict.index_base === 3 && runJ.mask_verdict.only_present === true
+        && bad1.status === 1 && bad2.status === 1 && JSON.stringify(runJ2.mask) === JSON.stringify(prevMask) && !leaksValue((m.stdout || '') + (m.stderr || '') + (bad1.stderr || '') + (bad2.stderr || '')));
+    }
+    // ⑥ leak-scan --only(M9′): 그 파일만 보고 지움 · 다른 파일 · 앞 회차 보류 칸 유지 — 대조군: --only 없이 = 두 파일 다 걸림
+    {
+      const dir = path.join(root, 'h2l'); fs.mkdirSync(dir);
+      const files = { 'verdict-device.json': JSON.stringify({ note: V.h2x }) + '\n', 'samples.jsonl': JSON.stringify({ x: V.h2y }) + '\n', 'withheld.json': JSON.stringify({ note: 'n', stages: { measure: [{ name: 'a.txt', kinds: ['long-token'] }] }, files: [{ name: 'a.txt', kinds: ['long-token'] }] }) + '\n' };
+      writeCase(dir, files);
+      const dirC = path.join(root, 'h2lc'); fs.mkdirSync(dirC);
+      writeCase(dirC, files);
+      const ctl = runLeak(dirC); // 대조군은 따로 담은 사본에서(검사가 withheld.json 을 고쳐 쓰므로)
+      const r = runLeak(dir, ['--stage', 'verdict', '--only', 'verdict-device.json', '--remove']);
+      const w = JSON.parse(fs.readFileSync(path.join(dir, 'withheld.json'), 'utf8'));
+      push('h2.only.leak', ['only file removed', 'other kept', 'stages kept', 'control 2 files'], ctl.status === 2 && ctl.parsed && ctl.parsed.files.length === 2
+        && r.status === 2 && r.parsed && r.parsed.only === 'verdict-device.json' && r.parsed.files.length === 1
+        && !fs.existsSync(path.join(dir, 'verdict-device.json')) && fs.existsSync(path.join(dir, 'samples.jsonl'))
+        && Array.isArray(w.stages.measure) && w.stages.measure.length === 1 && Array.isArray(w.stages.verdict) && w.stages.verdict[0].name === 'verdict-device.json' && w.files.length === 2
+        && !ctl.echoed && !r.echoed);
+    }
+    // ⑦ 판독 규칙 · 판독기 sha256(결-7): 정확 일치만 남음 — 대조군: 같은 길이 무작위 64 16진은 가림
+    {
+      const shas = Mk.ruleFileShas();
+      const rulesSha = shaHex(fs.readFileSync(path.join(HERE, 'rules.json')));
+      const judgeSha = shaHex(fs.readFileSync(path.join(HERE, 'judge.js')));
+      const dir = path.join(root, 'h2s'); fs.mkdirSync(dir);
+      writeCase(dir, {
+        'run.json': JSON.stringify({ rules_sha256: rulesSha, judge_sha256: judgeSha, rules_sha256_bent: V.h2r }) + '\n',
+        'verdict-device.json': JSON.stringify({ rulesSha256: rulesSha, judgeSha256: judgeSha, other: V.h2r }) + '\n',
+      });
+      const m = spawnSync(process.execPath, [MASK, dir], { env: ENV, encoding: 'utf8' });
+      const runT = fs.readFileSync(path.join(dir, 'run.json'), 'utf8');
+      const vT = fs.readFileSync(path.join(dir, 'verdict-device.json'), 'utf8');
+      const r = runLeak(dir);
+      push('h2.rule.sha', ['exact kept', 'random masked'], shas.length === 2 && shas.includes(rulesSha) && shas.includes(judgeSha) && m.status === 0
+        && runT.includes(rulesSha) && runT.includes(judgeSha) && vT.includes(rulesSha) && vT.includes(judgeSha) && !runT.includes(V.h2r) && !vT.includes(V.h2r)
+        && JSON.parse(runT).mask.tokens_replaced === 2 && r.status === 0 && !r.echoed && !leaksValue((m.stdout || '') + (m.stderr || '')));
+    }
+    // ⑧ 워크플로 배관(결-6 甲 · K-1 · K-2) — 단계 순서 · 인자 · 트리거 push 하나 · 쓰기 권한 잡 하나 · 외부 액션 40자 SHA
+    //    대조군 3: M7 과 M8 이름 맞바꿈(순서 틀림) · --withheld 뺌 · 태그 고정 uses — 셋 다 거부여야
+    {
+      const wfPath = path.join(HERE, '..', '..', '.github', 'workflows', 'hqa-s4-measure.yml');
+      const wf = fs.readFileSync(wfPath, 'utf8').replace(/\r\n/g, '\n');
+      const ORDER = ["'[장치] run.json 조립 · 고정 머리 2회차'", "'[장치] M8 가림'", "'[장치] M9 누출 검사'", "'[판독] M7 장치 판독'",
+        "'[장치] M8′ 가림 — verdict 만'", "'[장치] M9′ 누출 검사 — verdict 만'", "'[장치] run.json 회차 줄 덧붙임'", "'[장치] M10 해시 목록'"];
+      const stepOf = (t, n) => { const i = t.indexOf('- name: ' + n); if (i < 0) return null; const j = t.indexOf('\n      - name: ', i + 1); return t.slice(i, j < 0 ? t.length : j); };
+      const check = (t) => {
+        const idx = ORDER.map((n) => t.indexOf('- name: ' + n));
+        if (idx.some((i) => i < 0) || idx.some((v, k) => k > 0 && v <= idx[k - 1])) return 'order';
+        if (!/node "\$f" --out "\$HQA_WORK\/selftest-judge\.json"/.test(stepOf(t, "'[장치] 자체시험 — 판독기'") || '')) return 'k1';
+        if (!/--withheld "\$HQA_RAW\/withheld\.json"/.test(stepOf(t, ORDER[3]) || '')) return 'k2';
+        if (!/--only verdict-device\.json/.test(stepOf(t, ORDER[4]) || '') || !/--only verdict-device\.json/.test(stepOf(t, ORDER[5]) || '')) return 'only';
+        const on = /\non:\n([\s\S]*?)\n\S/.exec(t);
+        if (!on || !/^  push:\n/.test(on[1]) || /^  (?!push:)[a-z_]+:/m.test(on[1])) return 'trigger';
+        if ((t.match(/contents: write/g) || []).length !== 1) return 'write';
+        const uses = t.match(/uses: \S+/g) || [];
+        if (!uses.length || !uses.every((u) => /@[0-9a-f]{40}$/.test(u))) return 'uses';
+        return 'ok';
+      };
+      const swapped = wf.split(ORDER[3]).join('@@T@@').split(ORDER[1]).join(ORDER[3]).split('@@T@@').join(ORDER[1]);
+      const noW = wf.replace(/ \\\n\s*--withheld "\$HQA_RAW\/withheld\.json"/, '');
+      const tag = wf.replace(/(uses: actions\/checkout)@[0-9a-f]{40}/, '$1@v7');
+      push('h2.wf.pipe', ['order', 'k1', 'k2', 'only', 'push only', 'one write', 'sha pinned', 'controls 3'],
+        check(wf) === 'ok' && check(swapped) === 'order' && check(noW) === 'k2' && check(tag) === 'uses');
+    }
+    results.h2 = H2.length;
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
 results.push({ case: 'names.short', expect: ['< 22'], kinds: null, status: 0, echoed_value: false, pass: results.every((r) => !/[A-Za-z0-9_-]{22,}/.test(r.case)) });
 
-// 고침4 G7: 옛 기대 수(CASES + 2 + Y2C + Y2D + 1)에 합성 대조군 2 를 더함
-const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 2 + 1 && results.every((r) => r.pass);
+// 고침4 G7: 옛 기대 수(CASES + 2 + Y2C + Y2D + 1)에 합성 대조군 2 를 더함 · 고침5 H2: 새 시험 8(results.h2 — 블록이 안 돌면 빨강)
+const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 2 + 8 + 1 && results.h2 === 8 && results.every((r) => r.pass);
 const doc = { ok, cases: results.length, failed: results.filter((r) => !r.pass).map((r) => r.case), results };
 const oi = process.argv.indexOf('--out');
 if (oi >= 0 && process.argv[oi + 1]) fs.writeFileSync(process.argv[oi + 1], JSON.stringify(doc, null, 2) + '\n');

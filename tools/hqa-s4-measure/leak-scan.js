@@ -6,9 +6,11 @@
 //   고침1: F3 JSON 키-값 자격증명 · F4 표준 base64 · F5 알려진 칸 밖 16진 40/64 · F6 PNG 머리 바이트 · 텍스트 덩어리
 //   걸린 파일: --remove 면 지움(공개 · 운반 0) · withheld.json 에 이름 · 꼴 종류만(값 0 · 이름이 걸리면 이름도 가림)
 //   출력에 걸린 값은 절대 안 찍는다. 종료 코드: 0 = 깨끗 · 2 = 걸림 · 1 = 처리 오류
+//   고침5 H2-3(결-6 甲): --only <상대 경로> = 그 파일만 검사(M9′ · verdict) · 다른 파일은 보지도 지우지도 않음 · 파일 없으면 걸림 0
+//             withheld.json 의 stages[<stage>] 에만 덧붙임(앞 회차 칸 유지)
 const fs = require('fs');
 const path = require('path');
-const { loadAllow, listFiles, findSecrets, hexCtx } = require('./mask.js');
+const { loadAllow, listFiles, findSecrets, hexCtx, onlyTarget } = require('./mask.js');
 
 const CONTENT_EXT = new Set(['.json', '.jsonl', '.txt']);
 const ALLOWED_EXT = new Set(['.json', '.jsonl', '.txt', '.png']);
@@ -82,10 +84,11 @@ function pngKinds(buf) {
   return [...kinds];
 }
 
-function scan(dir, env) {
+function scan(dir, env, only) {
   const allow = loadAllow();
   const hits = [];
-  for (const f of listFiles(dir)) {
+  const targets = only ? [onlyTarget(dir, only)].filter((p) => fs.existsSync(p)) : listFiles(dir);
+  for (const f of targets) {
     const rel = path.relative(dir, f).split(path.sep).join('/');
     const kinds = new Set();
     let nameHit = false;
@@ -114,7 +117,9 @@ function main(argv, env) {
   const remove = argv.includes('--remove');
   const writeW = argv.includes('--withheld-write');
   const asJson = argv.includes('--json');
-  const hits = scan(dir, env);
+  const oi = argv.indexOf('--only');
+  const only = oi >= 0 && oi + 1 < argv.length ? argv[oi + 1] : null;
+  const hits = scan(dir, env, only);
   let k = 0;
   const entries = hits.map((h) => ({ name: h.nameHit ? '<이름 가림:' + (++k) + '>' : h.rel, kinds: h.kinds }));
   if (remove) for (const h of hits) fs.unlinkSync(h.file);
@@ -127,7 +132,7 @@ function main(argv, env) {
     doc.files = Object.values(doc.stages).flat();
     fs.writeFileSync(wf, JSON.stringify(doc, null, 2) + '\n');
   }
-  if (asJson) console.log(JSON.stringify({ stage, hits: hits.length, files: entries }));
+  if (asJson) console.log(JSON.stringify(only ? { stage, only, hits: hits.length, files: entries } : { stage, hits: hits.length, files: entries }));
   else console.log('[M9] 누출 검사 ' + stage + ' · 걸린 파일 ' + hits.length + (hits.length ? ' · ' + JSON.stringify(entries) : ''));
   return hits.length ? 2 : 0;
 }
