@@ -1130,6 +1130,7 @@ function checkProbe(src) {
       F5.contrastInvalid === Q2_INVALID && F5.contrastNoStimulus === Q2_NO_STIMULUS && q6.contrastState.state === Q2_INVALID && q6.contrastState.reason === Q2_NO_STIMULUS, q6.contrastState);
     const Rq = JSON.parse(JSON.stringify(R5));
     Rq.readingText.fix5.contrastNoStimulus = Rq.readingText.fix5.contrastNoStimulus.replace('(D1 재현)', '');
+    Rq.readingText.fix5.contrastNoStimScreen = Rq.readingText.fix5.contrastNoStimScreen.replace('(D1 재현)', ''); // 고침6 X2: 사유는 새 키(화면 이름 꼴)에서 나옴 → 같은 돌연변이를 새 키에도
     const qm = run(Rq, xq.map((s) => JSON.parse(JSON.stringify(s)))).items['I-6'];
     plant('고침5-B ④ 대조군: 사유 글자에서 「(D1 재현)」 뺀 rules 사본 → 판독 사유 ≠ Q2 글자(위 시험이 잡는 꼴)', qm.contrastState.state === Q2_INVALID && qm.contrastState.reason !== Q2_NO_STIMULUS, qm.contrastState);
   }
@@ -1147,8 +1148,8 @@ function checkProbe(src) {
     const shapeOk = (e) => typeof e.screen === 'string' && typeof e.shapeText === 'string' && e.shapeText.includes(e.item + ' · ' + e.screen + (e.delay === undefined ? '' : ' · ' + e.delay));
     const bad = all.filter((e) => !same(e)).map((e) => e.no || '(no 없음)').concat((rules.exposure || []).filter((e) => !shapeOk(e)).map((e) => 'shape:' + e.no));
     const covered = new Set(all.map((e) => e.no));
-    check('고침5-B ①: MAPPING §10 노1~노11 ↔ rules exposure ∪ exposureNonCell 글자 일치(칸 꼴 · 출처 · 노출 내용 · Q4ⓒ) · 11행 전부 짝 · 항목 칸 행 = 화면 칸 있음 · 칸 꼴 글자에 항목 · 화면 · 지연',
-      Object.keys(mrows).length === 11 && bad.length === 0 && Object.keys(mrows).every((k) => covered.has(k)) && covered.size === 11, { rows: Object.keys(mrows).length, bad });
+    check('고침5-B ① · 고침6(옛 단언 11행 → 13행 · 노12 · 노13 더함): MAPPING §10 노1~노13 ↔ rules exposure ∪ exposureNonCell 글자 일치(칸 꼴 · 출처 · 노출 내용 · Q4ⓒ) · 11행 전부 짝 · 항목 칸 행 = 화면 칸 있음 · 칸 꼴 글자에 항목 · 화면 · 지연',
+      Object.keys(mrows).length === 13 && bad.length === 0 && Object.keys(mrows).every((k) => covered.has(k)) && covered.size === 13, { rows: Object.keys(mrows).length, bad });
     const RE = JSON.parse(JSON.stringify(rules));
     RE.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
     const expo = (r) => {
@@ -1433,16 +1434,18 @@ function checkProbe(src) {
   // H4-G-B(검증팀장 [4] R-1 · PM 결정 · 대표 결정 ⓑ · 작업지시서 §7-2): item 단위 = 공백 꼴 줄로만 판정 · 빈 값 · null 꼴 = 기록만(항목 판정에 안 씀)
   const gb = (rows, R) => mkH((xs) => { fx(xs, 'I-8', 'blank-rows', 'v2').readings.blankRows = rows; }, R);
   const gbS = (v) => v.items['I-8'].contrastState;
+  // 고침6 결-11 X2: 옛 단언 「reason === F5.contrastNoRepro(/before …)」 → 대조 화면 v2 이름을 넣은 글자(옛 → 새 표 = 개발명세 부록 M)
+  const F5V2_NOREPRO = F5.contrastNoReproScreen.split('{screen}').join(F5.contrastScreenLabel.v2);
   const gbK = (v, k) => gbS(v).kinds.find((x) => x.kind === k);
   const gbRec = (v) => ['empty', 'null'].every((k) => gbK(v, k).recordOnly === H.t3KindRecordOnly) && gbK(v, 'blank').recordOnly === null && JSON.stringify(gbS(v).judgedKinds) === '["blank"]';
   const gb1 = gb([okRow('blank', '3'), okRow('empty', '4'), failRow('null', '6'), okRow('blank', '8')]);
-  plant('H4-G-B ①: I-8 null 줄만 재현(공백 무재현) → 항목 「성립」 아님(대조 무효) · null 꼴 칸 = 재현 기록 + 기록만 표지', gbS(gb1).state === F5.contrastInvalid && gbS(gb1).reason === F5.contrastNoRepro && gbK(gb1, 'null').contrast === F5.contrastHolds && gbRec(gb1), gbS(gb1));
+  plant('H4-G-B ①: I-8 null 줄만 재현(공백 무재현) → 항목 「성립」 아님(대조 무효) · null 꼴 칸 = 재현 기록 + 기록만 표지', gbS(gb1).state === F5.contrastInvalid && gbS(gb1).reason === F5V2_NOREPRO && gbK(gb1, 'null').contrast === F5.contrastHolds && gbRec(gb1), gbS(gb1));
   const gb2 = gb([okRow('blank', '3'), failRow('empty', '4'), okRow('null', '6'), okRow('blank', '8')]);
-  plant('H4-G-B ②: I-8 빈 값 줄만 재현(공백 무재현) → 항목 「성립」 아님(대조 무효) · 빈 값 꼴 칸 = 재현 기록 + 기록만 표지', gbS(gb2).state === F5.contrastInvalid && gbS(gb2).reason === F5.contrastNoRepro && gbK(gb2, 'empty').contrast === F5.contrastHolds && gbRec(gb2), gbS(gb2));
+  plant('H4-G-B ②: I-8 빈 값 줄만 재현(공백 무재현) → 항목 「성립」 아님(대조 무효) · 빈 값 꼴 칸 = 재현 기록 + 기록만 표지', gbS(gb2).state === F5.contrastInvalid && gbS(gb2).reason === F5V2_NOREPRO && gbK(gb2, 'empty').contrast === F5.contrastHolds && gbRec(gb2), gbS(gb2));
   const gb3 = gb([failRow('blank', '3'), okRow('empty', '4'), okRow('null', '6'), failRow('blank', '8')]);
   check('H4-G-B ③: I-8 공백 줄만 재현 → 항목 성립 · 판정 꼴 = blank 하나 · 빈 값 · null = 기록만 표지 · 빨강 아님', gbS(gb3).state === F5.contrastHolds && gbRec(gb3) && gb3.red === false, gbS(gb3));
   const gb4 = gb([okRow('blank', '3'), failRow('empty', '4'), failRow('null', '6'), okRow('blank', '8')]);
-  plant('H4-G-B ④: I-8 공백 재현 없음 + 빈 값 · null 재현 → 대조 무효(성립 아님)', gbS(gb4).state === F5.contrastInvalid && gbS(gb4).reason === F5.contrastNoRepro, gbS(gb4));
+  plant('H4-G-B ④: I-8 공백 재현 없음 + 빈 값 · null 재현 → 대조 무효(성립 아님)', gbS(gb4).state === F5.contrastInvalid && gbS(gb4).reason === F5V2_NOREPRO, gbS(gb4));
   const gb5 = gb([failRow('blank', '3'), failRow('blank', '8')]);
   check('H4-G-B ⑤: I-8 v2 빈 값 · null 줄 0 + 공백 재현 → 항목 성립 · 빨강 아님 · 줄 0 은 기록만 칸(noRowsRecordOnly v2:empty · v2:null)', gbS(gb5).state === F5.contrastHolds && gb5.red === false && gbK(gb5, 'empty').contrast === null && gbK(gb5, 'null').contrast === null && !!gbS(gb5).noRowsRecordOnly && gbS(gb5).noRowsRecordOnly.text === H.t3KindRecordOnly && JSON.stringify(gbS(gb5).noRowsRecordOnly.rows) === '["v2:empty","v2:null"]', { s: gbS(gb5), red: gb5.redReasons });
   const gb5c = gb([failRow('blank', '3'), failRow('blank', '8')], RHc);

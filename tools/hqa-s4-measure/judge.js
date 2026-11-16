@@ -298,6 +298,22 @@ function fix5Text(rules) {
   if (!t || typeof t !== 'object') throw new Error('readingText.fix5 없음');
   return t;
 }
+// 고침6 결-11 X2: 대조 무효 사유 글자 = 그 칸 대조 화면 이름을 넣은 글자(readingText.fix5 의 화면 꼴 새 키 둘 · 아래 표)
+//   /before 칸이면 옛 글자(contrastNoRepro · contrastNoStimulus)와 같은 글자 · 새 키가 없는 옛 규칙 파일 = 옛 글자 그대로 · 주소 글자 0
+//   새 키 이름은 21자 이하(P3-3 · 가림 대비) — 작업지시서 글자 contrastNoStimulus+Screen(24자) 대신 contrastNoStimScreen
+const CONTRAST_REASON_KEYS = { contrastNoRepro: 'contrastNoReproScreen', contrastNoStimulus: 'contrastNoStimScreen' };
+function contrastScreenLabel(rules, screen) {
+  const t = fix5Text(rules).contrastScreenLabel;
+  return t && typeof t === 'object' && typeof t[screen] === 'string' ? t[screen] : `비교 화면 ${screen}`;
+}
+function contrastReasonText(rules, key, screens) {
+  const F5 = fix5Text(rules);
+  const tpl = F5[CONTRAST_REASON_KEYS[key]];
+  if (typeof tpl !== 'string') return F5[key];
+  const ss = Array.from(new Set(screens || []));
+  const label = (ss.length ? ss : ['before']).map((s) => contrastScreenLabel(rules, s)).join(' · ');
+  return tpl.split('{screen}').join(label);
+}
 // 결-6 甲: 판정 칸(judgeSchema samples.jsonl) 값에 가린 자리표가 있는가 — 돌려줌 [{ path }] (값 0)
 const MASKED_RE = /<가림:[0-9]+>/;
 function maskedReads(rules, s, mc) {
@@ -739,7 +755,8 @@ function judge(rules, samples, extra) {
       const val = rows.reduce((n, r) => n + r.valid, 0);
       const ku = rows.reduce((n, r) => n + r.kbdUnreachable, 0);
       if (rep > 0) state = F5.contrastHolds;
-      else { state = F5.contrastInvalid; reason = ku > 0 && ku === val ? F5.contrastNoStimulus : F5.contrastNoRepro; }
+      // ⬛ 옛 줄(고침5 · 대조 화면과 무관하게 「/before …」 글자): reason = ku > 0 && ku === val ? F5.contrastNoStimulus : F5.contrastNoRepro;
+      else { state = F5.contrastInvalid; reason = contrastReasonText(rules, ku > 0 && ku === val ? 'contrastNoStimulus' : 'contrastNoRepro', ccs.map((c) => c.screen)); }
     }
     return { state, reason, cells: rows };
   }
@@ -781,7 +798,8 @@ function judge(rules, samples, extra) {
     else {
       const holds = judged.every((k) => k.contrast === F5.contrastHolds);
       if (holds) state = F5.contrastHolds;
-      else { state = F5.contrastInvalid; reason = F5.contrastNoRepro; }
+      // ⬛ 옛 줄(고침5): reason = F5.contrastNoRepro;
+      else { state = F5.contrastInvalid; reason = contrastReasonText(rules, 'contrastNoRepro', [cscr]); }
     }
     items['I-8'] = {
       source: t.source, expected: [t.expected], contrastRule: t.contrastRule,
@@ -965,7 +983,9 @@ module.exports = {
   // 고침5 H1
   fix5Text, maskedReads, exposureOf, pathShape, BEFORE_FAIL, ATTEMPT_KIND, isAttemptLine,
   // H4
-  contrastTable, contrastScreenOf, contrastScreensSet, caseSplitItem, i8Rows, I8_ROW_FAIL, I8_ROW_OK
+  contrastTable, contrastScreenOf, contrastScreensSet, caseSplitItem, i8Rows, I8_ROW_FAIL, I8_ROW_OK,
+  // 고침6
+  contrastScreenLabel, contrastReasonText
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
