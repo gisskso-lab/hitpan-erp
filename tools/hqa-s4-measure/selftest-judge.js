@@ -16,6 +16,8 @@ const { buildPlan, cellKey, defaultWindow } = require('./judge.js');
 const HERE = __dirname;
 const results = [];
 function check(name, ok, info) { results.push({ name, ok: !!ok, info: info === undefined ? null : info }); }
+// 고침5 K-1: 심은 위반(대조군) — 걸려야(빨강이어야) ok · 셈은 --out 의 plantedRed / plantedTotal
+function plant(name, red, info) { check(name, red, info); results[results.length - 1].planted = true; }
 
 const rules = JSON.parse(fs.readFileSync(path.join(HERE, 'rules.json'), 'utf8'));
 const T = rules.readingText;
@@ -144,7 +146,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   // 고침4 보탬(PM F-6 ②): 옛 기대 104(N-1 12 · a2 4칸) 대체 → a2 는 대조 단 300 · 500 두 칸만 → 102(I 84 + N-1 10 + N-2 8)
   const a2cells = plan.cells.filter((c) => c.screen === 'a2');
   const sumSamples = plan.cells.reduce((n, c) => n + c.samples, 0);
-  check('계획 칸 수 = 102(I 84 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(임시 3/5) 342', plan.cells.length === 102 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 342, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
+  // 고침5 결-10 甲: 옛 기대 102 · 342 대체 → I-7 below-list(F10) 6칸 더함 → 108(I 90 + N-1 10 + N-2 8) · 표본 360
+  check('계획 칸 수 = 108(I 90 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(3/5) 360', plan.cells.length === 108 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 360, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
   {
     const throwsP = (r) => { try { buildPlan(r); return null; } catch (e) { return String(e.message); } };
     const noSd = JSON.parse(JSON.stringify(rules)); delete noSd.plan.itemSpecs['N-1'].screenDelays;
@@ -160,7 +163,11 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   check('I-8 T3 = 「미측정 · 정의 후보 있음 · HQA 확인 대기」 · 계획에 없음 · 측정 코드 0', i8 && i8.text === '미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기' && !rules.plan.items.includes('I-8') && !Object.keys(Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'))).includes('I-8'));
   check('N-1 판정 글자 = 대조 무효 / 🔴 / 🟡', T['N-1'].contrastInvalid === '대조 무효' && T['N-1'].red === '🔴' && T['N-1'].yellow === '🟡');
   const pend = Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_'));
-  check('HQA 회신 대기 6칸 표지(T3 포함)', pend.length === 6 && pend.includes('T3') && pend.every((k) => String(rules.hqaPending[k].status).includes('HQA 회신 대기')), pend);
+  // 고침5 H1-12: 옛 단언(6칸 모두 「HQA 회신 대기」) 대체 → 칸 6 그대로 · ①② = HQA 회신 반영 꼴 · ③④⑤ = 사전 고정 꼴(댓글 자리표) · ⑥ T3 = 「HQA 회신 대기」 그대로(대표 자리)
+  check('고침5 hqaPending 6칸 상태: ①② 반영 · ③④⑤ 사전 고정(자리표) · T3 회신 대기 무변', pend.length === 6 && pend.includes('T3')
+    && ['S1toS4', 'rawFormat'].every((k) => /^HQA 회신 반영 · 댓글 [0-9]{6,}$/.test(rules.hqaPending[k].status))
+    && ['samplesPerCell', 'delayUnit', 'browserCondition'].every((k) => rules.hqaPending[k].status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>')
+    && rules.hqaPending.T3.status === 'HQA 회신 대기' && rules.hqaPending.T3.value === null, pend.map((k) => rules.hqaPending[k].status));
   // 고침1 F8: 장전 관문(hqa-gate.js) — 필수 칸 목록 고정 · 확정 꼴만 통과 · 대조군 1 + 우회 꼴 6
   {
     const G = require('./hqa-gate.js');
@@ -296,7 +303,7 @@ function checkSource(name, src, isLib) {
   ];
   for (const [n, src, isLib] of planted) {
     const r = checkSource(n, src, isLib);
-    check(`대조군 걸림: ${n}`, r.hits.length > 0, r.hits);
+    plant(`대조군 걸림: ${n}`, r.hits.length > 0, r.hits); // 고침5 K-1: check → plant(같은 단언 · 셈만 더함)
   }
   const good = checkSource('정상 읽기', 'await page.evaluate((a) => document.querySelectorAll(a.s).length, { s: "#x" });', true);
   check('대조군 통과: 읽기만 하는 evaluate', good.hits.length === 0, good.hits);
@@ -640,7 +647,7 @@ function checkProbe(src) {
   ];
   for (const [n, add] of plantedP) {
     const s2 = typeof add === 'function' ? add(src) : src + add;
-    check(n + ' → 빨강', s2 !== src && checkProbe(s2).length > 0, typeof add === 'function' && s2 === src ? '바꿈 자리 못 찾음' : null);
+    plant(n + ' → 빨강', s2 !== src && checkProbe(s2).length > 0, typeof add === 'function' && s2 === src ? '바꿈 자리 못 찾음' : null); // 고침5 K-1: check → plant
   }
   check('probe 대조군 수 ≥ 24(원 5 + 재검증 19)', plantedP.length >= 24, plantedP.length);
   // 고침4 G10
@@ -862,11 +869,279 @@ function checkProbe(src) {
   }
 }
 
+// ── 고침5 H1-12 — 판독 칸 넷 · 회차 글자 · 분모 · 노출 · 제외 판독 · 관문 · K-1 · K-2 (대조군을 함께 · 동작을 잰다) ──
+{
+  const J = require('./judge.js');
+  const G = require('./hqa-gate.js');
+  const F5 = rules.readingText.fix5;
+  const R5 = JSON.parse(JSON.stringify(rules));
+  R5.plan.items = ['I-1', 'I-2', 'I-4', 'I-6', 'I-7', 'N-1'];
+  R5.plan.iDelays = [0];
+  R5.plan.nDelays = [300, 500];
+  R5.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+  const P_D1 = [{ i: 1, row: '1', tag: 'TD', role: null, tabIndex: -1, inRef: true, isStatusActivator: false, afterRef: false, body: false },
+    { i: 2, row: '2', tag: 'TD', role: null, tabIndex: -1, inRef: false, isStatusActivator: false, afterRef: true, body: false }];
+  const P_OTHER = [{ i: 1, row: null, tag: 'BODY', role: null, tabIndex: -1, inRef: false, isStatusActivator: false, afterRef: false, body: true }];
+  const ku = (s, p) => { s.kbd = { reached: false, path: p || P_D1, row1: { present: true, focusableVisible: 0, activator: { present: true, display: 'contents', rects: 0 } }, rowClick: { ok: true } }; s.deviceReading = 'keyboard_unreachable'; s.valid = true; };
+  const aur = (s, p) => { ku(s, p); s.valid = false; s.deviceReading = 'device_failure'; };
+  const base = (r) => {
+    const xs = [];
+    for (const c of buildPlan(r).cells) {
+      for (let n = 1; n <= c.samples; n++) {
+        xs.push({ item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: n, valid: true, errors: [], deviceReading: null,
+          readings: { opened: true, listClosed: true, focusSameRowBtn: true, otherRowsChanged: false, maxOpenCount: 1, rowclickDelta: 0, changedOtherRows: [], openCountAfterEsc: 0, focusOnSameRowBtn: true, overlapAny: false },
+          circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false }, kbd: { reached: true, tabs: 3 } });
+      }
+    }
+    return xs;
+  };
+  const ordered = (r, xs) => {
+    const rank = (sc) => r.plan.screenOrder.indexOf(sc);
+    xs.sort((a, b) => (a.delay - b.delay) || (rank(a.screen) - rank(b.screen)));
+    xs.forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
+    return xs;
+  };
+  const run = (r, xs, extra) => J.judge(r, ordered(r, xs), extra || {});
+  const v0 = run(R5, base(R5));
+  check('고침5 바탕: 손대지 않은 합성 원자료 = 빨강 아님 · round 판독 가능(아래 대조군의 기준)', v0.red === false && v0.round.state === F5.roundReadable && v0.round.red === false, v0.redReasons);
+
+  // ① Σ 칸 = totals
+  {
+    const xs = base(R5);
+    xs.splice(xs.findIndex((s) => s.item === 'I-2'), 1);
+    const add = JSON.parse(JSON.stringify(xs.find((s) => s.item === 'I-4' && s.screen === 'after' && s.case === 'mouse-open')));
+    add.sampleNo = 2; aur(add); xs.push(add);
+    const un = JSON.parse(JSON.stringify(xs[0])); un.cell = 'X|계획밖'; xs.push(un);
+    const v = run(R5, xs);
+    const t = v.totals;
+    const S = (f) => v.cells.reduce((n, c) => n + f(c), 0);
+    check('고침5 ①: Σ 칸 = totals(계획 · 받음 · 누락 · 제외 넷) · 옛 planned = 칸 수 그대로 · 받음 + 계획 밖 = 표본 · devicePlan 같음',
+      t.plannedSamples === S((c) => c.planned) && t.gotSamples === S((c) => c.got) && t.missingSamples === S((c) => c.missing)
+      && ['afterUnreachable', 'deviceFailure', 'maskConflict', 'maskedRead'].every((k) => t.excluded[k] === S((c) => c.excluded[k]))
+      && t.planned === t.cells && t.cells === v.cells.length && t.gotSamples + t.excluded.outOfPlan === t.samples && v.devicePlan.plannedSamples === t.plannedSamples
+      && v.totalsMeaning.planned === F5.totalsPlannedMeaning, t);
+    plant('고침5 ① 심은 값: 누락 1 · /after 미도달 제외 1 · 계획 밖 1 이 그대로 잡힘(대조군 = 0 · 0 · 0)',
+      t.missingSamples === 1 && t.excluded.afterUnreachable === 1 && t.excluded.outOfPlan === 1 && v0.totals.missingSamples === 0 && v0.totals.excluded.afterUnreachable === 0 && v0.totals.excluded.outOfPlan === 0, { t, t0: v0.totals });
+    const c = v.cells.find((x) => x.item === 'I-4' && x.screen === 'after' && x.case === 'mouse-open');
+    check('고침5 ⑦: /after 미도달이 있는데 실패 안 한 칸에도 사유 글자 · 비교 기준 없으면 exclNoRef', c.status === '표본 있음' && c.afterUnreachable.reason === F5.afterUrReason && c.exclusionReview.count === 1 && c.exclusionReview.ofGot === 2 && c.exclusionReview.sameShapeAsD1 === null && c.exclusionReview.reading === F5.exclNoRef, c);
+    check('고침5 ⑦: 미도달 0 인 /after 칸에도 사유 글자 · 판독 null', v0.cells.filter((x) => x.screen === 'after').every((x) => x.afterUnreachable.reason === F5.afterUrReason && x.exclusionReview.count === 0 && x.exclusionReview.reading === null));
+  }
+  // ⑦ 제외 표본 판독 — 같은 묶음 /before 미도달 경로와 같은 꼴인가
+  {
+    const mk = (pAfter) => {
+      const xs = base(R5);
+      for (const s of xs) if (s.item === 'I-6' && s.case === 'esc' && s.screen === 'before') ku(s, P_D1);
+      const add = JSON.parse(JSON.stringify(xs.find((s) => s.item === 'I-6' && s.case === 'esc' && s.screen === 'after')));
+      add.sampleNo = 2; aur(add, pAfter); xs.push(add);
+      const v = run(R5, xs);
+      return { v, c: v.cells.find((x) => x.item === 'I-6' && x.case === 'esc' && x.screen === 'after') };
+    };
+    const same = mk(P_D1);
+    const diff = mk(P_OTHER);
+    plant('고침5 ⑦: /after 제외 경로 = /before D1 경로 → 「D1 모양과 같음」 · hiddenDefectSuspect 1', same.c.exclusionReview.sameShapeAsD1 === true && same.c.exclusionReview.reading === F5.exclSame && same.v.hiddenDefectSuspect === 1, same.c.exclusionReview);
+    check('고침5 ⑦ 대조군: 경로 다름 → 「D1 모양과 다름」 · hiddenDefectSuspect 0', diff.c.exclusionReview.sameShapeAsD1 === false && diff.c.exclusionReview.reading === F5.exclDiff && diff.v.hiddenDefectSuspect === 0, diff.c.exclusionReview);
+  }
+  // ② · H1-3 · H1-4 칸 넷
+  {
+    const xs = base(R5);
+    for (const s of xs) if (s.item === 'I-6' && s.screen === 'before') ku(s);
+    const i6 = run(R5, xs).items['I-6'];
+    plant('고침5 ②: /before 미도달 → contrastState 대조 무효 · 사유 자극 실행 불가 · d1Reproduced > 0 · 둘 다 남음 · 옛 contrast 칸 유지',
+      i6.contrastState.state === F5.contrastInvalid && i6.contrastState.reason === F5.contrastNoStimulus && i6.d1Reproduced.count === 2 && i6.d1Reproduced.of === 2 && i6.contrast === T['I-6'].contrastInvalid && i6.fields5 === F5.legacyFields, i6);
+    const ys = base(R5);
+    for (const s of ys) if (s.item === 'I-6' && s.screen === 'before') s.readings.maxOpenCount = 2;
+    const w = run(R5, ys).items['I-6'];
+    check('고침5 ② 대조군: /before 재현 → 성립 · d1 0 · 옛 「재현됨」 = beforeFailRepro 칸으로 가름', w.contrastState.state === F5.contrastHolds && w.contrastState.reason === null && w.d1Reproduced.count === 0 && w.beforeFailRepro.count === 2 && w.contrast === '재현됨', w);
+    const u = v0.items;
+    check('고침5 ② 대조군: 도달 · 재현 0 → 대조 무효 · 사유 = 재현 못 함(자극 실행 불가 아님)', u['I-6'].contrastState.state === F5.contrastInvalid && u['I-6'].contrastState.reason === F5.contrastNoRepro, u['I-6'].contrastState);
+    check('고침5 H1-4: I-2 = 대조 기준 미정(정본 인용 없음 · 대조 무효와 다른 글자) · I-1 · I-4 · I-6 · I-7 · N-1 = 미정 아님',
+      u['I-2'].contrastState.state === F5.contrastUndefined && u['I-2'].contrastState.reason === F5.contrastNoShapeReason && ['I-1', 'I-4', 'I-6', 'I-7', 'N-1'].every((k) => u[k].contrastState.state !== F5.contrastUndefined), Object.keys(u).map((k) => [k, u[k].contrastState && u[k].contrastState.state]));
+    const zs = base(R5);
+    for (const s of zs) if (s.item === 'I-1' && s.screen === 'before') ku(s);
+    plant('고침5 H1-4: I-1 /before 미도달(D1 = 실패 꼴) → 성립 · 대조군(도달) → 대조 무효', run(R5, zs).items['I-1'].contrastState.state === F5.contrastHolds && u['I-1'].contrastState.state === F5.contrastInvalid);
+    const es = base(R5);
+    es.find((s) => s.item === 'I-4' && s.screen === 'before' && s.case === 'mouse-open').readings.openCountAfterEsc = 1;
+    plant('고침5 H1-4: I-4 /before Esc 뒤 열림 남음 → 성립 · 대조군(닫힘) → 대조 무효', run(R5, es).items['I-4'].contrastState.state === F5.contrastHolds && u['I-4'].contrastState.state === F5.contrastInvalid);
+    const f6 = run(R5, base(R5).filter((s) => !(s.item === 'I-6' && s.screen === 'before' && s.case === 'esc'))).items['I-6'];
+    plant('고침5 H1-3: 대조 칸 장치 실패 → contrastState.state null(대조 불가 사유) · deviceFailure 칸 · 사유 따로 · 미측정 아님',
+      f6.contrastState.state === null && f6.contrastState.reason === F5.contrastDeviceFail && f6.deviceFailure.flag === true && f6.deviceFailure.cells.length === 1 && String(f6.deviceFailure.reasons[0]).startsWith(T.cellShortReason) && f6.notMeasured.flag === false, f6);
+    check('고침5 H1-3 대조군: 장치 실패 0 → deviceFailure.flag 거짓 · 전 항목 칸 넷 있음', ['I-1', 'I-2', 'I-4', 'I-6', 'I-7', 'N-1'].every((k) => u[k].deviceFailure.flag === false && u[k].d1Reproduced && u[k].contrastState && u[k].notMeasured));
+  }
+  // ③ 시도 있는데 「미측정」 0
+  {
+    const ks = ['I-1', 'I-2', 'I-4', 'I-6', 'I-7', 'N-1'];
+    check('고침5 ③: 시도 있음 → 미측정 0(전 항목)', ks.every((k) => v0.items[k].notMeasured.flag === false && v0.items[k].notMeasured.reason === null));
+    const w = run(R5, base(R5).filter((s) => s.item !== 'I-7')).items['I-7'];
+    plant('고침5 ③ 대조군: I-7 시도 · 원자료 0 → 미측정 표지 + 장치 실패', w.notMeasured.flag === true && w.notMeasured.reason === F5.notMeasuredReason && w.deviceFailure.flag === true, w.notMeasured);
+  }
+  // ④ 가림 충돌 · 결-6 가린 값 · 대조군 두 벌
+  {
+    const tok = 'abcdefghij'.repeat(3);
+    const xs = base(R5); xs.find((s) => s.item === 'I-2').readings.focusAfter = { role: tok };
+    const v = run(R5, xs);
+    plant('고침5 ④: 판정 칸 가림 충돌 1 → round 판정 불가/미통과 · red', v.round.state === F5.roundUnreadable && v.round.red === true && v.red === true && v.round.reasons.some((r) => r.startsWith(F5.roundMaskConflict)), v.round);
+    const m = base(R5); m.find((s) => s.item === 'I-2').readings.focusAfter = { role: '<가림:3>' };
+    const vm = run(R5, m);
+    plant('고침5 결-6: 판정 칸에 <가림:n> → 그 표본 장치 실패 · round 판정 불가/미통과 · red', vm.round.state === F5.roundUnreadable && vm.red === true && vm.totals.excluded.maskedRead === 1 && vm.totals.maskedReadSamples === 1 && vm.round.reasons.some((r) => r.startsWith(F5.roundMaskedRead)), vm.round);
+    const n = base(R5); n.find((s) => s.item === 'I-2').readings.note = '<가림:3>';
+    const vn = run(R5, n);
+    check('고침5 결-6 대조군 1: 판정 칸 밖 <가림:n> → 판독 가능 · 빨강 아님', vn.round.state === F5.roundReadable && vn.red === false && vn.totals.excluded.maskedRead === 0, vn.redReasons);
+    const ok2 = base(R5); ok2.find((s) => s.item === 'I-2').readings.focusAfter = { role: 'button' };
+    const vo = run(R5, ok2);
+    check('고침5 결-6 대조군 2: 같은 판정 칸 · 가림 없는 값 → 판독 가능 · 빨강 아님', vo.round.state === F5.roundReadable && vo.red === false, vo.redReasons);
+  }
+  // ⑤ K-2 보류 · H1-2 머리 (명령줄 그대로)
+  {
+    const rp5 = path.join(tmp, 'rules-fix5.json');
+    fs.writeFileSync(rp5, JSON.stringify(R5), 'utf8');
+    const sp5 = path.join(tmp, 's5.jsonl');
+    fs.writeFileSync(sp5, ordered(R5, base(R5)).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+    let n5 = 0;
+    const cli = (args) => {
+      const op = path.join(tmp, `v5-${n5++}.json`);
+      const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp5, '--samples', sp5, '--out', op].concat(args), { encoding: 'utf8' });
+      return { code: r.status, v: fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null };
+    };
+    const wf = path.join(tmp, 'withheld-a.json'); fs.writeFileSync(wf, JSON.stringify({ stages: { measure: [{ rel: 'samples.jsonl', kinds: ['long'] }] }, files: [{ rel: 'samples.jsonl', kinds: ['long'] }] }));
+    const wo = path.join(tmp, 'withheld-b.json'); fs.writeFileSync(wo, JSON.stringify({ files: [{ rel: 'shots/x.png', kinds: ['long'] }] }));
+    const wbad = path.join(tmp, 'withheld-c.json'); fs.writeFileSync(wbad, '{');
+    const a = cli(['--withheld', wf]);
+    const b = cli(['--withheld', wo]);
+    const c0 = cli([]);
+    const d = cli(['--withheld', wbad]);
+    const e = cli(['--withheld', path.join(tmp, 'none.json')]);
+    plant('고침5 ⑤ K-2: 판독 원자료(samples.jsonl) 보류 1 → round 판정 불가/미통과 · red · 종료 1', a.code === 1 && a.v && a.v.round.state === F5.roundUnreadable && a.v.red === true && a.v.totals.withheldFiles === 1, a.v && a.v.round);
+    check('고침5 ⑤ K-2 대조군: 판독 밖 파일 보류 → 판독 가능 · withheldFiles 1 / 인자 없음 · 파일 없음 → 보류 0 · 종료 0',
+      b.code === 0 && b.v.round.state === F5.roundReadable && b.v.totals.withheldFiles === 1 && c0.code === 0 && c0.v.totals.withheldFiles === 0 && e.code === 0 && e.v.totals.withheldFiles === 0, { b: b.code, c: c0.code, e: e.code });
+    plant('고침5 ⑤ K-2: 보류 목록 깨짐 → 종료 2 · 판독 파일 0(보류 0 으로 착각 0)', d.code === 2 && d.v === null, d.code);
+    const jsha = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(HERE, 'judge.js'))).digest('hex');
+    check('고침5 H1-2: verdict 머리 judgeSha256 = 판독기 파일 SHA-256 · rulesSha256 · devicePlan · browserCondition · delayUnit 사본',
+      c0.v.judgeSha256 === jsha && /^[0-9a-f]{64}$/.test(c0.v.rulesSha256) && c0.v.devicePlan.cells === c0.v.totals.cells && JSON.stringify(c0.v.browserCondition) === JSON.stringify(R5.hqaPending.browserCondition.value) && c0.v.delayUnit === 'round-trip-ms', { j: c0.v.judgeSha256 });
+  }
+  // ⑥ 노출 표지 — 판정값 무변
+  {
+    const Rn = JSON.parse(JSON.stringify(R5)); Rn.exposure = [];
+    const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
+    const va = run(R5, base(R5));
+    const vb = run(Rn, base(Rn));
+    check('고침5 ⑥: 노출 표 넣은 · 뺀 두 verdict 가 표지 밖 같음(판정 · 표본 · 셈 무변)', JSON.stringify(strip(va)) === JSON.stringify(strip(vb)));
+    plant('고침5 ⑥ 대조군: 넣은 쪽에만 표지(I-4 kbd-open /before 0 · N-1 a2 · 항목 독립성 글자) · 뺀 쪽 0',
+      va.cells.some((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'before' && c.exposed) && va.cells.filter((c) => c.item === 'N-1' && c.screen === 'a2').every((c) => c.exposed && c.exposed.source.length >= 1)
+      && va.items['I-4'].independenceNote === F5.independenceNote && vb.cells.every((c) => !c.exposed) && !vb.items['I-4'].independenceNote);
+  }
+  // H1-8 I-4 닫힌 뒤 초점
+  {
+    const xs = base(R5); xs.find((s) => s.item === 'I-4' && s.case === 'mouse-open' && s.screen === 'after').readings.focusOnSameRowBtn = false;
+    const f = run(R5, xs).items['I-4'].focusAfterClose;
+    const f0 = v0.items['I-4'].focusAfterClose;
+    plant('고침5 H1-8: I-4 focusAfterClose 4줄(2경우 × 2화면) · 심은 off 1 이 그 줄에만 · 대조군 off 0', f.length === 4 && f.find((r) => r.case === 'mouse-open' && r.screen === 'after').offSameRowBtn === 1 && f.reduce((n, r) => n + r.offSameRowBtn, 0) === 1 && f0.every((r) => r.offSameRowBtn === 0 && r.onSameRowBtn === r.valid), f);
+  }
+  // ⑧ 관문 칸별 허용 꼴
+  {
+    const D9 = '1234567890';
+    const conf5 = (r) => {
+      const c = JSON.parse(JSON.stringify(r));
+      for (const k of ['S1toS4', 'rawFormat', 'T3']) c.hqaPending[k].status = 'HQA 회신 반영 · 댓글 ' + D9;
+      for (const k of ['samplesPerCell', 'delayUnit', 'browserCondition']) c.hqaPending[k].status = '개발팀 사전 고정 · 장전 전 공개 · 댓글 ' + D9;
+      c.hqaPending.T3.value = 'x';
+      c.plan.notMeasured.find((x) => x.item === 'I-8').approval = '미측정 허용 결재 · 댓글 ' + D9;
+      return c;
+    };
+    const why = (r, k) => G.check(r).problems.filter((p) => p.key === k).map((p) => p.why);
+    check('고침5 ⑧ 관문 대조군: ③④⑤ 사전 고정 꼴 + ①② · T3 반영 꼴 = 통과', G.check(conf5(rules)).ok, G.check(conf5(rules)).problems);
+    const a1 = conf5(rules); a1.hqaPending.S1toS4.status = '개발팀 사전 고정 · 장전 전 공개 · 댓글 ' + D9;
+    plant('고침5 ⑧ 관문: ① 에 사전 고정 꼴 = 거부', why(a1, 'S1toS4').includes('status'));
+    const a2 = conf5(rules); a2.hqaPending.rawFormat.status = '개발팀 사전 고정 · 장전 전 공개 · 댓글 ' + D9;
+    plant('고침5 ⑧ 관문: ② 에 사전 고정 꼴 = 거부', why(a2, 'rawFormat').includes('status'));
+    const a6 = conf5(rules); a6.hqaPending.T3.status = '개발팀 사전 고정 · 장전 전 공개 · 댓글 ' + D9;
+    plant('고침5 ⑧ 관문: ⑥ T3 에 사전 고정 꼴 = 거부(T3 그대로)', why(a6, 'T3').includes('status'));
+    const dl = conf5(rules); delete dl.hqaPending.samplesPerCell;
+    plant('고침5 ⑧ 관문: ③ 키 삭제 = 거부', why(dl, 'samplesPerCell').includes('missing'));
+    const ph = conf5(rules); ph.hqaPending.delayUnit.status = '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>';
+    plant('고침5 ⑧ 관문: 댓글 자리표 남음 = 거부', why(ph, 'delayUnit').includes('status'));
+    const rs = conf5(rules); rs.hqaPending.rawFormat.value = 'samples.jsonl · verdict-device.json';
+    plant('고침5 ⑧ 관문: ② 값 = 옛 꼴 글자 하나 = 거부(필수 키 넷)', why(rs, 'rawFormat').includes('shape'));
+    const rk = conf5(rules); delete rk.hqaPending.rawFormat.value.hashes;
+    plant('고침5 ⑧ 관문: ② 값 필수 키(해시 목록) 빠짐 = 거부', why(rk, 'rawFormat').includes('shape'));
+    const now = G.check(rules).problems.map((p) => p.key);
+    check('고침5 ⑧: 지금 rules = 거부 · 걸린 칸 = ③④⑤(자리표) + T3 · ①② 는 통과', !G.check(rules).ok && JSON.stringify(Array.from(new Set(now))) === '["samplesPerCell","delayUnit","browserCondition","T3"]', G.check(rules).problems);
+  }
+  // ⑨ hqaPendingOpen = 관문 꼴로 셈
+  {
+    const filled = JSON.parse(JSON.stringify(R5));
+    for (const k of ['samplesPerCell', 'delayUnit', 'browserCondition']) filled.hqaPending[k].status = filled.hqaPending[k].status.replace('<사전공개댓글>', '1234567890');
+    const vf = run(filled, base(filled));
+    check('고침5 ⑨: 자리표 채운 뒤 hqaPendingOpen = T3 하나 · 지금 rules = 자리표 3 + T3 · 자리표 칸 따로 표시',
+      JSON.stringify(vf.hqaPendingOpen) === '["T3"]' && vf.hqaPendingOpenCount === 1 && vf.hqaPendingPlaceholder.length === 0
+      && JSON.stringify(v0.hqaPendingOpen) === '["samplesPerCell","delayUnit","browserCondition","T3"]' && v0.hqaPendingPlaceholder.length === 3, { vf: vf.hqaPendingOpen, v0: v0.hqaPendingOpen });
+    const nt = JSON.parse(JSON.stringify(filled)); nt.hqaPending.T3.status = '검토 중';
+    const old = Object.keys(nt.hqaPending).filter((k) => !k.startsWith('_') && String(nt.hqaPending[k].status).includes('HQA 회신 대기'));
+    plant('고침5 ⑨ 대조군: T3 를 새 글자(검토 중)로 → 옛 셈 0(거짓 표시) · 새 셈 = T3 열림', old.length === 0 && JSON.stringify(run(nt, base(nt)).hqaPendingOpen) === '["T3"]');
+  }
+  // H1-10 · H1-11
+  {
+    const iSrc = fs.readFileSync(path.join(HERE, 'items', 'i-items.js'), 'utf8');
+    check('고침5 H1-10: I-4 키보드 열기 불가 글자 = kbdOpenNoEscV5(「입력 안 함(키보드로 열기 불가)」) · 옛 글자 칸 유지', /escNote: ctx\.rules\.deviceReading\.kbdOpenNoEscV5 \}/.test(iSrc) && !/deviceReading\.kbdOpenNoEsc \}/.test(iSrc) && rules.deviceReading.kbdOpenNoEscV5 === '입력 안 함(키보드로 열기 불가)' && rules.deviceReading.kbdOpenNoEsc === '키보드로 열기 불가 — Esc 측정 0');
+    const riSrc5 = fs.readFileSync(path.join(HERE, 'run-items.js'), 'utf8');
+    const m = riSrc5.match(/function proxyDelayArg\(rules, delay\) \{[\s\S]*?\r?\n\}/);
+    const fnP = m ? new Function('return ' + m[0])() : null;
+    const rr = (u) => ({ hqaPending: { delayUnit: { value: u } } });
+    check('고침5 H1-11: 왕복 150 → 방향당 75 · 500 → 250 · rules 단위 = round-trip-ms · 프록시 인자 = perDirectionMs · 표본 proxy 칸에 둘 다',
+      !!fnP && fnP(rr('round-trip-ms'), 150).perDirectionMs === 75 && fnP(rr('round-trip-ms'), 500).perDirectionMs === 250 && fnP(rr('round-trip-ms'), 0).perDirectionMs === 0
+      && rules.hqaPending.delayUnit.value === 'round-trip-ms' && /String\(proxyDelayArg\(rules, delay\)\.perDirectionMs\)/.test(riSrc5) && /started: proxy\.ok \}, proxyDelayArg\(rules, delay\)\)/.test(riSrc5));
+    plant('고침5 H1-11 대조군: 옛 단위(per-direction-ms) → 인자 = N 그대로 · 목록 밖 단위 = throw', !!fnP && fnP(rr('per-direction-ms'), 150).perDirectionMs === 150 && (() => { try { fnP(rr('ms'), 1); return false; } catch (e) { return true; } })());
+  }
+  // ⑩ K-1 — --out 숫자 = 표준 출력 숫자(안쪽 실행은 이 시험을 건너뜀)
+  if (!process.env.HQA_SELFTEST_INNER) {
+    const op = path.join(tmp, 'k1.json');
+    const r = spawnSync(process.execPath, [path.join(HERE, 'selftest-judge.js'), '--out', op], { encoding: 'utf8', env: Object.assign({}, process.env, { HQA_SELFTEST_INNER: '1' }) });
+    let last = null;
+    try { last = JSON.parse((r.stdout || '').trim().split(/\r?\n/).pop()); } catch (e) { last = null; }
+    const k = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
+    check('고침5 ⑩ K-1: --out 숫자 = 표준 출력 숫자(total · failed) · passed = total − failed · plantedRed ≤ plantedTotal · plantedTotal ≥ 1',
+      !!k && !!last && k.total === last.total && k.failed === last.fail && k.passed === k.total - k.failed && k.plantedTotal >= 1 && k.plantedRed <= k.plantedTotal, { k, last });
+  }
+}
+
+// ── 고침5 결-10 甲 — F10 「목록 밑」 누름(I-7 below-list) · 이 커밋만 빼면 되돌아간다 ──
+{
+  const J = require('./judge.js');
+  const R10 = JSON.parse(JSON.stringify(rules));
+  R10.plan.items = ['I-7'];
+  R10.plan.iDelays = [0];
+  R10.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+  const p10 = buildPlan(R10);
+  const mk = (bad) => {
+    const xs = p10.cells.map((c, i) => ({ item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: 1, valid: true, errors: [], deviceReading: null, order: i + 1, contextId: i + 1,
+      readings: { rowclickDelta: 0, changedOtherRows: [] }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }));
+    const rank = (sc) => R10.plan.screenOrder.indexOf(sc);
+    xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
+    if (bad) xs.find((s) => s.case === 'below-list' && s.screen === 'after').readings.changedOtherRows = [{ row: '2' }];
+    return J.judge(R10, xs, {});
+  };
+  const ok = mk(false);
+  const bad = mk(true);
+  check('결-10 F10: I-7 계획에 below-list 칸(화면 2 × 지연) · 기대 글자 F10 무변', p10.cells.filter((c) => c.case === 'below-list').length === 2 && T['I-7'].expectedF10 === '연 줄뿐 · 다른 줄 0' && JSON.stringify(rules.plan.itemSpecs['I-7'].cases) === '["row-cell","below-list"]');
+  plant('결-10 F10: /after 목록 밑 누름에서 다른 줄 변화 → I-7 afterMismatchExpected 1 · 대조군(변화 0) → 0', bad.items['I-7'].afterMismatchExpected === 1 && ok.items['I-7'].afterMismatchExpected === 0 && ok.red === false, { bad: bad.items['I-7'].afterMismatchExpected, ok: ok.items['I-7'].afterMismatchExpected });
+  const src = fs.readFileSync(path.join(HERE, 'items', 'i-items.js'), 'utf8');
+  const g0 = /async function i7Below/.test(src) && /if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error/.test(src) && /const below = y > lb\.y \+ lb\.h && x >= lb\.x && x <= lb\.x \+ lb\.w;/.test(src)
+    && src.indexOf('if (!below || inside', src.indexOf('async function i7Below')) < src.indexOf('await L.mouseClick(ctx, x, y);', src.indexOf('async function i7Below'));
+  check('결-10 F10 원문: i7Below 가 누르기 전에 「목록 상자 밖 · 아래」 를 단언(아니면 throw · 누름 0) · row-cell 길은 i7 그대로', g0 && /if \(ctx\.cell\.case === 'below-list'\) return i7Below\(ctx\);/.test(src));
+  const cut = src.replace(/  if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error\([^\n]*\n/, '');
+  plant('결-10 F10 원문 대조군: 단언 줄을 뺀 원문 → 검사 빨강', cut !== src && !(/if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error/.test(cut)));
+}
+
 // ── 결과─────────────────────────────────────────────────────────────
 function finish() {
   const fail = results.filter((r) => !r.ok);
   for (const r of results) process.stdout.write(`${r.ok ? 'OK  ' : 'FAIL'} ${r.name}${r.ok ? '' : ' :: ' + JSON.stringify(r.info)}\n`);
   process.stdout.write(JSON.stringify({ selftest: 'judge+static', total: results.length, fail: fail.length }) + '\n');
+  // 고침5 K-1: --out <경로> → {passed, failed, total, plantedRed, plantedTotal} 한 JSON(인자 없으면 표준 출력만 · 옛 꼴 그대로)
+  const oi = process.argv.indexOf('--out');
+  if (oi >= 0 && process.argv[oi + 1]) {
+    const pl = results.filter((r) => r.planted);
+    fs.writeFileSync(process.argv[oi + 1], JSON.stringify({ passed: results.length - fail.length, failed: fail.length, total: results.length, plantedRed: pl.filter((r) => r.ok).length, plantedTotal: pl.length }) + '\n', 'utf8');
+  }
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exitCode = fail.length ? 1 : 0;
 }

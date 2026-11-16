@@ -7,7 +7,9 @@
 // · 고침4 G1: 화면 = rules.plan.screenTable 의 이름(before · after · a2) · 가르기는 이름 같음 비교만(주소 앞머리 판단 0)
 // · 고침4 G3: rules.n1Contrast 화면을 N-1 대조로 읽는다(D-1 ⓒ) · 그것이 before 가 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀
 // · 고침4 G6 순서 · G7 판정 칸 가림 충돌 → 빨강
-// 쓰는 법: node judge.js [--rules <rules.json>] [--samples <samples.jsonl>] [--out <verdict-device.json>]
+// · 고침5 H1(작업지시서 §7): 분모 칸(H1-1) · 머리 해시 · 계획 · 브라우저 조건(H1-2) · 전 항목 칸 넷(H1-3 · H1-4) · 회차 글자(H1-5)
+//   · 노출 표지(H1-6) · /after 제외 판독 도움(H1-7) · I-4 닫힌 뒤 초점(H1-8) · 열린 칸 셈 = 관문 꼴(H1-9) — 옛 칸은 모두 그대로 둔다(#1)
+// 쓰는 법: node judge.js [--rules <rules.json>] [--samples <samples.jsonl>] [--out <verdict-device.json>] [--withheld <withheld.json>]
 //   기본: rules = 이 폴더 rules.json · samples/out = $HQA_OUT_DIR/samples.jsonl · $HQA_OUT_DIR/verdict-device.json
 // 종료 코드: 0 = 빨강 아님 · 1 = 빨강(판독 파일은 씀) · 2 = 인자 · 규칙 파일 오류(판독 파일 못 씀)
 const fs = require('fs');
@@ -231,6 +233,46 @@ function maskConflicts(rules, s, mc) {
   return out;
 }
 
+// ── 고침5 H1 — 판독 칸 넷 · 회차 글자 · 노출 표지 · 제외 판독 도움 함수 ──
+// 판독 글자 묶음(rules.readingText.fix5) — 없으면 규칙 파일 오류(throw → 종료 2)
+function fix5Text(rules) {
+  const t = rules.readingText && rules.readingText.fix5;
+  if (!t || typeof t !== 'object') throw new Error('readingText.fix5 없음');
+  return t;
+}
+// 결-6 甲: 판정 칸(judgeSchema samples.jsonl) 값에 가린 자리표가 있는가 — 돌려줌 [{ path }] (값 0)
+const MASKED_RE = /<가림:[0-9]+>/;
+function maskedReads(rules, s, mc) {
+  const c = mc || maskConflictCtx(rules);
+  const out = [];
+  if (!s || typeof s !== 'object' || !c.pats.length) return out;
+  for (const [p, v] of c.M.schemaValues(s, c.pats)) {
+    const str = typeof v === 'string' ? v : (v && typeof v === 'object' ? JSON.stringify(v) : null);
+    if (str !== null && MASKED_RE.test(str)) out.push({ path: c.M.pathStr(p) });
+  }
+  return out;
+}
+// H1-6: 칸이 rules.exposure 항목에 걸리는가(항목에 없는 칸 = 아무 값) — 걸린 출처 목록
+function exposureOf(rules, cell) {
+  const xs = Array.isArray(rules.exposure) ? rules.exposure : [];
+  const hit = (e, k, v) => !Object.prototype.hasOwnProperty.call(e, k) || e[k] === v;
+  return xs.filter((e) => e && typeof e === 'object' && hit(e, 'item', cell.item) && hit(e, 'screen', cell.screen) && hit(e, 'delay', cell.delay) && hit(e, 'case', cell.case))
+    .map((e) => e.source);
+}
+// H1-7: Tab 경로 꼴(줄 · 줄 안 · 뒤 · BODY · 상태 단추 순서) — 두 경로가 같은 꼴인지 비교용
+function pathShape(p) {
+  return JSON.stringify(pathOnly(p).map((x) => [x.row, x.inRef, x.afterRef, x.body, x.isStatusActivator]));
+}
+// H1-4: 항목별 /before 실패 꼴(rules.readingText.beforeFailShape 에 defined=true 인 것만 · 꼴 함수는 여기 고정)
+const BEFORE_FAIL = {
+  'I-1': (s, ku) => ku,
+  'I-3': (s, ku, R) => !ku && R.overlapAny === true,
+  'I-4': (s, ku, R) => !ku && Number(R.openCountAfterEsc) >= 1,
+  'I-6': (s, ku, R) => !ku && R.maxOpenCount >= 2,
+  'I-7': (s, ku, R) => R.rowclickDelta > 0 || (Array.isArray(R.changedOtherRows) && R.changedOtherRows.length > 0),
+  'N-1': (s, ku) => !ku && !!(s.circuit && s.circuit.dead)
+};
+
 // 고침4 G5: Tab 경로 한 칸을 스키마 칸만으로(태그 · role · 줄 번호 · 참거짓 · tabIndex · 순번)
 const PATH_KEYS = ['i', 'row', 'tag', 'role', 'tabIndex', 'inRef', 'isStatusActivator', 'afterRef', 'body'];
 function pathOnly(p) {
@@ -284,6 +326,12 @@ function effective(rules, samples) {
   const mc = maskConflictCtx(rules);
   for (const s of samples) {
     if (!s) continue;
+    // 고침5 결-6 甲(가림 → 누출 → 판독): 판정 칸 값에 가린 자리표(<가림:n>)가 있으면 그 표본 = device_failure · 회차 「판정 불가/미통과」(H1-5)
+    const masked = maskedReads(rules, s, mc);
+    if (masked.length) {
+      eff.set(s, { valid: false, reading: 'device_failure', reason: fix5Text(rules).roundMaskedRead, mismatch: false, maskedReads: masked });
+      continue;
+    }
     const conf = maskConflicts(rules, s, mc);
     if (conf.length) {
       eff.set(s, { valid: false, reading: 'device_failure', reason: rules.deviceReading.maskConflict, mismatch: false, maskConflicts: conf });
@@ -328,6 +376,13 @@ function judge(rules, samples, extra) {
   const validOf = (key) => byCell[key].filter(isValid);
   const redReasons = [];
   const contrast = n1ContrastOf(rules);
+  // 고침5 H1: 판독 글자 묶음 · 같은 묶음(항목 · 경우 · 지연 · 창)의 /before 미도달 Tab 경로 꼴(H1-7 비교 기준)
+  const F5 = fix5Text(rules);
+  const beforeUrShapes = {};
+  for (const s of samples) {
+    if (!s || s.screen !== 'before' || !s.kbd || s.kbd.reached !== false) continue;
+    (beforeUrShapes[groupKey(s)] = beforeUrShapes[groupKey(s)] || new Set()).add(pathShape(s.kbd.path));
+  }
 
   const cells = plan.cells.map((c) => {
     const all = byCell[c.key];
@@ -340,7 +395,29 @@ function judge(rules, samples, extra) {
     if (c.screen === 'after') {
       const ur = all.filter(isAfterUr);
       out.afterUnreachable = { count: ur.length, samples: ur.map((s) => s.sampleNo), tabPath: ur.map((s) => pathOnly(s.kbd && s.kbd.path)) };
+      // 고침5 H1-7: 사유 글자는 칸이 실패하지 않아도 항상 · 제외 표본이 결함을 숨기지 않는지 판독 도움 칸(판정 = HQA)
+      out.afterUnreachable.reason = F5.afterUrReason;
+      const ref = beforeUrShapes[groupKey(c)] || null;
+      const same = ur.length === 0 || !ref ? null : ur.some((s) => ref.has(pathShape(s.kbd && s.kbd.path)));
+      out.exclusionReview = {
+        count: ur.length, ofGot: all.length, sameShapeAsD1: same,
+        reading: ur.length === 0 ? null : (same === null ? F5.exclNoRef : (same ? F5.exclSame : F5.exclDiff))
+      };
     }
+    // 고침5 H1-1: 칸별 누락(계획 − 받음 · 0 아래 없음) · 제외 사유별 수(서로 겹침 0: 가린 값 · 가림 충돌 → /after 미도달 → 그 밖 장치 실패)
+    out.missing = Math.max(0, c.samples - all.length);
+    out.excluded = { afterUnreachable: 0, deviceFailure: 0, maskConflict: 0, maskedRead: 0 };
+    for (const s of all) {
+      const e = eff.get(s);
+      if (!e || e.valid) continue;
+      if (e.maskedReads) out.excluded.maskedRead += 1;
+      else if (e.maskConflicts) out.excluded.maskConflict += 1;
+      else if (isAfterUr(s)) out.excluded.afterUnreachable += 1;
+      else out.excluded.deviceFailure += 1;
+    }
+    // 고침5 H1-6: 노출 칸 표지(판정 · 표본 · 기대값 변경 0 — 표지만)
+    const ex = exposureOf(rules, c);
+    if (ex.length) out.exposed = { source: ex };
     // 고침4 G3(D-2): n1Contrast 가 before 아니면 /before N-1 칸 = 기록만 · 판정에 안 씀
     const ro = recordOnlyTag(rules, c);
     if (ro) out.n1Role = ro.role;
@@ -492,6 +569,66 @@ function judge(rules, samples, extra) {
     };
   }
 
+  // ── 고침5 H1-3 · H1-4: 전 항목(I-1~I-7 · N-1)에 칸 넷을 따로 — 옛 칸(contrast · reading · labels)은 그대로 둔다(#1) ──
+  //   d1Reproduced = 관찰 사실(/before 키보드 도달 0 표본 수 / 받은 수) · contrastState = 성립 · 대조 무효 · 대조 기준 미정(장치 실패 칸이면 state null)
+  //   notMeasured = 시도 · 원자료 0 일 때만 · deviceFailure = 장치 실패 칸 · 사유
+  //   (새 대조 칸 이름 = contrastState — I-6 · I-7 의 옛 contrast 글자 칸과 겹치지 않게)
+  const cellOut = {};
+  for (const c of cells) cellOut[c.key] = c;
+  const shapes = rules.readingText.beforeFailShape || {};
+  const fourCells = (item) => {
+    const cs = cellsOf(item);
+    const got = cs.reduce((n, c) => n + byCell[c.key].length, 0);
+    const bCs = cs.filter((c) => c.screen === 'before');
+    const bGot = bCs.reduce((n, c) => n + byCell[c.key].length, 0);
+    const ccs = item === 'N-1' ? cellsOf('N-1', (c) => c.screen === contrast && rules.plan.n1ContrastDelays.includes(c.delay)) : bCs;
+    const sh = shapes[item];
+    const fn = sh && sh.defined === true ? BEFORE_FAIL[item] : null;
+    const rows = ccs.map((c) => {
+      const v = validOf(c.key);
+      return { key: c.key, valid: v.length, kbdUnreachable: v.filter(isKu).length, reproduced: fn ? v.filter((s) => fn(s, isKu(s), R(s))).length : null };
+    });
+    let state = null;
+    let reason = null;
+    if (ccs.some(cellFailed)) reason = F5.contrastDeviceFail;
+    else if (!fn) { state = F5.contrastUndefined; reason = F5.contrastNoShapeReason; }
+    else {
+      const rep = rows.reduce((n, r) => n + r.reproduced, 0);
+      const val = rows.reduce((n, r) => n + r.valid, 0);
+      const ku = rows.reduce((n, r) => n + r.kbdUnreachable, 0);
+      if (rep > 0) state = F5.contrastHolds;
+      else { state = F5.contrastInvalid; reason = ku > 0 && ku === val ? F5.contrastNoStimulus : F5.contrastNoRepro; }
+    }
+    const failCs = cs.filter(cellFailed);
+    return {
+      d1Reproduced: { count: flat(bCs).filter(isKu).length, of: bGot, text: F5.d1Text },
+      contrastState: { state, reason, cells: rows },
+      notMeasured: { flag: got === 0, reason: got === 0 ? F5.notMeasuredReason : null },
+      deviceFailure: { flag: failCs.length > 0, reasons: Array.from(new Set(failCs.map((c) => cellOut[c.key].reason))), cells: failCs.map((c) => c.key) },
+      fields5: F5.legacyFields
+    };
+  };
+  for (const item of ['I-1', 'I-2', 'I-3', 'I-4', 'I-5', 'I-6', 'I-7', 'N-1']) if (items[item]) Object.assign(items[item], fourCells(item));
+  // I-6 · I-7 의 옛 「재현됨」(항목 실패 재현) → 다른 단어 칸으로 가름(D1 재현과 섞지 않음 · 옛 칸 유지)
+  for (const item of ['I-6', 'I-7']) if (items[item]) items[item].beforeFailRepro = { count: items[item].beforeReproduced, text: F5.beforeFailRepro };
+  // H1-8: I-4 닫힌 뒤 초점 — 독립 판독 칸(두 경우 · 화면 각각 · 새 자극 0 · 있는 읽기에서)
+  if (items['I-4']) {
+    items['I-4'].focusAfterClose = rules.plan.itemSpecs['I-4'].cases.reduce((a, kase) => a.concat(['before', 'after'].map((sc) => {
+      const v = flat(cellsOf('I-4', (c) => c.case === kase && c.screen === sc));
+      return {
+        case: kase, screen: sc, valid: v.length,
+        onSameRowBtn: v.filter((s) => R(s).focusOnSameRowBtn === true).length,
+        offSameRowBtn: v.filter((s) => R(s).focusOnSameRowBtn === false).length,
+        noRead: v.filter((s) => typeof R(s).focusOnSameRowBtn !== 'boolean').length
+      };
+    })), []);
+  }
+  // H1-6: 노출 칸이 있는 항목에 독립성 제약 글자(판정 = HQA)
+  for (const item of Object.keys(items)) {
+    const ex = cells.filter((c) => c.item === item && c.exposed).map((c) => c.key);
+    if (ex.length) { items[item].independenceNote = F5.independenceNote; items[item].exposedCells = ex; }
+  }
+
   const mism = samples.filter((s) => eff.get(s) && eff.get(s).mismatch).length;
   if (mism) redReasons.push(`${D.validMismatch} ${mism}건`);
   // 고침4 G7: 판정 칸 가림 충돌(값 0 · 칸 경로 · 꼴 · 길이만)
@@ -511,16 +648,49 @@ function judge(rules, samples, extra) {
   if (extra && extra.samplesMissing) redReasons.push('samples.jsonl 없음');
   if (samples.length === 0) redReasons.push('표본 0');
 
-  const pending = Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_') && String(rules.hqaPending[k].status).includes('HQA 회신 대기'));
+  // 고침5 결-6 甲: 판정 칸에 가린 값을 읽은 표본(값 0 · 칸 경로만)
+  const maskedSamples = samples.filter((s) => eff.get(s) && eff.get(s).maskedReads);
+  if (maskedSamples.length) redReasons.push(`${F5.roundMaskedRead} ${maskedSamples.length}건`);
+  // 고침5 H1-5 · K-2: 판독에 쓰는 원자료가 보류됐는가(withheld.json 의 파일 이름 끝 = roundInputFiles)
+  const withheld = (extra && Array.isArray(extra.withheld)) ? extra.withheld : [];
+  const wName = (w) => String(typeof w === 'string' ? w : (w && (w.rel || w.file || w.name)) || '');
+  const inputWithheld = withheld.filter((w) => F5.roundInputFiles.some((f) => wName(w) === f || wName(w).endsWith('/' + f)));
+  const roundReasons = [];
+  if (conflictSamples) roundReasons.push(`${F5.roundMaskConflict} ${conflictSamples}건`);
+  if (maskedSamples.length) roundReasons.push(`${F5.roundMaskedRead} ${maskedSamples.length}건`);
+  if (inputWithheld.length) roundReasons.push(`${F5.roundWithheld} ${inputWithheld.length}개`);
+  if (extra && extra.samplesMissing) roundReasons.push(F5.roundSamplesMissing);
+  if (inputWithheld.length) redReasons.push(`${F5.roundWithheld} ${inputWithheld.length}개`);
+  // 고침5 H1-9: 열린 칸 = 관문의 허용 닫힘 꼴이 아닌 칸(옛 꼴 = 「HQA 회신 대기」 글자 포함 여부 — 새 글자면 0 으로 거짓 표시라 대체)
+  const G = require('./hqa-gate.js');
+  const pending = G.openKeys(rules);
+  // 고침5 H1-1: 분모 칸(Σ 칸 = totals · 옛 totals.planned = 칸 수 그대로 둠)
+  const sum = (f) => cells.reduce((n, c) => n + f(c), 0);
+  const excluded = {
+    afterUnreachable: sum((c) => c.excluded.afterUnreachable), deviceFailure: sum((c) => c.excluded.deviceFailure),
+    outOfPlan: unplanned.length, maskConflict: sum((c) => c.excluded.maskConflict), maskedRead: sum((c) => c.excluded.maskedRead)
+  };
   return {
     marker: T.marker,
     rulesVersion: rules.rulesVersion,
     rulesSha256: (extra && extra.rulesSha256) || null,
+    // 고침5 H1-2 · H1-5: 판독기 해시 · 장치 계획 · 브라우저 조건 · 지연 단위 사본 · 회차 글자
+    judgeSha256: (extra && extra.judgeSha256) || null,
+    devicePlan: { cells: plan.cells.length, plannedSamples: sum((c) => c.planned) },
+    browserCondition: rules.hqaPending.browserCondition.value,
+    delayUnit: rules.hqaPending.delayUnit.value,
+    round: { state: roundReasons.length ? F5.roundUnreadable : F5.roundReadable, reasons: roundReasons, red: roundReasons.length > 0 },
+    totalsMeaning: { planned: F5.totalsPlannedMeaning },
+    hiddenDefectSuspect: cells.filter((c) => c.exclusionReview && c.exclusionReview.sameShapeAsD1 === true).length,
     totals: {
       planned: plan.cells.length, samples: samples.length, valid: samples.filter(isValid).length, unplanned: unplanned.length, badLines: bad.length,
       kbdUnreachable: samples.filter(isKu).length, afterUnreachExcl: samples.filter(isAfterUr).length, validMismatch: mism,
-      maskConflictSamples: conflictSamples, orderProblems: orderProblems.length
+      maskConflictSamples: conflictSamples, orderProblems: orderProblems.length,
+      cells: plan.cells.length, plannedSamples: sum((c) => c.planned), gotSamples: sum((c) => c.got), missingSamples: sum((c) => c.missing),
+      excluded, withheldFiles: withheld.length, maskedReadSamples: maskedSamples.length
     },
+    hqaPendingOpenCount: pending.length,
+    hqaPendingPlaceholder: G.placeholderKeys(rules),
     deviceReadingText: { device_failure: D.device_failure, keyboard_unreachable: D.keyboard_unreachable },
     n1Contrast: contrast,
     red: redReasons.length > 0,
@@ -562,10 +732,30 @@ function main(argv) {
   if (fs.existsSync(samplesPath)) text = fs.readFileSync(samplesPath, 'utf8');
   else samplesMissing = true;
   const parsed = parseJsonl(text);
-  const verdict = judge(rules, parsed.samples, {
-    badLines: parsed.bad, samplesMissing,
-    rulesSha256: crypto.createHash('sha256').update(rulesBuf).digest('hex')
-  });
+  // 고침5 K-2: --withheld <withheld.json> — 인자 없거나 파일 없으면 보류 0 · 있는데 못 읽으면 종료 2(보류를 0 으로 착각하지 않게)
+  const withheldPath = argOf(argv, '--withheld');
+  let withheld = [];
+  if (withheldPath && fs.existsSync(withheldPath)) {
+    try {
+      const w = JSON.parse(fs.readFileSync(withheldPath, 'utf8'));
+      withheld = Array.isArray(w) ? w : (w && Array.isArray(w.files) ? w.files : []);
+    } catch (e) {
+      process.stderr.write(`judge: 보류 목록 읽기 실패 — ${String(e.message).slice(0, 200)}\n`);
+      return 2;
+    }
+  }
+  let verdict;
+  try {
+    verdict = judge(rules, parsed.samples, {
+      badLines: parsed.bad, samplesMissing, withheld,
+      rulesSha256: crypto.createHash('sha256').update(rulesBuf).digest('hex'),
+      // 고침5 H1-2: 판독기 자신(나무 파일 바이트)의 SHA-256
+      judgeSha256: crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex')
+    });
+  } catch (e) {
+    process.stderr.write(`judge: 규칙 오류 — ${String(e.message).slice(0, 200)}\n`);
+    return 2;
+  }
   fs.writeFileSync(outPath, JSON.stringify(verdict, null, 2) + '\n', 'utf8');
   process.stdout.write(JSON.stringify({ red: verdict.red, redReasons: verdict.redReasons.slice(0, 10), totals: verdict.totals }) + '\n');
   return verdict.red ? 1 : 0;
@@ -576,7 +766,9 @@ module.exports = {
   // 고침4
   screenSpec, screensFor, n1ContrastOf, screenRankOf, screenUrl, screenCheck, checkScreens, maskConflicts, orderCheck, pathOnly,
   // 고침4 보탬(PM F-6 ② ③ ④)
-  delaysFor, recordOnlyTag, a2VariantCheck
+  delaysFor, recordOnlyTag, a2VariantCheck,
+  // 고침5 H1
+  fix5Text, maskedReads, exposureOf, pathShape, BEFORE_FAIL
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

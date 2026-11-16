@@ -134,7 +134,7 @@ async function i4(ctx) {
     await L.locatorClick(ctx, chipOf(ctx, row));
   } else {
     reach = await L.tabTo(ctx, row);
-    if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEsc });
+    if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEscV5 }); // 고침5 H1-10: 옛 글자 kbdOpenNoEsc(「Esc 측정 0」) 대체 — 미측정과 혼동 막기(판독 글자만)
     await L.press(ctx, 'Enter');
   }
   const st1 = await L.waitOpen(ctx, true);
@@ -218,6 +218,7 @@ async function i6(ctx) {
 
 // I-7 열린 채 다른 줄 위 바깥 누름 → 행 클릭 0 · 바뀐 줄(F10 = 연 줄뿐 · 다른 줄 0)
 async function i7(ctx) {
+  if (ctx.cell.case === 'below-list') return i7Below(ctx); // 고침5 결-10 甲: F10 전용 경우(아래 함수) · row-cell 길은 그대로
   const d = ctx.rules.device;
   const rowA = String(d.i7.row);
   const rowB = String(d.i7.otherRow);
@@ -237,6 +238,42 @@ async function i7(ctx) {
     readings: {
       rowA, rowB, openCountBeforePress: st1.openCount,
       point: { x, y }, pointInsideOpenList: inside,
+      rowclickDelta: s.state.rowclickCount - st0.rowclickCount,
+      rowclicksAfter: s.state.rowclicks,
+      detailOpenBefore: st0.detailOpen, detailOpenAfter: s.state.detailOpen, detailRowAfter: s.state.detailRow,
+      changedRows: changed,
+      changedOtherRows: changed.filter((c) => c.row !== rowA),
+      newPicks: L.newPicks(st0, s.state),
+      openCountAfter: s.state.openCount,
+      final: L.slim(s.state)
+    },
+    circuit: L.circuitSince(ctx, ctx.inputAt)
+  }];
+}
+
+// 고침5 결-10 甲(F10 · 정본 #15 · I-7 겸함): 열린 목록 「밑」 누름 — 누른 점이 목록 상자 밖 · 아래인지 누르기 전에 단언(아니면 표본 오류 · 누름 0)
+//   점 = 첫 열린 목록 가로 가운데 · 목록 아래 끝 + device.i7.belowGapPx · 기대 글자 = readingText.I-7.expectedF10(무변)
+async function i7Below(ctx) {
+  const d = ctx.rules.device;
+  const rowA = String(d.i7.row);
+  const st0 = await L.readState(ctx);
+  await L.locatorClick(ctx, chipOf(ctx, rowA));
+  const st1 = await L.waitOpen(ctx, true);
+  const rects = await L.readRects(ctx);
+  const lb = rects.lists[0];
+  if (!lb) throw new Error('열린 목록 좌표 없음');
+  const x = Math.round(lb.x + lb.w / 2);
+  const y = lb.y + lb.h + d.i7.belowGapPx;
+  const inside = rects.lists.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+  const below = y > lb.y + lb.h && x >= lb.x && x <= lb.x + lb.w;
+  if (!below || inside || y >= rects.viewport.h) throw new Error(`목록 밑 점 단언 실패 below=${below} inside=${inside} y=${y} vh=${rects.viewport.h}`);
+  await L.mouseClick(ctx, x, y);
+  const s = await L.settle(ctx, L.settleMs(ctx.rules, ctx.cell.delay));
+  const changed = L.rowsDiff(st0, s.state);
+  return [{
+    readings: {
+      rowA, pressAt: 'below-list', openCountBeforePress: st1.openCount,
+      point: { x, y }, listBox: lb, pointBelowOpenList: below, pointInsideOpenList: inside,
       rowclickDelta: s.state.rowclickCount - st0.rowclickCount,
       rowclicksAfter: s.state.rowclicks,
       detailOpenBefore: st0.detailOpen, detailOpenAfter: s.state.detailOpen, detailRowAfter: s.state.detailRow,
