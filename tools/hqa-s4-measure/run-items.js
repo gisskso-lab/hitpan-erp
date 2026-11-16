@@ -21,7 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { buildPlan, kbdGate, groupKey, screenSpec, screenUrl, screenCheck, screenRankOf, recordOnlyTag } = require('./judge.js');
+const { buildPlan, kbdGate, groupKey, screenSpec, screenUrl, screenCheck, screenRankOf, recordOnlyTag, ATTEMPT_KIND } = require('./judge.js');
 const L = require('./items/_lib.js');
 const ITEMS = Object.assign({}, require('./items/i-items.js'), require('./items/n-items.js'));
 
@@ -246,6 +246,12 @@ async function main(argv) {
   let order = 0;
   // 고침4 G6: 원자료 각 표본에 order(전체 순번 · 쓰는 순서) — judge.js orderCheck 가 지연 단 · 화면 순서를 다시 잰다
   const write = (r) => { order += 1; r.order = order; fs.appendFileSync(samplesPath, JSON.stringify(r) + '\n', 'utf8'); };
+  // 고침5-B ⓐ(PM 결정 11/16): 시도 기록 줄 — 칸마다 표본보다 먼저 한 줄(order 없음 · 판독기가 표본에서 뗀다). 시도 있음 + 표본 0 = 장치 실패만 · 시도 0 = 미측정
+  const writeAttempt = (c, parent) => {
+    const a = { kind: ATTEMPT_KIND, item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, planned: c.samples, ts: new Date().toISOString(), rulesVersion: rules.rulesVersion };
+    if (parent) a.parentCell = parent.key;
+    fs.appendFileSync(samplesPath, JSON.stringify(a) + '\n', 'utf8');
+  };
   let ctxSeq = 0;
   const nextContextId = () => { ctxSeq += 1; return ctxSeq; };
   let count = 0;
@@ -264,6 +270,8 @@ async function main(argv) {
         screenPathOf: (sc) => screenSpec(rules, sc).path
       };
       for (const cell of own.filter((c) => c.delay === delay).sort((a, b) => screenRank(a) - screenRank(b))) {
+        writeAttempt(cell, null);
+        for (const dc of (plan.derived[cell.key] || [])) writeAttempt(dc, cell);
         for (let n = 1; n <= cell.samples; n++) {
           let recs;
           if (!proxy.ok) {

@@ -358,7 +358,15 @@ function parseJsonl(text) {
   return { samples, bad };
 }
 
+// 고침5-B ⓐ(PM 결정 11/16): 시도 기록 줄 — run-items.js 가 칸마다 표본보다 먼저 samples.jsonl 에 한 줄(kind = ATTEMPT_KIND) 쓴다.
+//   판독기는 이 줄을 표본에서 떼어 칸 · 항목 시도 수로만 쓴다(표본 수 · 순서 · 계획 밖 표본 셈에 안 들어감).
+const ATTEMPT_KIND = 'attempt';
+const isAttemptLine = (s) => !!(s && typeof s === 'object' && s.kind === ATTEMPT_KIND);
+
 function judge(rules, samples, extra) {
+  // 고침5-B ⓐ: 시도 기록 줄을 떼어 둔다(시도 줄 0 이면 옛 동작 그대로)
+  const attemptLines = (Array.isArray(samples) ? samples : []).filter(isAttemptLine);
+  samples = (Array.isArray(samples) ? samples : []).filter((s) => !isAttemptLine(s));
   const T = rules.readingText;
   const D = rules.deviceReading;
   const plan = buildPlan(rules);
@@ -374,6 +382,13 @@ function judge(rules, samples, extra) {
     else unplanned.push(s && s.cell ? s.cell : '(cell 없음)');
   }
   const validOf = (key) => byCell[key].filter(isValid);
+  // 고침5-B ⓐ: 칸별 시도 기록 수 · 계획 밖 시도 줄
+  const attemptsByCell = {};
+  const attemptUnplanned = [];
+  for (const a of attemptLines) {
+    if (Object.prototype.hasOwnProperty.call(byCell, a.cell)) attemptsByCell[a.cell] = (attemptsByCell[a.cell] || 0) + 1;
+    else attemptUnplanned.push(a.cell || '(cell 없음)');
+  }
   const redReasons = [];
   const contrast = n1ContrastOf(rules);
   // 고침5 H1: 판독 글자 묶음 · 같은 묶음(항목 · 경우 · 지연 · 창)의 /before 미도달 Tab 경로 꼴(H1-7 비교 기준)
@@ -388,6 +403,8 @@ function judge(rules, samples, extra) {
     const all = byCell[c.key];
     const valid = all.filter(isValid).length;
     const out = { key: c.key, item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, planned: c.samples, got: all.length, valid, invalid: all.length - valid };
+    // 고침5-B ⓐ: 시도 기록 수(원자료 시도 줄 · 표본과 따로)
+    out.attemptRecords = attemptsByCell[c.key] || 0;
     // 고침2 N1-d: 칸 판독 — device_failure(빨강) ↔ keyboard_unreachable(/before · a2 유효 표본 · 판정 = HQA)
     out.kbdUnreachable = all.filter(isKu).length;
     out.afterUnreachExcl = all.filter(isAfterUr).length;
@@ -572,6 +589,7 @@ function judge(rules, samples, extra) {
   // ── 고침5 H1-3 · H1-4: 전 항목(I-1~I-7 · N-1)에 칸 넷을 따로 — 옛 칸(contrast · reading · labels)은 그대로 둔다(#1) ──
   //   d1Reproduced = 관찰 사실(/before 키보드 도달 0 표본 수 / 받은 수) · contrastState = 성립 · 대조 무효 · 대조 기준 미정(장치 실패 칸이면 state null)
   //   notMeasured = 시도 · 원자료 0 일 때만 · deviceFailure = 장치 실패 칸 · 사유
+  //   고침5-B ⓐ: 「시도 0」 = 그 항목 칸 전부 시도 기록 0 · 표본 0. 시도 기록 ≥ 1 인데 표본 0 = 장치 실패만(미측정 표지 0 · HQA Q2)
   //   (새 대조 칸 이름 = contrastState — I-6 · I-7 의 옛 contrast 글자 칸과 겹치지 않게)
   const cellOut = {};
   for (const c of cells) cellOut[c.key] = c;
@@ -600,10 +618,13 @@ function judge(rules, samples, extra) {
       else { state = F5.contrastInvalid; reason = ku > 0 && ku === val ? F5.contrastNoStimulus : F5.contrastNoRepro; }
     }
     const failCs = cs.filter(cellFailed);
+    const att = cs.reduce((n, c) => n + (attemptsByCell[c.key] || 0), 0);
+    const nm = got === 0 && att === 0;
     return {
+      attempted: { records: att, cells: cs.filter((c) => (attemptsByCell[c.key] || 0) > 0).length, of: cs.length, text: F5.attemptedText },
       d1Reproduced: { count: flat(bCs).filter(isKu).length, of: bGot, text: F5.d1Text },
       contrastState: { state, reason, cells: rows },
-      notMeasured: { flag: got === 0, reason: got === 0 ? F5.notMeasuredReason : null },
+      notMeasured: { flag: nm, reason: nm ? F5.notMeasuredReason : null },
       deviceFailure: { flag: failCs.length > 0, reasons: Array.from(new Set(failCs.map((c) => cellOut[c.key].reason))), cells: failCs.map((c) => c.key) },
       fields5: F5.legacyFields
     };
@@ -643,6 +664,7 @@ function judge(rules, samples, extra) {
   const orderProblems = orderCheck(rules, samples);
   for (const p of orderProblems) redReasons.push(p);
   if (unplanned.length) redReasons.push(`계획 밖 표본 ${unplanned.length}건`);
+  if (attemptUnplanned.length) redReasons.push(`${F5.attemptOutOfPlan} ${attemptUnplanned.length}건`);
   const bad = (extra && extra.badLines) || [];
   if (bad.length) redReasons.push(`읽지 못한 줄 ${bad.length}건`);
   if (extra && extra.samplesMissing) redReasons.push('samples.jsonl 없음');
@@ -687,7 +709,9 @@ function judge(rules, samples, extra) {
       kbdUnreachable: samples.filter(isKu).length, afterUnreachExcl: samples.filter(isAfterUr).length, validMismatch: mism,
       maskConflictSamples: conflictSamples, orderProblems: orderProblems.length,
       cells: plan.cells.length, plannedSamples: sum((c) => c.planned), gotSamples: sum((c) => c.got), missingSamples: sum((c) => c.missing),
-      excluded, withheldFiles: withheld.length, maskedReadSamples: maskedSamples.length
+      excluded, withheldFiles: withheld.length, maskedReadSamples: maskedSamples.length,
+      // 고침5-B ⓐ: 시도 기록 줄(표본 수에 안 들어감)
+      attemptRecords: attemptLines.length, attemptOutOfPlan: attemptUnplanned.length
     },
     hqaPendingOpenCount: pending.length,
     hqaPendingPlaceholder: G.placeholderKeys(rules),
@@ -768,7 +792,7 @@ module.exports = {
   // 고침4 보탬(PM F-6 ② ③ ④)
   delaysFor, recordOnlyTag, a2VariantCheck,
   // 고침5 H1
-  fix5Text, maskedReads, exposureOf, pathShape, BEFORE_FAIL
+  fix5Text, maskedReads, exposureOf, pathShape, BEFORE_FAIL, ATTEMPT_KIND, isAttemptLine
 };
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));

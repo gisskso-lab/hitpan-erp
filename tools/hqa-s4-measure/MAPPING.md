@@ -153,7 +153,7 @@
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | 「blob 3개 = PR #850 머리 대조 뒤 시작」 | A §5 · §4 끝 단락 L70 · §3 L37 | M0 `m0-assert.json` `m0_5_blobs` | ⭕ (B #24 로 4개 · 대체) | 정본 기대 글자 없음 — 장치 단언(blob 같음) | 해당 없음(전제 행) | 해당 없음(항목 칸 아님) | 측정(장치 단언) | R1 |
 | 2 | 「새 코드 커밋이 오면 무효」 | A L70 · L37 | M0 `m0_4_feat_head` · `run.json` `fixed_heads_assert` | ⭕ | 정본 기대 글자 없음 — 장치 단언(기능 머리 `16e88c01`) · 무효 판단 = HQA · PM | 해당 없음(전제 행) | 해당 없음 | 측정(장치 단언) | R2 |
-| 3 | 「/before 가 실패를 재현 못 한 항목은 「대조 무효」」 · 「같은 조건에서」 | A L70 · L37 · §2 검증팀장 1 L21 | 지금 `items.I-6.contrast` · `items.I-7.contrast` · `items.N-1.labels` → 고침5 H1-3 전 항목(I-1~I-7 · N-1) `contrast{state, reason, cells[]}` | ❌ → H1-3 · H1-4 합류 뒤 ⭕ 인지 [4] 확인 | 「대조 무효」(A L37 · L70) · 「통과로 안 셈」(B §6 L164 · N-1) | 항목별 = 이 표 #4 ~ #11 · #15 · #18 · #27 칸 | 해당 없음(규칙 행) | 측정(H1 뒤) · 🟡 §8 R3 「I-1 ~ I-5 는 정본에 실패 정의 없음」 은 I-1 · I-3 · I-4 에 틀림(V2 F-2) → 이 행이 대체 | R3 |
+| 3 | 「/before 가 실패를 재현 못 한 항목은 「대조 무효」」 · 「같은 조건에서」 | A L70 · L37 · §2 검증팀장 1 L21 | 지금 `items.I-6.contrast` · `items.I-7.contrast` · `items.N-1.labels` → 고침5 H1-3 전 항목(I-1~I-7 · N-1) `contrast{state, reason, cells[]}`(옛 이름 · 작업지시서 글자) → **코드 칸(고침5-B)**: `items.<항목>.contrastState{state, reason, cells[]}` · `d1Reproduced` · `notMeasured` · `attempted` · `deviceFailure` · I-6 · I-7 `beforeFailRepro` — 대응 = §9-3 | ❌ → H1-3 · H1-4 합류 뒤 ⭕ 인지 [4] 확인 | 「대조 무효」(A L37 · L70) · 「통과로 안 셈」(B §6 L164 · N-1) | 항목별 = 이 표 #4 ~ #11 · #15 · #18 · #27 칸 | 해당 없음(규칙 행) | 측정(H1 뒤) · 🟡 §8 R3 「I-1 ~ I-5 는 정본에 실패 정의 없음」 은 I-1 · I-3 · I-4 에 틀림(V2 F-2) → 이 행이 대체 | R3 |
 | 4 | 「키보드 탭 도달」 | A §3 L38 | I-1 · tab-walk · before/after · 0/150/300 | ⭕(자극) · 대조 = H1-3 뒤 | 정본 기대 글자 없음 → 「판독값 기록 · 판정 = HQA」 | H1-4 = 「D1 키보드 미도달」(A §3-4 · 11/7 작업지시서 §7-2 M6) · 🟡 부록 I 쟁점 1 | 노1 · 노2 | 측정 | R4 |
 | 5 | 「Enter/Space(길게 누름 포함)」 | A L38 | I-2 · enter-short · space-short · enter-long · space-long | ⭕ | 정본 기대 글자 없음 | **대조 기준 미정** — A · B 에 Enter/Space 의 실패 꼴 글자 0(A L41 「스페이스 길게 누름 · 엔터 반복 0」 = 관문 ② 허용 동작 · 고친 꼴 설명) · 11/7 작업지시서 §7-2 M7 「열리지 않음」 = 정본 밖 · V0 를 `/before` 기대로 쓰지 않음(작업지시서 S12) | 노3 · 노7 | 측정 · 대조 = 기준 미정(안건 ③ 재료) | R5 |
 | 6 | 「덮임(창 높이 330/200 · 아래쪽 줄)」 | A L38 | I-3 · bottom-row · 창 1280×330 · 1280×200 | ⭕(자극) | 정본 기대 글자 없음(「A1 덮임 원문 추적(옆 자리 겹침 0)」 은 코드 원문 대조 줄 L40) | H1-4 = 「덮임」(A §2 검증팀장 1 L21 「/before 덮임이 실제로 나는 창 높이·줄 위치를 먼저 고정」) | 노출 0 | 측정 | R6 |
@@ -219,10 +219,28 @@
 
 - 5행 모두 대조 줄 1개 이상 · 항목 1개 이상 → 커밋 단위 빈 곳 0. **diff 더한 줄 단위 대조(「어디에도 안 걸리는 더한 줄 0」 · B X-2) = 미측정** — 안 걸리는 줄이 나오면 줄을 더하지 않고 3인에 돌린다(B X-2 글자).
 
+### 9-3. 판독 칸 이름 대응 — 옛 이름 · 설계 글자 → 코드 칸 (고침5-B ② · PM 결정 11/16 · [4] 7)
+
+> 공개 묶음 독자는 아래 「코드 칸」 을 읽는다. 왼쪽 옛 이름 · 설계 글자는 지우지 않고 「옛 이름」 으로 남긴다(헌법 #1). 판정 기대 글자 변경 0.
+
+| 옛 이름 · 설계 글자 | 코드 칸(`verdict-device.json` 등) | 만드는 곳 | 뜻 |
+|---|---|---|---|
+| `contrast{state, reason, cells[]}`(§9 #3 · 작업지시서 H1-3) | `items.<항목>.contrastState{state, reason, cells[]}` | `judge.js` fourCells | 성립 · 대조 무효 · 대조 기준 미정 — 대조 칸이 장치 실패면 state null · 사유 「대조 불가 — …」 |
+| `items.I-6.contrast` · `items.I-7.contrast` · `reading` · `labels` · `deviceFail` | 그대로(옛 칸 · 정본 아님 · `readingText.fix5.legacyFields`) | `judge.js` | 옛 꼴 유지 |
+| (D1 재현 관찰) | `items.<항목>.d1Reproduced{count, of, text}` | `judge.js` fourCells | `/before` 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 |
+| `notMeasured{flag, reason}` | `items.<항목>.notMeasured{flag, reason}` | `judge.js` fourCells | **고침5-B ⓐ**: 그 항목 칸 전부 시도 기록 0 · 표본 0 일 때만(HQA Q2) |
+| (시도 근거 · 고침5-B ⓐ 새 칸) | `items.<항목>.attempted{records, cells, of, text}` · 칸 `cells[].attemptRecords` · `totals.attemptRecords` · `totals.attemptOutOfPlan` · 원자료 `samples.jsonl` 의 `kind: "attempt"` 줄 | `run-items.js`(칸마다 표본보다 먼저 한 줄 · order 없음) → `judge.js`(표본에서 뗌) | 시도 있음 + 표본 0 = 장치 실패만(미측정 표지 0) · 시도 0 = 미측정 · 계획 밖 시도 줄 = 빨강 |
+| `deviceFailure{flag, reasons[], cells[]}` | `items.<항목>.deviceFailure{flag, reasons, cells}` | `judge.js` fourCells | 장치 실패 칸 · 사유 — 칸 `excluded.deviceFailure`(표본 수)와 같은 글자 · 다른 뜻 |
+| `beforeFailureReproduced`(작업지시서 H1-3) | `items.I-6.beforeFailRepro` · `items.I-7.beforeFailRepro{count, text}` | `judge.js` | 항목 실패 재현 수(옛 「재현됨」 · D1 재현과 다른 뜻) |
+| (H1-7 제외 판독) | `/after` 칸 `cells[].exclusionReview{count, ofGot, sameShapeAsD1, reading}` · 머리 `hiddenDefectSuspect` | `judge.js` | 제외 표본이 결함을 숨기는지 판독 도움 · 판정 = HQA |
+| `totals.planned`(옛 · 칸 수) | `totals.plannedSamples` · `gotSamples` · `missingSamples` · `excluded{afterUnreachable · deviceFailure · outOfPlan · maskConflict · maskedRead}` · `withheldFiles` · 칸 `missing` · `excluded` | `judge.js` | 분모 · 제외 수(H1-1) |
+| `run.json` `round_line.round` · `red`(옛: verdict 보류 · 없음이면 null) | **고침5-B ⓒ**: 장전 · verdict 없음 → `round{state: 「판정 불가/미통과」, reasons: [보류 또는 없음 글자], red: true}` · `red: true` · `round_from` / **ⓑ** `verdict_file` · `verdict_sha256` · `verdict_holds` | `boot.sh round` | 분모 · 제외 수 · 은폐 판독은 verdict 안(SHA 목록 안) — run.json 은 verdict 파일 이름 · SHA 만 가리킴 · 리허설은 null 그대로 |
+
 ## 10. 노출 칸 목록 (고침5 H3 §9-2 · 장전 전 공개 · 판정 · 표본 · 기대값 변경 0)
 
 > 원천(SHA 고정 · 읽기만): 리허설 2 = 런 43748603465 · 원자료 커밋 `0c76c101` `hqa-raw/43748603465-1/probe.json` · 리허설 3 = 런 43753935152 · `f2362cca` `hqa-raw/43753935152-1/probe.json` · 리허설 4 = 런 43812697138 · `b02aad72` `hqa-raw/43812697138-1/probe.json` · PM 질의 PR #850 댓글 6902200730 §2 · Q4ⓒ.
 > 칸 꼴 = 항목 · 화면 · 지연 · 경우(창은 전부 1280×720). 「노출 내용」 은 값이 아니라 「무엇이 알려졌나」 다. 이 표의 글자는 rules `exposure[]`(H1-6) 와 한 글자도 다르지 않아야 한다 — 맞춤은 합류 때 PM · [4].
+> 🟢 **고침5-B ①(PM 결정 11/16 · [4] 7)**: 맞춤 끝 — rules `exposure[]` 각 행의 `no` · `shapeText` · `rawSource` · `exposedText` · `q4cList` = 아래 표 칸 글자 그대로(`selftest-judge.js` 가 이 표를 읽어 대조). 칸 꼴 하나 = rules 한 행(노6 = 2행 · 노7 = 5행). 노6(I-5 · I-6 `/after`) · 노7 N-1 `/before` 행 더함 · 노4 = `/after` 로 바로잡음(옛 행 = `exposure_옛행_고침5B` · 판독기 안 읽음). 노8 · 노10 · 노11 = 항목 칸이 아님 → rules `exposureNonCell`(판독기 표지 0 · 글자 대조만). rules 의 옛 `source` · `content` = 옛 이름(짧은 출처 · 말 · verdict `exposed.source` 에 씀).
 
 | 번호 | 칸 꼴(항목 · 화면 · 지연 · 경우) | 출처(원자료 필드) | 노출 내용 | 댓글 Q4ⓒ 목록 |
 |---|---|---|---|---|

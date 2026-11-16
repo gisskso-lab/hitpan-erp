@@ -972,7 +972,113 @@ function checkProbe(src) {
     const ks = ['I-1', 'I-2', 'I-4', 'I-6', 'I-7', 'N-1'];
     check('고침5 ③: 시도 있음 → 미측정 0(전 항목)', ks.every((k) => v0.items[k].notMeasured.flag === false && v0.items[k].notMeasured.reason === null));
     const w = run(R5, base(R5).filter((s) => s.item !== 'I-7')).items['I-7'];
-    plant('고침5 ③ 대조군: I-7 시도 · 원자료 0 → 미측정 표지 + 장치 실패', w.notMeasured.flag === true && w.notMeasured.reason === F5.notMeasuredReason && w.deviceFailure.flag === true, w.notMeasured);
+    // 고침5-B ⓐ: 이 경우는 시도 기록 줄도 0(= 「시도 0」) — 이름만 고침 · 기대 무변. 시도 있음 + 표본 0 은 아래 고침5-B ⓐ 시험
+    plant('고침5 ③ 대조군(고침5-B 이름 고침): I-7 시도 기록 0 · 원자료 0 → 미측정 표지 + 장치 실패(칸)', w.notMeasured.flag === true && w.notMeasured.reason === F5.notMeasuredReason && w.deviceFailure.flag === true && w.attempted.records === 0, w.notMeasured);
+  }
+  // 고침5-B ⓐ(PM 결정 11/16): 시도 기록 줄 — 시도 있음 + 표본 0 = 장치 실패만 · 시도 0 = 미측정
+  {
+    const attemptsFor = (r, pred) => buildPlan(r).cells.filter(pred).map((c) => ({ kind: J.ATTEMPT_KIND, item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, planned: c.samples }));
+    const i7cells = buildPlan(R5).cells.filter((c) => c.item === 'I-7');
+    const va = J.judge(R5, ordered(R5, base(R5).filter((s) => s.item !== 'I-7')).concat(attemptsFor(R5, (c) => c.item === 'I-7')), {});
+    const a7 = va.items['I-7'];
+    plant('고침5-B ⓐ: I-7 시도 기록 있음 · 표본 0 → 미측정 표지 0 · 장치 실패만 · attempted = 칸 수 · 칸 attemptRecords 1 · got 0',
+      a7.notMeasured.flag === false && a7.notMeasured.reason === null && a7.deviceFailure.flag === true && a7.attempted.records === i7cells.length && a7.attempted.cells === i7cells.length
+      && va.cells.filter((c) => c.item === 'I-7').every((c) => c.attemptRecords === 1 && c.got === 0), { nm: a7.notMeasured, att: a7.attempted });
+    const vb = J.judge(R5, ordered(R5, base(R5)).concat(attemptsFor(R5, () => true)), {});
+    check('고침5-B ⓐ 대조군: 전 칸 시도 줄을 더해도 표본 수 · 빨강 사유 · 순서 문제 = 시도 줄 없을 때와 같음 · totals.attemptRecords = 칸 수',
+      vb.red === v0.red && vb.totals.samples === v0.totals.samples && vb.totals.orderProblems === v0.totals.orderProblems && JSON.stringify(vb.redReasons) === JSON.stringify(v0.redReasons)
+      && vb.totals.attemptRecords === buildPlan(R5).cells.length && vb.totals.attemptOutOfPlan === 0, vb.redReasons);
+    const vc = J.judge(R5, ordered(R5, base(R5)).concat([{ kind: J.ATTEMPT_KIND, item: 'I-9', cell: 'I-9|x' }]), {});
+    plant('고침5-B ⓐ: 계획 밖 시도 줄 → 빨강 사유 「계획 밖 시도 기록 1건」', vc.red === true && vc.redReasons.includes(F5.attemptOutOfPlan + ' 1건') && vc.totals.attemptOutOfPlan === 1, vc.redReasons);
+    const ri = fs.readFileSync(path.join(HERE, 'run-items.js'), 'utf8');
+    check('고침5-B ⓐ 원자료: run-items.js 가 칸마다 표본보다 먼저 시도 줄(kind = ATTEMPT_KIND · order 없음) · 파생 칸도',
+      J.ATTEMPT_KIND === 'attempt' && ri.includes('kind: ATTEMPT_KIND') && ri.includes('writeAttempt(dc, cell);') && ri.indexOf('writeAttempt(cell, null);') > 0
+      && ri.indexOf('writeAttempt(cell, null);') < ri.indexOf('for (let n = 1; n <= cell.samples; n++)'));
+  }
+  // 고침5-B ④ — 자체시험 구멍 2(리뷰서 대조군 M1 · M3 초록)를 막는 시험
+  {
+    // M3: /before 칸만 표본 0 인 항목에 「미측정」 0
+    const m6 = run(R5, base(R5).filter((s) => !(s.item === 'I-6' && s.screen === 'before'))).items['I-6'];
+    plant('고침5-B ④(M3 막음): I-6 /before 칸만 표본 0 · /after 있음 → 미측정 0 · 장치 실패 · 대조 불가(state null)',
+      m6.notMeasured.flag === false && m6.notMeasured.reason === null && m6.deviceFailure.flag === true && m6.contrastState.state === null && m6.contrastState.reason === F5.contrastDeviceFail, { nm: m6.notMeasured, cs: m6.contrastState.state });
+    // M1: Q2 사유 글자를 rules 밖 글자(작업지시서 H1-4 의 Q2 글자)에 고정
+    const Q2_INVALID = '대조 무효';
+    const Q2_NO_STIMULUS = '/before 키보드 도달 0 — 자극 실행 불가(D1 재현) · 비교 성립 안 함';
+    const xq = base(R5);
+    for (const s of xq) if (s.item === 'I-6' && s.screen === 'before') ku(s);
+    const q6 = run(R5, xq.map((s) => JSON.parse(JSON.stringify(s)))).items['I-6'];
+    check('고침5-B ④(M1 막음): Q2 글자 고정 — rules 글자 · 판독 결과 사유 = Q2 글자 그대로(rules 자기 대조 아님)',
+      F5.contrastInvalid === Q2_INVALID && F5.contrastNoStimulus === Q2_NO_STIMULUS && q6.contrastState.state === Q2_INVALID && q6.contrastState.reason === Q2_NO_STIMULUS, q6.contrastState);
+    const Rq = JSON.parse(JSON.stringify(R5));
+    Rq.readingText.fix5.contrastNoStimulus = Rq.readingText.fix5.contrastNoStimulus.replace('(D1 재현)', '');
+    const qm = run(Rq, xq.map((s) => JSON.parse(JSON.stringify(s)))).items['I-6'];
+    plant('고침5-B ④ 대조군: 사유 글자에서 「(D1 재현)」 뺀 rules 사본 → 판독 사유 ≠ Q2 글자(위 시험이 잡는 꼴)', qm.contrastState.state === Q2_INVALID && qm.contrastState.reason !== Q2_NO_STIMULUS, qm.contrastState);
+  }
+  // 고침5-B ① · ③ — MAPPING §10 ↔ rules exposure 글자 · 노4 화면 · I-4 출처
+  {
+    const mapTxt = fs.readFileSync(path.join(HERE, 'MAPPING.md'), 'utf8').split(String.fromCharCode(13)).join('');
+    const mrows = {};
+    for (const line of mapTxt.split(String.fromCharCode(10))) {
+      if (!line.startsWith('| 노')) continue;
+      const cols = line.slice(2, -2).split(' | ');
+      mrows[cols[0]] = cols.slice(1);
+    }
+    const all = (rules.exposure || []).concat(rules.exposureNonCell || []);
+    const same = (e) => { const m = mrows[e.no]; return !!m && m.length === 4 && e.shapeText === m[0] && e.rawSource === m[1] && e.exposedText === m[2] && e.q4cList === m[3]; };
+    const shapeOk = (e) => typeof e.screen === 'string' && typeof e.shapeText === 'string' && e.shapeText.includes(e.item + ' · ' + e.screen + (e.delay === undefined ? '' : ' · ' + e.delay));
+    const bad = all.filter((e) => !same(e)).map((e) => e.no || '(no 없음)').concat((rules.exposure || []).filter((e) => !shapeOk(e)).map((e) => 'shape:' + e.no));
+    const covered = new Set(all.map((e) => e.no));
+    check('고침5-B ①: MAPPING §10 노1~노11 ↔ rules exposure ∪ exposureNonCell 글자 일치(칸 꼴 · 출처 · 노출 내용 · Q4ⓒ) · 11행 전부 짝 · 항목 칸 행 = 화면 칸 있음 · 칸 꼴 글자에 항목 · 화면 · 지연',
+      Object.keys(mrows).length === 11 && bad.length === 0 && Object.keys(mrows).every((k) => covered.has(k)) && covered.size === 11, { rows: Object.keys(mrows).length, bad });
+    const RE = JSON.parse(JSON.stringify(rules));
+    RE.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+    const expo = (r) => {
+      const v = J.judge(r, ordered(r, base(r)), {});
+      const ce = (item, screen, delay, kase) => v.cells.find((c) => c.item === item && c.screen === screen && c.delay === delay && (!kase || c.case === kase));
+      const src = (c) => (c && c.exposed ? c.exposed.source : []);
+      return { i4b: src(ce('I-4', 'before', 0, 'kbd-open')), i4a: src(ce('I-4', 'after', 0, 'kbd-open')), i4m: src(ce('I-4', 'before', 0, 'mouse-open')), i5a: src(ce('I-5', 'after', 0, 'tab')), i6a: src(ce('I-6', 'after', 0, 'enter')), n1b: src(ce('N-1', 'before', 0)) };
+    };
+    const ne = expo(RE);
+    check('고침5-B ① 동작: 노4 화면 = after — I-4 /after kbd-open 노출 · /before kbd-open 은 노7 출처 하나만 · mouse-open 노출 0 · 노6 I-5 · I-6 /after 노출 · 노7 N-1 /before 0 노출',
+      ne.i4a.includes('리허설 2 런 43748603465') && ne.i4b.length === 1 && !ne.i4b.includes('리허설 2 런 43748603465') && ne.i4m.length === 0 && ne.i5a.length === 1 && ne.i6a.length === 1 && ne.n1b.length === 1, ne);
+    const REo = JSON.parse(JSON.stringify(RE));
+    REo.exposure = REo.exposure.filter((e) => e.no !== '노4' && e.no !== '노6' && !(e.no === '노7' && e.item === 'N-1')).map((e) => ({ item: e.item, screen: e.screen, case: e.case, delay: e.delay, source: e.source }));
+    REo.exposure.splice(3, 0, RE.exposure_옛행_고침5B[0].row);
+    const oe = expo(REo);
+    plant('고침5-B ① 대조군: 고침5-B 전 exposure(옛 노4 행 · 노6 · 노7 N-1 없음) → /before kbd-open 출처 2 · I-5 /after · N-1 /before 0 노출 0(위 시험이 잡는 꼴)',
+      oe.i4b.length === 2 && oe.i5a.length === 0 && oe.n1b.length === 0, oe);
+    const s4 = rules.readingText.beforeFailShape['I-4'];
+    check('고침5-B ③: rules I-4 /before 실패 꼴 출처 = 「A §3-4(L40) 코드 원문 대조 Esc 원인 문장」 · 옛 글자 = _source_옛값_고침5', s4.source.startsWith('A §3-4(L40) 코드 원문 대조 Esc 원인 문장') && s4._source_옛값_고침5 === 'A §3-2 · §4 코드 원문 대조 Esc 원인 문장', s4);
+  }
+  // 고침5-B ⓑ · ⓒ — run.json 회차 줄(boot.sh round 를 그대로 돌림 · 임시 폴더)
+  {
+    const crypto = require('crypto');
+    const bs = path.join(HERE, 'boot.sh');
+    const mkRaw = (name, files) => {
+      const d = path.join(tmp, name); const w = path.join(tmp, name + '-w');
+      fs.mkdirSync(d, { recursive: true }); fs.mkdirSync(w, { recursive: true });
+      for (const f of Object.keys(files)) fs.writeFileSync(path.join(d, f), JSON.stringify(files[f]), 'utf8');
+      return [d, w];
+    };
+    const roundOf = (dw) => {
+      const r = spawnSync('bash', [bs, 'round', dw[0], dw[1]], { encoding: 'utf8' });
+      let doc = null;
+      try { doc = JSON.parse(fs.readFileSync(path.join(dw[0], 'run.json'), 'utf8')); } catch (e) { doc = null; }
+      return { code: r.status, rl: doc && doc.round_line ? doc.round_line : null, err: String(r.stderr || '').slice(0, 300) };
+    };
+    const a = roundOf(mkRaw('b5-withheld', { 'run.json': { mode: 'armed' }, 'withheld.json': { files: [{ name: 'verdict-device.json' }], stages: { verdict: [{ name: 'verdict-device.json' }] } } }));
+    plant('고침5-B ⓒ: 장전 · verdict 보류 → run.json 회차 줄 round = 「판정 불가/미통과」(null 아님) · 사유 = 보류 글자 · red = true · verdict SHA null',
+      a.code === 0 && !!a.rl && !!a.rl.round && a.rl.round.state === F5.roundUnreadable && a.rl.round.reasons[0] === F5.roundVerdictWithheld && a.rl.red === true && a.rl.verdict_withheld === true && a.rl.verdict_sha256 === null, a);
+    const n = roundOf(mkRaw('b5-absent', { 'run.json': { mode: 'armed' } }));
+    plant('고침5-B ⓒ: 장전 · verdict 없음(보류 아님) → round = 「판정 불가/미통과」 · 사유 = 없음 글자', n.code === 0 && !!n.rl && !!n.rl.round && n.rl.round.state === F5.roundUnreadable && n.rl.round.reasons[0] === F5.roundVerdictAbsent && n.rl.red === true, n);
+    const vdoc = { round: { state: F5.roundReadable, reasons: [], red: false }, red: false };
+    const dwP = mkRaw('b5-present', { 'run.json': { mode: 'armed' }, 'verdict-device.json': vdoc });
+    const p = roundOf(dwP);
+    const vsha = crypto.createHash('sha256').update(fs.readFileSync(path.join(dwP[0], 'verdict-device.json'))).digest('hex');
+    check('고침5-B ⓒ 대조군 · ⓑ: verdict 있음 → round = verdict round 그대로 · verdict 파일 이름 · SHA-256 = 파일 바이트(분모 · 제외 · 은폐 판독은 verdict 안)',
+      p.code === 0 && !!p.rl && !!p.rl.round && p.rl.round.state === F5.roundReadable && p.rl.red === false && p.rl.verdict_file === 'verdict-device.json' && p.rl.verdict_sha256 === vsha, p);
+    const h = roundOf(mkRaw('b5-rehearsal', { 'run.json': { mode: 'rehearsal' } }));
+    check('고침5-B ⓒ 대조군: 리허설(판독기 안 돎) → round null 그대로(옛 동작)', h.code === 0 && !!h.rl && h.rl.round === null && h.rl.red === null, h);
   }
   // ④ 가림 충돌 · 결-6 가린 값 · 대조군 두 벌
   {

@@ -169,14 +169,19 @@
       "exclSame": "D1 모양과 같음 — 제품 결함 의심 · 판정 = HQA",
       "exclDiff": "D1 모양과 다름 — 장치 쪽 의심 · 판정 = HQA",
       "exclNoRef": "비교할 /before 미도달 경로 없음 · 판정 = HQA",
-      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA"
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "_표지_고침5B": "고침5-B ⓐ · ⓒ(PM 결정 11/16) — 아래 글자 더하기만(위 글자 무변). attempted = 시도 기록 줄(samples.jsonl kind attempt · run-items.js 가 칸마다 표본보다 먼저) 수 · 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 기록 ≥ 1 + 표본 0 = 장치 실패만. roundVerdict* = boot.sh round 가 verdict 없이 회차 줄을 쓸 때 사유(회차 글자 = roundUnreadable · null 금지).",
+      "attemptedText": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패",
+      "attemptOutOfPlan": "계획 밖 시도 기록",
+      "roundVerdictWithheld": "판독 결과 파일(verdict-device.json) 보류 — 누출 검사",
+      "roundVerdictAbsent": "판독 결과 파일(verdict-device.json) 없음 — 판독기 미실행 또는 출력 0"
     },
     "beforeFailShape": {
       "_표지": "고침5 H1-4 — 항목별 /before 실패 꼴(정본 인용 있는 것만 defined=true · 꼴 함수 = judge.js BEFORE_FAIL). defined=false 면 그 항목 contrastState = 「대조 기준 미정」. 기대 글자 아님(대조 성립 여부만).",
       "I-1": { "defined": true, "shape": "/before 키보드 미도달(D1 · keyboard_unreachable 표본)", "source": "A §3-2 항목 「키보드 탭 도달」 의 부정 · 참고 = 11/7 작업지시서 §7-2 M6(기대 채택 아님 · PM 대응 E-5)" },
       "I-2": { "defined": false, "shape": null, "source": null, "note": "확인 필요 — 정본 인용 대기(H3 · 설계) · 못 찾으면 「대조 기준 미정」 그대로" },
       "I-3": { "defined": true, "shape": "목록이 꼬리표를 덮음(readings.overlapAny)", "source": "A §2 검증팀장 1 · 11/7 작업지시서 M3" },
-      "I-4": { "defined": true, "shape": "Esc 뒤 목록 열림 남음(readings.openCountAfterEsc ≥ 1)", "source": "A §3-2 · §4 코드 원문 대조 Esc 원인 문장" },
+      "I-4": { "defined": true, "shape": "Esc 뒤 목록 열림 남음(readings.openCountAfterEsc ≥ 1)", "source": "A §3-4(L40) 코드 원문 대조 Esc 원인 문장 · 실패 꼴 「Esc 뒤 열림 남음」 = A §3-2 항목 「Esc(마우스로 연 뒤 · 키보드로 연 뒤 · 닫힌 뒤 초점)」 의 부정(추론)", "_source_옛값_고침5": "A §3-2 · §4 코드 원문 대조 Esc 원인 문장", "_source_표지_고침5B": "고침5-B ③(PM 결정 11/16 · [4] 4) — 옛 인용 「§4」 는 정본 A 에서 Esc 원인 문장이 없는 절(§4 = 원문 확인 L50 「Esc 만 받음」 뿐) → §3-4(L40) 로 바로잡음 · 옛 글자 = _source_옛값_고침5" },
       "I-5": { "defined": false, "shape": null, "source": null, "note": "확인 필요 — 정본 인용 대기(H3 · 설계) · 못 찾으면 「대조 기준 미정」 그대로" },
       "I-6": { "defined": true, "shape": "두 목록 동시 열림(readings.maxOpenCount ≥ 2)", "source": "A §3-2" },
       "I-7": { "defined": true, "shape": "행 클릭 · 다른 줄 변화(readings.rowclickDelta > 0 · changedOtherRows ≥ 1)", "source": "A §4 C5 · §3-3" },
@@ -223,17 +228,29 @@
     }
   },
   "exposure_표지": "고침5 H1-6(Q4ⓒ · S13 · [1-V] V2 §4) — 공개 끝난 칸 꼴. 항목에 없는 칸 이름 = 아무 값. 판독기는 칸마다 exposed{source} · 항목에 independenceNote 표지만 단다(판정 · 표본 · 기대값 변경 0). 리허설 2 원자료 probe.json 원문 대조는 미측정(V2 §4).",
+  "exposure_표지_고침5B": "고침5-B ①(PM 결정 11/16 · [4] 7) — MAPPING §10 노1~노11 과 글자 일치: 각 행에 no · shapeText(칸 꼴) · rawSource(출처 · 원자료 필드) · exposedText(노출 내용) · q4cList(댓글 Q4ⓒ 목록) = MAPPING 표 칸 글자 그대로(자체시험이 표를 읽어 대조). 노6(I-5 · I-6 after) · 노7(N-1 before) 행 더함 · 노4 화면 = after 로 바로잡음(옛 행 = exposure_옛행_고침5B · 판독기는 안 읽음). source · content = 옛 이름(짧은 출처 · 말 · 판독기 exposed.source 에 그대로 씀). 노8 · 노10 · 노11 = 항목 칸이 아님 → exposureNonCell(판독기 표지 0 · 글자 대조만).",
   "exposure": [
-    { "item": "I-1", "screen": "before", "delay": 0, "source": "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check R2)", "content": "Tab 도달" },
-    { "item": "I-1", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab 도달" },
-    { "item": "I-2", "screen": "after", "case": "enter-short", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Enter 뒤 열림" },
-    { "item": "I-4", "case": "kbd-open", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(화면 표기 없음 → 두 화면 모두 표지)" },
-    { "item": "N-1", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지" },
-    { "item": "I-2", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐" },
-    { "item": "I-4", "screen": "before", "case": "kbd-open", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐" },
-    { "item": "I-5", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐" },
-    { "item": "I-6", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐" },
-    { "item": "N-1", "screen": "a2", "source": "리허설 4 b02aad72(a2 R1)", "content": "A2 화면 1번 줄 구조(요소 1)" }
+    { "item": "I-1", "screen": "before", "delay": 0, "source": "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check R2)", "content": "Tab 도달", "no": "노1", "shapeText": "I-1 · before · 0 · tab-walk", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false · 오류 「Tab 40회 안에 1번 줄 상태 단추에 못 감」) · 리허설 3 · 4 `screens[0].r1` · `r2` · `k_check`(K-결함 「(나) /before 결함 D1 재현」)", "exposedText": "`/before` 지연 0 에서 Tab 으로 1번 줄 상태 단추에 닿지 못함(D1) · 1번 줄 안 초점 받을 보이는 요소 0", "q4cList": "있음(I-1 `/before`)" },
+    { "item": "I-1", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab 도달", "no": "노2", "shapeText": "I-1 · after · 0 · tab-walk", "rawSource": "리허설 2 `screens[1].tab_first_row`(reached true · tabs 7)", "exposedText": "`/after` 지연 0 에서 Tab 으로 1번 줄 상태 단추에 닿음 · 닿은 Tab 수", "q4cList": "있음(I-1 `/after`)" },
+    { "item": "I-2", "screen": "after", "case": "enter-short", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Enter 뒤 열림", "no": "노3", "shapeText": "I-2 · after · 0 · enter-short", "rawSource": "리허설 2 `screens[1].open_list_after_enter`(found true)", "exposedText": "`/after` 지연 0 에서 1번 줄 상태 단추 Enter 뒤 목록 열림", "q4cList": "있음(I-2 `/after` Enter 뒤 열림)" },
+    { "item": "I-4", "screen": "after", "case": "kbd-open", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(화면 = after · 고침5-B 바로잡음)", "no": "노4", "shapeText": "I-4 · after · 0 · kbd-open", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "키보드로 열기 단계(Tab → Enter → 열림)만 · Esc 뒤 결과 노출 0 · **화면 = after**(리허설 2 `/before` 의 같은 필드 = null · 시도 0)", "q4cList": "있음(I-4 키보드 첫 동작 · 댓글엔 화면 표기 없음)" },
+    { "item": "N-1", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지", "no": "노5", "shapeText": "N-1 · after · 0 · arrows", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "키보드로 열기 단계만 · 연타 뒤 결과 노출 0", "q4cList": "있음(N-1 첫 동작)" },
+    { "item": "I-2", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
+    { "item": "I-4", "screen": "before", "case": "kbd-open", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
+    { "item": "I-5", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
+    { "item": "I-6", "screen": "before", "delay": 0, "source": "리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" },
+    { "item": "N-1", "screen": "a2", "source": "리허설 4 b02aad72(a2 R1)", "content": "A2 화면 1번 줄 구조(요소 1)", "no": "노9", "shapeText": "N-1 · a2 · (지연 0 구조 · 칸 꼴 밖 — a2 칸은 300 · 500 뿐)", "rawSource": "리허설 4 `a2_check`(focusableVisible 1 · variant a2 · css after) · `screens[2].r1`", "exposedText": "A2 화면 1번 줄에 초점 받을 보이는 요소 1(단추) · 입력 0", "q4cList": "목록 밖" },
+    { "item": "I-5", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(열기 단계만)", "no": "노6", "shapeText": "I-5 · after · 0 · tab · shift-tab / I-6 · after · 0 · esc · enter", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "같은 꼴의 열기 단계(1번 줄 · Tab → Enter → 열림)만 · 그 뒤 키 결과 노출 0", "q4cList": "**목록 밖**(같은 필드가 이 칸의 첫 동작과 같음 · 새로 셈)" },
+    { "item": "I-6", "screen": "after", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(열기 단계만)", "no": "노6", "shapeText": "I-5 · after · 0 · tab · shift-tab / I-6 · after · 0 · esc · enter", "rawSource": "리허설 2 `screens[1].open_list_after_enter`", "exposedText": "같은 꼴의 열기 단계(1번 줄 · Tab → Enter → 열림)만 · 그 뒤 키 결과 노출 0", "q4cList": "**목록 밖**(같은 필드가 이 칸의 첫 동작과 같음 · 새로 셈)" },
+    { "item": "N-1", "screen": "before", "case": "arrows", "delay": 0, "source": "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check)", "content": "/before 키보드 미도달 — 키 입력 0 이라 결과 사실상 정해짐", "no": "노7", "shapeText": "I-2 · before · 0 · 4경우 / I-4 · before · 0 · kbd-open / I-5 · before · 0 · tab · shift-tab / I-6 · before · 0 · esc · enter / N-1 · before · 0 · arrows", "rawSource": "리허설 2 `screens[0].tab_first_row`(reached false) · 리허설 3 · 4 `k_check`", "exposedText": "`/before` 지연 0 키보드 미도달 → 장치는 키를 누르지 않음(자극 미실행) → 이 칸 결과가 사실상 정해짐", "q4cList": "**목록 밖**(V2 F-7 은 리허설 3 부터로 셈 · 원자료는 **리허설 2 에서 이미** 미도달을 공개)" }
+  ],
+  "exposure_옛행_고침5B": [
+    { "_표지": "고침5-B 전 노4 행 — 화면 칸 없음(두 화면 모두 표지). MAPPING §10 노4 「화면 = after」 와 반대 사실이라 exposure 에서 뺌(지우지 않음 · 판독기 안 읽음)", "row": { "item": "I-4", "case": "kbd-open", "delay": 0, "source": "리허설 2 런 43748603465", "content": "Tab → Enter 열림까지(화면 표기 없음 → 두 화면 모두 표지)" } }
+  ],
+  "exposureNonCell": [
+    { "no": "노8", "shapeText": "I-7 · before · 0 · (목록 닫힌 채 · 칸 꼴 밖)", "rawSource": "리허설 3 · 4 `screens[0].r3`(clicked true · before 0 → after 1)", "exposedText": "목록 닫힌 채 행 누름 1회에 행 클릭 셈이 1 오름(양성 대조) · 열린 목록 상태가 아니므로 I-7 칸(열린 채 B 줄 누름) 결과 아님", "q4cList": "목록 밖(참고)" },
+    { "no": "노10", "shapeText": "(항목 칸 아님) after 첫 화면", "rawSource": "리허설 2 · 3 · 4 `shots/probe.after.first.png` · `png_check`", "exposedText": "`/after` 첫 화면 그림(입력 0)", "q4cList": "목록 밖(항목 결과 아님)" },
+    { "no": "노11", "shapeText": "(항목 칸 아님) 선택자 존재", "rawSource": "리허설 2 · 3 · 4 `screens[].selectors`(화면마다 11)", "exposedText": "README 선택자 · 상태 칩 · 재연결 표시의 존재 · 찾은 ms", "q4cList": "목록 밖(항목 결과 아님)" }
   ],
   "deviceReading": {
     "_표지": "고침2 N1(설계 §12-1 (3)) — 장치 판독 글자(판정 글자 아님 · 정본 readingText 와 따로). keyboard_unreachable 은 /before 칸에만 · /after 미도달 표본은 유효 표본에서 빼고 device_failure(완화 금지 · C1-3). 「결함 재현」 이라는 판정 글자는 장치가 쓰지 않는다.",

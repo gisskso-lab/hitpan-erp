@@ -293,9 +293,12 @@ NODE
 # 고침5 H2-3(결-6 甲): M7 판독 · verdict 만 M8′ · M9′ 뒤 run.json 에 회차 줄 덧붙임(옛 칸 덮어쓰기 0 · 새 칸 round_line 하나)
 #   verdict 의 round(판독기 H1-5 칸) · red 를 그대로 옮긴다 · 장치는 판정 글자를 새로 만들지 않는다
 #   단 장전인데 verdict 가 없으면(판독기 미실행 · M9′ 보류) device_note 에 「verdict 없음」 사실만 · run.json 이 M9 에 보류됐으면 아무것도 안 씀
+#   고침5-B ⓒ(PM 결정 11/16 · HQA Q-B): 장전인데 verdict 가 없으면 round = 「판정 불가/미통과」(rules readingText.fix5.roundUnreadable 글자 그대로 · null 금지) · red = true
+#   고침5-B ⓑ: 분모 · 제외 수 · 은폐 판독은 verdict 안 — run.json 에는 verdict 파일 이름 · SHA-256 만 가리킨다
 round() {
-  RAWD="$RAW" node <<'NODE'
+  RAWD="$RAW" HERED="$HERE" node <<'NODE'
 const fs = require('fs');
+const crypto = require('crypto');
 const raw = process.env.RAWD, e = process.env;
 const runJson = raw + '/run.json';
 if (!fs.existsSync(runJson)) { console.log('[round] run.json 없음(보류 또는 M0 실패) — 회차 줄 0'); process.exit(0); }
@@ -315,13 +318,32 @@ if (!vPresent) {
   if (doc.mode === 'armed') note = 'armed: verdict-device.json absent (' + (vWithheld ? 'withheld by leak scan' : 'judge not run or no output') + ') - device reading 0 for this round';
   else note = 'rehearsal: judge not run (item measurement 0)';
 }
+// 고침5-B ⓒ: 장전 · verdict 없음(보류 또는 미실행) → 회차 글자 = rules 의 「판정 불가/미통과」 · 사유 글자도 rules(장치가 새 판정 글자를 만들지 않음)
+let F5 = null;
+try { F5 = JSON.parse(fs.readFileSync(e.HERED + '/rules.json', 'utf8')).readingText.fix5; } catch (err) { F5 = null; }
+let roundVal = vPresent && v.round !== undefined ? v.round : null;
+let redVal = vPresent && typeof v.red === 'boolean' ? v.red : null;
+let roundFrom = vPresent ? 'verdict-device.json' : null;
+if (!vPresent && doc.mode === 'armed') {
+  const unreadable = F5 && typeof F5.roundUnreadable === 'string' ? F5.roundUnreadable : 'unreadable (rules fix5 text missing)';
+  const why = F5 ? (vWithheld ? F5.roundVerdictWithheld : F5.roundVerdictAbsent) : null;
+  roundVal = { state: unreadable, reasons: why ? [why] : [], red: true };
+  redVal = true;
+  roundFrom = 'boot.sh round (verdict absent - fix5B c)';
+}
+const vFile = raw + '/verdict-device.json';
+const vSha = vPresent && fs.existsSync(vFile) ? crypto.createHash('sha256').update(fs.readFileSync(vFile)).digest('hex') : null;
 doc.round_line = {
   source: 'verdict-device.json',
   order: 'measure > run.json > M8 > M9 > M7(reads masked samples) > M8prime/M9prime(verdict only) > round_line > M10',
   verdict_present: vPresent,
   verdict_withheld: vWithheld,
-  round: vPresent && v.round !== undefined ? v.round : null,
-  red: vPresent && typeof v.red === 'boolean' ? v.red : null,
+  round: roundVal,
+  red: redVal,
+  round_from: roundFrom,
+  verdict_file: 'verdict-device.json',
+  verdict_sha256: vSha,
+  verdict_holds: 'denominators (totals.plannedSamples/gotSamples/missingSamples/excluded) · cells[].excluded · exclusionReview · hiddenDefectSuspect = in verdict-device.json only (fix5B b)',
   device_note: note,
   withheld_files: w && Array.isArray(w.files) ? w.files.length : 0,
   stage_outcomes_late: late,
