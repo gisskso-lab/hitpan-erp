@@ -7,17 +7,33 @@
 //   · 확정 꼴 = status 가 정확히 「HQA 회신 반영 · 댓글 <숫자 6자 이상>」(앞뒤 덧붙임 0)
 //               + value 가 null · 빈 글자 · 빈 객체가 아님 + 목록 밖 칸 0(밑줄로 시작하는 표지 칸 제외)
 //   · 출력은 칸 이름 · 사유만(값 0)
+//   · 고침5 H1-9(결-4 · 결-5): 위 「확정 꼴」 한 줄은 칸별 허용 꼴 표(STATUS_FORMS)로 대체 — ①② · ⑥ = 「HQA 회신 반영 · 댓글 <숫자>」 만 ·
+//     ③④⑤ = 그것 또는 「개발팀 사전 고정 · 장전 전 공개 · 댓글 <숫자>」 · 댓글 존재 확인은 꼴만([4] 가 실제 댓글과 대조) ·
+//     ② 값 꼴 = 필수 키(paths · hashes · denominators · meta) · 목록 고정 · T3 조건 무변
 const fs = require('fs');
 
 const REQUIRED = ['S1toS4', 'rawFormat', 'samplesPerCell', 'delayUnit', 'browserCondition', 'T3'];
 const CONFIRMED_RE = /^HQA 회신 반영 · 댓글 [0-9]{6,}$/;
+// 고침5 H1-9(결-5): 칸별 허용 닫힘 꼴 — 사전 고정 꼴은 ③④⑤ 에만(①② · T3 에 쓰면 거부)
+const PRESET_RE = /^개발팀 사전 고정 · 장전 전 공개 · 댓글 [0-9]{6,}$/;
+const STATUS_FORMS = {
+  S1toS4: [CONFIRMED_RE], rawFormat: [CONFIRMED_RE], T3: [CONFIRMED_RE],
+  samplesPerCell: [CONFIRMED_RE, PRESET_RE], delayUnit: [CONFIRMED_RE, PRESET_RE], browserCondition: [CONFIRMED_RE, PRESET_RE]
+};
+// 댓글 번호 자리표(사전 공개 댓글 전 · 숫자는 PM 이 댓글 뒤 채움) — 자리표 꼴은 닫힘이 아니다(열린 칸으로 셈 · 따로 표시)
+const PLACEHOLDER = '<사전공개댓글>';
+function statusOk(k, status) {
+  return typeof status === 'string' && (STATUS_FORMS[k] || []).some((re) => re.test(status));
+}
 // 고침2 C4 ①: 칸마다 값 꼴 — 글자 칸은 비지 않은 글자(숫자 · 참거짓 단독 거부) · 표본 수 = 1 이상 정수 · 지연 방식 = 정해진 목록 중 하나
 const DELAY_UNITS = ['per-direction-ms', 'round-trip-ms'];
 const str = (v) => typeof v === 'string' && v.trim() !== '';
 const SHAPE = {
   S1toS4: str,
   T3: str,
-  rawFormat: str,
+  // 고침5 H1-9: 옛 꼴(고침4까지 rawFormat = 비지 않은 글자) 대체 → 필수 키 넷이 모두 비지 않은 값
+  rawFormat: (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+    && ['paths', 'hashes', 'denominators', 'meta'].every((k) => Object.prototype.hasOwnProperty.call(v, k) && !emptyValue(v[k]) && typeof v[k] !== 'number' && typeof v[k] !== 'boolean'),
   samplesPerCell: (v) => !!v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'default')
     && Object.values(v).every((n) => Number.isInteger(n) && n >= 1),
   delayUnit: (v) => DELAY_UNITS.includes(v),
@@ -46,7 +62,8 @@ function check(rules, opts) {
   for (const k of REQUIRED) {
     const e = hp[k];
     if (!e || typeof e !== 'object' || Array.isArray(e)) { problems.push({ key: k, why: 'missing' }); continue; }
-    if (typeof e.status !== 'string' || !CONFIRMED_RE.test(e.status)) problems.push({ key: k, why: 'status' });
+    // 고침5 H1-9: 옛 꼴(CONFIRMED_RE 하나) → 칸별 허용 꼴(statusOk)
+    if (!statusOk(k, e.status)) problems.push({ key: k, why: 'status' });
     if (emptyValue(e.value)) problems.push({ key: k, why: 'value' });
     else if (!SHAPE[k](e.value)) problems.push({ key: k, why: 'shape' });
   }
@@ -65,7 +82,18 @@ function check(rules, opts) {
   return { ok: problems.length === 0, required: REQUIRED, problems };
 }
 
-module.exports = { REQUIRED, CONFIRMED_RE, DELAY_UNITS, APPROVAL_RE, check };
+// 고침5 H1-9: 열린 칸 = 필수 칸 중 허용 닫힘 꼴이 아닌 칸(judge.js hqaPendingOpen 이 쓴다 · 값 꼴 검사는 check 몫)
+function openKeys(rules) {
+  const hp = (rules && rules.hqaPending) || {};
+  return REQUIRED.filter((k) => !hp[k] || typeof hp[k] !== 'object' || !statusOk(k, hp[k].status));
+}
+// 상태 글자에 댓글 번호 자리표가 남은 칸(열린 칸 중 「숫자만 남음」 을 따로 보이게)
+function placeholderKeys(rules) {
+  const hp = (rules && rules.hqaPending) || {};
+  return REQUIRED.filter((k) => hp[k] && typeof hp[k].status === 'string' && hp[k].status.includes(PLACEHOLDER));
+}
+
+module.exports = { REQUIRED, CONFIRMED_RE, DELAY_UNITS, APPROVAL_RE, check, PRESET_RE, STATUS_FORMS, PLACEHOLDER, statusOk, openKeys, placeholderKeys };
 
 if (require.main === module) {
   let rc;

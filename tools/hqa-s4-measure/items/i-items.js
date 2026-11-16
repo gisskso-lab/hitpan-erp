@@ -134,7 +134,7 @@ async function i4(ctx) {
     await L.locatorClick(ctx, chipOf(ctx, row));
   } else {
     reach = await L.tabTo(ctx, row);
-    if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEsc });
+    if (!reach.reached) return notReached(ctx, row, reach, { openPath: ctx.cell.case, escNote: ctx.rules.deviceReading.kbdOpenNoEscV5 }); // 고침5 H1-10: 옛 글자 kbdOpenNoEsc(「Esc 측정 0」) 대체 — 미측정과 혼동 막기(판독 글자만)
     await L.press(ctx, 'Enter');
   }
   const st1 = await L.waitOpen(ctx, true);

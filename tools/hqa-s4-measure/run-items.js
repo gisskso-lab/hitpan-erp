@@ -40,10 +40,19 @@ function pendingKeys(rules) {
   return require('./hqa-gate.js').check(rules, { itemsHave: Object.keys(ITEMS) }).problems.map((p) => p.key + ':' + p.why);
 }
 
+// 고침5 H1-11(결-2 乙): 「지연 N」 = 왕복 N ms → delay-proxy.js 둘째 인자(방향당 ms) = N/2
+//   옛 꼴(per-direction-ms · 인자 = N 그대로)은 delayUnit 값이 per-direction-ms 일 때만 남는다(되돌림용 · 지금 rules = round-trip-ms)
+function proxyDelayArg(rules, delay) {
+  const unit = rules.hqaPending.delayUnit.value;
+  if (unit === 'round-trip-ms') return { unit, roundTripMs: delay, perDirectionMs: delay / 2 };
+  if (unit === 'per-direction-ms') return { unit, roundTripMs: delay * 2, perDirectionMs: delay };
+  throw new Error(`delayUnit 값 목록 밖: ${unit}`);
+}
+
 function startProxy(rules, fixtureDir, delay) {
   const d = rules.device;
   const script = path.join(fixtureDir, 'proxy', 'delay-proxy.js');
-  const args = [String(d.proxyPort), String(delay), String(d.appPort), d.host];
+  const args = [String(d.proxyPort), String(proxyDelayArg(rules, delay).perDirectionMs), String(d.appPort), d.host];
   return new Promise((resolve) => {
     if (!fs.existsSync(script)) { resolve({ ok: false, args, error: '프록시 파일 없음(시험 앱 나무 proxy/delay-proxy.js)' }); return; }
     const child = spawn(process.execPath, [script].concat(args), { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -250,7 +259,7 @@ async function main(argv) {
     for (const delay of delays) {
       const proxy = await startProxy(rules, fixtureDir, delay);
       const meta = {
-        proxy: { script: 'tools/hqa-s4-fixture/proxy/delay-proxy.js', args: proxy.args, unit: rules.hqaPending.delayUnit.value, started: proxy.ok },
+        proxy: Object.assign({ script: 'tools/hqa-s4-fixture/proxy/delay-proxy.js', args: proxy.args, unit: rules.hqaPending.delayUnit.value, started: proxy.ok }, proxyDelayArg(rules, delay)),
         playwrightVersion: pwVersion, browserVersion: bver, rulesVersion: rules.rulesVersion,
         screenPathOf: (sc) => screenSpec(rules, sc).path
       };
