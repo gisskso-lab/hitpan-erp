@@ -506,6 +506,107 @@ async function asyncChecks() {
     { a2: a2Reach.out.length, a2Enter: enters(a2Reach.inputs), old: oldReach.out.length, oldEnter: enters(oldReach.inputs) });
   const a2Un = await mockRun(ALL['N-1'], cellFor('N-1', 'arrows', 'a2'), 0, { derivedItems: [] });
   check('G4-G1 합성: a2 칸 미도달 → N-1 결과만 · Tab 밖 키 0', a2Un.out.length === 1 && a2Un.inputs.filter((x) => KEY_K.has(x.k) && x.key !== 'Tab').length === 0, a2Un.out.length);
+  await probeContrastChecks();
+}
+
+// ── ⑧-2 S4 보탬(4_재검증_H4GB ③): probe 비교 화면 대조의 「동작」 시험 — 브라우저 0 · probe.js 무변
+//   probe.js 원문에서 contrastVariant 함수 글자와 main 의 종료 코드 꼬리(const cRed … return 0)를 떠서
+//   가짜 page(속성 읽기 getAttribute 만 있음 · 그 밖의 부름 = 예외)로 직접 부른다 → 판단 · 종료 코드 경로를 값으로 대조
+//   정적 검사(⑧ checkProbe)는 「L.* 0 · 입력 0」 만 본다 — 대조 지움 · 종료 코드 2 지움은 이 시험이 잡는다(심은 위반 3)
+function probeFnText(src, name) {
+  const m = new RegExp('(?:async\\s+)?function\\s+' + name + '\\s*\\(').exec(src);
+  const body = fnBody(src, name);
+  if (!m || body === null) return null;
+  const at = src.indexOf(body, m.index);
+  return at < 0 ? null : src.slice(m.index, at + body.length) + '}';
+}
+async function probeContrastHits(src) {
+  const hits = [];
+  const J = require('./judge.js');
+  const cvText = probeFnText(src, 'contrastVariant');
+  const mainBody = fnBody(src, 'main');
+  const tailAt = mainBody ? mainBody.indexOf('const cRed') : -1;
+  if (!cvText) hits.push('contrastVariant 함수 글자 못 뜸');
+  if (tailAt < 0) hits.push('main 종료 코드 꼬리(const cRed) 못 뜸');
+  if (hits.length) return hits;
+  let cv;
+  let exitOf;
+  try {
+    cv = new Function('RULES', 'errText', 'return (' + cvText + ');')(rules, (e) => String(e && e.message ? e.message : e));
+    exitOf = new Function('doc', 'process', mainBody.slice(tailAt));
+  } catch (e) { return ['probe 글자 해석 실패: ' + String(e && e.message ? e.message : e).slice(0, 120)]; }
+  const quiet = { stderr: { write: () => true } };
+  const ATTR = { '#fixture-root': 'data-variant', 'link[data-fixture-css]': 'data-fixture-css' };
+  async function call(screen, variant, css) {
+    const reads = [];
+    const val = { 'data-variant': variant, 'data-fixture-css': css };
+    const page = { locator: (sel) => ({ first: () => ({ getAttribute: async (a) => { reads.push(sel + '|' + a); const v = val[a]; if (v instanceof Error) throw v; return v; } }) }) };
+    const out = { errors: [] };
+    let r = null;
+    let err = null;
+    try { r = await cv({ page }, out, J, screen); } catch (e) { err = String(e && e.message ? e.message : e).slice(0, 120); }
+    return { r, err, reads, out };
+  }
+  const screens = Object.keys(rules.device.probe.contrastModes || {});
+  if (screens.length < 2) hits.push(`비교 화면 ${screens.length} < 2`);
+  let n = 0;
+  for (const screen of screens) {
+    const sp = J.screenSpec(rules, screen);
+    const otherV = J.screenSpec(rules, screens.find((s) => s !== screen)).variant;
+    const otherC = sp.css === 'before' ? 'after' : 'before';
+    const cases = [
+      ['둘 다 맞음', sp.variant, sp.css, 'ok'],
+      ['variant 다름', otherV, sp.css, 'red'],
+      ['css 다름', sp.variant, otherC, 'red'],
+      ['둘 다 다름', otherV, otherC, 'red'],
+      ['속성 없음(null)', null, null, 'red'],
+      ['variant 읽기 예외', new Error('읽기 실패'), sp.css, 'red']
+    ];
+    for (const [nm, v, c, want] of cases) {
+      n++;
+      const tag = `${screen} ${nm}`;
+      const { r, err, reads, out } = await call(screen, v, c);
+      if (err || !r) { hits.push(`${tag}: 예외 ${err}`); continue; }
+      // 입력 0 · 줄 읽기 0 — 부름 = 속성 읽기 둘(정해진 선택자 · 속성) 뿐
+      const wantReads = Object.keys(ATTR).map((s) => s + '|' + ATTR[s]);
+      if (reads.length !== 2 || wantReads.some((x) => !reads.includes(x))) hits.push(`${tag}: 속성 읽기 ${JSON.stringify(reads)}`);
+      if (r.device !== want) hits.push(`${tag}: device ${r.device} ≠ ${want}`);
+      if (want === 'ok' && r.deviceReason !== null) hits.push(`${tag}: 사유 있음`);
+      if (want === 'red' && !(typeof r.deviceReason === 'string' && r.deviceReason.startsWith(rules.deviceReading.contrastVariantDiff) && r.deviceReason.includes(screen))) hits.push(`${tag}: 사유 글자 ${r.deviceReason}`);
+      if (!r.expected || r.expected.variant !== sp.variant || r.expected.css !== sp.css) hits.push(`${tag}: 기대 칸 ${JSON.stringify(r.expected)}`);
+      if (v instanceof Error && !out.errors.some((x) => x.startsWith(screen + ' data-variant: '))) hits.push(`${tag}: 오류 칸 기록 없음`);
+      // 종료 코드 경로 — 이 화면 판단을 doc 에 넣고 main 꼬리를 그대로 돌림(빨강 = 2 · 정상 = 0)
+      let code;
+      try { code = exitOf({ contrast_checks: { [screen]: r }, a2_check: null }, quiet); } catch (e) { code = 'throw'; }
+      const wantCode = want === 'red' ? 2 : 0;
+      if (code !== wantCode) hits.push(`${tag}: 종료 코드 ${code} ≠ ${wantCode}`);
+    }
+  }
+  // 종료 코드 꼬리 단독 — 두 화면 정상 + a2 정상 = 0 / 한 화면만 빨강 = 2 / 꼴 표에 없는 화면 빨강 = 2
+  const ex = (doc) => { try { return exitOf(doc, quiet); } catch (e) { return 'throw'; } };
+  const okAll = { contrast_checks: Object.fromEntries(screens.map((s) => [s, { device: 'ok', deviceReason: null }])), a2_check: { device: 'ok' } };
+  if (ex(okAll) !== 0) hits.push(`꼬리: 전부 정상 → ${ex(okAll)} ≠ 0`);
+  const oneRed = JSON.parse(JSON.stringify(okAll));
+  oneRed.contrast_checks[screens[screens.length - 1]] = { device: 'red', deviceReason: 'x' };
+  if (ex(oneRed) !== 2) hits.push(`꼬리: 한 화면 빨강 → ${ex(oneRed)} ≠ 2`);
+  if (ex({ contrast_checks: { zz: { screen: 'zz', mode: null, device: 'red', deviceReason: 'contrastModes 에 zz 없음' } }, a2_check: null }) !== 2) hits.push('꼬리: 꼴 표에 없는 화면 → 2 아님');
+  if (n < 12) hits.push(`경우 수 ${n} < 12`);
+  return hits;
+}
+async function probeContrastChecks() {
+  const src = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
+  const h = await probeContrastHits(src);
+  check('S4 보탬 probe 동작: 비교 화면(e1t3 · v2) variant 다름 · css 다름 → 장치 빨강 + 종료 2 · 둘 다 맞음 → 정상 + 종료 0 · 부름 = 속성 읽기 둘뿐(입력 0)', h.length === 0, h);
+  const P = [
+    ['S4 보탬 probe 대조군: variant 대조 지움', (s) => s.replace('variant !== sp.variant || css !== sp.css', 'css !== sp.css')],
+    ['S4 보탬 probe 대조군: css 대조 지움', (s) => s.replace('variant !== sp.variant || css !== sp.css', 'variant !== sp.variant')],
+    ['S4 보탬 probe 대조군: 비교 화면 빨강 종료 코드 2 지움', (s) => s.replace(/(if \(cRed\.length\) \{[\s\S]*?)return 2;/, '$1')]
+  ];
+  for (const [nm, f] of P) {
+    const s2 = f(src);
+    const h2 = s2 === src ? [] : await probeContrastHits(s2);
+    plant(nm + ' → 빨강', s2 !== src && h2.length > 0, s2 === src ? '바꿈 자리 못 찾음' : h2.slice(0, 3));
+  }
 }
 
 // ── ⑧ 고침2 N1-a probe 정적 검사(C1-4) + 심은 위반 대조군 ──────────────────────────
