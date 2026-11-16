@@ -886,6 +886,12 @@ function judge(rules, samples, extra) {
     devicePlan: { cells: plan.cells.length, plannedSamples: sum((c) => c.planned) },
     browserCondition: rules.hqaPending.browserCondition.value,
     delayUnit: rules.hqaPending.delayUnit.value,
+    // 고침6 J1-7: I-4 Esc 기다림 · polling 사본(rules device.i4 · 옛 규칙 파일 = null)
+    escWait: rules.device && rules.device.i4 && typeof rules.device.i4.escWaitMs === 'number' ? {
+      ms: rules.device.i4.escWaitMs, openPollMs: rules.device.i4.openPollMs, ref: rules.device.i4.escWaitRef,
+      pollAfterEscMaxMs: rules.device.i4.pollAfterEscMaxMs === undefined ? null : rules.device.i4.pollAfterEscMaxMs,
+      menuZeroFailCases: Array.isArray(rules.device.i4.menuZeroFailCases) ? rules.device.i4.menuZeroFailCases : null
+    } : null,
     round: { state: roundReasons.length ? F5.roundUnreadable : F5.roundReadable, reasons: roundReasons, red: roundReasons.length > 0 },
     totalsMeaning: { planned: F5.totalsPlannedMeaning },
     hiddenDefectSuspect: cells.filter((c) => c.exclusionReview && c.exclusionReview.sameShapeAsD1 === true).length,
