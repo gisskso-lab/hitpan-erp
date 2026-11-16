@@ -97,7 +97,7 @@
     "i4": { "row": 1 },
     "i5": { "row": 1 },
     "i6": { "row": 1, "maxTabs": 20 },
-    "i7": { "row": 1, "otherRow": 2 },
+    "i7": { "row": 1, "otherRow": 2, "belowGapPx": 12, "_belowGapPx_표지": "고침5 결-10 甲 — F10 「목록 밑」 누름 점 = 열린 목록 아래 끝 + 12px(장치 선택 · 결과 보기 전 고정 · 기대값 아님)" },
     "n1": { "row": 1, "keys": ["ArrowDown", "ArrowUp"], "count": 24, "intervalMs": 0, "settleExtraMs": 1500 },
     "n2": { "gapMs": 120 },
     "kbd": { "refRow": 1, "_표지": "고침2 N1 — Tab 경로 기록 · 구조 읽기(R1) · U2/K 의 「1번 줄」 기준 줄 번호" },
@@ -126,7 +126,7 @@
       "I-4": { "cases": ["mouse-open", "kbd-open"], "delays": "iDelays" },
       "I-5": { "cases": ["tab", "shift-tab"], "delays": "iDelays" },
       "I-6": { "cases": ["esc", "enter"], "delays": "iDelays" },
-      "I-7": { "cases": ["row-cell"], "delays": "iDelays" },
+      "I-7": { "cases": ["row-cell", "below-list"], "delays": "iDelays", "_cases_표지": "고침5 결-10 甲(PM 11/16 · 조건부 · CTO 범위 확인) — F10 전용 경우 below-list 더함(옛 꼴 = [\"row-cell\"] · 반려면 이 커밋만 되돌림). 계획 칸 102 → 108 · 계획 표본(3/5) 342 → 360." },
       "N-1": { "cases": ["arrows"], "delays": "nDelays", "screens": ["before", "after", "a2"], "_screens_표지": "고침4 G1 — a2 칸은 N-1 에만(다른 항목 a2 칸 0 · N-2 도 0). 화면 목록 밖 화면은 N-1 의 n1Contrast 하나만 허용(buildPlan 거부).", "screenDelays": { "a2": "n1ContrastDelays" }, "_screenDelays_표지": "고침4 보탬(PM F-6 ②) — a2 칸은 판정 대조 단(n1ContrastDelays = 300 · 500) 두 단만 계획(0 · 150 = 쓰지 않는 표본 · 필요한 만큼). 화면 목록 밖 화면(a2)의 지연이 n1ContrastDelays 밖이면 buildPlan 거부. 계획 칸 104 → 102 · 계획 표본(임시 표본 수 기준) 352 → 342." },
       "N-2": { "cases": ["enter-twice"], "delays": "nDelays", "derivedFrom": "N-1" }
     },

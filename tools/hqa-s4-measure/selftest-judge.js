@@ -146,7 +146,8 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   // 고침4 보탬(PM F-6 ②): 옛 기대 104(N-1 12 · a2 4칸) 대체 → a2 는 대조 단 300 · 500 두 칸만 → 102(I 84 + N-1 10 + N-2 8)
   const a2cells = plan.cells.filter((c) => c.screen === 'a2');
   const sumSamples = plan.cells.reduce((n, c) => n + c.samples, 0);
-  check('계획 칸 수 = 102(I 84 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(임시 3/5) 342', plan.cells.length === 102 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 342, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
+  // 고침5 결-10 甲: 옛 기대 102 · 342 대체 → I-7 below-list(F10) 6칸 더함 → 108(I 90 + N-1 10 + N-2 8) · 표본 360
+  check('계획 칸 수 = 108(I 90 + N-1 10 + N-2 8) · a2 칸 = N-1 2(지연 300 · 500) · 다른 항목 a2 0 · 계획 표본(3/5) 360', plan.cells.length === 108 && a2cells.length === 2 && a2cells.every((c) => c.item === 'N-1') && JSON.stringify(a2cells.map((c) => c.delay)) === '[300,500]' && sumSamples === 360, { cells: plan.cells.length, a2: a2cells.map((c) => c.delay), sumSamples });
   {
     const throwsP = (r) => { try { buildPlan(r); return null; } catch (e) { return String(e.message); } };
     const noSd = JSON.parse(JSON.stringify(rules)); delete noSd.plan.itemSpecs['N-1'].screenDelays;
@@ -1100,6 +1101,34 @@ function checkProbe(src) {
     check('고침5 ⑩ K-1: --out 숫자 = 표준 출력 숫자(total · failed) · passed = total − failed · plantedRed ≤ plantedTotal · plantedTotal ≥ 1',
       !!k && !!last && k.total === last.total && k.failed === last.fail && k.passed === k.total - k.failed && k.plantedTotal >= 1 && k.plantedRed <= k.plantedTotal, { k, last });
   }
+}
+
+// ── 고침5 결-10 甲 — F10 「목록 밑」 누름(I-7 below-list) · 이 커밋만 빼면 되돌아간다 ──
+{
+  const J = require('./judge.js');
+  const R10 = JSON.parse(JSON.stringify(rules));
+  R10.plan.items = ['I-7'];
+  R10.plan.iDelays = [0];
+  R10.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
+  const p10 = buildPlan(R10);
+  const mk = (bad) => {
+    const xs = p10.cells.map((c, i) => ({ item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, sampleNo: 1, valid: true, errors: [], deviceReading: null, order: i + 1, contextId: i + 1,
+      readings: { rowclickDelta: 0, changedOtherRows: [] }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }));
+    const rank = (sc) => R10.plan.screenOrder.indexOf(sc);
+    xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
+    if (bad) xs.find((s) => s.case === 'below-list' && s.screen === 'after').readings.changedOtherRows = [{ row: '2' }];
+    return J.judge(R10, xs, {});
+  };
+  const ok = mk(false);
+  const bad = mk(true);
+  check('결-10 F10: I-7 계획에 below-list 칸(화면 2 × 지연) · 기대 글자 F10 무변', p10.cells.filter((c) => c.case === 'below-list').length === 2 && T['I-7'].expectedF10 === '연 줄뿐 · 다른 줄 0' && JSON.stringify(rules.plan.itemSpecs['I-7'].cases) === '["row-cell","below-list"]');
+  plant('결-10 F10: /after 목록 밑 누름에서 다른 줄 변화 → I-7 afterMismatchExpected 1 · 대조군(변화 0) → 0', bad.items['I-7'].afterMismatchExpected === 1 && ok.items['I-7'].afterMismatchExpected === 0 && ok.red === false, { bad: bad.items['I-7'].afterMismatchExpected, ok: ok.items['I-7'].afterMismatchExpected });
+  const src = fs.readFileSync(path.join(HERE, 'items', 'i-items.js'), 'utf8');
+  const g0 = /async function i7Below/.test(src) && /if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error/.test(src) && /const below = y > lb\.y \+ lb\.h && x >= lb\.x && x <= lb\.x \+ lb\.w;/.test(src)
+    && src.indexOf('if (!below || inside', src.indexOf('async function i7Below')) < src.indexOf('await L.mouseClick(ctx, x, y);', src.indexOf('async function i7Below'));
+  check('결-10 F10 원문: i7Below 가 누르기 전에 「목록 상자 밖 · 아래」 를 단언(아니면 throw · 누름 0) · row-cell 길은 i7 그대로', g0 && /if \(ctx\.cell\.case === 'below-list'\) return i7Below\(ctx\);/.test(src));
+  const cut = src.replace(/  if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error\([^\n]*\n/, '');
+  plant('결-10 F10 원문 대조군: 단언 줄을 뺀 원문 → 검사 빨강', cut !== src && !(/if \(!below \|\| inside \|\| y >= rects\.viewport\.h\) throw new Error/.test(cut)));
 }
 
 // ── 결과─────────────────────────────────────────────────────────────
