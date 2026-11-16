@@ -61,7 +61,8 @@
   "n1Contrast": "a2",
   "contrastScreen_표지": "H4 §7-1(PM 결재 11/16 · 결-H1 甲 · 결-H2 · 결-H5) — 항목(경우)별 대조 화면 표. 열쇠 = 「항목/경우」 또는 「항목」 · 찾는 순서 = 항목/경우 → 항목 → before. 근거: N-1 = 대표 11/16 ㉡(n1Contrast 와 같아야 함 · buildPlan 단언) · I-4/mouse-open = /before(11/7 리뷰서 L51 · 작업지시서 §2 S3) · I-4/kbd-open = e1t3(11/8 근본원인 L27 · S4) · I-8 = v2(11/7 리뷰서 L151 · S6). A2 의 I-4 사용 = 되돌림(결-H1 甲 · A2 는 Esc 고침 뒤 판). 화면 목록(plan.screens) 밖 화면은 이 표가 가리키는 항목(경우) 칸에만 둔다(다른 칸 = buildPlan 거부). 대조 화면이 before 아닌 항목(경우)의 /before 칸 = 기록만 · 판정에 안 씀. HQA 불수락 화면은 G-값 커밋에서 표에서 빼고 그 칸 = 대조 무효(대표 결정 ⓐ 되돌림).",
   "contrastScreen": { "N-1": "a2", "I-4/mouse-open": "before", "I-4/kbd-open": "e1t3", "I-8": "v2" },
-  "t3ReadUnit_표지": "H4 §7-1 · 대표 결정 ⓑ — T3(I-8) 대조 판독 단위. item = 같은 항목의 어느 상태 꼴(공백 · 빈 · null) 하나라도 대조 화면에서 실패 꼴 재현이면 항목 대조 성립 · cell = 세 꼴 모두 재현일 때만 성립. 한 값만 판독에 쓴다(두 단위 동시 계산 · 고르기 0). HQA 이의면 G-값 커밋에서 cell 로.",
+  "t3ReadUnit_표지": "H4 §7-1 · H4-G-B(대표 결정 ⓑ · 작업지시서 §7-2 · PM 결정) — T3(I-8) 대조 판독 단위. item = 같은 항목의 공백 꼴 줄(device.i8.itemKind = blank)로만 대조 · 판정 — 대조 화면에서 공백 꼴 줄에 실패 꼴 재현이면 항목 대조 성립 · 공백 꼴 재현 없음 = 대조 무효. 빈 값 · null 꼴 줄은 꼴별 칸 그대로 원자료 · 판정 칸에 기록만(표지 readingText.h4.t3KindRecordOnly) · 항목 판정에 안 씀(재현돼도 성립 근거 아님 · 줄 0 · 판독 불가여도 항목 판정을 막지 않음 · 장치 빨강 아님). cell = 세 꼴 모두 재현일 때만 성립(옛 그대로). 한 값만 판독에 쓴다(두 단위 동시 계산 · 고르기 0). HQA 이의면 G-값 커밋에서 cell 로.",
+  "t3ReadUnit_표지_옛해석": "H4 §7-1 · 대표 결정 ⓑ — T3(I-8) 대조 판독 단위. item = 같은 항목의 어느 상태 꼴(공백 · 빈 · null) 하나라도 대조 화면에서 실패 꼴 재현이면 항목 대조 성립 · cell = 세 꼴 모두 재현일 때만 성립. 한 값만 판독에 쓴다(두 단위 동시 계산 · 고르기 0). HQA 이의면 G-값 커밋에서 cell 로. [옛 해석 · 대표 결정 ⓑ 로 대체(H4-G-B · 검증팀장 [4] R-1 · PM 결정) — 판독에 안 씀]",
   "t3ReadUnit": "item",
   "mask_allow_표지":"가림(M8) · 누출(M9) 허용 — 판독 선택자 · 규칙 칸 · 꾸러미 옵션 같은 공개 고정 이름만(값 아님 · 16진은 받지 않음). 고침1 F11 · [3-V] I5.",
   "mask_allow": ["components-reconnect-modal", "expectedBrowserVersion", "--no-install-recommends",
@@ -101,7 +102,7 @@
     "i4": { "row": 1 },
     "i5": { "row": 1 },
     "i6": { "row": 1, "maxTabs": 20 },
-    "i8": { "kinds": ["blank", "empty", "null"], "hiddenSel": ".mud-menu-button-hidden", "_표지": "H4 §7-2 — I-8 이 읽는 줄 = [data-row] 의 data-status-kind 가 이 목록 값인 줄(줄 번호는 화면에서 읽음 · 코드에 적지 않음). 값 출처 = 시험 앱 b967b1b0 FixtureData.KindOf(null → null · 길이 0 → empty · 공백뿐 → blank). 숨김 클래스 = 11/7 리뷰서 L151 의 mud-menu-button-hidden. 장치 선택 · 기대값 아님." },
+    "i8": { "kinds": ["blank", "empty", "null"], "itemKind": "blank", "_itemKind_표지": "H4-G-B(대표 결정 ⓑ · 작업지시서 §7-2) — t3ReadUnit = item 일 때 항목 판정에 쓰는 꼴 하나(공백). 나머지 꼴 = 기록만. 장치 선택 아님 · 결정 글자 그대로.", "hiddenSel": ".mud-menu-button-hidden", "_표지": "H4 §7-2 — I-8 이 읽는 줄 = [data-row] 의 data-status-kind 가 이 목록 값인 줄(줄 번호는 화면에서 읽음 · 코드에 적지 않음). 값 출처 = 시험 앱 b967b1b0 FixtureData.KindOf(null → null · 길이 0 → empty · 공백뿐 → blank). 숨김 클래스 = 11/7 리뷰서 L151 의 mud-menu-button-hidden. 장치 선택 · 기대값 아님." },
     "i7": { "row": 1, "otherRow": 2, "belowGapPx": 12,"_belowGapPx_표지": "고침5 결-10 甲 — F10 「목록 밑」 누름 점 = 열린 목록 아래 끝 + 12px(장치 선택 · 결과 보기 전 고정 · 기대값 아님)" },
     "n1": { "row": 1, "keys": ["ArrowDown", "ArrowUp"], "count": 24, "intervalMs": 0, "settleExtraMs": 1500 },
     "n2": { "gapMs": 120 },
@@ -196,7 +197,9 @@
       "contrastByCaseRule": "경우별 대조 — 항목 contrastState 는 모든 경우가 성립일 때만 성립(I-4 · 결-H4) · 어느 경우든 대조 칸 장치 실패면 state null(대조 불가)",
       "contrastByCaseRuleI7": "경우별 대조(보탬 G-3) — 경우마다 그 경우 대조 칸만으로 판독 · 한 경우의 장치 실패가 다른 경우 대조 칸을 덮지 않음 · 항목 contrastState(옛 묶음 판독)는 그대로",
       "t3KindInvalid": "대조 무효(어느 판에서도 실패 꼴 없음)",
-      "t3UnitItem": "항목 단위(같은 항목의 어느 꼴이든 대조 화면에서 재현이면 성립)",
+      "t3UnitItem": "항목 단위(같은 항목의 공백 칸으로 대조 화면에서 재현이면 성립 · 빈 값 · null 칸은 기록만)",
+      "t3UnitItem_옛해석": "항목 단위(같은 항목의 어느 꼴이든 대조 화면에서 재현이면 성립) [옛 해석 · 대표 결정 ⓑ 로 대체(H4-G-B · 검증팀장 [4] R-1 · PM 결정) — 판독에 안 씀]",
+      "t3KindRecordOnly": "기록만 · 항목 판정에 안 씀(대표 결정 ⓑ)",
       "t3UnitCell": "칸 단위(공백 · 빈 · null 세 꼴 모두 재현일 때만 성립)",
       "t3NoKindRows": "그 꼴 줄 0 — 읽은 줄 없음(장치 실패)",
       "i8InputViolation": "I-8 입력 기록 있음 — 입력 0 구조 읽기 위반"
@@ -320,7 +323,7 @@
     "e1t3ProbeKeep": "E1T3 화면 줄 안 초점 받을 보이는 요소 ≥ 1 → 유지",
     "e1t3ProbeZero": "되돌림 규칙 해당(I-4 키보드로 연 뒤 대조 무효)",
     "e1t3ProbeNoRow": "E1T3 화면 1번 줄 없음 — 구조 읽기 불가",
-    "contrastProbeVariantDiff": "비교 화면 판 속성 불일치 — 장치 빨강",
+    "contrastVariantDiff": "비교 화면 판 속성 불일치 — 장치 빨강",
     "v2ProbeChecked": "V2 화면 확인만(판 속성 둘) — 줄 읽기 0"
   },
   "judgeSchema": {

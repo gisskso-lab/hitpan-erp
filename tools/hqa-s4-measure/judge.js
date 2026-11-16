@@ -750,6 +750,11 @@ function judge(rules, samples, extra) {
     const unit = rules.t3ReadUnit;
     if (unit !== 'item' && unit !== 'cell') throw new Error(`t3ReadUnit=${unit} 는 item · cell 이 아님`);
     const kinds = rules.device.i8.kinds;
+    // H4-G-B(검증팀장 [4] R-1 · PM 결정 · 대표 결정 ⓑ · 작업지시서 §7-2): item 단위 = 공백 꼴(itemKind) 줄로만 대조 · 판정
+    //   빈 값 · null 꼴 = 꼴별 칸 그대로 기록만(표지 t3KindRecordOnly) · 항목 판정 · 장치 빨강에 끌어오지 않음 · cell 단위는 옛 그대로(세 꼴)
+    const itemKind = rules.device.i8.itemKind;
+    if (unit === 'item' && !kinds.includes(itemKind)) throw new Error(`device.i8.itemKind=${itemKind} 는 kinds 밖`);
+    const judgedKind = (k) => unit === 'cell' || k === itemKind;
     const cs = cellsOf('I-8');
     const fail = cs.filter(cellFailed).map((c) => c.key);
     const cscr = contrastScreenOf(rules, 'I-8', 'blank-rows');
@@ -759,18 +764,22 @@ function judge(rules, samples, extra) {
       return { kind: k, samples: v.length, rows: rows.length, failShape: rows.filter(I8_ROW_FAIL).length, afterShapeMismatch: rows.filter((r) => !I8_ROW_OK(r)).length };
     });
     const noRows = [];
-    for (const sc of screensFor(rules, 'I-8', 'blank-rows')) for (const kr of kindRead(sc)) if (kr.samples > 0 && kr.rows === 0) noRows.push(`${sc}:${kr.kind}`);
+    const noRowsRecordOnly = [];
+    for (const sc of screensFor(rules, 'I-8', 'blank-rows')) for (const kr of kindRead(sc)) if (kr.samples > 0 && kr.rows === 0) (judgedKind(kr.kind) ? noRows : noRowsRecordOnly).push(`${sc}:${kr.kind}`);
     if (noRows.length) redReasons.push(`I-8 ${H.t3NoKindRows} ${noRows.join(' · ')}`);
     const ccFail = cs.filter((c) => c.screen === cscr).some(cellFailed);
     const byKind = kindRead(cscr).map((kr) => Object.assign(kr, {
-      contrast: ccFail || kr.rows === 0 ? null : (kr.failShape > 0 ? F5.contrastHolds : H.t3KindInvalid)
+      contrast: ccFail || kr.rows === 0 ? null : (kr.failShape > 0 ? F5.contrastHolds : H.t3KindInvalid),
+      recordOnly: judgedKind(kr.kind) ? null : H.t3KindRecordOnly
     }));
+    const judged = byKind.filter((k) => judgedKind(k.kind));
     let state = null;
     let reason = null;
     if (ccFail) reason = F5.contrastDeviceFail;
-    else if (byKind.some((k) => k.contrast === null)) reason = H.t3NoKindRows;
+    // 옛 해석(H4 · 대표 결정 ⓑ 로 대체): 거부권 = byKind.some(null) · item 성립 = byKind.some(성립) — 세 꼴 중 하나라도
+    else if (judged.some((k) => k.contrast === null)) reason = H.t3NoKindRows;
     else {
-      const holds = unit === 'item' ? byKind.some((k) => k.contrast === F5.contrastHolds) : byKind.every((k) => k.contrast === F5.contrastHolds);
+      const holds = judged.every((k) => k.contrast === F5.contrastHolds);
       if (holds) state = F5.contrastHolds;
       else { state = F5.contrastInvalid; reason = F5.contrastNoRepro; }
     }
@@ -785,7 +794,7 @@ function judge(rules, samples, extra) {
     };
     Object.assign(items['I-8'], fourCells('I-8'));
     // 네 칸의 대조(표본 단위)는 꼴 단위 판독으로 바꿔 둔다(한 단위만 · 표본 단위 판독은 쓰지 않음)
-    items['I-8'].contrastState = { state, reason, unit, kinds: byKind };
+    items['I-8'].contrastState = { state, reason, unit, judgedKinds: judged.map((k) => k.kind), kinds: byKind, noRowsRecordOnly: noRowsRecordOnly.length ? { text: H.t3KindRecordOnly, rows: noRowsRecordOnly } : null };
   }
   for (const item of ['I-1', 'I-2', 'I-3', 'I-4', 'I-5', 'I-6', 'I-7', 'N-1']) if (items[item]) Object.assign(items[item], fourCells(item));
   // I-6 · I-7 의 옛 「재현됨」(항목 실패 재현) → 다른 단어 칸으로 가름(D1 재현과 섞지 않음 · 옛 칸 유지)

@@ -99,7 +99,7 @@ async function contrastVariant(ctx, out, J, screen) {
   const css = await ctx.page.locator('link[data-fixture-css]').first().getAttribute('data-fixture-css').catch((e) => { out.errors.push(screen + ' data-fixture-css: ' + errText(e)); return null; });
   const sp = J.screenSpec(RULES, screen);
   const red = variant !== sp.variant || css !== sp.css;
-  return { variant, css, expected: { variant: sp.variant, css: sp.css }, device: red ? 'red' : 'ok', deviceReason: red ? `${RULES.deviceReading.contrastProbeVariantDiff} ${screen} data-variant=${variant} · data-fixture-css=${css}` : null };
+  return { variant, css, expected: { variant: sp.variant, css: sp.css }, device: red ? 'red' : 'ok', deviceReason: red ? `${RULES.deviceReading.contrastVariantDiff} ${screen} data-variant=${variant} · data-fixture-css=${css}` : null };
 }
 // H4 §7-3: r1 꼴 — 1번 줄 구조 읽기 하나뿐(입력 0) · 값 = 줄 안 초점 받을 보이는 요소 수
 async function contrastR1(ctx, out, L, J, screen) {
