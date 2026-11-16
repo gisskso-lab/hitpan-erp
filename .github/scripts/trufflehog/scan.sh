@@ -4,9 +4,13 @@
 #       docs/운영기록/20261113작_비밀탐지설정정상화_작업지시서.md ㄱ-1 · ㄱ-5
 #
 # 종료 코드 (둘 다 잡 빨강 · 메시지가 다르다):
-#   0 = 깨끗(엔진 0 + 결과 0줄)
-#   1 = 찾음(엔진 183 + 결과 1줄 이상)
-#   2 = 검사 오류(그 밖의 모든 조합 — 엔진이 끝까지 못 돌았거나 결과와 종료 코드가 어긋남)
+#   0 = 깨끗(엔진 0 + 공백 아닌 결과 줄 0)
+#   1 = 찾음(엔진 183 + 결과 객체 1줄 이상 + 객체 아닌 줄 0)
+#   2 = 검사 오류(그 밖의 모든 조합 — 엔진이 끝까지 못 돌았거나 결과와 종료 코드가 어긋남 ·
+#       공백 아닌 결과 줄 가운데 JSON 객체가 아닌 줄이 하나라도 있음)
+#
+# 탐지기 이름(#859 후속 ㄱ′-1): 원문은 임시 파일로만. 로그·요약에는 아래 허용 목록 안의 이름만,
+#   목록 밖·모양 밖은 모두 「기타」 로 센다(개수 · 판정은 무변). 목록을 늘리려면 PR(사람 검토).
 #
 # 로그 위생(공개 저장소): 엔진 결과(JSON)는 임시 파일로만 받고 끝에 지운다.
 #   로그에는 개수 · 탐지기 이름 · 훑은 양(숫자)만 찍는다. 값 · 위치 · 줄은 찍지 않는다.
@@ -64,6 +68,23 @@ work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/th-scan.XXXXXX")" || scan_error "임시 
 trap 'rm -rf "$work"' EXIT
 
 is_sha() { [[ "$1" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; }
+
+# 탐지기 이름 허용 목록 — 초기 값 = 관측 2개(작업지시서 §9 K1 · PM 승인). 늘리려면 PR.
+ALLOWED_DETECTORS=(CustomRegex SQLServer)
+# 표준 입력 = @json 한 줄씩(names.raw) → 표준 출력 = 허용 이름 또는 「기타」 한 줄씩. 원문은 내보내지 않는다.
+# 모양 검사는 C 지역(범위 [A-Z] 가 지역 글자로 넓어지지 않게) · 목록 대조는 글자 그대로 같음(대소문자·비슷한 글자 불허).
+map_detector_names() {
+  local LC_ALL=C q v n ok
+  while IFS= read -r q || [ -n "$q" ]; do
+    v="${q#\"}"; v="${v%\"}"
+    ok=0
+    if [[ "$v" =~ ^[A-Za-z0-9_]{1,40}$ ]]; then
+      for n in "${ALLOWED_DETECTORS[@]}"; do [ "$v" = "$n" ] && ok=1; done
+    fi
+    if [ "$ok" -eq 1 ]; then printf '%s\n' "$v"; else printf '%s\n' "기타"; fi
+  done
+}
+
 [ -z "$BASE" ] || is_sha "$BASE" || scan_error "BASE 가 SHA 가 아니다"
 [ -z "$HEAD" ] || is_sha "$HEAD" || scan_error "HEAD 가 SHA 가 아니다"
 
@@ -115,17 +136,38 @@ scanned="$(grep -m1 'finished scanning' "$work/engine.log" | grep -oE '"?(chunks
 chunks="$(printf '%s' "$scanned" | grep -oE 'chunks[:=] ?[0-9]+' | grep -oE '[0-9]+$' || true)"
 scanned="${scanned}commits=${commits:-?}"
 
-count="$(grep -c '^{' "$work/results.jsonl" || true)"
-count="${count:-0}"
+# ── 결과 파일 엄격 해석(ㄱ′-3) ─────────────────────────────────────────
+# 공백 아닌 모든 줄이 JSON 객체여야 한다. 하나라도 아니면 검사 오류(줄 내용은 찍지 않는다 · 숫자만).
+# 공백 판정은 grep(C 지역) 과 jq 가 같은 ASCII 공백 6종을 쓴다 — 어긋나면 objects 가 모자라 검사 오류 쪽으로 닫힌다.
+nonempty="$(LC_ALL=C grep -cv '^[[:space:]]*$' "$work/results.jsonl" 2>/dev/null)" || true
+[[ "$nonempty" =~ ^[0-9]+$ ]] || scan_error "엔진 결과 줄 수를 세지 못했다(종료 코드 ${rc})" 0 "$rc"
+objects=0
+bad=0
 detectors=""
-if [ "$count" -gt 0 ]; then
-  if ! names="$(jq -r '.DetectorName // "unknown"' "$work/results.jsonl" 2>/dev/null)"; then
-    scan_error "엔진 결과를 읽지 못했다(종료 코드 ${rc})" "$count" "$rc"
+if [ "$nonempty" -gt 0 ]; then
+  # 공백 아닌 줄마다 true(객체) / false(그 밖 · 해석 실패) 한 줄
+  if ! jq -R 'select(test("^[ \t\n\r\f\u000b]*$") | not) | (try (fromjson | type == "object") catch false)' \
+      "$work/results.jsonl" > "$work/kinds.raw" 2>/dev/null; then
+    scan_error "엔진 결과를 읽지 못했다(종료 코드 ${rc})" 0 "$rc"
   fi
-  detectors="$(printf '%s\n' "$names" | sort | uniq -c | awk '{printf "%s%s(%s)", (NR>1?" ":""), $2, $1}')"
-fi
+  objects="$(grep -cx 'true' "$work/kinds.raw")" || true
+  objects="${objects:-0}"
+  bad=$(( nonempty - objects ))
+  [ "$bad" -eq 0 ] || scan_error "결과 ${bad}줄 해석 실패" "$objects" "$rc"
 
-if [ "$rc" -eq 0 ] && [ "$count" -eq 0 ]; then
+  # ── 탐지기 이름 허용 목록(ㄱ′-1) ──────────────────────────────────────
+  # 객체마다 정확히 한 줄: 문자열이면 그 값, 아니면 빈 값 — @json 으로 줄바꿈·제어문자까지 한 줄 안에 가둔다.
+  if ! jq -r '(.DetectorName | if type == "string" then . else "" end) | @json' \
+      "$work/results.jsonl" > "$work/names.raw" 2>/dev/null; then
+    scan_error "엔진 결과를 읽지 못했다(종료 코드 ${rc})" "$objects" "$rc"
+  fi
+  name_lines="$(grep -c '' "$work/names.raw")" || true
+  [ "${name_lines:-0}" -eq "$objects" ] || scan_error "탐지기 이름 줄 수 불일치(이름 ${name_lines:-0}줄 · 객체 ${objects}줄)" "$objects" "$rc"
+  detectors="$(map_detector_names < "$work/names.raw" | LC_ALL=C sort | uniq -c | awk '{printf "%s%s(%s)", (NR>1?" ":""), $2, $1}')"
+fi
+count="$objects"
+
+if [ "$rc" -eq 0 ] && [ "$nonempty" -eq 0 ]; then
   # 하한([3-V] F4): 범위에 커밋이 있는데 훑은 조각이 0(또는 기록 없음)이면 「깨끗」 이 아니라 검사 오류
   [[ "$commits" =~ ^[0-9]+$ ]] || scan_error "범위 커밋 수를 세지 못했다" 0 "$rc"
   if [ "$commits" -gt 0 ] && { [ -z "$chunks" ] || [ "$chunks" -eq 0 ]; }; then
@@ -136,7 +178,7 @@ if [ "$rc" -eq 0 ] && [ "$count" -eq 0 ]; then
   exit 0
 fi
 
-if [ "$rc" -eq 183 ] && [ "$count" -gt 0 ]; then
+if [ "$rc" -eq 183 ] && [ "$objects" -ge 1 ] && [ "$bad" -eq 0 ]; then
   say_error "비밀 후보 찾음" "${count}건 · 탐지기: ${detectors} · 위치 확인은 로컬에서만(설계서 §3-4) · 훑은 양: ${scanned:-(기록 없음)}"
   write_summary found "$count" "$detectors" "$rc"
   exit 1

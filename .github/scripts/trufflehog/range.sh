@@ -81,7 +81,8 @@ case "$EVENT_NAME" in
     after="$(ev '.after')"
     deleted="$(ev '.deleted')"
     default_branch="$(ev '.repository.default_branch')"
-    [ -n "$default_branch" ] || default_branch="main"
+    # #859 후속 ㄱ′-4: 사건에 기본 가지 이름이 없으면 빨강 — 「main」 으로 대신하면 기준이 조용히 바뀔 수 있다
+    [ -n "$default_branch" ] || fail "사건에 기본 가지 이름이 없다 — main 으로 대신하지 않는다"
     git check-ref-format --branch "$default_branch" > /dev/null 2>&1 || fail "기본 가지 이름이 올바르지 않다"
     main_ref="refs/remotes/origin/${default_branch}"   # F1: 완전 이름 — 같은 이름 태그가 가로채지 못한다
 
