@@ -1405,30 +1405,58 @@ function checkProbe(src) {
     const SP4 = ['.github/workflows/trufflehog.yml', '.github/scripts/trufflehog/range.sh', '.github/scripts/trufflehog/scan.sh', '.github/scripts/trufflehog/self-test.sh'];
     const SB4 = ['50e4e57daefdb325c110430887405dea4267d34b', '7e6534064235927f80c42df7fc7d455f210a27bd', 'b44a24645cf52acdd4a634dc8a232d90096de84a', '0a369de4ab45362a088d7003f83d5a27e4710244'];
     const BASE0 = '88085da1d797b915b8e8be314517af180d0b9939';
+    // 값커밋 결-17 ③(작업지시서 §9 · [3-V] 3회차 P3-4): 허용 검사 원문(아래 「const SH_GIT_SUB」 줄 ~ 「const sh =」 줄 · 줄끝 LF) sha256 고정 — 허용 목록 · 검사 글자를 바꾸면 빨강(T34 핀 밖을 메움)
+    const SH_GUARD_SHA = '977729d7b8944261cd6771e36d50436ec7aa04fd73eded6fd3d2b2c3556f27ae';
+    // 값커밋 결-17 ①: 블록이 넘기는 env 객체 둘(env0 · genv)을 검사보다 먼저 만들고 얼린다 — 허용 = 그 객체 자체(===)뿐 · 값 바꿔치기 0
+    Object.freeze(env0);
+    const idx = path.join(fs.mkdtempSync(path.join(tmp, 'm0x-')), 'index');
+    const genv = Object.freeze(Object.assign({}, env0, { GIT_INDEX_FILE: idx }));
     // 자식 프로세스 실행 자리 = 이 한 줄(sh)만 — T34 정적 게이트 셈
     // 값커밋 결-15(작업지시서 §9 · [3-V] 2회차 P2-1): 실행 자리는 한 줄 그대로 · 그 앞에서 고정 허용 목록 검사(shGuard) — 범용 실행기로 새 실행을 숨기지 못하게
     //   허용 ① git + 이 블록이 실제로 쓰는 하위 명령 6개만(첫 인자 = 하위 명령 · '-' 로 시작하면 거부 → `-c` 등 하위 명령 앞 옵션 0)
     //   허용 ② bash <m0-assert.sh 경로> <임시 폴더 m0d-*> --diff-only <나무 40자> 꼴 하나 · 그 밖 = 던짐 → 아래 이름 붙은 빨강(shBad)
     const SH_GIT_SUB = ['read-tree', 'update-index', 'write-tree', 'hash-object', 'cat-file', 'rev-parse'];
     const shBad = [];
+    // 값커밋 결-17 ②: git 허용 = 하위 명령 이름이 아니라 이 블록이 실제로 부르는 호출 모양 8개(실측) — 인자 개수 · 고정 글자 · 자리별 꼴
+    //   H = 40자 16진 소문자 · P4 = 허용 4경로(SP4) · P5 = P4 + (가) 심은 경로 extra.sh · CI = 100644|100755,<H>,<P5> · RP = <H>:<P4> · 그 밖(추가 옵션 · 다른 경로 · 다른 개수) = 던짐
+    const SH_P5 = Object.freeze(SP4.concat(['.github/scripts/trufflehog/extra.sh']));
+    const shH = (x) => /^[0-9a-f]{40}$/.test(x);
+    const shP4 = (x) => SP4.includes(x);
+    const shCI = (x) => { const m = String(x).match(/^(100644|100755),([0-9a-f]{40}),(.+)$/); return !!m && SH_P5.includes(m[3]); };
+    const shRP = (x) => { const m = String(x).match(/^([0-9a-f]{40}):(.+)$/); return !!m && SP4.includes(m[2]); };
+    const SH_GIT_SHAPES = Object.freeze([
+      ['read-tree', 'HEAD'],
+      ['update-index', '--force-remove', '--', shP4],
+      ['update-index', '--add', '--cacheinfo', shCI],
+      ['write-tree'],
+      ['hash-object', '-w', '--stdin'],
+      ['cat-file', '-e', shH],
+      ['cat-file', 'blob', shH],
+      ['rev-parse', shRP],
+    ]);
+    const shGitShape = (a) => SH_GIT_SHAPES.some((s) => s.length === a.length && s.every((p, i) => (typeof p === 'string' ? a[i] === p : p(a[i]))));
     const shOk = (cmd, args) => {
       const a = Array.isArray(args) ? args : [];
       if (!a.every((x) => typeof x === 'string')) return false;
-      if (cmd === 'git') return a.length > 0 && !a[0].startsWith('-') && SH_GIT_SUB.includes(a[0]);
+      // (옛 줄 · 결-17 으로 대체) if (cmd === 'git') return a.length > 0 && !a[0].startsWith('-') && SH_GIT_SUB.includes(a[0]);
+      if (cmd === 'git') return a.length > 0 && !a[0].startsWith('-') && SH_GIT_SUB.includes(a[0]) && shGitShape(a);
       if (cmd === 'bash') return a.length === 4 && a[0] === m0 && path.resolve(path.dirname(a[1])) === path.resolve(tmp) && path.basename(a[1]).startsWith('m0d-') && a[2] === '--diff-only' && /^[0-9a-f]{40}$/.test(a[3]);
       return false;
     };
     // 값커밋 결-16(작업지시서 §9 「c-V5 처리」): sh 셋째 인자(opt) 열쇠 허용 목록 = 이 블록이 실제로 넘기는 열쇠만(실측 3개 · encoding · env · input) · `shell` 열쇠가 있으면(값 무관) 던짐
     const SH_OPT_KEYS = ['encoding', 'env', 'input'];
     const shOptOk = (opt) => opt === undefined || (!!opt && typeof opt === 'object' && !('shell' in opt) && Object.keys(opt).every((k) => SH_OPT_KEYS.includes(k)));
+    // 값커밋 결-17 ①: env 열쇠(상속 포함 'env' in opt) = git 꼴에서 자기 열쇠이고 값이 env0 · genv 객체 그 자체(===)일 때만 · bash 꼴은 env 열쇠 자체 금지
+    const shEnvOk = (cmd, opt) => opt === undefined || !('env' in opt) || (cmd === 'git' && k1Own(opt, 'env') && (opt.env === env0 || opt.env === genv));
     // (옛 줄 · 결-16 으로 대체) const shGuard = (cmd, args) => { if (!shOk(cmd, args)) { … 허용 목록 밖 실행 … throw } };
-    const shGuard = (cmd, args, opt) => { const okO = shOptOk(opt); if (!shOk(cmd, args) || !okO) { const m = '값커밋 결-15 허용 목록 밖 실행: ' + String(cmd) + ' ' + JSON.stringify(args).slice(0, 120) + (okO ? '' : ' · 옵션 열쇠(결-16) ' + JSON.stringify(opt && typeof opt === 'object' ? Object.keys(opt) : typeof opt)); shBad.push(m); throw new Error(m); } };
+    // (옛 줄 · 결-17 으로 대체) const shGuard = (cmd, args, opt) => { const okO = shOptOk(opt); if (!shOk(cmd, args) || !okO) { … 옵션 열쇠(결-16) … throw } };
+    const shGuard = (cmd, args, opt) => { const okO = shOptOk(opt); const okE = okO && shEnvOk(cmd, opt); if (!shOk(cmd, args) || !okO || !okE) { const m = '값커밋 결-15 허용 목록 밖 실행: ' + String(cmd) + ' ' + JSON.stringify(args).slice(0, 120) + (okO ? '' : ' · 옵션 열쇠(결-16) ' + JSON.stringify(opt && typeof opt === 'object' ? Object.keys(opt) : typeof opt)) + (okO && !okE ? ' · env 객체(결-17)' : ''); shBad.push(m); throw new Error(m); } };
     const sh = (cmd, args, opt) => (shGuard(cmd, args, opt), spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {})));
     let shErr = null;
     try {
     const git = (args, opt) => sh('git', args, Object.assign({ encoding: 'utf8' }, opt || {}));
-    const idx = path.join(fs.mkdtempSync(path.join(tmp, 'm0x-')), 'index');
-    const genv = Object.assign({}, env0, { GIT_INDEX_FILE: idx });
+    // (옛 줄 · 결-17 으로 검사 앞으로 옮김 · 얼림) const idx = path.join(fs.mkdtempSync(path.join(tmp, 'm0x-')), 'index');
+    // (옛 줄 · 결-17 으로 검사 앞으로 옮김 · 얼림) const genv = Object.assign({}, env0, { GIT_INDEX_FILE: idx });
     const mkTree = (edit) => {
       if (fs.existsSync(idx)) fs.unlinkSync(idx);
       let r = git(['read-tree', 'HEAD'], { env: genv }); if (r.status !== 0) return null;
@@ -1491,6 +1519,32 @@ function checkProbe(src) {
     // 값커밋 결-16 (ㄹ): 허용된 명령 · 하위 명령(git rev-parse HEAD)에 옵션 {shell: true} 만 더함 → 실행 전 던짐(옵션 열쇠 때문임을 글자로 확인)
     const pS = shTry('git', ['rev-parse', 'HEAD'], { shell: true });
     plant('값커밋 결-16 (ㄹ) 심은 위반: 허용 git 하위 명령 + 옵션 {shell: true} → 실행 전 던짐(옵션 열쇠 이름 붙은 빨강)', pS.threw && pS.named && /옵션 열쇠\(결-16\)/.test(shBad[shBad.length - 1] || ''), pS);
+    // 값커밋 결-17 ④(작업지시서 §9 · [3-V] 3회차 P2-2 · P3-5): 허용 모양 그대로 env 사본만 바꿈 3건 + 모양 밖 하위 옵션 1건 → 모두 실행 전 던짐(던지지 않아도 닿는 곳 = 없는 임시 경로뿐)
+    const shLast = () => shBad[shBad.length - 1] || '';
+    const pBE = shTry('bash', [m0, path.join(tmp, 'm0d-plant'), '--diff-only', '0'.repeat(40)], { encoding: 'utf8', env: Object.assign({}, env0, { BASH_ENV: path.join(tmp, 'm0x-plant-bashenv.sh') }) });
+    const lBE = shLast();
+    plant('값커밋 결-17 (ㅁ) 심은 위반(P2-2 H1 꼴): 허용 bash 꼴 + env 사본에 BASH_ENV → 실행 전 던짐(env 객체 이름 붙은 빨강)', pBE.threw && pBE.named && /env 객체\(결-17\)/.test(lBE), pBE);
+    const pGC = shTry('git', ['cat-file', '-e', SB4[0]], { encoding: 'utf8', env: Object.assign({}, genv, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.attributesFile', GIT_CONFIG_VALUE_0: path.join(tmp, 'm0x-plant-attr') }) });
+    const lGC = shLast();
+    plant('값커밋 결-17 (ㅂ) 심은 위반(P2-2 H2 꼴): 허용 git 모양 + genv 사본에 GIT_CONFIG_COUNT/KEY/VALUE → 실행 전 던짐(env 객체 이름 붙은 빨강)', pGC.threw && pGC.named && /env 객체\(결-17\)/.test(lGC), pGC);
+    const pPA = shTry('git', ['cat-file', '-e', SB4[0]], { encoding: 'utf8', env: Object.assign({}, env0, { PATH: path.join(tmp, 'm0x-plant-path'), Path: path.join(tmp, 'm0x-plant-path') }) });
+    const lPA = shLast();
+    plant('값커밋 결-17 (ㅅ) 심은 위반(P2-2 H3 꼴): 허용 git 모양 + env0 사본에 PATH → 실행 전 던짐(env 객체 이름 붙은 빨강)', pPA.threw && pPA.named && /env 객체\(결-17\)/.test(lPA), pPA);
+    const pIO = shTry('git', ['read-tree', '--index-output=' + path.join(tmp, 'm0x-plant-idx'), 'HEAD'], { encoding: 'utf8', env: genv });
+    const lIO = shLast();
+    plant('값커밋 결-17 (ㅇ) 심은 위반(P3-5 H5 꼴): git read-tree --index-output=… HEAD(모양 밖 하위 옵션 · env = genv 그대로) → 실행 전 던짐 · 그 경로 파일 0', pIO.threw && pIO.named && !/env 객체|옵션 열쇠/.test(lIO) && !fs.existsSync(path.join(tmp, 'm0x-plant-idx')), pIO);
+    // 값커밋 결-17 ④ 더함([4] 2회차 c-V5 P2-V5-1 · 넷째 길): env 사본에 core.fsmonitor 설정 주입 + git update-index --refresh → 실행 전 던짐(env 객체 이름 붙음 · --refresh 는 블록이 안 쓰는 모양이라 모양 검사로도 막힘) · 그 표지 경로 파일 0
+    const pFM = shTry('git', ['update-index', '--refresh'], { encoding: 'utf8', env: Object.assign({}, genv, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: 'echo x > "' + path.join(tmp, 'm0x-plant-fsmon') + '"; true' }) });
+    const lFM = shLast();
+    plant('값커밋 결-17 (ㅈ) 심은 위반([4] P2-V5-1): genv 사본에 GIT_CONFIG core.fsmonitor=<셸 명령> + git update-index --refresh → 실행 전 던짐(env 객체 이름 붙은 빨강) · 표지 파일 0', pFM.threw && pFM.named && /env 객체\(결-17\)/.test(lFM) && !fs.existsSync(path.join(tmp, 'm0x-plant-fsmon')), pFM);
+    // 값커밋 결-17 ③(P3-4): 허용 검사 원문 sha256 고정 단언 + 허용 목록 한 글자 바꾼 사본 → 고정값과 다름(빨강)
+    const shRegion = (src) => { const L = String(src).replace(/\r\n/g, '\n').split('\n'); const i = L.findIndex((x) => x.startsWith('    const SH_GIT_SUB = [')); const j = L.findIndex((x) => x.startsWith('    const sh = (cmd, args, opt) =>')); return i >= 0 && j > i ? L.slice(i, j + 1).join('\n') : null; };
+    const shSha = (t) => (t === null ? null : crypto.createHash('sha256').update(t, 'utf8').digest('hex'));
+    const rg0 = shRegion(fs.readFileSync(__filename, 'utf8'));
+    const rgSha = shSha(rg0);
+    check('값커밋 결-17 ③(P3-4): 허용 검사 원문(const SH_GIT_SUB 줄 ~ const sh 줄 · 줄끝 LF) sha256 = 고정값 SH_GUARD_SHA', rgSha !== null && rgSha === SH_GUARD_SHA, { got: rgSha, lines: rg0 === null ? null : rg0.split('\n').length });
+    const rgX = rg0 === null ? null : rg0.replace("'--force-remove'", "'--force-removE'");
+    plant('값커밋 결-17 ③ 심은 위반(P3-4): 허용 모양 목록 한 글자 바꾼 사본(--force-remove → --force-removE) → sha256 ≠ 고정값', rgX !== null && rgX !== rg0 && rgX.length === rg0.length && shSha(rgX) !== SH_GUARD_SHA, { got: shSha(rgX) });
   }
   // C-2(결-1 조건 ①): 장치 폴더 · 워크플로에 주소 앞머리 판단 0 — 꼴은 조각으로 만든다(이 파일이 스스로 걸리지 않게)
   {
