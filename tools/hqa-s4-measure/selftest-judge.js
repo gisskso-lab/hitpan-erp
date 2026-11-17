@@ -415,6 +415,18 @@ const results = [];
 function check(name, ok, info) { results.push({ name, ok: !!ok, info: info === undefined ? null : info }); }
 // 고침5 K-1: 심은 위반(대조군) — 걸려야(빨강이어야) ok · 셈은 --out 의 plantedRed / plantedTotal
 function plant(name, red, info) { check(name, red, info); results[results.length - 1].planted = true; }
+// 값커밋 c-V1(결-5 · PM 결재 11/17): 「지금 상태」 스냅숏 옛 단언을 걸 사본 — 칸마다 _옛값_값커밋 을 제자리로 되돌림(87cb635c 글자) · 옛 단언은 이 사본에 그대로 · 지금 rules 에 걸면 빨강(대조군)
+function oldValCommit(r) {
+  const c = JSON.parse(JSON.stringify(r));
+  for (const k of Object.keys(c.hqaPending || {})) {
+    const e = c.hqaPending[k];
+    if (e && typeof e === 'object' && e._옛값_값커밋) { Object.assign(e, JSON.parse(JSON.stringify(e._옛값_값커밋))); delete e._옛값_값커밋; }
+  }
+  return c;
+}
+const VC_PRESET = '개발팀 사전 고정 · 장전 전 공개 · 댓글 6921734895';
+const VC_T3_STATUS = 'HQA 회신 반영 · 댓글 6921942407';
+const VC_T3_VALUE = '11/7 작업지시서 L306 글자 고정(공백 · 빈 · null) · 항목 단위 · 빈 문자열 · null = 명시적 미판정/관찰 항목 · 정상 간주 금지(HQA 6921942407 Q-H2 조건)';
 
 const rules = JSON.parse(fs.readFileSync(path.join(HERE, 'rules.json'), 'utf8'));
 const T = rules.readingText;
@@ -565,15 +577,25 @@ const noInvented = (v) => !/🟢|PASS|통과 판정/.test(JSON.stringify(v));
   check('N-1 판정 글자 = 대조 무효 / 🔴 / 🟡', T['N-1'].contrastInvalid === '대조 무효' && T['N-1'].red === '🔴' && T['N-1'].yellow === '🟡');
   const pend = Object.keys(rules.hqaPending).filter((k) => !k.startsWith('_'));
   // 고침5 H1-12: 옛 단언(6칸 모두 「HQA 회신 대기」) 대체 → 칸 6 그대로 · ①② = HQA 회신 반영 꼴 · ③④⑤ = 사전 고정 꼴(댓글 자리표) · ⑥ T3 = 「HQA 회신 대기」 그대로(대표 자리)
-  check('고침5 hqaPending 6칸 상태: ①② 반영 · ③④⑤ 사전 고정(자리표) · T3 회신 대기 무변', pend.length === 6 && pend.includes('T3')
-    && ['S1toS4', 'rawFormat'].every((k) => /^HQA 회신 반영 · 댓글 [0-9]{6,}$/.test(rules.hqaPending[k].status))
-    && ['samplesPerCell', 'delayUnit', 'browserCondition'].every((k) => rules.hqaPending[k].status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>')
-    && rules.hqaPending.T3.status === 'HQA 회신 대기' && rules.hqaPending.T3.value === null, pend.map((k) => rules.hqaPending[k].status));
+  // 값커밋 c-V1: 옛 단언(아래 식 그대로)은 _옛값_값커밋 사본에 건다 · 지금 rules 에 걸면 빨강(대조군 1회) · 지금 값은 새 단언
+  const hp6Old = (r) => { const pd = Object.keys(r.hqaPending).filter((k) => !k.startsWith('_')); return pd.length === 6 && pd.includes('T3')
+    && ['S1toS4', 'rawFormat'].every((k) => /^HQA 회신 반영 · 댓글 [0-9]{6,}$/.test(r.hqaPending[k].status))
+    && ['samplesPerCell', 'delayUnit', 'browserCondition'].every((k) => r.hqaPending[k].status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>')
+    && r.hqaPending.T3.status === 'HQA 회신 대기' && r.hqaPending.T3.value === null; };
+  check('고침5 hqaPending 6칸 상태: ①② 반영 · ③④⑤ 사전 고정(자리표) · T3 회신 대기 무변 [값커밋: _옛값_값커밋 사본]', hp6Old(oldValCommit(rules)), pend.map((k) => oldValCommit(rules).hqaPending[k].status));
+  plant('값커밋 대조군: 옛 단언 「hqaPending 6칸 상태(자리표 · T3 회신 대기)」 를 지금 rules 에 → 빨강', !hp6Old(rules));
+  check('값커밋 hqaPending 6칸 상태: ①② 반영 무변 · ③④⑤ = 사전 고정 · 댓글 6921734895(결-1 甲 · 「HQA 회신 반영」 꼴 0) · T3 = HQA 회신 반영 · 댓글 6921942407 · 값 = 결-2 乙 글자 · 옛 글자 = _옛값_값커밋',
+    pend.length === 6 && ['S1toS4', 'rawFormat'].every((k) => /^HQA 회신 반영 · 댓글 [0-9]{6,}$/.test(rules.hqaPending[k].status) && !rules.hqaPending[k]._옛값_값커밋)
+    && ['samplesPerCell', 'delayUnit', 'browserCondition'].every((k) => rules.hqaPending[k].status === VC_PRESET && rules.hqaPending[k]._옛값_값커밋 && rules.hqaPending[k]._옛값_값커밋.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>')
+    && rules.hqaPending.T3.status === VC_T3_STATUS && rules.hqaPending.T3.value === VC_T3_VALUE
+    && !!rules.hqaPending.T3._옛값_값커밋 && rules.hqaPending.T3._옛값_값커밋.status === 'HQA 회신 대기' && rules.hqaPending.T3._옛값_값커밋.value === null, pend.map((k) => rules.hqaPending[k].status));
   // 고침1 F8: 장전 관문(hqa-gate.js) — 필수 칸 목록 고정 · 확정 꼴만 통과 · 대조군 1 + 우회 꼴 6
   {
     const G = require('./hqa-gate.js');
     const conf = (r) => { const c = JSON.parse(JSON.stringify(r)); for (const k of G.REQUIRED) { c.hqaPending[k].status = 'HQA 회신 반영 · 댓글 1234567890'; if (c.hqaPending[k].value === null) c.hqaPending[k].value = 'x'; } c.plan.notMeasured.find((x) => x.item === 'I-8').approval = '미측정 허용 결재 · 댓글 1234567890'; return c; };
-    check('관문: 지금 rules = 거부(회신 대기 남음)', !G.check(rules).ok);
+    check('관문: 지금 rules = 거부(회신 대기 남음) [값커밋: _옛값_값커밋 사본]', !G.check(oldValCommit(rules)).ok);
+    plant('값커밋 대조군: 옛 단언 「관문: 지금 rules = 거부」 를 지금 rules 에 → 빨강', G.check(rules).ok);
+    check('값커밋 관문: 지금 rules = 통과(기계 잠금 풀림 — 이제 장전을 막는 것 = push 0 순서 · 작업지시서 §6 위험 1)', G.check(rules).ok, G.check(rules).problems);
     check('관문: 필수 칸 = 6 · T3 포함', G.REQUIRED.length === 6 && G.REQUIRED.includes('T3'));
     const all = conf(rules);
     check('관문: 6칸 모두 확정 꼴 = 통과(대조군)', G.check(all).ok, G.check(all).problems);
@@ -1712,17 +1734,26 @@ function checkProbe(src) {
     plant('고침5 ⑧ 관문: ② 값 = 옛 꼴 글자 하나 = 거부(필수 키 넷)', why(rs, 'rawFormat').includes('shape'));
     const rk = conf5(rules); delete rk.hqaPending.rawFormat.value.hashes;
     plant('고침5 ⑧ 관문: ② 값 필수 키(해시 목록) 빠짐 = 거부', why(rk, 'rawFormat').includes('shape'));
-    const now = G.check(rules).problems.map((p) => p.key);
-    check('고침5 ⑧: 지금 rules = 거부 · 걸린 칸 = ③④⑤(자리표) + T3 · ①② 는 통과', !G.check(rules).ok && JSON.stringify(Array.from(new Set(now))) === '["samplesPerCell","delayUnit","browserCondition","T3"]', G.check(rules).problems);
+    // 값커밋 c-V1: 옛 단언(식 그대로)은 _옛값_값커밋 사본에 · 지금 rules 에 걸면 빨강(대조군 1회) · 지금 값 = 새 단언
+    const g8Old = (r) => { const nw = G.check(r).problems.map((p) => p.key); return !G.check(r).ok && JSON.stringify(Array.from(new Set(nw))) === '["samplesPerCell","delayUnit","browserCondition","T3"]'; };
+    check('고침5 ⑧: 지금 rules = 거부 · 걸린 칸 = ③④⑤(자리표) + T3 · ①② 는 통과 [값커밋: _옛값_값커밋 사본]', g8Old(oldValCommit(rules)), G.check(oldValCommit(rules)).problems);
+    plant('값커밋 대조군: 옛 단언 「고침5 ⑧ 지금 rules = 거부 · ③④⑤ + T3」 를 지금 rules 에 → 빨강', !g8Old(rules));
+    check('값커밋 ⑧: 지금 rules = 관문 걸린 칸 0(③④⑤ 사전 고정 꼴 · T3 반영 꼴 · 계획 · 측정 코드 I-8)', G.check(rules).problems.length === 0, G.check(rules).problems);
   }
   // ⑨ hqaPendingOpen = 관문 꼴로 셈
   {
-    const filled = JSON.parse(JSON.stringify(R5));
+    // 값커밋 c-V1: 옛 단언(식 그대로)의 바닥 R5 를 _옛값_값커밋 사본(R5o)으로 · 지금 rules 판독(v0)에 걸면 빨강(대조군 1회) · 지금 값 = 새 단언
+    const R5o = oldValCommit(R5);
+    const filled = JSON.parse(JSON.stringify(R5o));
     for (const k of ['samplesPerCell', 'delayUnit', 'browserCondition']) filled.hqaPending[k].status = filled.hqaPending[k].status.replace('<사전공개댓글>', '1234567890');
     const vf = run(filled, base(filled));
-    check('고침5 ⑨: 자리표 채운 뒤 hqaPendingOpen = T3 하나 · 지금 rules = 자리표 3 + T3 · 자리표 칸 따로 표시',
-      JSON.stringify(vf.hqaPendingOpen) === '["T3"]' && vf.hqaPendingOpenCount === 1 && vf.hqaPendingPlaceholder.length === 0
-      && JSON.stringify(v0.hqaPendingOpen) === '["samplesPerCell","delayUnit","browserCondition","T3"]' && v0.hqaPendingPlaceholder.length === 3, { vf: vf.hqaPendingOpen, v0: v0.hqaPendingOpen });
+    const v0o = run(R5o, base(R5o));
+    const g9Old = (a, b) => JSON.stringify(a.hqaPendingOpen) === '["T3"]' && a.hqaPendingOpenCount === 1 && a.hqaPendingPlaceholder.length === 0
+      && JSON.stringify(b.hqaPendingOpen) === '["samplesPerCell","delayUnit","browserCondition","T3"]' && b.hqaPendingPlaceholder.length === 3;
+    check('고침5 ⑨: 자리표 채운 뒤 hqaPendingOpen = T3 하나 · 지금 rules = 자리표 3 + T3 · 자리표 칸 따로 표시 [값커밋: _옛값_값커밋 사본]',
+      g9Old(vf, v0o), { vf: vf.hqaPendingOpen, v0: v0o.hqaPendingOpen });
+    plant('값커밋 대조군: 옛 단언 「고침5 ⑨ 지금 rules = 자리표 3 + T3」 를 지금 rules 판독에 → 빨강', !g9Old(vf, v0));
+    check('값커밋 ⑨: 지금 rules 판독 hqaPendingOpen = 0 · 자리표 0', JSON.stringify(v0.hqaPendingOpen) === '[]' && v0.hqaPendingOpenCount === 0 && v0.hqaPendingPlaceholder.length === 0, { v0: v0.hqaPendingOpen, ph: v0.hqaPendingPlaceholder });
     const nt = JSON.parse(JSON.stringify(filled)); nt.hqaPending.T3.status = '검토 중';
     const old = Object.keys(nt.hqaPending).filter((k) => !k.startsWith('_') && String(nt.hqaPending[k].status).includes('HQA 회신 대기'));
     plant('고침5 ⑨ 대조군: T3 를 새 글자(검토 중)로 → 옛 셈 0(거짓 표시) · 새 셈 = T3 열림', old.length === 0 && JSON.stringify(run(nt, base(nt)).hqaPendingOpen) === '["T3"]');
@@ -1740,9 +1771,16 @@ function checkProbe(src) {
     const unitPerDir = (r) => !!fnP && r.hqaPending.delayUnit.value === 'per-direction-ms' && fnP(r, 300).perDirectionMs === 300 && fnP(r, 300).roundTripMs === 600 && fnP(r, 150).perDirectionMs === 150 && fnP(r, 0).perDirectionMs === 0;
     check('고침6 T1: rules 단위 = per-direction-ms(HQA 집행 단위) · 방향당 300 → 프록시 인자 300 · 왕복 기록 600 · 프록시 인자 = perDirectionMs · 표본 proxy 칸에 둘 다',
       unitPerDir(rules) && srcUse, { unit: rules.hqaPending.delayUnit.value });
-    check('고침6 T1: 옛 값 보존 — _옛값_고침5 = round-trip-ms(고침5 note 그대로) · _옛값_고침4 = per-direction-ms · 상태 글자 자리표 그대로',
+    // 값커밋 c-V1: 옛 단언(식 그대로)은 _옛값_값커밋 사본에 · 지금 rules 에 걸면 빨강(대조군 1회) · 지금 값 = 새 단언(상태 글자만 댓글 번호로)
+    const t1Old = (r) => !!(r.hqaPending.delayUnit._옛값_고침5 && r.hqaPending.delayUnit._옛값_고침5.value === 'round-trip-ms' && /같은 나무 유일 글자/.test(r.hqaPending.delayUnit._옛값_고침5.note)
+      && r.hqaPending.delayUnit._옛값_고침4.value === 'per-direction-ms' && r.hqaPending.delayUnit.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>');
+    check('고침6 T1: 옛 값 보존 — _옛값_고침5 = round-trip-ms(고침5 note 그대로) · _옛값_고침4 = per-direction-ms · 상태 글자 자리표 그대로 [값커밋: _옛값_값커밋 사본]',
+      t1Old(oldValCommit(rules)));
+    plant('값커밋 대조군: 옛 단언 「고침6 T1 상태 글자 자리표 그대로」 를 지금 rules 에 → 빨강', !t1Old(rules));
+    check('값커밋 T1: 옛 값 보존 — _옛값_고침5 = round-trip-ms · _옛값_고침4 = per-direction-ms · 상태 = 사전 고정 · 댓글 6921734895 · _옛값_값커밋 = 자리표 글자',
       rules.hqaPending.delayUnit._옛값_고침5 && rules.hqaPending.delayUnit._옛값_고침5.value === 'round-trip-ms' && /같은 나무 유일 글자/.test(rules.hqaPending.delayUnit._옛값_고침5.note)
-      && rules.hqaPending.delayUnit._옛값_고침4.value === 'per-direction-ms' && rules.hqaPending.delayUnit.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>');
+      && rules.hqaPending.delayUnit._옛값_고침4.value === 'per-direction-ms' && rules.hqaPending.delayUnit.status === VC_PRESET
+      && rules.hqaPending.delayUnit._옛값_값커밋.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>');
     check('고침5 시절 대조군(T1 · 옛 단언 보존): 왕복 150 → 방향당 75 · 500 → 250 · 0 → 0(round-trip-ms 갈래 코드 무변)',
       !!fnP && fnP(rr('round-trip-ms'), 150).perDirectionMs === 75 && fnP(rr('round-trip-ms'), 500).perDirectionMs === 250 && fnP(rr('round-trip-ms'), 0).perDirectionMs === 0);
     const rtCopy = JSON.parse(JSON.stringify(rules)); rtCopy.hqaPending.delayUnit.value = 'round-trip-ms';
@@ -1906,7 +1944,11 @@ function checkProbe(src) {
   plant('H4 ⑩ 대조군: 글자에 「/after」 심음 → 빨강', !noAfter(n10));
   // ⑪ hqaPendingOpen T3 = G-값 전 1 · 뒤 0
   const g1 = cp(); g1.hqaPending.T3.status = 'HQA 회신 반영 · 댓글 1234567890'; g1.hqaPending.T3.value = '11/7 작업지시서 L306 글자 고정 · 항목 단위';
-  check('H4 ⑪: hqaPendingOpen T3 = G-값 전 1 · 뒤 0 · 관문 T3 = 계획 · 측정 코드 있으면 통과', G.openKeys(rules).includes('T3') && !G.openKeys(g1).includes('T3') && !G.check(g1, { itemsHave: ['I-8'] }).problems.some((p) => p.key === 'T3'));
+  // 값커밋 c-V1: 옛 단언(식 그대로)의 「G-값 전」 바닥을 _옛값_값커밋 사본으로 · 지금 rules 에 걸면 빨강(대조군 1회) · 지금 rules = G-값 뒤
+  const h11Old = (r) => G.openKeys(r).includes('T3') && !G.openKeys(g1).includes('T3') && !G.check(g1, { itemsHave: ['I-8'] }).problems.some((p) => p.key === 'T3');
+  check('H4 ⑪: hqaPendingOpen T3 = G-값 전 1 · 뒤 0 · 관문 T3 = 계획 · 측정 코드 있으면 통과 [값커밋: _옛값_값커밋 사본]', h11Old(oldValCommit(rules)));
+  plant('값커밋 대조군: 옛 단언 「H4 ⑪ 지금 rules = G-값 전(T3 열림)」 을 지금 rules 에 → 빨강', !h11Old(rules));
+  check('값커밋 H4 ⑪: 지금 rules = G-값 뒤 — hqaPendingOpen 에 T3 없음 · 관문 T3 문제 0(계획 · 측정 코드 I-8)', !G.openKeys(rules).includes('T3') && !G.check(rules, { itemsHave: ['I-8'] }).problems.some((p) => p.key === 'T3'));
   plant('H4 ⑪ 대조군: T3 확정 · 측정 코드 목록에 I-8 없음 → 관문 거부', G.check(g1, { itemsHave: ['I-1'] }).problems.some((p) => p.why === 'no-code-or-approval'));
   // probe 비교 화면 심은 위반
   const psrc = fs.readFileSync(path.join(HERE, 'probe.js'), 'utf8');
