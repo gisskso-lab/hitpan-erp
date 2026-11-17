@@ -309,7 +309,7 @@ fi
 
 # ── S9·S10 가짜 엔진(#859 후속 ㄱ′-2) ──────────────────────────────────────
 # 실행 때 임시 폴더에 `docker` 실행 파일을 만들고, **그 scan.sh 호출에만** PATH 앞에 끼운다(새 환경 변수 0 ·
-# scan.sh 에 시험용 손잡이 0). 가짜 엔진 = 지정 결과 줄(표준 출력) + 훑은 양 숫자 줄(오류 출력) + 지정 종료 코드.
+# scan.sh 에 시험용 손잡이 0). 가짜 엔진 = 지정 결과 줄(표준 출력) + 훑은 양 기록 줄(오류 출력 · 파일에서 읽음) + 지정 종료 코드.
 # 🔴 출력 격리: S9 는 ANNOTATE=1(운영 꼴)이라 출력이 그대로 잡 로그에 가면 진짜 주석이 된다
 #    → 출력은 F_OUT 파일로만 받고 ALL_LOG 에도 붙이지 않는다. miss 문구에는 숫자·0/1 만 넣는다.
 fake_bin="${root}/fake-bin"
@@ -317,17 +317,22 @@ mkdir -p "$fake_bin"
 cat > "${fake_bin}/docker" <<EOF
 #!/usr/bin/env bash
 cat "${root}/fake.out"
-echo 'level=info msg="finished scanning" {"chunks": 3, "bytes": 120}' >&2
+cat "${root}/fake.err" >&2
 exit "\$(cat "${root}/fake.rc")"
 EOF
 chmod +x "${fake_bin}/docker"
 
 F_OUT="${root}/fake.last"
 f_rc=0 f_state="" f_det=""
-run_fake() {     # 엔진_종료코드 결과_파일 ANNOTATE
+run_fake() {     # 엔진_종료코드 결과_파일 ANNOTATE [기록_줄_파일 — 없으면 기본 한 줄(조각 3)]
   local sum="${root}/fake.sum"
   : > "$sum"
   cp "$2" "${root}/fake.out"
+  if [ -n "${4:-}" ]; then
+    cp "$4" "${root}/fake.err"
+  else
+    printf '%s\n' 'level=info msg="finished scanning" {"chunks": 3, "bytes": 120}' > "${root}/fake.err"
+  fi
   echo "$1" > "${root}/fake.rc"
   set +e
   PATH="${fake_bin}:${PATH}" BASE="$M3" HEAD="$F1" REPO_DIR="$scan_repo" CONFIG_FILE="" EXCLUDE_FILE="" \
@@ -419,6 +424,63 @@ else
   miss "S10 엄격 해석 — 기대 「a~d error/2 · e clean/0 · f error/2 · 깨진 줄 글자 0」 · 실제 ${s10}깨진줄글자(${s10d_can})"
 fi
 
+# ── S11 하한 값 모양(C5-N1 후속): 커밋이 있는 범위 · 엔진 0 · 결과 0줄에서 훑은 양 기록 줄의 모양별 판정 ──
+# 기록 줄은 실행 때 printf 로 만든다(합성 숫자만). 행마다 종료 코드 · 요약 상태 · 문구 종류를 본다.
+#   모양 = 「훑은 양 기록 모양 이상」 1줄 + 「훑은 조각 0」 0줄 · 조각0 = 반대 · 깨끗 = 「판정: 깨끗 — 」 1줄 + 「records=1」 1줄
+# 첫 불일치에서 멈추지 않는다 — 불일치 행마다 miss 1줄(행 · 상태/종료 · 문구 셈 숫자만) · 다 돈 뒤 묶음 끝에서 판정(CTO C2).
+s11_in="${root}/s11.err"
+s11_ok=0 s11_n=0
+s11_one() {      # 행 기대_상태 기대_종료 기대_문구(모양|조각0|깨끗) (기록 줄은 s11_in)
+  local shape zero clean rec ok=0
+  run_fake 0 "$empty_in" 0 "$s11_in"
+  shape="$(fcnt 0 -F -e '훑은 양 기록 모양 이상')"
+  zero="$(fcnt 0 -F -e '훑은 조각 0')"
+  clean="$(fcnt 0 -E '^판정: 깨끗 — ')"
+  rec="$(fcnt 0 -F -e 'records=1')"
+  case "$4" in
+    모양) [ "$shape" -eq 1 ] && [ "$zero" -eq 0 ] && ok=1 ;;
+    조각0) [ "$zero" -eq 1 ] && [ "$shape" -eq 0 ] && ok=1 ;;
+    깨끗) [ "$clean" -eq 1 ] && [ "$rec" -eq 1 ] && ok=1 ;;
+  esac
+  s11_n=$((s11_n + 1))
+  if [ "$f_rc" -eq "$3" ] && [ "$f_state" = "$2" ] && [ "$ok" -eq 1 ]; then
+    s11_ok=$((s11_ok + 1))
+  else
+    miss "S11${1} — 기대 ${2}/${3} · ${4} · 실제 ${f_state:-?}/${f_rc} · 모양${shape} 조각0${zero} 깨끗${clean} records1${rec}"
+  fi
+}
+s11_p='level=info msg="finished scanning"'
+s11_line() { printf '%s %s\n' "$s11_p" "$1" > "$s11_in"; }
+s11_line '{"chunks": 0, "chunks": 22, "bytes": 120}'; s11_one a error 2 모양       # 한 줄 · 값 둘(0 + 22)
+s11_line '{"chunks": 22, "chunks": 0, "bytes": 120}'; s11_one b error 2 모양       # 한 줄 · 값 둘(22 + 0)
+s11_line '{"unit_chunks": 0, "chunks": 22, "bytes": 120}'; s11_one c error 2 모양  # 접두어 붙은 하위 열쇠
+printf '%s %s\n' "$s11_p" '{"chunks": 22, "bytes": 120}' "$s11_p" '{"chunks": 0, "bytes": 0}' > "$s11_in"; s11_one d error 2 모양    # 기록 줄 둘 22/0
+printf '%s %s\n' "$s11_p" '{"chunks": 0, "bytes": 0}' "$s11_p" '{"chunks": 22, "bytes": 120}' > "$s11_in"; s11_one e error 2 모양    # 기록 줄 둘 0/22
+printf '%s %s\n' "$s11_p" '{"chunks": 22, "bytes": 120}' "$s11_p" '{"chunks": 22, "bytes": 120}' > "$s11_in"; s11_one f error 2 모양 # 기록 줄 둘 22/22
+s11_line '{"chunks": 007, "bytes": 120}'; s11_one g error 2 모양                   # 앞자리 0
+s11_line '{"chunks": 00, "bytes": 120}'; s11_one h error 2 모양                    # 앞자리 0
+s11_line '{"chunks": -5, "bytes": 120}'; s11_one i error 2 모양                    # 부호
+s11_line '{"chunks": +5, "bytes": 120}'; s11_one j error 2 모양                    # 부호
+s11_line '{"chunks":  22, "bytes": 120}'; s11_one k error 2 모양                   # 콜론 뒤 두 칸
+s11_line '{"chunks" : 22, "bytes": 120}'; s11_one l error 2 모양                   # 콜론 앞 공백
+s11_line '{"chunks": 1234567890, "bytes": 120}'; s11_one m error 2 모양            # 10자리
+s11_line '{"chunks": 12345678901234567890, "bytes": 120}'; s11_one n error 2 모양  # 20자리(넘침)
+s11_line '{"chunks": "", "bytes": 120}'; s11_one o error 2 모양                    # 빈 값
+s11_line '{"chunks": "22", "bytes": 120}'; s11_one p error 2 모양                  # 따옴표 숫자
+s11_line '{"chunk_count": 22, "bytes": 120}'; s11_one q error 2 모양               # 열쇠 이름 바뀜
+: > "$s11_in"; s11_one r error 2 모양                                              # 기록 줄 없음
+s11_line '{"chunks": 22, "bytes": 120}'; s11_one s clean 0 깨끗                    # 대조 · 22 하나
+printf '%s %s\r\n' "$s11_p" 'bytes=120 chunks=22' > "$s11_in"; s11_one t clean 0 깨끗   # 대조 · 숫자 바로 뒤 줄 끝 CR
+s11_line '{"chunks": 123456789, "bytes": 120}'; s11_one u clean 0 깨끗             # 대조 · 9자리
+s11_line '{"chunks": 0, "bytes": 120}'; s11_one v error 2 조각0                    # 하한 본체 · 0 하나
+s11_line '{"chunks": 22x, "bytes": 120}'; s11_one w error 2 모양                   # 숫자 뒤 글자
+s11_line '{"chunks": 2.5, "bytes": 120}'; s11_one x error 2 모양                   # 소수점
+if [ "$s11_n" -eq 24 ] && [ "$s11_ok" -eq 24 ]; then
+  pass "S11 하한 값 모양 — 여러 값 · 줄 둘 · 앞자리 0 · 부호 · 공백 · 10자리 · 넘침 · 빈 값 · 글자 · 숫자 뒤 글자 = 모양 이상(종료 2) · 정수 하나(CR · 9자리 포함) = 깨끗 · 0 하나 = 조각0(종료 2)"
+elif [ "$s11_n" -ne 24 ]; then
+  miss "S11 하한 값 모양 — 기대 24행 · 실제 ${s11_n}행"
+fi
+
 # ── 로그 위생: 가짜 비밀 내용이 하위 출력 어디에도 0회 ─────────────────────
 body="${root}/fake.body"
 : > "$body"
@@ -434,4 +496,4 @@ if [ "$fails" -ne 0 ]; then
   echo "::error title=비밀 탐지 자체시험::${fails}개 실패 — 검사 장치를 믿을 수 없으므로 잡을 빨강으로 끝낸다"
   exit 1
 fi
-echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · 로그 위생 모두 통과"
+echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · S11a~x · 로그 위생 모두 통과"

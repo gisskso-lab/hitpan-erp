@@ -134,6 +134,11 @@ rc=$?
 # 훑은 양(숫자만) — 「아무것도 안 훑고 초록」 을 사람이 볼 수 있게
 scanned="$(grep -m1 'finished scanning' "$work/engine.log" | grep -oE '"?(chunks|bytes)"?[:=] ?[0-9]+' | tr -d '"' | tr '\n' ' ')"
 chunks="$(printf '%s' "$scanned" | grep -oE 'chunks[:=] ?[0-9]+' | grep -oE '[0-9]+$' || true)"
+# 하한 확인용 개수(C5-N1) — 엔진 기록 글자는 변수에도 출력에도 남기지 않는다. 숫자만(셈 실패 = 빈 값).
+#   records = 기록 줄 수 · nvals = 조각 값 줄 수 · tailbad = 조각 숫자 바로 뒤 글자가 허용 끝 글자(쉼표 · } · 공백 · 탭 · CR · 줄 끝) 밖인 자리 수
+records="$(LC_ALL=C grep -ac 'finished scanning' "$work/engine.log" 2>/dev/null)" || true
+nvals="$(printf '%s' "$chunks" | grep -c '')" || true
+tailbad="$(LC_ALL=C grep -a 'finished scanning' "$work/engine.log" 2>/dev/null | LC_ALL=C grep -aoE $'"?chunks"?[:=] ?[0-9]+[^0-9,} \t\r]' | grep -c '')" || true
 scanned="${scanned}commits=${commits:-?}"
 
 # ── 결과 파일 엄격 해석(ㄱ′-3) ─────────────────────────────────────────
@@ -171,10 +176,15 @@ count="$objects"
 if [ "$rc" -eq 0 ] && [ "$nonempty" -eq 0 ]; then
   # 하한([3-V] F4): 범위에 커밋이 있는데 훑은 조각이 0(또는 기록 없음)이면 「깨끗」 이 아니라 검사 오류
   [[ "$commits" =~ ^[0-9]+$ ]] || scan_error "범위 커밋 수를 세지 못했다" 0 "$rc"
-  if [ "$commits" -gt 0 ] && { [ -z "$chunks" ] || [ "$chunks" -eq 0 ]; }; then
-    scan_error "범위 커밋 ${commits}개인데 훑은 조각 ${chunks:-기록 없음}" 0 "$rc"
+  if [ "$commits" -gt 0 ]; then
+    # C5-N1: 값이 정수 하나가 아니면(여러 줄 값 · 넘침) 정수 비교가 실패(상태 2)해 「거짓」 이 되고 깨끗으로 새던 꼴을 닫는다.
+    # 1층 = 비교 전에 글자로 확인(기록 줄 정확히 1 · 값 = 0 또는 1~9자리 ASCII 숫자 하나 · 숫자 뒤 허용 끝 글자). 2층 = 1층이 사라졌을 때의 예비(참일 때만 통과).
+    if [ "${records:-}" != "1" ] || [[ ! "$chunks" =~ ^(0|[123456789][0123456789]{0,8})$ ]] || [ "${tailbad:-}" != "0" ]; then
+      scan_error "훑은 양 기록 모양 이상(기록 줄 ${records:-?}개 · 조각 값 ${nvals:-?}개 · 범위 커밋 ${commits}개)" 0 "$rc"
+    fi
+    [ "$chunks" -gt 0 ] 2>/dev/null || scan_error "범위 커밋 ${commits}개인데 훑은 조각 0(또는 비교 불가)" 0 "$rc"
   fi
-  echo "판정: 깨끗 — 결과 0건 · 훑은 양: ${scanned}"
+  echo "판정: 깨끗 — 결과 0건 · 훑은 양: ${scanned} · records=${records:-?}"
   write_summary clean 0 "" "$rc"
   exit 0
 fi
