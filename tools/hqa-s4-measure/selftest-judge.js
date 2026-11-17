@@ -36,7 +36,7 @@ const K1_FLOOR_INNER = 110;
 const K1_SITE_FLOOR = { "700998716a29": 1, ddfa4a5c60c0: 4, e6ba771bb50c: 1, bf023daed110: 1, "166d4d52c03d": 1, "01f5ac44ad80": 1, "8a32bfa08278": 1, "34cc44b36d9e": 1, "87f935b90ad1": 1, "9952ee49a660": 1, db78d1f1e019: 1, adaf17e56e22: 1, "2aaf26927378": 1, "7fc66723be29": 1, "71838eeea029": 1, fbfb49ad33a8: 1, fafd9c2fe877: 1, "3e747f0c29be": 1, "55eaed6e1442": 1, "865b4629bac4": 1, "3c0702d2836d": 1, "6f39be2d69aa": 1, "00fabddac9b7": 1, "12b024a19a5a": 1, "9c8c4e350bba": 1, "8c3ccbe7ad3c": 1, "00cc1fd5271c": 1, "1fff25de5aef": 1, b2ad7a927821: 1, "3434528ee919": 1, c5ac3a3a7a17: 1, "68580c0f0b1d": 1, c1c96fda9f9d: 1, f617af48d94e: 7, "2ce3ac3c84b2": 1, b89cab35e63f: 1, "5d194b264cc2": 1, bbf0d6f5ea47: 1, "921fa8e02663": 1, "32a0967c876c": 1, c45e3b85195c: 1, "21c682212ad1": 1, e31901893a34: 1, "15a598b328ec": 1, e4a38384d338: 2, e954065a3400: 2, "5265e8927134": 2, "96a4c0fb0225": 4, "944a5b80659e": 1, fb9f3f9976b8: 1, "2704b06996ff": 1, "20eefd59dd7e": 4, faee6d54169a: 1, "6586c3389f44": 4, "60ab8d6d0597": 1, "2074223aefb7": 1, d6c7b30e95fa: 1, db97871cc8c2: 1, "6d29df68f078": 1, "93aa66b75523": 1, "52f6f976afe5": 1, "3c11065e9367": 1, "5b0d39613181": 1, "16d9ad248fe7": 1, e34a2711c425: 1, "1772bd33418e": 1, a5cea0ebb645: 1, "4c6b00ded4c5": 1, d401995535e3: 1, a1552b12cc05: 1, "93103b4e4ba1": 1, f1f46e0aa791: 1, "190fecc8f684": 1, "3703b561ab32": 1, c3aa6d9da8bc: 1, "2df913df0fa1": 3, eb6aa8b11e96: 1, "7e86b09d7809": 1, cd748ae4874c: 1, e27ddbf46bfa: 1, "67493276294d": 1, "3cfae413726a": 1, "678e640af8f4": 1, c269d372468a: 1, "112e1b290744": 1, "80849870fa91": 1, babfb9abadc0: 1, "27c166a9ed31": 1, "3aa7c8c23caa": 1 };
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
 // T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
-const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 13, sha: "83673b6cb087959e"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
+const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 14, sha: "a838da2ddc05439a"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
   loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [], zone: null, baselineMissing: false };
@@ -1395,6 +1395,58 @@ function checkProbe(src) {
     const msrc = fs.readFileSync(m0, 'utf8');
     check('G4-G8 원문: 장전 때 원자료 가지 있으면 측정 0(ls-remote · armed_raw_branch_absent) · 원자료에 github_sha · mode_line',
       /armed_raw_branch_absent/.test(msrc) && /ls-remote origin "refs\/heads\/\$RAW_BRANCH"/.test(msrc) && /github_sha:/.test(msrc) && /mode_line:/.test(msrc));
+  }
+  // 값커밋 c-V4 결-13 甲(작업지시서 §9 · PM 재결재 11/18): M0 ③ 허용 4경로(정확히 · 와일드카드 0) · ③b 고정 blob — 임시 색인으로 지은 나무에 --diff-only(망 0 · 파일 0 · 참조 0) · 심은 위반 (가)(나) · 대조군 (다)(라)
+  {
+    const m0 = path.join(HERE, 'm0-assert.sh');
+    const root = path.resolve(HERE, '..', '..');
+    const env0 = Object.assign({}, process.env);
+    for (const k of ['GITHUB_SHA', 'GITHUB_RUN_ATTEMPT', 'GITHUB_ACTIONS', 'GITHUB_OUTPUT', 'GITHUB_RUN_ID', 'GIT_INDEX_FILE']) delete env0[k];
+    const SP4 = ['.github/workflows/trufflehog.yml', '.github/scripts/trufflehog/range.sh', '.github/scripts/trufflehog/scan.sh', '.github/scripts/trufflehog/self-test.sh'];
+    const SB4 = ['50e4e57daefdb325c110430887405dea4267d34b', '7e6534064235927f80c42df7fc7d455f210a27bd', 'b44a24645cf52acdd4a634dc8a232d90096de84a', '0a369de4ab45362a088d7003f83d5a27e4710244'];
+    const BASE0 = '88085da1d797b915b8e8be314517af180d0b9939';
+    // 자식 프로세스 실행 자리 = 이 한 줄(sh)만 — T34 정적 게이트 셈
+    const sh = (cmd, args, opt) => spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {}));
+    const git = (args, opt) => sh('git', args, Object.assign({ encoding: 'utf8' }, opt || {}));
+    const idx = path.join(fs.mkdtempSync(path.join(tmp, 'm0x-')), 'index');
+    const genv = Object.assign({}, env0, { GIT_INDEX_FILE: idx });
+    const mkTree = (edit) => {
+      if (fs.existsSync(idx)) fs.unlinkSync(idx);
+      let r = git(['read-tree', 'HEAD'], { env: genv }); if (r.status !== 0) return null;
+      for (const e of edit) {
+        r = e.remove ? git(['update-index', '--force-remove', '--', e.path], { env: genv }) : git(['update-index', '--add', '--cacheinfo', '100644,' + e.blob + ',' + e.path], { env: genv });
+        if (r.status !== 0) return null;
+      }
+      r = git(['write-tree'], { env: genv }); return r.status === 0 ? r.stdout.trim() : null;
+    };
+    const hashW = (buf) => { const r = sh('git', ['hash-object', '-w', '--stdin'], { input: buf }); return r.status === 0 ? String(r.stdout).trim() : null; };
+    const run3 = (tree) => {
+      const d = fs.mkdtempSync(path.join(tmp, 'm0d-'));
+      const r = sh('bash', [m0, d, '--diff-only', tree], { encoding: 'utf8' });
+      const out = (r.stdout || '') + (r.stderr || '');
+      const st = (nm) => (new RegExp(nm + ' 통과').test(out) ? 1 : (new RegExp(nm + ' 다름').test(out) ? 0 : null));
+      return { rc: r.status, a3: st('m0_3_diff_allowed'), b3: st('m0_3b_secret_blobs'), files: fs.readdirSync(d).length, out: out.slice(0, 400), err: r.error ? String(r.error.message).slice(0, 80) : null };
+    };
+    const fix4 = SP4.map((q, i) => ({ path: q, blob: SB4[i] }));
+    const have = SB4.every((b) => git(['cat-file', '-e', b]).status === 0);
+    // (다) 4파일 = 고정 blob 그대로
+    const tC = mkTree(fix4);
+    // (라) 4파일 없음(87cb635c 꼴) — trufflehog.yml = BASE 판 blob · scripts 3 없음
+    const baseWf = git(['rev-parse', BASE0 + ':' + SP4[0]]).stdout.trim();
+    const tD = mkTree([{ path: SP4[0], blob: baseWf }, { path: SP4[1], remove: true }, { path: SP4[2], remove: true }, { path: SP4[3], remove: true }]);
+    // (가) 4경로 밖 .github 경로 1개(허용 경로와 같은 폴더 — 와일드카드 0 확인)
+    const xBlob = hashW(Buffer.from('# 값커밋 결-13 자체시험 심은 위반 (가)\n'));
+    const tA = xBlob ? mkTree(fix4.concat([{ path: '.github/scripts/trufflehog/extra.sh', blob: xBlob }])) : null;
+    // (나) scan.sh 끝 1바이트 바꿈
+    const sc = sh('git', ['cat-file', 'blob', SB4[2]]);
+    const scB = Buffer.from(sc.stdout || []); if (scB.length) scB[scB.length - 1] = scB[scB.length - 1] ^ 1;
+    const nBlob = scB.length ? hashW(scB) : null;
+    const tB = nBlob ? mkTree(fix4.map((e, i) => (i === 2 ? { path: e.path, blob: nBlob } : e))) : null;
+    const rC = tC ? run3(tC) : null, rD = tD ? run3(tD) : null, rA = tA ? run3(tA) : null, rB = tB ? run3(tB) : null;
+    check('값커밋 결-13 (다) 대조군: 4파일 = 고정 blob 그대로 → ③ · ③b 초록(checked=4) · 원자료 파일 0', have && !!rC && rC.rc === 0 && rC.a3 === 1 && rC.b3 === 1 && /checked=4/.test(rC.out) && rC.files === 0, rC);
+    check('값커밋 결-13 (라) 대조군: 4파일 없음(87cb635c 꼴) → ③ · ③b 초록(③b 해당 없음 · checked=0)', !!rD && rD.rc === 0 && rD.a3 === 1 && rD.b3 === 1 && /checked=0/.test(rD.out), rD);
+    plant('값커밋 결-13 (가) 심은 위반: 4경로 밖 .github 경로 1개(.github/scripts/trufflehog/extra.sh) → ③ 빨강', !!rA && rA.rc === 1 && rA.a3 === 0 && /extra\.sh/.test(rA.out), rA);
+    plant('값커밋 결-13 (나) 심은 위반: scan.sh 1바이트 바꿈 → ③b 빨강(③ 은 초록)', !!rB && rB.rc === 1 && rB.a3 === 1 && rB.b3 === 0 && /scan\.sh/.test(rB.out), rB);
   }
   // C-2(결-1 조건 ①): 장치 폴더 · 워크플로에 주소 앞머리 판단 0 — 꼴은 조각으로 만든다(이 파일이 스스로 걸리지 않게)
   {

@@ -9,10 +9,16 @@
 #     ⑦ 장전(armed) 때 원자료 가지가 이미 있으면 측정 0(이 잡 첫머리 ls-remote)
 #     ① 원자료(m0-assert.json)에 github_sha · run_id · run_attempt · mode_line(MODE 줄)
 #     --guard-only = ⑤ ⑥ 만 재고 끝(망 접속 0 · 파일 0 — selftest-judge.js 가 attempt 2 → 측정 0 을 동작으로 확인)
+#   값커밋 결-13 甲(작업지시서 §9 · PM 재결재 11/18): ③ 허용 목록 = 측정 워크플로 · tools/hqa-s4-measure/ + 비밀 검사 4경로(정확히 · 와일드카드 0)
+#     ③b m0_3b_secret_blobs = 그 4경로 중 diff 에 있는 경로마다 blob = 고정값(main b0305286 실측) · 없으면 해당 없음(초록) · 「M0 blob 10쌍」(⑤) 셈과 따로
+#     --diff-only <나무 · 커밋> = ③ · ③b 만 그 나무로 재고 끝(망 접속 0 · 파일 0 — selftest-judge.js 가 심은 위반 · 대조군을 동작으로 확인)
 set -u -o pipefail
 
 RAW="${1:?usage: m0-assert.sh <raw-dir> [--guard-only]}"
 GUARD_ONLY=0; [ "${2:-}" = "--guard-only" ] && GUARD_ONLY=1
+# 값커밋 결-13: --diff-only <나무> (자체시험용)
+DIFF_ONLY=0; DIFF_REV=HEAD
+if [ "${2:-}" = "--diff-only" ]; then DIFF_ONLY=1; DIFF_REV="${3:?usage: m0-assert.sh <raw-dir> --diff-only <tree-ish>}"; fi
 mkdir -p "$RAW"
 
 # 고침4 G9(G-값 · F′): 옛 값 FIX_TREE=0b31f869… · BASE=01161edb… 대체 → F′(b967b1b0 · A2 화면 더한 판 · 부모 01161edb)
@@ -26,6 +32,9 @@ A2SRC=2a6a0ee10fcc3c79791f49747070009b25290fec      # A2 원 커밋(⑤ 쌍 ⑤ 
 E1T3SRC=e456e4f6a0b2dc36f14ef53f64106d455f363ecb    # 비교 화면 e1t3 원 커밋(⑤ 쌍 ⑦ · ⑧ · 결-H2 · 결-H9)
 V2SRC=74a76c58f3005dcc92be0a2043918dcc483e6220      # 비교 화면 v2 원 커밋(⑤ 쌍 ⑨ · ⑩ · 결-H9)
 WF=.github/workflows/hqa-s4-measure.yml
+# 값커밋 결-13: 비밀 검사 4경로(정확히) · 고정 blob = main b0305286 판(작업지시서 §9 표) — 4파일을 바꾸면 이 값과 공개 v4 를 함께 정정
+SECRET_PATHS=(".github/workflows/trufflehog.yml" ".github/scripts/trufflehog/range.sh" ".github/scripts/trufflehog/scan.sh" ".github/scripts/trufflehog/self-test.sh")
+SECRET_BLOBS=("50e4e57daefdb325c110430887405dea4267d34b" "7e6534064235927f80c42df7fc7d455f210a27bd" "b44a24645cf52acdd4a634dc8a232d90096de84a" "0a369de4ab45362a088d7003f83d5a27e4710244")
 MDIR=tools/hqa-s4-measure/
 MODE_PATH=tools/hqa-s4-measure/MODE
 HEADS=("refs/heads/main" "refs/heads/feat/20261107-백오피스S4닫기" "refs/heads/hqa/20261107-S4-시험앱")
@@ -71,6 +80,44 @@ rec() { # 이름 · 통과(1/0) · 세부
   if [ "$2" != "1" ]; then fail=1; fi
 }
 
+# 값커밋 결-13: ③ · ③b 함수 — 인자 = 잴 나무(평소 HEAD · --diff-only 면 그 나무)
+m0_check3() {
+  local rev="$1"
+  # ③ (옛 본문 그대로 · HEAD → "$rev" · 4경로 허용 줄 더함)
+  bad=""; n=0; d3ok=0
+  if git diff --no-renames --name-only "$BASE" "$rev" > "$TMPD/d3" 2>"$TMPD/e3"; then
+    while IFS= read -r p; do
+      [ -z "$p" ] && continue
+      n=$((n+1))
+      if [ "$p" = "$WF" ]; then continue; fi
+      case "$p" in "$MDIR"*) continue ;; esac
+      # 값커밋 결-13: 비밀 검사 4경로 — 정확히 같은 글자만(와일드카드 0) · 바이트는 ③b 가 고정값으로 잰다
+      sp_ok=0; for sp in "${SECRET_PATHS[@]}"; do if [ "$p" = "$sp" ]; then sp_ok=1; fi; done
+      if [ "$sp_ok" = "1" ]; then continue; fi
+      bad="$bad $p"
+    done < "$TMPD/d3"
+    d3ok=1
+    if [ -z "$bad" ]; then rec m0_3_diff_allowed 1 "changed=$n"; else rec m0_3_diff_allowed 0 "outside allowed:$bad"; fi
+  else
+    rec m0_3_diff_allowed 0 "diff error: $(cat "$TMPD/e3")"
+  fi
+  # ③b 4경로 중 diff 에 있는 경로마다 그 나무의 blob = 고정값 (diff 를 못 읽으면 빨강 · 4경로가 diff 에 없으면 해당 없음 = 초록)
+  if [ "$d3ok" = "1" ]; then
+    sb_bad=""; sb_n=0; i=0
+    for sp in "${SECRET_PATHS[@]}"; do
+      if grep -Fxq -- "$sp" "$TMPD/d3"; then
+        sb_n=$((sb_n+1))
+        got=$(git rev-parse -q --verify "$rev:$sp" 2>/dev/null || echo none)
+        if [ "$got" != "${SECRET_BLOBS[$i]}" ]; then sb_bad="$sb_bad path=$sp got=$got want=${SECRET_BLOBS[$i]}"; fi
+      fi
+      i=$((i+1))
+    done
+    if [ -z "$sb_bad" ]; then rec m0_3b_secret_blobs 1 "checked=$sb_n"; else rec m0_3b_secret_blobs 0 "blob differs:$sb_bad"; fi
+  else
+    rec m0_3b_secret_blobs 0 "diff error: $(cat "$TMPD/e3" 2>/dev/null)"
+  fi
+}
+
 HEAD_SHA=$(git rev-parse HEAD 2>&1)
 IN_ACTIONS=0; [ "${GITHUB_ACTIONS:-}" = "true" ] && IN_ACTIONS=1
 # 고침4 G8 ⑤: 옛 꼴 = GITHUB_SHA 가 있을 때만 대조 → Actions 안이면 반드시 대조(없으면 다름)
@@ -88,6 +135,16 @@ if [ "$GUARD_ONLY" = "1" ]; then
   echo "[M0] 실행 사슬 통과(--guard-only)"
   exit 0
 fi
+# 값커밋 결-13: --diff-only = ③ · ③b 만(망 접속 0 · 파일 0)
+if [ "$DIFF_ONLY" = "1" ]; then
+  : > "$TSV"; fail=0
+  m0_check3 "$DIFF_REV"
+  cut -f1,2,3 "$TSV" | sed 's/\t1\t/ 통과 /; s/\t0\t/ 다름 /'
+  rm -rf "$TMPD"
+  if [ "$fail" != "0" ]; then echo "[M0] ③ · ③b 다름(--diff-only)" >&2; exit 1; fi
+  echo "[M0] ③ · ③b 통과(--diff-only)"
+  exit 0
+fi
 
 # ① 시험 앱 나무 해시
 got=$(git rev-parse "HEAD:tools/hqa-s4-fixture" 2>&1)
@@ -102,19 +159,8 @@ if git merge-base --is-ancestor "$BASE_ROOT" HEAD 2>"$TMPD/e2r"; then rec m0_2_r
 else rec m0_2_root_ancestor 0 "not ancestor: $(cat "$TMPD/e2r")"; fi
 
 # ③ diff ⊆ 허용 목록 (이름 바꾸기 감지 끔 — 옮긴 파일의 옛 경로도 드러나게)
-bad=""; n=0
-if git diff --no-renames --name-only "$BASE" HEAD > "$TMPD/d3" 2>"$TMPD/e3"; then
-  while IFS= read -r p; do
-    [ -z "$p" ] && continue
-    n=$((n+1))
-    if [ "$p" = "$WF" ]; then continue; fi
-    case "$p" in "$MDIR"*) continue ;; esac
-    bad="$bad $p"
-  done < "$TMPD/d3"
-  if [ -z "$bad" ]; then rec m0_3_diff_allowed 1 "changed=$n"; else rec m0_3_diff_allowed 0 "outside allowed:$bad"; fi
-else
-  rec m0_3_diff_allowed 0 "diff error: $(cat "$TMPD/e3")"
-fi
+#   값커밋 결-13: 본문은 m0_check3 함수로 옮김(글자 무변 · HEAD 자리 = 인자 · 허용 4경로 줄 더함) · 여기서 HEAD 로 부름
+m0_check3 HEAD
 
 # ④ 고정 머리 3개 ls-remote (1회차 · 2회차는 run.json 조립 때)
 #   고침1 F7: 기록만이 아니라 단언 — 줄 수 = 3 · 기능 머리 = FEAT · 시험 앱 머리 = BASE · main 은 값 기록(시작/끝 같음은 runjson 이 단언)
