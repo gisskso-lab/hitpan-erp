@@ -424,6 +424,14 @@ function oldValCommit(r) {
   }
   return c;
 }
+// 값커밋 c-V3(결-5 · PM 결재 11/17 · 결-7 재결재 甲): 노출 표 옛 사본 — _표지_값커밋 행(노15~노20)을 뺌(87cb635c 노출 표 · 노9 는 무변) · 옛 단언은 이 사본에 그대로
+function oldExpoValCommit(r) {
+  const c = JSON.parse(JSON.stringify(r));
+  const keep = (e) => !(e && typeof e === 'object' && Object.prototype.hasOwnProperty.call(e, '_표지_값커밋'));
+  c.exposure = (c.exposure || []).filter(keep);
+  c.exposureNonCell = (c.exposureNonCell || []).filter(keep);
+  return c;
+}
 const VC_PRESET = '개발팀 사전 고정 · 장전 전 공개 · 댓글 6921734895';
 const VC_T3_STATUS = 'HQA 회신 반영 · 댓글 6921942407';
 const VC_T3_VALUE = '11/7 작업지시서 L306 글자 고정(공백 · 빈 · null) · 항목 단위 · 빈 문자열 · null = 명시적 미판정/관찰 항목 · 정상 간주 금지(HQA 6921942407 Q-H2 조건)';
@@ -1576,17 +1584,37 @@ function checkProbe(src) {
     // J1-B([4] ①): 노14(/after kbd-open 참고 행) · 노12 출처 글자 정정 · 칸별 알려진 결과 · 옛 글자 보존 · 전체 14행 짝
     const N14_TXT = '/after kbd-open(I-4 · 방향당 0·150·300) — 같은 칸 노출 없음. 가족 참고: 11/8 수정안 A 사본(`644e27eb`+1줄 · 레포 미커밋) HQA 절차 36/36 🟢 · 기다림 훑기(방향당 300 · 0~1800) 24/24 🟢. `9c358a00`(A′)은 A2 가드 · F13 · F14 를 더한 다른 글자. A′ 자체의 HQA 700ms 칸 측정 = 찾지 못함';
     const KNOWN12 = { 0: '방향당 0 🟢 12/12(복원)', 150: '방향당 150 🟢 12/12(복원)', 300: '방향당 300 🔴 0/12(끝 초점 BODY)' };
-    const j1bExpo = (R) => {
+    // 값커밋 c-V3(결-5): 옛 식의 행 수 자리(MAPPING 14행)만 인자로 — 옛 식 = j1bExpoN(R, 노1~노14 표, 14) 를 옛 노출 표 사본에 · 지금 = 20행(j1bExpo · 아래 심은 위반 RX1~RX3 도 20행 식에 그대로)
+    const upTo14 = (k) => /^노([1-9]|1[0-4])$/.test(k);
+    const mrows14 = {}; for (const k of Object.keys(mrows)) if (upTo14(k)) mrows14[k] = mrows[k];
+    const j1bExpoN = (R, M, nRows) => {
       const allR = (R.exposure || []).concat(R.exposureNonCell || []);
       const cov = new Set(allR.map((e) => e.no));
       const n14 = (R.exposureNonCell || []).filter((e) => e.no === '노14');
       const r12 = (R.exposure || []).filter((e) => e.no === '노12');
-      return n14.length === 1 && n14[0].exposedText === N14_TXT && same(n14[0]) && !(R.exposure || []).some((e) => e.no === '노14') && Object.keys(mrows).length === 14 && cov.size === 14 && Object.keys(mrows).every((k) => cov.has(k))
+      return n14.length === 1 && n14[0].exposedText === N14_TXT && same(n14[0]) && !(R.exposure || []).some((e) => e.no === '노14') && Object.keys(M).length === nRows && cov.size === nRows && Object.keys(M).every((k) => cov.has(k))
         && r12.length === 3 && r12.every((e) => same(e) && e.source.startsWith('11/8 근본원인 §2 묶음 A(지금 판') && e.rawSource.startsWith('11/8 근본원인 §2 묶음 A(지금 판') && e.rawSource.includes('방향당 0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY')
           && e.knownResult === KNOWN12[e.delay] && typeof e._source_옛값_J1B === 'string' && e._source_옛값_J1B.startsWith('11/8 근본원인 §2 A(') && typeof e._rawSource_옛값_J1B === 'string' && e._rawSource_옛값_J1B.startsWith('11/8 근본원인 §2 A('));
     };
-    check('J1-B ①: 노14 참고 행(exposureNonCell 하나 · 노출 내용 글자 그대로 · 판독기 표지 0) · MAPPING 14행 전부 짝 · 노12 출처 「11/8 근본원인 §2 묶음 A(지금 판)」 + 칸별 알려진 결과(0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY) · 옛 글자 보존',
-      j1bExpo(rules), { rows: Object.keys(mrows).length, r12: (rules.exposure || []).filter((e) => e.no === '노12').map((e) => e.knownResult) });
+    const j1bExpo = (R) => j1bExpoN(R, mrows, 20);
+    check('J1-B ①: 노14 참고 행(exposureNonCell 하나 · 노출 내용 글자 그대로 · 판독기 표지 0) · MAPPING 14행 전부 짝 · 노12 출처 「11/8 근본원인 §2 묶음 A(지금 판)」 + 칸별 알려진 결과(0 🟢 12/12 · 150 🟢 12/12 · 300 🔴 0/12 끝 초점 BODY) · 옛 글자 보존 [값커밋: 옛 노출 표 사본 · 노1~노14]',
+      j1bExpoN(oldExpoValCommit(rules), mrows14, 14), { rows: Object.keys(mrows14).length, r12: (rules.exposure || []).filter((e) => e.no === '노12').map((e) => e.knownResult) });
+    plant('값커밋 대조군: 옛 단언 「J1-B ① MAPPING 14행 전부 짝」 을 지금 rules · MAPPING 에 → 빨강', !j1bExpoN(rules, mrows, 14));
+    check('값커밋 J1-B ①: 노14 · 노12 단언 무변 · MAPPING 20행(노1~노20) 전부 짝(rules exposure ∪ exposureNonCell)', j1bExpo(rules), { rows: Object.keys(mrows).length });
+    // 값커밋 c-V3(V3-1~V3-5 · V3-6 결-7 재결재 甲): 노15 · 노16 = exposure 칸 행(delay 키 없음 · 결-4 甲) · 노17~노20 = exposureNonCell 참고 행 · 노9 = exposure 칸 행 그대로(옮기지 않음) · 글자 = MAPPING 표 · Q4ⓒ = 목록 밖(결-8)
+    const vcRows = (R) => {
+      const one = (arr, no) => (arr || []).filter((e) => e.no === no);
+      const cell = (no, item, screen, kase) => { const a = one(R.exposure, no); return a.length === 1 && a[0].item === item && a[0].screen === screen && a[0].case === kase && !Object.prototype.hasOwnProperty.call(a[0], 'delay') && same(a[0]) && a[0].q4cList.startsWith('목록 밖') && one(R.exposureNonCell, no).length === 0; };
+      const ref = (no) => { const a = one(R.exposureNonCell, no); return a.length === 1 && !Object.prototype.hasOwnProperty.call(a[0], 'item') && same(a[0]) && a[0].q4cList.startsWith('목록 밖') && one(R.exposure, no).length === 0; };
+      return cell('노15', 'I-4', 'before', 'mouse-open') && cell('노16', 'I-8', 'v2', 'blank-rows') && ['노17', '노18', '노19', '노20'].every(ref)
+        && one(R.exposure, '노9').length === 1 && one(R.exposure, '노9')[0].item === 'N-1' && one(R.exposure, '노9')[0].screen === 'a2' && one(R.exposure, '노9')[0].delay === 0 && same(one(R.exposure, '노9')[0]) && one(R.exposureNonCell, '노9').length === 0;
+    };
+    check('값커밋 V3: 노15(I-4 · before · mouse-open) · 노16(I-8 · v2 · blank-rows) = exposure 칸 행 · 지연 키 없음 · 노17~노20 = 참고 행 · 노9 = 칸 행 그대로(결-7 재결재 甲) · MAPPING 글자 일치 · Q4ⓒ = 목록 밖', vcRows(rules));
+    const VX1 = JSON.parse(JSON.stringify(rules)); VX1.exposure = VX1.exposure.filter((e) => e.no !== '노15');
+    const VX2 = JSON.parse(JSON.stringify(rules)); for (const e of VX2.exposure) if (e.no === '노16') e.delay = 0;
+    const VX3 = JSON.parse(JSON.stringify(rules)); const r9_ = VX3.exposure.find((e) => e.no === '노9'); VX3.exposure = VX3.exposure.filter((e) => e.no !== '노9'); VX3.exposureNonCell.push({ no: r9_.no, shapeText: r9_.shapeText, rawSource: r9_.rawSource, exposedText: r9_.exposedText, q4cList: r9_.q4cList });
+    const VX4 = JSON.parse(JSON.stringify(rules)); for (const e of VX4.exposureNonCell) if (e.no === '노18') e.exposedText = e.exposedText.replace('단추 1', '단추 2');
+    plant('값커밋 V3 심은 위반: 노15 뺀 사본 · 노16 에 지연 0 칸 · 노9 를 참고 행으로 옮긴 사본 · 노18 글자 1자 바꾼 사본 → 넷 다 빨강', !vcRows(VX1) && !vcRows(VX2) && !vcRows(VX3) && !vcRows(VX4));
     const RX1 = JSON.parse(JSON.stringify(rules));
     for (const e of RX1.exposure) if (e.no === '노12') { e.source = e._source_옛값_J1B; e.rawSource = e._rawSource_옛값_J1B; delete e.knownResult; }
     const RX2 = JSON.parse(JSON.stringify(rules)); RX2.exposureNonCell = RX2.exposureNonCell.filter((e) => e.no !== '노14');
@@ -1601,8 +1629,14 @@ function checkProbe(src) {
       return { i4b: src(ce('I-4', 'before', 0, 'kbd-open')), i4a: src(ce('I-4', 'after', 0, 'kbd-open')), i4m: src(ce('I-4', 'before', 0, 'mouse-open')), i5a: src(ce('I-5', 'after', 0, 'tab')), i6a: src(ce('I-6', 'after', 0, 'enter')), n1b: src(ce('N-1', 'before', 0)) };
     };
     const ne = expo(RE);
-    check('고침5-B ① 동작: 노4 화면 = after — I-4 /after kbd-open 노출 · /before kbd-open 은 노7 출처 하나만 · mouse-open 노출 0 · 노6 I-5 · I-6 /after 노출 · 노7 N-1 /before 0 노출',
-      ne.i4a.includes('리허설 2 런 43748603465') && ne.i4b.length === 1 && !ne.i4b.includes('리허설 2 런 43748603465') && ne.i4m.length === 0 && ne.i5a.length === 1 && ne.i6a.length === 1 && ne.n1b.length === 1, ne);
+    // 값커밋 c-V3(결-5): 옛 식 그대로(g5bAct)를 옛 노출 표 사본에 · 지금 rules 에 걸면 빨강(대조군 1회) · 지금 = mouse-open /before 0 노출 = 노15 출처 하나 · 나머지 무변
+    const g5bAct = (ne) => ne.i4a.includes('리허설 2 런 43748603465') && ne.i4b.length === 1 && !ne.i4b.includes('리허설 2 런 43748603465') && ne.i4m.length === 0 && ne.i5a.length === 1 && ne.i6a.length === 1 && ne.n1b.length === 1;
+    const neO = expo(oldExpoValCommit(RE));
+    check('고침5-B ① 동작: 노4 화면 = after — I-4 /after kbd-open 노출 · /before kbd-open 은 노7 출처 하나만 · mouse-open 노출 0 · 노6 I-5 · I-6 /after 노출 · 노7 N-1 /before 0 노출 [값커밋: 옛 노출 표 사본]',
+      g5bAct(neO), neO);
+    plant('값커밋 대조군: 옛 단언 「고침5-B ① 동작 mouse-open 노출 0」 을 지금 rules 에 → 빨강', !g5bAct(ne));
+    check('값커밋 고침5-B ① 동작: I-4 /before mouse-open 0 노출 = 노15 출처 하나(11/7 리뷰서 L51) · I-4 /after kbd-open · /before kbd-open · 노6 · 노7 N-1 무변',
+      ne.i4a.includes('리허설 2 런 43748603465') && ne.i4b.length === 1 && !ne.i4b.includes('리허설 2 런 43748603465') && JSON.stringify(ne.i4m) === JSON.stringify(['11/7 리뷰서 L51']) && ne.i5a.length === 1 && ne.i6a.length === 1 && ne.n1b.length === 1, ne);
     const REo = JSON.parse(JSON.stringify(RE));
     REo.exposure = REo.exposure.filter((e) => e.no !== '노4' && e.no !== '노6' && !(e.no === '노7' && e.item === 'N-1')).map((e) => ({ item: e.item, screen: e.screen, case: e.case, delay: e.delay, source: e.source }));
     REo.exposure.splice(3, 0, RE.exposure_옛행_고침5B[0].row);
@@ -1780,7 +1814,7 @@ function checkProbe(src) {
     check('값커밋 T1: 옛 값 보존 — _옛값_고침5 = round-trip-ms · _옛값_고침4 = per-direction-ms · 상태 = 사전 고정 · 댓글 6921734895 · _옛값_값커밋 = 자리표 글자',
       rules.hqaPending.delayUnit._옛값_고침5 && rules.hqaPending.delayUnit._옛값_고침5.value === 'round-trip-ms' && /같은 나무 유일 글자/.test(rules.hqaPending.delayUnit._옛값_고침5.note)
       && rules.hqaPending.delayUnit._옛값_고침4.value === 'per-direction-ms' && rules.hqaPending.delayUnit.status === VC_PRESET
-      && rules.hqaPending.delayUnit._옛값_값커밋.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>');
+      && !!rules.hqaPending.delayUnit._옛값_값커밋 && rules.hqaPending.delayUnit._옛값_값커밋.status === '개발팀 사전 고정 · 장전 전 공개 · 댓글 <사전공개댓글>'); // [4] P3-1: 보존 칸 없음 = 이 단언 빨강(멈춤 아님)
     check('고침5 시절 대조군(T1 · 옛 단언 보존): 왕복 150 → 방향당 75 · 500 → 250 · 0 → 0(round-trip-ms 갈래 코드 무변)',
       !!fnP && fnP(rr('round-trip-ms'), 150).perDirectionMs === 75 && fnP(rr('round-trip-ms'), 500).perDirectionMs === 250 && fnP(rr('round-trip-ms'), 0).perDirectionMs === 0);
     const rtCopy = JSON.parse(JSON.stringify(rules)); rtCopy.hqaPending.delayUnit.value = 'round-trip-ms';
@@ -2348,8 +2382,15 @@ function checkProbe(src) {
     // T16 마우스 성립(before 비노출)
     const Rn = onlyI4(1); Rn.exposure = [];
     const v16 = f6Run(Rn, rdB);
-    check('고침7 T16: 마우스 경우 성립(before 비노출) → 경우 표지 거짓 · 키보드도 비노출이면 항목 거짓 · 노출 표 있는 쪽 마우스도 거짓',
-      ms(v16).state === F7.contrastHolds && ms(v16).exposureOnly.flag === false && kb(v16).exposureOnly.flag === false && it(v16).exposureOnly.flag === false && ms(v13).exposureOnly.flag === false, { m: ms(v16).exposureOnly.flag, i: it(v16).exposureOnly.flag });
+    // 값커밋 c-V3(결-5 · T16 끝 조건): 「노출 표 있는 쪽 마우스도 거짓」 = 옛 노출 표(노15 없음) 사본 v13o 에 · 지금 노출 표(노15 = I-4 /before mouse-open 모든 지연)에 걸면 빨강(대조군 1회) · 지금 = 새 단언
+    const v13o = f6Run(oldExpoValCommit(R1), rdB);
+    const t16 = (vm) => ms(v16).state === F7.contrastHolds && ms(v16).exposureOnly.flag === false && kb(v16).exposureOnly.flag === false && it(v16).exposureOnly.flag === false && ms(vm).exposureOnly.flag === false;
+    check('고침7 T16: 마우스 경우 성립(before 비노출) → 경우 표지 거짓 · 키보드도 비노출이면 항목 거짓 · 노출 표 있는 쪽 마우스도 거짓 [값커밋: 노출 표 있는 쪽 = 옛 노출 표 사본]',
+      t16(v13o), { m: ms(v16).exposureOnly.flag, i: it(v16).exposureOnly.flag, mo: ms(v13o).exposureOnly.flag });
+    plant('값커밋 대조군: 옛 단언 「T16 노출 표 있는 쪽 마우스도 거짓」 을 지금 노출 표(노15)에 → 빨강', !t16(v13));
+    check('값커밋 T16: 지금 노출 표(노15) 쪽 마우스 경우 = 표지 참 · 경우 · 항목 상태 · 사유 = 옛 노출 표 사본과 같음(판정 · 상태 · 사유 무변 · 표지만 바뀜)',
+      ms(v13).exposureOnly.flag === true && ms(v13).state === ms(v13o).state && ms(v13).reason === ms(v13o).reason && kb(v13).state === kb(v13o).state && kb(v13).reason === kb(v13o).reason && it(v13).state === it(v13o).state && it(v13).reason === it(v13o).reason,
+      { m: ms(v13).exposureOnly, mo: ms(v13o).exposureOnly.flag });
     // T17 심은 위반 ×2
     const FLAG = '    const xoFlag = state === F5.contrastHolds ? (repCells.length > 0 && expCells.length === repCells.length) : null;';
     const mjF = mutantJudge((s) => s.replace(FLAG, '    const xoFlag = state === F5.contrastHolds ? false : null;'));
