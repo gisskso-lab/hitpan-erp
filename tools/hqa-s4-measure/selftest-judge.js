@@ -2598,6 +2598,9 @@ async function fix6bChecks(i4) {
   // ⬛ J1-B 제목: `J1-B 2-a: 700ms 기다림 = 간격 ${d4.openPollMs}ms 관측 — Esc 직전 열린 목록 1(openCountAtEsc) · 기다리는 동안 읽기 ≥ ${minReads} · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자`
   check('J1-B 2-a · J1-C: 700ms 기다림 = 읽기 0 · Esc 직전 한 번 읽기 — Esc 직전 열린 목록 1(openCountAtEsc) · holdReads 1 · 옛 칸 openCountBeforeEsc 그대로 · 두 경우 · 새 사유 키 4 ≤ 21자',
     holdOk(hk) && holdOk(hm) && keyLen, { k: hk.R && [hk.R.openCountAtEsc, hk.R.holdReads], m: hm.R && [hm.R.openCountAtEsc, hm.R.holdReads], err: hk.err || hm.err });
+  // 값커밋 c-V2(V2-1 · V2-2 · 결-3 甲): i4OpenNotHeld 앞 마디 = v3 공개 글자(Esc 직전 한 번 읽기) · 뒤 마디 무변 · 옛 글자 = _i4OpenNotHeld_옛값
+  check('값커밋 V2: i4OpenNotHeld = 「Esc 직전 한 번 읽기에서 0 — 열림 유지 미확인 · HQA 절차 전제 불성립」 · 옛 글자 「Esc 전 기다리는 동안 메뉴 0 — …」 = _i4OpenNotHeld_옛값 보존',
+    DR.i4OpenNotHeld === 'Esc 직전 한 번 읽기에서 0 — 열림 유지 미확인 · HQA 절차 전제 불성립' && DR._i4OpenNotHeld_옛값 === 'Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 · HQA 절차 전제 불성립', { now: DR.i4OpenNotHeld, old: DR._i4OpenNotHeld_옛값 });
   // J1-C (다): 기다림 동안 readState 호출 0 · Esc 직전 읽기 1(읽기 끝 = Esc 시각) — 가짜 시계 readLog 로 잼 · 두 경우 + 계획 I-4 칸 전부
   const allI4 = buildPlan(rules).cells.filter((c) => c.item === 'I-4');
   const qAll = [];

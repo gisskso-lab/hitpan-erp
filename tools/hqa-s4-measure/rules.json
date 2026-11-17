@@ -355,7 +355,8 @@
     "i4MenuZeroNotObserved": "Esc 뒤 메뉴 0 관측 안 됨 — HQA 절차 전제 불성립",
     "i4MenuNotClosedRead": "Esc 뒤 메뉴 0 관측 안 됨 — 열림 남음 판독값 · 초점 polling 안 함",
     "_i4_표지_J1B": "J1-B(반려 고침 · [3-V] 2-a · 2-b) — 장치 쪽 두 글자(i4OpenNotHeld · i4RuleBad) = i4 가 이 글자로 예외 → run-items.js 가 표본 errors 칸 · valid=false(판독기 device_failure). 판독기 쪽 두 글자(i4EscWaitMissing · i4FocusNotBool) = judge.js 빨강 사유 · 표본 device_failure 사유. 키 이름 21자 이하(가림 대비).",
-    "i4OpenNotHeld": "Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 · HQA 절차 전제 불성립",
+    "i4OpenNotHeld": "Esc 직전 한 번 읽기에서 0 — 열림 유지 미확인 · HQA 절차 전제 불성립",
+    "_i4OpenNotHeld_옛값": "Esc 전 기다리는 동안 메뉴 0 — 열림 유지 미확인 · HQA 절차 전제 불성립",
     "i4RuleBad": "I-4 규칙 값 빠짐 · 깨짐(기다림 · 관측 간격 · polling 상한 · 메뉴 0 실패 경우) — 진행 0",
     "i4EscWaitMissing": "I-4 칸 계획 있음 · verdict 머리 escWait 없음 또는 값 깨짐 — 장치 빨강",
     "i4FocusNotBool": "I-4 kbd-open 초점 판독값 참/거짓 아님 — 장치 실패(통과로 안 셈)"
