@@ -1456,7 +1456,9 @@ function checkProbe(src) {
   // ⑥ 노출 표지 — 판정값 무변
   {
     const Rn = JSON.parse(JSON.stringify(R5)); Rn.exposure = [];
-    const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
+    // 고침7 c2 결-10 (ㄱ): 지우는 키 목록에 H4 새 칸 exposureOnly 덧붙임(단언 삭제 0 · 그 칸은 아래 고침7 T13~T18 이 따로 봄)
+    // ⬛ 옛 줄: const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
+    const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells' || k === 'exposureOnly') ? undefined : x));
     const va = run(R5, base(R5));
     const vb = run(Rn, base(Rn));
     check('고침5 ⑥: 노출 표 넣은 · 뺀 두 verdict 가 표지 밖 같음(판정 · 표본 · 셈 무변)', JSON.stringify(strip(va)) === JSON.stringify(strip(vb)));
@@ -1836,7 +1838,9 @@ function checkProbe(src) {
     const R = onlyI4(3);
     const Rn = JSON.parse(JSON.stringify(R)); Rn.exposure = [];
     const rd = (c, n) => ({ openCountAfterEsc: c.screen === 'before' ? 1 : 0, focusOnSameRowBtn: !(c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === 300 && n === 1) });
-    const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
+    // 고침7 c2 결-10 (ㄱ): 지우는 키 목록에 H4 새 칸 exposureOnly 덧붙임(단언 삭제 0 · 그 칸은 아래 고침7 T13~T18 이 따로 봄)
+    // ⬛ 옛 줄: const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells') ? undefined : x));
+    const strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => ((k === 'exposed' || k === 'independenceNote' || k === 'exposedCells' || k === 'exposureOnly') ? undefined : x));
     const va = f6Run(R, rd);
     const vb = f6Run(Rn, rd);
     // J1-B ①: 노12 출처 글자 정정(「§2 A」 → 「§2 묶음 A(지금 판)」 · 옛 글자 = rules _source_옛값_J1B)에 맞춤 — 단언 뜻(세 칸에 노12 표지) 무변
@@ -2003,6 +2007,55 @@ function checkProbe(src) {
     check('고침7 T25 ③ · 규칙 ①②⑤: 입구 사본만 덧붙임(HQA = 그 순간 장치 값 · 메뉴 0 = 참거짓이면 참) · 원 입력에 두 칸 0 · 바뀐 장치 값을 다음 입구가 그대로 복사 · 한 칸 있음 · readings 없음 · 장치 칸 없음 · I-4 밖 = 같은 객체',
       e1[0].readings.hqaFocusRow1Restored === true && e1[0].readings.menuZeroObserved === true && !k1Own(xs[0].readings, 'hqaFocusRow1Restored') && e2[0].readings.hqaFocusRow1Restored === false
       && e1[1] === xs[1] && e1[2] === xs[2] && e1[3] === xs[3] && e1[4] === xs[4] && e1[6] === xs[6] && e1[5].readings.hqaFocusRow1Restored === null && e1[5].readings.menuZeroObserved === false);
+  }
+  // ── 고침7 c2(H4 · 작업지시서 20261117작 §8 T13~T18) — 대조가 노출 칸만으로 섰나 · 상태 값 무변 (대조군 + 심은 위반) ──
+  {
+    const F7 = T.fix5;
+    const R1 = onlyI4(1);
+    const E300 = (c, n) => c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === 300 && n === 1;
+    const rdB = (c, n) => ({ openCountAfterEsc: c.case === 'mouse-open' && c.screen === 'before' && c.delay === 0 && n === 1 ? 1 : 0, focusOnSameRowBtn: !E300(c, n) });
+    const rdAt = (ds) => (c, n) => ({ openCountAfterEsc: c.case === 'mouse-open' && c.screen === 'before' && c.delay === 0 && n === 1 ? 1 : 0, focusOnSameRowBtn: !(c.case === 'kbd-open' && c.screen === 'e1t3' && ds.includes(c.delay) && n === 1) });
+    const kb = (v) => v.items['I-4'].contrastByCase['kbd-open'];
+    const ms = (v) => v.items['I-4'].contrastByCase['mouse-open'];
+    const it = (v) => v.items['I-4'].contrastState;
+    const key = (d) => buildPlan(R1).cells.find((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === d).key;
+    // T13 노출만(키보드 e1t3 300 재현 · 노12 노출)
+    let x13 = null;
+    const v13 = f6Run(R1, rdB, null, { onXs: (xs) => { x13 = structuredClone(xs); } });
+    const P = k1PreJudge();
+    const p13 = P ? P.judge(R1, x13, {}) : null;
+    const t13 = (v) => kb(v).exposureOnly.flag === true && it(v).exposureOnly.flag === true && JSON.stringify(kb(v).exposureOnly.exposedReproCells) === JSON.stringify([key(300)]);
+    check('고침7 T13(H4 노출만): 키보드 경우 성립(e1t3 300 재현 · 노출) → 경우 표지 참 · 항목 참 · 상태 · 사유 = 고침 전 판독기와 같음 · 글자',
+      t13(v13) && !!p13 && kb(v13).state === p13.items['I-4'].contrastByCase['kbd-open'].state && kb(v13).reason === p13.items['I-4'].contrastByCase['kbd-open'].reason
+      && it(v13).state === p13.items['I-4'].contrastState.state && it(v13).reason === p13.items['I-4'].contrastState.reason && kb(v13).exposureOnly.text === '대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA'
+      && JSON.stringify(kb(v13).reproducedCells) === JSON.stringify([key(300)]), { kb: kb(v13).exposureOnly });
+    // T14 · T15 대조군 — 노출 행을 300 하나로 줄인 규칙 사본
+    const R14 = onlyI4(1);
+    R14.exposure = [{ item: 'I-4', case: 'kbd-open', screen: 'e1t3', delay: 300, source: '고침7 시험 — 300 하나' }];
+    const v14 = f6Run(R14, rdAt([150]));
+    const t14 = (v) => kb(v).state === F7.contrastHolds && kb(v).exposureOnly.flag === false && kb(v).exposureOnly.exposedReproCells.length === 0;
+    check('고침7 T14(H4 대조군 ①): 노출 행 300 하나 · 150 에서 재현 → 표지 거짓', t14(v14), kb(v14).exposureOnly);
+    const v15 = f6Run(R14, rdAt([150, 300]));
+    check('고침7 T15(H4 대조군 ②): 노출 300 · 미노출 150 둘 다 재현 → 표지 거짓(재현 칸 모두 노출일 때만 참 · 결-5 (ㄱ))',
+      kb(v15).state === F7.contrastHolds && kb(v15).exposureOnly.flag === false && JSON.stringify(kb(v15).exposureOnly.exposedReproCells) === JSON.stringify([key(300)]) && kb(v15).exposureOnly.reproducedCells.length === 2, kb(v15).exposureOnly);
+    // T16 마우스 성립(before 비노출)
+    const Rn = onlyI4(1); Rn.exposure = [];
+    const v16 = f6Run(Rn, rdB);
+    check('고침7 T16: 마우스 경우 성립(before 비노출) → 경우 표지 거짓 · 키보드도 비노출이면 항목 거짓 · 노출 표 있는 쪽 마우스도 거짓',
+      ms(v16).state === F7.contrastHolds && ms(v16).exposureOnly.flag === false && kb(v16).exposureOnly.flag === false && it(v16).exposureOnly.flag === false && ms(v13).exposureOnly.flag === false, { m: ms(v16).exposureOnly.flag, i: it(v16).exposureOnly.flag });
+    // T17 심은 위반 ×2
+    const FLAG = '    const xoFlag = state === F5.contrastHolds ? (repCells.length > 0 && expCells.length === repCells.length) : null;';
+    const mjF = mutantJudge((s) => s.replace(FLAG, '    const xoFlag = state === F5.contrastHolds ? false : null;'));
+    const mjT = mutantJudge((s) => s.replace(FLAG, '    const xoFlag = state === F5.contrastHolds ? true : null;'));
+    const vF = mjF ? f6Run(R1, rdB, mjF) : null;
+    const vT = mjT ? f6Run(R14, rdAt([150]), mjT) : null;
+    plant('고침7 T17 심은 위반: 표지 늘 거짓 사본 → T13 빨강', !!vF && !t13(vF), vF && kb(vF).exposureOnly.flag);
+    plant('고침7 T17 심은 위반: 표지 늘 참 사본 → T14 빨강', !!vT && !t14(vT), vT && kb(vT).exposureOnly.flag);
+    // T18 H4 + H11 겹침 — 노출 칸 유일 재현이 불일치
+    const rd18 = (c, n) => { const o = rdB(c, n); if (E300(c, n)) { o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; } return o; };
+    const v18 = f6Run(R1, rd18, null, { mm: true });
+    check('고침7 T18(H4 + H11 겹침): 노출 칸 유일 재현이 불일치 → 재현 0 · 상태 대조 무효 · 표지 null · 재현 칸 0',
+      kb(v18).state === F7.contrastInvalid && kb(v18).exposureOnly.flag === null && kb(v18).reproducedCells.length === 0 && kb(v18).exprMismatchChanged === true, kb(v18).exposureOnly);
   }
 }
 

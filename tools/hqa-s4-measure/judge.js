@@ -427,6 +427,10 @@ const EXPR_TEXT = {
 };
 // 결-3 · CTO ④ 조건: 대조 칸의 두 칸은 이 한 곳에서 늘 같이 쓴다(뺀 수 0 이어도 false · 0)
 function exprPair(changed, removed) { return { exprMismatchChanged: changed === true, exprMismatchRemoved: removed }; }
+// 고침7 c2(H4 · 결-5 (ㄱ) (나)): 대조가 노출 칸만으로 섰나 — flag = 성립 · 재현 칸 모두 노출이면 참 · 성립 아니면 null · 상태 · 사유 무변 · 판정 = HQA
+//   칸 이름 exposedReproCells = 재현 칸 중 노출 칸(22자 이상 이름은 가림 토큰에 걸려 짧게)
+const EXPO_ONLY_TEXT = '대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA';
+function exposureOnlyOf(flag, repCells, expCells) { return { flag, reproducedCells: repCells, exposedReproCells: expCells, text: EXPO_ONLY_TEXT }; }
 
 // judge 쪽 유효 판단(표본의 valid 를 그대로 믿지 않고 미도달 표본은 kbdGate 로 다시 잰다)
 //   고침4 G7: 판정 칸 가림 충돌 표본 = device_failure(사유 「판정 칸 가림 충돌」) — 다른 판단보다 먼저
@@ -739,6 +743,8 @@ function judge(rules, samples, extra) {
     const out4 = { state: st.state, reason: st.reason, cells: st.cells };
     // 고침7 c1(결-3): 항목 대조 칸의 두 칸(경우별 항목이면 아래에서 경우들로 다시 셈)
     out4.xp = exprPair(st.exprMismatchChanged, st.exprMismatchRemoved);
+    // 고침7 c2(H4): 항목 대조 칸의 노출 표지(경우별 항목이면 아래에서 경우들로 다시 셈)
+    out4.xo = { reproducedCells: st.reproducedCells, exposureOnly: st.exposureOnly };
     let byCase = null;
     let legacy = null;
     if (caseSplitItem(rules, item)) {
@@ -758,6 +764,11 @@ function judge(rules, samples, extra) {
       const allSt = Object.values(raw).map((r) => r.stateAll);
       const itemAll = allSt.some((x) => x === null) ? null : (allSt.some((x) => x === F5.contrastUndefined) ? F5.contrastUndefined : (allSt.every((x) => x === F5.contrastHolds) ? F5.contrastHolds : F5.contrastInvalid));
       out4.xp = exprPair(itemAll !== out4.state, Object.values(raw).reduce((n, r) => n + r.exprMismatchRemoved, 0));
+      // 고침7 c2(H4 · 결-5 (나)): 항목 = 성립한 경우 중 하나라도 노출 칸만으로 섰으면 참 · 성립한 경우 0 이면 null
+      const rcAll = Object.values(raw).reduce((a, r) => a.concat(r.reproducedCells), []);
+      const ecAll = Object.values(raw).reduce((a, r) => a.concat(r.exposureOnly.exposedReproCells), []);
+      const xoFlag = Object.values(raw).some((r) => r.exposureOnly.flag === true) ? true : (Object.values(raw).some((r) => r.state === F5.contrastHolds) ? false : null);
+      out4.xo = { reproducedCells: rcAll, exposureOnly: exposureOnlyOf(xoFlag, rcAll, ecAll) };
       out4.rule = H.contrastByCaseRule;
       const lg = stateOf(item, bCs, true);
       legacy = { state: lg.state, reason: lg.reason, cells: lg.cells };
@@ -775,7 +786,7 @@ function judge(rules, samples, extra) {
     return {
       attempted: { records: att, cells: cs.filter((c) => (attemptsByCell[c.key] || 0) > 0).length, of: cs.length, text: F5.attemptedText },
       d1Reproduced: { count: flat(bCs).filter(isKu).length, of: bGot, text: F5.d1Text },
-      contrastState: Object.assign({ state, reason, cells: rows }, out4.rule ? { rule: out4.rule } : {}, out4.xp),
+      contrastState: Object.assign({ state, reason, cells: rows }, out4.rule ? { rule: out4.rule } : {}, out4.xp, out4.xo),
       notMeasured: { flag: nm, reason: nm ? F5.notMeasuredReason : null },
       deviceFailure: { flag: failCs.length > 0, reasons: Array.from(new Set(failCs.map((c) => cellOut[c.key].reason))), cells: failCs.map((c) => c.key) },
       fields5: F5.legacyFields,
@@ -821,8 +832,13 @@ function judge(rules, samples, extra) {
     }
     // 장치 실패 · 기준 미정 갈래는 셈과 무관 → 뺀 표본 넣어도 같은 상태
     if (stateAll === null) stateAll = state;
+    // 고침7 c2(H4): 재현 > 0 칸(reproducedCells · 불일치 뺀 뒤 재현) · 그중 노출 칸
+    const repCells = rows.filter((r) => r.reproduced > 0).map((r) => r.key);
+    const expCells = repCells.filter((k) => exposureOf(rules, ccs.find((c) => c.key === k)).length > 0);
+    const xoFlag = state === F5.contrastHolds ? (repCells.length > 0 && expCells.length === repCells.length) : null;
     // 고침7 c1(결-3): 상태 = 뺀 뒤 값 · 두 칸 늘 함께 · stateAll = 열거 안 되는 칸(항목 결합용 · JSON 에 안 나감)
-    return Object.defineProperty(Object.assign({ state, reason, cells: rows }, exprPair(stateAll !== state, xRemoved)), 'stateAll', { value: stateAll, enumerable: false });
+    // ⬛ c1 줄: return Object.defineProperty(Object.assign({ state, reason, cells: rows }, exprPair(stateAll !== state, xRemoved)), 'stateAll', { value: stateAll, enumerable: false });
+    return Object.defineProperty(Object.assign({ state, reason, cells: rows }, exprPair(stateAll !== state, xRemoved), { reproducedCells: repCells, exposureOnly: exposureOnlyOf(xoFlag, repCells, expCells) }), 'stateAll', { value: stateAll, enumerable: false });
   }
   // H4 §7-2: I-8(T3) — 입력 0 구조 읽기 · 대조 화면 = contrastScreen I-8 · 판독 단위 = rules.t3ReadUnit 한 값만
   if (has('I-8')) {
