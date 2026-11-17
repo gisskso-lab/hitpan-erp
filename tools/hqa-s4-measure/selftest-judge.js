@@ -36,7 +36,7 @@ const K1_FLOOR_INNER = 110;
 const K1_SITE_FLOOR = { "700998716a29": 1, ddfa4a5c60c0: 4, e6ba771bb50c: 1, bf023daed110: 1, "166d4d52c03d": 1, "01f5ac44ad80": 1, "8a32bfa08278": 1, "34cc44b36d9e": 1, "87f935b90ad1": 1, "9952ee49a660": 1, db78d1f1e019: 1, adaf17e56e22: 1, "2aaf26927378": 1, "7fc66723be29": 1, "71838eeea029": 1, fbfb49ad33a8: 1, fafd9c2fe877: 1, "3e747f0c29be": 1, "55eaed6e1442": 1, "865b4629bac4": 1, "3c0702d2836d": 1, "6f39be2d69aa": 1, "00fabddac9b7": 1, "12b024a19a5a": 1, "9c8c4e350bba": 1, "8c3ccbe7ad3c": 1, "00cc1fd5271c": 1, "1fff25de5aef": 1, b2ad7a927821: 1, "3434528ee919": 1, c5ac3a3a7a17: 1, "68580c0f0b1d": 1, c1c96fda9f9d: 1, f617af48d94e: 7, "2ce3ac3c84b2": 1, b89cab35e63f: 1, "5d194b264cc2": 1, bbf0d6f5ea47: 1, "921fa8e02663": 1, "32a0967c876c": 1, c45e3b85195c: 1, "21c682212ad1": 1, e31901893a34: 1, "15a598b328ec": 1, e4a38384d338: 2, e954065a3400: 2, "5265e8927134": 2, "96a4c0fb0225": 4, "944a5b80659e": 1, fb9f3f9976b8: 1, "2704b06996ff": 1, "20eefd59dd7e": 4, faee6d54169a: 1, "6586c3389f44": 4, "60ab8d6d0597": 1, "2074223aefb7": 1, d6c7b30e95fa: 1, db97871cc8c2: 1, "6d29df68f078": 1, "93aa66b75523": 1, "52f6f976afe5": 1, "3c11065e9367": 1, "5b0d39613181": 1, "16d9ad248fe7": 1, e34a2711c425: 1, "1772bd33418e": 1, a5cea0ebb645: 1, "4c6b00ded4c5": 1, d401995535e3: 1, a1552b12cc05: 1, "93103b4e4ba1": 1, f1f46e0aa791: 1, "190fecc8f684": 1, "3703b561ab32": 1, c3aa6d9da8bc: 1, "2df913df0fa1": 3, eb6aa8b11e96: 1, "7e86b09d7809": 1, cd748ae4874c: 1, e27ddbf46bfa: 1, "67493276294d": 1, "3cfae413726a": 1, "678e640af8f4": 1, c269d372468a: 1, "112e1b290744": 1, "80849870fa91": 1, babfb9abadc0: 1, "27c166a9ed31": 1, "3aa7c8c23caa": 1 };
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
 // T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
-const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 13, sha: "83673b6cb087959e"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}};
+const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 13, sha: "83673b6cb087959e"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
   loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [], zone: null, baselineMissing: false };
@@ -266,7 +266,8 @@ function k1CallVerdict(calls, cli) {
 //   ③ 구조분해 함정(C16-3): 아래 spawnSync 지역 이름은 감싸기 뒤에 묶음 → T33 이 같은 객체임을 단언
 //   ④ 훅 밖 길(동적 import · worker · vm · new Function · 캐시 지움 · 실행 꼴)은 T34 정적 동작 게이트가 함께 막음(C16-2)
 const K1_CP_WRAPPED = Symbol('k1-cp-wrapped');
-const K1_CP_ORIG = Symbol('k1-cp-orig');
+// 고침7 수정 c6(P2-6 · 결-20 (가)): 「원 함수」 표지 제거 — 원 실행 함수는 아래 감싸기 덩이 안 닫힌 자리에만 · 바깥엔 참거짓만 내주는 대조 함수(k1CpProbe)
+let k1CpProbe = null;
 const K1_CP_NAMES = ['spawnSync', 'spawn', 'execFileSync', 'execFile', 'execSync', 'exec', 'fork'];
 const K1_EVAL = ['-e', '--eval', '-p', '--print'];
 const K1_JUDGE_MARK = 'function ' + 'judge(rules, samples, extra) {';
@@ -293,7 +294,12 @@ const K1_SCAN = [
   ['vm', 'require\\(\\s*[\'"](?:node:)?v' + 'm[\'"]\\s*\\)'],
   ['newFn', '\\bnew\\s+Func' + 'tion\\b|(?<![.\\w$])ev' + 'al\\s*\\('],
   ['cpCall', '\\b(?:spawn' + 'Sync|spa' + 'wn|execFile' + 'Sync|execF' + 'ile|execS' + 'ync|ex' + 'ec|fo' + 'rk)\\s*\\('],
-  ['cpReq', 'child' + '_process']
+  ['cpReq', 'child' + '_process'],
+  // 고침7 수정 c6(P2-5 · P2-6 · 결-21 덧붙임만): 직접 컴파일 · 모듈 생성자 / new 없는 맨꼴 / 간접 꼴(쉼표 식 · 다른 이름에 담음 · 전역 객체 점 · 대괄호) / 대괄호로 꺼내 바로 부름 · 꺼내어 call · apply
+  ['compile', '\\._comp' + 'ile\\b|\\bmodule\\s*\\.\\s*constr' + 'uctor\\b|\\bnew\\s+Mod' + 'ule\\s*\\(|\\bModule\\s*\\.\\s*proto' + 'type\\b'],
+  ['bareFn', '(?<!\\bnew\\s+)\\bFunc' + 'tion\\s*\\('],
+  ['indirEval', '(?:[=:,\\[(]\\s*|\\.\\s*|\\[\\s*[\'"`])ev' + 'al\\b'],
+  ['bracketCall', '\\]\\s*(?:\\.\\s*(?:ca' + 'll|app' + 'ly)\\s*)?\\(']
 ];
 function k1Scan(src) {
   const lines = String(src).split(String.fromCharCode(13)).join('').split(String.fromCharCode(10));
@@ -328,6 +334,30 @@ k1Mod._load = function k1Load(request, parent, isMain) {
   }
   return m;
 };
+// 고침7 수정 c6(P2-5 · C16-1): 모듈 컴파일 단계도 감쌈 — 모듈 생성자로 만든 새 모듈에 판독기 소스를 직접 컴파일해도(적재 함수 · 캐시 안 거침) 내보낸 judge 를 감쌈
+//   판별 = 파일 이름 judge.js 또는 컴파일에 넘긴 소스(또는 그 파일)의 내용 지문 · 출처 = 경로 · 컴파일한 소스 지문 · 같은 객체 두 번 감싸기 0(표시 · 본 집합 공유 — 보통 적재는 이 단계에서 먼저 감싸져 적재 함수 훅은 건너뜀)
+const k1Comp0 = k1Mod.prototype._compile;
+k1Mod.prototype._compile = function k1Compile(content, filename) {
+  const r = k1Comp0.apply(this, arguments);
+  const m = this.exports;
+  if (m && (typeof m === 'object' || typeof m === 'function') && typeof m.judge === 'function' && !m[K1_WRAPPED] && !k1Seen.has(m)) {
+    k1Seen.add(m);
+    try {
+      const file = typeof filename === 'string' && filename ? filename : String(this.filename || '');
+      const csrc = typeof content === 'string' ? content.split(String.fromCharCode(13)).join('') : null;
+      const fsrc = file && path.isAbsolute(file) ? k1SrcOf(file) : null;
+      const isJ = k1IsJudgeFile(file, csrc === null ? undefined : csrc) || (fsrc !== null && fsrc.includes(K1_JUDGE_MARK));
+      if (isJ) {
+        const src = csrc !== null ? csrc : fsrc;
+        const o = k1OriginOf(file, src);
+        if (o !== 'pre' && JSON.stringify(k1Scan(src || '')) !== k1JudgeScan()) K1.scanBad.push(path.basename(file));
+        k1Wrap(m, o);
+        K1.loads.push({ origin: o, name: path.basename(file) });
+      } else K1.hookOdd.push(path.basename(String(file)));
+    } catch (e) { K1.hookErr.push(String(e && e.message ? e.message : e).slice(0, 120)); }
+  }
+  return r;
+};
 function k1Tok(str) { return (String(str).match(/"[^"]*"|'[^']*'|\S+/g) || []).map((t) => t.replace(/^["']|["']$/g, '')); }
 function k1SeeSpawn(name, a) {
   const opts = a.find((x, i) => i > 0 && !!x && typeof x === 'object' && !Array.isArray(x)) || {};
@@ -349,17 +379,32 @@ function k1SeeSpawn(name, a) {
 }
 {
   const cp = require('child' + '_process');
+  const k1CpOrigOf = new Map();
   for (const name of K1_CP_NAMES) {
     const orig = cp[name];
+    if (typeof orig === 'function' && !orig[K1_CP_WRAPPED]) k1CpOrigOf.set(name, orig);
     if (typeof orig !== 'function' || orig[K1_CP_WRAPPED]) continue;
     const w = function k1CpWrapped() {
       try { k1SeeSpawn(name, Array.from(arguments)); } catch (e) { K1.spawnErr.push(name + ' ' + String(e && e.message ? e.message : e).slice(0, 80)); }
       return orig.apply(this, arguments);
     };
     Object.defineProperty(w, K1_CP_WRAPPED, { value: name });
-    Object.defineProperty(w, K1_CP_ORIG, { value: orig });
     cp[name] = w;
   }
+  // 바깥엔 참거짓만: earlyBoundSame = 「감싸기 전에 묶인 지역 이름(원 함수)」 에 T33 같은 객체 단언을 돌린 결과 · wrappedOf = 지금 실행 함수가 이 자리에서 감싼 것인가
+  k1CpProbe = Object.freeze({
+    earlyBoundSame: (name) => { const L0 = k1CpOrigOf.get(name); return !!L0 && L0 === cp[name] && !!L0[K1_CP_WRAPPED]; },
+    wrappedOf: (name) => k1CpOrigOf.has(name) && typeof cp[name] === 'function' && cp[name] !== k1CpOrigOf.get(name) && !!cp[name][K1_CP_WRAPPED]
+  });
+}
+// 고침7 수정 c6(P2-6 (가) 동작 단언): 함수 값(값 · 읽기 함수)을 가진 자기 속성 열쇠(글자 · 심볼) — 감싼 실행 함수에 0 이어야 원 함수를 꺼낼 길이 없음
+function k1FnProps(f) {
+  const bad = [];
+  for (const k of Reflect.ownKeys(f)) {
+    const d = Object.getOwnPropertyDescriptor(f, k);
+    if (d && (typeof d.value === 'function' || typeof d.get === 'function')) bad.push(String(k));
+  }
+  return bad;
 }
 // 옮긴 두 줄(글자 무변) — 감싸기 뒤에 묶음(구조분해 함정 · C16-3)
 const { spawnSync } = require('child_process');
@@ -2181,8 +2226,9 @@ function checkProbe(src) {
     plant('고침7 T30b 심은 위반(C16-7): 판독기 두 식 판별 칸 고르기(i4s 자리)만 옛 item 기준으로 되돌린 사본 → T29 빨강 · T19 등식 빨강', p30b.ok, p30b.info);
     // T31 · T32(P1-2 · C16-4): 별도 자식 프로세스(이 자체시험 사본 · 위반 한 덩이 심음 · 안쪽 꼴)의 빨강 사유 이름으로 판정 — 자식 판독기 호출은 이 프로세스 셈 · 하한 밖
     if (!process.env.HQA_SELFTEST_INNER) {
-      const kid = (name, ins) => {
-        const src = fs.readFileSync(__filename, 'utf8');
+      const kid = (name, ins, tf) => {
+        const src0 = fs.readFileSync(__filename, 'utf8');
+        const src = typeof tf === 'function' ? tf(src0) : src0;
         const at = '    const mj20 = ' + 'mutantJudge(';
         const f = path.join(HERE, '.k1-child-' + process.pid + '-' + name + '.js');
         let r = null;
@@ -2201,6 +2247,13 @@ function checkProbe(src) {
       check('고침7 T31 · T32 대조군(V0 · C16-4): 같은 자식 프로세스 꼴 · 위반 없음 → 자식 빨강 0 · 종료 0', k0.done && k0.fails.length === 0 && k0.status === 0, k0);
       plant('고침7 T31 심은 위반(V1 꼴): 자식 프로세스에서 캐시 지움 → 다시 실음 → 허용 밖 이름표 T1 로 옛 꼴 판독 → 자식 빨강 사유 T26(허용 덧 = T34 정적 게이트만)', only(k1v, ['T26'], ['T34']), k1v);
       plant('고침7 T32 심은 위반(V2 꼴): 자식 프로세스에서 두 칸 없는 옛 꼴 파일을 명령줄 판독기에 직접(기록 함수 안 부름) → 자식 빨강 사유 T27(허용 덧 = T26 · T34 만)', only(k2v, ['T27'], ['T26', 'T34']), k2v);
+      // 고침7 수정 c6 — T36(P2-5 · B1 꼴): 모듈 생성자로 새 모듈 + 판독기 소스 직접 컴파일(적재 함수 · 캐시 안 거침) + 허용 밖 이름표 T1 → 컴파일 단계 훅이 감싸 셈 표에 T1 → 자식 빨강 사유 T26
+      const k36 = kid('V36', "    { const P_ = path.join(HERE, 'judge.js'); const M_ = new module.constr" + "uctor(P_, module); M_.filename = P_; M_.paths = module.paths; M_._comp" + "ile(fs.readFileSync(P_, 'utf8'), P_); f6Run(R1, rd7, M_.exports, { tag: 'T1' }); }\n");
+      plant('고침7 T36 심은 위반(B1 꼴): 자식 프로세스에서 모듈 생성자 · 직접 컴파일로 판독기를 실어 허용 밖 이름표 T1 로 판독 → 자식 빨강 사유 T26(허용 덧 = T34 정적 게이트만)', only(k36, ['T26'], ['T34']), k36);
+      // T37(P2-6 · B3 꼴): 원 함수 표지를 되살린 사본 · 대괄호 호출로 원 실행 함수를 꺼내 손으로 지은 두 칸 없는 옛 꼴 입력 파일(이름표 재사용 0)을 명령줄 판독기에 → 자식 빨강 사유 T33b(허용 덧 = T34 만 · T26 · T27 섞이면 실패)
+      const k37 = kid('V37', "    { const rp_ = path.join(tmp, 'k1-v37-rules.json'); fs.writeFileSync(rp_, JSON.stringify(R1)); const sp_ = path.join(tmp, 'k1-v37.jsonl'); fs.writeFileSync(sp_, JSON.stringify({ item: 'I-4', cell: 'I-4|k1-hand', sampleNo: 1, valid: true, errors: [], readings: { focusOnSameRowBtn: true }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }) + '\\n'); spawnSync[Symbol.for('k1-cp-orig')]" + "(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp_, '--samples', sp_, '--out', path.join(tmp, 'k1-v37.json')], { encoding: 'utf8' }); }\n",
+        (s0) => { const s = s0.split(String.fromCharCode(13)).join(''); const a = "    Object.defineProperty(w, K1_CP_WRAPPED, { value: name });\n"; return s.split(a).length === 2 ? s.replace(a, () => a + "    Object.defineProperty(w, Symbol.for('k1-cp-orig'), { value: orig });\n") : ''; });
+      plant('고침7 T37 심은 위반(B3 꼴): 자식 프로세스에서 되살린 원 함수 표지 · 대괄호 호출로 원 실행 함수를 꺼내 손으로 지은 옛 꼴 입력을 명령줄 판독기에 → 자식 빨강 사유 T33b(허용 덧 = T34 만)', only(k37, ['T33b'], ['T34']), k37);
     }
     // T22 · T24 심은 위반 — T21 · T23 판정 함수가 사본 판정에서 잡는가
     const mj22 = mutantJudge((s) => s.replace('        exprMismatchExcluded: v.length - vx.length', '        exprMismatchExcluded: 0'));
@@ -2630,14 +2683,37 @@ function k1Final() {
   check('고침7 T33(C16-1 · C16-3): 지역 이름 spawnSync = 감싼 실행 함수와 같은 객체 · 실행 함수 7개 감쌈 · 원 판독기 · 이름 바꾼 사본(내용 지문) 싣는 순간 감쌈 · 고침 전 비교용 = 따로 가름 · 훅 · 감싸기 오류 0',
     cpOk && Jkeep[K1_WRAPPED] === true && RN[K1_WRAPPED] === true && K1.loads.some((l) => l.name === 'jdg-renamed-copy.js' && l.origin === 'mutant') && K1.loads.filter((l) => l.origin === 'pre').length === (k1PreJudge() ? 1 : 0) && K1.hookErr.length === 0 && K1.spawnErr.length === 0 && K1.hookOdd.length === 0,
     { cpOk, loads: K1.loads.length, hookErr: K1.hookErr.slice(0, 2), spawnErr: K1.spawnErr.slice(0, 2), odd: K1.hookOdd.slice(0, 3) });
-  const L0 = cpNow.spawnSync[K1_CP_ORIG];
-  plant('고침7 T33 대조군: 감싸기 전에 묶인 지역 이름(원 실행 함수) → 같은 객체 단언 빨강', !(L0 === cpNow.spawnSync && !!L0[K1_CP_WRAPPED]));
+  // 고침7 수정 c6(P2-6 (가)): 원 함수는 닫힌 자리 — 대조군은 그 자리 안 같은 객체 단언의 참거짓만 받음(단언 · 기대 무변)
+  plant('고침7 T33 대조군: 감싸기 전에 묶인 지역 이름(원 실행 함수) → 같은 객체 단언 빨강', !k1CpProbe.earlyBoundSame('spawnSync'));
+  // T33b(P2-6 (가) 동작 단언): 감싼 실행 함수 7개 어디에도 함수 값을 가진 자기 속성(글자 · 심볼 열쇠) 0 · 7개 모두 이 자리에서 감싼 것
+  const fnProps = K1_CP_NAMES.map((n) => [n, typeof cpNow[n] === 'function' ? k1FnProps(cpNow[n]) : ['없음']]).filter((x) => x[1].length > 0);
+  check('고침7 T33b(P2-6 (가)): 감싼 실행 함수 7개에 함수 값 자기 속성(글자 · 심볼 열쇠) 0 — 원 실행 함수를 꺼낼 표지 없음 · 7개 모두 닫힌 자리에서 감쌈',
+    fnProps.length === 0 && K1_CP_NAMES.every((n) => k1CpProbe.wrappedOf(n)), { fnProps: fnProps.slice(0, 3) });
+  { // T33b 대조군: 원 함수를 심볼 표지로 매단 감싼 함수 꼴(따로 만든 함수) → 단언 빨강
+    const fk = function k1Fake() { return null; };
+    Object.defineProperty(fk, Symbol('k1-fake-orig'), { value: function k1FakeOrig() { return null; } });
+    plant('고침7 T33b 대조군: 원 함수를 심볼 표지로 매단 함수 꼴 → 함수 값 자기 속성 잡힘', k1FnProps(fk).length === 1);
+  }
   // T34(C16-2) 정적 동작 게이트: 자체시험 소스(자기 파일) · 실린 판독기 사본 소스(원 판독기와 같은 꼴 수) — 자리(줄 글자) · 수 = 허용 목록
   const ownSrc = fs.readFileSync(__filename, 'utf8');
   const ownScan = k1Scan(ownSrc);
   check('고침7 T34(C16-2 정적 동작 게이트): 자체시험 소스의 캐시 지움 · 동적 import · worker · vm · new Function · eval · 자식 프로세스 실행 꼴 자리 · 수 = 허용 목록 · 실린 판독기 사본 꼴 = 원 판독기',
     JSON.stringify(ownScan) === JSON.stringify(K1_SCAN_PIN) && K1.scanBad.length === 0, { own: ownScan, bad: K1.scanBad.slice(0, 3) });
   plant('고침7 T34 심은 위반: 허용 밖 꼴 한 줄(모듈 캐시 지움) 넣은 자체시험 사본 → 빨강', JSON.stringify(k1Scan(ownSrc + '\n    delete require.cache[k];\n')) !== JSON.stringify(K1_SCAN_PIN));
+  // 고침7 수정 c6(P2-5 · P2-6): 새 꼴마다 허용 밖 한 줄 넣은 사본 → 빨강 · 그 꼴 열쇠 수가 넣은 꼴 수만큼 늚(새 열쇠가 잡았음) · 옛 열쇠는 무변(옛 꼴로는 안 잡히던 꼴)
+  const p34 = (key, ln, k) => {
+    const s = k1Scan(ownSrc + '\n' + ln + '\n');
+    const old = ['loader', 'dynImport', 'worker', 'vm', 'newFn', 'cpCall', 'cpReq'].every((x) => JSON.stringify(s[x]) === JSON.stringify(K1_SCAN_PIN[x]));
+    return { ok: JSON.stringify(s) !== JSON.stringify(K1_SCAN_PIN) && !!K1_SCAN_PIN[key] && s[key].n === K1_SCAN_PIN[key].n + k && old, n: s[key] && s[key].n, old };
+  };
+  const p34a = p34('compile', "    { const M_ = new module.constr" + "uctor(f_, module); M_._comp" + "ile(s_, f_); }", 2);
+  plant('고침7 T34 (가) 심은 위반: 모듈 생성자 · 직접 컴파일 한 줄 넣은 사본 → 빨강(compile 열쇠 +2)', p34a.ok, p34a);
+  const p34b = p34('bareFn', "    Func" + "tion('r', 'return r')(require);", 1);
+  plant('고침7 T34 (나) 심은 위반: new 없는 맨꼴 한 줄 넣은 사본 → 빨강(bareFn 열쇠 +1)', p34b.ok, p34b);
+  const p34c = p34('indirEval', "    { (0, ev" + "al)('1'); const e_ = ev" + "al; globalThis['ev" + "al']('1'); }", 3);
+  plant('고침7 T34 (다) 심은 위반: 간접 꼴(쉼표 식 · 다른 이름에 담음 · 전역 객체 대괄호) 한 줄 넣은 사본 → 빨강(indirEval 열쇠 +3)', p34c.ok, p34c);
+  const p34d = p34('bracketCall', "    cpNow.spawnSync[k_]" + "(process.execPath, []);", 1);
+  plant('고침7 T34 대괄호 꼴 심은 위반: 대괄호로 꺼낸 함수를 바로 부르는 한 줄 넣은 사본 → 빨강(bracketCall 열쇠 +1)', p34d.ok, p34d);
   // T28 ⓐⓑⓒ — 판정 함수를 따로 만든 기록에 돌림(본 기록에 섞지 않음)
   const fa = k1CallVerdict([{ origin: 'judge', entry: false, tag: null, needsTwo: 0 }], []);
   const fb = k1CallVerdict([{ origin: 'judge', entry: false, tag: 'T1', needsTwo: 0 }], []);
