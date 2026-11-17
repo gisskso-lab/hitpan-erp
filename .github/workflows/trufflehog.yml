@@ -67,7 +67,7 @@ jobs:
         if: ${{ !github.event.deleted }}
         run: docker pull "$TRUFFLEHOG_IMAGE"
 
-      - name: Self-test (S1-S4, S6-S8)
+      - name: Self-test (S1-S4, S6-S10)
         if: ${{ !github.event.deleted }}
         env:
           CONFIG_FILE: ${{ github.workspace }}/.github/trufflehog-config.yaml
