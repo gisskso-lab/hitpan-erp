@@ -36,7 +36,7 @@ const K1_FLOOR_INNER = 110;
 const K1_SITE_FLOOR = { "700998716a29": 1, ddfa4a5c60c0: 4, e6ba771bb50c: 1, bf023daed110: 1, "166d4d52c03d": 1, "01f5ac44ad80": 1, "8a32bfa08278": 1, "34cc44b36d9e": 1, "87f935b90ad1": 1, "9952ee49a660": 1, db78d1f1e019: 1, adaf17e56e22: 1, "2aaf26927378": 1, "7fc66723be29": 1, "71838eeea029": 1, fbfb49ad33a8: 1, fafd9c2fe877: 1, "3e747f0c29be": 1, "55eaed6e1442": 1, "865b4629bac4": 1, "3c0702d2836d": 1, "6f39be2d69aa": 1, "00fabddac9b7": 1, "12b024a19a5a": 1, "9c8c4e350bba": 1, "8c3ccbe7ad3c": 1, "00cc1fd5271c": 1, "1fff25de5aef": 1, b2ad7a927821: 1, "3434528ee919": 1, c5ac3a3a7a17: 1, "68580c0f0b1d": 1, c1c96fda9f9d: 1, f617af48d94e: 7, "2ce3ac3c84b2": 1, b89cab35e63f: 1, "5d194b264cc2": 1, bbf0d6f5ea47: 1, "921fa8e02663": 1, "32a0967c876c": 1, c45e3b85195c: 1, "21c682212ad1": 1, e31901893a34: 1, "15a598b328ec": 1, e4a38384d338: 2, e954065a3400: 2, "5265e8927134": 2, "96a4c0fb0225": 4, "944a5b80659e": 1, fb9f3f9976b8: 1, "2704b06996ff": 1, "20eefd59dd7e": 4, faee6d54169a: 1, "6586c3389f44": 4, "60ab8d6d0597": 1, "2074223aefb7": 1, d6c7b30e95fa: 1, db97871cc8c2: 1, "6d29df68f078": 1, "93aa66b75523": 1, "52f6f976afe5": 1, "3c11065e9367": 1, "5b0d39613181": 1, "16d9ad248fe7": 1, e34a2711c425: 1, "1772bd33418e": 1, a5cea0ebb645: 1, "4c6b00ded4c5": 1, d401995535e3: 1, a1552b12cc05: 1, "93103b4e4ba1": 1, f1f46e0aa791: 1, "190fecc8f684": 1, "3703b561ab32": 1, c3aa6d9da8bc: 1, "2df913df0fa1": 3, eb6aa8b11e96: 1, "7e86b09d7809": 1, cd748ae4874c: 1, e27ddbf46bfa: 1, "67493276294d": 1, "3cfae413726a": 1, "678e640af8f4": 1, c269d372468a: 1, "112e1b290744": 1, "80849870fa91": 1, babfb9abadc0: 1, "27c166a9ed31": 1, "3aa7c8c23caa": 1 };
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
 // T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
-const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 14, sha: "d3a322a92c9b6be6"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
+const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 14, sha: "ff24a0d6b8286224"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
   loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [], zone: null, baselineMissing: false };
@@ -1418,8 +1418,12 @@ function checkProbe(src) {
       if (cmd === 'bash') return a.length === 4 && a[0] === m0 && path.resolve(path.dirname(a[1])) === path.resolve(tmp) && path.basename(a[1]).startsWith('m0d-') && a[2] === '--diff-only' && /^[0-9a-f]{40}$/.test(a[3]);
       return false;
     };
-    const shGuard = (cmd, args) => { if (!shOk(cmd, args)) { const m = '값커밋 결-15 허용 목록 밖 실행: ' + String(cmd) + ' ' + JSON.stringify(args).slice(0, 120); shBad.push(m); throw new Error(m); } };
-    const sh = (cmd, args, opt) => (shGuard(cmd, args), spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {})));
+    // 값커밋 결-16(작업지시서 §9 「c-V5 처리」): sh 셋째 인자(opt) 열쇠 허용 목록 = 이 블록이 실제로 넘기는 열쇠만(실측 3개 · encoding · env · input) · `shell` 열쇠가 있으면(값 무관) 던짐
+    const SH_OPT_KEYS = ['encoding', 'env', 'input'];
+    const shOptOk = (opt) => opt === undefined || (!!opt && typeof opt === 'object' && !('shell' in opt) && Object.keys(opt).every((k) => SH_OPT_KEYS.includes(k)));
+    // (옛 줄 · 결-16 으로 대체) const shGuard = (cmd, args) => { if (!shOk(cmd, args)) { … 허용 목록 밖 실행 … throw } };
+    const shGuard = (cmd, args, opt) => { const okO = shOptOk(opt); if (!shOk(cmd, args) || !okO) { const m = '값커밋 결-15 허용 목록 밖 실행: ' + String(cmd) + ' ' + JSON.stringify(args).slice(0, 120) + (okO ? '' : ' · 옵션 열쇠(결-16) ' + JSON.stringify(opt && typeof opt === 'object' ? Object.keys(opt) : typeof opt)); shBad.push(m); throw new Error(m); } };
+    const sh = (cmd, args, opt) => (shGuard(cmd, args, opt), spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {})));
     let shErr = null;
     try {
     const git = (args, opt) => sh('git', args, Object.assign({ encoding: 'utf8' }, opt || {}));
@@ -1477,13 +1481,16 @@ function checkProbe(src) {
     const shBadBlock = shBad.slice();
     check('값커밋 결-15 (P2-1): 결-13 블록 안 자식 실행 = 고정 허용 목록만(git 하위 명령 ' + SH_GIT_SUB.join(' · ') + ' · bash m0-assert.sh <임시 폴더> --diff-only <나무>) · 목록 밖 0 · 던짐 0', shBadBlock.length === 0 && shErr === null, { bad: shBadBlock.slice(0, 3), err: shErr });
     // 심은 위반 (ㄱ)(ㄴ)(ㄷ): 같은 sh 로 목록 밖 실행을 부르면 실행 전에 던짐(자식 프로세스 0)
-    const shTry = (cmd, args) => { const n0 = shBad.length; try { sh(cmd, args, { encoding: 'utf8' }); return { threw: false, named: false }; } catch (e) { return { threw: true, named: shBad.length === n0 + 1 && /값커밋 결-15 허용 목록 밖 실행/.test(String(e.message)) }; } };
+    const shTry = (cmd, args, opt) => { const n0 = shBad.length; try { sh(cmd, args, opt || { encoding: 'utf8' }); return { threw: false, named: false }; } catch (e) { return { threw: true, named: shBad.length === n0 + 1 && /값커밋 결-15 허용 목록 밖 실행/.test(String(e.message)) }; } };
     const pG = shTry('bash', ['-c', 'true']);
     plant('값커밋 결-15 (ㄱ) 심은 위반: sh(bash, [-c, true]) → 실행 전 던짐(이름 붙은 빨강)', pG.threw && pG.named, pG);
     const pN = shTry('git', ['-c', 'alias.x=!true', 'x']);
     plant('값커밋 결-15 (ㄴ) 심은 위반: git -c alias.x=!true x(하위 명령 앞 옵션) → 실행 전 던짐', pN.threw && pN.named, pN);
     const pD = shTry('git', ['status', '--porcelain']);
     plant('값커밋 결-15 (ㄷ) 심은 위반: 목록 밖 git 하위 명령(status) → 실행 전 던짐', pD.threw && pD.named, pD);
+    // 값커밋 결-16 (ㄹ): 허용된 명령 · 하위 명령(git rev-parse HEAD)에 옵션 {shell: true} 만 더함 → 실행 전 던짐(옵션 열쇠 때문임을 글자로 확인)
+    const pS = shTry('git', ['rev-parse', 'HEAD'], { shell: true });
+    plant('값커밋 결-16 (ㄹ) 심은 위반: 허용 git 하위 명령 + 옵션 {shell: true} → 실행 전 던짐(옵션 열쇠 이름 붙은 빨강)', pS.threw && pS.named && /옵션 열쇠\(결-16\)/.test(shBad[shBad.length - 1] || ''), pS);
   }
   // C-2(결-1 조건 ①): 장치 폴더 · 워크플로에 주소 앞머리 판단 0 — 꼴은 조각으로 만든다(이 파일이 스스로 걸리지 않게)
   {
