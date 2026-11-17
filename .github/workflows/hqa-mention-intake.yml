@@ -1,0 +1,53 @@
+name: HQA mention intake (proposal)
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+jobs:
+  intake:
+    if: ${{ github.event.issue.pull_request != null && !github.event.comment.user.type == 'Bot' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate mention and queue independent review
+        uses: actions/github-script@v7
+        env:
+          HQA_ENDPOINT: ${{ secrets.HQA_INTAKE_ENDPOINT }}
+          HQA_TOKEN: ${{ secrets.HQA_INTAKE_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const e = context.payload;
+            const body = e.comment.body || '';
+            // Explicit command only. A literal alias is not a GitHub user mention.
+            if (!/^\\s*@HQA-ARGOS\\s+검증요청\\b/m.test(body)) return;
+            if (!['OWNER','MEMBER','COLLABORATOR'].includes(e.comment.author_association)) return;
+            if (e.comment.user.type === 'Bot') return;
+            const endpoint = process.env.HQA_ENDPOINT;
+            const token = process.env.HQA_TOKEN;
+            if (!endpoint || !token) {
+              core.warning('HQA intake is not configured; no acknowledgement or verification claimed.');
+              return;
+            }
+            const url = new URL(endpoint);
+            if (url.protocol !== 'https:' || url.username || url.password) throw Error('Invalid HQA endpoint');
+            const pr = await github.rest.pulls.get({owner:context.repo.owner,repo:context.repo.repo,pull_number:e.issue.number});
+            const sha = pr.data.head.sha;
+            const requestId = `${context.repo.owner}/${context.repo.repo}:${e.comment.id}:${sha}`;
+            const controller = new AbortController();
+            const t = setTimeout(()=>controller.abort(),15000);
+            let response;
+            try {
+              response = await fetch(url.toString(),{
+                method:'POST',
+                headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json','Idempotency-Key':requestId},
+                body:JSON.stringify({repository:context.repo.owner+'/'+context.repo.repo,pr:e.issue.number,comment_id:e.comment.id,comment_url:e.comment.html_url,head_sha:sha,request_id:requestId,body}),
+                signal:controller.signal
+              });
+            } finally { clearTimeout(t); }
+            if (!response.ok) throw Error(`HQA queue rejected: HTTP ${response.status}`);
+            // This only confirms queue acceptance, not verification or a verdict.
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:e.issue.number,body:`[HQA 자동접수] 의뢰 큐 접수 · PR #${e.issue.number} · SHA \\`${sha}\\` · 요청 \\`${requestId}\\`. 독립검증/최종판정은 아직 수행되지 않았습니다. 검증 실행기가 별도 결과 댓글을 게시합니다.`});
