@@ -123,9 +123,13 @@ git clone -q --no-local "file://${origin}" "$scan_repo" 2>> "$ALL_LOG"
 # ── 도우미 ──────────────────────────────────────────────────────────────
 # 가짜 사건 파일 → range.sh (실제 경로와 같은 입력: GITHUB_EVENT_NAME · GITHUB_EVENT_PATH)
 EVF="${root}/event.json"
+# default_branch: 생략 = main · 빈 값("") = 빈 값 그대로 · __none__ = 키 자체 없음(S4f·S4g)
 push_event() {   # ref before after [deleted] [default_branch]
-  jq -n --arg ref "$1" --arg before "$2" --arg after "$3" --arg del "${4:-false}" --arg db "${5:-main}" \
-    '{ref:$ref, before:$before, after:$after, deleted:($del=="true"), repository:{default_branch:$db}}' > "$EVF"
+  local db="${5-main}" nokey=0
+  [ "$db" = "__none__" ] && nokey=1
+  jq -n --arg ref "$1" --arg before "$2" --arg after "$3" --arg del "${4:-false}" --arg db "$db" --arg nokey "$nokey" \
+    '{ref:$ref, before:$before, after:$after, deleted:($del=="true"),
+      repository:(if $nokey == "1" then {} else {default_branch:$db} end)}' > "$EVF"
 }
 pr_event() {     # base head
   jq -n --arg b "$1" --arg h "$2" \
@@ -236,6 +240,18 @@ else
   miss "S4 범위 0 — 같은커밋(${s4a}) 삭제(${s4b}) 이력단절(${s4c}) 기준가지없음(${s4d}) 기본가지강제(${s4e})"
 fi
 
+# ── S4f·S4g 기본 가지 이름 없음(#859 후속 ㄱ′-4): 키 없음 / 빈 값 → 빨강 ───────
+# 같은 사건에 기본 가지 main 을 주면 S2 처럼 범위가 계산된다 = 대조군(S1·S2·S4a~e 무후퇴).
+push_event refs/heads/feat-clean "$ZERO" "$F1" false __none__ ; run_range push
+s4f="${r_rc}"; s4f_ok=0; [ "$r_rc" -ne 0 ] && s4f_ok=1
+push_event refs/heads/feat-clean "$ZERO" "$F1" false "" ; run_range push
+s4g="${r_rc}"; s4g_ok=0; [ "$r_rc" -ne 0 ] && s4g_ok=1
+if [ $((s4f_ok + s4g_ok)) -eq 2 ]; then
+  pass "S4f·S4g 기본 가지 이름 없음 — 키 없음·빈 값 모두 빨강(main 으로 대신하지 않음)"
+else
+  miss "S4f·S4g 기본 가지 이름 없음 — 기대 「둘 다 종료 ≠0」 · 실제 키없음(${s4f}) 빈값(${s4g})"
+fi
+
 # ── S6 엔진 오류: 「검사 오류」 는 「0건」 과 구분된다 ────────────────────
 # 오류 길의 출력은 scan.sh 자기 문구 두 줄과 「글자 그대로」 같아야 한다(엔진 기록 글자 0 · 외부 예비 회신 #6846795334)
 # [4] 재검증 V2-1: 줄 머리만 보면 꼬리·문구 안에 엔진 글자가 붙어도 통과한다 → 문구 끝까지 `$` 로 맞춘다.
@@ -291,6 +307,118 @@ else
   miss "S8 같은 이름 태그 — 기대 「함정 걸림 · 가지·태그 모두 찾음」 · 실제 함정=${s8_trap} 가지=${s8_branch} 태그=${s8_tag}"
 fi
 
+# ── S9·S10 가짜 엔진(#859 후속 ㄱ′-2) ──────────────────────────────────────
+# 실행 때 임시 폴더에 `docker` 실행 파일을 만들고, **그 scan.sh 호출에만** PATH 앞에 끼운다(새 환경 변수 0 ·
+# scan.sh 에 시험용 손잡이 0). 가짜 엔진 = 지정 결과 줄(표준 출력) + 훑은 양 숫자 줄(오류 출력) + 지정 종료 코드.
+# 🔴 출력 격리: S9 는 ANNOTATE=1(운영 꼴)이라 출력이 그대로 잡 로그에 가면 진짜 주석이 된다
+#    → 출력은 F_OUT 파일로만 받고 ALL_LOG 에도 붙이지 않는다. miss 문구에는 숫자·0/1 만 넣는다.
+fake_bin="${root}/fake-bin"
+mkdir -p "$fake_bin"
+cat > "${fake_bin}/docker" <<EOF
+#!/usr/bin/env bash
+cat "${root}/fake.out"
+echo 'level=info msg="finished scanning" {"chunks": 3, "bytes": 120}' >&2
+exit "\$(cat "${root}/fake.rc")"
+EOF
+chmod +x "${fake_bin}/docker"
+
+F_OUT="${root}/fake.last"
+f_rc=0 f_state="" f_det=""
+run_fake() {     # 엔진_종료코드 결과_파일 ANNOTATE
+  local sum="${root}/fake.sum"
+  : > "$sum"
+  cp "$2" "${root}/fake.out"
+  echo "$1" > "${root}/fake.rc"
+  set +e
+  PATH="${fake_bin}:${PATH}" BASE="$M3" HEAD="$F1" REPO_DIR="$scan_repo" CONFIG_FILE="" EXCLUDE_FILE="" \
+    NO_VERIFICATION=1 ANNOTATE="$3" SUMMARY_FILE="$sum" bash "$SCAN" > "$F_OUT" 2>&1
+  f_rc=$?
+  set -e
+  f_state="$(sed -n 's/^state=//p' "$sum")"
+  f_det="$(sed -n 's/^detectors=//p' "$sum")"
+}
+# F_OUT 줄 수 세기 — 첫 인자 = 파일을 못 읽을 때의 값(「0 이어야 함」 단언은 1 을 줘 실패 쪽으로)
+fcnt() { local d="$1" n; shift; n="$(grep -c "$@" "$F_OUT" 2> /dev/null)" || true; echo "${n:-$d}"; }
+# 결과 한 줄 = 탐지기 이름 하나를 단 객체(jq 가 줄바꿈·제어문자를 한 줄 안으로 이스케이프)
+obj() { jq -cn --arg n "$1" '{DetectorName:$n}'; }
+empty_in="${root}/empty.jsonl"
+: > "$empty_in"
+
+# S9a 양성 — 허용 3 + 주입 이름 5(줄바꿈 · ::warning · %0A · 제어문자 BEL·ESC · 41자) · 주입마다 실행 때 만든 카나리
+canary="$(openssl rand -hex 8)"
+s9a_in="${root}/s9a.jsonl"
+{
+  obj CustomRegex; obj CustomRegex; obj SQLServer
+  obj "n${canary}"$'\n'"::warning title=inj::${canary}"
+  obj "::warning title=inj::${canary}"
+  obj "p%0A${canary}%0D%25"
+  obj "c"$'\a'"${canary}"$'\e'"[31m"
+  obj "${canary}${canary}ABCDEFGHI"
+} > "$s9a_in"
+S9A_DET="CustomRegex(2) SQLServer(1) 기타(5)"
+run_fake 183 "$s9a_in" 1
+s9a_lines="$(fcnt 0 -e '')"
+s9a_head="$(fcnt 0 -E '^::error title=비밀 후보 찾음::8건 · 탐지기: CustomRegex\(2\) SQLServer\(1\) 기타\(5\) · ')"
+s9a_colon="$(grep -o '::' "$F_OUT" 2> /dev/null | wc -l | tr -d ' ')" || true
+s9a_pct="$(fcnt 1 -iE '%0A|%0D|%25')"
+s9a_ctl="$(LC_ALL=C grep -c '[[:cntrl:]]' "$F_OUT" 2> /dev/null)" || true
+s9a_can="$(fcnt 1 -F -e "$canary")"
+s9a_sum=0; [ "$f_det" = "$S9A_DET" ] && s9a_sum=1
+s9a_ok=0
+[ "$f_rc" -eq 1 ] && [ "$s9a_lines" -eq 1 ] && [ "$s9a_head" -eq 1 ] && [ "${s9a_colon:-0}" -eq 2 ] \
+  && [ "$s9a_pct" -eq 0 ] && [ "${s9a_ctl:-1}" -eq 0 ] && [ "$s9a_can" -eq 0 ] && [ "$s9a_sum" -eq 1 ] && s9a_ok=1
+s9a="종료${f_rc}/줄${s9a_lines}/머리${s9a_head}/::${s9a_colon:-?}/%${s9a_pct}/제어${s9a_ctl:-?}/카나리${s9a_can}/요약${s9a_sum}"
+
+# S9b 양성 대조 — 허용 이름만 3줄: 「다 기타 로 뭉개서 통과」 를 잡는다
+s9b_in="${root}/s9b.jsonl"
+{ obj CustomRegex; obj CustomRegex; obj SQLServer; } > "$s9b_in"
+run_fake 183 "$s9b_in" 1
+s9b_etc="$(fcnt 1 -F -e '기타')"
+s9b_sum=0; [ "$f_det" = "CustomRegex(2) SQLServer(1)" ] && s9b_sum=1
+s9b_ok=0; [ "$f_rc" -eq 1 ] && [ "$s9b_etc" -eq 0 ] && [ "$s9b_sum" -eq 1 ] && s9b_ok=1
+s9b="종료${f_rc}/기타${s9b_etc}/요약${s9b_sum}"
+
+# S9c 음성 — 종료 0 · 결과 0줄: 깨끗 한 줄 · 주석 줄 0
+run_fake 0 "$empty_in" 1
+s9c_lines="$(fcnt 0 -e '')"; s9c_clean="$(fcnt 0 -E '^판정: 깨끗 — ')"; s9c_ann="$(fcnt 1 -E '^::')"
+s9c_ok=0; [ "$f_rc" -eq 0 ] && [ "$s9c_lines" -eq 1 ] && [ "$s9c_clean" -eq 1 ] && [ "$s9c_ann" -eq 0 ] && s9c_ok=1
+s9c="종료${f_rc}/줄${s9c_lines}/깨끗${s9c_clean}/주석${s9c_ann}"
+
+# S9d 오류 길 — 종료 2 · 결과 0줄: 오류 줄 수 한 줄 + 고정 문구 주석 한 줄(글자 그대로)
+run_fake 2 "$empty_in" 1
+s9d_lines="$(fcnt 0 -e '')"; s9d_cnt="$(fcnt 0 -E "^${S6_LINE_COUNT}\$")"
+s9d_err="$(fcnt 0 -xF -e '::error title=검사 오류::엔진 종료 코드 2 · 결과 0줄 — 「찾음」 이 아니라 검사가 끝나지 않았다')"
+s9d_ok=0; [ "$f_rc" -eq 2 ] && [ "$s9d_lines" -eq 2 ] && [ "$s9d_cnt" -eq 1 ] && [ "$s9d_err" -eq 1 ] && s9d_ok=1
+s9d="종료${f_rc}/줄${s9d_lines}/오류줄수${s9d_cnt}/문구${s9d_err}"
+
+if [ $((s9a_ok + s9b_ok + s9c_ok + s9d_ok)) -eq 4 ]; then
+  pass "S9 운영 꼴 출력 위생 — 양성 한 줄(허용 이름만 · 주입 5건 = 기타(5) · 카나리 0) · 대조 기타 0 · 음성 깨끗 · 오류 길 고정 문구"
+else
+  miss "S9 운영 꼴 출력 위생 — 실제 양성(${s9a}) 대조(${s9b}) 음성(${s9c}) 오류길(${s9d})"
+fi
+
+# ── S10 결과 파일 엄격 해석(#859 후속 ㄱ′-3): 공백 아닌 줄은 전부 JSON 객체여야 한다 ──────
+s10_in="${root}/s10.jsonl"
+s10_one() {      # 이름 엔진_종료코드 기대_종료 기대_상태 (결과는 s10_in)
+  run_fake "$2" "$s10_in" 0
+  if [ "$f_rc" -eq "$3" ] && [ "$f_state" = "$4" ]; then s10_ok=$((s10_ok + 1)); fi
+  s10="${s10}${1}(${f_state:-?}/${f_rc}) "
+}
+s10_ok=0 s10=""
+printf '%s\n' "not a json line" > "$s10_in"; s10_one a 0 2 error          # 지금 코드라면 깨끗 0 — 대조군
+printf '%s\n' "null" > "$s10_in"; s10_one b 0 2 error
+{ obj CustomRegex; obj SQLServer; printf '%s\n' "[1,2]"; } > "$s10_in"; s10_one c 183 2 error
+canary2="$(openssl rand -hex 8)"
+{ obj CustomRegex; obj SQLServer; printf '%s\n' "{\"DetectorName\":\"${canary2}"; } > "$s10_in"; s10_one d 183 2 error
+s10d_can="$(fcnt 1 -F -e "$canary2")"
+printf '   \n\t\n' > "$s10_in"; s10_one e 0 0 clean                         # 빈 줄 허용 — 과잉 차단 대조
+printf '\000  \n' > "$s10_in"; s10_one f 0 2 error                     # NUL+공백 한 줄(실행 때 만듦) — grep -a 없으면 공백 줄로 빠져 깨끗 0 (P-6 · 보안상무 P2-1)
+if [ "$s10_ok" -eq 6 ] && [ "$s10d_can" -eq 0 ]; then
+  pass "S10 엄격 해석 — 글자·null·배열·깨진 줄·NUL 든 줄 = 검사 오류(종료 2) · 깨진 줄 글자 0 · 공백 줄만 = 깨끗"
+else
+  miss "S10 엄격 해석 — 기대 「a~d error/2 · e clean/0 · f error/2 · 깨진 줄 글자 0」 · 실제 ${s10}깨진줄글자(${s10d_can})"
+fi
+
 # ── 로그 위생: 가짜 비밀 내용이 하위 출력 어디에도 0회 ─────────────────────
 body="${root}/fake.body"
 : > "$body"
@@ -306,4 +434,4 @@ if [ "$fails" -ne 0 ]; then
   echo "::error title=비밀 탐지 자체시험::${fails}개 실패 — 검사 장치를 믿을 수 없으므로 잡을 빨강으로 끝낸다"
   exit 1
 fi
-echo "자체시험 S1~S4 · S6 · S7 · S8 · 로그 위생 모두 통과"
+echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · 로그 위생 모두 통과"
