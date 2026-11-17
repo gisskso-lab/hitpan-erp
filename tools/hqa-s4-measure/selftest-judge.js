@@ -12,6 +12,190 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { buildPlan, cellKey, defaultWindow } = require('./judge.js');
+// ── 고침7 K1(작업지시서 20261117작 §8 안 (가) · C2-1~C2-4) — 판독기 입구 · 비켜 감 · 호출 셈 ──
+//   이 셋은 자체시험 파일에만 있다(판독기 judge.js 는 두 칸을 읽기만 · C2-3).
+//   입구 규칙: ① I-4 표본 readings 에 두 칸(hqaFocusRow1Restored · menuZeroObserved)이 모두 없을 때만 덧붙임
+//     — HQA 칸 = 판독기에 넘기는 그 순간의 장치 값(focusOnSameRowBtn) 그대로 · menuZeroObserved = 장치 값이 참/거짓이면 참
+//   ② 두 칸 중 하나라도 있으면 그 표본은 손대지 않음 ③ I-4 밖 표본 · 다른 키 무변
+//   ④ 원 입력은 바꾸지 않음 · 손대는 표본(과 그 readings)만 사본 · 손 안 대는 표본은 같은 객체
+//   ⑤ readings 가 없거나 장치 값 칸 자체가 없는 표본은 손대지 않음
+//   셈의 눈(C2-2): 실린 판독기 모듈의 judge 를 한 번 감쌈(같은 프로세스의 require('./judge.js') = 같은 객체) ·
+//   심은 위반 사본은 사본을 싣는 함수(mutantJudge) 하나에서 감쌈 · 고침 전 판독기(비교용)는 감싸지 않음(PM 재개 결재)
+const K1_ENTRY = Symbol('k1-entry');
+const K1_PRE = Symbol('k1-pre');
+const K1_TAG = Symbol('k1-bypass-tag');
+const K1_CONTROL = Symbol('k1-control');
+const K1_MM = Symbol('k1-planted-mismatch');
+const K1_WRAPPED = Symbol('k1-wrapped');
+const K1_BYPASS_OK = ['T7', 'T20'];
+// 하한(C2-2): 고침 전 [3] 실측 = 한 런(바깥 + 자기 재실행 안쪽 · 명령줄 판독기 포함) 220 · 안쪽만(재실행 없음) 110
+const K1_FLOOR_RUN = 220;
+const K1_FLOOR_INNER = 110;
+// 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
+const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
+const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null }, inner: null, out: null };
+const k1Own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const k1Touchable = (s) => !!s && typeof s === 'object' && s.item === 'I-4' && !!s.readings && typeof s.readings === 'object' && k1Own(s.readings, 'focusOnSameRowBtn');
+const k1NeedsTwo = (s) => k1Touchable(s) && !k1Own(s.readings, 'hqaFocusRow1Restored') && !k1Own(s.readings, 'menuZeroObserved');
+function k1Entry(samples, opt) {
+  if (!Array.isArray(samples)) return samples;
+  const before = JSON.stringify(samples);
+  let touched = 0;
+  const xs = samples.map((s) => {
+    if (!k1NeedsTwo(s)) return s;
+    touched += 1;
+    const dev = s.readings.focusOnSameRowBtn;
+    return Object.assign({}, s, { readings: Object.assign({}, s.readings, { hqaFocusRow1Restored: dev, menuZeroObserved: typeof dev === 'boolean' }) });
+  });
+  K1.entryCalls += 1;
+  K1.entryTouched += touched;
+  // T25 ①②③ — 이 호출의 입구 전/후 입력
+  const bad = [];
+  if (JSON.stringify(samples) !== before) bad.push('③ 원 입력 바뀜');
+  xs.forEach((o, i) => {
+    const s = samples[i];
+    if (o === s) { if (k1NeedsTwo(s)) bad.push(`① ${i} 덧붙일 표본을 안 건드림`); return; }
+    if (!k1NeedsTwo(s)) bad.push(`① ${i} 손대면 안 되는 표본`);
+    const ka = Object.keys(s);
+    if (JSON.stringify(ka) !== JSON.stringify(Object.keys(o)) || ka.some((k) => k !== 'readings' && o[k] !== s[k])) bad.push(`① ${i} 다른 키`);
+    const ra = Object.keys(s.readings);
+    if (JSON.stringify(Object.keys(o.readings)) !== JSON.stringify(ra.concat(['hqaFocusRow1Restored', 'menuZeroObserved'])) || ra.some((k) => o.readings[k] !== s.readings[k])) bad.push(`① ${i} readings 다른 칸`);
+    if (o.readings.hqaFocusRow1Restored !== s.readings.focusOnSameRowBtn || o.readings.menuZeroObserved !== (typeof s.readings.focusOnSameRowBtn === 'boolean')) bad.push(`② ${i} 값 규칙`);
+  });
+  if (bad.length) K1.entryBad.push(bad.slice(0, 3));
+  Object.defineProperty(xs, K1_ENTRY, { value: true });
+  Object.defineProperty(xs, K1_PRE, { value: samples });
+  if (opt && opt.mm) Object.defineProperty(xs, K1_MM, { value: true });
+  return xs;
+}
+// 옛 꼴 시험(T7 · T20)만 쓰는 비켜 감 — 이름표를 붙여 판독기를 바로 부름
+function k1Bypass(tag, mod, r, samples, extra) {
+  const xs = Array.from(samples);
+  Object.defineProperty(xs, K1_TAG, { value: tag });
+  return mod.judge(r, xs, extra || {});
+}
+// 명령줄 판독기 입력 파일(입력 파일을 쓴 뒤 · 띄우기 직전에 한 번) — 이 프로세스가 띄운 명령줄 호출 셈
+function k1Cli(file, viaEntry) {
+  let xs = null;
+  try { xs = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch (e) { xs = null; }
+  K1.cli.push({ viaEntry: viaEntry === true, i4: xs ? xs.filter((s) => s && s.item === 'I-4').length : null, needsTwo: xs ? xs.filter(k1NeedsTwo).length : null });
+}
+// T19 독립 판별(판독기 꼴과 따로 씀) · T19 · T21 · T23 문제 목록(판정 한 벌)
+function k1Cls(s) {
+  const X = s && s.readings && typeof s.readings === 'object' ? s.readings : {};
+  if (typeof X.focusOnSameRowBtn !== 'boolean') return 'ownPath';
+  if (X.hqaFocusRow1Restored === X.focusOnSameRowBtn) return 'match';
+  return k1Own(X, 'hqaFocusRow1Restored') || k1Own(X, 'menuZeroObserved') ? 'mismatch' : 'notComparable';
+}
+function k1Problems(samples, v) {
+  const p = { t19: [], t21: [], t23: [] };
+  if (!v || !v.items) return p;
+  const i4 = v.items['I-4'];
+  if (i4) {
+    const xs = (Array.isArray(samples) ? samples : []).filter((s) => s && s.item === 'I-4' && !require('./judge.js').isAttemptLine(s));
+    const em = i4.exprMismatch;
+    const c = em && em.classes;
+    const mine = { ownPath: 0, match: 0, notComparable: 0, mismatch: 0 };
+    for (const s of xs) mine[k1Cls(s)] += 1;
+    if (!c || c.total !== xs.length || c.ownPath + c.match + c.notComparable + c.mismatch !== c.total) p.t19.push({ total: c && c.total, n: xs.length });
+    else if (JSON.stringify([c.ownPath, c.match, c.notComparable, c.mismatch]) !== JSON.stringify([mine.ownPath, mine.match, mine.notComparable, mine.mismatch])) p.t19.push({ judge: c, mine });
+    else if (em.count !== c.mismatch || em.notComparable.count !== c.notComparable || em.rows.length !== em.count || em.notComparable.rows.length !== em.notComparable.count) p.t19.push('count');
+    else {
+      const key = (r) => [r.case, r.screen, r.delay, r.sampleNo].join('|');
+      const all = xs.map((s) => [s.case, s.screen, s.delay, s.sampleNo].join('|'));
+      const uniq = new Set(all).size === all.length;
+      const a = new Set(em.rows.map(key));
+      if (uniq && em.notComparable.rows.some((r) => a.has(key(r)))) p.t19.push('겹침');
+    }
+    for (const r of i4.focusAfterClose || []) if (r.valid !== r.onSameRowBtn + r.offSameRowBtn + r.noRead + r.exprMismatchExcluded) p.t21.push(r);
+  }
+  for (const [item, it] of Object.entries(v.items)) {
+    const cs = [];
+    if (it.contrastState && Array.isArray(it.contrastState.cells)) cs.push(['contrastState', it.contrastState]);
+    for (const [k, x] of Object.entries(it.contrastByCase || {})) cs.push([k, x]);
+    for (const [k, x] of cs) {
+      const ok = typeof x.exprMismatchChanged === 'boolean' && Number.isInteger(x.exprMismatchRemoved) && x.exprMismatchRemoved >= 0 && (!x.exprMismatchChanged || x.exprMismatchRemoved > 0);
+      if (!ok) p.t23.push(`${item}:${k}`);
+    }
+  }
+  return p;
+}
+const K1_NEW_KEYS = new Set(['exprMismatch', 'exprMismatchExcluded', 'exprMismatchChanged', 'exprMismatchRemoved', 'exposureOnly', 'reproducedCells']);
+const k1Strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => (K1_NEW_KEYS.has(k) ? undefined : x));
+let k1PreMod;
+function k1PreJudge() {
+  if (k1PreMod !== undefined) return k1PreMod;
+  k1PreMod = null;
+  try {
+    const crypto = require('crypto');
+    const lg = spawnSync('git', ['log', '--format=%H', '--', 'judge.js'], { cwd: HERE, encoding: 'utf8' });
+    for (const sha of (lg.stdout || '').split(/\r?\n/).filter(Boolean).slice(0, 60)) {
+      const r = spawnSync('git', ['show', sha + ':./judge.js'], { cwd: HERE, encoding: 'utf8', maxBuffer: 1 << 24 });
+      const s = (r.stdout || '').split(String.fromCharCode(13)).join('');
+      if (crypto.createHash('sha256').update(s).digest('hex') !== K1_PRE_LF_SHA256) continue;
+      const p = path.join(tmp, 'judge-pre-fix7.js');
+      fs.writeFileSync(p, s.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
+        .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')'), 'utf8');
+      k1PreMod = require(p);
+      K1.pre.from = sha.slice(0, 8);
+      break;
+    }
+    if (!k1PreMod) K1.pre.err = '나무 이력에 고침 전 판독기 없음';
+  } catch (e) { K1.pre.err = String(e && e.message ? e.message : e).slice(0, 120); }
+  return k1PreMod;
+}
+function k1Wrap(mod, origin) {
+  if (!mod || typeof mod.judge !== 'function' || mod[K1_WRAPPED]) return mod;
+  const real = mod.judge;
+  mod.judge = function k1Counted(r, samples, extra) {
+    const isArr = Array.isArray(samples);
+    const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, needsTwo: isArr ? samples.filter(k1NeedsTwo).length : 0 };
+    K1.calls.push(rec);
+    const do25 = origin === 'judge' && rec.entry && !!k1PreJudge();
+    const a = do25 ? structuredClone(samples[K1_PRE]) : null;
+    const b = do25 ? structuredClone(Array.from(samples)) : null;
+    const v = real.apply(this, arguments);
+    if (origin === 'judge') {
+      K1.judged += 1;
+      const p = k1Problems(samples, v);
+      if (p.t19.length) K1.t19.push(p.t19[0]);
+      if (p.t21.length) K1.t21.push(p.t21[0]);
+      if (p.t23.length) K1.t23.push(p.t23[0]);
+    }
+    if (do25) {
+      // T25 ④ 고침 전 판독기: 입구 전 · 뒤 입력 → 판정 통째 같음 / ⑤ 고침 뒤 판독기(입구 뒤) − 새 칸 = 고침 전(입구 전)
+      try {
+        const P = k1PreJudge();
+        const va = P.judge(r, a, extra);
+        const vb = P.judge(r, b, extra);
+        K1.pre.calls += 2;
+        K1.t25checked += 1;
+        if (JSON.stringify(va) !== JSON.stringify(vb)) K1.t25.push('④');
+        if (samples[K1_MM] === true) K1.t25mm += 1;
+        else if (JSON.stringify(k1Strip(v)) !== JSON.stringify(va)) K1.t25.push('⑤');
+      } catch (e) { K1.t25.push('비교 예외 ' + String(e && e.message).slice(0, 80)); }
+    }
+    return v;
+  };
+  Object.defineProperty(mod, K1_WRAPPED, { value: true });
+  return mod;
+}
+// T26 · T27 판정(셈 기록 한 벌 → 칸) — T28 이 따로 만든 기록으로 이 함수가 진짜 잡는지 본다
+function k1CallVerdict(calls, cli) {
+  const byTag = {};
+  for (const c of calls) if (c.tag) byTag[c.tag] = (byTag[c.tag] || 0) + 1;
+  return {
+    total: calls.length + cli.length,
+    viaEntry: calls.filter((c) => c.entry).length + cli.filter((c) => c.viaEntry).length,
+    bypass: calls.filter((c) => !c.entry && c.tag).length,
+    byTag,
+    missing: calls.filter((c) => !c.entry && !c.tag).length + cli.filter((c) => !c.viaEntry).length,
+    badBypass: Object.keys(byTag).filter((t) => !K1_BYPASS_OK.includes(t)),
+    badFiles: cli.filter((c) => c.needsTwo !== 0).length,
+    entryNeedsTwo: calls.filter((c) => c.entry && c.needsTwo > 0).length
+  };
+}
+k1Wrap(require('./judge.js'), 'judge');
 
 const HERE = __dirname;
 const results = [];
@@ -89,7 +273,8 @@ function runJudge(name, rp) {
   const rPath = rp || rulesPath;
   const sp = path.join(tmp, `${name}.jsonl`);
   const op = path.join(tmp, `${name}.json`);
-  fs.writeFileSync(sp, canon(sets[name], RULES_BY_PATH[rPath]).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+  fs.writeFileSync(sp, k1Entry(canon(sets[name], RULES_BY_PATH[rPath])).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+  k1Cli(sp, true);
   const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rPath, '--samples', sp, '--out', op], { encoding: 'utf8' });
   const v = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
   return { code: r.status, v, stderr: (r.stderr || '').slice(0, 200) };
@@ -1019,7 +1204,7 @@ function checkProbe(src) {
     xs.forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
     return xs;
   };
-  const run = (r, xs, extra) => J.judge(r, ordered(r, xs), extra || {});
+  const run = (r, xs, extra) => J.judge(r, k1Entry(ordered(r, xs)), extra || {});
   const v0 = run(R5, base(R5));
   check('고침5 바탕: 손대지 않은 합성 원자료 = 빨강 아님 · round 판독 가능(아래 대조군의 기준)', v0.red === false && v0.round.state === F5.roundReadable && v0.round.red === false, v0.redReasons);
 
@@ -1098,16 +1283,16 @@ function checkProbe(src) {
   {
     const attemptsFor = (r, pred) => buildPlan(r).cells.filter(pred).map((c) => ({ kind: J.ATTEMPT_KIND, item: c.item, case: c.case, screen: c.screen, delay: c.delay, window: c.window, cell: c.key, planned: c.samples }));
     const i7cells = buildPlan(R5).cells.filter((c) => c.item === 'I-7');
-    const va = J.judge(R5, ordered(R5, base(R5).filter((s) => s.item !== 'I-7')).concat(attemptsFor(R5, (c) => c.item === 'I-7')), {});
+    const va = J.judge(R5, k1Entry(ordered(R5, base(R5).filter((s) => s.item !== 'I-7')).concat(attemptsFor(R5, (c) => c.item === 'I-7'))), {});
     const a7 = va.items['I-7'];
     plant('고침5-B ⓐ: I-7 시도 기록 있음 · 표본 0 → 미측정 표지 0 · 장치 실패만 · attempted = 칸 수 · 칸 attemptRecords 1 · got 0',
       a7.notMeasured.flag === false && a7.notMeasured.reason === null && a7.deviceFailure.flag === true && a7.attempted.records === i7cells.length && a7.attempted.cells === i7cells.length
       && va.cells.filter((c) => c.item === 'I-7').every((c) => c.attemptRecords === 1 && c.got === 0), { nm: a7.notMeasured, att: a7.attempted });
-    const vb = J.judge(R5, ordered(R5, base(R5)).concat(attemptsFor(R5, () => true)), {});
+    const vb = J.judge(R5, k1Entry(ordered(R5, base(R5)).concat(attemptsFor(R5, () => true))), {});
     check('고침5-B ⓐ 대조군: 전 칸 시도 줄을 더해도 표본 수 · 빨강 사유 · 순서 문제 = 시도 줄 없을 때와 같음 · totals.attemptRecords = 칸 수',
       vb.red === v0.red && vb.totals.samples === v0.totals.samples && vb.totals.orderProblems === v0.totals.orderProblems && JSON.stringify(vb.redReasons) === JSON.stringify(v0.redReasons)
       && vb.totals.attemptRecords === buildPlan(R5).cells.length && vb.totals.attemptOutOfPlan === 0, vb.redReasons);
-    const vc = J.judge(R5, ordered(R5, base(R5)).concat([{ kind: J.ATTEMPT_KIND, item: 'I-9', cell: 'I-9|x' }]), {});
+    const vc = J.judge(R5, k1Entry(ordered(R5, base(R5)).concat([{ kind: J.ATTEMPT_KIND, item: 'I-9', cell: 'I-9|x' }])), {});
     plant('고침5-B ⓐ: 계획 밖 시도 줄 → 빨강 사유 「계획 밖 시도 기록 1건」', vc.red === true && vc.redReasons.includes(F5.attemptOutOfPlan + ' 1건') && vc.totals.attemptOutOfPlan === 1, vc.redReasons);
     const ri = fs.readFileSync(path.join(HERE, 'run-items.js'), 'utf8');
     check('고침5-B ⓐ 원자료: run-items.js 가 칸마다 표본보다 먼저 시도 줄(kind = ATTEMPT_KIND · order 없음) · 파생 칸도',
@@ -1176,7 +1361,7 @@ function checkProbe(src) {
     const RE = JSON.parse(JSON.stringify(rules));
     RE.hqaPending.samplesPerCell.value = { default: 1, 'N-1': 1 };
     const expo = (r) => {
-      const v = J.judge(r, ordered(r, base(r)), {});
+      const v = J.judge(r, k1Entry(ordered(r, base(r))), {});
       const ce = (item, screen, delay, kase) => v.cells.find((c) => c.item === item && c.screen === screen && c.delay === delay && (!kase || c.case === kase));
       const src = (c) => (c && c.exposed ? c.exposed.source : []);
       return { i4b: src(ce('I-4', 'before', 0, 'kbd-open')), i4a: src(ce('I-4', 'after', 0, 'kbd-open')), i4m: src(ce('I-4', 'before', 0, 'mouse-open')), i5a: src(ce('I-5', 'after', 0, 'tab')), i6a: src(ce('I-6', 'after', 0, 'enter')), n1b: src(ce('N-1', 'before', 0)) };
@@ -1244,10 +1429,11 @@ function checkProbe(src) {
     const rp5 = path.join(tmp, 'rules-fix5.json');
     fs.writeFileSync(rp5, JSON.stringify(R5), 'utf8');
     const sp5 = path.join(tmp, 's5.jsonl');
-    fs.writeFileSync(sp5, ordered(R5, base(R5)).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+    fs.writeFileSync(sp5, k1Entry(ordered(R5, base(R5))).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
     let n5 = 0;
     const cli = (args) => {
       const op = path.join(tmp, `v5-${n5++}.json`);
+      k1Cli(sp5, true);
       const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp5, '--samples', sp5, '--out', op].concat(args), { encoding: 'utf8' });
       return { code: r.status, v: fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null };
     };
@@ -1357,6 +1543,8 @@ function checkProbe(src) {
     let last = null;
     try { last = JSON.parse((r.stdout || '').trim().split(/\r?\n/).pop()); } catch (e) { last = null; }
     const k = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
+    // 고침7 K1: 안쪽 프로세스의 판독기 호출 셈(안쪽 판정은 안쪽에서 따로 · 바깥은 하한 셈에만 더함)
+    K1.inner = k && k.judgeCalls ? k.judgeCalls : null;
     check('고침5 ⑩ K-1: --out 숫자 = 표준 출력 숫자(total · failed) · passed = total − failed · plantedRed ≤ plantedTotal · plantedTotal ≥ 1',
       !!k && !!last && k.total === last.total && k.failed === last.fail && k.passed === k.total - k.failed && k.plantedTotal >= 1 && k.plantedRed <= k.plantedTotal, { k, last });
   }
@@ -1376,7 +1564,7 @@ function checkProbe(src) {
     const rank = (sc) => R10.plan.screenOrder.indexOf(sc);
     xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
     if (bad) xs.find((s) => s.case === 'below-list' && s.screen === 'after').readings.changedOtherRows = [{ row: '2' }];
-    return J.judge(R10, xs, {});
+    return J.judge(R10, k1Entry(xs), {});
   };
   const ok = mk(false);
   const bad = mk(true);
@@ -1430,7 +1618,7 @@ function checkProbe(src) {
     const rank = (sc) => RR.plan.screenOrder.indexOf(sc);
     xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
     if (tweak) tweak(xs);
-    return J.judge(RR, xs, {});
+    return J.judge(RR, k1Entry(xs), {});
   };
   const fx = (xs, item, kase, screen) => xs.find((s) => s.item === item && s.case === kase && s.screen === screen);
   const v0 = mkH();
@@ -1519,7 +1707,7 @@ function checkProbe(src) {
       readings: { rowclickDelta: 0, changedOtherRows: [] }, circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false } }));
     const rank = (sc) => R7.plan.screenOrder.indexOf(sc);
     xs.sort((a, b) => rank(a.screen) - rank(b.screen)).forEach((s, i) => { s.order = i + 1; s.contextId = i + 1; });
-    return J.judge(R7, xs, {});
+    return J.judge(R7, k1Entry(xs), {});
   };
   const a7 = mk7(false);
   const b7 = mk7(true);
@@ -1552,7 +1740,8 @@ function checkProbe(src) {
   const J = require('./judge.js');
   const F5x = T.fix5;
   // 계획 칸 전부에 손 표본(칸마다 정해진 수) — 순서 = 지연 단 → 화면 순서 · readOf(칸, 번호) = readings · 입력 0 · kbd 없음(유효)
-  const f6Run = (R, readOf, judgeMod) => {
+  // 고침7 K1: opt.tag = 옛 꼴 비켜 감(T7 · T20 만) · opt.mm = 일부러 불일치를 심은 입력(T25 ⑤ 비교 제외 표지) · opt.onXs = 입구 전 입력 받기
+  const f6Run = (R, readOf, judgeMod, opt) => {
     const p = buildPlan(R);
     const rank = (sc) => R.plan.screenOrder.indexOf(sc);
     const cs = p.cells.filter((c) => !c.derivedFrom).sort((a, b) => a.delay - b.delay || rank(a.screen) - rank(b.screen));
@@ -1565,7 +1754,9 @@ function checkProbe(src) {
           readings: readOf(c, n), circuit: { dead: !!(readOf(c, n) || {})._dead, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false }, kbd: null });
       }
     }
-    return (judgeMod || J).judge(R, xs, {});
+    if (opt && opt.onXs) opt.onXs(xs);
+    if (opt && opt.tag) return k1Bypass(opt.tag, judgeMod || J, R, xs, {});
+    return (judgeMod || J).judge(R, k1Entry(xs, opt), {});
   };
   // 돌연변이 judge 사본(임시 파일 · 옆 모듈은 절대 경로) — 바뀐 글자가 안 걸리면 null(시험이 죽은 것 → 빨강)
   let jSeq = 0;
@@ -1577,7 +1768,8 @@ function checkProbe(src) {
     const p = path.join(tmp, 'judge-mut-' + jSeq + '.js');
     fs.writeFileSync(p, out.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
       .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')'), 'utf8');
-    return require(p);
+    // 고침7 K1(C2-2): 심은 위반 사본은 사본을 싣는 이 함수 하나에서 셈으로 감쌈
+    return k1Wrap(require(p), 'mutant');
   };
   const onlyI4 = (n) => { const R = JSON.parse(JSON.stringify(rules)); R.plan.items = ['I-4']; R.hqaPending.samplesPerCell.value = { default: n, 'N-1': n }; return R; };
   // J1-7 머리 사본
@@ -1699,6 +1891,119 @@ function checkProbe(src) {
     const fbm = mjF ? fnbRun(mjF) : null;
     plant('J1-B 2-b 판독기 심은 위반: 참거짓 검사 뺀 judge 사본 → 4꼴 모두 유효로 셈(통과로 샘) → 빨강', !!fbm && fbm.every((x) => !x.ok && x.valid === 1), fbm && fbm.map((x) => x.valid));
   }
+  // ── 고침7 c1(H11 · 작업지시서 20261117작 §8 T1~T12 · T19~T25) — 두 식 불일치 · 비교 불가 · 같은 줄 셈 · 재현 셈 · G4 (대조군 + 심은 위반) ──
+  {
+    const F7 = T.fix5;
+    const R1 = onlyI4(1);
+    const R3 = onlyI4(3);
+    const at = (kase, sc, d) => (c, n) => c.case === kase && c.screen === sc && c.delay === d && n === 1;
+    const edit = (rd, pred, fx) => (c, n) => { const o = rd(c, n); if (pred(c, n)) fx(o); return o; };
+    // 바탕: 마우스 = before 0 하나만 열림 남음(성립) · 키보드 = e1t3 300 하나만 초점 실패(성립 · 그 칸 유일 재현)
+    const rdB = (c, n) => ({ openCountAfterEsc: c.case === 'mouse-open' && c.screen === 'before' && c.delay === 0 && n === 1 ? 1 : 0, focusOnSameRowBtn: !(c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === 300 && n === 1) });
+    const E300 = at('kbd-open', 'e1t3', 300);
+    const KA0 = at('kbd-open', 'after', 0);
+    const MB0 = at('mouse-open', 'before', 0);
+    const kb = (v) => v.items['I-4'].contrastByCase['kbd-open'];
+    const ms = (v) => v.items['I-4'].contrastByCase['mouse-open'];
+    const em = (v) => v.items['I-4'].exprMismatch;
+    const fac = (v, kase, sc) => v.items['I-4'].focusAfterClose.find((r) => r.case === kase && r.screen === sc);
+    const repSum = (x) => x.cells.reduce((n, r) => n + r.reproduced, 0);
+    const vB = f6Run(R1, rdB);
+    check('고침7 바탕 대조군: 두 식 같음(입구 덧붙임) → 두 경우 성립 · 불일치 0 · 비교 불가 0 · 상태 바뀜 거짓 · 뺀 수 0',
+      kb(vB).state === F7.contrastHolds && ms(vB).state === F7.contrastHolds && em(vB).count === 0 && em(vB).notComparable.count === 0
+      && kb(vB).exprMismatchChanged === false && kb(vB).exprMismatchRemoved === 0 && vB.items['I-4'].contrastState.exprMismatchChanged === false, { kb: kb(vB).state, em: em(vB).classes });
+    // T1 · T2
+    const rd1 = edit(rdB, E300, (o) => { o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; });
+    const rd2 = edit(rd1, KA0, (o) => { o.hqaFocusRow1Restored = false; o.menuZeroObserved = true; });
+    const v1 = f6Run(R1, rd1, null, { mm: true });
+    const v2 = f6Run(R1, rd2, null, { mm: true });
+    const t1 = (v) => repSum(kb(v)) === 0 && kb(v).state === F7.contrastInvalid && kb(v).exprMismatchChanged === true && kb(v).exprMismatchRemoved === 1
+      && em(v).count >= 1 && em(v).rows.some((r) => JSON.stringify(r) === JSON.stringify({ sampleNo: 1, case: 'kbd-open', screen: 'e1t3', delay: 300, device: false, hqa: true }));
+    const t2 = (v) => fac(v, 'kbd-open', 'after').onSameRowBtn === fac(vB, 'kbd-open', 'after').onSameRowBtn - 1 && fac(v, 'kbd-open', 'after').valid === fac(vB, 'kbd-open', 'after').valid
+      && fac(v, 'kbd-open', 'after').exprMismatchExcluded === 1 && em(v).count === 2 && JSON.stringify(em(v).samples) === '[1,1]';
+    check('고침7 T1: 장치 거짓 · HQA 참(키보드 e1t3 300 · 그 칸 유일 재현) → 재현 셈 0 · 키보드 경우 대조 무효 · 상태 바뀜 참 · 뺀 수 1 · 불일치 칸에 표본 번호 · 경우 · 화면 · 지연 · 두 값', t1(v1), { kb: kb(v1), em: em(v1) });
+    check('고침7 T2: 장치 참 · HQA 거짓(키보드 after 0) → 같은 줄 셈 on −1 · valid 무변 · 그 줄 뺀 수 1 · T1 과 합쳐 불일치 2', t2(v2), { f: fac(v2, 'kbd-open', 'after'), em: em(v2).count });
+    // T3 일치 대조군 — 같은 칸 · 두 식 같음 → 고침 전 판독기(같은 입력) − 새 칸 = 통째 같음
+    const rd3 = edit(edit(rdB, E300, (o) => { o.hqaFocusRow1Restored = false; o.menuZeroObserved = true; }), KA0, (o) => { o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; });
+    let x3 = null;
+    const v3 = f6Run(R1, rd3, null, { onXs: (xs) => { x3 = structuredClone(xs); } });
+    const P3 = k1PreJudge();
+    const p3 = P3 ? P3.judge(R1, x3, {}) : null;
+    check('고침7 T3: 일치 대조군(같은 칸 · 두 식 같음) → 불일치 0 · 고침 전 판독기와 새 칸 밖 통째 같음(재현 · 같은 줄 셈 · 대조 상태)',
+      !!p3 && em(v3).count === 0 && JSON.stringify(k1Strip(v3)) === JSON.stringify(p3) && kb(v3).state === F7.contrastHolds, { pre: K1.pre });
+    // T4 심은 위반: 거름 줄 항등
+    const mj4 = mutantJudge((s) => s.replace("  const xExcl = (s) => xCls.get(s) === 'notComparable' || xCls.get(s) === 'mismatch';", '  const xExcl = (s) => false;'));
+    const v4m = mj4 ? f6Run(R1, rd2, mj4, { mm: true }) : null;
+    plant('고침7 T4 심은 위반: 불일치 거름을 항등으로 바꾼 판독기 사본 → T1 · T2 기대 깨짐 → 빨강', !!v4m && !t1(v4m) && !t2(v4m), v4m && kb(v4m).state);
+    // T5 · T6
+    const v5 = f6Run(R1, edit(rdB, E300, (o) => { o.hqaFocusRow1Restored = null; o.menuZeroObserved = true; }), null, { mm: true });
+    const v6 = f6Run(R1, edit(rdB, E300, (o) => { o.menuZeroObserved = true; }), null, { mm: true });
+    check('고침7 T5: 장치 거짓 · HQA null · menuZeroObserved 참 → 불일치(셈에서 뺌 · 값 null)', em(v5).count === 1 && em(v5).rows[0].hqa === null && kb(v5).state === F7.contrastInvalid && em(v5).notComparable.count === 0, em(v5).rows);
+    check('고침7 T6: menuZeroObserved 있음 · HQA 칸 빠짐 → 불일치(셈에서 뺌 · 값 「빠짐」)', em(v6).count === 1 && em(v6).rows[0].hqa === '빠짐' && kb(v6).state === F7.contrastInvalid && em(v6).notComparable.count === 0, em(v6).rows);
+    // T7 옛 꼴(두 칸 다 없음 · 입구 비켜 감) — 키보드 e1t3 300 1건 + 마우스 before 0 1건(열림 남음 · 장치 거짓)
+    const rd7v = edit(rdB, MB0, (o) => { o.focusOnSameRowBtn = false; });
+    const rd7 = (c, n) => { const o = rd7v(c, n); if (!E300(c, n) && !MB0(c, n)) { o.hqaFocusRow1Restored = o.focusOnSameRowBtn; o.menuZeroObserved = true; } return o; };
+    const v7c = f6Run(R1, rd7v);
+    const t7 = (v) => {
+      const nc = em(v).notComparable;
+      const keys = nc.rows.map((r) => [r.case, r.screen, r.delay, r.sampleNo].join('|')).sort();
+      const facX = v.items['I-4'].focusAfterClose.reduce((n, r) => n + r.exprMismatchExcluded, 0);
+      return nc.count === 2 && JSON.stringify(nc.samples) === '[1,1]' && JSON.stringify(keys) === JSON.stringify(['kbd-open|e1t3|300|1', 'mouse-open|before|0|1']) && em(v).count === 0
+        && repSum(kb(v)) === 0 && kb(v).state === F7.contrastInvalid && kb(v).exprMismatchChanged === true
+        && repSum(ms(v)) === repSum(ms(v7c)) && ms(v).state === F7.contrastHolds
+        && fac(v, 'mouse-open', 'before').exprMismatchExcluded === 1 && fac(v, 'mouse-open', 'before').offSameRowBtn === fac(v7c, 'mouse-open', 'before').offSameRowBtn - 1 && facX === 1
+        && v.items['I-4'].contrastState.exprMismatchChanged === true && v.items['I-4'].contrastState.exprMismatchRemoved >= 1
+        && JSON.stringify(v.cells.map((c) => c.valid)) === JSON.stringify(v7c.cells.map((c) => c.valid)) && JSON.stringify(v.redReasons) === JSON.stringify(v7c.redReasons);
+    };
+    const v7 = f6Run(R1, rd7, null, { tag: 'T7' });
+    check('고침7 T7(CTO 확인 기대): 옛 꼴 2건 → 비교 불가 2 · 표본 번호 · 키보드 재현 0 → 대조 무효 · 상태 바뀜 참 · 마우스 열림 재현 셈 무변(성립) · 같은 줄 셈에서 뺌(마우스 before 1 · e1t3 은 같은 줄 셈 칸 밖) · 항목 뺀 수 ≥ 1 · valid · 빨강 사유 = 대조군',
+      t7(v7) && ms(v7c).state === F7.contrastHolds && kb(v7c).state === F7.contrastHolds, { nc: em(v7).notComparable, kb: kb(v7).state, ms: ms(v7).state });
+    // T8 · T9 마우스
+    const rd8 = edit(rdB, MB0, (o) => { o.focusOnSameRowBtn = false; o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; });
+    const t8 = (v) => ms(v).state === F7.contrastHolds && repSum(ms(v)) === repSum(ms(vB)) && fac(v, 'mouse-open', 'before').exprMismatchExcluded === 1 && em(v).count === 1 && ms(v).exprMismatchRemoved === 0;
+    const v8 = f6Run(R1, rd8, null, { mm: true });
+    check('고침7 T8: 마우스 before 0 장치 거짓 · HQA 참 · 열림 남음 → 열림 재현 셈 무변(성립) · 같은 줄 셈에서 뺌 · 불일치 1', t8(v8), { ms: ms(v8), f: fac(v8, 'mouse-open', 'before') });
+    const mj9 = mutantJudge((s) => s.replace("      const focusShape = !!fn && fn === BEFORE_FAIL['I-4/kbd-open'];", '      const focusShape = !!fn;'));
+    const v9m = mj9 ? f6Run(R1, rd8, mj9, { mm: true }) : null;
+    plant('고침7 T9 심은 위반: 마우스 열림 재현 셈에도 거름을 건 사본 → T8 깨짐 → 빨강', !!v9m && !t8(v9m), v9m && ms(v9m).state);
+    // T10 ~ T12 G4 경계
+    const vG = f6Run(R3, rdB);
+    const K3 = (c, n) => c.case === 'kbd-open' && c.screen === 'after' && c.delay === 0 && n === 2;
+    const rd10 = edit(rdB, K3, (o) => { o.hqaFocusRow1Restored = false; o.menuZeroObserved = true; });
+    const cKA = (v) => v.cells.find((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'after' && c.delay === 0);
+    const t10 = (v) => cKA(v).valid === 3 && cKA(v).status === '표본 있음' && JSON.stringify(v.redReasons) === JSON.stringify(vG.redReasons) && em(v).count === 1;
+    const v10 = f6Run(R3, rd10, null, { mm: true });
+    check('고침7 T10(G4 경계): 칸당 3표본 중 불일치 1 → 칸 valid 3/3 · 표본 있음 · 빨강 사유 = 대조군', t10(v10), { c: cKA(v10).status, red: v10.redReasons });
+    const rd11 = (c, n) => { const o = rdB(c, n); if (c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === 300) { o.focusOnSameRowBtn = false; o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; } return o; };
+    const v11 = f6Run(R3, rd11, null, { mm: true });
+    const c11 = v11.cells.find((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'e1t3' && c.delay === 300);
+    check('고침7 T11(G4): 3/3 불일치 → 칸 장치 실패 0 · 키보드 상태 = 뺀 뒤 값(대조 무효) · 상태 바뀜 참 · 뺀 수 3',
+      c11.valid === 3 && c11.status === '표본 있음' && !v11.items['I-4'].deviceFailure.flag && kb(v11).state === F7.contrastInvalid && kb(v11).exprMismatchChanged === true && kb(v11).exprMismatchRemoved === 3 && em(v11).count === 3, { c: c11.status, kb: kb(v11).state });
+    const mj12 = mutantJudge((s) => s.replace('  const isValid = (s) => !!(eff.get(s) && eff.get(s).valid);', '  const isValid = (s) => !!(eff.get(s) && eff.get(s).valid) && !xExcl(s);'));
+    const v12m = mj12 ? f6Run(R3, rd10, mj12, { mm: true }) : null;
+    plant('고침7 T12 심은 위반: 불일치 표본을 유효에서 빼는 사본(결-1 (A)) → T10 칸 실패 → 빨강', !!v12m && !t10(v12m) && cKA(v12m).status !== '표본 있음', v12m && cKA(v12m).status);
+    // T20 심은 위반: 옛 꼴을 셈에 넣는 사본(비교 불가 → 일치)
+    const mj20 = mutantJudge((s) => s.replace("  if (!has('hqaFocusRow1Restored') && !has('menuZeroObserved')) return 'notComparable';", "  if (!has('hqaFocusRow1Restored') && !has('menuZeroObserved')) return 'match';"));
+    const v20m = mj20 ? f6Run(R1, rd7, mj20, { tag: 'T20' }) : null;
+    plant('고침7 T20 심은 위반: 옛 꼴(두 칸 없음)을 일치로 보내는 사본 → T7 기대 깨짐 → 빨강', !!v20m && !t7(v20m), v20m && em(v20m).notComparable.count);
+    // T22 · T24 심은 위반 — T21 · T23 판정 함수가 사본 판정에서 잡는가
+    const mj22 = mutantJudge((s) => s.replace('        exprMismatchExcluded: v.length - vx.length', '        exprMismatchExcluded: 0'));
+    const v22m = mj22 ? f6Run(R1, rd2, mj22, { mm: true }) : null;
+    plant('고침7 T22 심은 위반: 뺀 수 칸을 늘 0 으로 쓰는 사본 → 칸마다 등식(T21) 빨강', !!v22m && k1Problems(null, v22m).t21.length > 0 && k1Problems(null, v2).t21.length === 0);
+    const mj24 = mutantJudge((s) => s.replace('function exprPair(changed, removed) { return { exprMismatchChanged: changed === true, exprMismatchRemoved: removed }; }',
+      'function exprPair(changed, removed) { return removed > 0 ? { exprMismatchRemoved: removed } : { exprMismatchChanged: changed === true, exprMismatchRemoved: removed }; }'));
+    const v24m = mj24 ? f6Run(R1, rd1, mj24, { mm: true }) : null;
+    plant('고침7 T24 심은 위반: 뺀 수 > 0 일 때 상태 바뀜 칸을 안 쓰는 사본 → 함께 나옴(T23) 빨강', !!v24m && k1Problems(null, v24m).t23.length > 0 && k1Problems(null, v1).t23.length === 0);
+    // T25 ③ 원 입력 무변 — 지은 뒤 장치 값을 바꿔도 다음 입구가 옛 복사값을 물려받지 않음 · 규칙 ② ⑤ 꼴
+    const xs = [{ item: 'I-4', readings: { focusOnSameRowBtn: true } }, { item: 'I-4', readings: { focusOnSameRowBtn: false, menuZeroObserved: true } }, { item: 'I-4', readings: null },
+      { item: 'I-4', readings: { openCountAfterEsc: 0 } }, { item: 'N-1', readings: { focusOnSameRowBtn: true } }, { item: 'I-4', readings: { focusOnSameRowBtn: null } }, { item: 'I-4' }];
+    const e1 = k1Entry(xs);
+    xs[0].readings.focusOnSameRowBtn = false;
+    const e2 = k1Entry(xs);
+    check('고침7 T25 ③ · 규칙 ①②⑤: 입구 사본만 덧붙임(HQA = 그 순간 장치 값 · 메뉴 0 = 참거짓이면 참) · 원 입력에 두 칸 0 · 바뀐 장치 값을 다음 입구가 그대로 복사 · 한 칸 있음 · readings 없음 · 장치 칸 없음 · I-4 밖 = 같은 객체',
+      e1[0].readings.hqaFocusRow1Restored === true && e1[0].readings.menuZeroObserved === true && !k1Own(xs[0].readings, 'hqaFocusRow1Restored') && e2[0].readings.hqaFocusRow1Restored === false
+      && e1[1] === xs[1] && e1[2] === xs[2] && e1[3] === xs[3] && e1[4] === xs[4] && e1[6] === xs[6] && e1[5].readings.hqaFocusRow1Restored === null && e1[5].readings.menuZeroObserved === false);
+  }
 }
 
 // ── 고침6 J1(작업지시서 20261116작 S4관문1 장치고침6 §8) — I-4 HQA 절차 동작 시험 ──
@@ -1815,11 +2120,11 @@ async function fix6Checks() {
       kbd: c.case === 'kbd-open' ? (c.screen === 'before' ? null : { reached: true, tabs: 3 }) : null
     }));
     for (const s of xs) if (s.case === 'kbd-open' && s.screen === 'before') { s.readings = { noInput: 'x' }; }
-    const okv = require('./judge.js').judge(R6, xs, {});
+    const okv = require('./judge.js').judge(R6, k1Entry(xs), {});
     const bad = JSON.parse(JSON.stringify(xs));
     const hit = bad.find((s) => s.case === 'kbd-open' && s.screen === 'e1t3' && s.delay === 300);
     hit.valid = false; hit.readings = null; hit.kbd = null; hit.errors = [t3.err];
-    const bv = require('./judge.js').judge(R6, bad, {});
+    const bv = require('./judge.js').judge(R6, k1Entry(bad), {});
     const bc = bv.items['I-4'].contrastByCase['kbd-open'];
     check('고침6 T3 판독기: 열림 미관측 표본 1 → 그 칸 장치 실패 · I-4 kbd-open 대조 = null(대조 불가) · 항목 state null · 빨강 / 대조군 = 성립',
       bv.red === true && bc.state === null && bc.reason === T.fix5.contrastDeviceFail && bv.items['I-4'].contrastState.state === null && okv.items['I-4'].contrastByCase['kbd-open'].state === T.fix5.contrastHolds,
@@ -2021,8 +2326,50 @@ async function fix6bChecks(i4) {
   plant('J1-B 2-b 대조군(옛 꼴 「|| []」 + 단언 0 사본): 목록 빠진 rules · kbd-open 메뉴 안 닫힘 → 장치 실패 없이 판독값이 나옴(새는 길 재현)', !!mo && !lk.err && !!lk.R && lk.R.menuZeroObserved === false, lk && { err: lk.err });
 }
 
+// ── 고침7 K1 마지막 판정(모든 판독기 호출 뒤) — T19 · T21 · T23(입력 전부) · T25 ④⑤ · T26 · T27 · T28 ──
+function k1Final() {
+  check('고침7 T19(CTO 조건 1): 판독기 입력 전부 — classes.total = I-4 표본 수 = 네 칸 합 · 독립 판별과 같음 · 불일치 · 비교 불가 겹침 0', K1.t19.length === 0 && K1.judged > 0, { bad: K1.t19.slice(0, 3), judged: K1.judged });
+  check('고침7 T21(CTO ④ 조건): 판독기 입력 전부 — focusAfterClose 줄마다 valid = on + off + noRead + exprMismatchExcluded', K1.t21.length === 0 && K1.judged > 0, K1.t21.slice(0, 3));
+  check('고침7 T23(CTO ④ 조건): 판독기 입력 전부 — 경우별 · 항목 대조 칸에 exprMismatchChanged · exprMismatchRemoved 늘 함께 · 바뀜 참이면 뺀 수 > 0', K1.t23.length === 0 && K1.judged > 0, K1.t23.slice(0, 3));
+  check('고침7 T25(CTO 조건 2 · 안 (가)): 입구 전/후 입력 — ① 차이 = I-4 두 칸뿐 ② 덧붙인 값 규칙 ③ 원 입력 무변 · ④ 고침 전 판독기 판정 같음 · ⑤ 고침 뒤 − 새 칸 = 고침 전(불일치를 심은 새 시험 입력 빼고)',
+    !!k1PreJudge() && K1.entryBad.length === 0 && K1.t25.length === 0 && K1.t25checked > 0 && K1.entryTouched > 0,
+    { pre: K1.pre, entryBad: K1.entryBad.slice(0, 3), t25: K1.t25.slice(0, 5), checked: K1.t25checked, plantedMm: K1.t25mm });
+  // T28 ⓓ(C2-2 셈의 눈 대조군): 새로 실은 판독기를 입구 · 이름표 없이 직접 1회(대조군 표지 · 본 판정에서 뺌)
+  const before = K1.calls.length;
+  const ctl = [];
+  Object.defineProperty(ctl, K1_CONTROL, { value: true });
+  const Jd = require('./judge.js');
+  try { Jd.judge(rules, ctl, {}); } catch (e) { check('고침7 T28 ⓓ 대조군 호출 예외', false, String(e && e.message).slice(0, 120)); }
+  const ctlCalls = K1.calls.filter((c) => c.control);
+  const dAll = k1CallVerdict(K1.calls, K1.cli);
+  const main = K1.calls.filter((c) => !c.control);
+  const V = k1CallVerdict(main, K1.cli);
+  check('고침7 T28 ⓓ(셈의 눈): 새로 실은 판독기 직접 1회 → 셈 +1 · 「빠진 자리」 1 로 잡힘 · 대조군 표지 붙은 호출 = 정확히 1',
+    K1.calls.length === before + 1 && ctlCalls.length === 1 && dAll.missing === V.missing + 1, { before, after: K1.calls.length, missing: dAll.missing });
+  // T28 ⓐⓑⓒ — 판정 함수를 따로 만든 기록에 돌림(본 기록에 섞지 않음)
+  const fa = k1CallVerdict([{ origin: 'judge', entry: false, tag: null, needsTwo: 0 }], []);
+  const fb = k1CallVerdict([{ origin: 'judge', entry: false, tag: 'T1', needsTwo: 0 }], []);
+  const fc = k1CallVerdict([], [{ viaEntry: true, i4: 3, needsTwo: 1 }]);
+  check('고침7 T28 ⓐⓑⓒ(대조군): 입구 · 이름표 없는 호출 → 빠진 자리 1 · T1 이름표 비켜 감 → 허용 밖 · 두 칸 없는 I-4 표본 든 명령줄 파일 → 입구 안 거친 파일 1',
+    fa.missing === 1 && fb.badBypass.length === 1 && fb.badBypass[0] === 'T1' && fc.badFiles === 1, { fa: fa.missing, fb: fb.badBypass, fc: fc.badFiles });
+  // T26 · T27(본 기록 · 대조군 호출 뺌)
+  const floorCount = main.filter((c) => c.origin === 'judge').length + K1.cli.length;
+  const inner = !!process.env.HQA_SELFTEST_INNER;
+  const innerFloor = K1.inner && Number.isInteger(K1.inner.floorCount) ? K1.inner.floorCount : null;
+  const runCount = inner ? floorCount : (innerFloor === null ? null : floorCount + innerFloor);
+  const floorOk = inner ? floorCount >= K1_FLOOR_INNER : (runCount !== null && runCount >= K1_FLOOR_RUN);
+  check(`고침7 T26: 판독기 호출 총수 = 입구 거친 수 + 비켜 간 수 · 비켜 간 이름표 = T7 · T20 뿐 · 각각 ≥ 1 · 하한(${inner ? '안쪽 ' + K1_FLOOR_INNER : '한 런 ' + K1_FLOOR_RUN} · C2-2)`,
+    V.missing === 0 && V.total === V.viaEntry + V.bypass && V.badBypass.length === 0 && (V.byTag.T7 || 0) >= 1 && (V.byTag.T20 || 0) >= 1 && floorOk,
+    { total: V.total, viaEntry: V.viaEntry, bypass: V.bypass, byTag: V.byTag, floorCount, runCount, innerFloor });
+  check('고침7 T27: 빠진 호출 자리 0 — ① 셈이 받은 판독기 입력마다 입구 표시 또는 T7 · T20 이름표 ② 명령줄 입력 파일(두 자리)의 I-4 표본 전부 두 칸 있음 · 입구 거친 입력에 두 칸 없는 I-4 표본 0',
+    V.missing === 0 && V.badFiles === 0 && V.entryNeedsTwo === 0 && K1.cli.length >= 2, { missing: V.missing, badFiles: V.badFiles, cli: K1.cli.length });
+  K1.out = { total: V.total, viaEntry: V.viaEntry, bypass: V.bypass, byTag: V.byTag, cli: K1.cli.length, mutant: main.filter((c) => c.origin === 'mutant').length,
+    floorCount, runCount, control: ctlCalls.length, preCompare: K1.pre.calls, inner: innerFloor };
+}
+
 // ── 결과─────────────────────────────────────────────────────────────
 function finish() {
+  k1Final();
   const fail = results.filter((r) => !r.ok);
   for (const r of results) process.stdout.write(`${r.ok ? 'OK  ' : 'FAIL'} ${r.name}${r.ok ? '' : ' :: ' + JSON.stringify(r.info)}\n`);
   process.stdout.write(JSON.stringify({ selftest: 'judge+static', total: results.length, fail: fail.length }) + '\n');
@@ -2030,7 +2377,7 @@ function finish() {
   const oi = process.argv.indexOf('--out');
   if (oi >= 0 && process.argv[oi + 1]) {
     const pl = results.filter((r) => r.planted);
-    fs.writeFileSync(process.argv[oi + 1], JSON.stringify({ passed: results.length - fail.length, failed: fail.length, total: results.length, plantedRed: pl.filter((r) => r.ok).length, plantedTotal: pl.length }) + '\n', 'utf8');
+    fs.writeFileSync(process.argv[oi + 1], JSON.stringify({ passed: results.length - fail.length, failed: fail.length, total: results.length, plantedRed: pl.filter((r) => r.ok).length, plantedTotal: pl.length, judgeCalls: K1.out }) + '\n', 'utf8');
   }
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exitCode = fail.length ? 1 : 0;

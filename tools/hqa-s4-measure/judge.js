@@ -398,6 +398,36 @@ function orderCheck(rules, samples) {
   return problems;
 }
 
+// 고침7 c1(H11 · 작업지시서 20261117작 §7 c1) — I-4 표본 두 식 판별: 장치 식 focusOnSameRowBtn · HQA 식 hqaFocusRow1Restored
+//   네 칸 중 정확히 하나(순서대로 · 마지막이 「그 밖 전부」 라 빈 칸 0):
+//   ownPath(장치 값 참/거짓 아님 → 기존 길) · match(둘 다 참/거짓 · 같음 → 셈에 넣음) ·
+//   notComparable(두 칸 hqaFocusRow1Restored · menuZeroObserved 다 없음 → 셈에서 뺌) · mismatch(그 밖 전부 → 셈에서 뺌)
+//   판독기는 두 칸을 읽기만 한다(채움 · 기본값 0 — 채우면 옛 꼴이 「일치」 로 셈에 들어감 · C2-3)
+const EXPR_CLASSES = ['ownPath', 'match', 'notComparable', 'mismatch'];
+function exprClass(s) {
+  const X = s && s.readings && typeof s.readings === 'object' ? s.readings : {};
+  const dev = X.focusOnSameRowBtn;
+  if (typeof dev !== 'boolean') return 'ownPath';
+  if (typeof X.hqaFocusRow1Restored === 'boolean' && X.hqaFocusRow1Restored === dev) return 'match';
+  const has = (k) => Object.prototype.hasOwnProperty.call(X, k);
+  if (!has('hqaFocusRow1Restored') && !has('menuZeroObserved')) return 'notComparable';
+  return 'mismatch';
+}
+// 공개 칸 값 꼴(원자료 글자 0): 참/거짓/null/「빠짐」/「참거짓 아님」
+function exprValueTag(X, k) {
+  if (!X || typeof X !== 'object' || !Object.prototype.hasOwnProperty.call(X, k)) return '빠짐';
+  const v = X[k];
+  return typeof v === 'boolean' || v === null ? v : '참거짓 아님';
+}
+// 결-9 (ㄱ): 판독 글자 = 판독기 안 상수(rules.json 무변) · 경우별(CTO ③ 조건)
+const EXPR_TEXT = {
+  keyboard: '두 식 불일치 · HQA 검토 — 키보드: 같은 줄 셈 · 실패 재현 셈 · 대조 근거에서 뺌 · 유효 표본 수 무변',
+  mouse: '두 식 불일치 · HQA 검토 — 마우스: 초점 셈(같은 줄 셈)에서만 뺌 · 열림 재현 셈 그대로 · 유효 표본 수 무변',
+  notComparable: '두 식 칸이 없는 표본 = 비교 불가 · 불일치와 같은 셈에서 뺌 · HQA 검토'
+};
+// 결-3 · CTO ④ 조건: 대조 칸의 두 칸은 이 한 곳에서 늘 같이 쓴다(뺀 수 0 이어도 false · 0)
+function exprPair(changed, removed) { return { exprMismatchChanged: changed === true, exprMismatchRemoved: removed }; }
+
 // judge 쪽 유효 판단(표본의 valid 를 그대로 믿지 않고 미도달 표본은 kbdGate 로 다시 잰다)
 //   고침4 G7: 판정 칸 가림 충돌 표본 = device_failure(사유 「판정 칸 가림 충돌」) — 다른 판단보다 먼저
 function effective(rules, samples) {
@@ -467,6 +497,10 @@ function judge(rules, samples, extra) {
   const D = rules.deviceReading;
   const plan = buildPlan(rules);
   const eff = effective(rules, samples);
+  // 고침7 c1: I-4 표본 두 식 판별(eff 직후 한 번) · 셈에서 뺄 표본 = 비교 불가 + 불일치 — 유효 판정 · G4 무변(결-1 (B))
+  const xCls = new Map();
+  for (const s of samples) if (s && s.item === 'I-4') xCls.set(s, exprClass(s));
+  const xExcl = (s) => xCls.get(s) === 'notComparable' || xCls.get(s) === 'mismatch';
   const isValid = (s) => !!(eff.get(s) && eff.get(s).valid);
   const isKu = (s) => !!(eff.get(s) && eff.get(s).valid && eff.get(s).reading === 'keyboard_unreachable');
   const isAfterUr = (s) => !!(s && s.screen === 'after' && s.kbd && s.kbd.reached === false);
@@ -703,18 +737,27 @@ function judge(rules, samples, extra) {
     const ccs = cs.filter(isCc);
     const st = stateOf(item, ccs);
     const out4 = { state: st.state, reason: st.reason, cells: st.cells };
+    // 고침7 c1(결-3): 항목 대조 칸의 두 칸(경우별 항목이면 아래에서 경우들로 다시 셈)
+    out4.xp = exprPair(st.exprMismatchChanged, st.exprMismatchRemoved);
     let byCase = null;
     let legacy = null;
     if (caseSplitItem(rules, item)) {
       // 결-H4: 경우별 대조 · 항목 contrastState = 모든 경우 성립일 때만 성립 · 고침5 옛 판독(before 칸 · 항목 꼴 하나) = contrastStateFix5 로 남김(#1)
       byCase = {};
-      for (const kase of rules.plan.itemSpecs[item].cases) byCase[kase] = Object.assign({ screen: contrastScreenOf(rules, item, kase) }, stateOf(item, ccs.filter((c) => c.case === kase)));
+      // 고침7 c1: 경우별 판독 원본(raw)을 남겨 항목 상태를 「뺀 표본 넣고 셌을 때」 와 비교(옛 줄 = 아래 ⬛)
+      // ⬛ 옛 줄: for (const kase of rules.plan.itemSpecs[item].cases) byCase[kase] = Object.assign({ screen: contrastScreenOf(rules, item, kase) }, stateOf(item, ccs.filter((c) => c.case === kase)));
+      const raw = {};
+      for (const kase of rules.plan.itemSpecs[item].cases) { raw[kase] = stateOf(item, ccs.filter((c) => c.case === kase)); byCase[kase] = Object.assign({ screen: contrastScreenOf(rules, item, kase) }, raw[kase]); }
       const vals = Object.values(byCase);
       const H = rules.readingText.h4;
       if (vals.some((v) => v.state === null)) { out4.state = null; out4.reason = F5.contrastDeviceFail; }
       else if (vals.some((v) => v.state === F5.contrastUndefined)) { out4.state = F5.contrastUndefined; out4.reason = F5.contrastNoShapeReason; }
       else if (vals.every((v) => v.state === F5.contrastHolds)) { out4.state = F5.contrastHolds; out4.reason = null; }
       else { out4.state = F5.contrastInvalid; out4.reason = vals.find((v) => v.state !== F5.contrastHolds).reason; }
+      // 고침7 c1(결-3): 같은 결합 규칙(위 네 줄)으로 「뺀 표본을 넣고 셌을 때」 의 항목 상태 → 다르면 참 · 뺀 수 = 경우별 합
+      const allSt = Object.values(raw).map((r) => r.stateAll);
+      const itemAll = allSt.some((x) => x === null) ? null : (allSt.some((x) => x === F5.contrastUndefined) ? F5.contrastUndefined : (allSt.every((x) => x === F5.contrastHolds) ? F5.contrastHolds : F5.contrastInvalid));
+      out4.xp = exprPair(itemAll !== out4.state, Object.values(raw).reduce((n, r) => n + r.exprMismatchRemoved, 0));
       out4.rule = H.contrastByCaseRule;
       const lg = stateOf(item, bCs, true);
       legacy = { state: lg.state, reason: lg.reason, cells: lg.cells };
@@ -732,7 +775,7 @@ function judge(rules, samples, extra) {
     return {
       attempted: { records: att, cells: cs.filter((c) => (attemptsByCell[c.key] || 0) > 0).length, of: cs.length, text: F5.attemptedText },
       d1Reproduced: { count: flat(bCs).filter(isKu).length, of: bGot, text: F5.d1Text },
-      contrastState: Object.assign({ state, reason, cells: rows }, out4.rule ? { rule: out4.rule } : {}),
+      contrastState: Object.assign({ state, reason, cells: rows }, out4.rule ? { rule: out4.rule } : {}, out4.xp),
       notMeasured: { flag: nm, reason: nm ? F5.notMeasuredReason : null },
       deviceFailure: { flag: failCs.length > 0, reasons: Array.from(new Set(failCs.map((c) => cellOut[c.key].reason))), cells: failCs.map((c) => c.key) },
       fields5: F5.legacyFields,
@@ -748,13 +791,23 @@ function judge(rules, samples, extra) {
       const sh = shapes[k];
       return sh && sh.defined === true ? (BEFORE_FAIL[k] || null) : null;
     };
+    // 고침7 c1(결-4 · CTO ③): 키보드 경우 꼴(초점 · L349)만 두 식 일치가 확인되지 않은 표본을 재현 셈에서 뺌
+    //   마우스 꼴 · 항목 꼴(열림 남음 · L344)은 초점 식을 읽지 않음 → 그대로 · xAll = 뺀 표본까지 넣은 재현 수(상태 비교용 · 공개 0)
+    const xAll = [];
+    let xRemoved = 0;
     const rows = ccs.map((c) => {
       const v = validOf(c.key);
       const fn = fnFor(c);
-      return { key: c.key, valid: v.length, kbdUnreachable: v.filter(isKu).length, reproduced: fn ? v.filter((s) => fn(s, isKu(s), R(s))).length : null };
+      const focusShape = !!fn && fn === BEFORE_FAIL['I-4/kbd-open'];
+      const vr = focusShape ? v.filter((s) => !xExcl(s)) : v;
+      xAll.push(fn ? v.filter((s) => fn(s, isKu(s), R(s))).length : null);
+      xRemoved += v.length - vr.length;
+      // ⬛ 옛 줄: return { key: c.key, valid: v.length, kbdUnreachable: v.filter(isKu).length, reproduced: fn ? v.filter((s) => fn(s, isKu(s), R(s))).length : null };
+      return { key: c.key, valid: v.length, kbdUnreachable: v.filter(isKu).length, reproduced: fn ? vr.filter((s) => fn(s, isKu(s), R(s))).length : null };
     });
     let state = null;
     let reason = null;
+    let stateAll = null;
     if (ccs.some(cellFailed)) reason = F5.contrastDeviceFail;
     else if (ccs.length ? ccs.some((c) => !fnFor(c)) : !(shapes[item] && shapes[item].defined === true)) { state = F5.contrastUndefined; reason = F5.contrastNoShapeReason; }
     else {
@@ -764,8 +817,12 @@ function judge(rules, samples, extra) {
       if (rep > 0) state = F5.contrastHolds;
       // ⬛ 옛 줄(고침5 · 대조 화면과 무관하게 「/before …」 글자): reason = ku > 0 && ku === val ? F5.contrastNoStimulus : F5.contrastNoRepro;
       else { state = F5.contrastInvalid; reason = contrastReasonText(rules, ku > 0 && ku === val ? 'contrastNoStimulus' : 'contrastNoRepro', ccs.map((c) => c.screen)); }
+      stateAll = xAll.reduce((n, x) => n + x, 0) > 0 ? F5.contrastHolds : F5.contrastInvalid;
     }
-    return { state, reason, cells: rows };
+    // 장치 실패 · 기준 미정 갈래는 셈과 무관 → 뺀 표본 넣어도 같은 상태
+    if (stateAll === null) stateAll = state;
+    // 고침7 c1(결-3): 상태 = 뺀 뒤 값 · 두 칸 늘 함께 · stateAll = 열거 안 되는 칸(항목 결합용 · JSON 에 안 나감)
+    return Object.defineProperty(Object.assign({ state, reason, cells: rows }, exprPair(stateAll !== state, xRemoved)), 'stateAll', { value: stateAll, enumerable: false });
   }
   // H4 §7-2: I-8(T3) — 입력 0 구조 읽기 · 대조 화면 = contrastScreen I-8 · 판독 단위 = rules.t3ReadUnit 한 값만
   if (has('I-8')) {
@@ -828,13 +885,33 @@ function judge(rules, samples, extra) {
   if (items['I-4']) {
     items['I-4'].focusAfterClose = rules.plan.itemSpecs['I-4'].cases.reduce((a, kase) => a.concat(['before', 'after'].map((sc) => {
       const v = flat(cellsOf('I-4', (c) => c.case === kase && c.screen === sc));
+      // 고침7 c1: 두 식 일치가 확인되지 않은 표본(비교 불가 + 불일치)은 같은 줄 셈에서 뺌 · valid 무변 · valid = on + off + noRead + exprMismatchExcluded
+      const vx = v.filter((s) => !xExcl(s));
+      // ⬛ 옛 셋 줄: on · off · noRead = v.filter(…)(뺀 표본 포함)
       return {
         case: kase, screen: sc, valid: v.length,
-        onSameRowBtn: v.filter((s) => R(s).focusOnSameRowBtn === true).length,
-        offSameRowBtn: v.filter((s) => R(s).focusOnSameRowBtn === false).length,
-        noRead: v.filter((s) => typeof R(s).focusOnSameRowBtn !== 'boolean').length
+        onSameRowBtn: vx.filter((s) => R(s).focusOnSameRowBtn === true).length,
+        offSameRowBtn: vx.filter((s) => R(s).focusOnSameRowBtn === false).length,
+        noRead: vx.filter((s) => typeof R(s).focusOnSameRowBtn !== 'boolean').length,
+        exprMismatchExcluded: v.length - vx.length
       };
     })), []);
+    // 고침7 c1(H11): 두 식 판별 칸 — 판정 = HQA · 값 = 참/거짓/null/빠짐/참거짓 아님 · 표본 번호 · 계획 칸 글자만(원자료 글자 0) · 불일치 0 이어도 늘 있음
+    const planCell = new Map(plan.cells.map((c) => [c.key, c]));
+    const where = (s) => { const pc = planCell.get(s.cell); return { sampleNo: Number.isInteger(s.sampleNo) ? s.sampleNo : null, case: pc ? pc.case : null, screen: pc ? pc.screen : null, delay: pc ? pc.delay : null }; };
+    const i4s = samples.filter((s) => s && s.item === 'I-4');
+    const ofCls = (k) => i4s.filter((s) => xCls.get(s) === k);
+    const mm = ofCls('mismatch');
+    const nc = ofCls('notComparable');
+    const classes = { total: i4s.length };
+    for (const k of EXPR_CLASSES) classes[k] = ofCls(k).length;
+    items['I-4'].exprMismatch = {
+      count: mm.length, samples: mm.map((s) => where(s).sampleNo),
+      rows: mm.map((s) => Object.assign(where(s), { device: exprValueTag(s.readings, 'focusOnSameRowBtn'), hqa: exprValueTag(s.readings, 'hqaFocusRow1Restored') })),
+      notComparable: { count: nc.length, samples: nc.map((s) => where(s).sampleNo), rows: nc.map(where) },
+      classes,
+      text: Object.assign({}, EXPR_TEXT)
+    };
   }
   // H1-6: 노출 칸이 있는 항목에 독립성 제약 글자(판정 = HQA)
   for (const item of Object.keys(items)) {
