@@ -8,7 +8,7 @@ permissions:
   pull-requests: read
 jobs:
   intake:
-    if: ${{ github.event.issue.pull_request != null && !github.event.comment.user.type == 'Bot' }}
+    if: ${{ github.event.issue.pull_request != null && github.event.comment.user.type != 'Bot' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -23,7 +23,7 @@ jobs:
             const e = context.payload;
             const body = e.comment.body || '';
             // Explicit command only. A literal alias is not a GitHub user mention.
-            if (!/^\\s*@HQA-ARGOS\\s+검증요청\\b/m.test(body)) return;
+            if (!body.trimStart().startsWith('@HQA-ARGOS 검증요청')) return;
             if (!['OWNER','MEMBER','COLLABORATOR'].includes(e.comment.author_association)) return;
             if (e.comment.user.type === 'Bot') return;
             const endpoint = process.env.HQA_ENDPOINT;
@@ -50,4 +50,4 @@ jobs:
             } finally { clearTimeout(t); }
             if (!response.ok) throw Error(`HQA queue rejected: HTTP ${response.status}`);
             // This only confirms queue acceptance, not verification or a verdict.
-            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:e.issue.number,body:`[HQA 자동접수] 의뢰 큐 접수 · PR #${e.issue.number} · SHA \\`${sha}\\` · 요청 \\`${requestId}\\`. 독립검증/최종판정은 아직 수행되지 않았습니다. 검증 실행기가 별도 결과 댓글을 게시합니다.`});
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:e.issue.number,body:`[HQA 자동접수] 의뢰 큐 접수 · PR #${e.issue.number} · SHA ${sha} · 요청 ${requestId}. 독립검증/최종판정은 아직 수행되지 않았습니다. 검증 실행기가 별도 결과 댓글을 게시합니다.`});
