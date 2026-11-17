@@ -27,16 +27,19 @@ const K1_TAG = Symbol('k1-bypass-tag');
 const K1_CONTROL = Symbol('k1-control');
 const K1_MM = Symbol('k1-planted-mismatch');
 const K1_WRAPPED = Symbol('k1-wrapped');
-const K1_BYPASS_OK = ['T7', 'T20', 'T29', 'T30a', 'T30b'];
+const K1_BYPASS_OK = ['T7', 'T20', 'T29', 'T30a', 'T30b', 'T7d'];
 // 하한(C2-2): 고침 전 [3] 실측 = 한 런(바깥 + 자기 재실행 안쪽 · 명령줄 판독기 포함) 220 · 안쪽만(재실행 없음) 110
 const K1_FLOOR_RUN = 220;
 const K1_FLOOR_INNER = 110;
+// 고침7 수정 c5(결-16 (A)): 하한은 기존 호출만 셈(고침 7 덩이 = K1.zone 'fix7' 표지 호출은 뺌) · C16-9 자리별 기준선(프로세스마다 · 자리 = 부른 줄 글자 두 단 · sha256 앞 12자 → 수) — 상한 없음
+// 기준선 = c2 와 같은 기존 호출 자리(고침 7 수정은 기존 호출 줄 무변) · 89 자리 · 합 112(직접 77 + 명령줄 35)
+const K1_SITE_FLOOR = { "700998716a29": 1, ddfa4a5c60c0: 4, e6ba771bb50c: 1, bf023daed110: 1, "166d4d52c03d": 1, "01f5ac44ad80": 1, "8a32bfa08278": 1, "34cc44b36d9e": 1, "87f935b90ad1": 1, "9952ee49a660": 1, db78d1f1e019: 1, adaf17e56e22: 1, "2aaf26927378": 1, "7fc66723be29": 1, "71838eeea029": 1, fbfb49ad33a8: 1, fafd9c2fe877: 1, "3e747f0c29be": 1, "55eaed6e1442": 1, "865b4629bac4": 1, "3c0702d2836d": 1, "6f39be2d69aa": 1, "00fabddac9b7": 1, "12b024a19a5a": 1, "9c8c4e350bba": 1, "8c3ccbe7ad3c": 1, "00cc1fd5271c": 1, "1fff25de5aef": 1, b2ad7a927821: 1, "3434528ee919": 1, c5ac3a3a7a17: 1, "68580c0f0b1d": 1, c1c96fda9f9d: 1, f617af48d94e: 7, "2ce3ac3c84b2": 1, b89cab35e63f: 1, "5d194b264cc2": 1, bbf0d6f5ea47: 1, "921fa8e02663": 1, "32a0967c876c": 1, c45e3b85195c: 1, "21c682212ad1": 1, e31901893a34: 1, "15a598b328ec": 1, e4a38384d338: 2, e954065a3400: 2, "5265e8927134": 2, "96a4c0fb0225": 4, "944a5b80659e": 1, fb9f3f9976b8: 1, "2704b06996ff": 1, "20eefd59dd7e": 4, faee6d54169a: 1, "6586c3389f44": 4, "60ab8d6d0597": 1, "2074223aefb7": 1, d6c7b30e95fa: 1, db97871cc8c2: 1, "6d29df68f078": 1, "93aa66b75523": 1, "52f6f976afe5": 1, "3c11065e9367": 1, "5b0d39613181": 1, "16d9ad248fe7": 1, e34a2711c425: 1, "1772bd33418e": 1, a5cea0ebb645: 1, "4c6b00ded4c5": 1, d401995535e3: 1, a1552b12cc05: 1, "93103b4e4ba1": 1, f1f46e0aa791: 1, "190fecc8f684": 1, "3703b561ab32": 1, c3aa6d9da8bc: 1, "2df913df0fa1": 3, eb6aa8b11e96: 1, "7e86b09d7809": 1, cd748ae4874c: 1, e27ddbf46bfa: 1, "67493276294d": 1, "3cfae413726a": 1, "678e640af8f4": 1, c269d372468a: 1, "112e1b290744": 1, "80849870fa91": 1, babfb9abadc0: 1, "27c166a9ed31": 1, "3aa7c8c23caa": 1 };
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
 // T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
 const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 13, sha: "83673b6cb087959e"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
-  loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [] };
+  loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [], zone: null, baselineMissing: false };
 const k1Own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 // 고침7 수정(P1-1 · C16-6): I-4 표본 = 표본 item 글자 또는 계획의 I-4 칸 열쇠 — 칸 집합은 자체시험이 계획 칸 열쇠 글자(첫 마디)에서 따로 셈(판독기 안의 집합을 가져오지 않음)
 function k1I4Keys(R) {
@@ -95,7 +98,7 @@ function k1CliRec(t, how, ev) {
   let keys = k1BaseKeys();
   try { if (rp) keys = k1I4Keys(JSON.parse(fs.readFileSync(rp, 'utf8'))); } catch (e) { keys = k1BaseKeys(); }
   const needsTwo = xs ? xs.filter((s) => k1NeedsTwo(s, keys)).length : null;
-  K1.cli.push({ viaEntry: !!xs && needsTwo === 0, i4: xs ? xs.filter((s) => k1IsI4(s, keys)).length : null, needsTwo, how, ev: ev === true });
+  K1.cli.push({ viaEntry: !!xs && needsTwo === 0, i4: xs ? xs.filter((s) => k1IsI4(s, keys)).length : null, needsTwo, how, ev: ev === true, zone: K1.zone, site: k1Site() });
 }
 // T19 독립 판별(판독기 꼴과 따로 씀) · T19 · T21 · T23 문제 목록(판정 한 벌)
 function k1Cls(s) {
@@ -140,17 +143,26 @@ function k1Problems(samples, v, R) {
 }
 const K1_NEW_KEYS = new Set(['exprMismatch', 'exprMismatchExcluded', 'exprMismatchChanged', 'exprMismatchRemoved', 'exposureOnly', 'reproducedCells']);
 const k1Strip = (v) => JSON.parse(JSON.stringify(v), (k, x) => (K1_NEW_KEYS.has(k) ? undefined : x));
+// 고침7 수정 c5(결-17): 이력에서 고침 전 판독기를 못 찾으면 실패(건너뜀 0) · 사유는 판독기 고장과 갈라 적음(표준 출력 · --out baselineMissing)
+const k1MissingText = (want) => '비교 기준 없음 — 받은 이력에 고침 전 판독기(LF sha256 ' + want.slice(0, 8) + '…' + want.slice(-4) + ') 없음 · 이력 전체 받기에서 다시';
+function k1PreFind(want) {
+  const lg = spawnSync('git', ['log', '--format=%H', '--', 'judge.js'], { cwd: HERE, encoding: 'utf8' });
+  for (const sha of (lg.stdout || '').split(/\r?\n/).filter(Boolean).slice(0, 60)) {
+    const r = spawnSync('git', ['show', sha + ':./judge.js'], { cwd: HERE, encoding: 'utf8', maxBuffer: 1 << 24 });
+    const s = (r.stdout || '').split(String.fromCharCode(13)).join('');
+    if (k1Sha(s) === want) return { sha, s };
+  }
+  return null;
+}
 let k1PreMod;
 function k1PreJudge() {
   if (k1PreMod !== undefined) return k1PreMod;
   k1PreMod = null;
   try {
-    const crypto = require('crypto');
-    const lg = spawnSync('git', ['log', '--format=%H', '--', 'judge.js'], { cwd: HERE, encoding: 'utf8' });
-    for (const sha of (lg.stdout || '').split(/\r?\n/).filter(Boolean).slice(0, 60)) {
-      const r = spawnSync('git', ['show', sha + ':./judge.js'], { cwd: HERE, encoding: 'utf8', maxBuffer: 1 << 24 });
-      const s = (r.stdout || '').split(String.fromCharCode(13)).join('');
-      if (crypto.createHash('sha256').update(s).digest('hex') !== K1_PRE_LF_SHA256) continue;
+    const hit = k1PreFind(K1_PRE_LF_SHA256);
+    if (hit) {
+      const sha = hit.sha;
+      const s = hit.s;
       const p = path.join(tmp, 'judge-pre-fix7.js');
       const preSrc = s.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
         .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')');
@@ -159,18 +171,47 @@ function k1PreJudge() {
       K1.pre.srcSha = k1Sha(preSrc);
       k1PreMod = require(p);
       K1.pre.from = sha.slice(0, 8);
-      break;
     }
-    if (!k1PreMod) K1.pre.err = '나무 이력에 고침 전 판독기 없음';
-  } catch (e) { K1.pre.err = String(e && e.message ? e.message : e).slice(0, 120); }
+  } catch (e) { K1.pre.exc = String(e && e.message ? e.message : e).slice(0, 120); }
+  if (!k1PreMod) { K1.pre.err = k1MissingText(K1_PRE_LF_SHA256); K1.baselineMissing = true; }
   return k1PreMod;
+}
+// 부른 자리(C16-9): 이 파일 안 · k1 기반 함수 밖의 첫 두 단 줄 글자(줄 번호 아님 — 줄이 밀려도 같은 자리)
+let k1OwnLinesMemo = null;
+function k1Site() {
+  const lim = Error.stackTraceLimit;
+  Error.stackTraceLimit = 40;
+  const st = String(new Error().stack || '').split(String.fromCharCode(10)).slice(1);
+  Error.stackTraceLimit = lim;
+  if (!k1OwnLinesMemo) k1OwnLinesMemo = (k1SrcOf(__filename) || '').split(String.fromCharCode(10));
+  const own = path.resolve(__filename);
+  const got = [];
+  for (const fr of st) {
+    const m = fr.match(/^\s*at (?:(\S+) \()?(.+):(\d+):(\d+)\)?$/);
+    if (!m || path.resolve(m[2]) !== own) continue;
+    if (m[1] && /(^|\.)k1[A-Z]/.test(m[1])) continue;
+    got.push((k1OwnLinesMemo[Number(m[3]) - 1] || '').trim().slice(0, 80));
+    if (got.length === 2) break;
+  }
+  return got.join(' ← ');
+}
+// 하한 판정(결-16 (A) · C16-9) — T28 ⓕ 가 따로 만든 셈으로 이 함수가 진짜 잡는지 본다
+function k1FloorVerdict(sites, total, min, pin) {
+  const short = [];
+  if (pin) for (const [k, n] of Object.entries(pin)) if ((sites[k] || 0) < n) short.push(k);
+  return { ok: Number.isInteger(total) && total >= min && !!pin && short.length === 0, short, total };
+}
+function k1SiteTable(recs) {
+  const t = {};
+  for (const c of recs) { const k = k1Sha(c.site || '').slice(0, 12); t[k] = (t[k] || 0) + 1; }
+  return t;
 }
 function k1Wrap(mod, origin) {
   if (!mod || typeof mod.judge !== 'function' || mod[K1_WRAPPED]) return mod;
   const real = mod.judge;
   mod.judge = function k1Counted(r, samples, extra) {
     const isArr = Array.isArray(samples);
-    const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, needsTwo: isArr ? ((k) => samples.filter((x) => k1NeedsTwo(x, k)).length)(k1I4Keys(r)) : 0 };
+    const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, zone: K1.zone, site: k1Site(), needsTwo: isArr ? ((k) => samples.filter((x) => k1NeedsTwo(x, k)).length)(k1I4Keys(r)) : 0 };
     (origin === 'pre' ? K1.pre.rec : K1.calls).push(rec);
     const do25 = origin === 'judge' && rec.entry && !!k1PreJudge();
     const a = do25 ? structuredClone(samples[K1_PRE]) : null;
@@ -212,6 +253,7 @@ function k1CallVerdict(calls, cli) {
     byTag,
     missing: calls.filter((c) => !c.entry && !c.tag).length + cli.filter((c) => !c.viaEntry).length,
     badBypass: Object.keys(byTag).filter((t) => !K1_BYPASS_OK.includes(t)),
+    reusedTags: Object.keys(byTag).filter((t) => byTag[t] !== 1),
     badFiles: cli.filter((c) => c.needsTwo !== 0).length,
     entryNeedsTwo: calls.filter((c) => c.entry && c.needsTwo > 0).length
   };
@@ -2021,6 +2063,7 @@ function checkProbe(src) {
   }
   // ── 고침7 c1(H11 · 작업지시서 20261117작 §8 T1~T12 · T19~T25) — 두 식 불일치 · 비교 불가 · 같은 줄 셈 · 재현 셈 · G4 (대조군 + 심은 위반) ──
   {
+    K1.zone = 'fix7'; // 고침7 수정 c5(결-16 (A)): 이 덩이 · 아래 c2 덩이의 판독기 호출 = 고침 7 이 더한 T 행(하한 셈 밖)
     const F7 = T.fix5;
     const R1 = onlyI4(1);
     const R3 = onlyI4(3);
@@ -2080,12 +2123,16 @@ function checkProbe(src) {
         && repSum(kb(v)) === 0 && kb(v).state === F7.contrastInvalid && kb(v).exprMismatchChanged === true
         && repSum(ms(v)) === repSum(ms(v7c)) && ms(v).state === F7.contrastHolds
         && fac(v, 'mouse-open', 'before').exprMismatchExcluded === 1 && fac(v, 'mouse-open', 'before').offSameRowBtn === fac(v7c, 'mouse-open', 'before').offSameRowBtn - 1 && facX === 1
-        && v.items['I-4'].contrastState.exprMismatchChanged === true && v.items['I-4'].contrastState.exprMismatchRemoved >= 1
+        && v.items['I-4'].contrastState.exprMismatchChanged === true && v.items['I-4'].contrastState.exprMismatchRemoved === 1 && kb(v).exprMismatchRemoved === 1 && ms(v).exprMismatchRemoved === 0
         && JSON.stringify(v.cells.map((c) => c.valid)) === JSON.stringify(v7c.cells.map((c) => c.valid)) && JSON.stringify(v.redReasons) === JSON.stringify(v7c.redReasons);
     };
     const v7 = f6Run(R1, rd7, null, { tag: 'T7' });
-    check('고침7 T7(CTO 확인 기대): 옛 꼴 2건 → 비교 불가 2 · 표본 번호 · 키보드 재현 0 → 대조 무효 · 상태 바뀜 참 · 마우스 열림 재현 셈 무변(성립) · 같은 줄 셈에서 뺌(마우스 before 1 · e1t3 은 같은 줄 셈 칸 밖) · 항목 뺀 수 ≥ 1 · valid · 빨강 사유 = 대조군',
+    check('고침7 T7(CTO 확인 기대): 옛 꼴 2건 → 비교 불가 2 · 표본 번호 · 키보드 재현 0 → 대조 무효 · 상태 바뀜 참 · 마우스 열림 재현 셈 무변(성립) · 같은 줄 셈에서 뺌(마우스 before 1 · e1t3 은 같은 줄 셈 칸 밖) · 뺀 수 키보드 = 1 · 마우스 = 0 · 항목 = 1(결-18 · F-6) · valid · 빨강 사유 = 대조군',
       t7(v7) && ms(v7c).state === F7.contrastHolds && kb(v7c).state === F7.contrastHolds, { nc: em(v7).notComparable, kb: kb(v7).state, ms: ms(v7).state });
+    // 고침7 수정 c5(F-6) 심은 위반: 뺀 수를 두 번 더하는 판독기 사본 → T7 정확 셈 빨강
+    const mj7d = mutantJudge((src) => src.replace('      xRemoved += v.length - vr.length;', '      xRemoved += 2 * (v.length - vr.length);'));
+    const v7d = mj7d ? f6Run(R1, rd7, mj7d, { tag: 'T7d' }) : null;
+    plant('고침7 T7 심은 위반(F-6): 뺀 수를 두 번 더하는 사본 → 키보드 · 항목 뺀 수 2 → T7 빨강', !!v7d && !t7(v7d) && kb(v7d).exprMismatchRemoved === 2, v7d && { kb: kb(v7d).exprMismatchRemoved, it: v7d.items['I-4'].contrastState.exprMismatchRemoved });
     // T8 · T9 마우스
     const rd8 = edit(rdB, MB0, (o) => { o.focusOnSameRowBtn = false; o.hqaFocusRow1Restored = true; o.menuZeroObserved = true; });
     const t8 = (v) => ms(v).state === F7.contrastHolds && repSum(ms(v)) === repSum(ms(vB)) && fac(v, 'mouse-open', 'before').exprMismatchExcluded === 1 && em(v).count === 1 && ms(v).exprMismatchRemoved === 0;
@@ -2221,6 +2268,7 @@ function checkProbe(src) {
     const v18 = f6Run(R1, rd18, null, { mm: true });
     check('고침7 T18(H4 + H11 겹침): 노출 칸 유일 재현이 불일치 → 재현 0 · 상태 대조 무효 · 표지 null · 재현 칸 0',
       kb(v18).state === F7.contrastInvalid && kb(v18).exposureOnly.flag === null && kb(v18).reproducedCells.length === 0 && kb(v18).exprMismatchChanged === true, kb(v18).exposureOnly);
+    K1.zone = null;
   }
 }
 
@@ -2596,32 +2644,58 @@ function k1Final() {
   const fc = k1CallVerdict([], [{ viaEntry: true, i4: 3, needsTwo: 1 }]);
   check('고침7 T28 ⓐⓑⓒ(대조군): 입구 · 이름표 없는 호출 → 빠진 자리 1 · T1 이름표 비켜 감 → 허용 밖 · 두 칸 없는 I-4 표본 든 명령줄 파일 → 입구 안 거친 파일 1',
     fa.missing === 1 && fb.badBypass.length === 1 && fb.badBypass[0] === 'T1' && fc.badFiles === 1, { fa: fa.missing, fb: fb.badBypass, fc: fc.badFiles });
-  // T26 · T27(본 기록 · 대조군 호출 뺌)
-  const floorCount = main.filter((c) => c.origin === 'judge').length + K1.cli.length;
+  const fe = k1CallVerdict([{ origin: 'judge', entry: false, tag: 'T7', needsTwo: 0 }, { origin: 'judge', entry: false, tag: 'T7', needsTwo: 0 }], []);
+  check('고침7 T28 ⓔ(결-18 대조군): 따로 만든 기록에 T7 이름표 2건 → 허용 이름표 재사용으로 잡힘', fe.reusedTags.length === 1 && fe.reusedTags[0] === 'T7' && fe.badBypass.length === 0, fe.reusedTags);
+  // T26 · T27(본 기록 · 대조군 호출 뺌) — 고침7 수정 c5(결-16 (A)): 하한 = 기존 호출만(고침 7 덩이 표지 호출 뺌)
+  const exJ = main.filter((c) => c.origin === 'judge' && !c.zone);
+  const exC = K1.cli.filter((c) => !c.zone);
+  const floorCount = exJ.length + exC.length;
+  const allCount = main.filter((c) => c.origin === 'judge').length + K1.cli.length;
+  const sites = k1SiteTable(exJ.concat(exC));
   const inner = !!process.env.HQA_SELFTEST_INNER;
   const innerFloor = K1.inner && Number.isInteger(K1.inner.floorCount) ? K1.inner.floorCount : null;
   const runCount = inner ? floorCount : (innerFloor === null ? null : floorCount + innerFloor);
   const floorOk = inner ? floorCount >= K1_FLOOR_INNER : (runCount !== null && runCount >= K1_FLOOR_RUN);
-  check(`고침7 T26: 판독기 호출 총수 = 입구 거친 수 + 비켜 간 수 · 비켜 간 이름표 = T7 · T20 뿐 · 각각 ≥ 1 · 하한(${inner ? '안쪽 ' + K1_FLOOR_INNER : '한 런 ' + K1_FLOOR_RUN} · C2-2)`,
-    V.missing === 0 && V.total === V.viaEntry + V.bypass && V.badBypass.length === 0 && (V.byTag.T7 || 0) >= 1 && (V.byTag.T20 || 0) >= 1 && floorOk,
-    { total: V.total, viaEntry: V.viaEntry, bypass: V.bypass, byTag: V.byTag, floorCount, runCount, innerFloor });
+  const tagKeys = (o) => JSON.stringify(Object.keys(o || {}).sort().map((k) => [k, o[k]]));
+  const innerTags = inner ? true : (!!K1.inner && tagKeys(K1.inner.byTag) === tagKeys(V.byTag));
+  check(`고침7 T26: 판독기 호출 총수 = 입구 거친 수 + 비켜 간 수 · 비켜 간 이름표 = 허용 목록 뿐 · 이름표마다 = 1(결-18) · 안쪽 이름표 표 통째 같음 · 하한(기존 호출만 · ${inner ? '안쪽 ' + K1_FLOOR_INNER : '한 런 ' + K1_FLOOR_RUN} · 결-16 (A))`,
+    V.missing === 0 && V.total === V.viaEntry + V.bypass && V.badBypass.length === 0 && K1_BYPASS_OK.every((t) => V.byTag[t] === 1) && Object.keys(V.byTag).length === K1_BYPASS_OK.length && V.reusedTags.length === 0 && innerTags && floorOk,
+    { total: V.total, viaEntry: V.viaEntry, bypass: V.bypass, byTag: V.byTag, floorCount, allCount, runCount, innerFloor, innerTags });
+  // T35(C16-9): 자리마다 c2 기준선 이상(프로세스마다 · 바깥은 안쪽 표도) · T28 ⓕ: 따로 만든 셈에서 기존 호출 1건 지움 → 하한 빨강
+  const fv = k1FloorVerdict(sites, floorCount, K1_FLOOR_INNER, K1_SITE_FLOOR);
+  const iv = inner ? { ok: true, short: [] } : k1FloorVerdict((K1.inner && K1.inner.sites) || {}, innerFloor, K1_FLOOR_INNER, K1_SITE_FLOOR);
+  check('고침7 T35(C16-9): 기존 호출 자리별 수 ≥ c2 기준선(자리 ' + (K1_SITE_FLOOR ? Object.keys(K1_SITE_FLOOR).length : 0) + ' · 상한 없음) · 바깥은 안쪽 표도',
+    fv.ok && iv.ok, { short: fv.short.slice(0, 5), innerShort: iv.short.slice(0, 5), table: Object.entries(sites).map(([k, n]) => [k, n, (exJ.concat(exC).find((c) => k1Sha(c.site || '').slice(0, 12) === k) || {}).site]) });
+  const k0 = K1_SITE_FLOOR ? Object.keys(K1_SITE_FLOOR)[0] : null;
+  const sitesF = Object.assign({}, sites);
+  if (k0) sitesF[k0] = (sitesF[k0] || 0) - 1;
+  const ff = k1FloorVerdict(sitesF, floorCount - 1, K1_FLOOR_INNER, K1_SITE_FLOOR);
+  check('고침7 T28 ⓕ(결-16 대조군): 따로 만든 셈에서 기존 호출 1건 지움 → 하한 판정 빨강(합계 · 그 자리)', !!k0 && fv.ok && !ff.ok && ff.short.includes(k0), { short: ff.short.slice(0, 2), total: ff.total });
+  // 결-17: 이력 있음 대조군 · 없는 지문 = 비교 기준 없음(바깥 런만 · 이력 60판 다시 읽기)
+  if (!inner) {
+    const want0 = '0'.repeat(64);
+    const miss = k1PreFind(want0);
+    check('고침7 결-17 대조군: 이력에 고침 전 판독기 있음 → baselineMissing 거짓 · 찾은 판 있음', K1.baselineMissing === false && !!k1PreJudge() && !!K1.pre.from, { from: K1.pre.from, err: K1.pre.err });
+    plant('고침7 결-17 심은 위반: 찾는 지문을 없는 값으로 → 비교 기준 없음 · T3 · T25 앞 조건(고침 전 판독기 있음) 거짓 → 실패 · 사유 글자 일치', miss === null && k1MissingText(want0) === '비교 기준 없음 — 받은 이력에 고침 전 판독기(LF sha256 00000000…0000) 없음 · 이력 전체 받기에서 다시', miss && miss.sha);
+  }
   check('고침7 T27: 빠진 호출 자리 0 — ① 셈이 받은 판독기 입력마다 입구 표시 또는 T7 · T20 이름표 ② 명령줄 입력 파일(두 자리)의 I-4 표본 전부 두 칸 있음 · 입구 거친 입력에 두 칸 없는 I-4 표본 0',
     V.missing === 0 && V.badFiles === 0 && V.entryNeedsTwo === 0 && K1.cli.length >= 2, { missing: V.missing, badFiles: V.badFiles, cli: K1.cli.length });
   K1.out = { total: V.total, viaEntry: V.viaEntry, bypass: V.bypass, byTag: V.byTag, cli: K1.cli.length, mutant: main.filter((c) => c.origin === 'mutant').length,
-    floorCount, runCount, control: ctlCalls.length, preCompare: K1.pre.calls, inner: innerFloor };
+    floorCount, allCount, runCount, control: ctlCalls.length, preCompare: K1.pre.calls, inner: innerFloor, sites, baselineMissing: K1.baselineMissing };
 }
 
 // ── 결과─────────────────────────────────────────────────────────────
 function finish() {
   k1Final();
   const fail = results.filter((r) => !r.ok);
+  if (K1.baselineMissing) process.stdout.write('[자체시험] ' + K1.pre.err + '\n');
   for (const r of results) process.stdout.write(`${r.ok ? 'OK  ' : 'FAIL'} ${r.name}${r.ok ? '' : ' :: ' + JSON.stringify(r.info)}\n`);
   process.stdout.write(JSON.stringify({ selftest: 'judge+static', total: results.length, fail: fail.length }) + '\n');
   // 고침5 K-1: --out <경로> → {passed, failed, total, plantedRed, plantedTotal} 한 JSON(인자 없으면 표준 출력만 · 옛 꼴 그대로)
   const oi = process.argv.indexOf('--out');
   if (oi >= 0 && process.argv[oi + 1]) {
     const pl = results.filter((r) => r.planted);
-    fs.writeFileSync(process.argv[oi + 1], JSON.stringify({ passed: results.length - fail.length, failed: fail.length, total: results.length, plantedRed: pl.filter((r) => r.ok).length, plantedTotal: pl.length, judgeCalls: K1.out }) + '\n', 'utf8');
+    fs.writeFileSync(process.argv[oi + 1], JSON.stringify({ passed: results.length - fail.length, failed: fail.length, total: results.length, plantedRed: pl.filter((r) => r.ok).length, plantedTotal: pl.length, judgeCalls: K1.out, baselineMissing: K1.baselineMissing }) + '\n', 'utf8');
   }
   fs.rmSync(tmp, { recursive: true, force: true });
   process.exitCode = fail.length ? 1 : 0;

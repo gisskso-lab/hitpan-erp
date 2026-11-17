@@ -444,13 +444,46 @@ try {
     }
     results.h2 = H2.length;
   }
+  // 고침7 수정 c5(P2-3): 판독기 새 칸(두 식 판별) — HQA 칸에 원자료 꼴 긴 글자를 심은 I-4 표본 → 판정 rows[].hqa = 값 꼬리표(참거짓 아님) · 판정 JSON · 요약 줄 어디에도 심은 글자 0 · 대조군 = 참/거짓 → 꼬리표 참/거짓
+  {
+    const Jd = require('./judge.js');
+    const rules = JSON.parse(fs.readFileSync(path.join(HERE, 'rules.json'), 'utf8'));
+    const cell = Jd.buildPlan(rules).cells.find((c) => c.item === 'I-4' && c.case === 'kbd-open' && c.screen === 'e1t3');
+    const RAW = '가짜 요소 글자 상태 메뉴 단추 줄 하나 열림 닫힘 초점 남음 표시 ' + '가나다라마바사 '.repeat(12);
+    const sample = (hqa, dev) => ({ item: 'I-4', case: cell.case, screen: cell.screen, delay: cell.delay, window: cell.window, cell: cell.key, sampleNo: 1, order: 1, contextId: 1, valid: true, errors: [], deviceReading: null, inputs: [],
+      circuit: { dead: false, reconnectVisible: false, wsClosedNotNav: false, consoleCircuitError: false }, kbd: null,
+      readings: { openCountAfterEsc: 0, focusOnSameRowBtn: dev === true, hqaFocusRow1Restored: hqa, menuZeroObserved: true } });
+    const runK = (name, hqa, dev) => {
+      const d = path.join(root, name);
+      fs.mkdirSync(d);
+      const rp = path.join(d, 'rules.json');
+      fs.writeFileSync(rp, JSON.stringify(rules));
+      const smp = path.join(d, 'samples.jsonl');
+      fs.writeFileSync(smp, JSON.stringify(sample(hqa, dev)) + '\n');
+      const op = path.join(d, 'verdict.json');
+      const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp, '--samples', smp, '--out', op], { encoding: 'utf8' });
+      const vt = fs.existsSync(op) ? fs.readFileSync(op, 'utf8') : '';
+      const v = vt ? JSON.parse(vt) : null;
+      const rows = v && v.items && v.items['I-4'] && v.items['I-4'].exprMismatch ? v.items['I-4'].exprMismatch.rows : [];
+      return { rows, out: vt + (r.stdout || '') + (r.stderr || ''), sum: r.stdout || '' };
+    };
+    const kRaw = runK('k1raw', RAW);
+    const kT = runK('k1t', true);
+    const kF = runK('k1f', false, true);
+    const pieces = [RAW.slice(0, 20), '가나다라마바사'];
+    const pass = kRaw.rows.length === 1 && kRaw.rows[0].hqa === '참거짓 아님' && pieces.every((x) => !kRaw.out.includes(x)) && kRaw.sum.length > 0
+      && kT.rows.length === 1 && kT.rows[0].hqa === true && kF.rows.length === 1 && kF.rows[0].hqa === false;
+    results.push({ case: 'k1.hqa.raw', expect: ['참거짓 아님 · 글자 0'], kinds: null, status: 0, echoed_value: false, pass });
+    results.k1 = 1;
+  }
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
 results.push({ case: 'names.short', expect: ['< 22'], kinds: null, status: 0, echoed_value: false, pass: results.every((r) => !/[A-Za-z0-9_-]{22,}/.test(r.case)) });
 
 // 고침4 G7: 옛 기대 수(CASES + 2 + Y2C + Y2D + 1)에 합성 대조군 2 를 더함 · 고침5 H2: 새 시험 8(results.h2 — 블록이 안 돌면 빨강)
-const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 2 + 8 + 1 && results.h2 === 8 && results.every((r) => r.pass);
+// 고침7 수정 c5(P2-3): 새 칸 누출 시험 1(results.k1 — 블록이 안 돌면 빨강)
+const ok = results.length === CASES.length + 2 + Y2C.length + Y2D.length + 2 + 8 + 1 + 1 && results.h2 === 8 && results.k1 === 1 && results.every((r) => r.pass);
 const doc = { ok, cases: results.length, failed: results.filter((r) => !r.pass).map((r) => r.case), results };
 const oi = process.argv.indexOf('--out');
 if (oi >= 0 && process.argv[oi + 1]) fs.writeFileSync(process.argv[oi + 1], JSON.stringify(doc, null, 2) + '\n');
