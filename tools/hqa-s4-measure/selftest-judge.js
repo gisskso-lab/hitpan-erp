@@ -36,7 +36,7 @@ const K1_FLOOR_INNER = 110;
 const K1_SITE_FLOOR = { "700998716a29": 1, ddfa4a5c60c0: 4, e6ba771bb50c: 1, bf023daed110: 1, "166d4d52c03d": 1, "01f5ac44ad80": 1, "8a32bfa08278": 1, "34cc44b36d9e": 1, "87f935b90ad1": 1, "9952ee49a660": 1, db78d1f1e019: 1, adaf17e56e22: 1, "2aaf26927378": 1, "7fc66723be29": 1, "71838eeea029": 1, fbfb49ad33a8: 1, fafd9c2fe877: 1, "3e747f0c29be": 1, "55eaed6e1442": 1, "865b4629bac4": 1, "3c0702d2836d": 1, "6f39be2d69aa": 1, "00fabddac9b7": 1, "12b024a19a5a": 1, "9c8c4e350bba": 1, "8c3ccbe7ad3c": 1, "00cc1fd5271c": 1, "1fff25de5aef": 1, b2ad7a927821: 1, "3434528ee919": 1, c5ac3a3a7a17: 1, "68580c0f0b1d": 1, c1c96fda9f9d: 1, f617af48d94e: 7, "2ce3ac3c84b2": 1, b89cab35e63f: 1, "5d194b264cc2": 1, bbf0d6f5ea47: 1, "921fa8e02663": 1, "32a0967c876c": 1, c45e3b85195c: 1, "21c682212ad1": 1, e31901893a34: 1, "15a598b328ec": 1, e4a38384d338: 2, e954065a3400: 2, "5265e8927134": 2, "96a4c0fb0225": 4, "944a5b80659e": 1, fb9f3f9976b8: 1, "2704b06996ff": 1, "20eefd59dd7e": 4, faee6d54169a: 1, "6586c3389f44": 4, "60ab8d6d0597": 1, "2074223aefb7": 1, d6c7b30e95fa: 1, db97871cc8c2: 1, "6d29df68f078": 1, "93aa66b75523": 1, "52f6f976afe5": 1, "3c11065e9367": 1, "5b0d39613181": 1, "16d9ad248fe7": 1, e34a2711c425: 1, "1772bd33418e": 1, a5cea0ebb645: 1, "4c6b00ded4c5": 1, d401995535e3: 1, a1552b12cc05: 1, "93103b4e4ba1": 1, f1f46e0aa791: 1, "190fecc8f684": 1, "3703b561ab32": 1, c3aa6d9da8bc: 1, "2df913df0fa1": 3, eb6aa8b11e96: 1, "7e86b09d7809": 1, cd748ae4874c: 1, e27ddbf46bfa: 1, "67493276294d": 1, "3cfae413726a": 1, "678e640af8f4": 1, c269d372468a: 1, "112e1b290744": 1, "80849870fa91": 1, babfb9abadc0: 1, "27c166a9ed31": 1, "3aa7c8c23caa": 1 };
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
 // T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
-const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 14, sha: "a838da2ddc05439a"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
+const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 14, sha: "d3a322a92c9b6be6"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}, compile: {n: 2, sha: "2e48942e3d7e6c38"}, bareFn: {n: 0, sha: "e3b0c44298fc1c14"}, indirEval: {n: 0, sha: "e3b0c44298fc1c14"}, bracketCall: {n: 4, sha: "f97c31993eb232f1"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
   loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [], zone: null, baselineMissing: false };
@@ -1406,7 +1406,22 @@ function checkProbe(src) {
     const SB4 = ['50e4e57daefdb325c110430887405dea4267d34b', '7e6534064235927f80c42df7fc7d455f210a27bd', 'b44a24645cf52acdd4a634dc8a232d90096de84a', '0a369de4ab45362a088d7003f83d5a27e4710244'];
     const BASE0 = '88085da1d797b915b8e8be314517af180d0b9939';
     // 자식 프로세스 실행 자리 = 이 한 줄(sh)만 — T34 정적 게이트 셈
-    const sh = (cmd, args, opt) => spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {}));
+    // 값커밋 결-15(작업지시서 §9 · [3-V] 2회차 P2-1): 실행 자리는 한 줄 그대로 · 그 앞에서 고정 허용 목록 검사(shGuard) — 범용 실행기로 새 실행을 숨기지 못하게
+    //   허용 ① git + 이 블록이 실제로 쓰는 하위 명령 6개만(첫 인자 = 하위 명령 · '-' 로 시작하면 거부 → `-c` 등 하위 명령 앞 옵션 0)
+    //   허용 ② bash <m0-assert.sh 경로> <임시 폴더 m0d-*> --diff-only <나무 40자> 꼴 하나 · 그 밖 = 던짐 → 아래 이름 붙은 빨강(shBad)
+    const SH_GIT_SUB = ['read-tree', 'update-index', 'write-tree', 'hash-object', 'cat-file', 'rev-parse'];
+    const shBad = [];
+    const shOk = (cmd, args) => {
+      const a = Array.isArray(args) ? args : [];
+      if (!a.every((x) => typeof x === 'string')) return false;
+      if (cmd === 'git') return a.length > 0 && !a[0].startsWith('-') && SH_GIT_SUB.includes(a[0]);
+      if (cmd === 'bash') return a.length === 4 && a[0] === m0 && path.resolve(path.dirname(a[1])) === path.resolve(tmp) && path.basename(a[1]).startsWith('m0d-') && a[2] === '--diff-only' && /^[0-9a-f]{40}$/.test(a[3]);
+      return false;
+    };
+    const shGuard = (cmd, args) => { if (!shOk(cmd, args)) { const m = '값커밋 결-15 허용 목록 밖 실행: ' + String(cmd) + ' ' + JSON.stringify(args).slice(0, 120); shBad.push(m); throw new Error(m); } };
+    const sh = (cmd, args, opt) => (shGuard(cmd, args), spawnSync(cmd, args, Object.assign({ cwd: root, env: env0 }, opt || {})));
+    let shErr = null;
+    try {
     const git = (args, opt) => sh('git', args, Object.assign({ encoding: 'utf8' }, opt || {}));
     const idx = path.join(fs.mkdtempSync(path.join(tmp, 'm0x-')), 'index');
     const genv = Object.assign({}, env0, { GIT_INDEX_FILE: idx });
@@ -1414,7 +1429,7 @@ function checkProbe(src) {
       if (fs.existsSync(idx)) fs.unlinkSync(idx);
       let r = git(['read-tree', 'HEAD'], { env: genv }); if (r.status !== 0) return null;
       for (const e of edit) {
-        r = e.remove ? git(['update-index', '--force-remove', '--', e.path], { env: genv }) : git(['update-index', '--add', '--cacheinfo', '100644,' + e.blob + ',' + e.path], { env: genv });
+        r = e.remove ? git(['update-index', '--force-remove', '--', e.path], { env: genv }) : git(['update-index', '--add', '--cacheinfo', (e.mode || '100644') + ',' + e.blob + ',' + e.path], { env: genv }); // 값커밋 결-15(P3-1): 모드 지정(없으면 100644 · 옛 꼴 그대로)
         if (r.status !== 0) return null;
       }
       r = git(['write-tree'], { env: genv }); return r.status === 0 ? r.stdout.trim() : null;
@@ -1442,11 +1457,33 @@ function checkProbe(src) {
     const scB = Buffer.from(sc.stdout || []); if (scB.length) scB[scB.length - 1] = scB[scB.length - 1] ^ 1;
     const nBlob = scB.length ? hashW(scB) : null;
     const tB = nBlob ? mkTree(fix4.map((e, i) => (i === 2 ? { path: e.path, blob: nBlob } : e))) : null;
+    // 값커밋 결-15(P3-1) (마) scan.sh 같은 blob · 모드 100755
+    const tE = mkTree(fix4.map((e, i) => (i === 2 ? { path: e.path, blob: e.blob, mode: '100755' } : e)));
+    // 값커밋 결-15([4] 2회차 P3-D) (바) 옛 래퍼 yml(바닥 판 blob) + 새 scripts 3(고정 blob) 섞인 나무
+    const tF = mkTree(fix4.map((e, i) => (i === 0 ? { path: e.path, blob: baseWf } : e)));
     const rC = tC ? run3(tC) : null, rD = tD ? run3(tD) : null, rA = tA ? run3(tA) : null, rB = tB ? run3(tB) : null;
+    const rE = tE ? run3(tE) : null, rF = tF ? run3(tF) : null;
     check('값커밋 결-13 (다) 대조군: 4파일 = 고정 blob 그대로 → ③ · ③b 초록(checked=4) · 원자료 파일 0', have && !!rC && rC.rc === 0 && rC.a3 === 1 && rC.b3 === 1 && /checked=4/.test(rC.out) && rC.files === 0, rC);
-    check('값커밋 결-13 (라) 대조군: 4파일 없음(87cb635c 꼴) → ③ · ③b 초록(③b 해당 없음 · checked=0)', !!rD && rD.rc === 0 && rD.a3 === 1 && rD.b3 === 1 && /checked=0/.test(rD.out), rD);
+    // (옛 단언 · 결-15 로 대체) check('값커밋 결-13 (라) 대조군: 4파일 없음(87cb635c 꼴) → ③ · ③b 초록(③b 해당 없음 · checked=0)', rD.rc === 0 && rD.a3 === 1 && rD.b3 === 1 && /checked=0/)
+    // 값커밋 결-15(작업지시서 §9 · [3-V] 2회차 P3-2 · §9 결-13 (라) 재결재): ③b = 4경로 모두 그 나무에 있어야 초록 → 4파일 없는 나무(옛 @main 래퍼로 되돌린 꼴)는 빨강
+    //   이유 = 대표 결-1 ⓐ 「push 전 그 가지에 4파일」 을 M0 가 기계로 강제(HQA SHA 대조 · push 순서에만 기대지 않음)
+    plant('값커밋 결-13 (라) → 결-15 심은 위반: 4파일 없음(87cb635c 꼴 · trufflehog.yml = 바닥 판) → ③ 초록 · ③b 빨강(없는 경로 got=none)', !!rD && rD.rc === 1 && rD.a3 === 1 && rD.b3 === 0 && /got=none/.test(rD.out) && /trufflehog\.yml/.test(rD.out), rD);
+    plant('값커밋 결-15 (마) 심은 위반(P3-1): scan.sh 같은 blob · 모드 100755 → ③b 빨강(③ 은 초록)', !!rE && rE.rc === 1 && rE.a3 === 1 && rE.b3 === 0 && /100755/.test(rE.out), rE);
+    plant('값커밋 결-15 (바) 심은 위반([4] 2회차 P3-D): 옛 래퍼 yml(바닥 판) + 새 scripts 3 섞인 나무 → ③ 초록 · ③b 빨강(trufflehog.yml blob 다름)', !!rF && rF.rc === 1 && rF.a3 === 1 && rF.b3 === 0 && /trufflehog\.yml/.test(rF.out) && !/got=none/.test(rF.out), rF);
     plant('값커밋 결-13 (가) 심은 위반: 4경로 밖 .github 경로 1개(.github/scripts/trufflehog/extra.sh) → ③ 빨강', !!rA && rA.rc === 1 && rA.a3 === 0 && /extra\.sh/.test(rA.out), rA);
     plant('값커밋 결-13 (나) 심은 위반: scan.sh 1바이트 바꿈 → ③b 빨강(③ 은 초록)', !!rB && rB.rc === 1 && rB.a3 === 1 && rB.b3 === 0 && /scan\.sh/.test(rB.out), rB);
+    } catch (e) { shErr = String(e && e.message ? e.message : e).slice(0, 200); }
+    // 값커밋 결-15(P2-1): 위 블록 안 자식 실행이 모두 허용 목록 안이었나(목록 밖 = 던짐 → 여기서 이름 붙은 빨강) — 심은 위반 셋보다 먼저 잰다
+    const shBadBlock = shBad.slice();
+    check('값커밋 결-15 (P2-1): 결-13 블록 안 자식 실행 = 고정 허용 목록만(git 하위 명령 ' + SH_GIT_SUB.join(' · ') + ' · bash m0-assert.sh <임시 폴더> --diff-only <나무>) · 목록 밖 0 · 던짐 0', shBadBlock.length === 0 && shErr === null, { bad: shBadBlock.slice(0, 3), err: shErr });
+    // 심은 위반 (ㄱ)(ㄴ)(ㄷ): 같은 sh 로 목록 밖 실행을 부르면 실행 전에 던짐(자식 프로세스 0)
+    const shTry = (cmd, args) => { const n0 = shBad.length; try { sh(cmd, args, { encoding: 'utf8' }); return { threw: false, named: false }; } catch (e) { return { threw: true, named: shBad.length === n0 + 1 && /값커밋 결-15 허용 목록 밖 실행/.test(String(e.message)) }; } };
+    const pG = shTry('bash', ['-c', 'true']);
+    plant('값커밋 결-15 (ㄱ) 심은 위반: sh(bash, [-c, true]) → 실행 전 던짐(이름 붙은 빨강)', pG.threw && pG.named, pG);
+    const pN = shTry('git', ['-c', 'alias.x=!true', 'x']);
+    plant('값커밋 결-15 (ㄴ) 심은 위반: git -c alias.x=!true x(하위 명령 앞 옵션) → 실행 전 던짐', pN.threw && pN.named, pN);
+    const pD = shTry('git', ['status', '--porcelain']);
+    plant('값커밋 결-15 (ㄷ) 심은 위반: 목록 밖 git 하위 명령(status) → 실행 전 던짐', pD.threw && pD.named, pD);
   }
   // C-2(결-1 조건 ①): 장치 폴더 · 워크플로에 주소 앞머리 판단 0 — 꼴은 조각으로 만든다(이 파일이 스스로 걸리지 않게)
   {

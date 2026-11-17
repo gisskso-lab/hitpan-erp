@@ -10,8 +10,11 @@
 #     ① 원자료(m0-assert.json)에 github_sha · run_id · run_attempt · mode_line(MODE 줄)
 #     --guard-only = ⑤ ⑥ 만 재고 끝(망 접속 0 · 파일 0 — selftest-judge.js 가 attempt 2 → 측정 0 을 동작으로 확인)
 #   값커밋 결-13 甲(작업지시서 §9 · PM 재결재 11/18): ③ 허용 목록 = 측정 워크플로 · tools/hqa-s4-measure/ + 비밀 검사 4경로(정확히 · 와일드카드 0)
-#     ③b m0_3b_secret_blobs = 그 4경로 중 diff 에 있는 경로마다 blob = 고정값(main b0305286 실측) · 없으면 해당 없음(초록) · 「M0 blob 10쌍」(⑤) 셈과 따로
+#     (옛 글자 · 결-15 로 대체) ③b m0_3b_secret_blobs = 그 4경로 중 diff 에 있는 경로마다 blob = 고정값(main b0305286 실측) · 없으면 해당 없음(초록) · 「M0 blob 10쌍」(⑤) 셈과 따로
+#     값커밋 결-15(작업지시서 §9 · [3-V] 2회차 P3-1 · P3-2): ③b = 4경로 모두 그 나무에 있어야 하고(diff 포함 여부와 무관) 경로마다 모드 100644 · 종류 blob · blob = 고정값이어야 초록
+#       — 4파일 없음 · 모드 다름(100755 · 120000) · blob 다름 = 빨강(대표 결-1 ⓐ 「push 전 그 가지에 4파일」 기계 강제) · 「M0 blob 10쌍」(⑤) 셈과 따로
 #     --diff-only <나무 · 커밋> = ③ · ③b 만 그 나무로 재고 끝(망 접속 0 · 파일 0 — selftest-judge.js 가 심은 위반 · 대조군을 동작으로 확인)
+#       값커밋 결-15(P3-3): --diff-only 셋째 인자가 '-' 로 시작하면 usage 로 멈춤(옵션으로 읽히지 않게)
 set -u -o pipefail
 
 RAW="${1:?usage: m0-assert.sh <raw-dir> [--guard-only]}"
@@ -19,6 +22,8 @@ GUARD_ONLY=0; [ "${2:-}" = "--guard-only" ] && GUARD_ONLY=1
 # 값커밋 결-13: --diff-only <나무> (자체시험용)
 DIFF_ONLY=0; DIFF_REV=HEAD
 if [ "${2:-}" = "--diff-only" ]; then DIFF_ONLY=1; DIFF_REV="${3:?usage: m0-assert.sh <raw-dir> --diff-only <tree-ish>}"; fi
+# 값커밋 결-15(P3-3): 셋째 인자가 '-' 로 시작하면 옵션으로 읽힐 수 있음 → usage 로 멈춤
+if [ "$DIFF_ONLY" = "1" ]; then case "$DIFF_REV" in -*) echo "usage: m0-assert.sh <raw-dir> --diff-only <tree-ish> (tree-ish must not start with '-')" >&2; exit 1 ;; esac; fi
 mkdir -p "$RAW"
 
 # 고침4 G9(G-값 · F′): 옛 값 FIX_TREE=0b31f869… · BASE=01161edb… 대체 → F′(b967b1b0 · A2 화면 더한 판 · 부모 01161edb)
@@ -101,15 +106,17 @@ m0_check3() {
   else
     rec m0_3_diff_allowed 0 "diff error: $(cat "$TMPD/e3")"
   fi
-  # ③b 4경로 중 diff 에 있는 경로마다 그 나무의 blob = 고정값 (diff 를 못 읽으면 빨강 · 4경로가 diff 에 없으면 해당 없음 = 초록)
+  # ③b (옛 글자 · 결-15 로 대체: 4경로 중 diff 에 있는 경로마다 그 나무의 blob = 고정값 · 4경로가 diff 에 없으면 해당 없음 = 초록)
+  # 값커밋 결-15(P3-1 · P3-2): 4경로 모두 그 나무에 있어야 함(diff 포함 여부와 무관) · 경로마다 한 줄 = 모드 100644 · 종류 blob · blob = 고정값 (diff 를 못 읽으면 빨강 그대로)
+  #   --full-tree = 지금 폴더와 무관하게 나무 뿌리 기준 경로 · 경로 글자는 글롭 아님(실측) · 나온 경로 글자도 정확히 같아야 함
   if [ "$d3ok" = "1" ]; then
     sb_bad=""; sb_n=0; i=0
     for sp in "${SECRET_PATHS[@]}"; do
-      if grep -Fxq -- "$sp" "$TMPD/d3"; then
-        sb_n=$((sb_n+1))
-        got=$(git rev-parse -q --verify "$rev:$sp" 2>/dev/null || echo none)
-        if [ "$got" != "${SECRET_BLOBS[$i]}" ]; then sb_bad="$sb_bad path=$sp got=$got want=${SECRET_BLOBS[$i]}"; fi
-      fi
+      sb_n=$((sb_n+1))
+      lt=$(git ls-tree --full-tree "$rev" -- "$sp" 2>/dev/null) || lt=""
+      want="100644 blob ${SECRET_BLOBS[$i]}"$'\t'"$sp"
+      if [ -z "$lt" ]; then sb_bad="$sb_bad path=$sp got=none want=100644:blob:${SECRET_BLOBS[$i]}"
+      elif [ "$lt" != "$want" ]; then sb_bad="$sb_bad path=$sp got=$(printf '%s' "$lt" | cut -f1 | tr ' ' ':' | paste -sd, -) want=100644:blob:${SECRET_BLOBS[$i]}"; fi
       i=$((i+1))
     done
     if [ -z "$sb_bad" ]; then rec m0_3b_secret_blobs 1 "checked=$sb_n"; else rec m0_3b_secret_blobs 0 "blob differs:$sb_bad"; fi
