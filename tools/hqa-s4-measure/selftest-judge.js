@@ -10,8 +10,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
-const { buildPlan, cellKey, defaultWindow } = require('./judge.js');
+const crypto = require('crypto');
 // ── 고침7 K1(작업지시서 20261117작 §8 안 (가) · C2-1~C2-4) — 판독기 입구 · 비켜 감 · 호출 셈 ──
 //   이 셋은 자체시험 파일에만 있다(판독기 judge.js 는 두 칸을 읽기만 · C2-3).
 //   입구 규칙: ① I-4 표본 readings 에 두 칸(hqaFocusRow1Restored · menuZeroObserved)이 모두 없을 때만 덧붙임
@@ -21,6 +20,7 @@ const { buildPlan, cellKey, defaultWindow } = require('./judge.js');
 //   ⑤ readings 가 없거나 장치 값 칸 자체가 없는 표본은 손대지 않음
 //   셈의 눈(C2-2): 실린 판독기 모듈의 judge 를 한 번 감쌈(같은 프로세스의 require('./judge.js') = 같은 객체) ·
 //   심은 위반 사본은 사본을 싣는 함수(mutantJudge) 하나에서 감쌈 · 고침 전 판독기(비교용)는 감싸지 않음(PM 재개 결재)
+//   ⬛ 위 두 줄(한 번 감싸기)은 고침7 수정 c4(P1-2 · C16-1~C16-5)로 넓힘 — 모듈 싣는 순간(적재 함수) · 자식 프로세스 실행 함수에서 셈(아래 「싣는 순간」 덩이)
 const K1_ENTRY = Symbol('k1-entry');
 const K1_PRE = Symbol('k1-pre');
 const K1_TAG = Symbol('k1-bypass-tag');
@@ -32,8 +32,11 @@ const K1_BYPASS_OK = ['T7', 'T20', 'T29', 'T30a', 'T30b'];
 const K1_FLOOR_RUN = 220;
 const K1_FLOOR_INNER = 110;
 // 고침 전 판독기(바닥 커밋의 judge.js) 내용 sha256(줄끝 LF) — 나무 이력에서 이 값과 같은 판을 찾아 비교용으로 싣는다
+// T34 허용 목록(C16-2) — 꼴마다 수 · 자리(맞은 줄 글자 정렬 sha256 앞 16자). 자체시험 소스가 이 꼴 줄을 바꾸면 여기도 함께(PM diff 대조)
+const K1_SCAN_PIN = {loader: {n: 10, sha: "4839b9e5a6007127"}, dynImport: {n: 0, sha: "e3b0c44298fc1c14"}, worker: {n: 0, sha: "e3b0c44298fc1c14"}, vm: {n: 0, sha: "e3b0c44298fc1c14"}, newFn: {n: 6, sha: "2c512d06d6d80ab8"}, cpCall: {n: 13, sha: "83673b6cb087959e"}, cpReq: {n: 2, sha: "c6ad7a838a8b540e"}};
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
-const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null }, inner: null, out: null };
+const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null, paths: [], srcSha: null, rec: [] }, inner: null, out: null,
+  loads: [], scanBad: [], hookOdd: [], hookErr: [], spawnErr: [] };
 const k1Own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 // 고침7 수정(P1-1 · C16-6): I-4 표본 = 표본 item 글자 또는 계획의 I-4 칸 열쇠 — 칸 집합은 자체시험이 계획 칸 열쇠 글자(첫 마디)에서 따로 셈(판독기 안의 집합을 가져오지 않음)
 function k1I4Keys(R) {
@@ -82,13 +85,17 @@ function k1Bypass(tag, mod, r, samples, extra) {
   Object.defineProperty(xs, K1_TAG, { value: tag });
   return mod.judge(r, xs, extra || {});
 }
-// 명령줄 판독기 입력 파일(입력 파일을 쓴 뒤 · 띄우기 직전에 한 번) — 이 프로세스가 띄운 명령줄 호출 셈
-function k1Cli(file, viaEntry, rulesFile) {
+// 명령줄 판독기 실행 한 건 기록(고침7 수정 c4 · P1-2 ②) — 자식 프로세스 실행 함수 감싸기(k1SeeSpawn)가 부름 · 입구 거침 = 입력 파일의 I-4 표본 전부 두 칸 있음(파일 내용으로)
+function k1CliRec(t, how, ev) {
+  const at = (k) => { const i = t.indexOf(k); return i >= 0 && i + 1 < t.length ? t[i + 1] : null; };
+  const smp = at('--samples');
+  const rp = at('--rules');
   let xs = null;
-  try { xs = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch (e) { xs = null; }
+  if (smp && !ev) { try { xs = fs.readFileSync(smp, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch (e) { xs = null; } }
   let keys = k1BaseKeys();
-  try { if (rulesFile) keys = k1I4Keys(JSON.parse(fs.readFileSync(rulesFile, 'utf8'))); } catch (e) { keys = k1BaseKeys(); }
-  K1.cli.push({ viaEntry: viaEntry === true, i4: xs ? xs.filter((s) => k1IsI4(s, keys)).length : null, needsTwo: xs ? xs.filter((s) => k1NeedsTwo(s, keys)).length : null });
+  try { if (rp) keys = k1I4Keys(JSON.parse(fs.readFileSync(rp, 'utf8'))); } catch (e) { keys = k1BaseKeys(); }
+  const needsTwo = xs ? xs.filter((s) => k1NeedsTwo(s, keys)).length : null;
+  K1.cli.push({ viaEntry: !!xs && needsTwo === 0, i4: xs ? xs.filter((s) => k1IsI4(s, keys)).length : null, needsTwo, how, ev: ev === true });
 }
 // T19 독립 판별(판독기 꼴과 따로 씀) · T19 · T21 · T23 문제 목록(판정 한 벌)
 function k1Cls(s) {
@@ -145,8 +152,11 @@ function k1PreJudge() {
       const s = (r.stdout || '').split(String.fromCharCode(13)).join('');
       if (crypto.createHash('sha256').update(s).digest('hex') !== K1_PRE_LF_SHA256) continue;
       const p = path.join(tmp, 'judge-pre-fix7.js');
-      fs.writeFileSync(p, s.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
-        .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')'), 'utf8');
+      const preSrc = s.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
+        .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')');
+      fs.writeFileSync(p, preSrc, 'utf8');
+      K1.pre.paths.push(p);
+      K1.pre.srcSha = k1Sha(preSrc);
       k1PreMod = require(p);
       K1.pre.from = sha.slice(0, 8);
       break;
@@ -161,7 +171,7 @@ function k1Wrap(mod, origin) {
   mod.judge = function k1Counted(r, samples, extra) {
     const isArr = Array.isArray(samples);
     const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, needsTwo: isArr ? ((k) => samples.filter((x) => k1NeedsTwo(x, k)).length)(k1I4Keys(r)) : 0 };
-    K1.calls.push(rec);
+    (origin === 'pre' ? K1.pre.rec : K1.calls).push(rec);
     const do25 = origin === 'judge' && rec.entry && !!k1PreJudge();
     const a = do25 ? structuredClone(samples[K1_PRE]) : null;
     const b = do25 ? structuredClone(Array.from(samples)) : null;
@@ -206,7 +216,112 @@ function k1CallVerdict(calls, cli) {
     entryNeedsTwo: calls.filter((c) => c.entry && c.needsTwo > 0).length
   };
 }
-k1Wrap(require('./judge.js'), 'judge');
+// ── 고침7 수정 c4(P1-2 · C16-1~C16-5) — 셈의 눈을 「싣는 순간」 · 「자식 프로세스 실행 함수」 에 ──
+//   ① 모듈 적재 함수를 감싸, 판독기(C16-1: 파일 이름 judge.js 또는 내용 지문 = 판독기 머리 글자)가 실릴 때마다 내보낸 judge 를 감쌈
+//      — 캐시를 지우고 다시 실어도 새 객체가 감싸짐 · 같은 객체 두 번 감싸기 0(표시) · 출처 = 경로 · 내용 지문(원 판독기 · 고침 전 비교용 · 그 밖 사본)
+//   ② 자식 프로세스 실행 함수 7개를 감싸, 판독기 파일 인자 · -e/--eval(문자열 명령 포함)이면 --samples 파일 내용으로 기록(부르는 쪽 표시 신뢰 0)
+//      · git(이력 읽기)은 판독기 실행이 아님 · 자기 재실행(안쪽)은 판독기 실행으로 세지 않음(결-13)
+//   ③ 구조분해 함정(C16-3): 아래 spawnSync 지역 이름은 감싸기 뒤에 묶음 → T33 이 같은 객체임을 단언
+//   ④ 훅 밖 길(동적 import · worker · vm · new Function · 캐시 지움 · 실행 꼴)은 T34 정적 동작 게이트가 함께 막음(C16-2)
+const K1_CP_WRAPPED = Symbol('k1-cp-wrapped');
+const K1_CP_ORIG = Symbol('k1-cp-orig');
+const K1_CP_NAMES = ['spawnSync', 'spawn', 'execFileSync', 'execFile', 'execSync', 'exec', 'fork'];
+const K1_EVAL = ['-e', '--eval', '-p', '--print'];
+const K1_JUDGE_MARK = 'function ' + 'judge(rules, samples, extra) {';
+const K1_MAIN = path.join(__dirname, 'judge.js');
+function k1Sha(x) { return crypto.createHash('sha256').update(String(x)).digest('hex'); }
+function k1SrcOf(file) { try { return fs.readFileSync(file, 'utf8').split(String.fromCharCode(13)).join(''); } catch (e) { return null; } }
+function k1IsJudgeFile(file, src) {
+  if (typeof file !== 'string' || !file) return false;
+  if (path.basename(file) === 'judge.js') return true;
+  let x = src;
+  if (x === undefined) { try { x = fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size < (1 << 22) ? k1SrcOf(file) : null; } catch (e) { x = null; } }
+  return typeof x === 'string' && x.includes(K1_JUDGE_MARK);
+}
+function k1OriginOf(file, src) {
+  if (path.resolve(file) === path.resolve(K1_MAIN)) return 'judge';
+  if (K1.pre.paths.includes(file) && !!K1.pre.srcSha && k1Sha(src) === K1.pre.srcSha) return 'pre';
+  return 'mutant';
+}
+// T34 정적 동작 게이트 꼴(꼴 글자는 조각으로 — 이 줄들이 스스로 걸려도 허용 목록에 같이 고정)
+const K1_SCAN = [
+  ['loader', 'require' + '\\.cache|Module' + '\\._cache|\\._lo' + 'ad\\b|_resolve' + 'Filename'],
+  ['dynImport', '\\bimp' + 'ort\\s*\\('],
+  ['worker', 'worker' + '_threads|new\\s+Wor' + 'ker\\b'],
+  ['vm', 'require\\(\\s*[\'"](?:node:)?v' + 'm[\'"]\\s*\\)'],
+  ['newFn', '\\bnew\\s+Func' + 'tion\\b|(?<![.\\w$])ev' + 'al\\s*\\('],
+  ['cpCall', '\\b(?:spawn' + 'Sync|spa' + 'wn|execFile' + 'Sync|execF' + 'ile|execS' + 'ync|ex' + 'ec|fo' + 'rk)\\s*\\('],
+  ['cpReq', 'child' + '_process']
+];
+function k1Scan(src) {
+  const lines = String(src).split(String.fromCharCode(13)).join('').split(String.fromCharCode(10));
+  const out = {};
+  for (const [name, re] of K1_SCAN) {
+    const rx = new RegExp(re, 'g');
+    const hits = [];
+    for (const l of lines) { const m = l.match(rx); if (m) for (let i = 0; i < m.length; i++) hits.push(l.trim()); }
+    out[name] = { n: hits.length, sha: k1Sha(hits.sort().join(String.fromCharCode(10))).slice(0, 16) };
+  }
+  return out;
+}
+let k1JudgeScanMemo = null;
+const k1JudgeScan = () => (k1JudgeScanMemo = k1JudgeScanMemo || JSON.stringify(k1Scan(k1SrcOf(K1_MAIN) || '')));
+const k1Mod = require('module');
+const k1Seen = new WeakSet();
+const k1Load0 = k1Mod._load;
+k1Mod._load = function k1Load(request, parent, isMain) {
+  const m = k1Load0.apply(this, arguments);
+  if (m && (typeof m === 'object' || typeof m === 'function') && typeof m.judge === 'function' && !m[K1_WRAPPED] && !k1Seen.has(m)) {
+    k1Seen.add(m);
+    try {
+      const file = k1Mod._resolveFilename(request, parent, isMain);
+      const src = path.isAbsolute(file) ? k1SrcOf(file) : null;
+      if (k1IsJudgeFile(file, src === null ? undefined : src)) {
+        const o = k1OriginOf(file, src);
+        if (o !== 'pre' && JSON.stringify(k1Scan(src || '')) !== k1JudgeScan()) K1.scanBad.push(path.basename(file));
+        k1Wrap(m, o);
+        K1.loads.push({ origin: o, name: path.basename(file) });
+      } else K1.hookOdd.push(path.basename(String(file)));
+    } catch (e) { K1.hookErr.push(String(e && e.message ? e.message : e).slice(0, 120)); }
+  }
+  return m;
+};
+function k1Tok(str) { return (String(str).match(/"[^"]*"|'[^']*'|\S+/g) || []).map((t) => t.replace(/^["']|["']$/g, '')); }
+function k1SeeSpawn(name, a) {
+  const opts = a.find((x, i) => i > 0 && !!x && typeof x === 'object' && !Array.isArray(x)) || {};
+  let cmd = null;
+  let args = [];
+  let str = null;
+  if (name === 'exec' || name === 'execSync') str = String(a[0]);
+  else if (name === 'fork') { cmd = process.execPath; args = [String(a[0])].concat(Array.isArray(a[1]) ? a[1].map(String) : []); }
+  else { cmd = String(a[0]); args = Array.isArray(a[1]) ? a[1].map(String) : []; if (opts.shell) str = [cmd].concat(args).join(' '); }
+  if (str !== null) {
+    const t = k1Tok(str);
+    const ev = t.some((x) => K1_EVAL.includes(x));
+    if (str.includes('judge.js') || ev || t.some((x) => k1IsJudgeFile(x))) k1CliRec(t, name, ev);
+    return;
+  }
+  if (path.basename(cmd).replace(/\.exe$/i, '').toLowerCase() === 'git') return;
+  const ev = args.some((x) => K1_EVAL.includes(x));
+  if (ev || k1IsJudgeFile(cmd) || args.some((x) => k1IsJudgeFile(x))) k1CliRec(args, name, ev);
+}
+{
+  const cp = require('child' + '_process');
+  for (const name of K1_CP_NAMES) {
+    const orig = cp[name];
+    if (typeof orig !== 'function' || orig[K1_CP_WRAPPED]) continue;
+    const w = function k1CpWrapped() {
+      try { k1SeeSpawn(name, Array.from(arguments)); } catch (e) { K1.spawnErr.push(name + ' ' + String(e && e.message ? e.message : e).slice(0, 80)); }
+      return orig.apply(this, arguments);
+    };
+    Object.defineProperty(w, K1_CP_WRAPPED, { value: name });
+    Object.defineProperty(w, K1_CP_ORIG, { value: orig });
+    cp[name] = w;
+  }
+}
+// 옮긴 두 줄(글자 무변) — 감싸기 뒤에 묶음(구조분해 함정 · C16-3)
+const { spawnSync } = require('child_process');
+const { buildPlan, cellKey, defaultWindow } = require('./judge.js');
 
 const HERE = __dirname;
 const results = [];
@@ -285,7 +400,6 @@ function runJudge(name, rp) {
   const sp = path.join(tmp, `${name}.jsonl`);
   const op = path.join(tmp, `${name}.json`);
   fs.writeFileSync(sp, k1Entry(canon(sets[name], RULES_BY_PATH[rPath]), { R: RULES_BY_PATH[rPath] }).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
-  k1Cli(sp, true, rPath);
   const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rPath, '--samples', sp, '--out', op], { encoding: 'utf8' });
   const v = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
   return { code: r.status, v, stderr: (r.stderr || '').slice(0, 200) };
@@ -1444,7 +1558,6 @@ function checkProbe(src) {
     let n5 = 0;
     const cli = (args) => {
       const op = path.join(tmp, `v5-${n5++}.json`);
-      k1Cli(sp5, true, rp5);
       const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp5, '--samples', sp5, '--out', op].concat(args), { encoding: 'utf8' });
       return { code: r.status, v: fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null };
     };
@@ -1781,8 +1894,8 @@ function checkProbe(src) {
     const p = path.join(tmp, 'judge-mut-' + jSeq + '.js');
     fs.writeFileSync(p, out.split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
       .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')'), 'utf8');
-    // 고침7 K1(C2-2): 심은 위반 사본은 사본을 싣는 이 함수 하나에서 셈으로 감쌈
-    return k1Wrap(require(p), 'mutant');
+    // 고침7 K1(C2-2): 심은 위반 사본은 사본을 싣는 이 함수 하나에서 셈으로 감쌈 — ⬛ 고침7 수정 c4: 싣는 순간 훅이 감쌈(이 줄은 싣기만)
+    return require(p);
   };
   const onlyI4 = (n) => { const R = JSON.parse(JSON.stringify(rules)); R.plan.items = ['I-4']; R.hqaPending.samplesPerCell.value = { default: n, 'N-1': n }; return R; };
   // J1-7 머리 사본
@@ -2019,6 +2132,29 @@ function checkProbe(src) {
     plant('고침7 T30a 심은 위반(C16-7): 판독기 표본 판별 고르기(xCls 자리)만 옛 item 기준으로 되돌린 사본 → T29 빨강 · T19 등식 빨강', p30a.ok, p30a.info);
     const p30b = t30('T30b', "    const i4s = samples.filter((s) => s && (s.item === 'I-4' || i4Keys.has(s.cell)));", "    const i4s = samples.filter((s) => s && s.item === 'I-4');");
     plant('고침7 T30b 심은 위반(C16-7): 판독기 두 식 판별 칸 고르기(i4s 자리)만 옛 item 기준으로 되돌린 사본 → T29 빨강 · T19 등식 빨강', p30b.ok, p30b.info);
+    // T31 · T32(P1-2 · C16-4): 별도 자식 프로세스(이 자체시험 사본 · 위반 한 덩이 심음 · 안쪽 꼴)의 빨강 사유 이름으로 판정 — 자식 판독기 호출은 이 프로세스 셈 · 하한 밖
+    if (!process.env.HQA_SELFTEST_INNER) {
+      const kid = (name, ins) => {
+        const src = fs.readFileSync(__filename, 'utf8');
+        const at = '    const mj20 = ' + 'mutantJudge(';
+        const f = path.join(HERE, '.k1-child-' + process.pid + '-' + name + '.js');
+        let r = null;
+        try {
+          fs.writeFileSync(f, src.split(at).length === 2 ? src.replace(at, () => ins + at) : '', 'utf8');
+          r = spawnSync(process.execPath, [f], { cwd: HERE, encoding: 'utf8', maxBuffer: 1 << 26, env: Object.assign({}, process.env, { HQA_SELFTEST_INNER: '1' }) });
+        } finally { try { fs.unlinkSync(f); } catch (e) { K1.spawnErr.push('자식 사본 지움 ' + String(e && e.message).slice(0, 60)); } }
+        const out = (r && r.stdout) || '';
+        const fails = out.split(/\r?\n/).filter((l) => l.startsWith('FAIL ')).map((l) => { const m = l.match(/^FAIL 고침7 (T\d+[a-z]?)\b/); return m ? m[1] : 'other:' + l.slice(5, 60); });
+        return { name, status: r && r.status, done: out.includes('"selftest":"judge+static"'), fails: Array.from(new Set(fails)) };
+      };
+      const only = (k, must, may) => k.done && must.every((x) => k.fails.includes(x)) && k.fails.every((x) => must.includes(x) || may.includes(x));
+      const k0 = kid('V0', '');
+      const k1v = kid('V1', "    { const p_ = require.resolve('./judge.js'); const keep_ = require.cache[p_]; delete require.cache[p_]; const Jn_ = require('./judge.js'); require.cache[p_] = keep_; f6Run(R1, rd7, Jn_, { tag: 'T1' }); }\n");
+      const k2v = kid('V2', "    { let cap_ = null; f6Run(R1, rd7, { judge: (r_, xs_) => { cap_ = Array.from(xs_); return null; } }, { tag: 'T7' }); const rp_ = path.join(tmp, 'k1-v2-rules.json'); fs.writeFileSync(rp_, JSON.stringify(R1)); const sp_ = path.join(tmp, 'k1-v2.jsonl'); fs.writeFileSync(sp_, cap_.map((o) => JSON.stringify(o)).join('\\n') + '\\n'); spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp_, '--samples', sp_, '--out', path.join(tmp, 'k1-v2.json')], { encoding: 'utf8' }); }\n");
+      check('고침7 T31 · T32 대조군(V0 · C16-4): 같은 자식 프로세스 꼴 · 위반 없음 → 자식 빨강 0 · 종료 0', k0.done && k0.fails.length === 0 && k0.status === 0, k0);
+      plant('고침7 T31 심은 위반(V1 꼴): 자식 프로세스에서 캐시 지움 → 다시 실음 → 허용 밖 이름표 T1 로 옛 꼴 판독 → 자식 빨강 사유 T26(허용 덧 = T34 정적 게이트만)', only(k1v, ['T26'], ['T34']), k1v);
+      plant('고침7 T32 심은 위반(V2 꼴): 자식 프로세스에서 두 칸 없는 옛 꼴 파일을 명령줄 판독기에 직접(기록 함수 안 부름) → 자식 빨강 사유 T27(허용 덧 = T26 · T34 만)', only(k2v, ['T27'], ['T26', 'T34']), k2v);
+    }
     // T22 · T24 심은 위반 — T21 · T23 판정 함수가 사본 판정에서 잡는가
     const mj22 = mutantJudge((s) => s.replace('        exprMismatchExcluded: v.length - vx.length', '        exprMismatchExcluded: 0'));
     const v22m = mj22 ? f6Run(R1, rd2, mj22, { mm: true }) : null;
@@ -2420,14 +2556,40 @@ function k1Final() {
   const before = K1.calls.length;
   const ctl = [];
   Object.defineProperty(ctl, K1_CONTROL, { value: true });
-  const Jd = require('./judge.js');
-  try { Jd.judge(rules, ctl, {}); } catch (e) { check('고침7 T28 ⓓ 대조군 호출 예외', false, String(e && e.message).slice(0, 120)); }
+  // 고침7 수정 c4(P1-2 ③): 실제로 캐시 지움 → 다시 실음(다른 객체) → 입구 · 이름표 없이 직접 1회 → 캐시 되돌림
+  const jp = require.resolve('./judge.js');
+  const keep = require.cache[jp];
+  const Jkeep = keep ? keep.exports : null;
+  delete require.cache[jp];
+  let Jd = null;
+  try { Jd = require('./judge.js'); Jd.judge(rules, ctl, {}); } catch (e) { check('고침7 T28 ⓓ 대조군 호출 예외', false, String(e && e.message).slice(0, 120)); } finally { require.cache[jp] = keep; }
+  const Jback = require('./judge.js');
+  check('고침7 T28 ⓓ′(P1-2 ③ · C16-5): 캐시 지움 → 다시 실은 판독기 = 다른 객체 · 싣는 순간 감싸짐 · 캐시 되돌림 뒤 받은 모듈 = 원래 감싼 객체',
+    !!Jd && !!Jkeep && Jd !== Jkeep && Jd[K1_WRAPPED] === true && Jback === Jkeep && Jkeep[K1_WRAPPED] === true, { fresh: !!Jd && Jd !== Jkeep, back: Jback === Jkeep });
   const ctlCalls = K1.calls.filter((c) => c.control);
   const dAll = k1CallVerdict(K1.calls, K1.cli);
   const main = K1.calls.filter((c) => !c.control);
   const V = k1CallVerdict(main, K1.cli);
   check('고침7 T28 ⓓ(셈의 눈): 새로 실은 판독기 직접 1회 → 셈 +1 · 「빠진 자리」 1 로 잡힘 · 대조군 표지 붙은 호출 = 정확히 1',
     K1.calls.length === before + 1 && ctlCalls.length === 1 && dAll.missing === V.missing + 1, { before, after: K1.calls.length, missing: dAll.missing });
+  // T33(C16-1 · C16-3): 지역 이름 = 감싼 실행 함수 · 실행 함수 7개 감쌈 · 원 판독기 감쌈 · 이름 바꾼 사본(내용 지문)도 싣는 순간 감쌈 · 훅 · 감싸기 오류 0
+  const cpNow = require('child_process');
+  const rn = path.join(tmp, 'jdg-renamed-copy.js');
+  fs.writeFileSync(rn, (k1SrcOf(K1_MAIN) || '').split("require('./mask.js')").join('require(' + JSON.stringify(path.join(HERE, 'mask.js')) + ')')
+    .split("require('./hqa-gate.js')").join('require(' + JSON.stringify(path.join(HERE, 'hqa-gate.js')) + ')'), 'utf8');
+  const RN = require(rn);
+  const cpOk = spawnSync === cpNow.spawnSync && !!spawnSync[K1_CP_WRAPPED] && K1_CP_NAMES.every((n) => typeof cpNow[n] === 'function' && !!cpNow[n][K1_CP_WRAPPED]);
+  check('고침7 T33(C16-1 · C16-3): 지역 이름 spawnSync = 감싼 실행 함수와 같은 객체 · 실행 함수 7개 감쌈 · 원 판독기 · 이름 바꾼 사본(내용 지문) 싣는 순간 감쌈 · 고침 전 비교용 = 따로 가름 · 훅 · 감싸기 오류 0',
+    cpOk && Jkeep[K1_WRAPPED] === true && RN[K1_WRAPPED] === true && K1.loads.some((l) => l.name === 'jdg-renamed-copy.js' && l.origin === 'mutant') && K1.loads.filter((l) => l.origin === 'pre').length === (k1PreJudge() ? 1 : 0) && K1.hookErr.length === 0 && K1.spawnErr.length === 0 && K1.hookOdd.length === 0,
+    { cpOk, loads: K1.loads.length, hookErr: K1.hookErr.slice(0, 2), spawnErr: K1.spawnErr.slice(0, 2), odd: K1.hookOdd.slice(0, 3) });
+  const L0 = cpNow.spawnSync[K1_CP_ORIG];
+  plant('고침7 T33 대조군: 감싸기 전에 묶인 지역 이름(원 실행 함수) → 같은 객체 단언 빨강', !(L0 === cpNow.spawnSync && !!L0[K1_CP_WRAPPED]));
+  // T34(C16-2) 정적 동작 게이트: 자체시험 소스(자기 파일) · 실린 판독기 사본 소스(원 판독기와 같은 꼴 수) — 자리(줄 글자) · 수 = 허용 목록
+  const ownSrc = fs.readFileSync(__filename, 'utf8');
+  const ownScan = k1Scan(ownSrc);
+  check('고침7 T34(C16-2 정적 동작 게이트): 자체시험 소스의 캐시 지움 · 동적 import · worker · vm · new Function · eval · 자식 프로세스 실행 꼴 자리 · 수 = 허용 목록 · 실린 판독기 사본 꼴 = 원 판독기',
+    JSON.stringify(ownScan) === JSON.stringify(K1_SCAN_PIN) && K1.scanBad.length === 0, { own: ownScan, bad: K1.scanBad.slice(0, 3) });
+  plant('고침7 T34 심은 위반: 허용 밖 꼴 한 줄(모듈 캐시 지움) 넣은 자체시험 사본 → 빨강', JSON.stringify(k1Scan(ownSrc + '\n    delete require.cache[k];\n')) !== JSON.stringify(K1_SCAN_PIN));
   // T28 ⓐⓑⓒ — 판정 함수를 따로 만든 기록에 돌림(본 기록에 섞지 않음)
   const fa = k1CallVerdict([{ origin: 'judge', entry: false, tag: null, needsTwo: 0 }], []);
   const fb = k1CallVerdict([{ origin: 'judge', entry: false, tag: 'T1', needsTwo: 0 }], []);
