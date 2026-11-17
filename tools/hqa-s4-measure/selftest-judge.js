@@ -27,7 +27,7 @@ const K1_TAG = Symbol('k1-bypass-tag');
 const K1_CONTROL = Symbol('k1-control');
 const K1_MM = Symbol('k1-planted-mismatch');
 const K1_WRAPPED = Symbol('k1-wrapped');
-const K1_BYPASS_OK = ['T7', 'T20'];
+const K1_BYPASS_OK = ['T7', 'T20', 'T29', 'T30a', 'T30b'];
 // 하한(C2-2): 고침 전 [3] 실측 = 한 런(바깥 + 자기 재실행 안쪽 · 명령줄 판독기 포함) 220 · 안쪽만(재실행 없음) 110
 const K1_FLOOR_RUN = 220;
 const K1_FLOOR_INNER = 110;
@@ -35,14 +35,22 @@ const K1_FLOOR_INNER = 110;
 const K1_PRE_LF_SHA256 = '5b83faf564a077e13c152e0d26108ccf23a25afa5773a1dd7469ccf53df3a840';
 const K1 = { calls: [], cli: [], entryBad: [], entryCalls: 0, entryTouched: 0, t19: [], t21: [], t23: [], t25: [], t25checked: 0, t25mm: 0, judged: 0, pre: { calls: 0, from: null, err: null }, inner: null, out: null };
 const k1Own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-const k1Touchable = (s) => !!s && typeof s === 'object' && s.item === 'I-4' && !!s.readings && typeof s.readings === 'object' && k1Own(s.readings, 'focusOnSameRowBtn');
-const k1NeedsTwo = (s) => k1Touchable(s) && !k1Own(s.readings, 'hqaFocusRow1Restored') && !k1Own(s.readings, 'menuZeroObserved');
+// 고침7 수정(P1-1 · C16-6): I-4 표본 = 표본 item 글자 또는 계획의 I-4 칸 열쇠 — 칸 집합은 자체시험이 계획 칸 열쇠 글자(첫 마디)에서 따로 셈(판독기 안의 집합을 가져오지 않음)
+function k1I4Keys(R) {
+  if (!R || typeof R !== 'object' || !R.plan) return new Set();
+  try { return new Set(buildPlan(R).cells.map((c) => String(c.key)).filter((k) => k.split('|')[0] === 'I-4')); } catch (e) { return new Set(); }
+}
+const k1BaseKeys = () => k1I4Keys(rules);
+const k1IsI4 = (s, keys) => !!s && typeof s === 'object' && (s.item === 'I-4' || (keys || k1BaseKeys()).has(s.cell));
+const k1Touchable = (s, keys) => k1IsI4(s, keys) && !!s.readings && typeof s.readings === 'object' && k1Own(s.readings, 'focusOnSameRowBtn');
+const k1NeedsTwo = (s, keys) => k1Touchable(s, keys) && !k1Own(s.readings, 'hqaFocusRow1Restored') && !k1Own(s.readings, 'menuZeroObserved');
 function k1Entry(samples, opt) {
   if (!Array.isArray(samples)) return samples;
+  const keys = opt && opt.R ? k1I4Keys(opt.R) : k1BaseKeys();
   const before = JSON.stringify(samples);
   let touched = 0;
   const xs = samples.map((s) => {
-    if (!k1NeedsTwo(s)) return s;
+    if (!k1NeedsTwo(s, keys)) return s;
     touched += 1;
     const dev = s.readings.focusOnSameRowBtn;
     return Object.assign({}, s, { readings: Object.assign({}, s.readings, { hqaFocusRow1Restored: dev, menuZeroObserved: typeof dev === 'boolean' }) });
@@ -54,8 +62,8 @@ function k1Entry(samples, opt) {
   if (JSON.stringify(samples) !== before) bad.push('③ 원 입력 바뀜');
   xs.forEach((o, i) => {
     const s = samples[i];
-    if (o === s) { if (k1NeedsTwo(s)) bad.push(`① ${i} 덧붙일 표본을 안 건드림`); return; }
-    if (!k1NeedsTwo(s)) bad.push(`① ${i} 손대면 안 되는 표본`);
+    if (o === s) { if (k1NeedsTwo(s, keys)) bad.push(`① ${i} 덧붙일 표본을 안 건드림`); return; }
+    if (!k1NeedsTwo(s, keys)) bad.push(`① ${i} 손대면 안 되는 표본`);
     const ka = Object.keys(s);
     if (JSON.stringify(ka) !== JSON.stringify(Object.keys(o)) || ka.some((k) => k !== 'readings' && o[k] !== s[k])) bad.push(`① ${i} 다른 키`);
     const ra = Object.keys(s.readings);
@@ -75,10 +83,12 @@ function k1Bypass(tag, mod, r, samples, extra) {
   return mod.judge(r, xs, extra || {});
 }
 // 명령줄 판독기 입력 파일(입력 파일을 쓴 뒤 · 띄우기 직전에 한 번) — 이 프로세스가 띄운 명령줄 호출 셈
-function k1Cli(file, viaEntry) {
+function k1Cli(file, viaEntry, rulesFile) {
   let xs = null;
   try { xs = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l)); } catch (e) { xs = null; }
-  K1.cli.push({ viaEntry: viaEntry === true, i4: xs ? xs.filter((s) => s && s.item === 'I-4').length : null, needsTwo: xs ? xs.filter(k1NeedsTwo).length : null });
+  let keys = k1BaseKeys();
+  try { if (rulesFile) keys = k1I4Keys(JSON.parse(fs.readFileSync(rulesFile, 'utf8'))); } catch (e) { keys = k1BaseKeys(); }
+  K1.cli.push({ viaEntry: viaEntry === true, i4: xs ? xs.filter((s) => k1IsI4(s, keys)).length : null, needsTwo: xs ? xs.filter((s) => k1NeedsTwo(s, keys)).length : null });
 }
 // T19 독립 판별(판독기 꼴과 따로 씀) · T19 · T21 · T23 문제 목록(판정 한 벌)
 function k1Cls(s) {
@@ -87,12 +97,13 @@ function k1Cls(s) {
   if (X.hqaFocusRow1Restored === X.focusOnSameRowBtn) return 'match';
   return k1Own(X, 'hqaFocusRow1Restored') || k1Own(X, 'menuZeroObserved') ? 'mismatch' : 'notComparable';
 }
-function k1Problems(samples, v) {
+function k1Problems(samples, v, R) {
   const p = { t19: [], t21: [], t23: [] };
   if (!v || !v.items) return p;
   const i4 = v.items['I-4'];
   if (i4) {
-    const xs = (Array.isArray(samples) ? samples : []).filter((s) => s && s.item === 'I-4' && !require('./judge.js').isAttemptLine(s));
+    const i4k = k1I4Keys(R);
+    const xs = (Array.isArray(samples) ? samples : []).filter((s) => k1IsI4(s, i4k) && !require('./judge.js').isAttemptLine(s));
     const em = i4.exprMismatch;
     const c = em && em.classes;
     const mine = { ownPath: 0, match: 0, notComparable: 0, mismatch: 0 };
@@ -149,7 +160,7 @@ function k1Wrap(mod, origin) {
   const real = mod.judge;
   mod.judge = function k1Counted(r, samples, extra) {
     const isArr = Array.isArray(samples);
-    const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, needsTwo: isArr ? samples.filter(k1NeedsTwo).length : 0 };
+    const rec = { origin, entry: isArr && samples[K1_ENTRY] === true, tag: (isArr && samples[K1_TAG]) || null, control: isArr && samples[K1_CONTROL] === true, needsTwo: isArr ? ((k) => samples.filter((x) => k1NeedsTwo(x, k)).length)(k1I4Keys(r)) : 0 };
     K1.calls.push(rec);
     const do25 = origin === 'judge' && rec.entry && !!k1PreJudge();
     const a = do25 ? structuredClone(samples[K1_PRE]) : null;
@@ -157,7 +168,7 @@ function k1Wrap(mod, origin) {
     const v = real.apply(this, arguments);
     if (origin === 'judge') {
       K1.judged += 1;
-      const p = k1Problems(samples, v);
+      const p = k1Problems(samples, v, r);
       if (p.t19.length) K1.t19.push(p.t19[0]);
       if (p.t21.length) K1.t21.push(p.t21[0]);
       if (p.t23.length) K1.t23.push(p.t23[0]);
@@ -273,8 +284,8 @@ function runJudge(name, rp) {
   const rPath = rp || rulesPath;
   const sp = path.join(tmp, `${name}.jsonl`);
   const op = path.join(tmp, `${name}.json`);
-  fs.writeFileSync(sp, k1Entry(canon(sets[name], RULES_BY_PATH[rPath])).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
-  k1Cli(sp, true);
+  fs.writeFileSync(sp, k1Entry(canon(sets[name], RULES_BY_PATH[rPath]), { R: RULES_BY_PATH[rPath] }).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+  k1Cli(sp, true, rPath);
   const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rPath, '--samples', sp, '--out', op], { encoding: 'utf8' });
   const v = fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null;
   return { code: r.status, v, stderr: (r.stderr || '').slice(0, 200) };
@@ -1429,11 +1440,11 @@ function checkProbe(src) {
     const rp5 = path.join(tmp, 'rules-fix5.json');
     fs.writeFileSync(rp5, JSON.stringify(R5), 'utf8');
     const sp5 = path.join(tmp, 's5.jsonl');
-    fs.writeFileSync(sp5, k1Entry(ordered(R5, base(R5))).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
+    fs.writeFileSync(sp5, k1Entry(ordered(R5, base(R5)), { R: R5 }).map((o) => JSON.stringify(o)).join('\n') + '\n', 'utf8');
     let n5 = 0;
     const cli = (args) => {
       const op = path.join(tmp, `v5-${n5++}.json`);
-      k1Cli(sp5, true);
+      k1Cli(sp5, true, rp5);
       const r = spawnSync(process.execPath, [path.join(HERE, 'judge.js'), '--rules', rp5, '--samples', sp5, '--out', op].concat(args), { encoding: 'utf8' });
       return { code: r.status, v: fs.existsSync(op) ? JSON.parse(fs.readFileSync(op, 'utf8')) : null };
     };
@@ -1758,7 +1769,7 @@ function checkProbe(src) {
     }
     if (opt && opt.onXs) opt.onXs(xs);
     if (opt && opt.tag) return k1Bypass(opt.tag, judgeMod || J, R, xs, {});
-    return (judgeMod || J).judge(R, k1Entry(xs, opt), {});
+    return (judgeMod || J).judge(R, k1Entry(xs, Object.assign({ R }, opt)), {});
   };
   // 돌연변이 judge 사본(임시 파일 · 옆 모듈은 절대 경로) — 바뀐 글자가 안 걸리면 null(시험이 죽은 것 → 빨강)
   let jSeq = 0;
@@ -1990,6 +2001,24 @@ function checkProbe(src) {
     const mj20 = mutantJudge((s) => s.replace("  if (!has('hqaFocusRow1Restored') && !has('menuZeroObserved')) return 'notComparable';", "  if (!has('hqaFocusRow1Restored') && !has('menuZeroObserved')) return 'match';"));
     const v20m = mj20 ? f6Run(R1, rd7, mj20, { tag: 'T20' }) : null;
     plant('고침7 T20 심은 위반: 옛 꼴(두 칸 없음)을 일치로 보내는 사본 → T7 기대 깨짐 → 빨강', !!v20m && !t7(v20m), v20m && em(v20m).notComparable.count);
+    // 고침7 수정 T29(P1-1 · [3-V] V3 꼴 대조군): T7 입력에서 옛 꼴 2건의 item 만 I-4 밖 글자(cell 그대로 · 입구 비켜 감) → T7 기대와 같음
+    const toX = (xs) => xs.forEach((s) => { if (s && s.item === 'I-4' && s.readings && !k1Own(s.readings, 'hqaFocusRow1Restored') && !k1Own(s.readings, 'menuZeroObserved')) s.item = 'I-4x'; });
+    const t29 = (v, xs) => !!v && !!xs && xs.filter((s) => s.item === 'I-4x').length === 2 && t7(v) && em(v).classes.total === em(v7).classes.total && v.red === v7.red && JSON.stringify(v.redReasons) === JSON.stringify(v7.redReasons);
+    let x29 = null;
+    const v29 = f6Run(R1, rd7, null, { tag: 'T29', onXs: (xs) => { toX(xs); x29 = xs; } });
+    check('고침7 T29(P1-1 · V3 꼴 대조군): T7 입력에서 옛 꼴 2건의 item 만 I-4 밖 글자(cell 그대로) → T7 기대와 같음(비교 불가 2 · 키보드 재현 0 → 대조 무효 · 상태 바뀜 참 · classes.total 같음 · 새 빨강 0)',
+      t29(v29, x29), { nc: em(v29).notComparable.count, total: em(v29).classes.total, kb: kb(v29).state, red: v29.red });
+    // T30a · T30b 심은 위반(C16-7): 판독기 I-4 고르기 두 자리를 하나씩 옛 item 기준으로 되돌린 사본 → 각각 T29 빨강 · T19 등식(짝 구현 = 계획 칸 기준) 빨강
+    const t30 = (tag, from, to) => {
+      const mj = mutantJudge((src) => src.replace(from, to));
+      let xs = null;
+      const v = mj ? f6Run(R1, rd7, mj, { tag, onXs: (q) => { toX(q); xs = q; } }) : null;
+      return { ok: !!v && !t29(v, xs) && k1Problems(xs, v, R1).t19.length > 0, info: v && { nc: em(v).notComparable.count, total: em(v).classes.total, kb: kb(v).state, t19: k1Problems(xs, v, R1).t19[0] } };
+    };
+    const p30a = t30('T30a', "  for (const s of samples) if (s && (s.item === 'I-4' || i4Keys.has(s.cell))) xCls.set(s, exprClass(s));", "  for (const s of samples) if (s && s.item === 'I-4') xCls.set(s, exprClass(s));");
+    plant('고침7 T30a 심은 위반(C16-7): 판독기 표본 판별 고르기(xCls 자리)만 옛 item 기준으로 되돌린 사본 → T29 빨강 · T19 등식 빨강', p30a.ok, p30a.info);
+    const p30b = t30('T30b', "    const i4s = samples.filter((s) => s && (s.item === 'I-4' || i4Keys.has(s.cell)));", "    const i4s = samples.filter((s) => s && s.item === 'I-4');");
+    plant('고침7 T30b 심은 위반(C16-7): 판독기 두 식 판별 칸 고르기(i4s 자리)만 옛 item 기준으로 되돌린 사본 → T29 빨강 · T19 등식 빨강', p30b.ok, p30b.info);
     // T22 · T24 심은 위반 — T21 · T23 판정 함수가 사본 판정에서 잡는가
     const mj22 = mutantJudge((s) => s.replace('        exprMismatchExcluded: v.length - vx.length', '        exprMismatchExcluded: 0'));
     const v22m = mj22 ? f6Run(R1, rd2, mj22, { mm: true }) : null;

@@ -502,8 +502,10 @@ function judge(rules, samples, extra) {
   const plan = buildPlan(rules);
   const eff = effective(rules, samples);
   // 고침7 c1: I-4 표본 두 식 판별(eff 직후 한 번) · 셈에서 뺄 표본 = 비교 불가 + 불일치 — 유효 판정 · G4 무변(결-1 (B))
+  // 고침7 수정(P1-1 · C16-6): I-4 표본 고르기 = 계획 칸 기준 — 표본 item 글자 또는 계획(아래 byCell 과 같은 plan)의 I-4 칸 열쇠 · 표본에서 짓지 않음
+  const i4Keys = new Set(plan.cells.filter((c) => c.item === 'I-4').map((c) => c.key));
   const xCls = new Map();
-  for (const s of samples) if (s && s.item === 'I-4') xCls.set(s, exprClass(s));
+  for (const s of samples) if (s && (s.item === 'I-4' || i4Keys.has(s.cell))) xCls.set(s, exprClass(s));
   const xExcl = (s) => xCls.get(s) === 'notComparable' || xCls.get(s) === 'mismatch';
   const isValid = (s) => !!(eff.get(s) && eff.get(s).valid);
   const isKu = (s) => !!(eff.get(s) && eff.get(s).valid && eff.get(s).reading === 'keyboard_unreachable');
@@ -915,7 +917,7 @@ function judge(rules, samples, extra) {
     // 고침7 c1(H11): 두 식 판별 칸 — 판정 = HQA · 값 = 참/거짓/null/빠짐/참거짓 아님 · 표본 번호 · 계획 칸 글자만(원자료 글자 0) · 불일치 0 이어도 늘 있음
     const planCell = new Map(plan.cells.map((c) => [c.key, c]));
     const where = (s) => { const pc = planCell.get(s.cell); return { sampleNo: Number.isInteger(s.sampleNo) ? s.sampleNo : null, case: pc ? pc.case : null, screen: pc ? pc.screen : null, delay: pc ? pc.delay : null }; };
-    const i4s = samples.filter((s) => s && s.item === 'I-4');
+    const i4s = samples.filter((s) => s && (s.item === 'I-4' || i4Keys.has(s.cell)));
     const ofCls = (k) => i4s.filter((s) => xCls.get(s) === k);
     const mm = ofCls('mismatch');
     const nc = ofCls('notComparable');
