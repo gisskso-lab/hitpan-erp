@@ -16,7 +16,10 @@
     -ModulePath  판정 모듈 경로(기본 = 같은 폴더 CommsGuard.psm1) — 「가드 한 줄 깬 사본」 대조군용
     -RunnerPath  러너 경로(기본 = 같은 폴더 Run-RoutinePcScenarios.ps1)
 
-  끝 줄: 「Test-CommsGuard 끝 — 경우 32/32 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치 · 세부 확인 하한 이상) / 1.
+  끝 줄: 「Test-CommsGuard 끝 — 경우 35/35 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치 · 세부 확인 하한 이상) / 1.
+    (11/19 [4] F8~F10) 경우 C33~C35 = [4] 작업리뷰서 변이 M02(G5 원점 /health) · M05(해석 9 2초 값) · M07(IPv6 ::1) 이 살아남던 줄 — 옛 끝 줄 「경우 32/32」.
+    (11/19 [4] F1) 시험 시간 — 임시 저장소 = repo-ok 복사 재사용 · G4a git 읽기 = 같은 저장소 · 같은 인자면 첫 1회 결과 재사용(Copy-CgRepo · $script:GitCacheInstall).
+    근거 docs/검증/20261119_WG1-53_갈래1_2_4_작업리뷰서.md §2 F1 · F8~F10 · 개발명세서 §4 · §7.
     (11/19 [3-V] 고침) 경우 C23~C27 = 보안상무 [3-V] A1~A5 입력 · 기대 「합격 아님」 — C1~C22 그대로 · 옛 끝 줄 「경우 22/22」.
     근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래1_가드모듈_보안상무.md A 표.
     (11/19 [3-V] 갈래2 고침) 경우 C28~C32 = 보안상무 [3-V] 러너 · 시험 V1 · V2(+V6) · V3 · V4 · V9 — 옛 끝 줄 「경우 27/27」.
@@ -209,6 +212,9 @@ class CgWorld {
         if ($url.StartsWith('http://127.0.0.1:')) {
             $this.LocalGets++
             if ($url -ne ('http://127.0.0.1:' + [string]$this.Cfg.Port + '/health')) { $this.BadUrls++ }
+            # (11/19 [4] F8 · C33) 원점 /health 처음부터 실패 — '503'(DB 실패 본문 · 표지 글자) · 'timeout'(시간 초과 = Status 0 · 시계는 상한만큼)
+            if ([string]$this.Cfg.OriginFail -eq 'timeout') { $this.Ms += [long]$timeoutSec * 1000 + 1; return @{ Status = 0; Body = $null } }
+            if ([string]$this.Cfg.OriginFail -eq '503') { return @{ Status = 503; Body = ('{"status":"Unhealthy","checks":{"database":"' + [string]$this.Cfg.DbErrText + '","version":"' + [string]$this.Cfg.Version + '"}}') } }
             return $this.Origin()
         }
         $this.ExtGets++
@@ -271,8 +277,8 @@ class CgWorld {
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 # (11/19 [3-V] 갈래2 V5) 경우 수 · 세부 확인 수 하한 — 경우 블록이 지워지거나 안 불리면 불일치 · 세부 확인이 줄면 종료 1
-$script:CaseMax = 32
-$script:MinDetail = 524   # 이 커밋 기준 세부 확인 수 530 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 420 이상 — 늘리기만 한다
+$script:CaseMax = 35      # (11/19 [4] F8~F10) 32 → 35(C33~C35)
+$script:MinDetail = 561   # 이 커밋 기준 세부 확인 수 567 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 524(530 − 6) · 420 이상 — 늘리기만 한다
 if (-not $ModulePath) { $ModulePath = Join-Path $PSScriptRoot 'CommsGuard.psm1' }
 if (-not $RunnerPath) { $RunnerPath = Join-Path $PSScriptRoot 'Run-RoutinePcScenarios.ps1' }
 $script:ModulePath = [System.IO.Path]::GetFullPath($ModulePath)
@@ -444,6 +450,49 @@ function New-CgRepo {
     return $repo
 }
 
+function Copy-CgRepo {
+    # (11/19 [4] F1 · 시험 시간) 임시 저장소 재사용 — 다 만든 임시 저장소를 폴더째 복사(git 프로세스 0) · 부르는 쪽이 바꿀 칸만 고친다.
+    #   옛: 저장소 5개를 New-CgRepo 로 따로 만듦(git 프로세스 26개 · 이 PC 5~6초). 지금: repo-ok 하나만 새로 · 나머지 = 복사 + git 0~3개.
+    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$Name)
+    $to = Join-Path $script:Root $Name
+    $null = [System.IO.Directory]::CreateDirectory($to)
+    foreach ($d in [System.IO.Directory]::GetDirectories($From, '*', [System.IO.SearchOption]::AllDirectories)) { $null = [System.IO.Directory]::CreateDirectory($to + $d.Substring($From.Length)) }
+    foreach ($f in [System.IO.Directory]::GetFiles($From, '*', [System.IO.SearchOption]::AllDirectories)) { [System.IO.File]::Copy($f, $to + $f.Substring($From.Length), $true) }
+    return $to
+}
+
+# (11/19 [4] F1 · 시험 시간) G4a git 읽기 재사용 — 모듈 Get-CgAllowlistGitState(git 프로세스 3개 · 이 PC 러너 런 1회당 0.3~0.5초 · 런 60번 남짓)를
+#   같은 (저장소 · 경로 · git 실행 파일) 이면 첫 1회 = 모듈 함수 그대로 실제 git · 그다음 = 그 결과의 사본. 임시 저장소는 준비 뒤 바뀌지 않음(C22 ⓕ 가 .git 무변을 잼).
+#   러너가 런마다 Import-Module -Force 로 모듈을 새로 읽으므로 스냅숏 훅이 런마다 다시 씌운다(모듈 파일 · Get-EnvSnapshot · Get-GuardDecision 무변).
+#   저장소가 다른 G4a 경우(C22 ⓐ ⓑ ⓒ · ⓕ)는 키가 달라 저마다 실제 git. 끝에 「G4a git 읽기: 실제 n · 재사용 m」 한 줄.
+$script:GitCache = @{}
+$script:GitCacheStat = @{ Real = 0; Reuse = 0 }
+$script:GitCacheInstall = {
+    param([hashtable]$Cache, [hashtable]$Stat)
+    $mods = @(Get-Module -Name 'CommsGuard')
+    if ($mods.Count -ne 1) { return }   # 못 찾으면 안 씌움(= 매번 실제 git · 느려질 뿐 판정 무변)
+    & $mods[0] {
+        param($Cache, $Stat)
+        if ($script:CgTestGitReuse) { return }
+        $orig = ${function:Get-CgAllowlistGitState}
+        if ($null -eq $orig) { return }
+        $wrap = {
+            [CmdletBinding()]
+            param([Parameter(Mandatory)][string]$RepoRoot, [Parameter(Mandatory)][string]$RelPath, [string]$GitExe = 'git')
+            $k = $RepoRoot + '|' + $RelPath + '|' + $GitExe
+            if (-not $Cache.ContainsKey($k)) {
+                $Cache[$k] = & $orig -RepoRoot $RepoRoot -RelPath $RelPath -GitExe $GitExe
+                $Stat['Real'] = 1 + [int]$Stat['Real']
+            } else { $Stat['Reuse'] = 1 + [int]$Stat['Reuse'] }
+            $copy = [ordered]@{}
+            foreach ($kk in @($Cache[$k].Keys)) { $copy[$kk] = $Cache[$k][$kk] }
+            return $copy
+        }.GetNewClosure()
+        ${function:script:Get-CgAllowlistGitState} = $wrap
+        $script:CgTestGitReuse = $true
+    } $Cache $Stat
+}
+
 function Get-CgTreeStamp {
     param([string]$Dir)
     $rows = foreach ($f in @([System.IO.Directory]::GetFiles($Dir, '*', [System.IO.SearchOption]::AllDirectories) | Sort-Object)) {
@@ -477,6 +526,7 @@ function New-CgCfg {
         SdDown = @(2500, 12500); CtlFail = @(); CtlTimeout = @(); CtlThrow = @(); CtlBaselineFail = $false
         HandMode = 'record'
         ObsThrowAt = -1; HandThrowAt = -1; HandWho = ''   # (11/19 [3-V] 갈래2 · C28 · C32) 기본 = 끔
+        OriginFail = ''   # (11/19 [4] F8 · C33) 기본 = 끔
     }
     if ($null -ne $Over) {
         foreach ($k in $Over.Keys) {
@@ -550,8 +600,9 @@ function New-CgProviders {
 
 function New-CgHooks {
     param([Parameter(Mandatory)]$W, [Parameter(Mandatory)][hashtable]$Prov, [Parameter(Mandatory)][string]$ModPath)
+    $gcI = $script:GitCacheInstall; $gcC = $script:GitCache; $gcS = $script:GitCacheStat   # (F1) G4a git 읽기 재사용 — 스냅숏 직전에 씌움
     return @{
-        GetSnapshot        = { Get-EnvSnapshot -Providers $Prov -NowUtc $W.Now() -Verbose:$W.Verbose }.GetNewClosure()
+        GetSnapshot        = { & $gcI $gcC $gcS; Get-EnvSnapshot -Providers $Prov -NowUtc $W.Now() -Verbose:$W.Verbose }.GetNewClosure()
         Now                = { $W.Now() }.GetNewClosure()
         Sleep              = { param([int]$Ms) $W.Sleep($Ms) }.GetNewClosure()
         HttpGet            = { param([string]$Url, [int]$TimeoutSec, [hashtable]$Headers) $W.HttpGet($Url, $TimeoutSec, $Headers) }.GetNewClosure()
@@ -745,10 +796,25 @@ $allowBoth = '{' + "`n" + '  "entries": [' + "`n" +
     '    { "primaryDomainSha256": "' + (Get-CgIdentityHash -Value $script:Id.Domain) + '", "tenantCodeSha256": "' + (Get-CgIdentityHash -Value $script:Id.Tenant) + '" }' + "`n" + '  ]' + "`n" + '}' + "`n"
 try {
     $script:RepoOk = New-CgRepo -Name 'repo-ok' -MainText $allowOk
-    $script:RepoA = New-CgRepo -Name 'repo-a' -MainText $allowOther -HeadText $allowOk
-    $script:RepoB = New-CgRepo -Name 'repo-b' -MainText $allowOk -WorkText $allowBoth
-    $script:RepoC = New-CgRepo -Name 'repo-c' -MainText $allowOk -NoOrigin
-    $script:RepoF = New-CgRepo -Name 'repo-f' -MainText $allowOk -AutoCrlf -WorkText (Get-CgAllowText -Domain $script:Id.Domain -Tenant $script:Id.Tenant -Nl "`r`n")
+    # (11/19 [4] F1 · 시험 시간) 나머지 4개 = repo-ok 복사 + 바꿀 칸만(옛 New-CgRepo 따로 만들기와 G4a 재료가 같음 · git 프로세스 26 → 10)
+    $relA = 'tests/scenarios/comms-integrity/test-pc-allowlist.json'
+    #   repo-a: origin/main = 다른 PC 허용목록 커밋 · HEAD = 그 뒤 로컬 커밋(이 PC 허용목록) → 작업 사본 ≠ origin/main
+    $script:RepoA = Copy-CgRepo -From $script:RepoOk -Name 'repo-a'
+    Write-CgFile -Path (Join-Path $script:RepoA ($relA -replace '/', '\')) -Text $allowOther
+    Invoke-CgGit -Repo $script:RepoA -GitArgs @('commit', '-a', '-q', '-m', 'main')
+    Invoke-CgGit -Repo $script:RepoA -GitArgs @('update-ref', 'refs/remotes/origin/main', 'HEAD')
+    Write-CgFile -Path (Join-Path $script:RepoA ($relA -replace '/', '\')) -Text $allowOk
+    Invoke-CgGit -Repo $script:RepoA -GitArgs @('commit', '-a', '-q', '-m', 'local')
+    #   repo-b: 커밋 안 한 작업 사본 변경(두 PC 허용목록)
+    $script:RepoB = Copy-CgRepo -From $script:RepoOk -Name 'repo-b'
+    Write-CgFile -Path (Join-Path $script:RepoB ($relA -replace '/', '\')) -Text $allowBoth
+    #   repo-c: origin/main 참조 없음
+    $script:RepoC = Copy-CgRepo -From $script:RepoOk -Name 'repo-c'
+    Invoke-CgGit -Repo $script:RepoC -GitArgs @('update-ref', '-d', 'refs/remotes/origin/main')
+    #   repo-f: core.autocrlf true · 작업 사본 CRLF · 저장소 LF(같은 blob)
+    $script:RepoF = Copy-CgRepo -From $script:RepoOk -Name 'repo-f'
+    Invoke-CgGit -Repo $script:RepoF -GitArgs @('config', 'core.autocrlf', 'true')
+    Write-CgFile -Path (Join-Path $script:RepoF ($relA -replace '/', '\')) -Text (Get-CgAllowText -Domain $script:Id.Domain -Tenant $script:Id.Tenant -Nl "`r`n")
     # (11/19 [3-V] 갈래2 V6) 「보고서 폴더 = 저장소 안」 시험용 가짜 저장소 — 임시 폴더에 러너 사본을 같은 상대 위치에 둔다(러너 저장소 뿌리 = 이 폴더).
     #   실제 저장소 안 경로는 쓰지 않는다(거절이 회귀해도 찌꺼기는 임시 폴더에만 · finally 가 지움).
     $script:FakeRepo = Join-Path $script:Root 'fake-repo'
@@ -1508,6 +1574,52 @@ Invoke-CgCaseBlock 'C32' '[3-V 갈래2] V9 · 손 기록 「누가」 16자 넘�
     Test-CgCase 'C32' 'ⓑ 실행 기록 TunnelSecret 0' (-not ([string]$r.HistText).Contains('TunnelSecret'))
 }
 
+# ─────────────────────────────────────────────── 경우 C33~C35 — (11/19) [4] 작업리뷰서 F8 · F9 · F10(변이 M02 · M05 · M07 이 살아남던 줄)
+# 근거 docs/검증/20261119_WG1-53_갈래1_2_4_작업리뷰서.md §2 F8~F10 · §1-2 변이 표. 러너는 가짜 훅으로만(실물 0).
+
+Invoke-CgCaseBlock 'C33' '[4] F8 · G5 원점 /health 200 아님(503 · 시간 초과) · 나머지 맞음 → 거절(G5) · 끊기 0 · 외부 GET 0' {
+    foreach ($pair in @(@('ⓐ 503', '503'), @('ⓑ 시간 초과', 'timeout'))) {
+        $r = Invoke-CgRun -Cfg @{ OriginFail = $pair[1] }
+        Assert-CgRejected 'C33' $r @('G5')
+        Test-CgCase 'C33' ($pair[0] + ' · G5 사유 = 원점 /health 200 아님') (@($r.Lines) -contains '  G5 거절 · 원점 /health 200 아님')
+        Test-CgCase 'C33' ($pair[0] + ' · 원점 GET = 가드 읽기 1회뿐') ($r.W.LocalGets -eq 1)
+        Test-CgCase 'C33' ($pair[0] + ' · 나머지 가드 칸 통과(G1~G4 · G4a · G6)') (@(@($r.Lines) | Where-Object { ([string]$_) -match '\A  (G1|G2|G3|G4|G4a|G6) 통과 · ' }).Count -eq 6)
+    }
+}
+
+Invoke-CgCaseBlock 'C34' '[4] F9 · S-D 손 기록 → 관측 시작 간격 상한 2초 경계(2.000 완료 · 2.001 측정불가(관측 기록 무효))' {
+    # 첫 회차 T 가 간격보다 커야 함(해석 9 둘째 조건) — 회차 T = 3~8(1~5 실패 · 6 복귀)로 간격 조건만 갈리게 한다
+    $rd = Get-CgSdRounds
+    foreach ($x in $rd) { $x.T = [double]$x.T + 2.0 }
+    $v2 = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -ObsStart $script:Base.AddSeconds(2))
+    Assert-CgV 'C34' 'ⓐ 간격 2.000초(상한 그대로) = 완료' $v2 $SdDone5
+    Test-CgCase 'C34' 'ⓐ 인계 0 · 상태 불명 0' (-not $v2.Handoff -and -not $v2.StateUnknown)
+    $v3 = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -ObsStart $script:Base.AddMilliseconds(2001))
+    Assert-CgV 'C34' 'ⓑ 간격 2.001초 = 관측 기록 무효' $v3 '반자동 — 실패(측정불가(관측 기록 무효))'
+    Test-CgCase 'C34' 'ⓑ 인계 · 상태 불명' ($v3.Handoff -and $v3.StateUnknown)
+    # ⓒ 종합: 자동 3 PASS + ⓑ → 미합격 · 종료 1 / 자동 3 PASS + ⓐ → 합격 · 종료 0(대조)
+    $std = Get-CgStdResults
+    $s3 = Get-Summary -Results @($std.A, $std.B, $std.C, $v3)
+    Test-CgCase 'C34' ('ⓒ 2.001 종합 = 미합격 · 종료 1(실제 「' + $s3.Header + '」)') (-not $s3.Header.StartsWith('합격') -and $s3.ExitCode -eq 1)
+    $s2 = Get-Summary -Results @($std.A, $std.B, $std.C, $v2)
+    Test-CgCase 'C34' 'ⓒ 대조 2.000 종합 = 합격 · 종료 0' ($s2.Header -eq $HdrPass -and $s2.ExitCode -eq 0)
+}
+
+Invoke-CgCaseBlock 'C35' '[4] F10 · 이름 풀이 주소 IPv6 루프백 ::1 → 외부 경로 아님 · S-A 측정불가(외부 경로 아님) · 끊기 0 · 외부 GET 0' {
+    # ⓐ 판정 함수(순수) — ::1 · 풀어 쓴 꼴 · IPv4 섞인 목록 = 외부 아님 / 대조 = 문서용 대역 주소(IPv4 · IPv6)는 외부
+    Test-CgCase 'C35' 'ⓐ ::1 = 외부 아님' (-not (Test-CgExternalAddress -Addresses @('::1')))
+    Test-CgCase 'C35' 'ⓐ 0:0:0:0:0:0:0:1 = 외부 아님' (-not (Test-CgExternalAddress -Addresses @('0:0:0:0:0:0:0:1')))
+    Test-CgCase 'C35' 'ⓐ 외부 IPv4 + ::1 섞임 = 외부 아님' (-not (Test-CgExternalAddress -Addresses @('203.0.113.10', '::1')))
+    Test-CgCase 'C35' 'ⓐ 대조 IPv6 2001:db8::10 = 외부' (Test-CgExternalAddress -Addresses @('2001:db8::10'))
+    Test-CgCase 'C35' 'ⓐ 대조 IPv4 203.0.113.10 = 외부' (Test-CgExternalAddress -Addresses @('203.0.113.10'))
+    # ⓑ 러너(가짜 훅) — 이름 풀이 = ::1 → S-A 기준 응답에서 멈춤
+    $b = Invoke-CgRun -Cfg @{ Addrs = @('::1') }
+    Assert-CgItem 'C35' $b 'S-A' ($LblA + '측정불가(외부 경로 아님)')
+    Assert-CgNoPass 'C35' $b 'S-A'
+    Test-CgCase 'C35' 'ⓑ 끊기 0 · 외부 GET 0 · 종료 1' ($b.W.FakeCuts -eq 0 -and $b.W.ExtGets -eq 0 -and $b.Exit -eq 1)
+    Assert-CgItem 'C35' $b 'S-B' ($LblB + '미실행(앞 건 정지)')
+}
+
 # ── 부가(경우 번호 밖 · 세부 확인에 셈)
 Invoke-CgCaseBlock '부가' '훅 전부-아니면-멈춤 · 판정 모드 · 보고서 폴더 · 캐시 회피 · 러너 정적 검사' {
     $x = Invoke-CgRun -DropHook @('ReadScmEvents')
@@ -1589,6 +1701,7 @@ if ($notRun.Count -gt 0) { Write-Host ('실행 안 된 경우(불일치로 셈):
 foreach ($u in $script:Unmeasured) { Write-Host ('미측정: ' + $u) }
 if (-not $script:CaseOk['부가']) { Write-Host '부가 확인(경우 번호 밖) 어긋남 — 세부 확인 칸에 셈' }
 Write-Host ('세부 확인 하한 {0} — 실제 {1} · {2}' -f $script:MinDetail, $script:DetailTotal, $(if ($minOk) { '맞음' } else { '모자람(종료 1)' }))
+Write-Host ('G4a git 읽기(시험 시간 · F1): 실제 {0} · 재사용 {1}' -f [int]$script:GitCacheStat['Real'], [int]$script:GitCacheStat['Reuse'])
 Write-Host ('걸린 시간 {0}초' -f [math]::Round($sw.Elapsed.TotalSeconds))
 Write-Host ('Test-CommsGuard 끝 — 경우 {0}/{1} 일치 · 세부 확인 {2}/{3} · 진짜 끊기 호출 {4}' -f $okCases, $caseIds.Count, $script:DetailPass, $script:DetailTotal, $real)
 if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq $script:CaseMax -and $script:CaseOk['부가'] -and $script:DetailPass -eq $script:DetailTotal -and $minOk -and $real -eq 0) { exit 0 }
