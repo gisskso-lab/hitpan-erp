@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    W-G1-51 인쇄 작3 · 갈래 Z 측정 장치 — PDF 판독기 + ⑨ 표본 만들기 (시험 쪽 도구 · 제품 코드 0)
+    근거: 작업지시서 docs/운영기록/20261118작_WG1-51_인쇄작3_반려봉합_작업지시서.md §2 Z · §4-1 · §4-2
+          설계 docs/설계/erp/20261118_WG1-51_인쇄작3_반려봉합_설계.md §1-3(판독) · §7-2 ⑨ 표본 · 셈
+    🔴 새 외부 의존 0 — PdfPig 0.1.10 = 시험 프로젝트가 이미 쓰는 판(src/HitPan.Tests/HitPan.Tests.csproj:20 · PM 11/18 Q4)
+                        QuestPDF 2026.2.4 = 제품이 이미 쓰는 판(src/HitPan.Application/HitPan.Application.csproj:26) — ⑨ 표본 암호 걸기에만
+    🔴 이 프로젝트는 솔루션(src/HitPan.sln)에 넣지 않는다 — 제품 빌드 · 설치본 · 업데이트 판에 안 실린다. CI 화면 시험 잡(ui-print)만 짓는다.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.10" />
+    <PackageReference Include="QuestPDF" Version="2026.2.4" />
+  </ItemGroup>
+
+</Project>
