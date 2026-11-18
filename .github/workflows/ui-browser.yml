@@ -43,7 +43,7 @@ jobs:
   #   합침 커밋 첫 부모 = 기준 가지 머리 · 이름이 옮겨져도 옛 자리 · 새 자리 둘 다 센다(옮김 짝 맞추기 끔).
   ui-changes:
     name: ui-changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -88,7 +88,7 @@ jobs:
     # 🔴 K 연결 — 취소 아님 그리고 (수동 실행 · H 머리 가지 · 거르기 출력이 「안 돈다」가 아님). 빈 출력 · 거르기 잡 실패 = 돈다.
     needs: ui-changes
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-') || needs.ui-changes.outputs.run != 'false') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -309,7 +309,7 @@ jobs:
   #   레포 위치 그대로 실행한다(사본 실행이면 워크플로 셈 칸이 대상을 못 찾는다).
   ui-selftest:
     name: ui-selftest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
