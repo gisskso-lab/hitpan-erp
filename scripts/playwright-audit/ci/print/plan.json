@@ -1,0 +1,33 @@
+{
+  "schema": "print-plan/1",
+  "about": "W-G1-51 인쇄 작3 갈래 Z 런 계획 — 작업지시서 §4-1 그대로 · 상한 Z 4 · 고침 6 · 런마다 run 칸만 바꿔 커밋(yml 무변) · 개발명세서 §3 ⑧ · §4",
+  "run": "Z1",
+  "cap": { "Z": 4, "fix": 6 },
+  "runs": {
+    "Z1": {
+      "what": "판독 · main 대조판(이 가지 머리 src = main) · 테넌트 A · 판독기 양성 대조 먼저 → 슬롯 ㉠ · 7종 ①②③ · K1~K5 · YN1 · 스타일 4 · 워터마크 켬/끔 · S 칸 · 로고 있음/지움 · ⑨ = 문 없음 · 판정 제외(qpdf 0 · PM §6-a 3)",
+      "jobs": [
+        { "id": "z1-main-read", "board": "main", "tenant": "A", "phase": "read", "patch": "", "qpdf": false }
+      ]
+    },
+    "Z2": {
+      "what": "옛 행 · DB — 슬롯 ㉡ · §1-5 ① · D-1~D-4 · 두 판 차림 앞 절반",
+      "blocked": "개발명세서 §3 ⑦ — CI DB 실물 DESCRIBE · SHOW INDEX(#13) 먼저 · 테넌트 B 차림 · 이번 지시 밖",
+      "jobs": []
+    },
+    "Z3": { "what": "Z1 · Z2 의 「차림 불가 · 미측정」 칸만", "blocked": "Z1 · Z2 결과 뒤", "jobs": [] },
+    "Z4": { "what": "예비 · 쓰면 PM 보고", "blocked": "Z3 결과 뒤", "jobs": [] },
+    "R1": { "what": "고친 합류본 · A · B · §1 전체 · ㉮ 경우(⑨ 표본 · qpdf) 등", "blocked": "갈래 A~F 코드 뒤", "jobs": [] },
+    "R2": { "what": "심은 결함 묶음 M 6", "blocked": "갈래 A~F 코드 뒤 · 예상 실패 사유 런 전 고정", "jobs": [] },
+    "R3": { "what": "심은 결함 묶음 S 11(⑨ⓐⓑⓒ 포함 · qpdf)", "blocked": "갈래 A~F 코드 뒤 · 예상 실패 사유 런 전 고정", "jobs": [] },
+    "R4": { "what": "R1~R3 의 미측정 · 차림 불가 칸만", "blocked": "R1~R3 뒤", "jobs": [] },
+    "R5": { "what": "예비", "blocked": "쓰면 PM 보고", "jobs": [] },
+    "R6": { "what": "예비", "blocked": "쓰면 PM 보고", "jobs": [] }
+  },
+  "expectedReasons": {
+    "about": "HQA ⑦ — 런 전 고정(개발명세서 §2 · 설계 :263 글자 그대로) · 나머지 심은 결함 = 미고정(패치 대상 코드 없음)",
+    "nine-a": "E1~E3 = 네이티브 열기 실패 거절 · E4~E8(E7a~c 포함) = 해석 시작 1 + ㉡ 거절 또는 허용",
+    "nine-b": "E7 · E7a · E7b 허용",
+    "nine-c": "거절은 나나 「해석 시작」 로그 1 · 표지 생성"
+  }
+}

@@ -83,6 +83,10 @@ public static class Program
         var w = facts["pages"]?[0]?["words"]?.AsArray().FirstOrDefault(n => n?["t"]?.GetValue<string>() == "PARTNERX");
         var xmm = w?["x"]?.GetValue<double>() ?? -1;
         Check("T3 글자 좌표 x(mm)", Math.Abs(xmm - (100 * 25.4 / 72)) < 0.5, $"x={xmm} · 기대≈{100 * 25.4 / 72:0.00}");
+        // T3b 글자 크기 · 글꼴(2차 · 스타일 표지 재료) — 12pt Helvetica 로 찍은 낱말
+        var fs = w?["fs"]?.GetValue<double>() ?? -1;
+        var fn = w?["fn"]?.GetValue<string>() ?? "";
+        Check("T3b 글자 크기 · 글꼴", Math.Abs(fs - 12) < 0.01 && fn.Contains("Helvetica", StringComparison.Ordinal), $"fs={fs} · fn={fn}");
 
         // T4 ⑨ 표본 — 만들고 유효 조건 표를 낸다(⒞ = qpdf 없으면 「미측정(설치 실패)」)
         var dir = Path.Combine(work, "nine");

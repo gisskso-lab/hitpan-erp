@@ -91,6 +91,9 @@ public static class PdfFacts
                 ["y"] = R2((hPt - b.Top) * MmPerPt),
                 ["w"] = R2(b.Width * MmPerPt),
                 ["h"] = R2(b.Height * MmPerPt),
+                // 🔴 2차(개발명세서 §3 ② · 시안 §3-3 M2) — 첫 글자 크기(pt) · 글꼴 이름 = 스타일 표지(제목 크기 · 격식 글꼴) 판독 재료
+                ["fs"] = w.Letters.Count > 0 ? R2(w.Letters[0].PointSize) : null,
+                ["fn"] = w.Letters.Count > 0 ? w.Letters[0].FontName : null,
             });
         }
         p["words"] = words;
