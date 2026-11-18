@@ -40,6 +40,7 @@ $script:CgConst = @{
     SdStreak              = 5
     GetTimeoutSec         = 2
     MaxSkewSec            = 2
+    HandObsMaxGapSec      = 2   # (11/19 [3-V] A3) 손 기록 → 관측 시작 간격 상한(S-D) · 개발명세서 §7 해석 9
     GuardHealthTimeoutSec = 5
     CooldownWindowMin     = 60
     CooldownMaxPrior      = 4
@@ -124,25 +125,57 @@ function Test-CgHex {
 }
 
 function ConvertTo-CgPort {
+    # (11/19 [3-V] A5) ASCII 숫자만([0-9] · \d 는 전각 · 아랍 숫자도 받아 [int] 변환 예외가 났음) · 변환 = TryParse — 형식 틀림 · 변환 실패 = $null(예외 0 · fail-closed)
     [CmdletBinding()]
     param([AllowNull()][string]$Value)
     if ($null -eq $Value) { return $null }
     $v = $Value.Trim()
-    if ($v -notmatch '\A\d{1,5}\z') { return $null }
-    $n = [int]$v
+    if ($v -cnotmatch '\A[0-9]{1,5}\z') { return $null }
+    $n = 0
+    if (-not [int]::TryParse($v, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$n)) { return $null }
     if ($n -lt 1 -or $n -gt 65535) { return $null }
     return $n
 }
 
 function ConvertTo-CgSlot {
+    # (11/19 [3-V] A5) 포트와 같은 규칙 — ASCII 숫자만 · TryParse · 실패 = $null(예외 0)
     [CmdletBinding()]
     param([AllowNull()][string]$Value)
     if ($null -eq $Value) { return $null }
     $v = $Value.Trim()
-    if ($v -notmatch '\A\d{1,3}\z') { return $null }
-    $n = [int]$v
+    if ($v -cnotmatch '\A[0-9]{1,3}\z') { return $null }
+    $n = 0
+    if (-not [int]::TryParse($v, [Globalization.NumberStyles]::None, [Globalization.CultureInfo]::InvariantCulture, [ref]$n)) { return $null }
     if ($n -lt 1) { return $null }
     return $n
+}
+
+function ConvertTo-CgObsSec {
+    # (11/19 [3-V] A2 · A3) 관측 기록의 초 칸(T · Skew) — 수 타입(정수 · 실수)이고 유한할 때만 [double].
+    # 그 밖($null · 글자 · NaN · 무한) = $null → 판정 불가 쪽(합격 0). 글자 「5」 도 받지 않는다(러너는 늘 수로 채움).
+    param([AllowNull()] $Value)
+    if ($null -eq $Value) { return $null }
+    $isNum = ($Value -is [double] -or $Value -is [single] -or $Value -is [decimal] -or $Value -is [int] -or $Value -is [long] -or
+        $Value -is [int16] -or $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [uint16] -or $Value -is [uint32] -or $Value -is [uint64])
+    if (-not $isNum) { return $null }
+    $d = [double]$Value
+    if ([double]::IsNaN($d) -or [double]::IsInfinity($d)) { return $null }
+    return $d
+}
+
+function Test-CgObsTimes {
+    # (11/19 [3-V] A2) 회차 시각 칸 T — 전부 수 · 유한 · 0 이상 · 엄격 증가여야 참. 하나라도 어긋나면 거짓(= 측정불가(관측 기록 무효)).
+    # 누락이면 [double]$null = 0 으로 풀려 「0초 복구」 가 나던 길 · 역행이면 그 사이 회차를 건너뛰던 길을 닫는다.
+    param([AllowNull()][object[]]$Items)
+    $prev = $null
+    foreach ($it in @($Items)) {
+        if ($null -eq $it) { continue }
+        $t = ConvertTo-CgObsSec -Value $it.T
+        if ($null -eq $t -or $t -lt 0) { return $false }
+        if ($null -ne $prev -and $t -le $prev) { return $false }
+        $prev = $t
+    }
+    return $true
 }
 
 # ─────────────────────────────────────────────── 읽기(수집) 도우미 — 전부 읽기만
@@ -825,6 +858,13 @@ function Resolve-CgAutoVerdict {
         $v.LastState = '멈추기 명령 실패'; $v.ElapsedSec = 0
         return (Complete-CgVerdict $v)
     }
+    # (11/19 [3-V] A2) 관측 기록 무결성 — 회차 시각 칸 T 누락 · 숫자 아님 · 음수 · 역행(엄격 증가 아님) = 판정 불가.
+    # 합격 0 · 그 자리 정지 · 인계(끊기는 이미 보냄 → 대상 상태 불명). -Partial 에서도 바로 정해진 값을 준다(러너가 멈춤).
+    if (-not (Test-CgObsTimes -Items $samples)) {
+        $v.Column = '측정불가'; $v.Reason = '관측 기록 무효'; $v.Halt = $true; $v.StateUnknown = $true; $v.Handoff = $true
+        $v.LastState = '회차 시각 칸 무효(누락 · 숫자 아님 · 음수 · 역행)'
+        return (Complete-CgVerdict $v)
+    }
     $lastT = if ($samples.Count -gt 0) { [double]$samples[-1].T } else { 0.0 }
     $v.ElapsedSec = [math]::Round($lastT)
     if ($samples.Count -gt 0) {
@@ -834,8 +874,14 @@ function Resolve-CgAutoVerdict {
     $baseVer = [string]$b.Version
     $isStop = {
         param($sm)
-        if ($Cat.Kind -eq 'service') { return ([string]$sm.Svc -eq 'Stopped' -or ($Obs.PreSvcPid -and $sm.SvcPid -and $sm.SvcPid -ne $Obs.PreSvcPid)) }
+        # (11/19 [3-V] A1 · 설계 §5-1a 「Stopped 닻」 · CTO A1) 서비스 멈춤 관측 = 상태 Stopped 를 실제로 본 회차만.
+        # 옛 「서비스 프로세스 번호 바뀜」 길은 뺐다 — 그 길로 들어오면 R2 고리를 안 보고 PASS 가 났음. 번호 바뀜은 기록 칸(Notes)에만.
+        if ($Cat.Kind -eq 'service') { return ([string]$sm.Svc -eq 'Stopped') }
         return $false
+    }
+    $isPidMoved = {
+        param($sm)
+        return ($Cat.Kind -eq 'service' -and [string]$sm.Svc -ne 'Stopped' -and $Obs.PreSvcPid -and $sm.SvcPid -and $sm.SvcPid -ne $Obs.PreSvcPid)
     }
     $isReflect = {
         param($sm)
@@ -856,18 +902,27 @@ function Resolve-CgAutoVerdict {
         return $false
     }
 
-    # ③ 멈춤 관측(최대 30초) — 서비스: Stopped 또는 서비스 프로세스 번호 바뀜 / 프로세스: 끊기 전 번호 전부 사라짐 + /health 실패 1회 이상
-    $stopIdx = -1; $reflIdx = -1; $gone = $false; $failSeen = $false
+    # ③ 멈춤 관측(최대 30초) — 서비스: Stopped 를 실제로 본 회차만([3-V] A1 · 옛: Stopped 또는 서비스 프로세스 번호 바뀜) / 프로세스: 끊기 전 번호 전부 사라짐 + /health 실패 1회 이상
+    #   (11/19 [3-V] A1) 서비스 끊김 반영 = 멈춤 관측 회차 이후(그 회차 포함 — 러너 Get-RgSample 은 같은 회차 안 상태 먼저 → GET) · 창 30초 안만 셈.
+    #   멈춤 관측 전 실패(끊기 직후 GET 시간 초과 한 번 등)는 반영으로 안 센다. 프로세스(S-C)는 옛 규칙 그대로.
+    $stopIdx = -1; $reflIdx = -1; $gone = $false; $failSeen = $false; $pidMoved = $false
     for ($i = 0; $i -lt $samples.Count; $i++) {
         $sm = $samples[$i]
         if ([double]$sm.T -gt $c.StopWindowSec) { break }
-        if ($reflIdx -lt 0 -and (& $isReflect $sm)) { $reflIdx = $i }
         if ($Cat.Kind -eq 'process') {
+            if ($reflIdx -lt 0 -and (& $isReflect $sm)) { $reflIdx = $i }
             if ($sm.OldAlive -eq $false) { $gone = $true }
             if ($reflIdx -ge 0) { $failSeen = $true }
             if ($stopIdx -lt 0 -and $gone -and $failSeen) { $stopIdx = $i }
-        } elseif ($stopIdx -lt 0 -and (& $isStop $sm)) { $stopIdx = $i }
+            continue
+        }
+        if ($stopIdx -lt 0) {
+            if (& $isStop $sm) { $stopIdx = $i }
+            elseif (& $isPidMoved $sm) { $pidMoved = $true }
+        }
+        if ($stopIdx -ge 0 -and $reflIdx -lt 0 -and (& $isReflect $sm)) { $reflIdx = $i }
     }
+    if ($pidMoved) { $v.Notes = @(@($v.Notes) + '서비스 프로세스 번호 바뀜(멈춤 관측 아님 · 기록만)') }
     if ($stopIdx -lt 0) {
         if ($Partial -and $lastT -lt $c.StopWindowSec) { return $null }
         $v.Column = '측정불가'; $v.Reason = '멈춤 미관측'; $v.Halt = $true; $v.StateUnknown = $true; $v.Handoff = $true
@@ -903,7 +958,7 @@ function Resolve-CgAutoVerdict {
         $v.Seconds = $sec
         if ($sec -le $c.RecoverWindowSec) { $v.Column = 'PASS'; $v.Reason = '5분 안 복구됨' }
         else { $v.Column = 'FAIL'; $v.Reason = '5분 안 복구 안 됨'; $v.Halt = $true; $v.StateUnknown = $true; $v.Handoff = $true }
-        if ($Cat.Id -eq 'S-B' -and $b.OriginPid -and $samples[$rIdx].Origin.Pid -and $samples[$rIdx].Origin.Pid -ne $b.OriginPid) { $v.Notes = @('원점 프로세스 번호 바뀜(기록만)') }
+        if ($Cat.Id -eq 'S-B' -and $b.OriginPid -and $samples[$rIdx].Origin.Pid -and $samples[$rIdx].Origin.Pid -ne $b.OriginPid) { $v.Notes = @(@($v.Notes) + '원점 프로세스 번호 바뀜(기록만)') }
     } else {
         if ($Partial -and ($lastT - $t0) -lt $c.RecoverWindowSec) { return $null }
         $v.Column = 'FAIL'; $v.Reason = '5분 안 복구 안 됨'; $v.Halt = $true; $v.StateUnknown = $true; $v.Handoff = $true
@@ -940,6 +995,22 @@ function Resolve-CgSdVerdict {
     $v.T0Utc = ConvertTo-CgUtc -Value $hand.Utc
     $rounds = @($Obs.Rounds | Where-Object { $null -ne $_ })
     $v.SampleCount = $rounds.Count
+    # (11/19 [3-V] A2) 회차 시각 칸 T 누락 · 숫자 아님 · 음수 · 역행 = 판정 불가 → 측정불가(관측 기록 무효) · 합격 0
+    if (-not (Test-CgObsTimes -Items $rounds)) {
+        $v.LastState = '회차 시각 칸 무효(누락 · 숫자 아님 · 음수 · 역행)'
+        & $fail '측정불가(관측 기록 무효)'
+        return (Complete-CgVerdict $v)
+    }
+    # (11/19 [3-V] A3) 손 기록 ↔ 관측 창 묶기(설계 §5-3 「손 기록 뒤 관측 창」) — 러너가 손 기록 바로 뒤 · 첫 회차 전에 적은
+    # 관측 시작 시각 ObsStartUtc 가 있어야 하고, 손 기록 시각 ≤ 관측 시작 ≤ 손 기록 + HandObsMaxGapSec(2초) · 첫 회차 T ≥ (관측 시작 − 손 기록).
+    # 없거나 어긋나면(손 기록이 관측보다 한참 앞 · 뒤) 회차의 상대 시각 T 를 손 기록에 묶을 수 없음 → 측정불가(관측 기록 무효)
+    $obsStart = ConvertTo-CgUtc -Value $Obs.ObsStartUtc
+    $gap = if ($null -ne $obsStart) { ($obsStart - $v.T0Utc).TotalSeconds } else { $null }
+    if ($null -eq $gap -or $gap -lt 0 -or $gap -gt $c.HandObsMaxGapSec -or ($rounds.Count -gt 0 -and [double]$rounds[0].T -lt $gap)) {
+        $v.LastState = '손 기록 시각이 관측 창 밖(관측 시작 기록 없음 · 어긋남)'
+        & $fail '측정불가(관측 기록 무효)'
+        return (Complete-CgVerdict $v)
+    }
     $lastT = if ($rounds.Count -gt 0) { [double]$rounds[-1].T } else { 0.0 }
     $v.ElapsedSec = [math]::Round($lastT)
 
@@ -958,9 +1029,11 @@ function Resolve-CgSdVerdict {
     }
     $endIdx = if ($recIdx -ge 0) { $recIdx } elseif ($cutIdx -ge 0) { $rounds.Count - 1 } else { $windowEnd }
     # 관측자 연결 대조 — 대조 기록 없음 · 실패(시간 초과 포함) · 목표 끝 → 대조 시작 간격 2초 넘김 = 구분 불가 → 측정불가(관측자 연결 불명)
+    #   (11/19 [3-V] A3) 간격 Skew 는 수 · 유한 · 0 이상 · 2초 이하만 통과 — NaN · 음수 · 글자 = 관측자 연결 불명(옛: 「2초 넘김」 만 봐서 NaN · −500 이 통과)
     for ($i = 0; $i -le $endIdx; $i++) {
         $r = $rounds[$i]
-        if ($null -eq $r.Control -or $r.Control.Ok -ne $true -or $null -eq $r.Skew -or [double]$r.Skew -gt $c.MaxSkewSec) {
+        $sk = ConvertTo-CgObsSec -Value $r.Skew
+        if ($null -eq $r.Control -or $r.Control.Ok -ne $true -or $null -eq $sk -or $sk -lt 0 -or $sk -gt $c.MaxSkewSec) {
             $v.LastState = '대조 실패 · 기록 없음'
             & $fail '측정불가(관측자 연결 불명)'
             return (Complete-CgVerdict $v)
@@ -997,7 +1070,8 @@ function Get-ScenarioVerdict {
       관측 기록 칸(러너가 채움): Skip · Baseline{Ok,Reason,Version,OriginPid} · Cut{Issued,Ok} · CutUtc · PreSvcPid
         · Samples[{T,Svc,SvcPid,Ext{AddrOk,Status,Version},Origin{Ok,Status,DatabaseOk,Version,UnderInstall,Pid},OldAlive}]
         · Evidence{E1Utc,E1Failure,E2Utc,E3,E4} / S-D: SdBaseline{TargetOk,ControlOk,Version} · Hand{Who,Utc}
-        · Rounds[{T,Target{Ok},Control{Ok}|$null,Skew}]
+        · ObsStartUtc(11/19 [3-V] A3 · 손 기록 바로 뒤 · 첫 회차 전 시각) · Rounds[{T,Target{Ok},Control{Ok}|$null,Skew}]
+      (11/19 [3-V] A2) T = 끊기(S-D: 손 기록) 뒤 초 · 수 · 유한 · 0 이상 · 엄격 증가 — 아니면 측정불가(관측 기록 무효). Skew = 수 · 0~2초.
     #>
     [CmdletBinding()]
     param(
@@ -1020,7 +1094,17 @@ function Get-Summary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results)
     $byId = @{}
-    foreach ($r in @($Results)) { if ($null -ne $r -and $r.Id) { $byId[[string]$r.Id] = $r } }
+    # (11/19 [3-V] A4) 같은 ID 결과 둘 이상 = 거절 — 뒤 결과가 앞을 덮지 않는다(건별 줄 = 앞 것) · 종합 = 「미합격(결과 중복 …)」 · 종료 1 · 경고 줄.
+    # 상태 불명 경고 · 인계 끝 줄은 중복분까지 전부 보고 정한다(어느 쪽에 FAIL · 인계가 있어도 사라지지 않게).
+    $allIn = New-Object System.Collections.Generic.List[object]
+    $dupCount = [ordered]@{}
+    foreach ($r in @($Results)) {
+        if ($null -eq $r -or -not $r.Id) { continue }
+        $allIn.Add($r)
+        $rid = [string]$r.Id
+        if ($byId.ContainsKey($rid)) { $dupCount[$rid] = 1 + [int]$dupCount[$rid]; continue }
+        $byId[$rid] = $r
+    }
     $ordered = New-Object System.Collections.Generic.List[object]
     foreach ($cat in $script:CgCatalog) {
         if ($byId.ContainsKey($cat.Id)) { $ordered.Add($byId[$cat.Id]) }
@@ -1040,7 +1124,11 @@ function Get-Summary {
     $sdState = [string]$sd.SdState
 
     $exit = 1
-    if ($allAutoPass -and $sdState -eq '완료') {
+    $dupText = if ($dupCount.Count -gt 0) { (@($dupCount.Keys | ForEach-Object { '{0} {1}건' -f $_, (1 + [int]$dupCount[$_]) }) -join ' · ') } else { $null }
+    if ($dupText) {
+        # (11/19 [3-V] A4) 결과 중복이면 다른 칸이 어떻든 「합격」 · 종료 0 없음
+        $header = ('미합격(결과 중복 · {0}) — 같은 ID 결과 둘 이상 · 판정 거절 · 칸별 사유 · 반자동 {1}' -f $dupText, $sdState)
+    } elseif ($allAutoPass -and $sdState -eq '완료') {
         $header = '합격(도구 범위 4 ID 중 4 · 자동 3 PASS + 반자동 1 완료)'
         $exit = 0
     } elseif ($allAutoPass -and $sdState -eq '실패') {
@@ -1055,8 +1143,10 @@ function Get-Summary {
     $fixed = '복구 주체 판정 아님 · #27 게이트 통과 아님'
     if ($sd.CutIssued) { $fixed = '손 1회 · #28 「고객 손 0번」 증명 아님 · ' + $fixed }
 
-    $warn = if (@($list | Where-Object { $_.StateUnknown }).Count -gt 0) { '⚠ 대상 상태 불명 · 사람 확인 필요' } else { $null }
-    $handoff = (@($list | Where-Object { $_.Handoff }).Count -gt 0)
+    $flagSrc = @($list) + @($allIn.ToArray())   # (11/19 [3-V] A4) 중복분 포함
+    $warn = if (@($flagSrc | Where-Object { $_.StateUnknown }).Count -gt 0) { '⚠ 대상 상태 불명 · 사람 확인 필요' } else { $null }
+    $dupWarn = if ($dupText) { ('⚠ 결과 중복({0}) · 뒤 결과로 앞을 덮지 않음 · 사람 확인 필요' -f $dupText) } else { $null }
+    $handoff = (@($flagSrc | Where-Object { $_.Handoff }).Count -gt 0)
     $counts = [ordered]@{}
     foreach ($col in $script:CgColumns) { $counts[$col] = @($list | Where-Object { $_.Column -eq $col }).Count }
 
@@ -1064,6 +1154,7 @@ function Get-Summary {
     $text.Add($header)
     $text.Add($fixed)
     if ($warn) { $text.Add($warn) }
+    if ($dupWarn) { $text.Add($dupWarn) }
     $text.Add(('칸별 개수: ' + (($counts.Keys | ForEach-Object { '{0}={1}' -f $_, $counts[$_] }) -join ' · ')))
     foreach ($r in $list) {
         $line = '- {0} [{1}] {2}' -f $r.Id, $r.Label, $r.Display
@@ -1075,6 +1166,7 @@ function Get-Summary {
     return [pscustomobject][ordered]@{
         Header = $header; FixedLine = $fixed; Warning = $warn; Handoff = $handoff; Counts = $counts
         Executed = $n; Cuts = $cuts; ExitCode = $exit; Results = $list; Text = $text.ToArray()
+        DuplicateIds = @($dupCount.Keys); DuplicateWarning = $dupWarn
     }
 }
 

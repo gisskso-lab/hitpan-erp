@@ -16,7 +16,9 @@
     -ModulePath  판정 모듈 경로(기본 = 같은 폴더 CommsGuard.psm1) — 「가드 한 줄 깬 사본」 대조군용
     -RunnerPath  러너 경로(기본 = 같은 폴더 Run-RoutinePcScenarios.ps1)
 
-  끝 줄: 「Test-CommsGuard 끝 — 경우 22/22 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치) / 1.
+  끝 줄: 「Test-CommsGuard 끝 — 경우 27/27 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치) / 1.
+    (11/19 [3-V] 고침) 경우 C23~C27 = 보안상무 [3-V] A1~A5 입력 · 기대 「합격 아님」 — C1~C22 그대로 · 옛 끝 줄 「경우 22/22」.
+    근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래1_가드모듈_보안상무.md A 표.
   비밀 꼴 키 이름 · 노출 금지어는 실행 중에 이어 붙여 만든다(이 파일 바이트에 0).
   인코딩: UTF-8 BOM.
 #>
@@ -259,7 +261,7 @@ $script:RunnerPath = [System.IO.Path]::GetFullPath($RunnerPath)
 foreach ($f in @($script:ModulePath, $script:RunnerPath)) {
     if (-not [System.IO.File]::Exists($f)) {
         Write-Host ('파일 없음: {0}' -f [System.IO.Path]::GetFileName($f))
-        Write-Host 'Test-CommsGuard 끝 — 경우 0/22 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+        Write-Host 'Test-CommsGuard 끝 — 경우 0/27 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
         exit 1
     }
 }
@@ -306,7 +308,7 @@ $null = [System.IO.Directory]::CreateDirectory($script:Root)
 $script:CaseSeq = 0
 $script:AllText = New-Object System.Collections.Generic.List[string]
 $script:CaseOk = [ordered]@{}
-foreach ($n in 1..22) { $script:CaseOk[('C{0}' -f $n)] = $true }
+foreach ($n in 1..27) { $script:CaseOk[('C{0}' -f $n)] = $true }
 $script:CaseOk['부가'] = $true
 $script:DetailPass = 0
 $script:DetailTotal = 0
@@ -480,7 +482,8 @@ function New-CgCaseEnv {
             if ($Opt.Secrets) { $lines.Add($script:SecretKeys[1] + '=' + $script:Mark + 'V2') }
             $lines.Add('SLOT_INDEX=9')
             if ($Opt.Secrets) { $lines.Add($script:SecretKeys[2] + '=' + $script:Mark + 'V3') }
-            $lines.Add('API_PORT=' + $script:Id.Port)
+            # (11/19 [3-V] A5 · C27) ApiPort = 포트 글자 바꿔 넣기(전각 · 아랍 숫자) — 없으면 옛 값 그대로
+            $lines.Add('API_PORT=' + $(if ($Opt.ContainsKey('ApiPort')) { [string]$Opt.ApiPort } else { [string]$script:Id.Port }))
             if ($Opt.Secrets) {
                 $lines.Add($script:SecretKeys[3] + '=' + $script:Mark + 'V4')
                 $lines.Add($script:SecretKeys[4] + '=' + $script:Mark + 'V5')
@@ -712,7 +715,7 @@ try {
 } catch {
     Write-Host ('임시 git 저장소 준비 실패: {0}' -f $_.Exception.Message)
     Remove-CgTree $script:Root
-    Write-Host 'Test-CommsGuard 끝 — 경우 0/22 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+    Write-Host 'Test-CommsGuard 끝 — 경우 0/27 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
     exit 1
 }
 
@@ -1020,6 +1023,235 @@ Invoke-CgCaseBlock 'C22' 'G4a · 안 B 조합 · S-D 끊김 반영 · 관측자 
     }
 }
 
+# ─────────────────────────────────────────────── 경우 C23~C27 — (11/19) [3-V] 보안상무 A1~A5 입력 · 기대 = 「합격 아님」
+# 근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래1_가드모듈_보안상무.md A 표. 판정 함수를 가짜 관측 기록으로 직접 부른다(러너 · 실물 0).
+# C27 ⓔ 만 러너 1회(가짜 훅). 「대조」 줄 = 고친 뒤에도 맞는 입력은 그대로 PASS · 합격(회귀 확인 · 옛 모듈도 맞음).
+
+$script:VV = '1.3.70'
+function New-CgExtS {
+    param([string]$S)
+    if ($S -eq 'ok') { return @{ AddrOk = $true; Status = 200; Version = $script:VV } }
+    return @{ AddrOk = $true; Status = 530; Version = $null }
+}
+function New-CgOrgS {
+    param([string]$S)
+    if ($S -eq 'ok') { return @{ Ok = $true; Status = 200; DatabaseOk = $true; Version = $script:VV; UnderInstall = $true; Pid = 5100 } }
+    return @{ Ok = $false; Status = 503; DatabaseOk = $false; Version = $script:VV; UnderInstall = $true; Pid = 5100 }
+}
+function New-CgSvcSm {
+    # 서비스 한 회차 — T(-NoT = 칸 없음) · 상태 · 서비스 프로세스 번호 · S-A 외부(ok / fail) 또는 S-B 원점(ok / fail)
+    param($T, [string]$Svc, [int]$SPid, [string]$Ext, [string]$Org, [switch]$NoT)
+    $h = @{ Svc = $Svc; SvcPid = $SPid }
+    if (-not $NoT) { $h.T = $T }
+    if ($Ext) { $h.Ext = New-CgExtS $Ext }
+    if ($Org) { $h.Origin = New-CgOrgS $Org }
+    return $h
+}
+function New-CgObsSvc {
+    param([object[]]$Samples, [int]$PrePid)
+    return @{
+        Baseline = @{ Ok = $true; Reason = $null; Version = $script:VV; OriginPid = 5100 }
+        Cut = @{ Issued = $true; Ok = $true }; CutUtc = $script:Base; PreSvcPid = $PrePid; Samples = $Samples
+    }
+}
+function New-CgRd {
+    # S-D 한 회차 — T(-NoT = 칸 없음) · 목표 성공 여부 · 대조 성공 · 간격 Skew
+    param($T, [bool]$TOk, $Skew = 0.0, [switch]$NoT)
+    $h = @{ Target = @{ Ok = $TOk }; Control = @{ Ok = $true }; Skew = $Skew }
+    if (-not $NoT) { $h.T = $T }
+    return $h
+}
+function Get-CgSdRounds {
+    # 완료 꼴: T=1~5 목표 실패(대조 성공) · T=6 목표 복귀 → 「완료(첫 실패 뒤 5초 복귀)」. -Skews 로 회차별 Skew 바꿈 · -NoT 로 T 칸 뺌
+    param([object[]]$Skews, [switch]$NoT)
+    $l = New-Object System.Collections.Generic.List[object]
+    for ($i = 1; $i -le 6; $i++) {
+        $sk = 0.0
+        if ($null -ne $Skews -and $Skews.Count -ge $i) { $sk = $Skews[$i - 1] }
+        $l.Add((New-CgRd -T ([double]$i) -TOk ($i -eq 6) -Skew $sk -NoT:$NoT))
+    }
+    return , ($l.ToArray())
+}
+function New-CgObsSd {
+    param([object[]]$Rounds, $HandUtc = $script:Base, $ObsStart = $script:Base, [switch]$NoObsStart)
+    $o = @{ SdBaseline = @{ TargetOk = $true; ControlOk = $true; Version = $script:VV }; Hand = @{ Who = '시험자'; Utc = $HandUtc }; Rounds = $Rounds }
+    if (-not $NoObsStart) { $o.ObsStartUtc = $ObsStart }
+    return $o
+}
+function Get-CgStdResults {
+    # 합격 짝(자동 3 PASS + 반자동 완료) — 종합 대조용 · Stopped 닻 있는 정상 꼴
+    return @{
+        A = Get-ScenarioVerdict -Id 'S-A' -Observation (New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Running' -SPid 4200 -Ext 'ok')))
+        B = Get-ScenarioVerdict -Id 'S-B' -Observation (New-CgObsSvc -PrePid 3100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Stopped' -SPid 0 -Org 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Running' -SPid 3200 -Org 'ok')))
+        C = Get-ScenarioVerdict -Id 'S-C' -Observation @{
+            Baseline = @{ Ok = $true; Version = $script:VV; OriginPid = 5100 }; Cut = @{ Issued = $true; Ok = $true }; CutUtc = $script:Base
+            Samples = @(@{ T = 1.0; Origin = (New-CgOrgS 'fail'); OldAlive = $false }, @{ T = 2.0; Origin = (New-CgOrgS 'ok'); OldAlive = $false })
+        }
+        D = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds))
+    }
+}
+function Assert-CgV {
+    param([string]$Case, [string]$What, $V, [string]$Expect)
+    $got = if ($null -eq $V) { '(없음)' } else { [string]$V.Display }
+    Test-CgCase $Case ('{0} = 「{1}」(실제 「{2}」)' -f $What, $Expect, $got) ($null -ne $V -and $got -eq $Expect)
+}
+$PassA1 = 'PASS(1초) — 5분 안 복구됨'
+$SdDone5 = '반자동 — 완료(첫 실패 뒤 5초 복귀 · 손 1회)'
+
+Invoke-CgCaseBlock 'C23' '[3-V] A1 · S-A · S-B 가 Stopped 를 안 보고(번호 바뀜 · 멈춤 전 실패 1회) PASS → 합격 아님' {
+    $std = Get-CgStdResults
+    Assert-CgV 'C23' '대조 S-A Stopped 닻 = PASS 그대로' $std.A $PassA1
+    Assert-CgV 'C23' '대조 S-B Stopped 닻 = PASS 그대로' $std.B $PassA1
+    # ⓐ 보안상무 측정 입력: T1 Running/번호 100/외부 실패 → T2 Running/번호 200/외부 ok → T3 ok (옛 = PASS(1초))
+    $oa = New-CgObsSvc -PrePid 100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Running' -SPid 100 -Ext 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Running' -SPid 200 -Ext 'ok'), (New-CgSvcSm -T 3.0 -Svc 'Running' -SPid 200 -Ext 'ok'))
+    $va = Get-ScenarioVerdict -Id 'S-A' -Observation $oa
+    Assert-CgV 'C23' 'ⓐ S-A 번호 바뀜만' $va '측정불가(멈춤 미관측)'
+    Test-CgCase 'C23' 'ⓐ 번호 바뀜 = 기록 칸(Notes)만' (@($va.Notes) -contains '서비스 프로세스 번호 바뀜(멈춤 관측 아님 · 기록만)')
+    Test-CgCase 'C23' 'ⓐ 상태 불명 · 인계 · 그 자리 정지' ($va.StateUnknown -and $va.Handoff -and $va.Halt)
+    # ⓐ' -Partial 로 30초 창을 다 채움(T2~T31 Running/번호 200/외부 ok) → 정해짐 = 측정불가(멈춤 미관측)
+    $sl = New-Object System.Collections.Generic.List[object]
+    $sl.Add((New-CgSvcSm -T 1.0 -Svc 'Running' -SPid 100 -Ext 'fail'))
+    for ($k = 2; $k -le 31; $k++) { $sl.Add((New-CgSvcSm -T ([double]$k) -Svc 'Running' -SPid 200 -Ext 'ok')) }
+    Assert-CgV 'C23' "ⓐ' -Partial 창 끝" (Get-ScenarioVerdict -Id 'S-A' -Observation (New-CgObsSvc -PrePid 100 -Samples $sl.ToArray()) -Partial) '측정불가(멈춤 미관측)'
+    # ⓑ S-B 같은 길: T1 Running/번호 바뀜/503 → T2 Running/원점 ok (옛 = PASS(1초))
+    $ob = New-CgObsSvc -PrePid 3100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Running' -SPid 3200 -Org 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Running' -SPid 3200 -Org 'ok'))
+    Assert-CgV 'C23' 'ⓑ S-B 번호 바뀜만' (Get-ScenarioVerdict -Id 'S-B' -Observation $ob) '측정불가(멈춤 미관측)'
+    # ⓒ S-B 503 이 Stopped 관측 전에만: T1 StopPending/503 → T2 Stopped/원점 ok → T3 Running/ok (옛 = PASS(1초))
+    $oc = New-CgObsSvc -PrePid 3100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'StopPending' -SPid 3100 -Org 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Stopped' -SPid 0 -Org 'ok'), (New-CgSvcSm -T 3.0 -Svc 'Running' -SPid 3200 -Org 'ok'))
+    $vc = Get-ScenarioVerdict -Id 'S-B' -Observation $oc
+    Assert-CgV 'C23' 'ⓒ S-B 멈춤 전 503 만' $vc '측정불가(끊김 미반영)'
+    Test-CgCase 'C23' 'ⓒ 상태 불명 · 인계' ($vc.StateUnknown -and $vc.Handoff)
+    # ⓓ 종합: ⓐ + 나머지 합격 짝 → 합격 아님 · 종료 1 · 경고 · 인계
+    $s = Get-Summary -Results @($va, $std.B, $std.C, $std.D)
+    Test-CgCase 'C23' ('ⓓ 종합 합격 아님 · 종료 1(실제 「' + $s.Header + '」)') (-not $s.Header.StartsWith('합격') -and $s.ExitCode -eq 1)
+    Test-CgCase 'C23' 'ⓓ 경고 줄 · 인계 끝 줄' ((@($s.Text) -contains $WarnLine) -and $s.Text[-1] -eq $HandoffEnd)
+}
+
+Invoke-CgCaseBlock 'C24' '[3-V] A2 · 회차 시각 칸 T 누락 · 숫자 아님 · 음수 · 역행 → 측정불가(관측 기록 무효) · 합격 아님' {
+    $want = '측정불가(관측 기록 무효)'
+    # ⓐ T 누락(옛 = PASS(0초))
+    $oa = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -NoT -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -NoT -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    $va = Get-ScenarioVerdict -Id 'S-A' -Observation $oa
+    Assert-CgV 'C24' 'ⓐ S-A T 누락' $va $want
+    Test-CgCase 'C24' 'ⓐ 상태 불명 · 인계 · 그 자리 정지' ($va.StateUnknown -and $va.Handoff -and $va.Halt)
+    # ⓑ 역행 T=10 → 900 → 12(옛 = PASS(2초)) · -Partial 도 바로 정해짐(러너가 그 자리 멈춤)
+    $ob = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T 10.0 -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 900.0 -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 12.0 -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    Assert-CgV 'C24' 'ⓑ S-A 역행' (Get-ScenarioVerdict -Id 'S-A' -Observation $ob) $want
+    Assert-CgV 'C24' 'ⓑ S-A 역행 -Partial' (Get-ScenarioVerdict -Id 'S-A' -Observation $ob -Partial) $want
+    # ⓒ 숫자 아님(글자 「1」 「2」 · 옛 = PASS(1초))
+    $oc = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T '1' -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T '2' -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    Assert-CgV 'C24' 'ⓒ S-A T 글자' (Get-ScenarioVerdict -Id 'S-A' -Observation $oc) $want
+    # ⓓ 음수 T=-5 → -4(옛 = PASS(1초))
+    $od = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T (-5.0) -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T (-4.0) -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    Assert-CgV 'C24' 'ⓓ S-A T 음수' (Get-ScenarioVerdict -Id 'S-A' -Observation $od) $want
+    # ⓔ 같은 값(엄격 증가 아님) T=1 → 1(옛 = PASS(0초)) · NaN
+    $oe = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 1.0 -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    Assert-CgV 'C24' 'ⓔ S-A T 같은 값' (Get-ScenarioVerdict -Id 'S-A' -Observation $oe) $want
+    $on = New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T ([double]::NaN) -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 2.0 -Svc 'Running' -SPid 4200 -Ext 'ok'))
+    Assert-CgV 'C24' 'ⓔ S-A T NaN' (Get-ScenarioVerdict -Id 'S-A' -Observation $on) $want
+    # ⓕ S-B T 누락(옛 = PASS(0초))
+    $of = New-CgObsSvc -PrePid 3100 -Samples @((New-CgSvcSm -NoT -Svc 'Stopped' -SPid 0 -Org 'fail'), (New-CgSvcSm -NoT -Svc 'Running' -SPid 3200 -Org 'ok'))
+    Assert-CgV 'C24' 'ⓕ S-B T 누락' (Get-ScenarioVerdict -Id 'S-B' -Observation $of) $want
+    # ⓖ S-D T 누락(옛 = 완료(0초)) · 역행
+    $vg = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -NoT))
+    Assert-CgV 'C24' 'ⓖ S-D T 누락' $vg ('반자동 — 실패(' + $want + ')')
+    Test-CgCase 'C24' 'ⓖ S-D 인계 · 상태 불명' ($vg.Handoff -and $vg.StateUnknown)
+    $rr = Get-CgSdRounds
+    $rr[3].T = 2.5
+    Assert-CgV 'C24' 'ⓖ S-D T 역행' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rr)) ('반자동 — 실패(' + $want + ')')
+    # ⓗ 종합: ⓐ + 나머지 합격 짝 → 합격 아님 · 종료 1
+    $std = Get-CgStdResults
+    $s = Get-Summary -Results @($va, $std.B, $std.C, $std.D)
+    Test-CgCase 'C24' ('ⓗ 종합 합격 아님 · 종료 1(실제 「' + $s.Header + '」)') (-not $s.Header.StartsWith('합격') -and $s.ExitCode -eq 1)
+}
+
+Invoke-CgCaseBlock 'C25' '[3-V] A3 · S-D 손 기록 시각이 관측 창 밖 · 대조 간격 Skew NaN · 음수 → 합격 아님' {
+    $wantRec = '반자동 — 실패(측정불가(관측 기록 무효))'
+    $wantObs = '반자동 — 실패(측정불가(관측자 연결 불명))'
+    $rd = Get-CgSdRounds
+    Assert-CgV 'C25' '대조 관측 시작 = 손 기록 · Skew 0 → 완료' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd)) $SdDone5
+    # ⓐ 손 기록 2000-01-01T00:00:00Z(관측은 2026) — 옛 = 완료
+    $va = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -HandUtc '2000-01-01T00:00:00Z')
+    Assert-CgV 'C25' 'ⓐ 손 기록 2000년' $va $wantRec
+    Test-CgCase 'C25' 'ⓐ 인계 · 상태 불명' ($va.Handoff -and $va.StateUnknown)
+    # ⓑ 관측 시작 기록 없음(fail-closed · 옛 = 완료)
+    Assert-CgV 'C25' 'ⓑ 관측 시작 없음' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -NoObsStart)) $wantRec
+    # ⓒ 손 기록이 관측 시작보다 10초 뒤
+    Assert-CgV 'C25' 'ⓒ 손 기록이 관측보다 뒤' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -HandUtc $script:Base.AddSeconds(10))) $wantRec
+    # ⓓ 관측 시작 = 손 기록 + 3초(상한 2초 넘김) · ⓔ 첫 회차(T=1)가 관측 시작(손 기록 + 1.5초) 앞
+    Assert-CgV 'C25' 'ⓓ 관측 시작이 손 기록 + 3초' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -ObsStart $script:Base.AddSeconds(3))) $wantRec
+    Assert-CgV 'C25' 'ⓔ 첫 회차가 관측 시작 앞' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds $rd -ObsStart $script:Base.AddMilliseconds(1500))) $wantRec
+    # ⓕ Skew NaN · ⓖ −500 · −0.001(옛 = 완료)
+    Assert-CgV 'C25' 'ⓕ Skew NaN' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @([double]::NaN)))) $wantObs
+    Assert-CgV 'C25' 'ⓖ Skew -500' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @(0.0, 0.0, (-500.0))))) $wantObs
+    Assert-CgV 'C25' 'ⓖ Skew -0.001' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @(0.0, 0.0, 0.0, 0.0, 0.0, (-0.001))))) $wantObs
+    # 대조 경계: Skew 2(상한 그대로) = 완료 · 2.001 = 관측자 연결 불명
+    Assert-CgV 'C25' '대조 Skew 2 = 완료' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @(2.0)))) $SdDone5
+    Assert-CgV 'C25' '대조 Skew 2.001 = 관측자 연결 불명' (Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @(2.001)))) $wantObs
+    # ⓗ 종합: 자동 3 PASS + ⓐ → 「미합격 — … 반자동 1 실패(측정불가(관측 기록 무효)) …」 · 종료 1
+    $std = Get-CgStdResults
+    $s = Get-Summary -Results @($std.A, $std.B, $std.C, $va)
+    Test-CgCase 'C25' ('ⓗ 종합 = 미합격(반자동 실패) · 종료 1(실제 「' + $s.Header + '」)') ($s.Header -eq '미합격 — 자동 3 PASS · 반자동 1 실패(측정불가(관측 기록 무효)) · 시험 종료 아님 · 인계 필요(§5-4)' -and $s.ExitCode -eq 1)
+}
+
+Invoke-CgCaseBlock 'C26' '[3-V] A4 · Get-Summary 같은 ID 결과 두 번 → 거절(뒤가 앞을 안 덮음 · 종료 1 · 경고 줄)' {
+    $std = Get-CgStdResults
+    $fa = Get-ScenarioVerdict -Id 'S-A' -Observation (New-CgObsSvc -PrePid 4100 -Samples @((New-CgSvcSm -T 1.0 -Svc 'Stopped' -SPid 0 -Ext 'fail'), (New-CgSvcSm -T 302.0 -Svc 'Stopped' -SPid 0 -Ext 'fail')))
+    Assert-CgV 'C26' '준비 S-A FAIL(상태 불명 · 인계)' $fa 'FAIL — 5분 안 복구 안 됨'
+    $s0 = Get-Summary -Results @($std.A, $std.B, $std.C, $std.D)
+    Test-CgCase 'C26' '대조 중복 없음 = 합격 · 종료 0' ($s0.Header -eq $HdrPass -and $s0.ExitCode -eq 0)
+    $dupA = '⚠ 결과 중복(S-A 2건) · 뒤 결과로 앞을 덮지 않음 · 사람 확인 필요'
+    # ⓐ 보안상무 측정 입력: S-A FAIL 다음 S-A PASS(옛 = 합격 · 종료 0 · 경고 0 · 인계 0)
+    $sa = Get-Summary -Results @($fa, $std.A, $std.B, $std.C, $std.D)
+    Test-CgCase 'C26' ('ⓐ 머리 = 미합격(결과 중복 · S-A 2건)(실제 「' + $sa.Header + '」)') ($sa.Header.StartsWith('미합격(결과 중복 · S-A 2건)'))
+    Test-CgCase 'C26' 'ⓐ 종료 코드 1' ($sa.ExitCode -eq 1)
+    Test-CgCase 'C26' 'ⓐ 결과 중복 경고 줄' (@($sa.Text) -contains $dupA)
+    Test-CgCase 'C26' 'ⓐ 상태 불명 경고 줄(FAIL 쪽 그대로)' (@($sa.Text) -contains $WarnLine)
+    Test-CgCase 'C26' 'ⓐ 인계 끝 줄' ($sa.Text[-1] -eq $HandoffEnd)
+    Test-CgCase 'C26' 'ⓐ 건별 S-A 줄 = 앞 결과(FAIL) · 뒤 PASS 가 안 덮음' ((@($sa.Text) -contains ($LblA + 'FAIL — 5분 안 복구 안 됨')) -and -not (@($sa.Text) -contains ($LblA + $PassA1)))
+    Test-CgCase 'C26' 'ⓐ 고정 줄 = 머리 바로 다음 줄' ($sa.Text[1] -eq $Fixed4)
+    foreach ($bad in @('통신', '#27', '17 중')) { Test-CgCase 'C26' ('ⓐ 머리에 「' + $bad + '」 0') (-not $sa.Header.Contains($bad)) }
+    # ⓑ 순서 반대(PASS 다음 FAIL) — 미합격 · 종료 1 · 경고 · 인계(뒤 FAIL 의 인계가 사라지지 않음)
+    $sb = Get-Summary -Results @($std.A, $std.B, $std.C, $std.D, $fa)
+    Test-CgCase 'C26' 'ⓑ 순서 반대 = 미합격(결과 중복) · 종료 1 · 경고 2줄 · 인계' ($sb.Header.StartsWith('미합격(결과 중복 · S-A 2건)') -and $sb.ExitCode -eq 1 -and (@($sb.Text) -contains $dupA) -and (@($sb.Text) -contains $WarnLine) -and $sb.Text[-1] -eq $HandoffEnd)
+    # ⓒ 같은 PASS 두 번 · ⓓ S-D 두 번(완료 · 실패) — 다른 칸이 다 맞아도 합격 · 종료 0 없음
+    $sc = Get-Summary -Results @($std.A, $std.A, $std.B, $std.C, $std.D)
+    Test-CgCase 'C26' 'ⓒ 같은 PASS 두 번 = 미합격 · 종료 1 · 경고' ($sc.Header.StartsWith('미합격(결과 중복 · S-A 2건)') -and $sc.ExitCode -eq 1 -and (@($sc.Text) -contains $dupA))
+    $sdFail = Get-ScenarioVerdict -Id 'S-D' -Observation (New-CgObsSd -Rounds (Get-CgSdRounds -Skews @([double]::NaN)))
+    $sd2 = Get-Summary -Results @($std.A, $std.B, $std.C, $std.D, $sdFail)
+    Test-CgCase 'C26' ('ⓓ S-D 두 번 = 미합격 · 종료 1(실제 「' + $sd2.Header + '」)') ($sd2.Header.StartsWith('미합격(결과 중복 · S-D 2건)') -and $sd2.ExitCode -eq 1 -and $sd2.Text[-1] -eq $HandoffEnd)
+}
+
+Invoke-CgCaseBlock 'C27' '[3-V] A5 · db.conf 포트 · 슬롯이 전각 · 아랍 숫자 → 예외 0 · 거절 판정 객체(fail-closed)' {
+    $fw = -join [char[]](0xFF11, 0xFF15, 0xFF12, 0xFF15, 0xFF17)   # 전각 숫자 15257
+    $ar = -join [char[]](0x0661, 0x0665, 0x0662, 0x0665, 0x0667)   # 아랍-인도 숫자 15257
+    $ar9 = [string][char]0x0669
+    # ⓐ 변환 함수 — 예외 0 · 없음($null) / ASCII 는 그대로(대조)
+    Test-CgCase 'C27' 'ⓐ 포트 전각 = 없음(예외 0)' ($null -eq (ConvertTo-CgPort -Value $fw))
+    Test-CgCase 'C27' 'ⓐ 포트 아랍 숫자 = 없음(예외 0)' ($null -eq (ConvertTo-CgPort -Value $ar))
+    Test-CgCase 'C27' 'ⓐ 슬롯 아랍 숫자 = 없음(예외 0)' ($null -eq (ConvertTo-CgSlot -Value $ar9))
+    Test-CgCase 'C27' '대조 ASCII 포트 · 슬롯 그대로' ((ConvertTo-CgPort -Value '15257') -eq 15257 -and (ConvertTo-CgSlot -Value '9') -eq 9)
+    # ⓑ Get-EnvSnapshot(가짜 공급자 · db.conf API_PORT = 전각) → 객체(예외 0) · 원점 GET 0
+    $w = [CgWorld]::new($script:Base, (New-CgCfg -Over $null))
+    $e = New-CgCaseEnv -Opt @{ ApiPort = $fw }
+    $snap = Get-EnvSnapshot -Providers (New-CgProviders -W $w -E $e -Repo $script:RepoOk) -NowUtc $script:Base
+    Test-CgCase 'C27' 'ⓑ 스냅숏 = 객체(예외 0) · 원점 GET 0' ($null -ne $snap -and $w.LocalGets -eq 0)
+    # ⓒ Get-GuardDecision → 객체(예외 0) · Allowed = $false(불리언) · 거절 = G5 하나
+    $g = Get-GuardDecision -Snapshot $snap -NowUtc $script:Base
+    Test-CgCase 'C27' 'ⓒ 판정 객체 · Allowed = 불리언 거짓' ($null -ne $g -and $g.Allowed -is [bool] -and $g.Allowed -eq $false)
+    Test-CgCase 'C27' ('ⓒ 거절 = G5 API_PORT 없음 · 못 읽음 하나(실제 ' + (@($g.RejectReasons) -join ' / ') + ')') ((@($g.RejectReasons) -join '|') -eq 'G5 API_PORT 없음 · 못 읽음')
+    # ⓓ 아랍 숫자 포트를 스냅숏에 넣고 판정만 다시 → 객체 · 거절
+    $snap.DbConf.Values['API_PORT'] = $ar
+    $g2 = Get-GuardDecision -Snapshot $snap -NowUtc $script:Base
+    Test-CgCase 'C27' 'ⓓ 아랍 숫자 포트 = 판정 객체 · 거절' ($null -ne $g2 -and $g2.Allowed -eq $false -and (@($g2.RejectReasons) -contains 'G5 API_PORT 없음 · 못 읽음'))
+    # ⓔ 러너 전체 런(가짜 훅) → 가드 거절(G5 하나) · 끊기 0 · 외부 GET 0 · 손 0 · 파일 0 · 종료 1
+    $r = Invoke-CgRun -Env @{ ApiPort = $fw }
+    Assert-CgRejected 'C27' $r @('G5')
+    # ⓕ 러너 거절 조건 = Allowed 가 참이 아니면 거절($null · 객체 없음도 거절 쪽 · 러너 규칙 고정)
+    $rt = [System.IO.File]::ReadAllText($script:RunnerPath, [System.Text.Encoding]::UTF8)
+    Test-CgCase 'C27' 'ⓕ 러너 거절 조건 = 「if (-not $guard.Allowed)」' ($rt.Contains('if (-not $guard.Allowed) {'))
+}
+
 # ── 부가(경우 번호 밖 · 세부 확인에 셈)
 Invoke-CgCaseBlock '부가' '훅 전부-아니면-멈춤 · 판정 모드 · 보고서 폴더 · 캐시 회피 · 러너 정적 검사' {
     $x = Invoke-CgRun -DropHook @('ReadScmEvents')
@@ -1094,5 +1326,5 @@ if ($script:Fails.Count -gt 0) {
 if (-not $script:CaseOk['부가']) { Write-Host '부가 확인(경우 번호 밖) 어긋남 — 세부 확인 칸에 셈' }
 Write-Host ('걸린 시간 {0}초' -f [math]::Round($sw.Elapsed.TotalSeconds))
 Write-Host ('Test-CommsGuard 끝 — 경우 {0}/{1} 일치 · 세부 확인 {2}/{3} · 진짜 끊기 호출 {4}' -f $okCases, $caseIds.Count, $script:DetailPass, $script:DetailTotal, $real)
-if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq 22 -and $script:DetailPass -eq $script:DetailTotal -and $real -eq 0) { exit 0 }
+if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq 27 -and $script:DetailPass -eq $script:DetailTotal -and $real -eq 0) { exit 0 }
 exit 1

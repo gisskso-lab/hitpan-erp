@@ -594,6 +594,9 @@ function Invoke-RgSemi {
     Add-RgHistory -Utc $handUtc -Key $Cat.Key
     Write-RgLine ('  손 기록: {0} · {1}' -f $who, (Format-CgUtc -Value $handUtc))
 
+    # (11/19 [3-V] A3) 관측 시작 시각 — 손 기록 바로 뒤 · 첫 회차 전. 모듈이 「손 기록 ≤ 관측 시작 ≤ 손 기록 + 2초」 로 관측 창을 손 기록에 묶는다.
+    $obs.ObsStartUtc = & $script:H.Now
+
     # 관측 창 — 1초 회차마다 목표 GET 바로 뒤 대조 GET 1회(1:1) · 회차마다 -Partial 판정
     $rounds = New-Object System.Collections.Generic.List[object]
     $cap = $c.SdWindowSec + $c.RecoverWindowSec + 60
