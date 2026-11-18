@@ -20,6 +20,9 @@
 #     guard G5 의 작업 나무 대조(diff · 새 파일) = 장치 커밋에서 새로 만든 임시 색인으로 잰다 — 저장소 색인의 stat · 개체 이름을 믿지 않음(색인 stat 위조 길 닫음)
 #       임시 색인 = guard 가 방금 비우고 만든 snap-guard 폴더 안(저장소 작업 나무 밖 · 원자료 0) · 명령 앞 GIT_INDEX_FILE(그 git 한 번에만 · 내보내지 않음) · 끝나면 지움
 #     m1 이 읽는 커밋 = 장치 커밋(g_dev · m3 · G5 와 같은 출처) — 옛 글자(K2‴) = HEAD
+#   v5 별건 A K2⁵([3-V] 차이 재셈 A #1 · [4] F10 — git 속성 변환으로 G5 우회):
+#     guard G5 에 작업 나무 원 바이트 대조를 더함 — 장치 커밋 ls-tree -r(--no-replace-objects) 의 경로 · 모드 · blob 이름 ↔ 작업 나무 파일마다 git hash-object --no-filters(속성 변환 없이)
+#       종류 대조(장치 커밋 = 일반 파일인데 작업 나무 = 심볼릭 링크 · 폴더 · 없음 = 빨강) · 임시 색인 diff · ls-files --others 는 그대로(둘 다 같아야 초록) · 원자료 칸 무변(tree_changed = 경로 이름만)
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -382,6 +385,12 @@ NODE
   #     색인 표시 단언(ls-files -v) · HEAD 단언 · refs/replace/ 단언은 저장소 색인 · 참조 그대로(증거 칸 유지)
   #     옛 글자(K2″) = if [ -n "$dev" ]; then git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
   #                   git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
+  #   v5 별건 A K2⁵([3-V] 차이 재셈 A #1 · [4] F10): 임시 색인 diff 는 파일을 다시 해시하되 속성(.gitattributes · info/attributes)의 clean 변환 뒤 내용을 해시한다
+  #     → 줄 끝 CR · 문자 부호 변환(working-tree-encoding)으로 바이트가 달라도 같다고 본다. 그래서 작업 나무 원 바이트를 따로 대조한다
+  #     장치 커밋 ls-tree -r -z(--no-replace-objects) 의 경로 · 모드 · blob 이름 ↔ 작업 나무 파일마다 git hash-object --no-filters(속성 변환 없이 · M1 「원 바이트」 와 같은 꼴)
+  #     종류 대조: 장치 커밋 = 일반 파일(100644 · 100755)인데 작업 나무 = 심볼릭 링크 · 폴더 · 없음이면 다름(hash-object 는 링크를 따라가므로 -L 먼저) · 장치 커밋의 다른 모드 = 대조 불가 = 다름
+  #     다른 경로 = tree.txt 에 이름만(이미 있으면 한 번) · 장치 커밋 목록을 못 읽거나 비면 t1=1 · 임시 색인 diff · ls-files --others 는 지우지 않고 함께(둘 다 같아야 초록)
+  #     외부 명령 = git(G5) · grep(G5) 만(새 이름 0) · 환경 변수 내보내기 0
   if [ $stop = 0 ]; then
     devref=$(g_devref); hok=0; fok=0; rok=0
     dev=$(g_dev) || { dev=""; t1=1; }
@@ -391,6 +400,18 @@ NODE
       GIT_INDEX_FILE="$idx" git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
     else t1=1; fi
     rm -f "$idx"
+    if [ -n "$dev" ]; then
+      if git --no-replace-objects -C "$REPO" ls-tree -r -z "$dev" -- "${G_TREE[@]}" > "$a/dev-tree.z" 2>> "$a/tree.err" && [ -s "$a/dev-tree.z" ]; then
+        local ent meta p m o w
+        while IFS= read -r -d '' ent; do
+          meta=${ent%%$'\t'*}; p=${ent#*$'\t'}; m=${meta%% *}; o=${meta##* }; w=""
+          case "$m" in
+            100644|100755) if [ ! -L "$REPO/$p" ] && [ -f "$REPO/$p" ]; then w=$(git -C "$REPO" hash-object --no-filters -- "$p" 2>> "$a/tree.err") || w=""; fi ;;
+          esac
+          if [ -z "$w" ] || [ "$w" != "$o" ]; then grep -qxF -- "$p" "$a/tree.txt" || printf '%s\n' "$p" >> "$a/tree.txt"; fi
+        done < "$a/dev-tree.z"
+      else t1=1; fi
+    fi
     hd=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
     if [ -n "$dev" ]; then dv=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
     if [ -n "$hd" ] && [ "$hd" = "$dv" ]; then hok=1; fi

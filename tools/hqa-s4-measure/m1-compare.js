@@ -1,7 +1,7 @@
 'use strict';
 // M1 [장치] 소스 tar ↔ 시험 앱 나무 — 고침1 F1
 //   사용: node m1-compare.js <나무.tsv> <tar.tsv> <출력 JSON>
-//     나무.tsv = 「경로 \t blob」 (git ls-tree -r HEAD:tools/hqa-s4-fixture)
+//     나무.tsv = 「경로 \t blob」 (git ls-tree -r <장치 커밋>:tools/hqa-s4-fixture · 장치 커밋 = boot.sh g_dev · v5 별건 A K2⁗ 뒤 · 옛 글자: HEAD:tools/hqa-s4-fixture)
 //     tar.tsv  = 「경로 \t 원 바이트 blob(--no-filters) \t 속성 적용 blob(--path)」
 //   경로로 짝을 맞춘다(정렬 순서와 무관). 판정 = 속성 적용 blob 이 나무 blob 과 전부 같음 · 파일 집합 같음.
 //   원 바이트 blob 도 함께 남긴다 — filter_only_match = 속성 적용으로만 같아진 파일 수(줄 끝 등 정규화 차이만 있는 파일).
