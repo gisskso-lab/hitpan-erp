@@ -362,7 +362,7 @@
 - 앞 단면 = `snap`(⑤ 바로 앞) · 뒤 = `guard`(M3 뒤). 순서 G1(+G6 대조군) → G2 → G3 → G4 → G5 · 첫 빨강에서 멈춤 · 앞 단면 없으면 빨강(G 판정 전).
 - G1 환경 변수 이름별 값 해시 — 바뀌거나 생기거나 사라진 이름 ⊄ 허용이면 빨강. 허용 9 = `HQA_SRC_DIR` · `HQA_CHROME` · `HQA_PW_DIR` + 실행기 단계별 이름 6(`GITHUB_ACTION` · `GITHUB_ENV` · `GITHUB_OUTPUT` · `GITHUB_PATH` · `GITHUB_STATE` · `GITHUB_STEP_SUMMARY` · 잠정 — 설계 §7 Q3 리허설 첫 런 뒤 PM 고정). `PATH` · `BASH_ENV` · `NODE_OPTIONS` · `LD_PRELOAD` · `GIT_*` 허용 0.
 - G2 git 설정 출처별 내용 · G3 `node` · `git` · `bash` 실행 파일 바이트 · G4 `/etc/ld.so.preload` 있음 · 내용 — 앞뒤 다르면 빨강.
-- G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(기준 = §12-4) + HEAD = 장치 커밋 + 색인 표시 전부 `H`(assume-unchanged · skip-worktree 0) — 하나라도 어긋나면 빨강.
+- G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(기준 = §12-4) + HEAD = 장치 커밋 + 색인 표시 전부 `H`(assume-unchanged · skip-worktree 0) — 하나라도 어긋나면 빨강. (별건 A K2″) 여기서 「장치 커밋」 은 replace 참조를 끈 장치 커밋이다 — 장치 커밋을 읽는 git 호출(G5 diff · HEAD · 장치 커밋 확인 · M3 잠금 blob 기대값)은 명령 인자 `--no-replace-objects`(환경 변수로 내보내지 않음 · G1 이 자기 자신을 잡지 않게) + `refs/replace/` 참조 0(하나라도 있으면 빨강 · 원자료 `replace_refs_none` = 참거짓만).
 
 ### 12-6. 음성 시험 ↔ 본 표본 구분 (HQA 사전협의 회신 6970680614)
 

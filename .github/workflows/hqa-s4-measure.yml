@@ -208,7 +208,8 @@ jobs:
               rules.json)  echo 62e8321fb410b262903a8de8da52255105b2e843597bcfccafe7d4b507d6ec06 ;;
             esac
           }
-          sum() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+          # v5 별건 A K2″([3-V] P2 #2 ②): 비교 도구 = 절대 경로(실행기 기본 이미지) — 앞 단계가 PATH 앞에 넣은 폴더의 같은 이름 도구를 안 탄다 · 옛 글자 = sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+          sum() { /usr/bin/sha256sum "$1" 2>/dev/null | /usr/bin/cut -d' ' -f1; }
           ok=1; rows=""
           for n in judge.js mask.js hqa-gate.js rules.json; do
             s=false; [ -f "$d/$n" ] && [ "$(sum "$d/$n")" = "$(want "$n")" ] && s=true

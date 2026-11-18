@@ -173,12 +173,14 @@ m3() {
   local f got exp lockok=1 lockmsg="" circ=x dev="" devref direx=1 trc=0
   : > "$WORK/m3-lock.tsv"
   # v5 별건 A K2′([3-V] P1-2): blob 기대값 기준 = 장치 커밋(g_dev) — 옛 글자(K2) = "HEAD:tools/hqa-s4-measure/pw/$f"
+  # v5 별건 A K2″([3-V] P1 replace 참조): 장치 커밋을 읽는 git 호출 = 명령 인자 --no-replace-objects(refs/replace 로 장치 커밋을 바꿔치면 기대값도 바뀜)
+  #   환경 변수(GIT_NO_REPLACE_OBJECTS)로 내보내지 않는다 — guard G1 이 자기 자신을 「바뀜」 으로 잡음 · 옛 글자(K2′) = exp=$(git -C "$REPO" rev-parse --verify -q "$dev:…")
   devref=$(g_devref)
   dev=$(g_dev) || { dev=""; lockok=0; lockmsg="$lockmsg devref"; }
   for f in package.json package-lock.json; do
     cp "$HERE/pw/$f" "$pw/$f" 2>> "$WORK/m3-lock.err" || lockok=0
     got=$(git -C "$REPO" hash-object --no-filters -- "$pw/$f" 2>> "$WORK/m3-lock.err") || got=""
-    exp=""; if [ -n "$dev" ]; then exp=$(git -C "$REPO" rev-parse --verify -q "$dev:tools/hqa-s4-measure/pw/$f" 2>> "$WORK/m3-lock.err") || exp=""; fi
+    exp=""; if [ -n "$dev" ]; then exp=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q "$dev:tools/hqa-s4-measure/pw/$f" 2>> "$WORK/m3-lock.err") || exp=""; fi
     if [ -n "$got" ] && [ "$got" = "$exp" ]; then printf '%s\t1\n' "$f" >> "$WORK/m3-lock.tsv"; else printf '%s\t0\n' "$f" >> "$WORK/m3-lock.tsv"; lockok=0; lockmsg="$lockmsg blob:$f"; fi
   done
   # v5 별건 A K2′([3-V] P1-1): 설치 자리 안 = 정확히 잠금 두 파일(숨은 잠금 · 설정 파일 · 그 밖 0) — 아니면 빨강 · npm ci 안 돎
@@ -301,6 +303,7 @@ snap() {
 guard() {
   local s="$WORK/snap" a="$WORK/snap-guard" f have=1 stop=0 r1="" r2="" r3="" r4="" r5="" t1=0 t2=0
   local dev="" devref="" hd="" dv="" hok="" fok=""   # v5 별건 A K2′([3-V] P1-2) — G5 기준 · HEAD = 장치 커밋 · 색인 표시
+  local rok=""   # v5 별건 A K2″([3-V] P1 replace 참조) — G5 refs/replace/ 비어 있음
   rm -rf "$a"; mkdir -p "$a"
   for f in env.json git-config.txt bins.tsv ld-preload.txt; do [ -f "$s/$f" ] || have=0; done
   [ $have = 1 ] || stop=1
@@ -332,21 +335,25 @@ NODE
   # G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(바뀐 · 지운 · 새 파일 · 무시 파일 포함)
   #   v5 별건 A K2′([3-V] P1-2): 대조 기준 = 장치 커밋(g_dev) — 옛 글자(K2) = git -C "$REPO" diff --name-only HEAD -- "${G_TREE[@]}"
   #     + HEAD = 장치 커밋(창 안에서 HEAD 를 옮기면 빨강) + 색인 표시 전부 H(assume-unchanged · skip-worktree 가 걸린 파일은 diff 가 안 봄 → 빨강)
+  #   v5 별건 A K2″([3-V] P1 replace 참조): 장치 커밋을 읽는 git 호출(diff · HEAD · "$dev^{commit}") = 명령 인자 --no-replace-objects
+  #     + refs/replace/ 비어 있음(하나라도 있으면 빨강 · 원자료 = 참거짓만) — 환경 변수로 내보내지 않음(G1 이 자기 자신을 잡음)
+  #     옛 글자(K2′) = git -C "$REPO" diff --name-only "$dev" · git -C "$REPO" rev-parse --verify -q HEAD · git -C "$REPO" rev-parse --verify -q "$dev^{commit}"
   if [ $stop = 0 ]; then
-    devref=$(g_devref); hok=0; fok=0
+    devref=$(g_devref); hok=0; fok=0; rok=0
     dev=$(g_dev) || { dev=""; t1=1; }
-    if [ -n "$dev" ]; then git -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
+    if [ -n "$dev" ]; then git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
     git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
-    hd=$(git -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
-    if [ -n "$dev" ]; then dv=$(git -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
+    hd=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
+    if [ -n "$dev" ]; then dv=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
     if [ -n "$hd" ] && [ "$hd" = "$dv" ]; then hok=1; fi
     git -C "$REPO" ls-files -v -- "${G_TREE[@]}" > "$a/flags.txt" 2>> "$a/tree.err" || t2=1
     if [ -s "$a/flags.txt" ] && ! grep -qv '^H ' "$a/flags.txt"; then fok=1; fi
-    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ] && [ $hok = 1 ] && [ $fok = 1 ]; then r5=1; else r5=0; fi
+    if git --no-replace-objects -C "$REPO" for-each-ref --format='%(refname)' refs/replace/ > "$a/replace.txt" 2>> "$a/tree.err"; then [ -s "$a/replace.txt" ] || rok=1; else t2=1; fi
+    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ] && [ $hok = 1 ] && [ $fok = 1 ] && [ $rok = 1 ]; then r5=1; else r5=0; fi
   fi
-  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "$hok" "$fok" "$devref" "${G_ALLOW[@]}" <<'NODE'
+  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "$hok" "$fok" "$devref" "$rok" "${G_ALLOW[@]}" <<'NODE'
 const fs = require('fs');
-const [s, a, out, have, r1, r2, r3, r4, r5, hok, fok, devref, ...allow] = process.argv.slice(2);
+const [s, a, out, have, r1, r2, r3, r4, r5, hok, fok, devref, rok, ...allow] = process.argv.slice(2);
 const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
 const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()) : []);
 const tri = (r) => (r === '1' ? true : r === '0' ? false : null);
@@ -387,6 +394,8 @@ const doc = {
   // v5 별건 A K2′([3-V] P1-2): G5 기준(GITHUB_SHA | HEAD = 로컬 시험 | none) · HEAD = 장치 커밋 · 색인 표시 전부 H · 표시 걸린 경로(이름만)
   dev_ref: devref || null, head_is_dev: tri(hok), index_flags_ok: tri(fok),
   index_flagged: fok === '0' ? lines(a + '/flags.txt').filter((l) => !l.startsWith('H ')).map((l) => l.slice(2)).slice(0, 50) : [],
+  // v5 별건 A K2″([3-V] P1 replace 참조): refs/replace/ 비어 있음 — 참거짓만(참조 이름 · 개체 이름 0)
+  replace_refs_none: tri(rok),
   values: 'names and true/false only - no values, no hashes (snapshot stays in the work folder)',
 };
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
