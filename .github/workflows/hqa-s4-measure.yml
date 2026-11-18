@@ -16,6 +16,12 @@
 # - 고침5 H2(작업지시서 20261116작 §8 · §3-PM 결-6 · 결-7 · 결-9 · §11 K-1 · K-2): 트리거 · 권한 · 외부 액션 SHA 무변
 #   판독기 자체시험 --out(K-1) · M7 을 M8 · M9 뒤로(결-6 甲 · --withheld = K-2) · verdict 만 M8′ · M9′ · run.json 회차 줄
 #   run.json 의 stage_outcomes.JUDGE 는 이제 비어 있다(M7 이 run.json 조립 뒤) → round_line.stage_outcomes_late 를 본다
+# - v5 별건 A(작업지시서 20261118작 K1 · 설계 20261118_S4_별건A_측정환경공급망 §5-1 · §5-2 · §5-5 · §5-6 · CTO 결-A9 K-a · K-b): 트리거 · 권한 · 외부 액션 SHA 무변
+#   새 단계 4: M3′ 앞 단면(snap · 판독기 자체시험 뒤 · ⑤ 바로 앞) · ⑤ 자체시험 M0 ③ · ③b(stm0 · M1 앞 · 조건 0 · 끝줄 + rc 만 원자료 negtest/neg-selftest-m0.txt)
+#     · M3′ 설치 뒤 단언(guard · M3 뒤 · M4 앞) · M7 직전 판독기 고정값(pin · M9 뒤 · M7 바로 앞 · 리허설에서도 돎 · 기대값 = 그 단계 본문 글자)
+#   조건: 점검 · 항목 = guard 성공 글자 더함 · M7 = pin 성공 글자 더함 / 판독 축(M7 · M8′ · M9′) = stm0 성공 / 기록 축(run.json 조립 · 회차 줄 · pin) = stm0 성공 또는 건너뜀
+#     / M8 · M9 · M10 · 원자료 운반 조건은 옛 글자 그대로(M0 빨강 회차에도 원자료를 운반한다)
+#   v4 의 「측정 워크플로는 selftest-m0.sh 를 부르지 않는다」(결-18)는 v5 부터 의미가 바뀐다 — ⑤ 가 부른다(MAPPING 「v5 의미 변경」 · 옛 글자 보존)
 name: HQA S4 관문1 GitHub 서버 실측
 
 on:
@@ -83,6 +89,23 @@ jobs:
           if [ "$MODE" = "armed" ]; then echo "판독기 자체시험 파일 없음 — 장전 런은 빨강" >&2; exit 1; fi
           echo "판독기 자체시험 파일 없음 — 리허설이라 계속"
 
+      # ---- v5 별건 A(설계 §5-6 C1 · 결-A8 (나)): M3′ 앞 단면 — ⑤ 바로 앞 · 작업 폴더 snap/(원자료 0) · M3 뒤 guard 가 대조 ----
+      - name: '[장치] M3′ 앞 단면'
+        id: snap
+        run: bash tools/hqa-s4-measure/boot.sh snap "$HQA_RAW" "$HQA_WORK"
+
+      # ---- v5 별건 A(설계 §5-5 ⓐ~ⓖ · §5-6 C1 · CTO 결-A4 · 결-A9 K-a): ⑤ M0 ③ · ③b 음성 시험 — 측정 런마다 · 조건 0(빨강 = 뒤 단계 건너뜀) ----
+      #      경계 = 이 단계 바이트는 장치 커밋으로 고정 · M2 앞(이미지 · 고정 액션뿐) · 허용 검사 약속 0 · 개체 쓰기 = 임시 개체 폴더만
+      #      결과 = 끝줄 + rc 만 원자료 negtest/neg-selftest-m0.txt(음성 시험 데이터 · 본 표본과 폴더 · 이름 분리) · 전체 출력은 작업 폴더
+      - name: '[장치] 자체시험 — M0 ③ · ③b'
+        id: stm0
+        run: |
+          mkdir -p "$HQA_RAW/negtest"
+          rc=0; bash tools/hqa-s4-measure/selftest-m0.sh > "$HQA_WORK/selftest-m0.txt" 2>&1 || rc=$?
+          cat "$HQA_WORK/selftest-m0.txt"
+          { tail -n 1 "$HQA_WORK/selftest-m0.txt"; echo "rc=$rc"; } > "$HQA_RAW/negtest/neg-selftest-m0.txt"
+          exit $rc
+
       - name: '[장치] M1 묶음 지문'
         id: m1
         timeout-minutes: 20
@@ -98,6 +121,11 @@ jobs:
         timeout-minutes: 20
         run: bash tools/hqa-s4-measure/boot.sh m3 "$HQA_RAW" "$HQA_WORK"
 
+      # ---- v5 별건 A(설계 §5-2 · §5-2-1 · §5-6 C1): M3′ 설치 뒤 단언 G1~G6 — 앞 단면(snap)과 대조 · 기본 success() · 빨강 = M4 이하 건너뜀 ----
+      - name: '[장치] M3′ 설치 뒤 단언'
+        id: guard
+        run: bash tools/hqa-s4-measure/boot.sh guard "$HQA_RAW" "$HQA_WORK"
+
       - name: '[장치] M4 앱 기동'
         id: m4
         timeout-minutes: 5
@@ -106,7 +134,8 @@ jobs:
       # ---- 리허설만: 판정 무관 점검(probe) — 고침1 F10 · 고침2 N1-a · 선택자 존재 · 시간 · NODE_PATH · /before 구분 점검(R1~R3 · 지연 0)만 · 항목 판독 0 ----
       - name: '[장치] 리허설 점검(probe · 판정 무관)'
         id: probe
-        if: steps.m0.outputs.mode == 'rehearsal' && steps.m4.outcome == 'success'
+        # v5 별건 A(설계 §5-2 · K-a): 끝에 guard 성공 글자 더함 · 앞 글자 무변 · 상태 함수 0(암묵 success() 유지)
+        if: steps.m0.outputs.mode == 'rehearsal' && steps.m4.outcome == 'success' && steps.guard.outcome == 'success'
         timeout-minutes: 5
         run: |
           HQA_OUT_DIR="$HQA_RAW" HQA_CHROME_PATH="$HQA_CHROME" \
@@ -116,7 +145,8 @@ jobs:
       # ---- 여기부터 장전(armed) 때만. 리허설은 항목 측정 0 ----
       - name: '[측정] M5~M6 항목'
         id: items
-        if: steps.m0.outputs.mode == 'armed'
+        # v5 별건 A(설계 §5-2 · K-a): 끝에 guard 성공 글자 더함 · 앞 글자 무변 · 상태 함수 0(암묵 success() 유지)
+        if: steps.m0.outputs.mode == 'armed' && steps.guard.outcome == 'success'
         run: |
           f=tools/hqa-s4-measure/run-items.js
           if [ ! -f "$f" ]; then echo "측정 스크립트 없음 — 표본 0 = 빨강" >&2; exit 1; fi
@@ -130,7 +160,8 @@ jobs:
       #      옛 순서(M7 → run.json → M8 → M9)는 누출 검사가 표본을 지워도 verdict 가 남았다(V1 2 · S2) — 이제 판독 근거 = 공개 표본
       # ---- 어느 단계가 죽어도 원자료는 남긴다(M0 실패면 m0-assert.json 만) ----
       - name: '[장치] run.json 조립 · 고정 머리 2회차'
-        if: always() && steps.m0.outcome == 'success'
+        # v5 별건 A(CTO 결-A9 K-b 기록 축): 끝에 stm0 성공 또는 건너뜀 글자 더함 · 앞 글자 무변
+        if: always() && steps.m0.outcome == 'success' && (steps.stm0.outcome == 'success' || steps.stm0.outcome == 'skipped')
         env:
           OUT_M0: ${{ steps.m0.outcome }}
           OUT_SELFTEST_LEAK: ${{ steps.stl.outcome }}
@@ -159,9 +190,49 @@ jobs:
           if [ "$M0_OUTCOME" = "success" ]; then extra="--withheld-write"; fi
           node tools/hqa-s4-measure/leak-scan.js "$HQA_RAW" --stage measure --remove $extra
 
+      # ---- v5 별건 A(설계 §5-1 · 결-A2 · CTO 결-A9 K-b 기록 축): M7 직전 판독기 고정값 — 판독 코드 4파일(judge.js 가 불러 쓰는 mask.js · hqa-gate.js 포함) ----
+      #      기대값 = 이 단계 본문 글자(디스크 · 환경 변수에서 안 읽음) · 장치 나무 blob 바이트 sha256 · v5 SHA 묶음과 같은 값
+      #      리허설에서도 돈다(M7 은 장전 때만 → 서버 양성 증거) · 원자료 m7-pin.json = 참거짓만(16진 0) · 다르면 M7 건너뜀(판독 0)
+      - name: '[판독] M7 직전 판독기 고정값'
+        id: pin
+        if: always() && steps.m0.outcome == 'success' && (steps.stm0.outcome == 'success' || steps.stm0.outcome == 'skipped')
+        env:
+          MODE: ${{ steps.m0.outputs.mode }}
+        run: |
+          d=tools/hqa-s4-measure
+          want() {
+            case "$1" in
+              judge.js)    echo 3aee183a08bfebcef98f5289582ae9b12b6e7132473ac0edfbadd151291f1852 ;;
+              mask.js)     echo 5745f962165230f5bbd7d745233c2d1056cd14e70d0fda248521040263ba2810 ;;
+              hqa-gate.js) echo a8e3dd71ada61a16049b9b4c391c1b045c8f8864785dce12451125313bbe58db ;;
+              rules.json)  echo 62e8321fb410b262903a8de8da52255105b2e843597bcfccafe7d4b507d6ec06 ;;
+            esac
+          }
+          sum() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+          ok=1; rows=""
+          for n in judge.js mask.js hqa-gate.js rules.json; do
+            s=false; [ -f "$d/$n" ] && [ "$(sum "$d/$n")" = "$(want "$n")" ] && s=true
+            [ "$s" = true ] || ok=0
+            rows="$rows${rows:+,}\"$n\":$s"
+          done
+          # 대조군(같은 단계 안): 판독기 임시 사본 끝 1바이트를 바꿔 세면 「다름」 이어야 한다 — 「같음」 이면 늘 초록 = 빨강
+          t=$(mktemp); c=false
+          if [ -s "$d/judge.js" ]; then
+            sz=$(wc -c < "$d/judge.js"); lb=$(tail -c 1 "$d/judge.js" | od -An -tu1 | tr -d ' \n')
+            head -c $((sz-1)) "$d/judge.js" > "$t"; printf "\\$(printf '%03o' $((lb ^ 1)))" >> "$t"
+            h=$(sum "$t"); [ -n "$h" ] && [ "$h" != "$(want judge.js)" ] && c=true
+          fi
+          rm -f "$t"
+          [ "$c" = true ] || ok=0
+          okj=false; [ "$ok" = 1 ] && okj=true
+          printf '{"stage":"M7pin","mode":"%s","files":{%s},"control_caught":%s,"ok":%s}\n' "${MODE:-}" "$rows" "$c" "$okj" > "$HQA_RAW/m7-pin.json"
+          if [ "$ok" != 1 ]; then echo "[M7 직전] 판독기 고정값 다름 — 판독 0(M7 건너뜀) · m7-pin.json" >&2; exit 1; fi
+          echo "[M7 직전] 판독기 고정값 같음 4/4 · 대조군 잡음"
+
       - name: '[판독] M7 장치 판독'
         id: judge
-        if: always() && steps.m0.outputs.mode == 'armed' && steps.m0.outcome == 'success' && steps.items.outcome != 'skipped'
+        # v5 별건 A(설계 §5-1 · CTO 결-A9 K-b 판독 축): 끝에 pin 성공 · stm0 성공 글자 더함 · 앞 글자 무변
+        if: always() && steps.m0.outputs.mode == 'armed' && steps.m0.outcome == 'success' && steps.items.outcome != 'skipped' && steps.pin.outcome == 'success' && steps.stm0.outcome == 'success'
         run: |
           f=tools/hqa-s4-measure/judge.js
           if [ ! -f "$f" ]; then echo "판독기 없음 — 빨강" >&2; exit 1; fi
@@ -172,17 +243,20 @@ jobs:
 
       - name: '[장치] M8′ 가림 — verdict 만'
         id: maskv
-        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped'
+        # v5 별건 A(CTO 결-A9 K-b 판독 축): 끝에 stm0 성공 글자 더함 · 앞 글자 무변
+        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped' && steps.stm0.outcome == 'success'
         run: node tools/hqa-s4-measure/mask.js "$HQA_RAW" --only verdict-device.json --summary-key mask_verdict
 
       - name: '[장치] M9′ 누출 검사 — verdict 만'
         id: leakv
-        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped'
+        # v5 별건 A(CTO 결-A9 K-b 판독 축): 끝에 stm0 성공 글자 더함 · 앞 글자 무변
+        if: always() && steps.m0.outcome == 'success' && steps.judge.outcome != 'skipped' && steps.stm0.outcome == 'success'
         run: node tools/hqa-s4-measure/leak-scan.js "$HQA_RAW" --stage verdict --only verdict-device.json --remove
 
       - name: '[장치] run.json 회차 줄 덧붙임'
         id: round
-        if: always() && steps.m0.outcome == 'success'
+        # v5 별건 A(CTO 결-A9 K-b 기록 축): 끝에 stm0 성공 또는 건너뜀 글자 더함 · 앞 글자 무변
+        if: always() && steps.m0.outcome == 'success' && (steps.stm0.outcome == 'success' || steps.stm0.outcome == 'skipped')
         env:
           OUT_M8: ${{ steps.mask.outcome }}
           OUT_M9: ${{ steps.leak.outcome }}
