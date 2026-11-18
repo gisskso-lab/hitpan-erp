@@ -4,6 +4,11 @@
 #   고침5 H2: runjson 에 selftest_judge_counts(K-1) · rules_sha256 · judge_sha256 · browser_condition(결-7 · S8) / round = verdict 뒤 회차 줄(결-6 甲)
 #   작업 폴더 = 원자료 밖(러너 임시 폴더) · 원자료 폴더 = 공개될 파일만
 #   종료 코드: 0 = 통과 · 1 = 그 단계 실패(실패 사실 · 오류 글자는 원자료 파일에 남김)
+#   v5 별건 A(작업지시서 20261118작 K2 · 설계 20261118_S4_별건A_측정환경공급망 §5-2 · §5-2-1 · §5-3 · §5-6 C1): 하위 명령 2개 더함(위 사용 줄 글자는 옛 글자 그대로)
+#     snap  = M3′ 앞 단면(⑤ 바로 앞 · 작업 폴더 snap/ · 원자료 0) — 옛 설계의 「m2 맨 앞 앞 단면」 을 옮김(m2 에는 앞 단면 저장 0)
+#     guard = M3′ 설치 뒤 단언 G1~G6(M3 뒤 · M4 앞) → 원자료 m3g-guard.json(참거짓 · 이름만 · 값 · 해시 0) · 앞 단면 없으면 빨강
+#     m2 = 설치 전후 dpkg 차이(m2-installed.txt) · 이번 apt 기록(m2-apt-history.txt) · 앞 환경 기록(m2-env-before.txt) 더함
+#     m3 = 잠금 두 파일(pw/) 작업 폴더 복사 → 장치 나무 blob 대조 → 잠금 안 판 = PW_VERSION → npm ci --ignore-scripts · 트리 기록(m3-npm-tree.json) · 설치 출력 원자료로(m3-npm.txt)
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -88,9 +93,27 @@ NODE
   return $fail
 }
 
+# v5 별건 A(설계 §5-3 · §5-4 #1): M2 앞 환경 기록 — git 설정 범위 · 출처 · 키(값은 system · global 만) / 실행 파일 판 글자
+m2_env_before() {
+  echo "# M2 앞 환경 기록 — v5 별건 A(설계 §5-3 · §5-4 #1) · git 설정 = 범위 · 출처 · 키 · 값(system · global 만) / 실행 파일 판 글자"
+  echo "# git config --list --show-origin --show-scope"
+  git -C "$REPO" config --list --show-origin --show-scope 2>&1 | awk -F'\t' 'BEGIN { OFS = "\t" } {
+    if ($1 == "system" || $1 == "global") { print; next }
+    k = $3; i = index(k, "="); if (i > 0) k = substr(k, 1, i - 1); print $1, $2, k }'
+  echo "# 실행 파일 판"
+  printf 'node\t%s\n' "$(node --version 2>&1 | head -n 1)"
+  printf 'git\t%s\n' "$(git --version 2>&1 | head -n 1)"
+  printf 'bash\t%s\n' "$(bash --version 2>&1 | head -n 1)"
+}
+
 m2() {
   local log="$WORK/m2-apt.txt" ok=0 i
   : > "$log"
+  # v5 별건 A(설계 §5-2 · §5-3 · §5-6 C1): 설치 전 dpkg 전체 목록 · apt 기록 줄 수 · 앞 환경 기록 — 앞 단면(M3′) 저장은 snap 으로 옮겨 여기 0
+  local hist=/var/log/apt/history.log hb=0
+  dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' 2> "$WORK/m2-dpkg-before.err" | LC_ALL=C sort > "$WORK/m2-dpkg-before.tsv"
+  if [ -r "$hist" ]; then hb=$(wc -l < "$hist" | tr -d ' '); fi
+  m2_env_before > "$RAW/m2-env-before.txt"
   for i in 1 2 3; do
     echo "--- try $i" >> "$log"
     if sudo timeout 300 apt-get update >> "$log" 2>&1 \
@@ -104,6 +127,20 @@ m2() {
     dpkg-query -W -f='${Package}\t${Version}\n' "${PKGS[@]}" 2>&1
     if [ $ok != 1 ]; then echo "# apt 마지막 80줄"; tail -n 80 "$log"; fi
   } > "$RAW/m2-packages.txt"
+  # v5 별건 A(설계 §5-3): 설치 뒤 목록 → 차이 = 이번에 새로 깔리거나 바뀐 꾸러미 전부(이름 · 판 · 아키텍처) · 이번 apt 기록 줄(설치 전 줄 수 뒤)
+  dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' 2> "$WORK/m2-dpkg-after.err" | LC_ALL=C sort > "$WORK/m2-dpkg-after.tsv"
+  LC_ALL=C comm -13 "$WORK/m2-dpkg-before.tsv" "$WORK/m2-dpkg-after.tsv" > "$WORK/m2-dpkg-diff.tsv"
+  {
+    echo "# M2 새로 깔리거나 바뀐 꾸러미 — v5 별건 A(설계 §5-3) · 설치 전후 dpkg-query 차이 · 이름 · 판 · 아키텍처"
+    echo "# before=$(wc -l < "$WORK/m2-dpkg-before.tsv" | tr -d ' ') after=$(wc -l < "$WORK/m2-dpkg-after.tsv" | tr -d ' ') changed=$(wc -l < "$WORK/m2-dpkg-diff.tsv" | tr -d ' ')"
+    if [ -s "$WORK/m2-dpkg-before.err" ]; then echo "# dpkg-query 오류(설치 전): $(head -n 1 "$WORK/m2-dpkg-before.err" | cut -c1-200)"; fi
+    if [ -s "$WORK/m2-dpkg-after.err" ]; then echo "# dpkg-query 오류(설치 뒤): $(head -n 1 "$WORK/m2-dpkg-after.err" | cut -c1-200)"; fi
+    cat "$WORK/m2-dpkg-diff.tsv"
+  } > "$RAW/m2-installed.txt"
+  {
+    echo "# M2 이번 apt 기록 줄 — v5 별건 A(설계 §5-3) · $hist 의 설치 전 줄 수(${hb}) 뒤"
+    if [ -r "$hist" ]; then tail -n +"$((hb + 1))" "$hist"; else echo "# $hist 읽기 실패(없음 또는 권한)"; fi
+  } > "$RAW/m2-apt-history.txt"
   stage_json m2 "$([ $ok = 1 ] && echo true || echo false)" "tries=$i"
   [ $ok = 1 ]
 }
@@ -111,11 +148,68 @@ m2() {
 m3() {
   local pw="$WORK/pw" cr="$WORK/chromium" ok=0 i
   mkdir -p "$pw" "$cr"
-  for i in 1 2 3; do
-    if ( cd "$pw" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 timeout 300 npm install --no-save --no-package-lock --no-audit --no-fund "playwright@${PW_VERSION}" > "$WORK/m3-npm.txt" 2>&1 ); then ok=1; break; fi
-    sleep 10
+  # v5 별건 A(설계 §5-2 · §5-3 · 결-A1 甲): 아래 옛 설치(판만 고정 · 잠금 · 무결성 · 스크립트 끔 0)를 잠금 설치로 바꿈 — 옛 글자(dcaf4a3f):
+  #   for i in 1 2 3; do
+  #     if ( cd "$pw" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 timeout 300 npm install --no-save --no-package-lock --no-audit --no-fund "playwright@${PW_VERSION}" > "$WORK/m3-npm.txt" 2>&1 ); then ok=1; break; fi
+  #     sleep 10
+  #   done
+  #   if [ $ok != 1 ]; then stage_json m3 false "npm install failed: $(tail -n 5 "$WORK/m3-npm.txt")"; return 1; fi
+  # 새 길: 잠금 두 파일 → 작업 폴더 복사 → 복사본 = 장치 나무(HEAD) blob 대조 → 잠금 안 판 = PW_VERSION(다르면 빨강) → npm ci --ignore-scripts
+  #   설치는 잠금만 따른다(PW_VERSION 글자는 판 대조용으로 남김) · 장치 폴더 안 node_modules 0(설치 자리 = 작업 폴더 사본)
+  local f got exp lockok=1 lockmsg="" circ=x
+  : > "$WORK/m3-lock.tsv"
+  for f in package.json package-lock.json; do
+    cp "$HERE/pw/$f" "$pw/$f" 2>> "$WORK/m3-lock.err" || lockok=0
+    got=$(git -C "$REPO" hash-object --no-filters -- "$pw/$f" 2>> "$WORK/m3-lock.err") || got=""
+    exp=$(git -C "$REPO" rev-parse --verify -q "HEAD:tools/hqa-s4-measure/pw/$f" 2>> "$WORK/m3-lock.err") || exp=""
+    if [ -n "$got" ] && [ "$got" = "$exp" ]; then printf '%s\t1\n' "$f" >> "$WORK/m3-lock.tsv"; else printf '%s\t0\n' "$f" >> "$WORK/m3-lock.tsv"; lockok=0; lockmsg="$lockmsg blob:$f"; fi
   done
-  if [ $ok != 1 ]; then stage_json m3 false "npm install failed: $(tail -n 5 "$WORK/m3-npm.txt")"; return 1; fi
+  if ! node -e 'const fs=require("fs");const [p,l,w]=process.argv.slice(1);const P=JSON.parse(fs.readFileSync(p,"utf8")),L=JSON.parse(fs.readFileSync(l,"utf8"));const d=P.dependencies||{},n=(L.packages||{})["node_modules/playwright"]||{};const ok=Object.keys(d).length===1&&d.playwright===w&&L.lockfileVersion===3&&n.version===w;if(!ok){console.error("lock version: deps="+JSON.stringify(d)+" lockfile="+L.lockfileVersion+" locked="+n.version+" want="+w);process.exit(1);}' \
+       "$pw/package.json" "$pw/package-lock.json" "$PW_VERSION" 2>> "$WORK/m3-lock.err"; then
+    lockok=0; lockmsg="$lockmsg version"
+  fi
+  if [ $lockok = 1 ]; then
+    for i in 1 2 3; do
+      if ( cd "$pw" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 timeout 300 npm ci --ignore-scripts --no-audit --no-fund > "$WORK/m3-npm.txt" 2>&1 ); then ok=1; circ=0; break; else circ=$?; fi
+      sleep 10
+    done
+  fi
+  # v5 별건 A(설계 §5-3): 설치 출력 → 원자료 · 의존 트리(이름 · 판 · 받은 주소 · 잠금 일치 · 스크립트 끔 · rc · npm 판) → 원자료(integrity 글자 0)
+  if [ -f "$WORK/m3-npm.txt" ]; then cp "$WORK/m3-npm.txt" "$RAW/m3-npm.txt"; fi
+  node - "$pw" "$RAW/m3-npm-tree.json" "$WORK/m3-lock.tsv" "$circ" "$PW_VERSION" "$lockok" "$(npm --version 2>/dev/null | head -n 1)" <<'NODE'
+const fs = require('fs');
+const [pw, out, tsv, rc, want, lockok, npmv] = process.argv.slice(2);
+const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+const lock = rd(pw + '/package-lock.json') || {};
+const hidden = rd(pw + '/node_modules/.package-lock.json') || {};
+const lp = lock.packages || {}, hp = hidden.packages || {};
+const blob = fs.existsSync(tsv) ? fs.readFileSync(tsv, 'utf8').split('\n').filter((l) => l.trim()).map((l) => { const [file, m] = l.split('\t'); return { file, match: m === '1' }; }) : [];
+const packages = Object.keys(lp).filter((k) => k !== '').sort().map((k) => {
+  const L = lp[k] || {}, H = hp[k] || null, inst = rd(pw + '/' + k + '/package.json');
+  return {
+    name: k.replace(/^node_modules\//, ''),
+    version: inst && typeof inst.version === 'string' ? inst.version : null,
+    lock_version: L.version || null,
+    resolved: H && typeof H.resolved === 'string' ? H.resolved : null,
+    installed: !!inst,
+    optional: L.optional === true,
+    lock_match: !!inst && inst.version === L.version && !!H && H.resolved === L.resolved,
+    install_script: L.hasInstallScript === true,
+  };
+});
+const needed = packages.filter((p) => !p.optional || p.installed);
+const doc = {
+  stage: 'M3', ok: rc === '0' && lockok === '1' && needed.length > 0 && needed.every((p) => p.lock_match),
+  command: 'npm ci --ignore-scripts --no-audit --no-fund', ignore_scripts: true, npm_ci_rc: rc === 'x' ? null : Number(rc),
+  npm_version: npmv || null, lockfile_version: lock.lockfileVersion || null, pw_version: want,
+  blob_match: blob, lock_ok: lockok === '1',
+  install_scripts_n: packages.filter((p) => p.install_script).length,
+  packages, lock_file: 'tools/hqa-s4-measure/pw/package-lock.json (device tree)',
+};
+fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
+NODE
+  if [ $lockok != 1 ]; then stage_json m3 false "lock check failed:$lockmsg $(tr '\r\n' '  ' < "$WORK/m3-lock.err" 2>/dev/null | cut -c1-300)"; return 1; fi
+  if [ $ok != 1 ]; then stage_json m3 false "npm ci failed: $(tail -n 5 "$WORK/m3-npm.txt")"; return 1; fi
   rm -rf "$cr"; mkdir -p "$cr"
   if ! unzip -q "$WORK/dl/$CHROME_ZIP" -d "$cr" 2> "$WORK/m3-unzip.txt"; then stage_json m3 false "unzip failed: $(cat "$WORK/m3-unzip.txt")"; return 1; fi
   local exe="$cr/chrome-linux64/chrome" missing
@@ -144,6 +238,122 @@ NODE
   to_env HQA_CHROME "$exe"
   to_env HQA_PW_DIR "$pw/node_modules/playwright"
   return $rc
+}
+
+# ---- v5 별건 A(설계 §5-2-1 · §5-6 C1 · 결-A8 (나)): M3′ 앞 단면(snap · ⑤ 바로 앞) · 설치 뒤 단언(guard · M3 뒤 · M4 앞) ----
+#   앞 단면 = 작업 폴더 snap/(원자료 밖) · 환경 변수는 이름별 값 sha256 만(값 0) · 결과 원자료 = m3g-guard.json(참거짓 · 이름만 · 값 · 해시 0)
+#   G1 허용 = M1 · M3 가 to_env 로 쓰는 이름 3(HQA_SRC_DIR = C1 로 창이 ⑤ 앞까지 넓어져 더함) + 실행기가 단계마다 바꾸는 이름
+#     실행기 몫 6개는 잠정 — 설계 §7 Q3(리허설 첫 런 m3g-guard.json env_changed 실측 뒤 PM 고정)
+#     PATH · BASH_ENV · NODE_OPTIONS · LD_PRELOAD · GIT_* 는 허용에 넣지 않는다
+#   순서 = G1(+G6 대조군) → G2 → G3 → G4 → G5 · 하나라도 빨강이면 뒤는 안 돎(설정이 바뀌었으면 git 을 부르기 전에 멈춤)
+G_ALLOW=(HQA_SRC_DIR HQA_CHROME HQA_PW_DIR GITHUB_ACTION GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STATE GITHUB_STEP_SUMMARY)
+G_BINS=(node git bash)
+G_TREE=(tools/hqa-s4-measure .github/workflows/hqa-s4-measure.yml)
+g_env() { node -e 'const c=require("crypto"),e=process.env,o={};for(const k of Object.keys(e).sort())o[k]=c.createHash("sha256").update(e[k]).digest("hex");process.stdout.write(JSON.stringify(o)+"\n");' > "$1"; }
+g_git() { git -C "$REPO" config --list --show-origin --show-scope > "$1" 2>&1; }
+g_bins() {
+  local b p h
+  for b in "${G_BINS[@]}"; do
+    p=$(command -v "$b" 2>/dev/null) && p=$(readlink -f "$p" 2>/dev/null) || p=""
+    h="-"; [ -n "$p" ] && [ -f "$p" ] && h=$(sha256sum "$p" 2>/dev/null | cut -d' ' -f1)
+    printf '%s\t%s\t%s\n' "$b" "${p:-missing}" "${h:--}"
+  done > "$1"
+}
+g_ld() { if [ -e /etc/ld.so.preload ]; then printf 'present\t%s\n' "$(sha256sum /etc/ld.so.preload 2>/dev/null | cut -d' ' -f1)"; else echo absent; fi > "$1"; }
+
+snap() {
+  local s="$WORK/snap" bad=""
+  rm -rf "$s"; mkdir -p "$s"
+  g_env "$s/env.json" || bad="$bad env"
+  g_git "$s/git-config.txt" || bad="$bad git"
+  g_bins "$s/bins.tsv" || bad="$bad bins"
+  g_ld "$s/ld-preload.txt" || bad="$bad ld"
+  if [ -n "$bad" ]; then rm -rf "$s"; echo "[M3′ 앞 단면] 저장 실패:$bad — 앞 단면 없음(guard 빨강)" >&2; return 1; fi
+  echo "[M3′ 앞 단면] 저장 — 환경 변수 이름별 해시 · git 설정 · 실행 파일 ${#G_BINS[@]} · ld.so.preload (작업 폴더 · 원자료 0)"
+}
+
+guard() {
+  local s="$WORK/snap" a="$WORK/snap-guard" f have=1 stop=0 r1="" r2="" r3="" r4="" r5="" t1=0 t2=0
+  rm -rf "$a"; mkdir -p "$a"
+  for f in env.json git-config.txt bins.tsv ld-preload.txt; do [ -f "$s/$f" ] || have=0; done
+  [ $have = 1 ] || stop=1
+  # G1 환경 변수 이름별 값 해시 · G6 대조군(앞 단면 + 가짜 이름 1개 → 같은 비교가 잡아야 함) — git 을 부르기 전
+  if [ $stop = 0 ]; then
+    if g_env "$a/env.json" && node - "$s/env.json" "$a/env.json" "$a/g1.json" "${G_ALLOW[@]}" <<'NODE'
+const fs = require('fs');
+const [bf, af, out, ...allow] = process.argv.slice(2);
+const diff = (b, a) => Array.from(new Set(Object.keys(b).concat(Object.keys(a)))).filter((k) => b[k] !== a[k]).sort();
+const bad = (names) => names.filter((k) => !allow.includes(k));
+let b = null, a = null, err = null;
+try { b = JSON.parse(fs.readFileSync(bf, 'utf8')); a = JSON.parse(fs.readFileSync(af, 'utf8')); } catch (e) { err = String(e.message).slice(0, 200); }
+const changed = b && a ? diff(b, a) : [];
+const disallowed = bad(changed);
+const planted = b ? Object.assign({}, b, { HQA_G6_PLANTED: '0' }) : null;
+const caught = !!planted && bad(diff(b, planted)).includes('HQA_G6_PLANTED');
+const g1 = !err && disallowed.length === 0;
+fs.writeFileSync(out, JSON.stringify({ g1, g6: caught, changed, disallowed, error: err }) + '\n');
+process.exit(g1 && caught ? 0 : 1);
+NODE
+    then r1=1; else r1=0; stop=1; fi
+  fi
+  # G2 git 설정 출처별 내용
+  if [ $stop = 0 ]; then g_git "$a/git-config.txt"; if cmp -s "$s/git-config.txt" "$a/git-config.txt"; then r2=1; else r2=0; stop=1; fi; fi
+  # G3 node · git · bash 실행 파일 바이트
+  if [ $stop = 0 ]; then g_bins "$a/bins.tsv"; if cmp -s "$s/bins.tsv" "$a/bins.tsv"; then r3=1; else r3=0; stop=1; fi; fi
+  # G4 /etc/ld.so.preload 있음 · 내용
+  if [ $stop = 0 ]; then g_ld "$a/ld-preload.txt"; if cmp -s "$s/ld-preload.txt" "$a/ld-preload.txt"; then r4=1; else r4=0; stop=1; fi; fi
+  # G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(바뀐 · 지운 · 새 파일 · 무시 파일 포함)
+  if [ $stop = 0 ]; then
+    git -C "$REPO" diff --name-only HEAD -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1
+    git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
+    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ]; then r5=1; else r5=0; fi
+  fi
+  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "${G_ALLOW[@]}" <<'NODE'
+const fs = require('fs');
+const [s, a, out, have, r1, r2, r3, r4, r5, ...allow] = process.argv.slice(2);
+const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()) : []);
+const tri = (r) => (r === '1' ? true : r === '0' ? false : null);
+const g = rd(a + '/g1.json');
+const checks = {
+  G1: r1 === '' ? null : !!(g && g.g1 === true),
+  G6: r1 === '' ? null : !!(g && g.g6 === true),
+  G2: tri(r2), G3: tri(r3), G4: tri(r4), G5: tri(r5),
+};
+const SCOPES = ['system', 'global', 'local', 'worktree', 'command'];
+const byScope = (ls) => { const m = {}; for (const l of ls) { const k = SCOPES.includes(l.split('\t')[0]) ? l.split('\t')[0] : 'other'; (m[k] = m[k] || []).push(l); } return m; };
+let gitScopes = [];
+if (checks.G2 === false) {
+  const x = byScope(lines(s + '/git-config.txt')), y = byScope(lines(a + '/git-config.txt'));
+  gitScopes = Array.from(new Set(Object.keys(x).concat(Object.keys(y)))).filter((k) => (x[k] || []).join('\n') !== (y[k] || []).join('\n')).sort();
+}
+let binsChanged = [];
+if (checks.G3 === false) {
+  const m = (ls) => Object.fromEntries(ls.map((l) => [l.split('\t')[0], l]));
+  const x = m(lines(s + '/bins.tsv')), y = m(lines(a + '/bins.tsv'));
+  binsChanged = Array.from(new Set(Object.keys(x).concat(Object.keys(y)))).filter((k) => x[k] !== y[k]).sort();
+}
+const tree = checks.G5 === false ? lines(a + '/tree.txt') : [];
+const order = ['G1', 'G6', 'G2', 'G3', 'G4', 'G5'];
+const ok = have === '1' && order.every((k) => checks[k] === true);
+const firstRed = have !== '1' ? 'snap' : (order.find((k) => checks[k] === false) || null);
+const doc = {
+  stage: 'M3prime', ok, snap_present: have === '1', first_red: firstRed,
+  order: 'G1(+G6 control) > G2 > G3 > G4 > G5 - stop at first red',
+  checks,
+  env_changed: g && Array.isArray(g.changed) ? g.changed : [],
+  env_disallowed: g && Array.isArray(g.disallowed) ? g.disallowed : [],
+  env_allow: allow,
+  git_scopes: gitScopes,
+  bins_changed: binsChanged,
+  ld_preload: checks.G4 === null ? null : (checks.G4 ? 'same' : 'changed'),
+  tree_changed_n: tree.length, tree_changed: tree.slice(0, 50),
+  values: 'names and true/false only - no values, no hashes (snapshot stays in the work folder)',
+};
+fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
+if (!ok) { process.stderr.write('[M3′] 설치 뒤 단언 빨강 — first_red=' + firstRed + '\n'); process.exit(1); }
+console.log('[M3′] 설치 뒤 단언 통과 — G1~G6');
+NODE
 }
 
 m4() {
@@ -362,5 +572,8 @@ case "$STAGE" in
   m4) m4 ;;
   runjson) runjson ;;
   round) round ;;
+  # v5 별건 A(설계 §5-6 C1 · §5-2-1)
+  snap) snap ;;
+  guard) guard ;;
   *) echo "unknown stage: $STAGE" >&2; exit 2 ;;
 esac
