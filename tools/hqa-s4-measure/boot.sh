@@ -9,6 +9,9 @@
 #     guard = M3′ 설치 뒤 단언 G1~G6(M3 뒤 · M4 앞) → 원자료 m3g-guard.json(참거짓 · 이름만 · 값 · 해시 0) · 앞 단면 없으면 빨강
 #     m2 = 설치 전후 dpkg 차이(m2-installed.txt) · 이번 apt 기록(m2-apt-history.txt) · 앞 환경 기록(m2-env-before.txt) 더함
 #     m3 = 잠금 두 파일(pw/) 작업 폴더 복사 → 장치 나무 blob 대조 → 잠금 안 판 = PW_VERSION → npm ci --ignore-scripts · 트리 기록(m3-npm-tree.json) · 설치 출력 원자료로(m3-npm.txt)
+#   v5 별건 A K2′([3-V] 병렬검증 P1-1 · P1-2 고침 · 설계 §5-2 「장치 나무 blob 대조」 · §5-2-1 G5 「= 장치 커밋」 글자 안):
+#     m3 = 설치 자리를 비우고 시작 · 복사 뒤 그 폴더 안 = 정확히 두 파일 · 트리 기록 ok 거짓이면 m3 빨강
+#     장치 커밋 기준 = GITHUB_SHA(로컬 시험만 HEAD · 원자료 dev_ref) — m3 blob 기대값 · G5 대조 · G5 에 HEAD = 장치 커밋 · 색인 표시 전부 H 더함
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -34,6 +37,15 @@ PKGS=(libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcai
   fonts-liberation fonts-wqy-zenhei fonts-noto-color-emoji)
 
 to_env() { if [ -n "${GITHUB_ENV:-}" ]; then printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"; fi; }
+# v5 별건 A K2′([3-V] P1-2): 「장치 커밋」 = GITHUB_SHA — M0 head_is_event 가 창 앞(체크아웃 바로 뒤)에서 HEAD = GITHUB_SHA 를 단언 · G1 허용 밖 이름(창 안에서 바뀌면 G1 빨강)
+#   HEAD · 색인은 창 안 단계가 옮기거나 표시(assume-unchanged · skip-worktree)를 걸 수 있어 기준으로 쓰지 않는다 · Actions 밖 로컬 시험만 HEAD(원자료 dev_ref = HEAD)
+#   Actions 안인데 GITHUB_SHA 가 비면 기준 없음 = 빨강(M0 head_is_event 와 같은 꼴)
+g_dev() {
+  if [ -n "${GITHUB_SHA:-}" ]; then printf '%s\n' "$GITHUB_SHA"; return 0; fi
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then return 1; fi
+  printf 'HEAD\n'
+}
+g_devref() { if [ -n "${GITHUB_SHA:-}" ]; then echo GITHUB_SHA; elif [ "${GITHUB_ACTIONS:-}" = "true" ]; then echo none; else echo HEAD; fi; }
 stage_json() { # 단계 이름 · 통과(true/false) · 세부(JSON 문자열 아님 · 한 줄)
   node -e 'const fs=require("fs");const [f,s,ok,d]=process.argv.slice(1);fs.writeFileSync(f,JSON.stringify({stage:s,ok:ok==="true",detail:d})+"\n");' \
     "$WORK/stages/$1.json" "$1" "$2" "$(printf '%s' "$3" | tr '\t\r\n' '   ' | cut -c1-600)"
@@ -147,6 +159,8 @@ m2() {
 
 m3() {
   local pw="$WORK/pw" cr="$WORK/chromium" ok=0 i
+  # v5 별건 A K2′([3-V] P1-1): 설치 자리를 비우고 시작 — 앞 단계가 심어 둔 숨은 잠금(npm-shrinkwrap.json) · 프로젝트 설정(.npmrc)을 남기지 않는다
+  rm -rf "$pw"
   mkdir -p "$pw" "$cr"
   # v5 별건 A(설계 §5-2 · §5-3 · 결-A1 甲): 아래 옛 설치(판만 고정 · 잠금 · 무결성 · 스크립트 끔 0)를 잠금 설치로 바꿈 — 옛 글자(dcaf4a3f):
   #   for i in 1 2 3; do
@@ -156,14 +170,19 @@ m3() {
   #   if [ $ok != 1 ]; then stage_json m3 false "npm install failed: $(tail -n 5 "$WORK/m3-npm.txt")"; return 1; fi
   # 새 길: 잠금 두 파일 → 작업 폴더 복사 → 복사본 = 장치 나무(HEAD) blob 대조 → 잠금 안 판 = PW_VERSION(다르면 빨강) → npm ci --ignore-scripts
   #   설치는 잠금만 따른다(PW_VERSION 글자는 판 대조용으로 남김) · 장치 폴더 안 node_modules 0(설치 자리 = 작업 폴더 사본)
-  local f got exp lockok=1 lockmsg="" circ=x
+  local f got exp lockok=1 lockmsg="" circ=x dev="" devref direx=1 trc=0
   : > "$WORK/m3-lock.tsv"
+  # v5 별건 A K2′([3-V] P1-2): blob 기대값 기준 = 장치 커밋(g_dev) — 옛 글자(K2) = "HEAD:tools/hqa-s4-measure/pw/$f"
+  devref=$(g_devref)
+  dev=$(g_dev) || { dev=""; lockok=0; lockmsg="$lockmsg devref"; }
   for f in package.json package-lock.json; do
     cp "$HERE/pw/$f" "$pw/$f" 2>> "$WORK/m3-lock.err" || lockok=0
     got=$(git -C "$REPO" hash-object --no-filters -- "$pw/$f" 2>> "$WORK/m3-lock.err") || got=""
-    exp=$(git -C "$REPO" rev-parse --verify -q "HEAD:tools/hqa-s4-measure/pw/$f" 2>> "$WORK/m3-lock.err") || exp=""
+    exp=""; if [ -n "$dev" ]; then exp=$(git -C "$REPO" rev-parse --verify -q "$dev:tools/hqa-s4-measure/pw/$f" 2>> "$WORK/m3-lock.err") || exp=""; fi
     if [ -n "$got" ] && [ "$got" = "$exp" ]; then printf '%s\t1\n' "$f" >> "$WORK/m3-lock.tsv"; else printf '%s\t0\n' "$f" >> "$WORK/m3-lock.tsv"; lockok=0; lockmsg="$lockmsg blob:$f"; fi
   done
+  # v5 별건 A K2′([3-V] P1-1): 설치 자리 안 = 정확히 잠금 두 파일(숨은 잠금 · 설정 파일 · 그 밖 0) — 아니면 빨강 · npm ci 안 돎
+  if [ "$(ls -A "$pw" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')" != "package-lock.json package.json " ]; then direx=0; lockok=0; lockmsg="$lockmsg extra"; fi
   if ! node -e 'const fs=require("fs");const [p,l,w]=process.argv.slice(1);const P=JSON.parse(fs.readFileSync(p,"utf8")),L=JSON.parse(fs.readFileSync(l,"utf8"));const d=P.dependencies||{},n=(L.packages||{})["node_modules/playwright"]||{};const ok=Object.keys(d).length===1&&d.playwright===w&&L.lockfileVersion===3&&n.version===w;if(!ok){console.error("lock version: deps="+JSON.stringify(d)+" lockfile="+L.lockfileVersion+" locked="+n.version+" want="+w);process.exit(1);}' \
        "$pw/package.json" "$pw/package-lock.json" "$PW_VERSION" 2>> "$WORK/m3-lock.err"; then
     lockok=0; lockmsg="$lockmsg version"
@@ -176,9 +195,9 @@ m3() {
   fi
   # v5 별건 A(설계 §5-3): 설치 출력 → 원자료 · 의존 트리(이름 · 판 · 받은 주소 · 잠금 일치 · 스크립트 끔 · rc · npm 판) → 원자료(integrity 글자 0)
   if [ -f "$WORK/m3-npm.txt" ]; then cp "$WORK/m3-npm.txt" "$RAW/m3-npm.txt"; fi
-  node - "$pw" "$RAW/m3-npm-tree.json" "$WORK/m3-lock.tsv" "$circ" "$PW_VERSION" "$lockok" "$(npm --version 2>/dev/null | head -n 1)" <<'NODE'
+  node - "$pw" "$RAW/m3-npm-tree.json" "$WORK/m3-lock.tsv" "$circ" "$PW_VERSION" "$lockok" "$(npm --version 2>/dev/null | head -n 1)" "$direx" "$devref" <<'NODE'
 const fs = require('fs');
-const [pw, out, tsv, rc, want, lockok, npmv] = process.argv.slice(2);
+const [pw, out, tsv, rc, want, lockok, npmv, direx, devref] = process.argv.slice(2);
 const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
 const lock = rd(pw + '/package-lock.json') || {};
 const hidden = rd(pw + '/node_modules/.package-lock.json') || {};
@@ -205,11 +224,18 @@ const doc = {
   blob_match: blob, lock_ok: lockok === '1',
   install_scripts_n: packages.filter((p) => p.install_script).length,
   packages, lock_file: 'tools/hqa-s4-measure/pw/package-lock.json (device tree)',
+  // v5 별건 A K2′([3-V] P1-1 · P1-2): 설치 자리 = 정확히 두 파일인가 · blob 기대값 기준(GITHUB_SHA | HEAD = 로컬 시험 | none)
+  pw_dir_exact: direx === '1', dev_ref: devref || null,
 };
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
+// v5 별건 A K2′([3-V] P1-1): ok 거짓 = 종료 1 → m3 빨강(아래 trc)
+process.exit(doc.ok ? 0 : 1);
 NODE
+  trc=$?
   if [ $lockok != 1 ]; then stage_json m3 false "lock check failed:$lockmsg $(tr '\r\n' '  ' < "$WORK/m3-lock.err" 2>/dev/null | cut -c1-300)"; return 1; fi
   if [ $ok != 1 ]; then stage_json m3 false "npm ci failed: $(tail -n 5 "$WORK/m3-npm.txt")"; return 1; fi
+  # v5 별건 A K2′([3-V] P1-1): 트리 기록 ok(잠금 일치 · 판 · rc) 거짓 = m3 빨강 — 「설치는 잠금만 따른다」 를 글자가 아니라 동작으로
+  if [ $trc != 0 ]; then stage_json m3 false "tree lock_match: m3-npm-tree.json ok=false"; return 1; fi
   rm -rf "$cr"; mkdir -p "$cr"
   if ! unzip -q "$WORK/dl/$CHROME_ZIP" -d "$cr" 2> "$WORK/m3-unzip.txt"; then stage_json m3 false "unzip failed: $(cat "$WORK/m3-unzip.txt")"; return 1; fi
   local exe="$cr/chrome-linux64/chrome" missing
@@ -274,6 +300,7 @@ snap() {
 
 guard() {
   local s="$WORK/snap" a="$WORK/snap-guard" f have=1 stop=0 r1="" r2="" r3="" r4="" r5="" t1=0 t2=0
+  local dev="" devref="" hd="" dv="" hok="" fok=""   # v5 별건 A K2′([3-V] P1-2) — G5 기준 · HEAD = 장치 커밋 · 색인 표시
   rm -rf "$a"; mkdir -p "$a"
   for f in env.json git-config.txt bins.tsv ld-preload.txt; do [ -f "$s/$f" ] || have=0; done
   [ $have = 1 ] || stop=1
@@ -303,14 +330,23 @@ NODE
   # G4 /etc/ld.so.preload 있음 · 내용
   if [ $stop = 0 ]; then g_ld "$a/ld-preload.txt"; if cmp -s "$s/ld-preload.txt" "$a/ld-preload.txt"; then r4=1; else r4=0; stop=1; fi; fi
   # G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(바뀐 · 지운 · 새 파일 · 무시 파일 포함)
+  #   v5 별건 A K2′([3-V] P1-2): 대조 기준 = 장치 커밋(g_dev) — 옛 글자(K2) = git -C "$REPO" diff --name-only HEAD -- "${G_TREE[@]}"
+  #     + HEAD = 장치 커밋(창 안에서 HEAD 를 옮기면 빨강) + 색인 표시 전부 H(assume-unchanged · skip-worktree 가 걸린 파일은 diff 가 안 봄 → 빨강)
   if [ $stop = 0 ]; then
-    git -C "$REPO" diff --name-only HEAD -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1
+    devref=$(g_devref); hok=0; fok=0
+    dev=$(g_dev) || { dev=""; t1=1; }
+    if [ -n "$dev" ]; then git -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
     git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
-    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ]; then r5=1; else r5=0; fi
+    hd=$(git -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
+    if [ -n "$dev" ]; then dv=$(git -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
+    if [ -n "$hd" ] && [ "$hd" = "$dv" ]; then hok=1; fi
+    git -C "$REPO" ls-files -v -- "${G_TREE[@]}" > "$a/flags.txt" 2>> "$a/tree.err" || t2=1
+    if [ -s "$a/flags.txt" ] && ! grep -qv '^H ' "$a/flags.txt"; then fok=1; fi
+    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ] && [ $hok = 1 ] && [ $fok = 1 ]; then r5=1; else r5=0; fi
   fi
-  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "${G_ALLOW[@]}" <<'NODE'
+  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "$hok" "$fok" "$devref" "${G_ALLOW[@]}" <<'NODE'
 const fs = require('fs');
-const [s, a, out, have, r1, r2, r3, r4, r5, ...allow] = process.argv.slice(2);
+const [s, a, out, have, r1, r2, r3, r4, r5, hok, fok, devref, ...allow] = process.argv.slice(2);
 const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
 const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()) : []);
 const tri = (r) => (r === '1' ? true : r === '0' ? false : null);
@@ -348,6 +384,9 @@ const doc = {
   bins_changed: binsChanged,
   ld_preload: checks.G4 === null ? null : (checks.G4 ? 'same' : 'changed'),
   tree_changed_n: tree.length, tree_changed: tree.slice(0, 50),
+  // v5 별건 A K2′([3-V] P1-2): G5 기준(GITHUB_SHA | HEAD = 로컬 시험 | none) · HEAD = 장치 커밋 · 색인 표시 전부 H · 표시 걸린 경로(이름만)
+  dev_ref: devref || null, head_is_dev: tri(hok), index_flags_ok: tri(fok),
+  index_flagged: fok === '0' ? lines(a + '/flags.txt').filter((l) => !l.startsWith('H ')).map((l) => l.slice(2)).slice(0, 50) : [],
   values: 'names and true/false only - no values, no hashes (snapshot stays in the work folder)',
 };
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
