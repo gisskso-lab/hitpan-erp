@@ -8,6 +8,10 @@
 #   원자료 파일 0: 경우마다 임시 하위 폴더를 원자료 폴더로 넘기고 파일 수 0 을 잰다 · 끝나면 임시 폴더 통째로 지움
 #   끝줄: [자체시험 M0 ③ · ③b] 통과 8/8 · 심은 위반 6/6 · 대조군 2/2 — 하나라도 어긋나면 이름 붙은 줄 + 종료 1
 #   대조군(T1 · T2)이 먼저 초록이어야 심은 위반 판정을 센다(대조군 실패 = 시험 전체 빨강 · 「늘 빨강」 을 가른다)
+#   v5 별건 A(작업지시서 20261118작 K4 · 설계 §5-5 · 대표 결재 기록 §18 「더함」 · CTO R6 J2-빈칸): 심은 위반 2 더함
+#     T9 = scan.sh 같은 blob · 모드 120000 → ③ 초록 · ③b 빨강(120000) / T10 = scan.sh 자리에 나무(scan.sh/x) → ③ 빨강(outside allowed) · ③b 빨강(040000)
+#     v5 끝줄: [자체시험 M0 ③ · ③b] 통과 10/10 · 심은 위반 8/8 · 대조군 2/2 (위 끝줄 · 위 「측정 워크플로는 이 파일을 부르지 않는다」 는 v4 글자 그대로 보존)
+#     v5 의미 변경: 측정 워크플로 ⑤ 단계(stm0 · M1 앞)가 이 파일을 부른다 · 경계 = 그 단계 바이트는 장치 커밋으로 고정 · M2 앞 · 허용 검사 약속 0 · 끝줄 + rc 만 원자료 negtest/
 set -u -o pipefail
 
 TAG="[자체시험 M0 ③ · ③b]"
@@ -117,13 +121,26 @@ judge T7 plant "심은 위반 (바): 바닥 판 yml + 새 scripts 3 → ③b 빨
 reset3; run3 T8 --diff-only --cached
 judge T8 plant "심은 위반 (사): --diff-only --cached → rc 1 · usage · 원자료 파일 0" "$( [ "$RC" = 1 ] && has "usage" && [ "$NF" = 0 ] && [ "$A3" = x ] && [ "$B3" = x ] && echo 0 || echo 1)"
 
+# v5 별건 A(K4) T9 심은 위반 (아): scan.sh 같은 blob · 모드 120000(링크 꼴)
+reset3; tG=$(mktree $(fix4 2 "120000,${SB4[2]}")) && run3 T9 --diff-only "$tG"
+judge T9 plant "심은 위반 (아): scan.sh 같은 blob · 120000 → ③ 초록 · ③b 빨강(120000)" "$( red3b && has "120000" && echo 0 || echo 1)"
+
+# v5 별건 A(K4) T10 심은 위반 (자): 4경로 중 scan.sh 자리에 나무(scan.sh/x · 040000) — ③ · ③b 두 겹 다 잡아야 함
+reset3; yB=$(printf '# v5 별건 A 자체시험 심은 위반 (자)\n' | git hash-object -w --stdin) \
+  && tJ=$(mktree "${F4[@]}" "-${SP4[2]}" "+100644,$yB,${SP4[2]}/x") && run3 T10 --diff-only "$tJ"
+judge T10 plant "심은 위반 (자): scan.sh 자리 나무(scan.sh/x) → ③ 빨강(scan.sh/x) · ③b 빨강(040000)" "$( [ "$RC" = 1 ] && [ "$A3" = 0 ] && [ "$B3" = 0 ] && has "scan.sh/x" && has "040000" && [ "$NF" = 0 ] && echo 0 || echo 1)"
+
 if [ "$ctl" != 2 ]; then
   echo "$TAG 다름 — 대조군 $ctl/2 · 심은 위반 판정 안 셈(대조군 실패 = 시험 전체 빨강)"
   exit 1
 fi
-if [ "$pass" != 8 ]; then
-  echo "$TAG 다름 — 통과 $pass/8 · 심은 위반 $pl/6 · 대조군 $ctl/2"
+# v5 별건 A(K4): 수 8 → 10 · 심은 위반 6 → 8 — 옛 글자(v4):
+#   if [ "$pass" != 8 ]; then
+#     echo "$TAG 다름 — 통과 $pass/8 · 심은 위반 $pl/6 · 대조군 $ctl/2"
+#   echo "$TAG 통과 8/8 · 심은 위반 6/6 · 대조군 2/2"
+if [ "$pass" != 10 ]; then
+  echo "$TAG 다름 — 통과 $pass/10 · 심은 위반 $pl/8 · 대조군 $ctl/2"
   exit 1
 fi
-echo "$TAG 통과 8/8 · 심은 위반 6/6 · 대조군 2/2"
+echo "$TAG 통과 10/10 · 심은 위반 8/8 · 대조군 2/2"
 exit 0
