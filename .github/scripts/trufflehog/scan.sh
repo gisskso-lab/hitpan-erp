@@ -136,7 +136,7 @@ scanned="$(grep -m1 'finished scanning' "$work/engine.log" | grep -oE '"?(chunks
 # 하한 확인용 셈(C5-N1 보완 · HQA Q2) — 기록 줄 = 엔진 JSON 객체 한 줄. 엔진 기록 글자는 작업 폴더 파일(rec.*)에만 두고
 #   변수 · 출력에는 숫자와 이 스크립트 고정 낱말(obj · bad · false)만 남긴다. 셈 실패(읽기 · 해석 오류) = 빈 값 → 1층에서 닫힌다.
 #   jq 표준 오류는 버린다(오류 문구에 입력 글자가 섞일 수 있다 · [3-V] P2-2).
-#   records = 기록 줄 수 · vals/objn = 해석한 값 수 / 그중 msg 가 글자 그대로 같은 객체 수 · msgn = 맨 글자 "msg": 수
+#   records = 기록 줄 수 · vals/objn = 해석한 값 수 / 그중 msg 가 글자 그대로 같은 객체 수 · msgn = 맨 글자 "msg" 수(콜론 무관 · 열쇠 뒤 공백도 셈 · [4] F-1)
 #   keyn/keyq/keyv = 흐름 해석 최상위 chunks 잎 수 / 그중 0~999999999 정수 수 / 그 숫자(ⓔ 숫자와 같아야 함 · [3-V] P1-1)
 #   t1 = 맨 글자 chunks 수 · t2 = 경계 맞은 조각 수(둘 다 grep -ao 로 뽑은 조각 줄 수) · bsn = 역빗금 수 · ccn = 제어 글자 수(줄 끝 CR 1개 뺌)
 rec_rc=0
@@ -150,7 +150,7 @@ if jq -r 'if type == "object" and .msg == "finished scanning" then "obj" else "b
   objn="$(grep -cx 'obj' "$work/rec.kind")" || true
 fi
 msgn="" msg_rc=0
-LC_ALL=C grep -ao '"msg":' "$work/rec.raw" > "$work/rec.msg" 2>/dev/null || msg_rc=$?
+LC_ALL=C grep -ao '"msg"' "$work/rec.raw" > "$work/rec.msg" 2>/dev/null || msg_rc=$?
 if [ "$msg_rc" -le 1 ]; then msgn="$(grep -c '' "$work/rec.msg")" || true; fi
 keyn="" keyq="" keyv=""
 if jq -c --stream 'select(length == 2 and .[0] == ["chunks"]) | .[1]
@@ -220,7 +220,7 @@ if [ "$rc" -eq 0 ] && [ "$nonempty" -eq 0 ]; then
   if [ "$commits" -gt 0 ]; then
     # C5-N1: 값이 정수 하나가 아니면(여러 줄 값 · 넘침) 정수 비교가 실패(상태 2)해 「거짓」 이 되고 깨끗으로 새던 꼴을 닫는다.
     # 1층(보완 · HQA Q2 · [3-V] 반영) = 비교 전에 기록 줄을 통째로 확인
-    #   ⓐ 줄 1 · ⓑ 해석 값 1 · msg 같은 객체 1 · 맨 글자 "msg": 1 · ⓒ 최상위 chunks 잎 1 · 그중 범위 정수 1 · 그 값 = ⓔ 숫자
+    #   ⓐ 줄 1 · ⓑ 해석 값 1 · msg 같은 객체 1 · 맨 글자 "msg" 1 · ⓒ 최상위 chunks 잎 1 · 그중 범위 정수 1 · 그 값 = ⓔ 숫자
     #   · ⓓ 맨 글자 chunks 1 · ⓔ 콜론 바로 뒤 0 또는 1~9자리 · 바로 뒤 , 또는 } 인 조각 1 · ⓕ 역빗금 0 · ⓖ 제어 글자 0(줄 끝 CR 1개만 허용)
     #   · 값 = ⓔ 조각 숫자. 해석(ⓑⓒ)과 글자(ⓓ~ⓖ)가 서로를 메운다. 비교는 글자로(빈 값 · 깨진 값 = 닫힘). 2층 = 1층이 사라졌을 때의 예비.
     if [ "${records:-}" != "1" ] || [ "${vals:-}" != "1" ] || [ "${objn:-}" != "1" ] || [ "${msgn:-}" != "1" ] \

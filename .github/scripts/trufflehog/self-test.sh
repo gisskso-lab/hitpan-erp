@@ -582,10 +582,12 @@ printf '%s\000%s%s\n' '{"level":"info-' '0","logger":"trufflehog","msg":"finishe
 printf '%s\t%s%s\n' '{"level":"info-' '0","logger":"trufflehog","msg":"finished scanning",' '"chunks":22,"bytes":120}' > "$s12_in"; s12_one aw error 2 모양   # 다른 필드 문자열 안 날 탭 · 정상 22
 s12_line '"x":{"chunks": 0},"chunks":22,"bytes":120}'; s12_one ax error 2 모양     # 중첩(콜론 뒤 공백) + 최상위 22 — ⓓ 단독 포착
 s12_line '"msg":"finished scanning","chunks":22,"bytes":120}'; s12_one ay error 2 모양  # 같은 msg 둘 · 정상 22
-if [ "$s12_n" -eq 51 ] && [ "$s12_ok" -eq 51 ]; then
-  pass "S12 기록 필드 전체 · 경계 — 숫자 사이 공백·탭·CR · 앞자리 0 · 부호 · 소수 · 지수 · nan · 키 둘 · 이스케이프 열쇠 · 미끼 열쇠 · 중첩 · 배열 · 객체 둘 · 줄 둘 · 빈 값 · null · 넘침 · NUL · 문자열 안 제어 글자 · 열쇠=값 꼴 · 옛 견본 꼴 · msg 다름 · msg 둘 · 꼬리 · 숫자 뒤 CR = 모양 이상(종료 2) · 정상 5 = 깨끗 · 0 하나 = 조각0(종료 2) · 행마다 기록 글자 출력 0"
-elif [ "$s12_n" -ne 51 ]; then
-  miss "S12 기록 필드 전체 · 경계 — 기대 51행 · 실제 ${s12_n}행"
+# [4] F-1 반영 행(PM 결재 덧붙임 2) — 같은 msg 둘 중 앞 열쇠만 콜론 앞 공백 · 해석은 뒤 값(finished scanning)만 남음
+printf '%s%s\n' '{"level":"info-0","logger":"trufflehog","msg" :"x",' '"msg":"finished scanning","chunks":22,"bytes":120}' > "$s12_in"; s12_one az error 2 모양  # 같은 msg 둘(앞 열쇠 콜론 앞 공백) · 정상 22
+if [ "$s12_n" -eq 52 ] && [ "$s12_ok" -eq 52 ]; then
+  pass "S12 기록 필드 전체 · 경계 — 숫자 사이 공백·탭·CR · 앞자리 0 · 부호 · 소수 · 지수 · nan · 키 둘 · 이스케이프 열쇠 · 미끼 열쇠 · 중첩 · 배열 · 객체 둘 · 줄 둘 · 빈 값 · null · 넘침 · NUL · 문자열 안 제어 글자 · 열쇠=값 꼴 · 옛 견본 꼴 · msg 다름 · msg 둘 · msg 둘(콜론 앞 공백) · 꼬리 · 숫자 뒤 CR = 모양 이상(종료 2) · 정상 5 = 깨끗 · 0 하나 = 조각0(종료 2) · 행마다 기록 글자 출력 0"
+elif [ "$s12_n" -ne 52 ]; then
+  miss "S12 기록 필드 전체 · 경계 — 기대 52행 · 실제 ${s12_n}행"
 fi
 
 # ── 로그 위생: 가짜 비밀 내용이 하위 출력 어디에도 0회 ─────────────────────
@@ -603,4 +605,4 @@ if [ "$fails" -ne 0 ]; then
   echo "::error title=비밀 탐지 자체시험::${fails}개 실패 — 검사 장치를 믿을 수 없으므로 잡을 빨강으로 끝낸다"
   exit 1
 fi
-echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · S11a~x · S12a~ay · 로그 위생 모두 통과"
+echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · S11a~x · S12a~az · 로그 위생 모두 통과"
