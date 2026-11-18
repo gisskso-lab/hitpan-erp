@@ -68,6 +68,31 @@ function fieldWants(i, path) {
   });
 }
 
+/**
+ * 🔴 3차-b(11/19 · [3-V] B1 · PM 판단 「기준이 음성뿐인 칸 전수에 양성 기준」) — 문서 확인(docIs) 재료.
+ *   받은 PDF 가 그 칸의 전표인가 = 쪽 ≥ 1 · 오류 안내 아님 · 첫 쪽 제목(가장 큰 글자 맨 윗줄 · 공백 뺌) = 그 종 제목 · 전표 입구면 표지 거래처 있음.
+ *   제목 글자 = main 이 그리는 머리 제목(PdfRenderService.cs:254~263 `KoLabel` · :273 20pt) + 양식 종 이름(FormTemplateService.cs:27~33).
+ *   반품 둘(매입 · 판매)은 main `KoLabel` 표에 없어 제목이 「문서」(`_ => "문서"`) → 「문서」 를 받아들인다.
+ *   한계(명세서): 매입 반품 ↔ 판매 반품은 main 에서 제목으로 못 가름 · 고친 판 반품 제목 글자는 갈래 코드 뒤 확인(R 런 전).
+ */
+const DOC_TITLES = {
+  estimate: ['견적서'],
+  delivery: ['거래명세서'],
+  sales_order: ['수주서'],
+  purchase_order: ['발주서'],
+  receipt: ['매입명세서'],
+  purchase_return: ['매입반품', '문서'],
+  sales_return: ['판매반품', '문서'],
+};
+/** 오류 안내 글자(공백 뺀 꼴) — PdfRenderService.cs:73 「저장된 전표가 아닙니다」 · :767 「(원본 문서를 찾을 수 없습니다)」 · DocumentController.cs PreviewPdf 「미리보기를 지원하지 않는 문서입니다」. */
+const ERROR_GUIDE = ['저장된전표가아닙니다', '찾을수없습니다', '지원하지않는문서', '오류가발생'];
+/** 문서 확인 기준 하나 — 설정 미리보기 = 견본 자료(거래처 값 모름)라 표지 거래처 없이 제목만 · 전표 입구 = 제목 + 표지 거래처. */
+function docCheck(typeKey, p) {
+  const titles = DOC_TITLES[typeKey] || [];
+  const others = [...new Set(Object.entries(DOC_TITLES).filter(([k]) => k !== typeKey).flatMap(([, v]) => v).filter((x) => !titles.includes(x)))];
+  return { kind: 'docIs', type: typeKey, titles, others, marker: p === 'settings' ? null : MARK.partner, errorGuide: ERROR_GUIDE };
+}
+
 const STD_HEAD = ['품명', '수량', '공급가액']; // PdfRenderService.cs:342~346
 /** 스타일 4종 표지(시안 §2-2 · §3-3 M2) — 제목 글자 크기 · 격식 = 명조 글꼴. */
 // ⬛ [낡은 줄 · 2차] { key, titlePt, serif } 만 — [4] F3 머리 배치 · 선 굵기 · 품명 잘림 0 빠짐
@@ -218,6 +243,11 @@ function plannedCells(opts) {
   cells.push({ id: 'S.estimate.editor', group: 'S', k: 'S', type: 'estimate', path: 'editor', mainExpect: '안 보임(기록)', expect: [{ kind: 'uiFacts' }] });
   // YN1 — 양식지 PDF 올리기 문이 main 에 없다 → 문 없음 · 판정 제외(개발명세서 §2 · HQA ⑧)
   cells.push({ id: 'YN1.estimate.editor', group: 'Y/N', k: 'YN1', type: 'estimate', path: 'editor', noDoorAtMain: 'PDF 양식 올리기 문 없음(C9)', mainExpect: '문 없음', expect: [] });
+  // 🔴 3차-b(11/19 · [3-V] B1 · 전수) — 기준이 「없음」(neg) 뿐인 칸은 빈 쪽 · 오류 안내 · 엉뚱한 전표에서도 「없음」 이 서서 초록이었다
+  //   (3차 기준 45칸 = ①(가) 끔 15 · ①(나) 켬 15 · ①(나) 끔 15). 칸 이름으로 고르지 않고 꼴(전부 neg)로 골라 문서 확인을 맨 앞에 붙인다.
+  for (const c of cells) {
+    if (Array.isArray(c.expect) && c.expect.length > 0 && c.expect.every((e) => e.neg === true)) c.expect.unshift(docCheck(c.type, c.path));
+  }
   return { cells, logo, groups: compositeGroups(cells) };
 }
 
@@ -250,4 +280,6 @@ const POSITIVE_CONTROL = (() => {
 module.exports = {
   TYPES, FIELDS, MARK, STYLES, K_CASES, STD_HEAD, ROW_PITCH_MM, SHIFT_MM, BOX_TOL_MM,
   fieldsFor, coordsJson, boxOf, fieldWants, templateBody, competitorBody, plannedCells, POSITIVE_CONTROL,
+  // 🔴 3차-b([3-V] B1) — 문서 확인 재료(자체시험 T-Z15)
+  DOC_TITLES, ERROR_GUIDE, docCheck,
 };

@@ -212,7 +212,40 @@ function evalCheck(chk, facts, cell, ctx) {
       return failCode({ ok: bad.length === 0, why: bad.length ? `글자 있음 ${bad.map((w) => w.t).join(' · ')}` : '안내 · 경고 글자 0' }, '글자있음');
     }
     case 'uiFacts':
+      // ⬛ [낡은 줄 · 3차] return { ok: true, record: true, why: cell.ui ? JSON.stringify(cell.ui) : '기록 없음' };
+      // 🔴 3차-b([3-V] B4) — 기록 칸(status recorded)이 아닌데 판정 길로 오면 「기록 없음」 이어도 초록이 섰다 → 기본값 = 미측정
+      if (!cell || cell.status !== 'recorded') return { ok: false, unmeasured: true, why: `기록 칸이 판정 길로 옴(${cell ? cell.status : '칸 없음'}) — 미측정` };
       return { ok: true, record: true, why: cell.ui ? JSON.stringify(cell.ui) : '기록 없음' };
+    case 'docIs': {
+      // 🔴 3차-b(11/19 · [3-V] B1 · PM 판단 · 설계 :89) — 받은 PDF 가 그 칸의 전표인가(양성 · 「없음」 기준만 있던 칸에 붙음 · fixture docCheck)
+      //   쪽 0 · 빈 쪽(글자 0) · 제목 크기 사실 없음 · 제목이 어느 종도 아님 = 미측정(받기 · 판독 · 확인 불가)
+      //   오류 안내 글자 = 받기 실패 → 미측정(설계 :89) · 단 오류가 곧 결함인 칸(errorIsDefect · C8) = 빨강(입구 결함)
+      //   다른 종 제목 · 표지 거래처 없음 = 엉뚱한 전표 → 차림 불가(setup) · 단 오류가 곧 결함인 칸 = 빨강(입구 결함)
+      const defect = !!(cell && cell.errorIsDefect === true);
+      const pages = pagesOf(facts);
+      if (pages.length === 0) return { ok: false, unmeasured: true, why: '쪽 0 — 받은 PDF 확인 불가' };
+      const ws = wordsOf(facts);
+      if (ws.length === 0) return { ok: false, unmeasured: true, why: `빈 쪽(쪽 ${pages.length} · 글자 0) — 문서 확인 불가` };
+      const flat = ws.map((w) => String(w.t)).join('').replace(/\s+/g, '');
+      const guide = (chk.errorGuide || []).filter((g) => flat.includes(g));
+      if (guide.length) {
+        return defect ? { ok: false, why: `오류 안내 PDF(${guide.join(' · ')}) — 입구 결함`, code: '문서:오류안내' }
+          : { ok: false, unmeasured: true, why: `오류 안내 PDF(${guide.join(' · ')}) — 받기 실패(설계 :89)` };
+      }
+      const tl = titleLine(pages[0]);
+      if (!tl) return { ok: false, unmeasured: true, why: '첫 쪽 글자 크기 사실 없음(판독기) — 제목 확인 불가' };
+      const title = String(tl.text).replace(/\s+/g, '');
+      if ((chk.others || []).includes(title)) {
+        return defect ? { ok: false, why: `엉뚱한 종 제목 「${title}」 — 입구 결함`, code: '문서:엉뚱한종' }
+          : { ok: false, setup: true, why: `엉뚱한 종 제목 「${title}」(${chk.type} 칸) — 차림 · 입구 고르기` };
+      }
+      if (!(chk.titles || []).includes(title)) return { ok: false, unmeasured: true, why: `제목 「${title}」 이 ${chk.type} 제목(${(chk.titles || []).join(' · ')}) 아님 — 문서 확인 불가` };
+      if (chk.marker && !flat.includes(String(chk.marker).replace(/\s+/g, ''))) {
+        return defect ? { ok: false, why: `표지 「${chk.marker}」 없음 — 엉뚱한 전표 · 입구 결함`, code: '문서:표지없음' }
+          : { ok: false, setup: true, why: `표지 「${chk.marker}」 없음 — 엉뚱한 전표(차림)` };
+      }
+      return { ok: true, why: `문서 확인 — 쪽 ${pages.length} · 제목 「${title}」${chk.marker ? ` · 표지 「${chk.marker}」` : ''}` };
+    }
     default:
       return { ok: false, unmeasured: true, why: `모르는 기준 ${chk.kind}` };
   }
@@ -283,10 +316,20 @@ function judgeCell(cell, ctx) {
   // ⬛ [낡은 줄 · 2차] if (cell.status === 'recorded') { … } — 위로 옮김
   // 🔴 3차([3-V] A2) — 기준이 0개인 칸(K5 · YN1 의 merged 판 등)은 열리기만 해도 초록이 섰다 → 「미측정(기준 없음)」
   if (!Array.isArray(cell.expect) || cell.expect.length === 0) return { cat: CAT.UNMEASURED, why: '기준 없음 — 미측정(기준 0개 칸 · [3-V] A2 · R 런 전 merged 판 기준 정의)' };
+  // 🔴 3차-b([3-V] B1 · 전수 지킴) — 양성 기준이 하나도 없는 칸(「없음」 기준만)은 빈 쪽 · 오류 안내 · 엉뚱한 전표에서도 초록이 섰다 →
+  //   차림 정의(fixture docCheck)가 빠뜨려도 판정기에서 미측정으로 막는다
+  if (cell.expect.every((c) => c && c.neg === true)) return { cat: CAT.UNMEASURED, why: '양성 기준 0 — 「없음」 기준만으로는 초록 못 냄([3-V] B1)' };
   const facts = ctx.factsById[cell.id];
   if (!facts) return { cat: CAT.UNMEASURED, why: '사실 JSON 없음(판독기 미실행)' };
   if (facts.ok !== true) return { cat: CAT.UNMEASURED, why: `판독기 열기 실패 ${facts.error || ''}` };
   const res = cell.expect.map((c) => ({ c, r: evalCheck(c, facts, cell, ctx) }));
+  // 🔴 3차-b([3-V] B1) — 문서 확인(docIs)을 못 하면 그 칸의 다른 기준(특히 「없음」)은 무효 → 차림 불가 · 미측정 · 빨강(입구 결함)으로 끝
+  const gate = res.find((x) => x.c.kind === 'docIs');
+  if (gate && !gate.r.ok) {
+    if (gate.r.setup) return { cat: CAT.SETUP, why: `문서 확인 — ${gate.r.why}` };
+    if (gate.r.unmeasured) return { cat: CAT.UNMEASURED, why: `문서 확인 — ${gate.r.why}` };
+    return { cat: CAT.RED, why: `× 문서 확인 — ${gate.r.why}`, code: gate.r.code || 'docIs' };
+  }
   const posFail = res.filter((x) => !x.c.neg && !x.r.ok && !x.r.unmeasured);
   const unm = res.filter((x) => x.r.unmeasured);
   const negFail = res.filter((x) => x.c.neg && !x.r.ok && !x.r.unmeasured);
@@ -309,8 +352,19 @@ function mainStops(rows, board) {
   const kRows = rows.filter((r) => /^K[1-5]$/.test(r.k || ''));
   const kJudged = kRows.filter((r) => r.cat === CAT.GREEN || r.cat === CAT.RED || r.cat === CAT.CHANGED);
   if (kJudged.length > 0 && kJudged.every((r) => r.cat !== CAT.RED)) stops.push('K1~K5 판정 칸 전부 main 초록 — 대표 실패를 못 잡음(멈춤 ⓐ)');
+  // ⬛ [낡은 줄 · 3차] const wmA = rows.filter((r) => r.group === '①(가)' && /-on\./.test(r.id));
+  // ⬛ [낡은 줄 · 3차] if (wmA.length && wmA.every((r) => r.cat === CAT.GREEN)) stops.push('①(가) main 초록 — 차림이 대표 화면 조건을 못 만듦 · 멈춤 · 측정 재설계');
+  //   — 3차에 ① 을 7종으로 넓혔는데 멈춤은 7종을 합쳐 every → 한 종만 main 초록이면 안 걸림([4] F12)
+  // 🔴 3차-b([4] F12 · 설계 :86 · PM 「①(가) 멈춤 = 종마다」) — 종마다 켬 칸 전부 main 초록이면 그 종 멈춤
   const wmA = rows.filter((r) => r.group === '①(가)' && /-on\./.test(r.id));
-  if (wmA.length && wmA.every((r) => r.cat === CAT.GREEN)) stops.push('①(가) main 초록 — 차림이 대표 화면 조건을 못 만듦 · 멈춤 · 측정 재설계');
+  for (const ty of [...new Set(wmA.map((r) => r.type))]) {
+    const a = wmA.filter((r) => r.type === ty);
+    if (a.length && a.every((r) => r.cat === CAT.GREEN)) stops.push(`①(가) ${ty} main 초록 — 차림이 대표 화면 조건을 못 만듦 · 그 종 멈춤 · 측정 재설계`);
+  }
+  // 🔴 3차-b([4] F11 · 명세서 §2 (2차 고정) ③(나) 행 「빨강이면 판독기 · 차림 사유 — 멈춤 · PM」) — 초록(회귀) 기대 칸이 main 빨강 = 멈춤
+  for (const r of rows) {
+    if (r.mainExpect === '초록(회귀)' && r.cat === CAT.RED) stops.push(`${r.id} main 빨강(회귀 기대 초록) — 판독기 · 차림 사유 · 멈춤 · PM`);
+  }
   return stops;
 }
 
@@ -442,8 +496,14 @@ function nineCountCore(manifest, outcomes, n1) {
     ].filter(Boolean).join(' · ') + nr;
   } else if (eValid === 0) { cat = CAT.UNMEASURED; why = 'E 행 전부 무효 — ⑨ 미측정 · 합격 0'; }
   else if (eMeasured === 0) { cat = CAT.UNMEASURED; why = `E 행 유효 ${eValid} · 결과 있음 0 — ⑨ 미측정 · 합격 0${nr}`; }
-  else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0${nr}`; }
-  else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}${nr}`; }
+  // ⬛ [낡은 줄 · 3차-a] else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0${nr}`; }
+  // ⬛ [낡은 줄 · 3차-a] else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}${nr}`; }
+  //   — S2 를 채우면 유효 E 행에 결과 없음이 있어도 ⑨ 초록(「결과 없음 n」 만 적음) · PM 확인 ⓐ 반려(11/19 02:0x)
+  // 🔴 3차-b(PM 확인 ⓐ · 설계 :88~:89 「PDF 못 받음 … = 미측정」 · 「하나라도 미측정이면 합격 0」) — 유효 E 행 결과 없음 ≥1 = ⑨ 부분(합격 0) · 「결과 없음 n」 그대로
+  else if (s2.length || noResult > 0) {
+    cat = '부분';
+    why = `${[s2.length ? `최소 유효 미달(S2): ${s2.join(' · ')}` : '', noResult > 0 ? '유효 E 행 결과 없음 ≥1(PM ⓐ)' : ''].filter(Boolean).join(' · ')} · 합격 0${nr}`;
+  } else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}${nr}`; }
   const n1Rows = {};
   for (const [k, v] of Object.entries(n1 || {})) {
     if (!v || v.setup !== true) n1Rows[k] = `${CAT.UNMEASURED}(차림 못 세움)`;
@@ -537,6 +597,8 @@ function toMarkdown(meta, res, nine) {
     // 🔴 3차-a(PM 11/19 판단 3 · CTO 조건 7 「같은 계열 · 판 기록」) — ⒞ 명령 판 · ⒜ QuestPDF 동봉 판 둘 다
     L.push(`- ⑨ qpdf 판 ⒞ 명령(\`qpdf --version\`): ${nine.qpdf || '기록 없음'}`);
     L.push(`- ⑨ qpdf 판 ⒜ QuestPDF 동봉(DocumentOperation): ${nine.qpdfBundled || '기록 없음'}`);
+    // 🔴 3차-b(PM 확인 「범위 밖 발견」 · 설계 :263 「결과표에 과잉 거절 수 P4 · P2 따로」) — json 에만 있던 overReject 를 md 에도
+    L.push(`- ⑨ 과잉 거절 수(따로 셈 · P4 = 받아들임 · P2 = 결함): ${nine.overReject ? `P4 ${nine.overReject.P4} · P2 ${nine.overReject.P2}` : `셈 없음(⑨ ${nine.cat})`}`);
   } else if (meta.nineQpdf) {
     L.push('');
     // ⬛ [낡은 줄 · 3차] L.push(`- ⑨ 표본 qpdf 판: ${meta.nineQpdf}(⑨ 셈 입력 없음)`);

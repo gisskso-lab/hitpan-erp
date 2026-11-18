@@ -7,6 +7,7 @@
 //   쓰는 법: node plan.js [GITHUB_OUTPUT 파일]   — 파일이 있으면 `matrix=…` 한 줄을 덧붙인다.
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process'); // 3차-b([3-V] B3) — --check-paths 가 바뀐 파일을 `-z` 로 스스로 받음
 
 const RUN_NAMES = ['Z1', 'Z2', 'Z3', 'Z4', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6'];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -77,10 +78,52 @@ function checkPatchText(text) {
   if (denied.length) why.push(`측정 장치 · 워크플로 자리 건드림: ${denied.join(' · ')}`);
   return { ok: why.length === 0, why: why.join(' · '), paths: [...paths] };
 }
+/**
+ * 🔴 3차-b([3-V] B3) — git 이 따옴표로 감싼 경로(core.quotepath 기본 · 한글 등 `"scripts/\355\225\234.js"`)를 원래 경로로 푼다.
+ *   C 탈출 \ooo(8진 바이트) · \\ · \" · \a \b \t \n \v \f \r 만 받고, 꼴이 다르면 null(= 거절 · fail-closed).
+ */
+function unquoteGitPath(s) {
+  const p = String(s);
+  if (!p.startsWith('"')) return p;
+  if (p.length < 2 || !p.endsWith('"')) return null;
+  const cs = Array.from(p.slice(1, -1));
+  const esc = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+  const bytes = [];
+  for (let i = 0; i < cs.length; i++) {
+    if (cs[i] !== '\\') { bytes.push(...Buffer.from(cs[i], 'utf8')); continue; }
+    const oct = cs.slice(i + 1, i + 4).join('');
+    if (/^[0-3][0-7]{2}$/.test(oct)) { bytes.push(parseInt(oct, 8)); i += 3; continue; }
+    if (esc[cs[i + 1]] === undefined) return null;
+    bytes.push(esc[cs[i + 1]]);
+    i += 1;
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
 /** 적용 뒤 바뀐 파일 목록(줄마다 하나)에 막힌 자리가 있나. */
 function checkPaths(lines) {
-  const denied = String(lines).split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter(deniedPath);
-  return { ok: denied.length === 0, why: denied.length ? `적용 뒤 측정 장치 · 워크플로 자리 바뀜: ${denied.join(' · ')}` : '' };
+  // ⬛ [낡은 줄 · 3차] const denied = String(lines).split(/\r?\n/).map((s) => s.trim()).filter(Boolean).filter(deniedPath);
+  // ⬛ [낡은 줄 · 3차] return { ok: denied.length === 0, why: denied.length ? `적용 뒤 측정 장치 · 워크플로 자리 바뀜: ${denied.join(' · ')}` : '' };
+  //   — 따옴표로 감싼 경로(`"scripts/\355…"`)는 /^scripts\// 에 안 걸려 통과했다([3-V] B3 측정)
+  // 🔴 3차-b([3-V] B3) — 따옴표 꼴은 풀어서 본다 · 못 풀면 거절
+  const raw = String(lines).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const odd = raw.filter((s) => unquoteGitPath(s) === null);
+  const denied = raw.map(unquoteGitPath).filter((x) => x !== null && deniedPath(x));
+  const why = [
+    denied.length ? `적용 뒤 측정 장치 · 워크플로 자리 바뀜: ${denied.join(' · ')}` : '',
+    odd.length ? `적용 뒤 경로 꼴 모름 ${odd.length}: ${odd.map((s) => s.slice(0, 60)).join(' · ')}` : '',
+  ].filter(Boolean).join(' · ');
+  return { ok: denied.length === 0 && odd.length === 0, why };
+}
+/** 🔴 3차-b([3-V] B3) — NUL 로 끊은 목록(`git … -z`) — 경로를 따옴표 · 탈출 없이 그대로 받는다(한글 경로 그대로). */
+function checkPathsZ(buf) {
+  const list = (Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)).split('\0').filter(Boolean);
+  const denied = list.filter(deniedPath);
+  return { ok: denied.length === 0, why: denied.length ? `적용 뒤(-z) 측정 장치 · 워크플로 자리 바뀜: ${denied.join(' · ')}` : '', n: list.length };
+}
+/** 🔴 3차-b([3-V] B3) — --check-paths 가 스스로 받는 바뀐 파일 목록(워크플로 줄 무변 · 표준 입력 목록과 둘 다 본다). */
+function gitChangedZ() {
+  const run = (args) => execFileSync('git', ['-c', 'core.quotepath=false', ...args], { maxBuffer: 64 * 1024 * 1024 });
+  return Buffer.concat([run(['diff', '--name-only', '-z', 'HEAD']), run(['ls-files', '-z', '--others', '--exclude-standard'])]);
 }
 
 // 🔴 3차([4] F6 · HQA ⑦) — 예상 사유 code 꼴(런 전 고정). target = 칸 id 또는 nine · code = 판정기가 내는 꼴 그대로(null = 미고정)
@@ -153,8 +196,18 @@ function main(outFile) {
   }
   if (outFile === '--check-paths') {
     const r = checkPaths(fs.readFileSync(0, 'utf8'));
-    console.log(r.ok ? '적용 뒤 검사 통과' : `⚫ FAIL [장치] ${r.why}`);
-    return r.ok ? 0 : 1;
+    // ⬛ [낡은 줄 · 3차] console.log(r.ok ? '적용 뒤 검사 통과' : `⚫ FAIL [장치] ${r.why}`);
+    // ⬛ [낡은 줄 · 3차] return r.ok ? 0 : 1;
+    // 🔴 3차-b([3-V] B3) — 표준 입력(워크플로 줄 그대로) + 스스로 받은 `git -c core.quotepath=false … -z` 목록 둘 다 통과해야
+    let z;
+    try {
+      z = checkPathsZ(gitChangedZ());
+    } catch (e) {
+      z = { ok: false, why: `git -z 목록 못 받음(${e.name})` };
+    }
+    const ok = r.ok && z.ok;
+    console.log(ok ? `적용 뒤 검사 통과(-z ${z.n})` : `⚫ FAIL [장치] ${[r.why, z.why].filter(Boolean).join(' · ')}`);
+    return ok ? 0 : 1;
   }
   const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'plan.json'), 'utf8'));
   const v = validate(plan);
@@ -188,4 +241,6 @@ function main(outFile) {
 
 if (require.main === module) process.exitCode = main(process.argv[2]);
 
-module.exports = { validate, matrixFor, RUN_NAMES, checkPatchText, checkPaths, deniedPath };
+// ⬛ [낡은 줄 · 3차] module.exports = { validate, matrixFor, RUN_NAMES, checkPatchText, checkPaths, deniedPath };
+// 🔴 3차-b([3-V] B3) — 따옴표 풀기 · -z 목록 검사(자체시험 T-Z20)
+module.exports = { validate, matrixFor, RUN_NAMES, checkPatchText, checkPaths, deniedPath, unquoteGitPath, checkPathsZ, gitChangedZ };

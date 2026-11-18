@@ -315,7 +315,9 @@ guard('T-Z4 [3-V] A1 · PM 정정 유효 E 결과 없음 = 그 행 미측정 · 
   check('T-Z4 [3-V] A1 · PM 정정 유효 E 결과 없음 = 그 행 미측정 · 분모 제외 · 초록 0',
     r.cat === C.UNMEASURED && r.omission === 0 && r.noResult === 4 && r.code === '' && ['E1', 'E4', 'E7', 'E7c'].every((id) => r.rows[id] === unm)
     && part.cat === '부분' && part.omission === 0 && part.noResult === 2 && part.rows.E4 === unm && /E4 · E5/.test(part.why)
-    && one.cat === C.GREEN && one.omission === 0 && one.noResult === 1 && one.rows.E1 === unm && /결과 없음 1/.test(one.why),
+    // ⬛ [낡은 기대 · 3차-a] && one.cat === C.GREEN && one.omission === 0 && one.noResult === 1 && one.rows.E1 === unm && /결과 없음 1/.test(one.why),
+    //   — PM 확인 ⓐ 반려(유효 E 행 결과 없음 ≥1 = ⑨ 부분) → 3차-b 기대 = 부분(T-Z18 이 따로 봄)
+    && one.cat === '부분' && one.omission === 0 && one.noResult === 1 && one.rows.E1 === unm && /결과 없음 1/.test(one.why),
     `전부 결과 없음 ${r.cat} · 누락 ${r.omission} · 결과 없음 ${r.noResult} · code '${r.code}' / E4 · E5 결과 없음 ${part.cat} · 누락 ${part.omission} / E1 만 결과 없음 ${one.cat} · ${one.why}`);
 });
 // T-Z5 [3-V] A7 — 판독기 자체시험 값 없음(undefined) = 실패
@@ -445,6 +447,138 @@ guard('T-Z14 PM 판단 3 qpdf 판 두 칸(⒞ 명령 · ⒜ 동봉)', () => {
     && /⑨ 표본 qpdf 판 ⒞ 명령/.test(mdMeta) && /⑨ 표본 qpdf 판 ⒜ QuestPDF 동봉.*동봉 qpdf 판 미측정/.test(mdMeta);
   check('T-Z14 PM 판단 3 qpdf 판 두 칸(⒞ 명령 · ⒜ 동봉)', okRead && okNot && okMd,
     `읽음 ⒞ ${a.qpdf} · ⒜ ${a.qpdfBundled} / 못 읽음(main) ⒜ ${m.qpdfBundled} / 결과표 두 줄 ${okMd}`);
+});
+
+// ════ 3차-b(11/19 · PM 판단 「3차 재셈」 · [3-V] B1 · B3 · B4 · [4] F11 · F12 · PM 확인 ⓐ · 과잉 거절 수 md) ════
+// 각 경우 = 「고치기 전(e134ce11) 판정기 · 차림 · 계획에서 실패 · 고친 판에서 통과」(명세서 §6-c 3차-b 행)
+const titled = (title, extra) => facts([{ wMm: 210, hMm: 297, words: [word(title, 20, 15, { fs: 20, w: 20, h: 7 }), word('문서번호:', 20, 24, { fs: 9 }), ...(extra || [])] }]);
+const partnerWord = () => word(F.MARK.partner, 30, 60, { fs: 10 });
+// 고치기 전 차림(DOC_TITLES 없음)에서도 도우미 예외가 아니라 판정기 판정으로 실패가 드러나게
+const firstTitle = (ty) => ((F.DOC_TITLES || {})[ty] || ['?'])[0];
+
+// T-Z15 [3-V] B1 — 「없음」 기준만 있던 45칸(①(가) 끔 · ①(나) 켬/끔) = 빈 쪽 · 오류 안내 · 엉뚱한 전표에서 초록이던 길(3-V 측정 45/45)
+guard('T-Z15 [3-V] B1 「없음」 기준만 있던 칸 = 문서 확인 먼저 · 빈 쪽 · 오류 안내 · 엉뚱한 전표 = 초록 0', () => {
+  const pl = F.plannedCells();
+  // 칸 고르기 = 이름(고치기 전 · 뒤 같은 45칸) · 고친 판에 「없음」 만 남은 칸 수 = 0 이어야
+  const target = pl.cells.filter((c) => /^WM-(가-off|나-on|나-off)\./.test(c.id));
+  const negOnlyLeft = pl.cells.filter((c) => Array.isArray(c.expect) && c.expect.length && c.expect.every((e) => e.neg === true)).length;
+  const defectN = target.filter((c) => c.errorIsDefect).length;
+  const blank = facts([{ wMm: 210, hMm: 297 }]);
+  const errPdf = facts([{ wMm: 210, hMm: 297, words: [word('저장된', 10, 10, { fs: 10 }), word('전표가', 22, 10, { fs: 10 }), word('아닙니다.', 34, 10, { fs: 10 })] }]);
+  const judgeAll = (mk, board) => {
+    const cats = {};
+    for (const c of target) {
+      const r = J.judgeCell({ ...c, status: 'captured', ui: { warnCount: 0 } }, { board, pcOk: true, factsById: { [c.id]: mk(c) } });
+      cats[r.cat] = (cats[r.cat] || 0) + 1;
+    }
+    return cats;
+  };
+  const g = (cats) => cats[C.GREEN] || 0;
+  const bMain = judgeAll(() => blank, 'main');
+  const bMerged = judgeAll(() => blank, 'merged');
+  const eMain = judgeAll(() => errPdf, 'main');
+  // 엉뚱한 전표 = 다른 종 제목(+ 표지 거래처) → 차림 불가 · 오류가 곧 결함인 칸(판매 반품 전표 입구) = 빨강
+  const wMain = judgeAll((c) => titled(c.type === 'delivery' ? '견적서' : '거래명세서', [partnerWord()]), 'main');
+  // 맞는 종 제목인데 표지 거래처 없음(전표 입구) = 엉뚱한 전표(같은 종 다른 전표)
+  const noMark = judgeAll((c) => titled(firstTitle(c.type)), 'main');
+  // 대조 — 맞는 문서(제목 + 전표 입구면 표지) = 초록 되살아남(기준이 살아 있나)
+  const goodFor = (c) => titled(firstTitle(c.type), c.path === 'settings' ? [] : [partnerWord()]);
+  const gMain = judgeAll(goodFor, 'main');
+  // 반품 둘 = main 제목 「문서」 받아들임
+  const docTitle = J.judgeCell({ ...target.find((c) => c.id === 'WM-나-off.purchase_return.doc'), status: 'captured', ui: { warnCount: 0 } },
+    { board: 'main', pcOk: true, factsById: { 'WM-나-off.purchase_return.doc': titled('문서', [partnerWord()]) } }).cat;
+  // 판정기 지킴 — 차림 정의가 빠뜨린 「없음」 만 칸 = 미측정
+  const negCell = { id: 'X.neg', status: 'captured', expect: [{ kind: 'image', ref: { sha: 'z' }, want: 'absent', neg: true }] };
+  const guardCat = J.judgeCell(negCell, { board: 'main', pcOk: true, factsById: { 'X.neg': goodFor({ type: 'estimate', path: 'settings' }) } }).cat;
+  const notSettingsN = target.filter((c) => c.path !== 'settings').length;
+  check('T-Z15 [3-V] B1 「없음」 기준만 있던 칸 = 문서 확인 먼저 · 빈 쪽 · 오류 안내 · 엉뚱한 전표 = 초록 0',
+    target.length === 45 && negOnlyLeft === 0 && defectN === 6
+    && g(bMain) === 0 && bMain[C.UNMEASURED] === 45 && g(bMerged) === 0
+    && g(eMain) === 0 && eMain[C.UNMEASURED] === 45 - defectN && eMain[C.RED] === defectN
+    && g(wMain) === 0 && wMain[C.SETUP] === 45 - defectN && wMain[C.RED] === defectN
+    && g(noMark) === 45 - notSettingsN && (noMark[C.SETUP] || 0) === notSettingsN - defectN && (noMark[C.RED] || 0) === defectN
+    && gMain[C.GREEN] === 45 && docTitle === C.GREEN && guardCat === C.UNMEASURED,
+    `45칸 ${target.length} · 「없음」 만 남음 ${negOnlyLeft} · 빈 쪽 main ${JSON.stringify(bMain)} · merged 초록 ${g(bMerged)} · 오류 안내 ${JSON.stringify(eMain)} · 엉뚱한 종 ${JSON.stringify(wMain)} · 표지 없음 ${JSON.stringify(noMark)} · 맞는 문서 초록 ${gMain[C.GREEN]} · 반품 「문서」 ${docTitle} · 지킴 ${guardCat}`);
+});
+
+// T-Z16 [4] F11 — 초록(회귀) 기대 칸(ST-basic · ST-ignore 16칸)이 main 빨강이어도 멈춤 0 이던 길
+guard('T-Z16 [4] F11 초록(회귀) 기대 칸 main 빨강 = 멈춤', () => {
+  const reg = F.plannedCells().cells.filter((c) => c.mainExpect === '초록(회귀)');
+  const rows = reg.map((c, k) => ({ id: c.id, k: c.k, type: c.type, group: c.group, mainExpect: c.mainExpect, cat: k === 0 ? C.RED : C.GREEN }));
+  const st = J.mainStops(rows, 'main');
+  const none = J.mainStops(rows.map((r) => ({ ...r, cat: C.GREEN })), 'main');
+  const unm = J.mainStops(rows.map((r) => ({ ...r, cat: C.UNMEASURED })), 'main');
+  const merged = J.mainStops(rows, 'merged');
+  check('T-Z16 [4] F11 초록(회귀) 기대 칸 main 빨강 = 멈춤',
+    reg.length === 16 && st.length === 1 && st[0].startsWith(`${reg[0].id} main 빨강`) && none.length === 0 && unm.length === 0 && merged.length === 0,
+    `회귀 칸 ${reg.length} · 한 칸 빨강 멈춤 ${st.length}(${String(st[0] || '-').slice(0, 50)}) · 전부 초록 ${none.length} · 미측정 ${unm.length} · merged ${merged.length}`);
+});
+
+// T-Z17 [4] F12 — ①(가) 멈춤이 7종 합쳐 every 라 한 종만 main 초록이면 안 걸리던 길(설계 :86)
+guard('T-Z17 [4] F12 ①(가) 멈춤 = 종마다', () => {
+  const wmOn = F.plannedCells().cells.filter((c) => c.group === '①(가)' && /-on\./.test(c.id));
+  const row = (c, cat) => ({ id: c.id, k: c.k, type: c.type, group: c.group, mainExpect: c.mainExpect, cat });
+  const wm = (s) => s.filter((x) => /^①\(가\)/.test(x));
+  const one = wm(J.mainStops(wmOn.map((c) => row(c, c.type === 'estimate' ? C.GREEN : C.RED)), 'main'));
+  const allRed = wm(J.mainStops(wmOn.map((c) => row(c, C.RED)), 'main'));
+  const half = wm(J.mainStops(wmOn.map((c) => row(c, c.type === 'estimate' && c.path === 'settings' ? C.GREEN : C.RED)), 'main'));
+  const allGreen = wm(J.mainStops(wmOn.map((c) => row(c, C.GREEN)), 'main'));
+  check('T-Z17 [4] F12 ①(가) 멈춤 = 종마다',
+    one.length === 1 && /estimate/.test(one[0]) && allRed.length === 0 && half.length === 0 && allGreen.length === 7,
+    `견적서만 초록 ${one.length}(${String(one[0] || '-').slice(0, 40)}) · 전부 빨강 ${allRed.length} · 견적서 설정만 초록 ${half.length} · 전부 초록 ${allGreen.length}`);
+});
+
+// T-Z18 PM 확인 ⓐ — S2 를 채워도 유효 E 행 결과 없음 ≥1 = ⑨ 부분(합격 0 · 「결과 없음 n」) · 3차-a = 초록
+guard('T-Z18 PM 확인 ⓐ 유효 E 결과 없음 ≥1 = ⑨ 부분', () => {
+  const out = { ...nineBase };
+  delete out.E1;
+  const r = J.nineCount(nineValid, out, 'merged');
+  const full = J.nineCount(nineValid, nineBase, 'merged');
+  const two = { ...nineBase };
+  delete two.E2;
+  delete two.E8;
+  const r2 = J.nineCount(nineValid, two, 'merged');
+  check('T-Z18 PM 확인 ⓐ 유효 E 결과 없음 ≥1 = ⑨ 부분',
+    r.cat === '부분' && r.noResult === 1 && /결과 없음 1\(E1/.test(r.why) && /합격 0/.test(r.why) && full.cat === C.GREEN && r2.cat === '부분' && r2.noResult === 2,
+    `E1 결과 없음 ${r.cat} · ${r.why.slice(0, 70)} / 전부 결과 ${full.cat} / E2 · E8 결과 없음 ${r2.cat}(${r2.noResult})`);
+});
+
+// T-Z19 PM 「범위 밖 발견」 — 과잉 거절 수(P4 · P2)가 print-result.md 에 없던 것(json 에만)
+guard('T-Z19 과잉 거절 수 P4 · P2 결과표 md 에', () => {
+  const res = { positive: { ok: true, why: '-' }, rows: [], composite: [], counts: Object.fromEntries(Object.values(C).map((v) => [v, 0])), stops: [], denomOut: 0 };
+  const n = J.nineCount(nineValid, { ...nineBase, P4: nineRej, P2: nineRej }, 'merged');
+  const md = J.toMarkdown({ run: 'R1', job: 'x', board: 'merged' }, res, n);
+  const md0 = J.toMarkdown({ run: 'R1', job: 'x', board: 'merged' }, res, J.nineCount(nineValid, nineBase, 'merged'));
+  const mdMain = J.toMarkdown({ run: 'Z1', job: 'x', board: 'main' }, res, J.nineCount(nineValid, nineBase, 'main'));
+  check('T-Z19 과잉 거절 수 P4 · P2 결과표 md 에',
+    /⑨ 과잉 거절 수[^\n]*P4 1 · P2 1/.test(md) && /⑨ 과잉 거절 수[^\n]*P4 0 · P2 0/.test(md0) && /⑨ 과잉 거절 수[^\n]*셈 없음/.test(mdMain),
+    `P4 · P2 거절 ${/P4 1 · P2 1/.test(md)} · 0 ${/P4 0 · P2 0/.test(md0)} · main 셈 없음 ${/셈 없음/.test(mdMain)}`);
+});
+
+// T-Z20 [3-V] B3 — 적용 뒤 검사가 git 따옴표 경로(한글 · `"scripts/\355…"`)를 못 거르던 길 · -z 목록은 한글 그대로
+guard('T-Z20 [3-V] B3 적용 뒤 검사 따옴표 경로 · -z 목록', () => {
+  const q = PLAN.checkPaths('src/a.cs\n"scripts/\\355\\225\\234.js"\n');
+  const qSrc = PLAN.checkPaths('"src/\\355\\225\\234\\352\\270\\200.cs"\n');
+  const odd = PLAN.checkPaths('"scripts/\\9zz.js"\n');
+  // 고치기 전 계획(함수 없음)에서도 따옴표 경로 판정(위 q)이 실패 사유로 보이게 — 함수 없음 = 그 줄 실패
+  const has = typeof PLAN.unquoteGitPath === 'function' && typeof PLAN.checkPathsZ === 'function';
+  const none = { ok: null, why: '함수 없음' };
+  const un = has ? PLAN.unquoteGitPath('"scripts/\\355\\225\\234.js"') : '함수 없음';
+  const z = has ? PLAN.checkPathsZ(Buffer.from('src/a.cs\0scripts/한.js\0', 'utf8')) : none;
+  const zSrc = has ? PLAN.checkPathsZ(Buffer.from('src/한글.cs\0', 'utf8')) : none;
+  const zGh = has ? PLAN.checkPathsZ(Buffer.from('.github/workflows/x.yml\0', 'utf8')) : none;
+  check('T-Z20 [3-V] B3 적용 뒤 검사 따옴표 경로 · -z 목록',
+    !q.ok && qSrc.ok && !odd.ok && un === 'scripts/한.js' && z.ok === false && zSrc.ok === true && zGh.ok === false,
+    `따옴표 scripts 거절 ${!q.ok} · 따옴표 src 통과 ${qSrc.ok} · 꼴 모름 거절 ${!odd.ok} · 풀기 ${un} · -z scripts 거절 ${z.ok === false} · -z src 통과 ${zSrc.ok === true} · -z .github 거절 ${zGh.ok === false}`);
+});
+
+// T-Z21 [3-V] B4 — 기록 칸(S)이 recorded 아닌 채 판정 길로 오면 「기록 없음」 이어도 초록이던 길
+guard('T-Z21 [3-V] B4 uiFacts 기본값 = 미측정', () => {
+  const sCell = { ...F.plannedCells({ types: ['estimate'] }).cells.find((c) => c.id === 'S.estimate.editor'), status: 'captured' };
+  const r = J.judgeCell(sCell, { board: 'main', pcOk: true, factsById: { [sCell.id]: facts([{ words: [] }]) } });
+  const rec = J.judgeCell({ ...sCell, status: 'recorded', ui: { coordTableVisible: false, pdfAccept: false } }, { board: 'main', pcOk: true, factsById: {} });
+  check('T-Z21 [3-V] B4 uiFacts 기본값 = 미측정', r.cat === C.UNMEASURED && rec.cat === C.NA && /coordTableVisible/.test(rec.why),
+    `판정 길 S ${r.cat} · 기록 S ${rec.cat}`);
 });
 
 console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`);
