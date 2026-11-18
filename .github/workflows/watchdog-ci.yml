@@ -189,3 +189,10 @@ jobs:
           }
           Write-Output "All scenario scripts parsed OK ($($files.Count)건)"
         shell: pwsh
+
+      # W-G1-53 ㉣ (2026-11-19): 가드 · 판정 모듈 + 새 러너 CI 시험 — 가짜 훅만(진짜 끊기 0) · Windows PowerShell 5.1(PC1 실행 환경 · run 줄은 ASCII 만)
+      - name: CommsGuard tests (fake hooks only, Windows PowerShell 5.1)
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/scenarios/comms-integrity/Test-CommsGuard.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Test-CommsGuard failed (exit $LASTEXITCODE)" }
+        shell: powershell

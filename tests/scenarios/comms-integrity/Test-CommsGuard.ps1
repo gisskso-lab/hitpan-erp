@@ -1,0 +1,1098 @@
+﻿#Requires -Version 5.1
+<#
+  Test-CommsGuard.ps1 — W-G1-53 ㉣ CI 시험(가짜 입력만 · 진짜 끊기 0 · 외부 모듈 없이)
+
+  근거(주소만):
+    설계       docs/설계/설치배포/20261118_WG1-53_장애시험도구재설계_설계.md  §7(경우 C1~C22) · §5 · §5-1a · §5-3
+    작업지시서 docs/운영기록/20261118작_WG1-53_장애시험도구재설계_작업지시서.md  §2 ㉣
+    개발명세서 docs/개발/설치배포/20261118_개발명세서_WG1-53_장애시험도구재설계.md  §0 다음 줄 2 · §7 새 창 구현 메모
+
+  하는 일:
+    가짜 세계(정수 ms 시계 · 서비스 · 프로세스 · HTTP · 이벤트)를 만들고, 새 러너(Run-RoutinePcScenarios.ps1)를
+    -Hooks 로만 돌려 경우 C1~C22 의 기대값과 맞춰 본다. 실물 공급자(레지스트리 · 서비스 · 외부 HTTP · 이벤트 로그) 호출 0.
+    G4a 는 임시 git 저장소(저장소 밖 임시 폴더)로 잰다 — 이 저장소에는 git 쓰기 0.
+
+  인자:
+    -ModulePath  판정 모듈 경로(기본 = 같은 폴더 CommsGuard.psm1) — 「가드 한 줄 깬 사본」 대조군용
+    -RunnerPath  러너 경로(기본 = 같은 폴더 Run-RoutinePcScenarios.ps1)
+
+  끝 줄: 「Test-CommsGuard 끝 — 경우 22/22 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치) / 1.
+  비밀 꼴 키 이름 · 노출 금지어는 실행 중에 이어 붙여 만든다(이 파일 바이트에 0).
+  인코딩: UTF-8 BOM.
+#>
+param(
+    [string]$ModulePath,
+    [string]$RunnerPath
+)
+
+Set-StrictMode -Off
+
+# ─────────────────────────────────────────────── 가짜 세계
+
+class CgWorld {
+    [datetime]$Base
+    [long]$Ms
+    [hashtable]$Cfg
+    [hashtable]$Cut
+    [hashtable]$CutCalls
+    [hashtable]$InfoCalls
+    [long]$LastStopMs
+    [int]$FakeCuts
+    [int]$ExtGets
+    [int]$LocalGets
+    [int]$HandCalls
+    [int]$BadUrls
+    [int]$NoCacheMissing
+    [System.Collections.Generic.List[string]]$Nonces
+    [bool]$Verbose
+
+    CgWorld([datetime]$base, [hashtable]$cfg) {
+        $this.Base = $base
+        $this.Ms = 0
+        $this.Cfg = $cfg
+        $this.Cut = @{}
+        $this.CutCalls = @{}
+        $this.InfoCalls = @{}
+        $this.LastStopMs = -1
+        $this.Nonces = New-Object 'System.Collections.Generic.List[string]'
+        $this.Verbose = $false
+    }
+
+    [datetime] Now() { return $this.Base.AddMilliseconds([double]$this.Ms) }
+    [void] Sleep([int]$delta) { if ($delta -gt 0) { $this.Ms += $delta } }
+    [bool] IsCut([string]$k) { return $this.Cut.ContainsKey($k) }
+    [long] Rel([string]$k) { return ($this.Ms - [long]$this.Cut[$k]) }
+    [bool] InWin([object[]]$w, [long]$r) {
+        if ($null -eq $w) { return $false }
+        for ($i = 0; $i + 1 -lt $w.Count; $i += 2) {
+            if ($r -ge [long]$w[$i] -and $r -lt [long]$w[$i + 1]) { return $true }
+        }
+        return $false
+    }
+
+    # ── 서비스(cloudflared · MariaDB) — 시각은 그 대상 끊기 시각 기준 ms
+    [string] SvcStatus([string]$name) {
+        $c = $this.Cfg.Svc[$name]
+        if ($null -eq $c) { return 'Running' }
+        if (-not $this.IsCut($name)) { return [string]$c.Pre }
+        $r = $this.Rel($name)
+        if ([long]$c.StopAt -lt 0) { return 'Running' }
+        if ($r -lt [long]$c.StopAt) { return 'StopPending' }
+        if ([long]$c.RunAt -ge 0 -and $r -ge [long]$c.RunAt) { return 'Running' }
+        return 'Stopped'
+    }
+    [bool] SvcBack([string]$name) {
+        $c = $this.Cfg.Svc[$name]
+        if ($null -eq $c -or -not $this.IsCut($name)) { return $false }
+        return ([long]$c.StopAt -ge 0 -and [long]$c.RunAt -ge 0 -and $this.Rel($name) -ge [long]$c.RunAt)
+    }
+    [int] SvcPid([string]$name) {
+        $c = $this.Cfg.Svc[$name]
+        if ($null -eq $c) { return 999 }
+        if ($this.SvcStatus($name) -eq 'Stopped') { return 0 }
+        if ($this.SvcBack($name)) { return [int]$c.PostPid }
+        return [int]$c.PrePid
+    }
+    [string] SnapStatus([string]$name) {
+        if ($this.Cfg.SnapSvc.ContainsKey($name)) { return [string]$this.Cfg.SnapSvc[$name] }
+        return $this.SvcStatus($name)
+    }
+    [hashtable] ServiceInfo([string]$name) {
+        $this.InfoCalls[$name] = 1 + [int]$this.InfoCalls[$name]
+        return @{ Status = $this.SvcStatus($name); Pid = $this.SvcPid($name) }
+    }
+    [void] StopService([string]$name) {
+        $this.FakeCuts++
+        $this.CutCalls[$name] = 1 + [int]$this.CutCalls[$name]
+        $this.LastStopMs = $this.Ms
+        $c = $this.Cfg.Svc[$name]
+        if ($null -ne $c -and [bool]$c.StopThrows) { throw 'fake stop failure' }
+        $this.Cut[$name] = $this.Ms
+    }
+
+    # ── HitPan.API 프로세스(S-C)
+    [bool] OldApi() {
+        if (-not $this.IsCut('api')) { return $true }
+        $g = [long]$this.Cfg.Api.OldGoneAt
+        if ($g -lt 0) { return $true }
+        return ($this.Rel('api') -lt $g)
+    }
+    [bool] NewApi() {
+        if (-not $this.IsCut('api')) { return $false }
+        $n = [long]$this.Cfg.Api.NewAt
+        if ($n -lt 0) { return $false }
+        return ($this.Rel('api') -ge $n)
+    }
+    [bool] ApiUp() { return ($this.OldApi() -or $this.NewApi()) }
+    [int] OldPid() {
+        $d = [int]$this.Cfg.Api.DbRestartPid
+        if ($d -gt 0 -and $this.SvcBack('MariaDB')) { return $d }
+        return [int]$this.Cfg.Api.OldPid
+    }
+    [int] ApiPid() {
+        if ($this.NewApi()) { return [int]$this.Cfg.Api.NewPid }
+        if ($this.OldApi()) { return $this.OldPid() }
+        return 0
+    }
+    [object[]] ApiProcs() {
+        $l = New-Object 'System.Collections.Generic.List[object]'
+        $u = [bool]$this.Cfg.Api.UnderInstall
+        if ($this.OldApi()) { $l.Add(@{ Pid = $this.OldPid(); UnderInstall = $u }) }
+        if ($this.NewApi()) { $l.Add(@{ Pid = [int]$this.Cfg.Api.NewPid; UnderInstall = $u }) }
+        return $l.ToArray()
+    }
+    [object] PortOwner() {
+        $p = $this.ApiPid()
+        if ($p -eq 0) { return $null }
+        return @{ Pid = $p; UnderInstall = [bool]$this.Cfg.Api.UnderInstall }
+    }
+    [void] StopProcesses([int[]]$pids) {
+        $this.FakeCuts++
+        $this.CutCalls['api'] = 1 + [int]$this.CutCalls['api']
+        $this.LastStopMs = $this.Ms
+        if ([bool]$this.Cfg.Api.KillThrows) { throw 'fake kill failure' }
+        $this.Cut['api'] = $this.Ms
+    }
+
+    # ── HTTP
+    [hashtable] Origin() {
+        if (-not $this.ApiUp()) { return @{ Status = 0; Body = $null } }
+        $v = [string]$this.Cfg.Version
+        $dbOk = ([bool]$this.Cfg.DbAlwaysOk -or $this.SvcStatus('MariaDB') -eq 'Running')
+        if ($dbOk) { return @{ Status = 200; Body = ('{"status":"Healthy","checks":{"database":"ok","version":"' + $v + '"}}') } }
+        return @{ Status = 503; Body = ('{"status":"Unhealthy","checks":{"database":"' + [string]$this.Cfg.DbErrText + '","version":"' + $v + '"}}') }
+    }
+    [hashtable] Ext() {
+        $ok = ($this.SvcStatus('cloudflared') -eq 'Running' -and $this.ApiUp())
+        $ver = [string]$this.Cfg.Version
+        if ($this.IsCut('cloudflared')) {
+            $r = $this.Rel('cloudflared')
+            if ([bool]$this.Cfg.ExtAlwaysOk) { $ok = $true }
+            if ($this.InWin($this.Cfg.ExtOkWin, $r)) { $ok = $true }
+            if ($this.SvcBack('cloudflared')) {
+                if ($this.Cfg.ExtAfterRun -eq 'fail') { $ok = $false }
+                elseif ($this.Cfg.ExtAfterRun -eq 'other') { $ver = '0.0.0-edge' }
+            }
+        } elseif ([bool]$this.Cfg.ExtBaselineFail) { $ok = $false }
+        if ($this.IsCut('hand') -and $this.InWin($this.Cfg.SdDown, $this.Rel('hand'))) { $ok = $false }
+        if ($ok) { return @{ Status = 200; Body = ('{"version":"' + $ver + '"}') } }
+        return @{ Status = 530; Body = '<html><body>error code: 1033</body></html>' }
+    }
+    [hashtable] Control([int]$timeoutSec) {
+        if ($this.IsCut('hand')) {
+            $r = $this.Rel('hand')
+            if ($this.InWin($this.Cfg.CtlThrow, $r)) { throw 'fake control failure' }
+            if ($this.InWin($this.Cfg.CtlTimeout, $r)) { $this.Ms += [long]$timeoutSec * 1000 + 1; return @{ Status = 0; Body = $null } }
+            if ($this.InWin($this.Cfg.CtlFail, $r)) { return @{ Status = 0; Body = $null } }
+        } elseif ([bool]$this.Cfg.CtlBaselineFail) { return @{ Status = 0; Body = $null } }
+        return @{ Status = 200; Body = ("fl=1f1`nh=" + [string]$this.Cfg.Domain + "`nip=" + [string]$this.Cfg.ObserverIp + "`nts=1700000000.000`nvisit_scheme=https`n") }
+    }
+    [hashtable] HttpGet([string]$url, [int]$timeoutSec, [hashtable]$headers) {
+        $this.Ms += [long]$this.Cfg.LatencyMs
+        if ($url.StartsWith('http://127.0.0.1:')) {
+            $this.LocalGets++
+            if ($url -ne ('http://127.0.0.1:' + [string]$this.Cfg.Port + '/health')) { $this.BadUrls++ }
+            return $this.Origin()
+        }
+        $this.ExtGets++
+        if ($null -eq $headers -or -not ([string]$headers['Cache-Control']).Contains('no-cache') -or [string]$headers['Pragma'] -ne 'no-cache') { $this.NoCacheMissing++ }
+        $m = [regex]::Match($url, '\Ahttps://([^/?#]+)(/[^?#]*)\?cg=([0-9a-f]{32})\z')
+        if (-not $m.Success) { $this.BadUrls++; $this.NoCacheMissing++; return @{ Status = 404; Body = $null } }
+        if ($m.Groups[1].Value -ne [string]$this.Cfg.Domain) { $this.BadUrls++ }
+        $this.Nonces.Add($m.Groups[3].Value)
+        $path = $m.Groups[2].Value
+        if ($path -eq '/api/app-version') { return $this.Ext() }
+        if ($path -eq '/cdn-cgi/trace') { return $this.Control($timeoutSec) }
+        $this.BadUrls++
+        return @{ Status = 404; Body = $null }
+    }
+    [string[]] Resolve([string]$hostName) { return [string[]]$this.Cfg.Addrs }
+
+    # ── 이벤트(워치독 · 서비스 제어 관리자) · 실패 동작 · 손 기록
+    [void] AddEv([object]$items, [string]$svc, [string]$kind, [long]$atMs, [datetime]$since, [datetime]$now) {
+        $t = $this.Base.AddMilliseconds([double]$atMs)
+        if ($t -ge $since -and $t -le $now) { $items.Add(@{ TimeUtc = $t; Text = ('WS-28-I: service ' + $svc + ' ' + $kind + [string]$this.Cfg.EventJunk) }) }
+    }
+    [hashtable] WdEvents([datetime]$since) {
+        if (-not [bool]$this.Cfg.EventsReadable) { return @{ Ok = $false; Items = @() } }
+        $now = $this.Now()
+        $items = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($e in @($this.Cfg.Events)) {
+            if ($null -eq $e) { continue }
+            $this.AddEv($items, [string]$e.Svc, [string]$e.Kind, [long]$e.AtMs, $since, $now)
+        }
+        foreach ($name in @('cloudflared', 'MariaDB')) {
+            if (-not $this.IsCut($name)) { continue }
+            $c = $this.Cfg.Svc[$name]
+            $cutMs = [long]$this.Cut[$name]
+            if ([long]$c.E1At -ge 0) { $this.AddEv($items, $name, 'restarted', $cutMs + [long]$c.E1At, $since, $now) }
+            if ([long]$c.FailAt -ge 0) { $this.AddEv($items, $name, 'restart failure', $cutMs + [long]$c.FailAt, $since, $now) }
+        }
+        return @{ Ok = $true; Items = $items.ToArray() }
+    }
+    [hashtable] ScmEvents([string]$name, [datetime]$since) {
+        if (-not [bool]$this.Cfg.ScmReadable) { return @{ Ok = $false; Items = @() } }
+        $items = New-Object 'System.Collections.Generic.List[object]'
+        $c = $this.Cfg.Svc[$name]
+        if ($null -ne $c -and $this.IsCut($name) -and [long]$c.E2At -ge 0) {
+            $t = $this.Base.AddMilliseconds([double]([long]$this.Cut[$name] + [long]$c.E2At))
+            if ($t -ge $since -and $t -le $this.Now()) { $items.Add(@{ TimeUtc = $t }) }
+        }
+        return @{ Ok = $true; Items = $items.ToArray() }
+    }
+    [string] FailureActions([string]$name) { return [string]$this.Cfg.FailureText }
+    [object] Hand() {
+        $this.HandCalls++
+        if ($this.Cfg.HandMode -eq 'none') { return $null }
+        $this.Cut['hand'] = $this.Ms
+        return @{ Who = '시험자'; Utc = $this.Now() }
+    }
+}
+
+# ─────────────────────────────────────────────── 준비
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+if (-not $ModulePath) { $ModulePath = Join-Path $PSScriptRoot 'CommsGuard.psm1' }
+if (-not $RunnerPath) { $RunnerPath = Join-Path $PSScriptRoot 'Run-RoutinePcScenarios.ps1' }
+$script:ModulePath = [System.IO.Path]::GetFullPath($ModulePath)
+$script:RunnerPath = [System.IO.Path]::GetFullPath($RunnerPath)
+foreach ($f in @($script:ModulePath, $script:RunnerPath)) {
+    if (-not [System.IO.File]::Exists($f)) {
+        Write-Host ('파일 없음: {0}' -f [System.IO.Path]::GetFileName($f))
+        Write-Host 'Test-CommsGuard 끝 — 경우 0/22 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+        exit 1
+    }
+}
+$script:RunnerRepo = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $script:RunnerPath) '..\..\..'))
+$global:HitPanCommsRealCutCalls = 0
+Import-Module -Name $script:ModulePath -Force -ErrorAction Stop
+
+$script:Base = New-Object datetime(2026, 11, 19, 1, 0, 0, [System.DateTimeKind]::Utc)
+$rnd = [guid]::NewGuid().ToString('N')
+$script:Mark = 'CGMARK' + $rnd.Substring(20, 10)
+$script:Id = @{
+    Domain  = 'pc1-' + $rnd.Substring(0, 8) + '.cg-test.invalid'
+    Tenant  = 'TCG' + $rnd.Substring(8, 6).ToUpperInvariant()
+    Guid    = [guid]::NewGuid().ToString()
+    Port    = 15257
+    Domain2 = 'pc9-' + $rnd.Substring(14, 6) + '.cg-test.invalid'
+    Tenant2 = 'TCX' + $rnd.Substring(14, 6).ToUpperInvariant()
+}
+$script:ObserverIp = '198.51.100.' + (10 + ([int]('0x' + $rnd.Substring(30, 2)) % 200))
+$script:DbErrText = 'dbfail-' + $script:Mark + 'DBERR'
+$script:EventJunk = ' (C:\' + $script:Mark + 'EVPATH\run.exe --' + $script:Mark + 'EVCMD)'
+$script:FailureText = "[SC] QueryServiceConfig2 SUCCESS`n`nSERVICE_NAME: x`n        RESET_PERIOD (in seconds)    : 0`n        REBOOT_MESSAGE               : `n" +
+    "        COMMAND_LINE                 : C:\" + $script:Mark + "FAPATH\run.exe /" + $script:Mark + "FACMD`n        FAILURE_ACTIONS              : `n"
+# 비밀 꼴 키 이름 6종(설치본 db.conf 동거 키 · 이름만) — 이어 붙여 만든다
+$script:SecretKeys = @(
+    ('DB_' + 'PASS' + 'WORD'), ('JWT_' + 'SEC' + 'RET'), ('ERP_ENCRYP' + 'TION_KEY'),
+    ('LICEN' + 'SE_KEY'), ('TUN' + 'NEL_TO' + 'KEN'), ('HITPAN_BOOT' + 'STRAP_TO' + 'KEN_KEY')
+)
+# 외부 노출 금지어(헌법 #23) — 코드포인트로 만든다
+$script:BannedRx = @(
+    ('\b' + (-join [char[]](65, 73)) + '\b'),
+    ('(?i)\b' + (-join [char[]](99, 108, 97, 117, 100, 101)) + '\b'),
+    ('(?i)\b' + (-join [char[]](99, 117, 114, 115, 111, 114)) + '\b')
+)
+$script:CredRx = @(
+    ('(?i)\b(' + 'pass' + '(word|wd)|pwd|' + 'sec' + 'ret|' + 'to' + 'ken|api_?key)\s*[:=]\s*\S'),
+    ('ey' + 'J[A-Za-z0-9_-]{8,}'),
+    '\b[0-9a-fA-F]{32,}\b',
+    '[A-Za-z0-9+/]{40,}={0,2}'
+)
+
+$script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ('cg-test-' + $rnd.Substring(0, 12))
+$null = [System.IO.Directory]::CreateDirectory($script:Root)
+$script:CaseSeq = 0
+$script:AllText = New-Object System.Collections.Generic.List[string]
+$script:CaseOk = [ordered]@{}
+foreach ($n in 1..22) { $script:CaseOk[('C{0}' -f $n)] = $true }
+$script:CaseOk['부가'] = $true
+$script:DetailPass = 0
+$script:DetailTotal = 0
+$script:Fails = New-Object System.Collections.Generic.List[string]
+
+$HdrPass = '합격(도구 범위 4 ID 중 4 · 자동 3 PASS + 반자동 1 완료)'
+$Fixed4 = '손 1회 · #28 「고객 손 0번」 증명 아님 · 복구 주체 판정 아님 · #27 게이트 통과 아님'
+$HandoffEnd = '시험 종료 아님 · 인계 필요(§5-4)'
+$WarnLine = '⚠ 대상 상태 불명 · 사람 확인 필요'
+$ActorMatch = '워치독 재시작 기록과 상태 전이 일치 · 단독 원인 귀속 미확정'
+$LblA = '- S-A [외부 경로] '
+$LblB = '- S-B [로컬 원점] '
+$LblC = '- S-C [로컬 원점] '
+$LblD = '- S-D [외부 경로 · 반자동(손 1회)] '
+
+# ─────────────────────────────────────────────── 도우미
+
+function Test-CgCase {
+    param([string]$Case, [string]$What, [bool]$Ok)
+    $script:DetailTotal++
+    if ($Ok) { $script:DetailPass++ }
+    else {
+        $script:CaseOk[$Case] = $false
+        $script:Fails.Add(('{0} · {1}' -f $Case, $What))
+    }
+}
+
+function Invoke-CgCaseBlock {
+    param([string]$Case, [string]$Title, [scriptblock]$Body)
+    $before = $script:DetailTotal
+    $t = [System.Diagnostics.Stopwatch]::StartNew()
+    try { & $Body }
+    catch { Test-CgCase $Case ('예외 ' + $_.Exception.GetType().Name + ' · ' + $_.Exception.Message) $false }
+    if ($script:DetailTotal -eq $before) { Test-CgCase $Case '확인 0건' $false }
+    Write-Host ('{0} {1} · {2} ({3}초 · 세부 {4})' -f $Case, $(if ($script:CaseOk[$Case]) { '일치' } else { '불일치' }), $Title, [math]::Round($t.Elapsed.TotalSeconds, 1), ($script:DetailTotal - $before))
+}
+
+function Write-CgFile {
+    param([string]$Path, [string]$Text)
+    $null = [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Path))
+    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Remove-CgTree {
+    param([string]$Dir)
+    if (-not [System.IO.Directory]::Exists($Dir)) { return }
+    try {
+        foreach ($f in [System.IO.Directory]::GetFiles($Dir, '*', [System.IO.SearchOption]::AllDirectories)) { [System.IO.File]::SetAttributes($f, [System.IO.FileAttributes]::Normal) }
+        [System.IO.Directory]::Delete($Dir, $true)
+    } catch { Write-Warning ("임시 폴더 정리 실패({0})" -f $_.Exception.GetType().Name) }
+}
+
+function Invoke-CgGit {
+    param([string]$Repo, [string[]]$GitArgs)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'git'
+    $all = @('-C', $Repo, '-c', 'core.hooksPath=.cg-no-hooks', '-c', 'commit.gpgsign=false', '-c', 'user.name=cg', '-c', 'user.email=cg') + $GitArgs
+    $psi.Arguments = (($all | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+    $p = [System.Diagnostics.Process]::Start($psi)
+    try {
+        $errTask = $p.StandardError.ReadToEndAsync()
+        $null = $p.StandardOutput.ReadToEnd()
+        $p.WaitForExit()
+        $null = $errTask.Result
+        if ($p.ExitCode -ne 0) { throw ('임시 저장소 git 실패: {0}({1})' -f $GitArgs[0], $p.ExitCode) }
+    } finally { $p.Dispose() }
+}
+
+function Get-CgAllowText {
+    param([string]$Domain, [string]$Tenant, [string]$Nl = "`n")
+    $d = Get-CgIdentityHash -Value $Domain
+    $t = Get-CgIdentityHash -Value $Tenant
+    return ('{' + $Nl + '  "entries": [' + $Nl + '    { "primaryDomainSha256": "' + $d + '", "tenantCodeSha256": "' + $t + '" }' + $Nl + '  ]' + $Nl + '}' + $Nl)
+}
+
+function New-CgRepo {
+    # 임시 git 저장소(저장소 밖). 허용목록 커밋 → origin/main 참조(선택) → 뒤 커밋(선택) → 작업 사본 덮어쓰기(선택).
+    param([string]$Name, [string]$MainText, [string]$HeadText, [string]$WorkText, [switch]$AutoCrlf, [switch]$NoOrigin)
+    $repo = Join-Path $script:Root $Name
+    $null = [System.IO.Directory]::CreateDirectory($repo)
+    Invoke-CgGit -Repo $repo -GitArgs @('init', '-q')
+    Invoke-CgGit -Repo $repo -GitArgs @('config', 'core.autocrlf', $(if ($AutoCrlf) { 'true' } else { 'false' }))
+    $rel = 'tests/scenarios/comms-integrity/test-pc-allowlist.json'
+    $abs = Join-Path $repo ($rel -replace '/', '\')
+    Write-CgFile -Path $abs -Text $MainText
+    Invoke-CgGit -Repo $repo -GitArgs @('add', '--', $rel)
+    Invoke-CgGit -Repo $repo -GitArgs @('commit', '-q', '-m', 'main')
+    if (-not $NoOrigin) { Invoke-CgGit -Repo $repo -GitArgs @('update-ref', 'refs/remotes/origin/main', 'HEAD') }
+    if ($HeadText) {
+        Write-CgFile -Path $abs -Text $HeadText
+        Invoke-CgGit -Repo $repo -GitArgs @('add', '--', $rel)
+        Invoke-CgGit -Repo $repo -GitArgs @('commit', '-q', '-m', 'local')
+    }
+    if ($WorkText) { Write-CgFile -Path $abs -Text $WorkText }
+    return $repo
+}
+
+function Get-CgTreeStamp {
+    param([string]$Dir)
+    $rows = foreach ($f in @([System.IO.Directory]::GetFiles($Dir, '*', [System.IO.SearchOption]::AllDirectories) | Sort-Object)) {
+        $fi = New-Object System.IO.FileInfo($f)
+        '{0}|{1}|{2}' -f $f.Substring($Dir.Length), $fi.Length, $fi.LastWriteTimeUtc.Ticks
+    }
+    return (@($rows) -join "`n")
+}
+
+function Get-CgSvcTiming {
+    param([int]$StopAt, [int]$RunAt)
+    $e1 = -1; $e2 = -1
+    if ($RunAt -ge 0) { $e1 = $RunAt + 200; $e2 = $RunAt }
+    return @{ StopAt = $StopAt; RunAt = $RunAt; E1At = $e1; E2At = $e2 }
+}
+
+function New-CgCfg {
+    param([hashtable]$Over)
+    $cfg = @{
+        Domain = $script:Id.Domain; Port = $script:Id.Port; Version = '1.3.70'; LatencyMs = 20
+        Addrs = @('203.0.113.10')
+        Svc = @{
+            cloudflared = @{ Pre = 'Running'; StopAt = 500; RunAt = 5500; PrePid = 4100; PostPid = 4200; StopThrows = $false; E1At = 5700; E2At = 5500; FailAt = -1 }
+            MariaDB     = @{ Pre = 'Running'; StopAt = 400; RunAt = 4400; PrePid = 3100; PostPid = 3200; StopThrows = $false; E1At = 4600; E2At = 4400; FailAt = -1 }
+        }
+        Api = @{ OldPid = 5100; NewPid = 5200; OldGoneAt = 300; NewAt = 3300; UnderInstall = $true; KillThrows = $false; DbRestartPid = 0 }
+        SnapSvc = @{}; IsAdmin = $true; MachineGuid = $script:Id.Guid
+        EventsReadable = $true; ScmReadable = $true; Events = @()
+        FailureText = $script:FailureText; DbErrText = $script:DbErrText; EventJunk = $script:EventJunk; ObserverIp = $script:ObserverIp
+        ExtAlwaysOk = $false; ExtOkWin = @(); ExtAfterRun = 'ok'; ExtBaselineFail = $false; DbAlwaysOk = $false
+        SdDown = @(2500, 12500); CtlFail = @(); CtlTimeout = @(); CtlThrow = @(); CtlBaselineFail = $false
+        HandMode = 'record'
+    }
+    if ($null -ne $Over) {
+        foreach ($k in $Over.Keys) {
+            if ($k -eq 'cloudflared' -or $k -eq 'MariaDB') { foreach ($kk in $Over[$k].Keys) { $cfg.Svc[$k][$kk] = $Over[$k][$kk] } }
+            elseif ($k -eq 'Api') { foreach ($kk in $Over[$k].Keys) { $cfg.Api[$kk] = $Over[$k][$kk] } }
+            else { $cfg[$k] = $Over[$k] }
+        }
+    }
+    return $cfg
+}
+
+function New-CgCaseEnv {
+    # 가짜 PC 파일: 마커 · 설치본({app}\db.conf · {app}\watchdog\appsettings.json) — 전부 임시 폴더
+    param([hashtable]$Opt)
+    if ($null -eq $Opt) { $Opt = @{} }
+    $script:CaseSeq++
+    $dir = Join-Path $script:Root ('case-{0:D3}' -f $script:CaseSeq)
+    $null = [System.IO.Directory]::CreateDirectory($dir)
+    $markerPath = Join-Path $dir 'marker.txt'
+    if ($Opt.Marker -ne 'none') {
+        $mach = if ($Opt.ContainsKey('MarkerMachine')) { [string]$Opt.MarkerMachine } else { Get-CgIdentityHash -Value $script:Id.Guid }
+        $exp = if ($Opt.ContainsKey('Expires')) { [string]$Opt.Expires } else { Format-CgUtc -Value $script:Base.AddHours(24) }
+        Write-CgFile -Path $markerPath -Text ("# test marker`nENV=TEST`nMACHINE=" + $mach + "`nEXPIRES=" + $exp + "`n")
+    }
+    $installDir = $null
+    if ($Opt.Install -ne 'none') {
+        $installDir = Join-Path $dir 'app'
+        $null = [System.IO.Directory]::CreateDirectory((Join-Path $installDir 'watchdog'))
+        if ($Opt.DbConf -ne 'none') {
+            $dom = if ($Opt.ContainsKey('Domain')) { [string]$Opt.Domain } else { $script:Id.Domain }
+            $ten = if ($Opt.ContainsKey('Tenant')) { [string]$Opt.Tenant } else { $script:Id.Tenant }
+            $lines = New-Object System.Collections.Generic.List[string]
+            $lines.Add('# db.conf (test)')
+            $lines.Add('PRIMARY_DOMAIN=' + $dom)
+            if ($Opt.Secrets) { $lines.Add($script:SecretKeys[0] + '=' + $script:Mark + 'V1') }
+            $lines.Add('TENANT_CODE=' + $ten)
+            if ($Opt.Secrets) { $lines.Add($script:SecretKeys[1] + '=' + $script:Mark + 'V2') }
+            $lines.Add('SLOT_INDEX=9')
+            if ($Opt.Secrets) { $lines.Add($script:SecretKeys[2] + '=' + $script:Mark + 'V3') }
+            $lines.Add('API_PORT=' + $script:Id.Port)
+            if ($Opt.Secrets) {
+                $lines.Add($script:SecretKeys[3] + '=' + $script:Mark + 'V4')
+                $lines.Add($script:SecretKeys[4] + '=' + $script:Mark + 'V5')
+                $lines.Add($script:SecretKeys[5] + '=' + $script:Mark + 'V6')
+                $lines.Add('this line is broken ' + $script:Mark + 'V7')
+                $lines.Add('PRIMARY_DOMAIN_SHADOW=' + $script:Mark + 'V8')
+            }
+            Write-CgFile -Path (Join-Path $installDir 'db.conf') -Text (($lines -join "`r`n") + "`r`n")
+        }
+        $svcs = if ($Opt.ContainsKey('WdServices')) { @($Opt.WdServices) } else { @('MariaDB', 'cloudflared') }
+        $json = '{"Watchdog":{"Processes":{"Services":[' + ((@($svcs) | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']}}}'
+        Write-CgFile -Path (Join-Path $installDir 'watchdog\appsettings.json') -Text $json
+    }
+    return @{ Dir = $dir; MarkerPath = $markerPath; InstallDir = $installDir; ReportDir = (Join-Path $dir 'reports') }
+}
+
+function New-CgProviders {
+    param([Parameter(Mandatory)]$W, [Parameter(Mandatory)][hashtable]$E, [Parameter(Mandatory)][string]$Repo, [string]$GitExe = 'git')
+    return @{
+        MarkerPath       = $E.MarkerPath
+        InstallDir       = $E.InstallDir
+        RepoRoot         = $Repo
+        GitExe           = $GitExe
+        GetMachineGuid   = { $W.Cfg.MachineGuid }.GetNewClosure()
+        GetServiceStatus = { param([string]$Name) $W.SnapStatus($Name) }.GetNewClosure()
+        GetIsAdmin       = { [bool]$W.Cfg.IsAdmin }.GetNewClosure()
+        HttpGet          = { param([string]$Url, [int]$TimeoutSec, [hashtable]$Headers) $W.HttpGet($Url, $TimeoutSec, $Headers) }.GetNewClosure()
+    }
+}
+
+function New-CgHooks {
+    param([Parameter(Mandatory)]$W, [Parameter(Mandatory)][hashtable]$Prov, [Parameter(Mandatory)][string]$ModPath)
+    return @{
+        GetSnapshot        = { Get-EnvSnapshot -Providers $Prov -NowUtc $W.Now() -Verbose:$W.Verbose }.GetNewClosure()
+        Now                = { $W.Now() }.GetNewClosure()
+        Sleep              = { param([int]$Ms) $W.Sleep($Ms) }.GetNewClosure()
+        HttpGet            = { param([string]$Url, [int]$TimeoutSec, [hashtable]$Headers) $W.HttpGet($Url, $TimeoutSec, $Headers) }.GetNewClosure()
+        ResolveHost        = { param([string]$HostName) $W.Resolve($HostName) }.GetNewClosure()
+        GetServiceInfo     = { param([string]$Name) $W.ServiceInfo($Name) }.GetNewClosure()
+        GetApiProcesses    = { param([string]$InstallDir) $W.ApiProcs() }.GetNewClosure()
+        GetPortOwner       = { param([int]$Port, [string]$InstallDir) $W.PortOwner() }.GetNewClosure()
+        StopService        = { param([string]$Name) $W.StopService($Name) }.GetNewClosure()
+        StopProcesses      = { param([int[]]$Pids) $W.StopProcesses($Pids) }.GetNewClosure()
+        ReadWatchdogEvents = { param([datetime]$SinceUtc) $W.WdEvents($SinceUtc) }.GetNewClosure()
+        ReadScmEvents      = { param([string]$Name, [datetime]$SinceUtc) $W.ScmEvents($Name, $SinceUtc) }.GetNewClosure()
+        ReadFailureActions = { param([string]$Name) $W.FailureActions($Name) }.GetNewClosure()
+        HandRecord         = { $W.Hand() }.GetNewClosure()
+        ModulePath         = $ModPath
+    }
+}
+
+function Invoke-CgRun {
+    # 러너 1회(가짜 훅만). 화면(모든 흐름) · 보고서 · 실행 기록을 모아 돌려준다.
+    param([hashtable]$Cfg, [hashtable]$Env, [switch]$NoConfirm, [switch]$Verbose, [string[]]$History,
+        [string]$Repo, [string]$GitExe = 'git', [string]$ReportDir, [string[]]$DropHook)
+    $W = [CgWorld]::new($script:Base, (New-CgCfg -Over $Cfg))
+    $W.Verbose = [bool]$Verbose
+    $e = New-CgCaseEnv -Opt $Env
+    $repoRoot = if ($Repo) { $Repo } else { $script:RepoOk }
+    $prov = New-CgProviders -W $W -E $e -Repo $repoRoot -GitExe $GitExe
+    $hooks = New-CgHooks -W $W -Prov $prov -ModPath $script:ModulePath
+    foreach ($d in @($DropHook)) { if ($d) { $hooks.Remove($d) } }
+    $rd = if ($ReportDir) { $ReportDir } else { $e.ReportDir }
+    if ($History) { Write-CgFile -Path (Join-Path $rd 'run-history.jsonl') -Text ((@($History) -join "`n") + "`n") }
+    $p = @{ Hooks = $hooks; ReportDir = $rd }
+    if (-not $NoConfirm) { $p.Confirm = $true }
+    if ($Verbose) { $p.Verbose = $true }
+    $global:LASTEXITCODE = 0
+    $err = $null
+    $lines = @()
+    try { $lines = @(& $script:RunnerPath @p *>&1 | ForEach-Object { [string]$_ }) }
+    catch { $err = $_ }
+    $exit = $LASTEXITCODE
+    $reportText = $null
+    $histText = $null
+    if ([System.IO.Directory]::Exists($rd)) {
+        $f = @([System.IO.Directory]::GetFiles($rd, 'routine-pc-*.txt'))
+        if ($f.Count -gt 0) { $reportText = [System.IO.File]::ReadAllText($f[0], [System.Text.Encoding]::UTF8) }
+        $hp = Join-Path $rd 'run-history.jsonl'
+        if ([System.IO.File]::Exists($hp)) { $histText = [System.IO.File]::ReadAllText($hp, [System.Text.Encoding]::UTF8) }
+    }
+    $script:AllText.Add(($lines -join "`n"))
+    if ($reportText) { $script:AllText.Add($reportText) }
+    if ($histText) { $script:AllText.Add($histText) }
+    $reportLines = @()
+    if ($reportText) { $reportLines = @($reportText -split "`r?`n") }
+    return [pscustomobject]@{
+        Lines = $lines; Exit = $exit; Error = $err; W = $W; Env = $e; ReportDir = $rd
+        ReportText = $reportText; ReportLines = $reportLines; HistText = $histText
+    }
+}
+
+function Get-CgGuardFails {
+    param($Lines)
+    return @(@($Lines) | ForEach-Object { if ($_ -match '\A  (G\d+a?) 거절 · ') { $Matches[1] } })
+}
+
+function Get-CgHeaderIdx {
+    param($Lines)
+    $a = @($Lines)
+    for ($i = $a.Count - 1; $i -ge 0; $i--) { if ([string]$a[$i] -match '\A(합격|미합격)') { return $i } }
+    return -1
+}
+
+function Get-CgHeader {
+    param($R)
+    $i = Get-CgHeaderIdx $R.Lines
+    if ($i -lt 0) { return '' }
+    return [string]$R.Lines[$i]
+}
+
+function Get-CgItem {
+    param($R, [string]$Id)
+    $l = @(@($R.Lines) | Where-Object { ([string]$_).StartsWith('- ' + $Id + ' [') })
+    if ($l.Count -eq 0) { return '' }
+    return [string]$l[-1]
+}
+
+function Get-CgActorOf {
+    param($R, [string]$Id)
+    $a = @($R.Lines)
+    for ($i = $a.Count - 2; $i -ge 0; $i--) {
+        if (([string]$a[$i]).StartsWith('- ' + $Id + ' [')) {
+            $n = [string]$a[$i + 1]
+            if ($n.StartsWith('  복구 주체(판정 미반영): ')) { return $n }
+            return ''
+        }
+    }
+    return ''
+}
+
+function Get-CgSummaryEnd {
+    # 종합 블록 마지막 줄(머리부터 빈 줄 · 「보고서:」 줄 · 끝 전까지)
+    param($R)
+    $a = @($R.Lines)
+    $i = Get-CgHeaderIdx $a
+    if ($i -lt 0) { return '' }
+    $last = ''
+    for ($j = $i; $j -lt $a.Count; $j++) {
+        $s = [string]$a[$j]
+        if ($s.Length -eq 0 -or $s.StartsWith('보고서: ')) { break }
+        $last = $s
+    }
+    return $last
+}
+
+function Assert-CgRejected {
+    param([string]$Case, $R, [string[]]$Expect, [switch]$Subset)
+    $fails = @(Get-CgGuardFails $R.Lines)
+    if ($Subset) { foreach ($g in $Expect) { Test-CgCase $Case ('가드 거절 칸에 ' + $g) ($fails -contains $g) } }
+    else {
+        $want = (@($Expect | Sort-Object) -join ',')
+        $got = (@($fails | Sort-Object) -join ',')
+        Test-CgCase $Case ('가드 거절 칸 = ' + $want + '(실제 ' + $got + ')') ($want -eq $got)
+    }
+    Test-CgCase $Case '가드 거절 줄' (@($R.Lines) -contains '가드(G1~G6 + G4a): 거절')
+    Test-CgCase $Case '끊기 0' ($R.W.FakeCuts -eq 0)
+    Test-CgCase $Case '외부 GET 0' ($R.W.ExtGets -eq 0)
+    Test-CgCase $Case '손 기록 부름 0' ($R.W.HandCalls -eq 0)
+    Test-CgCase $Case '종합 「미합격(측정 0건)」' ((Get-CgHeader $R).StartsWith('미합격(측정 0건)'))
+    Test-CgCase $Case '종료 코드 1' ($R.Exit -eq 1)
+    Test-CgCase $Case '파일 쓰기 0(보고서 폴더 없음)' (-not [System.IO.Directory]::Exists($R.ReportDir))
+}
+
+function Assert-CgItem {
+    param([string]$Case, $R, [string]$Id, [string]$Expect, [switch]$Prefix)
+    $got = Get-CgItem $R $Id
+    $ok = if ($Prefix) { $got.StartsWith($Expect) } else { $got -eq $Expect }
+    Test-CgCase $Case ('{0} 줄 = 「{1}」(실제 「{2}」)' -f $Id, $Expect, $got) $ok
+}
+
+function Assert-CgNoPass {
+    param([string]$Case, $R, [string]$Id)
+    Test-CgCase $Case ($Id + ' PASS 0') (-not (Get-CgItem $R $Id).Contains('] PASS('))
+}
+
+function Assert-CgHandoff {
+    param([string]$Case, $R)
+    $a = @($R.Lines)
+    foreach ($k in @('  ── 인계 쪽지(§5-4) · ', '  대상: ', '  마지막 관측 상태: ', '  t0: ', '  경과: ', '  워치독 마지막 복구 기록 시각: ', '  쿨다운 셈: ', '  사람이 할 일(', '  안전 복구 순서: ', '  종료 조건: ')) {
+        Test-CgCase $Case ('인계 쪽지 칸 「' + $k.Trim() + '」') (@($a | Where-Object { ([string]$_).StartsWith($k) }).Count -ge 1)
+    }
+    Test-CgCase $Case '도구 시작 · 재시작 호출: 0' ($a -contains '  도구 시작 · 재시작 호출: 0')
+    Test-CgCase $Case '사람 확인 경고(쪽지)' ($a -contains '  경고: 대상 상태 불명 · 사람 확인 필요')
+    Test-CgCase $Case '종합 경고 줄' ($a -contains $script:WarnLineG)
+    Test-CgCase $Case ('종합 끝 줄 = 「' + $script:HandoffEndG + '」') ((Get-CgSummaryEnd $R) -eq $script:HandoffEndG)
+}
+$script:WarnLineG = $WarnLine
+$script:HandoffEndG = $HandoffEnd
+
+function Get-CgWhere {
+    # 어긋났을 때만 쓰는 위치 표시: 몇 번째 덩이 · 그 줄(가짜 값뿐 · 120자까지)
+    param([string]$Rx)
+    $k = 0
+    foreach ($chunk in $script:AllText) {
+        $k++
+        foreach ($ln in ($chunk -split "`r?`n")) {
+            if ($ln -match $Rx) {
+                $s = if ($ln.Length -gt 120) { $ln.Substring(0, 120) } else { $ln }
+                return (' · 덩이 ' + $k + ' 「' + $s + '」')
+            }
+        }
+    }
+    return ''
+}
+
+function Get-CgHist {
+    param([string]$Key, [int]$Count)
+    $l = New-Object System.Collections.Generic.List[string]
+    for ($i = 1; $i -le $Count; $i++) {
+        $l.Add(('{{"utc":"{0}","key":"{1}"}}' -f (Format-CgUtc -Value $script:Base.AddMinutes(-10 * $i)), $Key))
+    }
+    return $l.ToArray()
+}
+
+# ─────────────────────────────────────────────── 임시 저장소(G4a)
+
+$allowOk = Get-CgAllowText -Domain $script:Id.Domain -Tenant $script:Id.Tenant
+$allowOther = Get-CgAllowText -Domain $script:Id.Domain2 -Tenant $script:Id.Tenant2
+$allowBoth = '{' + "`n" + '  "entries": [' + "`n" +
+    '    { "primaryDomainSha256": "' + (Get-CgIdentityHash -Value $script:Id.Domain2) + '", "tenantCodeSha256": "' + (Get-CgIdentityHash -Value $script:Id.Tenant2) + '" },' + "`n" +
+    '    { "primaryDomainSha256": "' + (Get-CgIdentityHash -Value $script:Id.Domain) + '", "tenantCodeSha256": "' + (Get-CgIdentityHash -Value $script:Id.Tenant) + '" }' + "`n" + '  ]' + "`n" + '}' + "`n"
+try {
+    $script:RepoOk = New-CgRepo -Name 'repo-ok' -MainText $allowOk
+    $script:RepoA = New-CgRepo -Name 'repo-a' -MainText $allowOther -HeadText $allowOk
+    $script:RepoB = New-CgRepo -Name 'repo-b' -MainText $allowOk -WorkText $allowBoth
+    $script:RepoC = New-CgRepo -Name 'repo-c' -MainText $allowOk -NoOrigin
+    $script:RepoF = New-CgRepo -Name 'repo-f' -MainText $allowOk -AutoCrlf -WorkText (Get-CgAllowText -Domain $script:Id.Domain -Tenant $script:Id.Tenant -Nl "`r`n")
+} catch {
+    Write-Host ('임시 git 저장소 준비 실패: {0}' -f $_.Exception.Message)
+    Remove-CgTree $script:Root
+    Write-Host 'Test-CommsGuard 끝 — 경우 0/22 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+    exit 1
+}
+
+# ─────────────────────────────────────────────── 경우 C1~C22
+
+try {
+
+Invoke-CgCaseBlock 'C1' '빈 PC(마커 · db.conf 없음) → 거절(G1) · 끊기 0' {
+    $r = Invoke-CgRun -Env @{ Marker = 'none'; Install = 'none' }
+    Assert-CgRejected 'C1' $r @('G1') -Subset
+}
+
+Invoke-CgCaseBlock 'C2' '대표 PC 모양(마커 없음 · demo 도메인 · 서비스 Running) → 거절(G1 · G4) · 운영 도메인 접촉 0' {
+    $r = Invoke-CgRun -Env @{ Marker = 'none'; Domain = ('de' + 'mo.hit' + 'pan.kr') }
+    Assert-CgRejected 'C2' $r @('G1', 'G4') -Subset
+    Test-CgCase 'C2' 'G4 사유 = demo 도메인' (@($r.Lines) -contains '  G4 거절 · demo 도메인(운영)')
+}
+
+Invoke-CgCaseBlock 'C3' '마커 오잔존(기기값 다름) → 거절(G2)' {
+    $r = Invoke-CgRun -Env @{ MarkerMachine = (Get-CgIdentityHash -Value ([guid]::NewGuid().ToString())) }
+    Assert-CgRejected 'C3' $r @('G2')
+}
+
+Invoke-CgCaseBlock 'C4' '마커 만료 · 72시간 넘게 잡힌 만료 → 거절(G3)' {
+    $r1 = Invoke-CgRun -Env @{ Expires = (Format-CgUtc -Value $script:Base.AddHours(-1)) }
+    Assert-CgRejected 'C4' $r1 @('G3')
+    Test-CgCase 'C4' '만료 사유' (@($r1.Lines) -contains '  G3 거절 · 만료됨')
+    $r2 = Invoke-CgRun -Env @{ Expires = (Format-CgUtc -Value $script:Base.AddHours(73)) }
+    Assert-CgRejected 'C4' $r2 @('G3')
+    Test-CgCase 'C4' '72시간 사유' (@($r2.Lines) -contains '  G3 거절 · 72시간 넘게 잡힌 만료')
+}
+
+Invoke-CgCaseBlock 'C5' '실고객 모양(도메인 · 테넌트 허용목록 밖) → 거절(G4)' {
+    $r = Invoke-CgRun -Env @{ Domain = $script:Id.Domain2; Tenant = $script:Id.Tenant2 }
+    Assert-CgRejected 'C5' $r @('G4')
+}
+
+Invoke-CgCaseBlock 'C6' 'db.conf 없음(마커 · 기기 맞음) → 거절(G4 · fail-open 닫힘)' {
+    $r = Invoke-CgRun -Env @{ DbConf = 'none' }
+    Assert-CgRejected 'C6' $r @('G4', 'G5')
+    Test-CgCase 'C6' 'G4 사유 = db.conf 없음' (@($r.Lines) -contains '  G4 거절 · db.conf 없음')
+}
+
+Invoke-CgCaseBlock 'C7' '비관리자 → 거절(G6)' {
+    $r = Invoke-CgRun -Cfg @{ IsAdmin = $false }
+    Assert-CgRejected 'C7' $r @('G6')
+}
+
+Invoke-CgCaseBlock 'C8' '워치독 멈춤 → 거절(G5)' {
+    $r = Invoke-CgRun -Cfg @{ SnapSvc = @{ HitPanWatchdog = 'Stopped' } }
+    Assert-CgRejected 'C8' $r @('G5')
+}
+
+Invoke-CgCaseBlock 'C9' '감시 목록에 cloudflared 없음 → S-A 측정불가(감시 대상 아님)' {
+    $r = Invoke-CgRun -Env @{ WdServices = @('MariaDB') }
+    Assert-CgItem 'C9' $r 'S-A' ($LblA + '측정불가(감시 대상 아님)')
+    Assert-CgItem 'C9' $r 'S-B' ($LblB + '미실행(앞 건 정지)')
+    Test-CgCase 'C9' '끊기 0' ($r.W.FakeCuts -eq 0)
+    Test-CgCase 'C9' '종료 코드 1' ($r.Exit -eq 1)
+}
+
+Invoke-CgCaseBlock 'C10' '끊기 명령 실패 → 측정불가(멈추기 실패) · 복구 대기 0 · PASS 0' {
+    $script:R10 = Invoke-CgRun -Cfg @{ cloudflared = @{ StopThrows = $true } }
+    $r = $script:R10
+    Assert-CgItem 'C10' $r 'S-A' ($LblA + '측정불가(멈추기 실패)')
+    Assert-CgNoPass 'C10' $r 'S-A'
+    Test-CgCase 'C10' '복구 대기 0(끊기 뒤 상태 조회 0)' ([int]$r.W.InfoCalls['cloudflared'] -eq 1)
+    Test-CgCase 'C10' '복구 대기 0(끊기 뒤 시계 1초 미만)' (($r.W.Ms - $r.W.LastStopMs) -lt 1000)
+    Assert-CgItem 'C10' $r 'S-B' ($LblB + '미실행(앞 건 정지)')
+    Test-CgCase 'C10' '종료 코드 1' ($r.Exit -eq 1)
+}
+
+Invoke-CgCaseBlock 'C11' '끊기 성공 보고 · 계속 Running → 측정불가(멈춤 미관측) · PASS 0' {
+    $script:R11 = Invoke-CgRun -Cfg @{ cloudflared = @{ StopAt = -1 } }
+    $r = $script:R11
+    Assert-CgItem 'C11' $r 'S-A' ($LblA + '측정불가(멈춤 미관측)')
+    Assert-CgNoPass 'C11' $r 'S-A'
+    Test-CgCase 'C11' '멈춤 관측 창 30초 안에서 끝(복구 대기 0)' ([int]$r.W.InfoCalls['cloudflared'] -le 32)
+    Test-CgCase 'C11' '종료 코드 1' ($r.Exit -eq 1)
+}
+
+Invoke-CgCaseBlock 'C12' '프로세스 끊기 뒤 옛 번호 남음 → 측정불가 · PASS 0' {
+    $r = Invoke-CgRun -Cfg @{ Api = @{ OldGoneAt = -1 } }
+    Assert-CgItem 'C12' $r 'S-A' ($LblA + 'PASS(') -Prefix
+    Assert-CgItem 'C12' $r 'S-B' ($LblB + 'PASS(') -Prefix
+    Assert-CgItem 'C12' $r 'S-C' ($LblC + '측정불가(멈춤 미관측)')
+    Assert-CgNoPass 'C12' $r 'S-C'
+    Test-CgCase 'C12' '종료 코드 1' ($r.Exit -eq 1)
+}
+
+Invoke-CgCaseBlock 'C13' '전 건 가드 거절(-Confirm 있음 · 없음) → 미합격(측정 0건) · 종료 코드 1 · 외부 GET 0' {
+    $r1 = Invoke-CgRun -Env @{ Marker = 'none' }
+    Assert-CgRejected 'C13' $r1 @('G1') -Subset
+    $r2 = Invoke-CgRun -Env @{ Marker = 'none' } -NoConfirm
+    Assert-CgRejected 'C13' $r2 @('G1') -Subset
+    Test-CgCase 'C13' '판정 모드 거절 = 「외부 GET 안 함」 줄' (@($r2.Lines) -contains '외부 GET 안 함(가드 거절) · 끊기 0 · 파일 쓰기 0')
+}
+
+Invoke-CgCaseBlock 'C14' 'S-A FAIL → 그 자리 정지 · S-B · S-C 미실행(앞 건 정지)' {
+    $script:R14 = Invoke-CgRun -Cfg @{ cloudflared = (Get-CgSvcTiming -StopAt 500 -RunAt -1) }
+    $r = $script:R14
+    Assert-CgItem 'C14' $r 'S-A' ($LblA + 'FAIL — 5분 안 복구 안 됨')
+    Assert-CgItem 'C14' $r 'S-B' ($LblB + '미실행(앞 건 정지)')
+    Assert-CgItem 'C14' $r 'S-C' ($LblC + '미실행(앞 건 정지)')
+    Assert-CgItem 'C14' $r 'S-D' ($LblD + '반자동 — 미실행(앞 건 정지)')
+    Test-CgCase 'C14' '뒤 건 끊기 0' ([int]$r.W.CutCalls['MariaDB'] -eq 0 -and [int]$r.W.CutCalls['api'] -eq 0 -and $r.W.HandCalls -eq 0)
+    Test-CgCase 'C14' '종료 코드 1' ($r.Exit -eq 1)
+}
+
+Invoke-CgCaseBlock 'C15' '같은 대상 60분 안 5회째 → 미실행(쿨다운 보호)' {
+    $r = Invoke-CgRun -History (Get-CgHist -Key 'svc:cloudflared' -Count 4)
+    Assert-CgItem 'C15' $r 'S-A' ($LblA + '미실행(쿨다운 보호)')
+    Test-CgCase 'C15' 'S-A 끊기 0' ([int]$r.W.CutCalls['cloudflared'] -eq 0)
+    Assert-CgItem 'C15' $r 'S-B' ($LblB + 'PASS(') -Prefix
+    Test-CgCase 'C15' '종합 = 4 ID 중 3 실행' ((Get-CgHeader $r) -eq '미합격(도구 범위 4 ID 중 3 실행) — 칸별 사유 · 반자동 완료')
+    # ⓑ 워치독 이벤트 셈(restarted 2 + restart failure 2 = 4) · 보고서 기록 0
+    $ev = @(
+        @{ Svc = 'cloudflared'; Kind = 'restarted'; AtMs = -600000 }, @{ Svc = 'cloudflared'; Kind = 'restarted'; AtMs = -1200000 },
+        @{ Svc = 'cloudflared'; Kind = 'restart failure'; AtMs = -1800000 }, @{ Svc = 'cloudflared'; Kind = 'restart failure'; AtMs = -2400000 }
+    )
+    $rb = Invoke-CgRun -Cfg @{ Events = $ev }
+    Assert-CgItem 'C15' $rb 'S-A' ($LblA + '미실행(쿨다운 보호)')
+    Test-CgCase 'C15' 'ⓑ 셈 · S-A 끊기 0' ([int]$rb.W.CutCalls['cloudflared'] -eq 0)
+    # 이벤트 로그 못 읽음 = 전부 미실행(fail-closed)
+    $ru = Invoke-CgRun -Cfg @{ EventsReadable = $false }
+    Assert-CgItem 'C15' $ru 'S-A' ($LblA + '미실행(쿨다운 보호 · 이벤트 로그 못 읽음)')
+    Assert-CgItem 'C15' $ru 'S-D' ($LblD + '반자동 — 미실행(쿨다운 보호 · 이벤트 로그 못 읽음)')
+    Test-CgCase 'C15' '이벤트 못 읽음 · 끊기 0' ($ru.W.FakeCuts -eq 0 -and $ru.W.HandCalls -eq 0)
+    # 경계: 지난 4회 미만(3) = 실행
+    $r3 = Invoke-CgRun -History (Get-CgHist -Key 'svc:cloudflared' -Count 3)
+    Assert-CgItem 'C15' $r3 'S-A' ($LblA + 'PASS(') -Prefix
+}
+
+Invoke-CgCaseBlock 'C16' '전 조건 맞음 · 멈춤 관측 · 90초 뒤 복구 → PASS(90초) · 종합 합격' {
+    $script:R16 = Invoke-CgRun -Cfg @{ cloudflared = (Get-CgSvcTiming -StopAt 500 -RunAt 90500) }
+    $r = $script:R16
+    Assert-CgItem 'C16' $r 'S-A' ($LblA + 'PASS(90초) — 5분 안 복구됨')
+    Assert-CgItem 'C16' $r 'S-B' ($LblB + 'PASS(4초) — 5분 안 복구됨')
+    Assert-CgItem 'C16' $r 'S-C' ($LblC + 'PASS(3초) — 5분 안 복구됨')
+    Assert-CgItem 'C16' $r 'S-D' ($LblD + '반자동 — 완료(첫 실패 뒤 10초 복귀 · 손 1회)')
+    Test-CgCase 'C16' '종합 합격' ((Get-CgHeader $r) -eq $HdrPass)
+    Test-CgCase 'C16' '종료 코드 0' ($r.Exit -eq 0)
+}
+
+Invoke-CgCaseBlock 'C18' '비밀 꼴 키 섞인 db.conf · 표지 경로 · 명령줄 → 어디에도 0 · 스냅숏 = 화이트리스트 4키' {
+    $r = Invoke-CgRun -Env @{ Secrets = $true } -Verbose
+    $script:R18 = $r
+    # 같은 가짜 PC 로 스냅숏 직접 수집(-Verbose · 경고 · 자세히 흐름 포함) → 직렬화
+    $w = [CgWorld]::new($script:Base, (New-CgCfg -Over $null))
+    $prov = New-CgProviders -W $w -E $r.Env -Repo $script:RepoOk
+    $recs = @(Get-EnvSnapshot -Providers $prov -NowUtc $script:Base -Verbose 4>&1 3>&1)
+    $snap = @($recs | Where-Object { $_ -is [pscustomobject] -and $null -ne $_.PSObject.Properties['DbConf'] })[0]
+    $msgs = (@($recs | Where-Object { -not ($_ -is [pscustomobject] -and $null -ne $_.PSObject.Properties['DbConf']) } | ForEach-Object { [string]$_ }) -join "`n")
+    $json = $snap | ConvertTo-Json -Depth 10 -Compress
+    $hay = @(($r.Lines -join "`n"), [string]$r.ReportText, [string]$r.HistText, $json, $msgs) -join "`n"
+    Test-CgCase 'C18' '자세히 출력 실제로 나옴(화이트리스트 밖 버림 줄)' ($msgs.Contains('화이트리스트 밖') -and (($r.Lines -join "`n").Contains('화이트리스트 밖')))
+    Test-CgCase 'C18' '표지 문자열 0(값 · 경로 · 명령줄 · 응답 · 이벤트 글)' (-not $hay.Contains($script:Mark))
+    foreach ($k in $script:SecretKeys) { Test-CgCase 'C18' ('비밀 꼴 키 이름 0 · ' + $k.Length + '자') (-not $hay.Contains($k)) }
+    $keys = (@($snap.DbConf.Values.Keys) | Sort-Object) -join ','
+    Test-CgCase 'C18' ('스냅숏 키 = 화이트리스트 4(실제 ' + $keys + ')') ($keys -eq ((@('API_PORT', 'PRIMARY_DOMAIN', 'SLOT_INDEX', 'TENANT_CODE') | Sort-Object) -join ','))
+    Test-CgCase 'C18' '깨진 줄 1' ([int]$snap.DbConf.BadLineCount -eq 1)
+    $actorRx = '\A  복구 주체\(판정 미반영\): (워치독 재시작 기록과 상태 전이 일치 · 단독 원인 귀속 미확정|불명) [—·] (E1 (예 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ|아니오) · E2 (예 \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ|아니오) · E3 (\d+|모름) · E4 (없음|있음|모름)|S-C = 서비스 증거\(E1 · E2\) 해당 없음)\z'
+    $al = @(@($r.Lines) + @($r.ReportLines) | Where-Object { ([string]$_).StartsWith('  복구 주체(판정 미반영): ') })
+    Test-CgCase 'C18' ('E1~E4 칸 = 예/아니오 · UTC 시각만(' + $al.Count + '줄)') ($al.Count -ge 6 -and @($al | Where-Object { $_ -notmatch $actorRx }).Count -eq 0)
+    Test-CgCase 'C18' '섞인 db.conf 로도 합격 · 종료 코드 0' ((Get-CgHeader $r) -eq $HdrPass -and $r.Exit -eq 0)
+}
+
+Invoke-CgCaseBlock 'C19' 'S-A 외부 경로 ⓐ~ⓕ → PASS 0' {
+    $a = Invoke-CgRun -Cfg @{ ExtAlwaysOk = $true }
+    $script:R19a = $a
+    Assert-CgItem 'C19' $a 'S-A' ($LblA + '측정불가(끊김 미반영)')
+    Assert-CgItem 'C19' $a 'S-B' ($LblB + '미실행(앞 건 정지)')
+    $b = Invoke-CgRun -Cfg @{ Addrs = @('127.0.0.1') }
+    Assert-CgItem 'C19' $b 'S-A' ($LblA + '측정불가(외부 경로 아님)')
+    Test-CgCase 'C19' 'ⓑ 끊기 0 · 외부 GET 0' ($b.W.FakeCuts -eq 0 -and $b.W.ExtGets -eq 0)
+    $c = Invoke-CgRun -Cfg @{ ExtAfterRun = 'other' }
+    Assert-CgItem 'C19' $c 'S-A' ($LblA + 'FAIL — 5분 안 복구 안 됨')
+    $d = Invoke-CgRun -Cfg @{ ExtBaselineFail = $true }
+    Assert-CgItem 'C19' $d 'S-A' ($LblA + '측정불가(기준 응답 없음)')
+    Test-CgCase 'C19' 'ⓓ 끊기 0' ($d.W.FakeCuts -eq 0)
+    $e = Invoke-CgRun -Cfg @{ ExtAfterRun = 'fail' }
+    Assert-CgItem 'C19' $e 'S-A' ($LblA + 'FAIL — 5분 안 복구 안 됨')
+    $f = Invoke-CgRun -Cfg @{ cloudflared = (Get-CgSvcTiming -StopAt 500 -RunAt 10500); ExtOkWin = @(1500, 3500) }
+    Assert-CgItem 'C19' $f 'S-A' ($LblA + '측정불가(끊김 미반영)')
+    foreach ($x in @($a, $b, $c, $d, $e, $f)) { Assert-CgNoPass 'C19' $x 'S-A'; Test-CgCase 'C19' '종료 코드 1' ($x.Exit -eq 1) }
+}
+
+Invoke-CgCaseBlock 'C20' 'S-B 원점 ⓐ 끊김 미반영 · ⓑ 인스턴스 불일치 · ⓒ 번호 바뀜 기록' {
+    $a = Invoke-CgRun -Cfg @{ DbAlwaysOk = $true }
+    Assert-CgItem 'C20' $a 'S-B' ($LblB + '측정불가(끊김 미반영)')
+    Assert-CgNoPass 'C20' $a 'S-B'
+    $b = Invoke-CgRun -Cfg @{ Api = @{ UnderInstall = $false } }
+    Assert-CgItem 'C20' $b 'S-B' ($LblB + '측정불가(인스턴스 불일치)')
+    Test-CgCase 'C20' 'ⓑ MariaDB 끊기 0' ([int]$b.W.CutCalls['MariaDB'] -eq 0)
+    $c = Invoke-CgRun -Cfg @{ Api = @{ DbRestartPid = 5300 } }
+    Assert-CgItem 'C20' $c 'S-B' ($LblB + 'PASS(4초) — 5분 안 복구됨 · 원점 프로세스 번호 바뀜(기록만)')
+}
+
+Invoke-CgCaseBlock 'C21' '인계 쪽지 · 복구 주체 별도 칸 · 종합 문구 수준 표지' {
+    foreach ($x in @($script:R10, $script:R11, $script:R19a)) { Assert-CgHandoff 'C21' $x }
+    # ⓑ 워치독 복구 기록 없는 PASS → 복구 주체 불명 · PASS 그대로
+    $b = Invoke-CgRun -Cfg @{ cloudflared = @{ E1At = -1 } }
+    Assert-CgItem 'C21' $b 'S-A' ($LblA + 'PASS(5초) — 5분 안 복구됨')
+    Test-CgCase 'C21' 'ⓑ 복구 주체 불명' ((Get-CgActorOf $b 'S-A').StartsWith('  복구 주체(판정 미반영): 불명 '))
+    # ⓒ 전부 PASS(C16) — 머리 · 고정 줄(콘솔 · 보고서) · 건별 표지 · 금지 문구
+    $r = $script:R16
+    $hi = Get-CgHeaderIdx $r.Lines
+    Test-CgCase 'C21' 'ⓒ 머리 = 합격(4 ID 중 4)' ($hi -ge 0 -and [string]$r.Lines[$hi] -eq $HdrPass)
+    Test-CgCase 'C21' 'ⓒ 머리 바로 다음 줄 = 고정 줄(콘솔)' ($hi -ge 0 -and [string]$r.Lines[$hi + 1] -eq $Fixed4)
+    Test-CgCase 'C21' 'ⓒ 보고서 1 · 2줄 = 머리 · 고정 줄' (@($r.ReportLines).Count -ge 2 -and $r.ReportLines[0] -eq $HdrPass -and $r.ReportLines[1] -eq $Fixed4)
+    foreach ($bad in @('통신', '#27', '17 중')) { Test-CgCase 'C21' ('ⓒ 머리에 「' + $bad + '」 0') (-not $HdrPass.Contains($bad) -and -not ([string]$r.Lines[$hi]).Contains($bad)) }
+    Assert-CgItem 'C21' $r 'S-A' $LblA -Prefix
+    Assert-CgItem 'C21' $r 'S-B' $LblB -Prefix
+    Assert-CgItem 'C21' $r 'S-C' $LblC -Prefix
+    Assert-CgItem 'C21' $r 'S-D' $LblD -Prefix
+    $all = (@($r.Lines) + @($r.ReportLines)) -join "`n"
+    foreach ($bad in @('워치독이 살', '#27 통과', '통신 복구 검증', '워치독(증거 4종)', '- S-A [로컬')) { Test-CgCase 'C21' ('ⓒ 「' + $bad + '」 0') (-not $all.Contains($bad)) }
+    Test-CgCase 'C21' 'ⓒ S-A 복구 주체 = 상태 전이 일치 · 단독 원인 귀속 미확정' ((Get-CgActorOf $r 'S-A').StartsWith('  복구 주체(판정 미반영): ' + $ActorMatch + ' — '))
+    Test-CgCase 'C21' 'ⓒ S-B 복구 주체 = 상태 전이 일치' ((Get-CgActorOf $r 'S-B').StartsWith('  복구 주체(판정 미반영): ' + $ActorMatch + ' — '))
+    # E1 이 E2 앞 · 실패 기록 있음 → 불명 · 둘 다 PASS 그대로
+    $c1 = Invoke-CgRun -Cfg @{ cloudflared = @{ E1At = 5300; E2At = 5500 } }
+    Assert-CgItem 'C21' $c1 'S-A' ($LblA + 'PASS(5초) — 5분 안 복구됨')
+    Test-CgCase 'C21' 'E1 이 E2 앞 → 불명' ((Get-CgActorOf $c1 'S-A').StartsWith('  복구 주체(판정 미반영): 불명 '))
+    $c2 = Invoke-CgRun -Cfg @{ cloudflared = @{ FailAt = 3000 } }
+    Assert-CgItem 'C21' $c2 'S-A' ($LblA + 'PASS(5초) — 5분 안 복구됨')
+    Test-CgCase 'C21' '실패 기록 있음 → 불명' ((Get-CgActorOf $c2 'S-A').StartsWith('  복구 주체(판정 미반영): 불명 '))
+}
+
+Invoke-CgCaseBlock 'C22' 'G4a · 안 B 조합 · S-D 끊김 반영 · 관측자 대조' {
+    # ⓐ~ⓒ G4a 거절
+    $a = Invoke-CgRun -Repo $script:RepoA
+    Assert-CgRejected 'C22' $a @('G4a')
+    $b = Invoke-CgRun -Repo $script:RepoB
+    Assert-CgRejected 'C22' $b @('G4a')
+    $c1 = Invoke-CgRun -Repo $script:RepoC
+    Assert-CgRejected 'C22' $c1 @('G4a')
+    Test-CgCase 'C22' 'ⓒ origin/main 참조 없음 사유' (@($c1.Lines) -contains '  G4a 거절 · 승인본 대조 못 함(origin/main 참조 없음)')
+    $c2 = Invoke-CgRun -GitExe (Join-Path $script:Root 'no-such-git.exe')
+    Assert-CgRejected 'C22' $c2 @('G4a')
+    Test-CgCase 'C22' 'ⓒ git 못 읽음 사유' (@($c2.Lines) -contains '  G4a 거절 · 승인본 대조 못 함(git 못 읽음)')
+    # ⓓ 안 B 조합 4줄 + 일부 실행
+    $d1 = $script:R16
+    $d2 = Invoke-CgRun -Cfg @{ SdDown = @(2500, 99999999) }
+    $d3 = Invoke-CgRun -Cfg @{ HandMode = 'none' }
+    $d4 = $script:R14
+    $d5 = Invoke-CgRun -History (Get-CgHist -Key 'svc:MariaDB' -Count 4)
+    $want = @(
+        @($d1, $HdrPass, 0),
+        @($d2, '미합격 — 자동 3 PASS · 반자동 1 실패(5분 안 복귀 없음) · 시험 종료 아님 · 인계 필요(§5-4)', 1),
+        @($d3, '미합격(반자동 미실행 · 4 ID 중 3 실행) — 자동 3 PASS · 합격선 「자동 3 + 반자동 1」 미충족', 1),
+        @($d4, '미합격(도구 범위 4 ID 중 1 실행) — 칸별 사유 · 반자동 미실행', 1),
+        @($d5, '미합격(도구 범위 4 ID 중 3 실행) — 칸별 사유 · 반자동 완료', 1)
+    )
+    $k = 0
+    foreach ($row in $want) {
+        $k++
+        $h = Get-CgHeader $row[0]
+        Test-CgCase 'C22' ('ⓓ 조합 ' + $k + ' 머리(실제 「' + $h + '」)') ($h -eq $row[1])
+        Test-CgCase 'C22' ('ⓓ 조합 ' + $k + ' 종료 코드 ' + $row[2]) ($row[0].Exit -eq $row[2])
+        if ($k -gt 1) { Test-CgCase 'C22' ('ⓓ 조합 ' + $k + ' 「합격」 머리 아님') (-not $h.StartsWith('합격')) }
+    }
+    Assert-CgItem 'C22' $d5 'S-B' ($LblB + '미실행(쿨다운 보호)')
+    Test-CgCase 'C22' 'ⓓ 손 기록 없음 = 반자동 미실행' ((Get-CgItem $d3 'S-D') -eq ($LblD + '반자동 — 미실행(손 기록 없음)'))
+    # ⓔ 손 기록 뒤 외부 내내 200 → 실패(끊김 미반영)
+    $e = Invoke-CgRun -Cfg @{ SdDown = @() }
+    Assert-CgItem 'C22' $e 'S-D' ($LblD + '반자동 — 실패(끊김 미반영)')
+    Test-CgCase 'C22' 'ⓔ 미합격 · 종료 코드 1 · 인계 문구' ((Get-CgHeader $e) -eq '미합격 — 자동 3 PASS · 반자동 1 실패(끊김 미반영) · 시험 종료 아님 · 인계 필요(§5-4)' -and $e.Exit -eq 1 -and (Get-CgSummaryEnd $e) -eq $HandoffEnd)
+    # ⓕ 작업 사본 CRLF · 저장소 LF · 내용 같음 → G4a 통과 · 저장소 쓰기 0
+    $wf = [CgWorld]::new($script:Base, (New-CgCfg -Over $null))
+    $ef = New-CgCaseEnv -Opt @{}
+    $relF = Join-Path $script:RepoF 'tests\scenarios\comms-integrity\test-pc-allowlist.json'
+    Test-CgCase 'C22' 'ⓕ 작업 사본 = CRLF' ([System.IO.File]::ReadAllText($relF).Contains("`r`n"))
+    $before = Get-CgTreeStamp (Join-Path $script:RepoF '.git')
+    $snapF = Get-EnvSnapshot -Providers (New-CgProviders -W $wf -E $ef -Repo $script:RepoF) -NowUtc $script:Base
+    $gF = Get-GuardDecision -Snapshot $snapF -NowUtc $script:Base
+    $after = Get-CgTreeStamp (Join-Path $script:RepoF '.git')
+    Test-CgCase 'C22' 'ⓕ G4a 통과' (@($gF.Checks | Where-Object { $_.Id -eq 'G4a' -and $_.Pass }).Count -eq 1)
+    Test-CgCase 'C22' 'ⓕ 가드 허용(나머지도 맞음)' ([bool]$gF.Allowed)
+    Test-CgCase 'C22' 'ⓕ 저장소 쓰기 0(.git 파일 · 크기 · 시각 그대로)' ($before -eq $after -and $before.Length -gt 0)
+    # ⓖ 단발 실패 1회 · 연속 4회 = 실패(끊김 미반영) / 연속 5회 + 복귀 = 완료
+    $g1 = Invoke-CgRun -Cfg @{ SdDown = @(2500, 3500) }
+    Assert-CgItem 'C22' $g1 'S-D' ($LblD + '반자동 — 실패(끊김 미반영)')
+    $g4 = Invoke-CgRun -Cfg @{ SdDown = @(2500, 6500) }
+    Assert-CgItem 'C22' $g4 'S-D' ($LblD + '반자동 — 실패(끊김 미반영)')
+    $g5 = Invoke-CgRun -Cfg @{ SdDown = @(2500, 7500) }
+    Assert-CgItem 'C22' $g5 'S-D' ($LblD + '반자동 — 완료(첫 실패 뒤 5초 복귀 · 손 1회)')
+    foreach ($x in @($g1, $g4)) { Test-CgCase 'C22' 'ⓖ 미합격 · 종료 코드 1' ($x.Exit -eq 1 -and -not (Get-CgHeader $x).StartsWith('합격')) }
+    Test-CgCase 'C22' 'ⓖ 5회 + 복귀 = 합격 · 종료 코드 0' ($g5.Exit -eq 0 -and (Get-CgHeader $g5) -eq $HdrPass)
+    # ⓗ 관측자 연결 대조
+    $h1 = Invoke-CgRun -Cfg @{ CtlFail = @(2500, 12500) }
+    Assert-CgItem 'C22' $h1 'S-D' ($LblD + '반자동 — 실패(측정불가(관측자 연결 불명))')
+    $h2 = Invoke-CgRun -Cfg @{ CtlTimeout = @(4500, 5500) }
+    Assert-CgItem 'C22' $h2 'S-D' ($LblD + '반자동 — 실패(측정불가(관측자 연결 불명))')
+    $h3 = Invoke-CgRun -Cfg @{ CtlBaselineFail = $true }
+    Assert-CgItem 'C22' $h3 'S-D' ($LblD + '반자동 — 실패(측정불가(기준 응답 없음))')
+    Test-CgCase 'C22' 'ⓗ③ 손 안내 0(손 기록 부름 0 · 안내 줄 0)' ($h3.W.HandCalls -eq 0 -and @(@($h3.Lines) | Where-Object { ([string]$_).StartsWith('  손 안내:') }).Count -eq 0)
+    $h4 = $g5
+    Assert-CgItem 'C22' $h4 'S-D' ($LblD + '반자동 — 완료(') -Prefix
+    $h5 = Invoke-CgRun -Cfg @{ CtlThrow = @(4500, 5500) }
+    Assert-CgItem 'C22' $h5 'S-D' ($LblD + '반자동 — 실패(측정불가(관측자 연결 불명))')
+    foreach ($x in @($h1, $h2, $h3, $h5)) { Test-CgCase 'C22' 'ⓗ 미합격 · 종료 코드 1' ($x.Exit -eq 1 -and -not (Get-CgHeader $x).StartsWith('합격')) }
+    foreach ($x in @($h1, $h2, $h3, $h4, $h5)) {
+        $t = (@($x.Lines) -join "`n") + "`n" + [string]$x.ReportText + "`n" + [string]$x.HistText
+        Test-CgCase 'C22' 'ⓗ 대조 응답 본문(관측자 주소 줄) 0' (-not $t.Contains($script:ObserverIp) -and -not $t.Contains('ip='))
+    }
+}
+
+# ── 부가(경우 번호 밖 · 세부 확인에 셈)
+Invoke-CgCaseBlock '부가' '훅 전부-아니면-멈춤 · 판정 모드 · 보고서 폴더 · 캐시 회피 · 러너 정적 검사' {
+    $x = Invoke-CgRun -DropHook @('ReadScmEvents')
+    Test-CgCase '부가' '훅 하나 빠짐 → 멈춤(실물로 안 메움)' (($null -ne $x.Error -or (($x.Lines -join "`n").Contains('시험 훅 누락'))) -and -not (@($x.Lines) -contains '가드(G1~G6 + G4a): 허용'))
+    Test-CgCase '부가' '훅 빠짐 · 끊기 0' ($x.W.FakeCuts -eq 0)
+    $j = Invoke-CgRun -NoConfirm
+    Test-CgCase '부가' '판정 모드(가드 허용) · 끊기 0 · 손 0 · 파일 0' ($j.W.FakeCuts -eq 0 -and $j.W.HandCalls -eq 0 -and -not [System.IO.Directory]::Exists($j.ReportDir))
+    Test-CgCase '부가' '판정 모드 · 상태 읽기(외부 GET 가드 통과 뒤)' ($j.W.ExtGets -ge 1 -and (Get-CgHeader $j).StartsWith('미합격(측정 0건)') -and $j.Exit -eq 1)
+    $inRepo = Join-Path $script:RunnerRepo ('tests\scenarios\comms-integrity\cg-no-write-' + $rnd.Substring(0, 8))
+    $q = Invoke-CgRun -ReportDir $inRepo
+    Test-CgCase '부가' '보고서 폴더 = 저장소 안 → 끊기 0 · 폴더 안 만듦' ($q.W.FakeCuts -eq 0 -and -not [System.IO.Directory]::Exists($inRepo) -and (($q.Lines -join "`n").Contains('판정 모드(보고서 폴더가 저장소 안')))
+    $r = $script:R16
+    Test-CgCase '부가' ('캐시 회피 · no-cache 머리 빠짐 0 · 주소 이상 0(외부 GET ' + $r.W.ExtGets + ')') ($r.W.NoCacheMissing -eq 0 -and $r.W.BadUrls -eq 0 -and $r.W.ExtGets -gt 0)
+    Test-CgCase '부가' '캐시 회피 · 쿼리값 매번 다름' ($r.W.Nonces.Count -eq $r.W.ExtGets -and @($r.W.Nonces | Select-Object -Unique).Count -eq $r.W.Nonces.Count)
+    # 러너 정적 검사(구문 트리): 시작 · 재시작 명령 0 · 끊기 명령은 실물 끊기 함수 둘 안에만 · 첫 줄 = 진짜 끊기 계수
+    $tk = $null; $pe = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:RunnerPath, [ref]$tk, [ref]$pe)
+    Test-CgCase '부가' '러너 구문 오류 0' (@($pe).Count -eq 0)
+    $cmds = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))
+    $names = @($cmds | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+    foreach ($bad in @('Start-Service', 'Restart-Service', 'Resume-Service', 'Set-Service', 'New-Service', 'Start-Process', 'Invoke-Expression', 'Invoke-Item')) {
+        Test-CgCase '부가' ('러너에 ' + $bad + ' 0') (@($names | Where-Object { $_ -ieq $bad }).Count -eq 0)
+    }
+    $members = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) | ForEach-Object { [string]$_.Member.Extent.Text })
+    Test-CgCase '부가' '러너에 .Start() · .Continue() 0' (@($members | Where-Object { @('Start', 'Continue') -contains $_ }).Count -eq 0)
+    foreach ($pair in @(@('Stop-Service', 'Invoke-RgRealStopService'), @('Stop-Process', 'Invoke-RgRealStopProcesses'))) {
+        $hits = @($cmds | Where-Object { $_.GetCommandName() -ieq $pair[0] })
+        $fn = $null
+        if ($hits.Count -eq 1) {
+            $p = $hits[0].Parent
+            while ($null -ne $p -and -not ($p -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $p = $p.Parent }
+            $fn = $p
+        }
+        $first = if ($null -ne $fn) { [string]$fn.Body.EndBlock.Statements[0].Extent.Text } else { '' }
+        Test-CgCase '부가' ($pair[0] + ' = ' + $pair[1] + ' 안 1곳 · 첫 줄 진짜 끊기 계수') ($hits.Count -eq 1 -and $null -ne $fn -and $fn.Name -eq $pair[1] -and $first -eq '$global:HitPanCommsRealCutCalls++')
+    }
+    $scs = @($cmds | Where-Object { $_.GetCommandName() -ieq 'sc.exe' })
+    Test-CgCase '부가' 'sc.exe 는 qfailure(조회)만' ($scs.Count -eq 1 -and [string]$scs[0].CommandElements[1].Extent.Text -eq 'qfailure')
+}
+
+Invoke-CgCaseBlock 'C17' '보고서 · 화면 · 실행 기록(전체 런) → 자격증명 모양 · 명령줄 · 외부 노출 금지어 0' {
+    $hay = ($script:AllText.ToArray()) -join "`n"
+    Test-CgCase 'C17' ('모은 글 있음(' + $script:AllText.Count + '덩이)') ($script:AllText.Count -ge 40)
+    Test-CgCase 'C17' '도메인 원문 0' ($hay.IndexOf($script:Id.Domain, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 -and $hay.IndexOf($script:Id.Domain2, [System.StringComparison]::OrdinalIgnoreCase) -lt 0)
+    Test-CgCase 'C17' '테넌트 코드 0' ($hay.IndexOf($script:Id.Tenant, [System.StringComparison]::OrdinalIgnoreCase) -lt 0)
+    Test-CgCase 'C17' '기기 식별값 0' ($hay.IndexOf($script:Id.Guid, [System.StringComparison]::OrdinalIgnoreCase) -lt 0)
+    Test-CgCase 'C17' '임시 폴더 경로(설치본 · 마커) 0' ($hay.IndexOf($script:Root, [System.StringComparison]::OrdinalIgnoreCase) -lt 0)
+    Test-CgCase 'C17' '표지 문자열(응답 · 이벤트 글 · 실패 동작 출력) 0' (-not $hay.Contains($script:Mark))
+    Test-CgCase 'C17' '명령줄 칸 · 실행 파일 0' ($hay -notmatch 'COMMAND_LINE' -and $hay -notmatch '(?i)\.exe\b')
+    Test-CgCase 'C17' '주소(URL) 0' ($hay -notmatch '(?i)https?://')
+    Test-CgCase 'C17' '관측자 주소 0' (-not $hay.Contains($script:ObserverIp))
+    $i = 0
+    foreach ($rx in $script:BannedRx) { $i++; Test-CgCase 'C17' ('외부 노출 금지어 ' + $i + ' 0' + (Get-CgWhere $rx)) ($hay -notmatch $rx) }
+    $i = 0
+    foreach ($rx in $script:CredRx) { $i++; Test-CgCase 'C17' ('자격증명 모양 ' + $i + ' 0' + (Get-CgWhere $rx)) ($hay -notmatch $rx) }
+}
+
+} finally {
+    Remove-CgTree $script:Root
+}
+
+# ─────────────────────────────────────────────── 끝
+
+$caseIds = @($script:CaseOk.Keys | Where-Object { $_ -ne '부가' })
+$okCases = @($caseIds | Where-Object { $script:CaseOk[$_] }).Count
+$real = [int]$global:HitPanCommsRealCutCalls
+if ($script:Fails.Count -gt 0) {
+    Write-Host ''
+    Write-Host ('어긋난 세부 확인 {0}건:' -f $script:Fails.Count)
+    foreach ($f in $script:Fails) { Write-Host ('  - ' + $f) }
+}
+if (-not $script:CaseOk['부가']) { Write-Host '부가 확인(경우 번호 밖) 어긋남 — 세부 확인 칸에 셈' }
+Write-Host ('걸린 시간 {0}초' -f [math]::Round($sw.Elapsed.TotalSeconds))
+Write-Host ('Test-CommsGuard 끝 — 경우 {0}/{1} 일치 · 세부 확인 {2}/{3} · 진짜 끊기 호출 {4}' -f $okCases, $caseIds.Count, $script:DetailPass, $script:DetailTotal, $real)
+if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq 22 -and $script:DetailPass -eq $script:DetailTotal -and $real -eq 0) { exit 0 }
+exit 1
