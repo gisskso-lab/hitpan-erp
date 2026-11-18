@@ -336,15 +336,31 @@ const E_ROWS = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E7a', 'E7b', 'E7c', '
 function nineCount(manifest, outcomes, board, n1) {
   // 🔴 3차([3-V] A9 · CTO §4-2 조건 7) — qpdf 판을 결과표에 싣도록 셈 결과에 붙인다(manifest 의 qpdfVersion)
   const qpdf = qpdfOf(manifest);
+  // 🔴 3차-a(PM 11/19 판단 3 · CTO 조건 7 「같은 계열 · 판 기록」) — ⒜ 암호 걸기(QuestPDF DocumentOperation)가 쓰는 동봉 qpdf 판도 붙인다
+  const qpdfBundled = qpdfBundledOf(manifest);
   // ⬛ [낡은 줄 · 2차] if (board === 'main') return { cat: CAT.NO_DOOR, why: …, omission: null };
-  if (board === 'main') return { cat: CAT.NO_DOOR, why: 'main = PDF 받기 0(C9) · 분모 밖(HQA ⑧)', omission: null, qpdf, code: '' };
+  // ⬛ [낡은 줄 · 3차] if (board === 'main') return { cat: CAT.NO_DOOR, why: 'main = PDF 받기 0(C9) · 분모 밖(HQA ⑧)', omission: null, qpdf, code: '' };
+  if (board === 'main') return { cat: CAT.NO_DOOR, why: 'main = PDF 받기 0(C9) · 분모 밖(HQA ⑧)', omission: null, qpdf, qpdfBundled, code: '' };
   const r9 = nineCountCore(manifest, outcomes, n1);
-  return { ...r9, qpdf };
+  // ⬛ [낡은 줄 · 3차] return { ...r9, qpdf };
+  return { ...r9, qpdf, qpdfBundled };
 }
+/** ⒞ = 시험 잡 qpdf 명령의 `qpdf --version`(manifest.qpdfVersion). */
 function qpdfOf(manifest) {
   if (!manifest) return '매니페스트 없음';
   if (manifest.qpdfVersion) return String(manifest.qpdfVersion);
   return manifest.qpdfMissing ? '없음(이 잡 qpdf 0 또는 설치 실패)' : '기록 없음';
+}
+/**
+ * 🔴 3차-a(PM 11/19 판단 3 · CTO 조건 7) — ⒜ = QuestPDF 동봉 qpdf 판(PrintProbe samples 가 런 안에서 읽어 manifest.qpdfBundledVersion 에 씀).
+ *   못 읽었으면 QuestPDF 패키지 판 + 「동봉 qpdf 판 미측정」(manifest.qpdfBundledWhy = 사유).
+ */
+function qpdfBundledOf(manifest) {
+  if (!manifest) return '매니페스트 없음';
+  const pkg = manifest.questPdfVersion ? `QuestPDF ${manifest.questPdfVersion}` : 'QuestPDF 판 기록 없음';
+  if (manifest.qpdfBundledVersion) return `qpdf ${manifest.qpdfBundledVersion}(${pkg} 동봉)`;
+  const why = manifest.qpdfBundledWhy && /동봉 qpdf 판 미측정/.test(manifest.qpdfBundledWhy) ? manifest.qpdfBundledWhy : '동봉 qpdf 판 미측정';
+  return `${why} · ${pkg}`;
 }
 function nineCountCore(manifest, outcomes, n1) {
   const rows = Object.fromEntries((manifest && Array.isArray(manifest.rows) ? manifest.rows : []).map((r) => [r.id, r]));
@@ -365,13 +381,18 @@ function nineCountCore(manifest, outcomes, n1) {
   let eMeasured = 0;
   let noResult = 0;
   const omitted = [];
+  const noResultIds = [];
   for (const id of E_ROWS) {
     if (!valid(id)) { per[id] = `${CAT.UNMEASURED}(표본 ${rows[id] ? rows[id].validity : '없음'})`; continue; }
     eValid++;
     const r = o[id];
     // ⬛ [낡은 줄 · 2차] if (!r || !r.decision) { per[id] = `${CAT.UNMEASURED}(결과 없음)`; continue; } — 누락에도 막힘에도 안 셈 → ⑨ 초록([3-V] A1)
-    // 🔴 3차([3-V] A1 · PM 11/19 「유효 E 행 + 제품 결과 없음 = 누락으로 셈 · 초록 0」) — 결과 없음 수를 따로 적고 누락에 더한다
-    if (!r || !r.decision) { omission++; noResult++; omitted.push(id); per[id] = `${CAT.RED}(누락 · 결과 없음)`; continue; }
+    // ⬛ [낡은 줄 · 3차] // 🔴 3차([3-V] A1 · PM 11/19 「유효 E 행 + 제품 결과 없음 = 누락으로 셈 · 초록 0」) — 결과 없음 수를 따로 적고 누락에 더한다
+    // ⬛ [낡은 줄 · 3차] if (!r || !r.decision) { omission++; noResult++; omitted.push(id); per[id] = `${CAT.RED}(누락 · 결과 없음)`; continue; }
+    //   — 3차 PM 글자 「유효 E 행 + 제품 결과 없음 = 누락으로 셈」 은 설계 :89(PM 지시 L88) 「PDF 못 받음 · 로그인 실패 · 시간 넘김 · 4xx/5xx = 미측정(빨강 아님)」 과 어긋남 → PM 정정(11/19)
+    // 🔴 3차-a(PM 정정 11/19 · 설계 :89 · :263) — 그 행 = 미측정(초록 0 · 빨강 아님) · 분모 제외 · 「결과 없음 n」 따로 적음
+    //   · ⑨ 전체 = 아래 S2(「유효 + 결과 있음」)를 못 채우면 부분 · 결과 있는 E 행 0 이면 미측정(둘 다 합격 0)
+    if (!r || !r.decision) { noResult++; noResultIds.push(id); per[id] = `${CAT.UNMEASURED}(결과 없음)`; continue; }
     eMeasured++;
     const trace = (r.parseStart || 0) > 0 || r.marker === true || r.deepWarn === true || r.copy === true;
     const miss = r.decision === '허용' || trace;
@@ -379,13 +400,24 @@ function nineCountCore(manifest, outcomes, n1) {
     per[id] = miss ? `${CAT.RED}(누락${trace ? ' · 해석 흔적' : ''})` : CAT.GREEN;
   }
   const overReject = { P4: o.P4 && o.P4.decision === '거절' ? 1 : 0, P2: o.P2 && o.P2.decision === '거절' ? 1 : 0 };
+  // 🔴 3차-a(PM 11/19 판단 2 · 설계 :263 「P1~P3 · U2 거절 = 결함」 · U1 빨강) — P · U 결함 행을 모아 ⑨ 전체 색에 넣는다(아래)
+  //   P1 거절 = 위 S3(같은 런 양성 대조 실패 = E · P · U · N 전부 미측정 · 설계 :254) 그대로 · 과잉 거절 수(P4 · P2) 따로 셈 그대로
+  const puDefect = [];
   for (const id of ['P2', 'P3', 'U2']) {
     if (!valid(id)) per[id] = CAT.UNMEASURED;
     else if (!o[id] || !o[id].decision) per[id] = `${CAT.UNMEASURED}(결과 없음)`;
     else per[id] = o[id].decision === '허용' ? CAT.GREEN : `${CAT.RED}(${id === 'P2' ? '과잉 거절 · 따로 셈' : '정상 거절 = 결함'})`;
+    if (valid(id) && o[id] && o[id].decision && o[id].decision !== '허용') puDefect.push(id);
   }
-  per.P4 = valid('P4') && o.P4 ? (o.P4.decision === '거절' ? `${CAT.GREEN}(과잉 거절 · 받아들임 · 따로 셈)` : CAT.GREEN) : CAT.UNMEASURED;
-  per.U1 = valid('U1') && o.U1 ? (o.U1.decision === '거절' && (o.U1.parseStart || 0) === 0 ? CAT.GREEN : CAT.RED) : CAT.UNMEASURED;
+  // ⬛ [낡은 줄 · 3차] per.P4 = valid('P4') && o.P4 ? (o.P4.decision === '거절' ? `${CAT.GREEN}(과잉 거절 · 받아들임 · 따로 셈)` : CAT.GREEN) : CAT.UNMEASURED; — 결과 꼴만 있고 decision 없으면 초록
+  // ⬛ [낡은 줄 · 3차] per.U1 = valid('U1') && o.U1 ? (o.U1.decision === '거절' && (o.U1.parseStart || 0) === 0 ? CAT.GREEN : CAT.RED) : CAT.UNMEASURED; — decision 없으면 빨강
+  // 🔴 3차-a(PM 정정 11/19 · 설계 :89) — 결과 없음(decision 없음) = 미측정(초록 0 · 빨강 아님) — U1 이 ⑨ 전체 색에 들어가므로 같은 규칙으로
+  const decided = (id) => valid(id) && o[id] && o[id].decision;
+  per.P4 = !valid('P4') ? CAT.UNMEASURED : !decided('P4') ? `${CAT.UNMEASURED}(결과 없음)`
+    : (o.P4.decision === '거절' ? `${CAT.GREEN}(과잉 거절 · 받아들임 · 따로 셈)` : CAT.GREEN);
+  per.U1 = !valid('U1') ? CAT.UNMEASURED : !decided('U1') ? `${CAT.UNMEASURED}(결과 없음)`
+    : (o.U1.decision === '거절' && (o.U1.parseStart || 0) === 0 ? CAT.GREEN : CAT.RED);
+  if (per.U1 === CAT.RED) puDefect.push('U1');
   per.U3 = '미측정 · 정적만';
   // ⬛ [낡은 줄 · 2차] S2 = 유효만 봄 → 3차([3-V] A1): 「유효 + 결과 있음」 기준
   const has = (id) => valid(id) && o[id] && o[id].decision;
@@ -395,16 +427,31 @@ function nineCountCore(manifest, outcomes, n1) {
   if (!has('E7c')) s2.push('E7c 무효 또는 결과 없음');
   let cat;
   let why;
-  if (eValid === 0) { cat = CAT.UNMEASURED; why = 'E 행 전부 무효 — ⑨ 미측정 · 합격 0'; }
-  else if (omission > 0) { cat = CAT.RED; why = `누락 ${omission}${noResult ? `(결과 없음 ${noResult} 포함)` : ''} — ㉮ 멈춤 · PM · CTO`; }
-  else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0`; }
-  else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}`; }
+  // ⬛ [낡은 줄 · 3차] if (eValid === 0) { cat = CAT.UNMEASURED; why = 'E 행 전부 무효 — ⑨ 미측정 · 합격 0'; }
+  // ⬛ [낡은 줄 · 3차] else if (omission > 0) { cat = CAT.RED; why = `누락 ${omission}${noResult ? `(결과 없음 ${noResult} 포함)` : ''} — ㉮ 멈춤 · PM · CTO`; }
+  // ⬛ [낡은 줄 · 3차] else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0`; }
+  // ⬛ [낡은 줄 · 3차] else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}`; }
+  //   — ⑨ 전체 색이 E 행만 봄(P · U 결함이 행에만 남음 · 명세서 §6-c 범위 밖 발견) · 결과 없음을 누락에 셈(PM 정정)
+  // 🔴 3차-a(PM 11/19 판단 1 · 2) — 차례: 빨강(누락 또는 P · U 결함) → 미측정(결과 있는 E 행 0) → 부분(S2) → 초록 · 결과 없음 n 은 늘 따로 적음
+  const nr = noResult ? ` · 결과 없음 ${noResult}(${noResultIds.join(',')} · 미측정 · 분모 제외)` : '';
+  if (omission > 0 || puDefect.length > 0) {
+    cat = CAT.RED;
+    why = [
+      omission > 0 ? `누락 ${omission} — ㉮ 멈춤 · PM · CTO` : '',
+      puDefect.length > 0 ? `P · U 결함 ${puDefect.length}(${puDefect.join(',')} · P1~P3 · U2 거절 = 결함 · U1 빨강) — 합격 0` : '',
+    ].filter(Boolean).join(' · ') + nr;
+  } else if (eValid === 0) { cat = CAT.UNMEASURED; why = 'E 행 전부 무효 — ⑨ 미측정 · 합격 0'; }
+  else if (eMeasured === 0) { cat = CAT.UNMEASURED; why = `E 행 유효 ${eValid} · 결과 있음 0 — ⑨ 미측정 · 합격 0${nr}`; }
+  else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0${nr}`; }
+  else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}${nr}`; }
   const n1Rows = {};
   for (const [k, v] of Object.entries(n1 || {})) {
     if (!v || v.setup !== true) n1Rows[k] = `${CAT.UNMEASURED}(차림 못 세움)`;
     else n1Rows[k] = v.underlay === 0 && v.error === 0 && v.native === 0 ? CAT.GREEN : CAT.RED;
   }
-  return { cat, why, omission, noResult, eValid, eMeasured, overReject, rows: per, n1: n1Rows, code: omitted.length ? `누락:${omitted.join(',')}` : '' };
+  // ⬛ [낡은 줄 · 3차] return { cat, why, omission, noResult, eValid, eMeasured, overReject, rows: per, n1: n1Rows, code: omitted.length ? `누락:${omitted.join(',')}` : '' };
+  //   code = 누락 행만(꼴 고정 · plan.json expectedCodes 「누락:<행,…>」 그대로) — P · U 결함은 puDefect · why 에 따로
+  return { cat, why, omission, noResult, noResultIds, puDefect, eValid, eMeasured, overReject, rows: per, n1: n1Rows, code: omitted.length ? `누락:${omitted.join(',')}` : '' };
 }
 
 /** 심은 결함 검출(HQA ⑦) — 예상 사유(런 전 고정) = 실제 사유일 때만 검출 · 다른 사유 빨강 = 검출 아님. */
@@ -486,10 +533,15 @@ function toMarkdown(meta, res, nine) {
     L.push('');
     L.push(`- ⑨ 셈: **${nine.cat}** — ${nine.why}`);
     // 🔴 3차([3-V] A9 · CTO §4-2 조건 7 「qpdf --version 을 결과표에」)
-    L.push(`- ⑨ qpdf 판: ${nine.qpdf || '기록 없음'}`);
+    // ⬛ [낡은 줄 · 3차] L.push(`- ⑨ qpdf 판: ${nine.qpdf || '기록 없음'}`);
+    // 🔴 3차-a(PM 11/19 판단 3 · CTO 조건 7 「같은 계열 · 판 기록」) — ⒞ 명령 판 · ⒜ QuestPDF 동봉 판 둘 다
+    L.push(`- ⑨ qpdf 판 ⒞ 명령(\`qpdf --version\`): ${nine.qpdf || '기록 없음'}`);
+    L.push(`- ⑨ qpdf 판 ⒜ QuestPDF 동봉(DocumentOperation): ${nine.qpdfBundled || '기록 없음'}`);
   } else if (meta.nineQpdf) {
     L.push('');
-    L.push(`- ⑨ 표본 qpdf 판: ${meta.nineQpdf}(⑨ 셈 입력 없음)`);
+    // ⬛ [낡은 줄 · 3차] L.push(`- ⑨ 표본 qpdf 판: ${meta.nineQpdf}(⑨ 셈 입력 없음)`);
+    L.push(`- ⑨ 표본 qpdf 판 ⒞ 명령(\`qpdf --version\`): ${meta.nineQpdf}(⑨ 셈 입력 없음)`);
+    L.push(`- ⑨ 표본 qpdf 판 ⒜ QuestPDF 동봉(DocumentOperation): ${meta.nineQpdfBundled || '기록 없음'}`);
   }
   if (Array.isArray(res.detections) && res.detections.length) {
     // 🔴 3차([4] F6 · HQA ⑦) — 예상 사유(런 전 고정 code) = 실제 code 일 때만 검출
@@ -532,7 +584,11 @@ function main(outDir) {
   }
   // 🔴 3차([3-V] A9) — ⑨ 셈 입력이 없어도 표본 manifest(워크플로 ⑨ 단계가 `nine/` 에 씀)가 있으면 qpdf 판을 결과표에
   const nineMf = path.join(outDir, 'nine', 'manifest.json');
-  const nineQpdf = !nine && fs.existsSync(nineMf) ? qpdfOf(JSON.parse(fs.readFileSync(nineMf, 'utf8'))) : null;
+  // ⬛ [낡은 줄 · 3차] const nineQpdf = !nine && fs.existsSync(nineMf) ? qpdfOf(JSON.parse(fs.readFileSync(nineMf, 'utf8'))) : null;
+  // 🔴 3차-a(PM 11/19 판단 3) — 같은 manifest 에서 ⒞ 명령 판 · ⒜ 동봉 판 둘 다
+  const nineMfDoc = !nine && fs.existsSync(nineMf) ? JSON.parse(fs.readFileSync(nineMf, 'utf8')) : null;
+  const nineQpdf = nineMfDoc ? qpdfOf(nineMfDoc) : null;
+  const nineQpdfBundled = nineMfDoc ? qpdfBundledOf(nineMfDoc) : null;
   // 🔴 3차([4] F6) — 이번 잡의 예상 사유(plan.json · 런 전 고정)를 판정 흐름에 연결
   let plan = null;
   try {
@@ -542,7 +598,8 @@ function main(outDir) {
   }
   res.detections = detectionsFor(expectsFromPlan(plan, doc.run, doc.job), res, nine);
   fs.writeFileSync(path.join(outDir, 'print-result.json'), JSON.stringify({ meta: { run: doc.run, job: doc.job, board: doc.board }, ...res, nine }, null, 2));
-  fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf }, res, nine));
+  // ⬛ [낡은 줄 · 3차] fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf }, res, nine));
+  fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf, nineQpdfBundled }, res, nine));
   for (const s of res.stops) console.log(`🔴 멈춤 ${s}`);
   console.log(endLine(res));
   return res.positive.ok ? 0 : 1;
@@ -553,4 +610,6 @@ if (require.main === module) process.exitCode = main(process.argv[2] || process.
 module.exports = {
   CAT, evalCheck, judgeCell, judgeRun, positiveControl, nineCount, detection, imageFrom, effectiveAlpha, mainStops, composite, endLine, toMarkdown, main, inBox, wordMatches,
   detectionsFor, expectsFromPlan, styleKey, titleLine,
+  // 🔴 3차-a(PM 11/19 판단 3) — 판 기록 두 칸(자체시험 T-Z14)
+  qpdfOf, qpdfBundledOf,
 };

@@ -287,11 +287,36 @@ guard('T-Z3 [3-V] A3 회귀 대조 글자 0 · 양성 대조 실패 = 미측정'
   check('T-Z3 [3-V] A3 회귀 대조 글자 0 · 양성 대조 실패 = 미측정', !a.ok && a.unmeasured === true && !b.ok && b.unmeasured === true, `${a.ok}/${a.unmeasured} · ${b.ok}/${b.unmeasured}`);
 });
 // T-Z4 [3-V] A1 — 유효 E 행인데 제품 결과 없음 → 2차 = 「누락 0 · 유효 E 4」 초록
-guard('T-Z4 [3-V] A1 유효 E 결과 없음 = 누락으로 셈 · 초록 0', () => {
+// ⬛ [낡은 경우 · 3차] 기대 = 「누락으로 셈」(PM 글자 · 빨강 · 누락 4 · code 누락:E1,E4,E7,E7c) — PM 정정(11/19 · 설계 :89 「PDF 못 받음 · … · 4xx/5xx = 미측정(빨강 아님)」)으로 기대를 바꿈
+// ⬛   guard('T-Z4 [3-V] A1 유효 E 결과 없음 = 누락으로 셈 · 초록 0', () => {
+// ⬛     const mf = { rows: ['P1', 'E1', 'E4', 'E7', 'E7c'].map((id) => ({ id, validity: '유효' })) };
+// ⬛     const r = J.nineCount(mf, { P1: { decision: '허용', parseStart: 1, copy: true } }, 'merged');
+// ⬛     check('T-Z4 [3-V] A1 유효 E 결과 없음 = 누락으로 셈 · 초록 0', r.cat !== C.GREEN && r.cat === C.RED && r.omission === 4 && r.noResult === 4 && r.code === '누락:E1,E4,E7,E7c',
+// ⬛       `${r.cat} · 누락 ${r.omission} · 결과 없음 ${r.noResult} · ${r.code} · ${r.why}`);
+// ⬛   });
+// 🔴 3차-a(PM 정정 11/19 · 설계 :89 · :263) — 결과 없음 행 = 미측정(초록 0 · 빨강 아님) · 분모 제외 · 결과 없음 n 따로
+//   · 결과 있는 E 행 0 = ⑨ 미측정 · S2(E4 · E5 / E7 계열 / E7c 「유효 + 결과 있음」) 못 채움 = 부분 · 채움 = 초록(결과 없음 n 적음)
+//   고치기 전(3차) 판정기 = 셋 다 빨강(누락) · 2차 판정기 = 첫 경우 초록 → 이 경우 실패
+guard('T-Z4 [3-V] A1 · PM 정정 유효 E 결과 없음 = 그 행 미측정 · 분모 제외 · 초록 0', () => {
   const mf = { rows: ['P1', 'E1', 'E4', 'E7', 'E7c'].map((id) => ({ id, validity: '유효' })) };
   const r = J.nineCount(mf, { P1: { decision: '허용', parseStart: 1, copy: true } }, 'merged');
-  check('T-Z4 [3-V] A1 유효 E 결과 없음 = 누락으로 셈 · 초록 0', r.cat !== C.GREEN && r.cat === C.RED && r.omission === 4 && r.noResult === 4 && r.code === '누락:E1,E4,E7,E7c',
-    `${r.cat} · 누락 ${r.omission} · 결과 없음 ${r.noResult} · ${r.code} · ${r.why}`);
+  const eAll = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E7a', 'E7b', 'E7c', 'E8'];
+  const mfAll = { rows: ['P1', ...eAll].map((id) => ({ id, validity: '유효' })) };
+  const base = Object.fromEntries(eAll.map((id) => [id, { decision: '거절', parseStart: 0 }]));
+  base.P1 = { decision: '허용', parseStart: 1, copy: true };
+  const partOut = { ...base };
+  delete partOut.E4;
+  delete partOut.E5;
+  const part = J.nineCount(mfAll, partOut, 'merged');
+  const oneOut = { ...base };
+  delete oneOut.E1;
+  const one = J.nineCount(mfAll, oneOut, 'merged');
+  const unm = `${C.UNMEASURED}(결과 없음)`;
+  check('T-Z4 [3-V] A1 · PM 정정 유효 E 결과 없음 = 그 행 미측정 · 분모 제외 · 초록 0',
+    r.cat === C.UNMEASURED && r.omission === 0 && r.noResult === 4 && r.code === '' && ['E1', 'E4', 'E7', 'E7c'].every((id) => r.rows[id] === unm)
+    && part.cat === '부분' && part.omission === 0 && part.noResult === 2 && part.rows.E4 === unm && /E4 · E5/.test(part.why)
+    && one.cat === C.GREEN && one.omission === 0 && one.noResult === 1 && one.rows.E1 === unm && /결과 없음 1/.test(one.why),
+    `전부 결과 없음 ${r.cat} · 누락 ${r.omission} · 결과 없음 ${r.noResult} · code '${r.code}' / E4 · E5 결과 없음 ${part.cat} · 누락 ${part.omission} / E1 만 결과 없음 ${one.cat} · ${one.why}`);
 });
 // T-Z5 [3-V] A7 — 판독기 자체시험 값 없음(undefined) = 실패
 guard('T-Z5 [3-V] A7 판독기 자체시험 값 없음 = 양성 대조 실패', () => {
@@ -379,6 +404,47 @@ guard('T-Z12 [4] F5 거래명세서 입구 반품 줄 거름', () => {
   const est = CAP.entryPick('estimate', 'doc')(fake);
   check('T-Z12 [4] F5 거래명세서 입구 반품 줄 거름', del.by && del.by.hasNotText === '반품' && j.by && j.by.hasText === '반품' && est === fake,
     `거래명세서 ${JSON.stringify(del.by)} · ⓙ ${JSON.stringify(j.by)} · 견적서 그대로 ${est === fake}`);
+});
+
+// ════ 3차-a(11/19 · PM 판단 1~3) — 각 경우 = 「고치기 전(76688452) 판정기에서 실패 · 고친 판에서 통과」 ════
+const nineAll = ['P1', 'P2', 'P3', 'P4', 'U1', 'U2', 'E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E7a', 'E7b', 'E7c', 'E8'];
+const nineValid = { rows: nineAll.map((id) => ({ id, validity: '유효' })) };
+const nineRej = { decision: '거절', parseStart: 0 };
+const nineOk = { decision: '허용', parseStart: 1, copy: true };
+// E 전부 정상 거절 · P1~P3 · U2 허용 · U1 해석 0 거절 · P4 허용 = ⑨ 초록 바탕
+const nineBase = Object.fromEntries(nineAll.map((id) => [id, id.startsWith('E') || id === 'U1' ? nineRej : nineOk]));
+
+// T-Z13 PM 판단 2(설계 :263 「P1~P3 · U2 거절 = 결함」 · U1 빨강) — ⑨ 전체 색에 P · U 행. 고치기 전 = E 만 봐서 초록
+guard('T-Z13 PM 판단 2 ⑨ 전체 색에 P · U 결함 · 과잉 거절 수 따로', () => {
+  // 경우 1: P2 · P3 · U2 거절 + P4 거절 → ⑨ 빨강(P · U 결함 P2 · P3 · U2) · 과잉 거절 P2 1 · P4 1(P4 = 받아들임 · 결함 아님) · 누락 code 무변('')
+  const c1 = J.nineCount(nineValid, { ...nineBase, P2: nineRej, P3: nineRej, U2: nineRej, P4: nineRej }, 'merged');
+  // 경우 2: U1 이 해석 시작 1(구조 못 읽음인데 해석기로 감) → U1 빨강 → ⑨ 빨강 / 대조: P4 만 거절 = ⑨ 초록(과잉 거절 P4 1 · 받아들임)
+  const c2 = J.nineCount(nineValid, { ...nineBase, U1: { decision: '거절', parseStart: 1 } }, 'merged');
+  const p4 = J.nineCount(nineValid, { ...nineBase, P4: nineRej }, 'merged');
+  // P1 거절 = S3 그대로(같은 런 양성 대조 실패 = 미측정 · 설계 :254)
+  const p1 = J.nineCount(nineValid, { ...nineBase, P1: nineRej }, 'merged');
+  check('T-Z13 PM 판단 2 ⑨ 전체 색에 P · U 결함 · 과잉 거절 수 따로',
+    c1.cat === C.RED && c1.omission === 0 && Array.isArray(c1.puDefect) && c1.puDefect.join(',') === 'P2,P3,U2' && c1.overReject.P2 === 1 && c1.overReject.P4 === 1 && c1.code === ''
+    && c2.cat === C.RED && Array.isArray(c2.puDefect) && c2.puDefect.join(',') === 'U1' && c2.rows.U1 === C.RED
+    && p4.cat === C.GREEN && p4.overReject.P4 === 1 && p4.puDefect.length === 0 && p1.cat === C.UNMEASURED,
+    `P2 · P3 · U2 거절 ${c1.cat}(${c1.puDefect}) · 과잉 P2 ${c1.overReject.P2} · P4 ${c1.overReject.P4} / U1 해석 1 ${c2.cat}(${c2.puDefect}) / P4 만 거절 ${p4.cat} / P1 거절 ${p1.cat}`);
+});
+
+// T-Z14 PM 판단 3(CTO 조건 7 「같은 계열 · 판 기록」) — ⒞ 명령 판 · ⒜ QuestPDF 동봉 판 둘 다 결과표에 · 동봉 판 못 읽음 = 패키지 판 + 「동봉 qpdf 판 미측정」
+guard('T-Z14 PM 판단 3 qpdf 판 두 칸(⒞ 명령 · ⒜ 동봉)', () => {
+  const mfRead = { ...nineValid, qpdfVersion: 'qpdf version 11.9.0', qpdfMissing: false, questPdfVersion: '2026.2.4', qpdfBundledVersion: '12.2.0' };
+  const mfNot = { ...nineValid, qpdfVersion: null, qpdfMissing: true, questPdfVersion: '2026.2.4', qpdfBundledVersion: null, qpdfBundledWhy: '동봉 qpdf 판 미측정(DllNotFoundException)' };
+  const a = J.nineCount(mfRead, nineBase, 'merged');
+  const m = J.nineCount(mfNot, nineBase, 'main');
+  const res = { positive: { ok: true, why: '-' }, rows: [], composite: [], counts: Object.fromEntries(Object.values(C).map((v) => [v, 0])), stops: [], denomOut: 0 };
+  const md = J.toMarkdown({ run: 'R1', job: 'x', board: 'merged' }, res, a);
+  const mdMeta = J.toMarkdown({ run: 'R1', job: 'x', board: 'merged', nineQpdf: J.qpdfOf(mfNot), nineQpdfBundled: J.qpdfBundledOf(mfNot) }, res, null);
+  const okRead = /11\.9\.0/.test(a.qpdf) && /12\.2\.0/.test(a.qpdfBundled || '') && /2026\.2\.4/.test(a.qpdfBundled || '');
+  const okNot = /동봉 qpdf 판 미측정/.test(m.qpdfBundled || '') && /QuestPDF 2026\.2\.4/.test(m.qpdfBundled || '') && m.cat === C.NO_DOOR;
+  const okMd = /⑨ qpdf 판 ⒞ 명령.*11\.9\.0/.test(md) && /⑨ qpdf 판 ⒜ QuestPDF 동봉.*12\.2\.0/.test(md)
+    && /⑨ 표본 qpdf 판 ⒞ 명령/.test(mdMeta) && /⑨ 표본 qpdf 판 ⒜ QuestPDF 동봉.*동봉 qpdf 판 미측정/.test(mdMeta);
+  check('T-Z14 PM 판단 3 qpdf 판 두 칸(⒞ 명령 · ⒜ 동봉)', okRead && okNot && okMd,
+    `읽음 ⒞ ${a.qpdf} · ⒜ ${a.qpdfBundled} / 못 읽음(main) ⒜ ${m.qpdfBundled} / 결과표 두 줄 ${okMd}`);
 });
 
 console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`);

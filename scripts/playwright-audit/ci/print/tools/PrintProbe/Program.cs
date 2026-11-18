@@ -109,6 +109,12 @@ public static class Program
             if (v.StartsWith("미측정", StringComparison.Ordinal)) Unmeasured($"T4 표본 {r["id"]}", line);
             else Check($"T4 표본 {r["id"]}", v != "무효", line);
         }
+        // T4q 3차-a(PM 11/19 판단 3 · CTO 조건 7 「같은 계열 · 판 기록」) — manifest 에 ⒜ 동봉 qpdf 판 · QuestPDF 판 · ⒞ 명령 판 칸
+        //   동봉 판을 못 읽으면 실패가 아니라 「미측정」(판 기록은 판정이 아님 · manifest 사유 = 「동봉 qpdf 판 미측정(…)」)
+        var bundledV = m["qpdfBundledVersion"]?.GetValue<string>();
+        var qpdfLine = $"⒜ 동봉 = {bundledV ?? "-"} · QuestPDF {m["questPdfVersion"]?.GetValue<string>() ?? "-"} · ⒞ 명령 = {m["qpdfVersion"]?.GetValue<string>() ?? (m["qpdfMissing"]?.GetValue<bool>() == true ? "없음(이 잡 qpdf 0)" : "-")} · {m["qpdfBundledWhy"]?.GetValue<string>()}";
+        if (string.IsNullOrWhiteSpace(bundledV)) Unmeasured("T4q 동봉 qpdf 판", qpdfLine);
+        else Check("T4q 동봉 qpdf 판 · QuestPDF 판 기록", !string.IsNullOrWhiteSpace(m["questPdfVersion"]?.GetValue<string>()), qpdfLine);
 
         // T5 실효 불투명도 양성 대조(개발명세서 §3 ① · 설계 §1-3 ① ⓒ) — 손으로 짠 PDF:
         //   쪽 → ExtGState `/ca 0.12` → 투명 묶음 양식 Fm1 → 그림 Im1(4분면 밝기 · `/SMask` 회색 값 128)

@@ -2,9 +2,11 @@
 //   ⒜ 만드는 법 = 이 파일이 건 설정(암호 있음 · 사용자 암호 빈 칸 · 편집 꼴)을 그대로 적는다
 //   ⒝ 판독기 = PdfFacts(PdfPig)가 낸 열기 · 암호 판정 — 함께 기록 · 어긋나면 표시만(E7 계열 판정에 안 씀)
 //   ⒞ = CI qpdf 명령 `--is-encrypted` · `--requires-password` 종료 코드 · `qpdf --version` 기록(같은 계열 · 판 기록)
+//   🔴 3차-a(PM 11/19) — ⒜ 가 쓰는 QuestPDF 동봉 qpdf 판도 manifest 에(questPdfVersion · qpdfBundledVersion · qpdfBundledWhy) · ⒜ ⒞ = 같은 계열 · 판은 다를 수 있음
 //   🔴 암호 값 = 런 안에서 무작위로 만들고 버린다 — 코드 · 문서 · 로그 · 표본 설명에 고정 글자 0(설계 :248)
 //   🔴 제품 코드 0 · 제품 시험 스위치 0 — 표본은 시험 쪽에서만 만든다. U3(검사 중 예외)은 시험 스위치 없이 못 만든다 → 「미측정 · 정적만」
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -117,10 +119,51 @@ public static class NineSamples
         rows.Add(new JsonObject { ["id"] = "U3", ["made"] = false, ["why"] = "검사 중 예외 · 읽기 실패 — 제품 시험 스위치 0 이라 못 만듦(설계 §7-2 U3)", ["validity"] = "미측정 · 정적만" });
 
         foreach (var row in rows) Judge(row!.AsObject());
+
+        // 🔴 3차-a(PM 11/19 판단 3 · CTO 조건 7 「같은 계열 · 판 기록」) — ⒜ 암호 걸기 · 풀기(위 DocumentOperation)가 쓴 QuestPDF 동봉 qpdf 판을
+        //    ⒞ 명령 판(qpdfVersion) 옆에 적는다. 못 읽으면 QuestPDF 패키지 판 + 「동봉 qpdf 판 미측정」(사유)
+        var (bundled, bundledWhy) = BundledQpdfVersion();
+        manifest["questPdfVersion"] = QuestPdfPackageVersion();
+        manifest["qpdfBundledVersion"] = bundled;
+        manifest["qpdfBundledWhy"] = bundledWhy;
         return manifest;
     }
 
     private static string FirstLine(string s) => s.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+
+    /// <summary>QuestPDF 패키지 판(어셈블리 정보 판 · 없으면 어셈블리 판).</summary>
+    public static string QuestPdfPackageVersion()
+    {
+        var asm = typeof(DocumentOperation).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return string.IsNullOrWhiteSpace(info) ? asm.GetName().Version?.ToString() ?? "판 기록 없음" : info.Trim();
+    }
+
+    /// <summary>
+    /// 🔴 3차-a(PM 11/19 판단 3) — QuestPDF 동봉 qpdf 판을 런 안에서 읽는다. DocumentOperation 이 부르는 같은 바인딩
+    /// (QuestPDF.Qpdf.QpdfAPI.GetQpdfVersion → 동봉 네이티브 qpdf_get_qpdf_version · QuestPDF 공개 API 아님 · 리플렉션)을 쓴다.
+    /// 못 부르면 (null, 「동봉 qpdf 판 미측정(사유)」) — 판정 0 · 기록만.
+    /// </summary>
+    public static (string? Version, string Why) BundledQpdfVersion()
+    {
+        try
+        {
+            var api = typeof(DocumentOperation).Assembly.GetType("QuestPDF.Qpdf.QpdfAPI", throwOnError: false);
+            var get = api?.GetMethod("GetQpdfVersion", BindingFlags.Public | BindingFlags.Static);
+            if (get is null) return (null, "동봉 qpdf 판 미측정(QuestPDF 안 판 읽기 자리 없음)");
+            var v = get.Invoke(null, null) as string;
+            return string.IsNullOrWhiteSpace(v)
+                ? (null, "동봉 qpdf 판 미측정(빈 값)")
+                : (v.Trim(), "QuestPDF 동봉 · DocumentOperation 과 같은 바인딩(QpdfAPI.GetQpdfVersion)");
+        }
+        catch (Exception ex) when (ex is TargetInvocationException or TypeInitializationException or DllNotFoundException
+                                       or EntryPointNotFoundException or MemberAccessException or BadImageFormatException or NotSupportedException)
+        {
+            var inner = ex is TargetInvocationException { InnerException: { } ie } ? ie.GetType().Name : ex.GetType().Name;
+            Console.Error.WriteLine($"동봉 qpdf 판 읽기 실패 {inner} — 동봉 qpdf 판 미측정");
+            return (null, $"동봉 qpdf 판 미측정({inner})");
+        }
+    }
 
     private static void Add(JsonArray rows, string id, string path, string maker, bool makerEncrypted, string expect, string? note)
     {
