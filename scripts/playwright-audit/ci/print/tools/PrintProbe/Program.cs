@@ -95,6 +95,47 @@ public static class Program
             Check($"T4 표본 {r["id"]}", v != "무효", $"유효={v} · ⒜={r["a"]} · ⒝={r["b"]} · ⒞={r["c"]} · {r["validityWhy"]}");
         }
 
+        // T5 실효 불투명도 양성 대조(개발명세서 §3 ① · 설계 §1-3 ① ⓒ) — 손으로 짠 PDF:
+        //   쪽 → ExtGState `/ca 0.12` → 투명 묶음 양식 Fm1 → 그림 Im1(4분면 밝기 · `/SMask` 회색 값 128)
+        //   기대: 그림 그린 자리 1 · alpha = 0.12 · imgSMask = true · smaskMean ≈ 0.502 · 자리 = page>Fm1
+        //         · 그림 목록 해시 = 그린 자리 해시 · 4분면 밝기 순서 = 차림 순서(왼위 0.90 > 왼아래 0.65 > 오아래 0.40 > 오위 0.15)
+        var t5Pdf = HandPdf.OpacityProbe(lum, 128, 0.12);
+        File.WriteAllBytes(Path.Combine(work, "t5-opacity.pdf"), t5Pdf);
+        var t5 = PdfFacts.Read(t5Pdf);
+        var t5Page = t5["pages"]?[0];
+        var t5Draws = t5Page?["draws"]?.AsArray() ?? new JsonArray();
+        var t5Img = t5Draws.FirstOrDefault(d => d?["inline"]?.GetValue<bool>() == false);
+        var t5Alpha = t5Img?["alpha"]?.GetValue<double>() ?? -1;
+        var t5Mask = t5Img?["imgSMask"]?.GetValue<bool>() ?? false;
+        var t5Mean = t5Img?["smaskMean"]?.GetValue<double>() ?? -1;
+        var t5Where = t5Img?["where"]?.GetValue<string>() ?? "";
+        Check("T5a 실효 불투명도(묶음 안 그림)", t5Page?["drawsOk"]?.GetValue<bool>() == true && t5Draws.Count == 1 && Math.Abs(t5Alpha - 0.12) < 0.0001 && t5Where == "page>Fm1",
+            $"그린 자리 {t5Draws.Count} · alpha={t5Alpha} · 자리={t5Where}");
+        Check("T5b 그림 소프트 마스크", t5Mask && Math.Abs(t5Mean - (128 / 255.0)) < 0.001, $"imgSMask={t5Mask} · smaskMean={t5Mean}");
+        var t5Images = t5Page?["images"]?.AsArray() ?? new JsonArray();
+        var t5Listed = t5Images.FirstOrDefault();
+        var t5Quad = t5Listed?["quad"]?.AsArray().Select(n => n!.GetValue<double>()).ToArray() ?? Array.Empty<double>();
+        var orderWant = Enumerable.Range(0, 4).OrderByDescending(i => lum[i]).ToArray();
+        var orderGot = t5Quad.Length == 4 ? Enumerable.Range(0, 4).OrderByDescending(i => t5Quad[i]).ToArray() : Array.Empty<int>();
+        Check("T5c 그림 목록 해시 = 그린 자리 해시 · 4분면 밝기 순서",
+            t5Images.Count == 1 && t5Listed?["sha"]?.GetValue<string>() == t5Img?["sha"]?.GetValue<string>() && orderGot.SequenceEqual(orderWant),
+            $"그림 {t5Images.Count} · 해시 같음={t5Listed?["sha"]?.GetValue<string>() == t5Img?["sha"]?.GetValue<string>()} · 순서 {string.Join(">", orderGot)} · 기대 {string.Join(">", orderWant)} · 밝기 {string.Join(",", t5Quad.Select(v => v.ToString("0.000")))}");
+        // T5d 음성 대조 — 같은 PDF 를 ca 1.0 으로 짜면 alpha = 1(판독기가 늘 0.12 를 내는 고장이 아님)
+        var t5n = PdfFacts.Read(HandPdf.OpacityProbe(lum, 255, 1.0));
+        var t5nImg = t5n["pages"]?[0]?["draws"]?.AsArray().FirstOrDefault(d => d?["inline"]?.GetValue<bool>() == false);
+        var t5nAlpha = t5nImg?["alpha"]?.GetValue<double>() ?? -1;
+        var t5nMean = t5nImg?["smaskMean"]?.GetValue<double>() ?? -1;
+        Check("T5d 음성 대조(ca 1.0 · 마스크 255)", Math.Abs(t5nAlpha - 1.0) < 0.0001 && Math.Abs(t5nMean - 1.0) < 0.0001, $"alpha={t5nAlpha} · smaskMean={t5nMean}");
+
+        // T6 P4 꼴(PM §6-a 5) — 손으로 짠 비압축 본문 PDF: 원시 `/Filter` 0 · 본문 `(/Encrypt) Tj` 1 · 주석 꼴 0 · 열림 · 암호 아님 · h4 이름 검사 = Encrypt 있음(과잉 거절 쪽)
+        var p4 = HandPdf.PlainTextPage("/Encrypt");
+        var p4f = PdfFacts.Read(p4);
+        var p4Word = p4f["pages"]?[0]?["words"]?.AsArray().Any(n => n?["t"]?.GetValue<string>() == "/Encrypt") == true;
+        Check("T6 P4 손 편집 비압축 본문",
+            NameScan.RawCount(p4, "/Filter") == 0 && NameScan.RawCount(p4, "(/Encrypt) Tj") == 1 && NameScan.RawCount(p4, "%/Encrypt") == 0
+            && p4f["ok"]?.GetValue<bool>() == true && p4f["encrypted"]?.GetValue<bool>() == false && p4Word && NameScan.DecodedNames(p4).ContainsKey("Encrypt"),
+            $"/Filter {NameScan.RawCount(p4, "/Filter")} · 본문 글자 {NameScan.RawCount(p4, "(/Encrypt) Tj")} · 열림 {p4f["ok"]} · 암호 {p4f["encrypted"]} · 낱말 {p4Word}");
+
         Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail}");
         return fail == 0 ? 0 : 1;
     }

@@ -96,15 +96,13 @@ public static class NineSamples
         Add(rows, "P3", P("P3"), "E4 를 묶음 Decrypt() 로 풂", false, "허용", null);
 
         // P4 — 암호 아님 · 비압축 본문에 `/Encrypt` 글자
-        var p4 = BuildPlainTextPdf("/Encrypt");
-        var p4Note = "PdfPig 쓰기(비압축 내용 흐름)에 글자 `(/Encrypt) Tj`";
-        if (NameScan.RawCount(p4, "/Encrypt") == 0)
-        {
-            p4 = Concat(File.ReadAllBytes(P("P1")), Encoding.ASCII.GetBytes("\n%/Encrypt\n"));
-            p4Note = "P1 끝에 주석 줄 `%/Encrypt`(비압축 내용 흐름에 글자가 안 남아 대신)";
-        }
+        // ⬛ [낡은 줄 · 1차 b674c459] PdfPig 쓰기 → 내용 흐름이 압축돼 글자가 안 남으면 P1 끝 주석 줄 `%/Encrypt` 로 대신
+        // ⬛   var p4 = BuildPlainTextPdf("/Encrypt"); … if (RawCount == 0) p4 = P1 + "\n%/Encrypt\n";
+        // 🔴 2차(PM §6-a 5 · 설계 :257 글자대로) — 주석 꼴은 P4 로 세지 않는다. 바이트를 손으로 짠 PDF(HandPdf · 내용 흐름 `/Filter` 0 ·
+        //    xref 오프셋 다시 셈)의 본문 `(/Encrypt) Tj` 로 만든다. 글자가 안 남으면 대신하지 않고 그 표본 = 무효(Judge).
+        var p4 = HandPdf.PlainTextPage("/Encrypt");
         File.WriteAllBytes(P("P4"), p4);
-        Add(rows, "P4", P("P4"), p4Note, false, "거절(과잉 · 받아들임)", null);
+        Add(rows, "P4", P("P4"), "손 편집 PDF · 비압축 내용 흐름(`/Filter` 0) 본문 `(/Encrypt) Tj`", false, "거절(과잉 · 받아들임)", null);
 
         // U1 — 구조 못 읽음(`%PDF-` 뒤 trailer · XRef 0)
         File.WriteAllBytes(P("U1"), Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj\n<< /Kind /Nothing >>\nendobj\n%%EOF\n"));
@@ -155,6 +153,8 @@ public static class NineSamples
             ["rawTrailer"] = raw["trailer"]?.GetValue<int>(),
             ["rawXRef"] = raw["XRef"]?.GetValue<int>(),
             ["rawEncryptLiteral"] = raw["EncryptLiteral"]?.GetValue<int>(),
+            ["rawFilter"] = NameScan.RawCount(bytes, "/Filter"),
+            ["p4InBody"] = id == "P4" ? NameScan.RawCount(bytes, "(/Encrypt) Tj") > 0 && NameScan.RawCount(bytes, "%/Encrypt") == 0 : null,
             ["expect"] = expect,
             ["note"] = note,
         });
@@ -186,6 +186,9 @@ public static class NineSamples
         if (id is "E8" or "P2" && trailer != 0) why.Add($"원시 바이트 trailer {trailer}(0 이어야)");
         if (id == "U1" && (trailer != 0 || xref != 0)) why.Add($"원시 바이트 trailer {trailer} · XRef {xref}(둘 다 0 이어야)");
         if (id == "P4" && encLit < 1) why.Add("원시 바이트에 `/Encrypt` 글자 없음");
+        // 🔴 2차(PM §6-a 5) — 「비압축 본문」 = 파일에 거르개 0 · 글자가 주석 줄이 아니라 내용 흐름 본문 `( … ) Tj` 안
+        if (id == "P4" && (r["rawFilter"]?.GetValue<int>() ?? -1) != 0) why.Add($"원시 바이트 `/Filter` {r["rawFilter"]}(0 이어야 · 비압축 본문)");
+        if (id == "P4" && r["p4InBody"]?.GetValue<bool>() != true) why.Add("`/Encrypt` 글자가 내용 흐름 본문 `( … ) Tj` 안에 없음(주석 꼴 = P4 아님)");
         if (id == "U2" && (bytes < 18 * Mb || bytes > 20 * Mb)) why.Add($"크기 {bytes}(18MB~20MB 이어야)");
         if (id == "U1" && c.StartsWith("암호", StringComparison.Ordinal)) r["mark"] = "⒞ 가 「암호」 — 표시만";
         r["validity"] = why.Count > 0 ? "무효" : (cMissing && id != "U1" ? "미측정(설치 실패)" : "유효");
