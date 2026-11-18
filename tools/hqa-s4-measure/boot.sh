@@ -16,6 +16,10 @@
 #     guard G1 = 장치 이름 3개(HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR) 값 = 기대값 단언 더함 — 기대값은 M1 · M3 가 to_env 로 쓰는 값과 같은 변수(V_*) · 원자료 칸 env_values_ok(참거짓만)
 #     guard 의 저장소 경로 = git 없이(물리 경로) — guard 에서 G2 판정 전 git 호출 = G2 자신의 설정 목록 읽기 하나 · 다른 하위 명령의 REPO 줄 바이트 무변
 #     m1 의 장치 커밋 읽기(ls-tree HEAD:…) = 명령 인자 --no-replace-objects(K2″ 와 같은 원칙)
+#   v5 별건 A K2⁗([3-V] 최종 재확인 P1 · P3 #5):
+#     guard G5 의 작업 나무 대조(diff · 새 파일) = 장치 커밋에서 새로 만든 임시 색인으로 잰다 — 저장소 색인의 stat · 개체 이름을 믿지 않음(색인 stat 위조 길 닫음)
+#       임시 색인 = guard 가 방금 비우고 만든 snap-guard 폴더 안(저장소 작업 나무 밖 · 원자료 0) · 명령 앞 GIT_INDEX_FILE(그 git 한 번에만 · 내보내지 않음) · 끝나면 지움
+#     m1 이 읽는 커밋 = 장치 커밋(g_dev · m3 · G5 와 같은 출처) — 옛 글자(K2‴) = HEAD
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -97,7 +101,10 @@ m1() {
     #   해시 2벌: 원 바이트(--no-filters) · 레포 속성 적용(--path · autocrlf 끔 = 러너와 같은 조건) · 판정 = 속성 적용 해시
     #   파일별 값은 원자료 m1-src-hashes.json(정규화로만 같아진 파일 수 = filter_only_match)
     #   v5 별건 A K2‴(PM 지시 · K2″ 와 같은 원칙): 커밋을 읽는 git 호출 = 명령 인자 --no-replace-objects(환경 변수로 내보내지 않음) — 옛 글자: git -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture
-    git --no-replace-objects -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture | awk -F'\t' '{split($1,a," "); print $2"\t"a[3]}' | LC_ALL=C sort > "$WORK/m1-tree.tsv"
+    #   v5 별건 A K2⁗([3-V] 최종 P3 #5): 읽는 커밋 = 장치 커밋(g_dev · m3 · G5 와 같은 출처 · Actions 안인데 GITHUB_SHA 가 비면 기준 없음 = 빨강) — 옛 글자(K2‴): git --no-replace-objects -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture
+    local dev; dev=$(g_dev) || dev=""
+    if [ -n "$dev" ]; then git --no-replace-objects -C "$REPO" ls-tree -r "$dev:tools/hqa-s4-fixture" | awk -F'\t' '{split($1,a," "); print $2"\t"a[3]}' | LC_ALL=C sort > "$WORK/m1-tree.tsv"
+    else : > "$WORK/m1-tree.tsv"; printf 'dev_ref\t-\t0\t%s\n' "$(g_devref)" >> "$tsv"; fail=1; fi
     ( cd "$root" && find . -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r p; do
         printf '%s\t%s\t%s\n' "$p" "$(git hash-object --no-filters -- "$p")" \
           "$(git -c core.autocrlf=false -C "$REPO" hash-object --path="tools/hqa-s4-fixture/$p" -- "$root/$p")"; done ) > "$WORK/m1-tar.tsv"
@@ -369,11 +376,21 @@ NODE
   #   v5 별건 A K2″([3-V] P1 replace 참조): 장치 커밋을 읽는 git 호출(diff · HEAD · "$dev^{commit}") = 명령 인자 --no-replace-objects
   #     + refs/replace/ 비어 있음(하나라도 있으면 빨강 · 원자료 = 참거짓만) — 환경 변수로 내보내지 않음(G1 이 자기 자신을 잡음)
   #     옛 글자(K2′) = git -C "$REPO" diff --name-only "$dev" · git -C "$REPO" rev-parse --verify -q HEAD · git -C "$REPO" rev-parse --verify -q "$dev^{commit}"
+  #   v5 별건 A K2⁗([3-V] 최종 P1 색인 stat 위조): 작업 나무 대조(diff · 새 파일)는 장치 커밋에서 새로 만든 임시 색인으로 잰다
+  #     저장소 색인은 stat 이 맞으면 파일을 다시 해시하지 않고 적힌 개체 이름을 믿는다 → 새 색인(stat 빈 칸)은 모든 파일을 다시 해시해 장치 커밋 blob 과 대조
+  #     임시 색인 = "$a"(guard 가 방금 비우고 만든 폴더 · 저장소 작업 나무 밖 · 원자료 0) · GIT_INDEX_FILE 은 명령 앞에만(그 git 한 번 · 내보내지 않음 · G1 은 이미 끝) · 끝나면 지움
+  #     색인 표시 단언(ls-files -v) · HEAD 단언 · refs/replace/ 단언은 저장소 색인 · 참조 그대로(증거 칸 유지)
+  #     옛 글자(K2″) = if [ -n "$dev" ]; then git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
+  #                   git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
   if [ $stop = 0 ]; then
     devref=$(g_devref); hok=0; fok=0; rok=0
     dev=$(g_dev) || { dev=""; t1=1; }
-    if [ -n "$dev" ]; then git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2> "$a/tree.err" || t1=1; else : > "$a/tree.txt"; fi
-    git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
+    local idx; idx="$(cd "$a" && pwd -P)/dev.idx"; rm -f "$idx"; : > "$a/tree.txt"; : > "$a/tree.err"
+    if [ -n "$dev" ] && GIT_INDEX_FILE="$idx" git --no-replace-objects -C "$REPO" read-tree "$dev" 2>> "$a/tree.err"; then
+      GIT_INDEX_FILE="$idx" git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2>> "$a/tree.err" || t1=1
+      GIT_INDEX_FILE="$idx" git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
+    else t1=1; fi
+    rm -f "$idx"
     hd=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
     if [ -n "$dev" ]; then dv=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
     if [ -n "$hd" ] && [ "$hd" = "$dv" ]; then hok=1; fi
