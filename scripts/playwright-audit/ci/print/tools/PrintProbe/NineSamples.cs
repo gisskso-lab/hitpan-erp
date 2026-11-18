@@ -85,7 +85,7 @@ public static class NineSamples
             var r = Qpdf(new[] { "--object-streams=generate", P(src), P(id) });
             if (r.Missing || !File.Exists(P(id)) || (r.Code != 0 && r.Code != 3))
             {
-                rows.Add(new JsonObject { ["id"] = id, ["made"] = false, ["why"] = r.Missing ? "qpdf 없음(설치 실패)" : $"qpdf 종료 코드 {r.Code}", ["validity"] = "미측정(설치 실패)" });
+                rows.Add(new JsonObject { ["id"] = id, ["made"] = false, ["why"] = r.Missing ? (QpdfAllowed ? "qpdf 없음(설치 실패)" : "이 잡 qpdf 0(PM §6-a 3)") : $"qpdf 종료 코드 {r.Code}", ["validity"] = r.Missing && !QpdfAllowed ? "미측정(이 잡 qpdf 0)" : "미측정(설치 실패)" });
                 continue;
             }
             Add(rows, id, P(id), $"{src} 를 qpdf --object-streams=generate 로 다시 씀", enc, enc ? "거절" : "허용", null);
@@ -129,7 +129,9 @@ public static class NineSamples
         var isEnc = Qpdf(new[] { "--is-encrypted", path });
         var reqPw = Qpdf(new[] { "--requires-password", path });
         string c;
-        if (isEnc.Missing) c = "미측정(설치 실패)";
+        // ⬛ [낡은 줄 · 1차] if (isEnc.Missing) c = "미측정(설치 실패)";
+        // 🔴 2차(PM §6-a 3) — qpdf 를 쓰지 않는 잡(Z1 등)은 「이 잡 qpdf 0」 으로 따로 적는다(설치 실패와 섞지 않음)
+        if (isEnc.Missing) c = QpdfAllowed ? "미측정(설치 실패)" : "미측정(이 잡 qpdf 0)";
         else if (isEnc.Code == 2) c = "암호 아님";
         else if (isEnc.Code == 0 && reqPw.Code == 0) c = "암호 · 비번 필요";
         else if (isEnc.Code == 0 && reqPw.Code == 3) c = "암호 · 비번 불요";
@@ -191,7 +193,8 @@ public static class NineSamples
         if (id == "P4" && r["p4InBody"]?.GetValue<bool>() != true) why.Add("`/Encrypt` 글자가 내용 흐름 본문 `( … ) Tj` 안에 없음(주석 꼴 = P4 아님)");
         if (id == "U2" && (bytes < 18 * Mb || bytes > 20 * Mb)) why.Add($"크기 {bytes}(18MB~20MB 이어야)");
         if (id == "U1" && c.StartsWith("암호", StringComparison.Ordinal)) r["mark"] = "⒞ 가 「암호」 — 표시만";
-        r["validity"] = why.Count > 0 ? "무효" : (cMissing && id != "U1" ? "미측정(설치 실패)" : "유효");
+        // ⬛ [낡은 줄 · 1차] r["validity"] = why.Count > 0 ? "무효" : (cMissing && id != "U1" ? "미측정(설치 실패)" : "유효");
+        r["validity"] = why.Count > 0 ? "무효" : (cMissing && id != "U1" ? c : "유효");
         r["validityWhy"] = why.Count > 0 ? string.Join(" · ", why) : null;
         if (r["b"]!.GetValue<string>() != a && id is not ("E7" or "E7a" or "E7b" or "E7c" or "U1"))
             r["bMark"] = "⒝ 어긋남 — 표시만";
@@ -281,8 +284,15 @@ public static class NineSamples
 
     public sealed record QpdfResult(bool Missing, int Code, string Out);
 
+    /// <summary>
+    /// 🔴 2차(PM §6-a 3 · CTO §4-2 조건 7) — qpdf 명령은 ⑨ 를 재는 잡(고침 R1 ㉮ · 고침 R3 ⑨ⓐⓑⓒ)에서만 부른다.
+    /// 그 잡의 워크플로 단계가 환경값 PRINT_QPDF=1 을 준다. 그 밖(Z1 · 자체시험 · 이 PC)은 부르지 않고 「이 잡 qpdf 0」.
+    /// </summary>
+    public static bool QpdfAllowed => Environment.GetEnvironmentVariable("PRINT_QPDF") == "1";
+
     public static QpdfResult Qpdf(string[] args)
     {
+        if (!QpdfAllowed) return new QpdfResult(true, -1, "");
         try
         {
             var psi = new ProcessStartInfo("qpdf") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
