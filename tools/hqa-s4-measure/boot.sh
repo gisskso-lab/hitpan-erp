@@ -12,13 +12,21 @@
 #   v5 별건 A K2′([3-V] 병렬검증 P1-1 · P1-2 고침 · 설계 §5-2 「장치 나무 blob 대조」 · §5-2-1 G5 「= 장치 커밋」 글자 안):
 #     m3 = 설치 자리를 비우고 시작 · 복사 뒤 그 폴더 안 = 정확히 두 파일 · 트리 기록 ok 거짓이면 m3 빨강
 #     장치 커밋 기준 = GITHUB_SHA(로컬 시험만 HEAD · 원자료 dev_ref) — m3 blob 기대값 · G5 대조 · G5 에 HEAD = 장치 커밋 · 색인 표시 전부 H 더함
+#   v5 별건 A K2‴(CTO 결-A11 (B) · 조건 A11-1 · A11-2 / PM 지시 m1 커밋 읽기):
+#     guard G1 = 장치 이름 3개(HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR) 값 = 기대값 단언 더함 — 기대값은 M1 · M3 가 to_env 로 쓰는 값과 같은 변수(V_*) · 원자료 칸 env_values_ok(참거짓만)
+#     guard 의 저장소 경로 = git 없이(물리 경로) — guard 에서 G2 판정 전 git 호출 = G2 자신의 설정 목록 읽기 하나 · 다른 하위 명령의 REPO 줄 바이트 무변
+#     m1 의 장치 커밋 읽기(ls-tree HEAD:…) = 명령 인자 --no-replace-objects(K2″ 와 같은 원칙)
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
 RAW="${2:?raw dir}"
 WORK="${3:?work dir}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# v5 별건 A K2‴(CTO A11-2): guard 는 저장소 경로를 git 없이 정한다 — 장치 폴더(tools/hqa-s4-measure)의 두 단계 위 · 물리 경로(pwd -P = git 최상위와 같은 꼴 · 심볼릭 링크 풂)
+#   guard 에서 G2 판정 전 git 호출 = G2 자신의 설정 목록 읽기 하나뿐(G1 전 git 0) · 다른 하위 명령은 아래 REPO 줄 바이트 그대로(else 쪽)
+if [ "$STAGE" = guard ]; then REPO="$(cd "$HERE/../.." && pwd -P)"; else
 REPO="$(git -C "$HERE" rev-parse --show-toplevel)"
+fi
 mkdir -p "$RAW" "$WORK/stages"
 
 # H4-G 값(F″): 릴리스 · 자산 이름 = F″ 앞 8자(옛 …-b967b1b0 대체)
@@ -37,6 +45,13 @@ PKGS=(libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcai
   fonts-liberation fonts-wqy-zenhei fonts-noto-color-emoji)
 
 to_env() { if [ -n "${GITHUB_ENV:-}" ]; then printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"; fi; }
+# v5 별건 A K2‴(CTO A11-1): 장치 이름 3개의 값을 만드는 식 = 이 다섯 줄 한 곳 — M1 · M3 의 to_env 값 · M3 가 띄우는 경로 · guard G1 기대값이 같은 변수에서 나온다(글자 사본 두 벌 0)
+#   $WORK = 하위 명령 셋째 인자(워크플로 = "$HQA_WORK" · 창 안에서 바뀌면 G1 이 이름으로 빨강)
+V_PW="$WORK/pw"
+V_CR="$WORK/chromium"
+V_SRC_DIR="$WORK/src/hqa-s4-fixture-src-88085da1/tools/hqa-s4-fixture"
+V_CHROME="$V_CR/chrome-linux64/chrome"
+V_PW_DIR="$V_PW/node_modules/playwright"
 # v5 별건 A K2′([3-V] P1-2): 「장치 커밋」 = GITHUB_SHA — M0 head_is_event 가 창 앞(체크아웃 바로 뒤)에서 HEAD = GITHUB_SHA 를 단언 · G1 허용 밖 이름(창 안에서 바뀌면 G1 빨강)
 #   HEAD · 색인은 창 안 단계가 옮기거나 표시(assume-unchanged · skip-worktree)를 걸 수 있어 기준으로 쓰지 않는다 · Actions 밖 로컬 시험만 HEAD(원자료 dev_ref = HEAD)
 #   Actions 안인데 GITHUB_SHA 가 비면 기준 없음 = 빨강(M0 head_is_event 와 같은 꼴)
@@ -69,7 +84,8 @@ m1() {
     printf 'sha256\t%s\t%s\tgot=%s expected=%s release=%s\n' "$f" "$m" "$got" "$exp" "$rel" >> "$tsv"
   done
   # 소스 tar ↔ 나무 blob (파일별 git blob 해시)
-  local sx="$WORK/src" root="$WORK/src/hqa-s4-fixture-src-88085da1/tools/hqa-s4-fixture"
+  # v5 별건 A K2‴(CTO A11-1): root = V_SRC_DIR(= to_env HQA_SRC_DIR 값 = guard 기대값 · 한 곳) — 옛 글자: local sx="$WORK/src" root="$WORK/src/hqa-s4-fixture-src-88085da1/tools/hqa-s4-fixture"
+  local sx="$WORK/src" root="$V_SRC_DIR"
   rm -rf "$sx"; mkdir -p "$sx"
   if [ -f "$dl/$SRC_TGZ" ] && tar -xzf "$dl/$SRC_TGZ" -C "$sx" 2> "$WORK/m1-tar.err"; then
     local outside; outside=$(tar -tzf "$dl/$SRC_TGZ" | grep -v '^hqa-s4-fixture-src-88085da1/' | head -5 | tr '\n' ' ')
@@ -80,7 +96,8 @@ m1() {
     # 고침1 F1: 경로 기준 대조 — 옛 꼴은 나무 목록만 「해시 경로」 줄째 정렬(=해시순) · tar 목록은 경로순이라 diff 가 엇갈렸다
     #   해시 2벌: 원 바이트(--no-filters) · 레포 속성 적용(--path · autocrlf 끔 = 러너와 같은 조건) · 판정 = 속성 적용 해시
     #   파일별 값은 원자료 m1-src-hashes.json(정규화로만 같아진 파일 수 = filter_only_match)
-    git -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture | awk -F'\t' '{split($1,a," "); print $2"\t"a[3]}' | LC_ALL=C sort > "$WORK/m1-tree.tsv"
+    #   v5 별건 A K2‴(PM 지시 · K2″ 와 같은 원칙): 커밋을 읽는 git 호출 = 명령 인자 --no-replace-objects(환경 변수로 내보내지 않음) — 옛 글자: git -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture
+    git --no-replace-objects -C "$REPO" ls-tree -r HEAD:tools/hqa-s4-fixture | awk -F'\t' '{split($1,a," "); print $2"\t"a[3]}' | LC_ALL=C sort > "$WORK/m1-tree.tsv"
     ( cd "$root" && find . -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r p; do
         printf '%s\t%s\t%s\n' "$p" "$(git hash-object --no-filters -- "$p")" \
           "$(git -c core.autocrlf=false -C "$REPO" hash-object --path="tools/hqa-s4-fixture/$p" -- "$root/$p")"; done ) > "$WORK/m1-tar.tsv"
@@ -158,7 +175,8 @@ m2() {
 }
 
 m3() {
-  local pw="$WORK/pw" cr="$WORK/chromium" ok=0 i
+  # v5 별건 A K2‴(CTO A11-1): pw · cr = V_PW · V_CR(아래 HQA_CHROME · HQA_PW_DIR 값의 바닥 · 한 곳) — 옛 글자: local pw="$WORK/pw" cr="$WORK/chromium" ok=0 i
+  local pw="$V_PW" cr="$V_CR" ok=0 i
   # v5 별건 A K2′([3-V] P1-1): 설치 자리를 비우고 시작 — 앞 단계가 심어 둔 숨은 잠금(npm-shrinkwrap.json) · 프로젝트 설정(.npmrc)을 남기지 않는다
   rm -rf "$pw"
   mkdir -p "$pw" "$cr"
@@ -240,9 +258,11 @@ NODE
   if [ $trc != 0 ]; then stage_json m3 false "tree lock_match: m3-npm-tree.json ok=false"; return 1; fi
   rm -rf "$cr"; mkdir -p "$cr"
   if ! unzip -q "$WORK/dl/$CHROME_ZIP" -d "$cr" 2> "$WORK/m3-unzip.txt"; then stage_json m3 false "unzip failed: $(cat "$WORK/m3-unzip.txt")"; return 1; fi
-  local exe="$cr/chrome-linux64/chrome" missing
+  # v5 별건 A K2‴(CTO A11-1): 띄우는 브라우저 · 자동화 패키지 경로 = to_env 로 쓰는 값과 같은 변수(V_CHROME · V_PW_DIR)
+  #   옛 글자: local exe="$cr/chrome-linux64/chrome" missing / PW_DIR="$pw/node_modules/playwright" EXE="$exe" …
+  local exe="$V_CHROME" missing
   missing=$(ldd "$exe" 2>&1 | grep 'not found' | awk '{print $1}' | tr '\n' ' ')
-  PW_DIR="$pw/node_modules/playwright" EXE="$exe" WANT="$BROWSER_WANT" OUT="$WORK/stages/m3.json" MISSING="$missing" node <<'NODE'
+  PW_DIR="$V_PW_DIR" EXE="$exe" WANT="$BROWSER_WANT" OUT="$WORK/stages/m3.json" MISSING="$missing" node <<'NODE'
 const fs = require('fs');
 const out = process.env.OUT;
 const doc = { stage: 'm3', ok: false, playwright: null, browser: null, headless_shell: 'not used', ldd_missing: process.env.MISSING.trim() ? process.env.MISSING.trim().split(' ') : [], detail: '' };
@@ -263,8 +283,9 @@ const doc = { stage: 'm3', ok: false, playwright: null, browser: null, headless_
 })();
 NODE
   local rc=$?
-  to_env HQA_CHROME "$exe"
-  to_env HQA_PW_DIR "$pw/node_modules/playwright"
+  # v5 별건 A K2‴(CTO A11-1): 값 = V_CHROME · V_PW_DIR(guard G1 기대값과 같은 변수) — 옛 글자: to_env HQA_CHROME "$exe" / to_env HQA_PW_DIR "$pw/node_modules/playwright"
+  to_env HQA_CHROME "$V_CHROME"
+  to_env HQA_PW_DIR "$V_PW_DIR"
   return $rc
 }
 
@@ -273,6 +294,8 @@ NODE
 #   G1 허용 = M1 · M3 가 to_env 로 쓰는 이름 3(HQA_SRC_DIR = C1 로 창이 ⑤ 앞까지 넓어져 더함) + 실행기가 단계마다 바꾸는 이름
 #     실행기 몫 6개는 잠정 — 설계 §7 Q3(리허설 첫 런 m3g-guard.json env_changed 실측 뒤 PM 고정)
 #     PATH · BASH_ENV · NODE_OPTIONS · LD_PRELOAD · GIT_* 는 허용에 넣지 않는다
+#   v5 별건 A K2‴(CTO 결-A11 (B) · A11-1): G1 에 장치 이름 3개 값 단언 — 뒤 단면의 HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR 값 = V_SRC_DIR · V_CHROME · V_PW_DIR(M1 · M3 가 쓴 식 그대로)
+#     다르거나 없으면 G1 빨강(first_red=G1 · 새 G 번호 0) · 원자료 = env_values_ok 참거짓 하나(값 · 해시 0) · 실행기 몫 6개는 값 무검사(이름만)
 #   순서 = G1(+G6 대조군) → G2 → G3 → G4 → G5 · 하나라도 빨강이면 뒤는 안 돎(설정이 바뀌었으면 git 을 부르기 전에 멈춤)
 G_ALLOW=(HQA_SRC_DIR HQA_CHROME HQA_PW_DIR GITHUB_ACTION GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STATE GITHUB_STEP_SUMMARY)
 G_BINS=(node git bash)
@@ -308,10 +331,14 @@ guard() {
   for f in env.json git-config.txt bins.tsv ld-preload.txt; do [ -f "$s/$f" ] || have=0; done
   [ $have = 1 ] || stop=1
   # G1 환경 변수 이름별 값 해시 · G6 대조군(앞 단면 + 가짜 이름 1개 → 같은 비교가 잡아야 함) — git 을 부르기 전
+  #   v5 별건 A K2‴(A11-1): 장치 이름 3개 값 단언 = 뒤 단면(같은 env.json) 의 값 해시 = 기대값(V_*) 해시 · 셋째 인자 뒤 3개 = 기대값(값은 g1.json · 원자료에 안 씀)
+  #     옛 글자: node - "$s/env.json" "$a/env.json" "$a/g1.json" "${G_ALLOW[@]}" · const [bf, af, out, ...allow] · const g1 = !err && disallowed.length === 0
+  #     옛 글자: fs.writeFileSync(out, JSON.stringify({ g1, g6: caught, changed, disallowed, error: err }) + '\n')
   if [ $stop = 0 ]; then
-    if g_env "$a/env.json" && node - "$s/env.json" "$a/env.json" "$a/g1.json" "${G_ALLOW[@]}" <<'NODE'
+    if g_env "$a/env.json" && node - "$s/env.json" "$a/env.json" "$a/g1.json" "$V_SRC_DIR" "$V_CHROME" "$V_PW_DIR" "${G_ALLOW[@]}" <<'NODE'
 const fs = require('fs');
-const [bf, af, out, ...allow] = process.argv.slice(2);
+const crypto = require('crypto');
+const [bf, af, out, wantSrc, wantChrome, wantPw, ...allow] = process.argv.slice(2);
 const diff = (b, a) => Array.from(new Set(Object.keys(b).concat(Object.keys(a)))).filter((k) => b[k] !== a[k]).sort();
 const bad = (names) => names.filter((k) => !allow.includes(k));
 let b = null, a = null, err = null;
@@ -320,8 +347,12 @@ const changed = b && a ? diff(b, a) : [];
 const disallowed = bad(changed);
 const planted = b ? Object.assign({}, b, { HQA_G6_PLANTED: '0' }) : null;
 const caught = !!planted && bad(diff(b, planted)).includes('HQA_G6_PLANTED');
-const g1 = !err && disallowed.length === 0;
-fs.writeFileSync(out, JSON.stringify({ g1, g6: caught, changed, disallowed, error: err }) + '\n');
+// K2‴ A11-1: 장치 이름 3개 — 뒤 단면 값 해시(g_env 와 같은 셈) = 기대값 해시 · 없거나 다르면 거짓
+const want = { HQA_SRC_DIR: wantSrc, HQA_CHROME: wantChrome, HQA_PW_DIR: wantPw };
+const h = (v) => crypto.createHash('sha256').update(v).digest('hex');
+const valuesOk = !!a && Object.keys(want).every((k) => typeof want[k] === 'string' && want[k] !== '' && typeof a[k] === 'string' && a[k] === h(want[k]));
+const g1 = !err && disallowed.length === 0 && valuesOk;
+fs.writeFileSync(out, JSON.stringify({ g1, g6: caught, changed, disallowed, values_ok: valuesOk, error: err }) + '\n');
 process.exit(g1 && caught ? 0 : 1);
 NODE
     then r1=1; else r1=0; stop=1; fi
@@ -387,6 +418,8 @@ const doc = {
   env_changed: g && Array.isArray(g.changed) ? g.changed : [],
   env_disallowed: g && Array.isArray(g.disallowed) ? g.disallowed : [],
   env_allow: allow,
+  // v5 별건 A K2‴(CTO A11-1): 장치 이름 3개(HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR) 값 = 기대값 — 참거짓만(값 · 해시 0) · G1 안 돌면 null(G1 과 같은 꼴)
+  env_values_ok: r1 === '' ? null : !!(g && g.values_ok === true),
   git_scopes: gitScopes,
   bins_changed: binsChanged,
   ld_preload: checks.G4 === null ? null : (checks.G4 ? 'same' : 'changed'),
