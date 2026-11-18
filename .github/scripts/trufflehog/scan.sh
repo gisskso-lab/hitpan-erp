@@ -133,12 +133,53 @@ rc=$?
 
 # 훑은 양(숫자만) — 「아무것도 안 훑고 초록」 을 사람이 볼 수 있게
 scanned="$(grep -m1 'finished scanning' "$work/engine.log" | grep -oE '"?(chunks|bytes)"?[:=] ?[0-9]+' | tr -d '"' | tr '\n' ' ')"
-chunks="$(printf '%s' "$scanned" | grep -oE 'chunks[:=] ?[0-9]+' | grep -oE '[0-9]+$' || true)"
-# 하한 확인용 개수(C5-N1) — 엔진 기록 글자는 변수에도 출력에도 남기지 않는다. 숫자만(셈 실패 = 빈 값).
-#   records = 기록 줄 수 · nvals = 조각 값 줄 수 · tailbad = 조각 숫자 바로 뒤 글자가 허용 끝 글자(쉼표 · } · 공백 · 탭 · CR · 줄 끝) 밖인 자리 수
-records="$(LC_ALL=C grep -ac 'finished scanning' "$work/engine.log" 2>/dev/null)" || true
-nvals="$(printf '%s' "$chunks" | grep -c '')" || true
-tailbad="$(LC_ALL=C grep -a 'finished scanning' "$work/engine.log" 2>/dev/null | LC_ALL=C grep -aoE $'"?chunks"?[:=] ?[0-9]+[^0-9,} \t\r]' | grep -c '')" || true
+# 하한 확인용 셈(C5-N1 보완 · HQA Q2) — 기록 줄 = 엔진 JSON 객체 한 줄. 엔진 기록 글자는 작업 폴더 파일(rec.*)에만 두고
+#   변수 · 출력에는 숫자와 이 스크립트 고정 낱말(obj · bad · false)만 남긴다. 셈 실패(읽기 · 해석 오류) = 빈 값 → 1층에서 닫힌다.
+#   jq 표준 오류는 버린다(오류 문구에 입력 글자가 섞일 수 있다 · [3-V] P2-2).
+#   records = 기록 줄 수 · vals/objn = 해석한 값 수 / 그중 msg 가 글자 그대로 같은 객체 수 · msgn = 맨 글자 "msg": 수
+#   keyn/keyq/keyv = 흐름 해석 최상위 chunks 잎 수 / 그중 0~999999999 정수 수 / 그 숫자(ⓔ 숫자와 같아야 함 · [3-V] P1-1)
+#   t1 = 맨 글자 chunks 수 · t2 = 경계 맞은 조각 수(둘 다 grep -ao 로 뽑은 조각 줄 수) · bsn = 역빗금 수 · ccn = 제어 글자 수(줄 끝 CR 1개 뺌)
+rec_rc=0
+LC_ALL=C grep -a 'finished scanning' "$work/engine.log" > "$work/rec.raw" 2>/dev/null || rec_rc=$?
+records=""
+if [ "$rec_rc" -le 1 ]; then records="$(LC_ALL=C grep -ac '' "$work/rec.raw" 2>/dev/null)" || true; fi
+vals="" objn=""
+if jq -r 'if type == "object" and .msg == "finished scanning" then "obj" else "bad" end' \
+    "$work/rec.raw" > "$work/rec.kind" 2>/dev/null; then
+  vals="$(grep -c '' "$work/rec.kind")" || true
+  objn="$(grep -cx 'obj' "$work/rec.kind")" || true
+fi
+msgn="" msg_rc=0
+LC_ALL=C grep -ao '"msg":' "$work/rec.raw" > "$work/rec.msg" 2>/dev/null || msg_rc=$?
+if [ "$msg_rc" -le 1 ]; then msgn="$(grep -c '' "$work/rec.msg")" || true; fi
+keyn="" keyq="" keyv=""
+if jq -c --stream 'select(length == 2 and .[0] == ["chunks"]) | .[1]
+    | if type == "number" then (if . == floor and . >= 0 and . <= 999999999 then . else false end) else false end' \
+    "$work/rec.raw" > "$work/rec.key" 2>/dev/null; then
+  keyn="$(grep -c '' "$work/rec.key")" || true
+  keyq="$(LC_ALL=C grep -cxE '0|[123456789][0123456789]{0,8}' "$work/rec.key")" || true
+  keyv="$(LC_ALL=C grep -xE '0|[123456789][0123456789]{0,8}' "$work/rec.key")" || true
+fi
+t1="" t1_rc=0
+LC_ALL=C grep -ao 'chunks' "$work/rec.raw" > "$work/rec.t1" 2>/dev/null || t1_rc=$?
+if [ "$t1_rc" -le 1 ]; then t1="$(grep -c '' "$work/rec.t1")" || true; fi
+t2="" t2_rc=0 chunks=""
+LC_ALL=C grep -aoE '"chunks":(0|[123456789][0123456789]{0,8})[,}]' "$work/rec.raw" > "$work/rec.t2" 2>/dev/null || t2_rc=$?
+if [ "$t2_rc" -le 1 ]; then
+  t2="$(grep -c '' "$work/rec.t2")" || true
+  chunks="$(LC_ALL=C grep -oE '[0123456789]+' "$work/rec.t2")" || true
+fi
+bsn="" bs_rc=0
+LC_ALL=C grep -ao '\\' "$work/rec.raw" > "$work/rec.bs" 2>/dev/null || bs_rc=$?
+if [ "$bs_rc" -le 1 ]; then bsn="$(grep -c '' "$work/rec.bs")" || true; fi
+ccn=""
+if LC_ALL=C sed 's/\r$//' "$work/rec.raw" > "$work/rec.cc" 2>/dev/null \
+    && LC_ALL=C tr -cd '\000-\011\013-\037\177' < "$work/rec.cc" > "$work/rec.cc2" 2>/dev/null; then
+  ccn="$(wc -c < "$work/rec.cc2")" || true
+  ccn="${ccn//[!0123456789]/}"
+fi
+same=0
+[ -n "$keyv" ] && [ "$keyv" = "$chunks" ] && same=1
 scanned="${scanned}commits=${commits:-?}"
 
 # ── 결과 파일 엄격 해석(ㄱ′-3) ─────────────────────────────────────────
@@ -178,9 +219,14 @@ if [ "$rc" -eq 0 ] && [ "$nonempty" -eq 0 ]; then
   [[ "$commits" =~ ^[0-9]+$ ]] || scan_error "범위 커밋 수를 세지 못했다" 0 "$rc"
   if [ "$commits" -gt 0 ]; then
     # C5-N1: 값이 정수 하나가 아니면(여러 줄 값 · 넘침) 정수 비교가 실패(상태 2)해 「거짓」 이 되고 깨끗으로 새던 꼴을 닫는다.
-    # 1층 = 비교 전에 글자로 확인(기록 줄 정확히 1 · 값 = 0 또는 1~9자리 ASCII 숫자 하나 · 숫자 뒤 허용 끝 글자). 2층 = 1층이 사라졌을 때의 예비(참일 때만 통과).
-    if [ "${records:-}" != "1" ] || [[ ! "$chunks" =~ ^(0|[123456789][0123456789]{0,8})$ ]] || [ "${tailbad:-}" != "0" ]; then
-      scan_error "훑은 양 기록 모양 이상(기록 줄 ${records:-?}개 · 조각 값 ${nvals:-?}개 · 범위 커밋 ${commits}개)" 0 "$rc"
+    # 1층(보완 · HQA Q2 · [3-V] 반영) = 비교 전에 기록 줄을 통째로 확인
+    #   ⓐ 줄 1 · ⓑ 해석 값 1 · msg 같은 객체 1 · 맨 글자 "msg": 1 · ⓒ 최상위 chunks 잎 1 · 그중 범위 정수 1 · 그 값 = ⓔ 숫자
+    #   · ⓓ 맨 글자 chunks 1 · ⓔ 콜론 바로 뒤 0 또는 1~9자리 · 바로 뒤 , 또는 } 인 조각 1 · ⓕ 역빗금 0 · ⓖ 제어 글자 0(줄 끝 CR 1개만 허용)
+    #   · 값 = ⓔ 조각 숫자. 해석(ⓑⓒ)과 글자(ⓓ~ⓖ)가 서로를 메운다. 비교는 글자로(빈 값 · 깨진 값 = 닫힘). 2층 = 1층이 사라졌을 때의 예비.
+    if [ "${records:-}" != "1" ] || [ "${vals:-}" != "1" ] || [ "${objn:-}" != "1" ] || [ "${msgn:-}" != "1" ] \
+        || [ "${keyn:-}" != "1" ] || [ "${keyq:-}" != "1" ] || [ "$same" != "1" ] || [ "${t1:-}" != "1" ] || [ "${t2:-}" != "1" ] \
+        || [ "${bsn:-}" != "0" ] || [ "${ccn:-}" != "0" ] || [[ ! "$chunks" =~ ^(0|[123456789][0123456789]{0,8})$ ]]; then
+      scan_error "훑은 양 기록 모양 이상(기록 줄 ${records:-?}개 · 값 ${vals:-?} · 객체 ${objn:-?} · msg ${msgn:-?} · 조각 열쇠 ${keyn:-?}/${keyq:-?} · 값 일치 ${same} · 글자 ${t1:-?}/${t2:-?} · 역빗금 ${bsn:-?} · 제어 ${ccn:-?} · 범위 커밋 ${commits}개)" 0 "$rc"
     fi
     [ "$chunks" -gt 0 ] 2>/dev/null || scan_error "범위 커밋 ${commits}개인데 훑은 조각 0(또는 비교 불가)" 0 "$rc"
   fi
