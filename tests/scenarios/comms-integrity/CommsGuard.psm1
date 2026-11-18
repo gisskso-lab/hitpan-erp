@@ -399,6 +399,8 @@ function Get-CgAllowlistGitState {
 
 function ConvertFrom-CgImagePath {
     # 서비스 ImagePath → 설치본 폴더({app}). 실행 파일이 ...\watchdog\HitPan.Watchdog.exe 꼴이 아니면 $null.
+    # (11/19 [3-V] 갈래2 V3) 설치본 폴더가 빈 값 · 드라이브 뿌리(X:\watchdog\… → X:\) · 「X:\이름」 꼴 아님(상대 · UNC 뿌리 · 장치 경로) = $null
+    #   — 뿌리를 설치본으로 받으면 그 드라이브의 HitPan.API 전부가 「설치본」 이 됨(러너 S-C 대상이 넓어짐 · 근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래2_러너시험_보안상무.md V3).
     [CmdletBinding()]
     param([AllowNull()][string]$ImagePath)
     if ([string]::IsNullOrWhiteSpace($ImagePath)) { return $null }
@@ -408,7 +410,9 @@ function ConvertFrom-CgImagePath {
         if ([System.IO.Path]::GetFileName($exe) -ne $script:CgConst.WatchdogExeName) { return $null }
         $dir = [System.IO.Path]::GetDirectoryName($exe)
         if ([System.IO.Path]::GetFileName($dir) -ne 'watchdog') { return $null }
-        return [System.IO.Path]::GetDirectoryName($dir)
+        $app = [System.IO.Path]::GetDirectoryName($dir)
+        if ([string]::IsNullOrWhiteSpace($app) -or $app -notmatch '\A[A-Za-z]:\\[^\\]') { return $null }
+        return $app
     } catch {
         Write-Verbose ("워치독 실행 파일 경로 해석 실패({0})" -f $_.Exception.GetType().Name)
         return $null

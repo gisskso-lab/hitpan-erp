@@ -16,9 +16,11 @@
     -ModulePath  판정 모듈 경로(기본 = 같은 폴더 CommsGuard.psm1) — 「가드 한 줄 깬 사본」 대조군용
     -RunnerPath  러너 경로(기본 = 같은 폴더 Run-RoutinePcScenarios.ps1)
 
-  끝 줄: 「Test-CommsGuard 끝 — 경우 27/27 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치) / 1.
+  끝 줄: 「Test-CommsGuard 끝 — 경우 32/32 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치 · 세부 확인 하한 이상) / 1.
     (11/19 [3-V] 고침) 경우 C23~C27 = 보안상무 [3-V] A1~A5 입력 · 기대 「합격 아님」 — C1~C22 그대로 · 옛 끝 줄 「경우 22/22」.
     근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래1_가드모듈_보안상무.md A 표.
+    (11/19 [3-V] 갈래2 고침) 경우 C28~C32 = 보안상무 [3-V] 러너 · 시험 V1 · V2(+V6) · V3 · V4 · V9 — 옛 끝 줄 「경우 27/27」.
+    V5: 경우 기본 = 불일치 · 실행된 경우만 · 세부 확인 수 하한. 근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래2_러너시험_보안상무.md A 표.
   비밀 꼴 키 이름 · 노출 금지어는 실행 중에 이어 붙여 만든다(이 파일 바이트에 0).
   인코딩: UTF-8 BOM.
 #>
@@ -45,6 +47,7 @@ class CgWorld {
     [int]$HandCalls
     [int]$BadUrls
     [int]$NoCacheMissing
+    [int]$ApiProcCalls
     [System.Collections.Generic.List[string]]$Nonces
     [bool]$Verbose
 
@@ -61,7 +64,12 @@ class CgWorld {
     }
 
     [datetime] Now() { return $this.Base.AddMilliseconds([double]$this.Ms) }
-    [void] Sleep([int]$delta) { if ($delta -gt 0) { $this.Ms += $delta } }
+    [void] Sleep([int]$delta) {
+        # (11/19 [3-V] 갈래2 V1 · C28) 관측 중 훅 예외 — 마지막 끊기(서비스 · 프로세스) 뒤 ObsThrowAt ms · 손 기록 뒤 HandThrowAt ms 지나면 잠 훅이 던짐
+        if ([long]$this.Cfg.ObsThrowAt -ge 0 -and $this.LastStopMs -ge 0 -and ($this.Ms - $this.LastStopMs) -ge [long]$this.Cfg.ObsThrowAt) { throw 'fake observe failure' }
+        if ([long]$this.Cfg.HandThrowAt -ge 0 -and $this.IsCut('hand') -and $this.Rel('hand') -ge [long]$this.Cfg.HandThrowAt) { throw 'fake observe failure' }
+        if ($delta -gt 0) { $this.Ms += $delta }
+    }
     [bool] IsCut([string]$k) { return $this.Cut.ContainsKey($k) }
     [long] Rel([string]$k) { return ($this.Ms - [long]$this.Cut[$k]) }
     [bool] InWin([object[]]$w, [long]$r) {
@@ -139,6 +147,13 @@ class CgWorld {
     [object[]] ApiProcs() {
         $l = New-Object 'System.Collections.Generic.List[object]'
         $u = [bool]$this.Cfg.Api.UnderInstall
+        # (11/19 [3-V] 갈래2 V3 · C30) 끊기 전 두 번째 조회(= 러너 끊기 직전 재확인)부터 번호 바뀜(pid) · 경로 바뀜(path)
+        if (-not $this.IsCut('api')) {
+            $this.ApiProcCalls++
+            $mode = [string]$this.Cfg.Api.RecheckMode
+            if ($this.ApiProcCalls -ge 2 -and $mode -eq 'pid') { $l.Add(@{ Pid = 5999; UnderInstall = $u }); return $l.ToArray() }
+            if ($this.ApiProcCalls -ge 2 -and $mode -eq 'path') { $l.Add(@{ Pid = $this.OldPid(); UnderInstall = $false }); return $l.ToArray() }
+        }
         if ($this.OldApi()) { $l.Add(@{ Pid = $this.OldPid(); UnderInstall = $u }) }
         if ($this.NewApi()) { $l.Add(@{ Pid = [int]$this.Cfg.Api.NewPid; UnderInstall = $u }) }
         return $l.ToArray()
@@ -247,13 +262,17 @@ class CgWorld {
         $this.HandCalls++
         if ($this.Cfg.HandMode -eq 'none') { return $null }
         $this.Cut['hand'] = $this.Ms
-        return @{ Who = '시험자'; Utc = $this.Now() }
+        $who = if ([string]$this.Cfg.HandWho) { [string]$this.Cfg.HandWho } else { '시험자' }   # (갈래2 V9 · C32) 「누가」 칸 바꿔 넣기
+        return @{ Who = $who; Utc = $this.Now() }
     }
 }
 
 # ─────────────────────────────────────────────── 준비
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+# (11/19 [3-V] 갈래2 V5) 경우 수 · 세부 확인 수 하한 — 경우 블록이 지워지거나 안 불리면 불일치 · 세부 확인이 줄면 종료 1
+$script:CaseMax = 32
+$script:MinDetail = 524   # 이 커밋 기준 세부 확인 수 530 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 420 이상 — 늘리기만 한다
 if (-not $ModulePath) { $ModulePath = Join-Path $PSScriptRoot 'CommsGuard.psm1' }
 if (-not $RunnerPath) { $RunnerPath = Join-Path $PSScriptRoot 'Run-RoutinePcScenarios.ps1' }
 $script:ModulePath = [System.IO.Path]::GetFullPath($ModulePath)
@@ -261,11 +280,10 @@ $script:RunnerPath = [System.IO.Path]::GetFullPath($RunnerPath)
 foreach ($f in @($script:ModulePath, $script:RunnerPath)) {
     if (-not [System.IO.File]::Exists($f)) {
         Write-Host ('파일 없음: {0}' -f [System.IO.Path]::GetFileName($f))
-        Write-Host 'Test-CommsGuard 끝 — 경우 0/27 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+        Write-Host ('Test-CommsGuard 끝 — 경우 0/{0} 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0' -f $script:CaseMax)
         exit 1
     }
 }
-$script:RunnerRepo = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $script:RunnerPath) '..\..\..'))
 $global:HitPanCommsRealCutCalls = 0
 Import-Module -Name $script:ModulePath -Force -ErrorAction Stop
 
@@ -308,8 +326,13 @@ $null = [System.IO.Directory]::CreateDirectory($script:Root)
 $script:CaseSeq = 0
 $script:AllText = New-Object System.Collections.Generic.List[string]
 $script:CaseOk = [ordered]@{}
-foreach ($n in 1..27) { $script:CaseOk[('C{0}' -f $n)] = $true }
-$script:CaseOk['부가'] = $true
+# (11/19 [3-V] 갈래2 V5) 기본 = 불일치. 일치 = 그 경우 블록이 실제로 돌았고(CaseRan) · 세부 확인 1건 이상(CaseDetail) · 어긋남 0(CaseBad)일 때만.
+foreach ($n in 1..$script:CaseMax) { $script:CaseOk[('C{0}' -f $n)] = $false }
+$script:CaseOk['부가'] = $false
+$script:CaseRan = @{}
+$script:CaseBad = @{}
+$script:CaseDetail = @{}
+$script:Unmeasured = New-Object System.Collections.Generic.List[string]
 $script:DetailPass = 0
 $script:DetailTotal = 0
 $script:Fails = New-Object System.Collections.Generic.List[string]
@@ -329,20 +352,30 @@ $LblD = '- S-D [외부 경로 · 반자동(손 1회)] '
 function Test-CgCase {
     param([string]$Case, [string]$What, [bool]$Ok)
     $script:DetailTotal++
+    $script:CaseDetail[$Case] = 1 + [int]$script:CaseDetail[$Case]
+    if (-not $script:CaseOk.Contains($Case)) { $Ok = $false; $What = '모르는 경우 이름 · ' + $What }   # (V5) 표에 없는 경우 이름 = 어긋남
     if ($Ok) { $script:DetailPass++ }
     else {
-        $script:CaseOk[$Case] = $false
+        $script:CaseBad[$Case] = $true
         $script:Fails.Add(('{0} · {1}' -f $Case, $What))
     }
+}
+
+function Update-CgCaseOk {
+    # (V5) 일치 = 블록 실행 + 세부 확인 1건 이상 + 어긋남 0
+    param([string]$Case)
+    $script:CaseOk[$Case] = ([bool]$script:CaseRan[$Case] -and [int]$script:CaseDetail[$Case] -gt 0 -and -not [bool]$script:CaseBad[$Case])
 }
 
 function Invoke-CgCaseBlock {
     param([string]$Case, [string]$Title, [scriptblock]$Body)
     $before = $script:DetailTotal
+    $script:CaseRan[$Case] = $true
     $t = [System.Diagnostics.Stopwatch]::StartNew()
     try { & $Body }
     catch { Test-CgCase $Case ('예외 ' + $_.Exception.GetType().Name + ' · ' + $_.Exception.Message) $false }
     if ($script:DetailTotal -eq $before) { Test-CgCase $Case '확인 0건' $false }
+    Update-CgCaseOk $Case
     Write-Host ('{0} {1} · {2} ({3}초 · 세부 {4})' -f $Case, $(if ($script:CaseOk[$Case]) { '일치' } else { '불일치' }), $Title, [math]::Round($t.Elapsed.TotalSeconds, 1), ($script:DetailTotal - $before))
 }
 
@@ -436,13 +469,14 @@ function New-CgCfg {
             cloudflared = @{ Pre = 'Running'; StopAt = 500; RunAt = 5500; PrePid = 4100; PostPid = 4200; StopThrows = $false; E1At = 5700; E2At = 5500; FailAt = -1 }
             MariaDB     = @{ Pre = 'Running'; StopAt = 400; RunAt = 4400; PrePid = 3100; PostPid = 3200; StopThrows = $false; E1At = 4600; E2At = 4400; FailAt = -1 }
         }
-        Api = @{ OldPid = 5100; NewPid = 5200; OldGoneAt = 300; NewAt = 3300; UnderInstall = $true; KillThrows = $false; DbRestartPid = 0 }
+        Api = @{ OldPid = 5100; NewPid = 5200; OldGoneAt = 300; NewAt = 3300; UnderInstall = $true; KillThrows = $false; DbRestartPid = 0; RecheckMode = '' }
         SnapSvc = @{}; IsAdmin = $true; MachineGuid = $script:Id.Guid
         EventsReadable = $true; ScmReadable = $true; Events = @()
         FailureText = $script:FailureText; DbErrText = $script:DbErrText; EventJunk = $script:EventJunk; ObserverIp = $script:ObserverIp
         ExtAlwaysOk = $false; ExtOkWin = @(); ExtAfterRun = 'ok'; ExtBaselineFail = $false; DbAlwaysOk = $false
         SdDown = @(2500, 12500); CtlFail = @(); CtlTimeout = @(); CtlThrow = @(); CtlBaselineFail = $false
         HandMode = 'record'
+        ObsThrowAt = -1; HandThrowAt = -1; HandWho = ''   # (11/19 [3-V] 갈래2 · C28 · C32) 기본 = 끔
     }
     if ($null -ne $Over) {
         foreach ($k in $Over.Keys) {
@@ -537,8 +571,9 @@ function New-CgHooks {
 
 function Invoke-CgRun {
     # 러너 1회(가짜 훅만). 화면(모든 흐름) · 보고서 · 실행 기록을 모아 돌려준다.
+    # (11/19 [3-V] 갈래2) -Runner = 다른 러너 파일(V2 · V6 가짜 저장소 안 사본) · 러너가 예외로 빠져도 그때까지의 화면 줄을 잃지 않게 모은다(V1 대조군)
     param([hashtable]$Cfg, [hashtable]$Env, [switch]$NoConfirm, [switch]$Verbose, [string[]]$History,
-        [string]$Repo, [string]$GitExe = 'git', [string]$ReportDir, [string[]]$DropHook)
+        [string]$Repo, [string]$GitExe = 'git', [string]$ReportDir, [string[]]$DropHook, [string]$Runner)
     $W = [CgWorld]::new($script:Base, (New-CgCfg -Over $Cfg))
     $W.Verbose = [bool]$Verbose
     $e = New-CgCaseEnv -Opt $Env
@@ -553,9 +588,11 @@ function Invoke-CgRun {
     if ($Verbose) { $p.Verbose = $true }
     $global:LASTEXITCODE = 0
     $err = $null
-    $lines = @()
-    try { $lines = @(& $script:RunnerPath @p *>&1 | ForEach-Object { [string]$_ }) }
+    $acc = New-Object System.Collections.Generic.List[string]
+    $rp = if ($Runner) { $Runner } else { $script:RunnerPath }
+    try { & $rp @p *>&1 | ForEach-Object { $acc.Add([string]$_) } }
     catch { $err = $_ }
+    $lines = $acc.ToArray()
     $exit = $LASTEXITCODE
     $reportText = $null
     $histText = $null
@@ -712,10 +749,16 @@ try {
     $script:RepoB = New-CgRepo -Name 'repo-b' -MainText $allowOk -WorkText $allowBoth
     $script:RepoC = New-CgRepo -Name 'repo-c' -MainText $allowOk -NoOrigin
     $script:RepoF = New-CgRepo -Name 'repo-f' -MainText $allowOk -AutoCrlf -WorkText (Get-CgAllowText -Domain $script:Id.Domain -Tenant $script:Id.Tenant -Nl "`r`n")
+    # (11/19 [3-V] 갈래2 V6) 「보고서 폴더 = 저장소 안」 시험용 가짜 저장소 — 임시 폴더에 러너 사본을 같은 상대 위치에 둔다(러너 저장소 뿌리 = 이 폴더).
+    #   실제 저장소 안 경로는 쓰지 않는다(거절이 회귀해도 찌꺼기는 임시 폴더에만 · finally 가 지움).
+    $script:FakeRepo = Join-Path $script:Root 'fake-repo'
+    $script:FakeRunner = Join-Path $script:FakeRepo 'tests\scenarios\comms-integrity\Run-RoutinePcScenarios.ps1'
+    $null = [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($script:FakeRunner))
+    [System.IO.File]::Copy($script:RunnerPath, $script:FakeRunner, $true)
 } catch {
     Write-Host ('임시 git 저장소 준비 실패: {0}' -f $_.Exception.Message)
     Remove-CgTree $script:Root
-    Write-Host 'Test-CommsGuard 끝 — 경우 0/27 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0'
+    Write-Host ('Test-CommsGuard 끝 — 경우 0/{0} 일치 · 세부 확인 0/0 · 진짜 끊기 호출 0' -f $script:CaseMax)
     exit 1
 }
 
@@ -1252,6 +1295,219 @@ Invoke-CgCaseBlock 'C27' '[3-V] A5 · db.conf 포트 · 슬롯이 전각 · 아�
     Test-CgCase 'C27' 'ⓕ 러너 거절 조건 = 「if (-not $guard.Allowed)」' ($rt.Contains('if (-not $guard.Allowed) {'))
 }
 
+# ─────────────────────────────────────────────── 경우 C28~C32 — (11/19) [3-V] 갈래2 보안상무 V1 · V2(+V6) · V3 · V4 · V9
+# 근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래2_러너시험_보안상무.md A 표 · 끝 「PM 판단」 표(고침 행).
+# 러너는 가짜 훅으로만(-Confirm 은 이 시험 장치 안 · 실물 공급자 0). 순수 함수는 러너 파일에서 구문 트리로 꺼내 정의만(러너 본체 실행 0).
+
+function Get-CgRunnerFunctions {
+    param([string]$Path, [string[]]$Names)
+    $tk = $null; $pe = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tk, [ref]$pe)
+    $out = [ordered]@{}
+    foreach ($f in @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+        if ($Names -contains $f.Name) { $out[$f.Name] = $f.Extent.Text }
+    }
+    return $out
+}
+
+function Get-CgCutHits {
+    # (V4) 「진짜 끊기」 꼴 — 별칭(spsv · kill · spps) · taskkill · net stop · sc stop · sc.exe stop · .Kill( (구문 트리 · 실행 0)
+    param($Ast)
+    $q = [char[]]@([char]34, [char]39)
+    $hits = New-Object System.Collections.Generic.List[string]
+    foreach ($c in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) {
+        $name = [string]$c.GetCommandName()
+        if (-not $name) { continue }
+        $nm = $name.ToLowerInvariant()
+        $rest = @($c.CommandElements | Select-Object -Skip 1 | ForEach-Object { ([string]$_.Extent.Text).Trim($q).ToLowerInvariant() })
+        if (@('spsv', 'kill', 'spps', 'taskkill', 'taskkill.exe') -contains $nm) { $hits.Add($nm) }
+        elseif (@('net', 'net.exe', 'net1', 'net1.exe') -contains $nm -and $rest -contains 'stop') { $hits.Add($nm + ' stop') }
+        elseif (@('sc', 'sc.exe') -contains $nm -and $rest -contains 'stop') { $hits.Add($nm + ' stop') }
+    }
+    foreach ($m in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) {
+        if (([string]$m.Member.Extent.Text).Trim($q) -ieq 'Kill') { $hits.Add('.Kill(') }
+    }
+    return $hits.ToArray()   # 원소로 내보냄(부르는 쪽이 @() 로 받음)
+}
+
+Invoke-CgCaseBlock 'C28' '[3-V 갈래2] V1 · 끊은 뒤 관측 중 훅 예외 → 인계 쪽지 · 대상 상태 불명 경고 · 실행 기록 · 보고서 · 종료 1' {
+    $abortLine = '  관측 중단: 정상 끝 없이 빠짐('
+    # ⓐ S-A 끊은 뒤 잠 훅이 3초째 던짐(가짜 · 실물 0)
+    $a = Invoke-CgRun -Cfg @{ ObsThrowAt = 2500 }
+    Test-CgCase 'C28' 'ⓐ 러너 밖으로 예외 0(종류만 경고 · 스스로 끝냄)' ($null -eq $a.Error)
+    Test-CgCase 'C28' 'ⓐ 종료 코드 1' ($a.Exit -eq 1)
+    Test-CgCase 'C28' 'ⓐ 끊기 1회뿐(다음 건 끊기 0)' ($a.W.FakeCuts -eq 1 -and [int]$a.W.CutCalls['cloudflared'] -eq 1)
+    Test-CgCase 'C28' 'ⓐ 관측 중단 줄 1' (@(@($a.Lines) | Where-Object { ([string]$_).StartsWith($abortLine) }).Count -eq 1)
+    Assert-CgItem 'C28' $a 'S-A' ($LblA + '측정불가(관측 중단)')
+    Assert-CgItem 'C28' $a 'S-B' ($LblB + '미실행(앞 건 정지)')
+    Assert-CgItem 'C28' $a 'S-D' ($LblD + '반자동 — 미실행(앞 건 정지)')
+    Assert-CgNoPass 'C28' $a 'S-A'
+    Assert-CgHandoff 'C28' $a
+    Test-CgCase 'C28' 'ⓐ 인계 쪽지 t0 = 모름(관측 중단)' (@($a.Lines) -contains '  t0: 모름(관측 중단 · 마지막 판정 없음)')
+    Test-CgCase 'C28' 'ⓐ 보고서 파일 · 인계 쪽지 · 쪽지 경고 · 종합 경고 · 인계 끝 줄' ($null -ne $a.ReportText -and $a.ReportText.Contains('  ── 인계 쪽지(§5-4) · S-A') -and $a.ReportText.Contains('  경고: 대상 상태 불명 · 사람 확인 필요') -and (@($a.ReportLines) -contains $WarnLine) -and (@($a.ReportLines) -contains $HandoffEnd))
+    Test-CgCase 'C28' 'ⓐ 실행 기록(쿨다운) svc:cloudflared 1줄' ($null -ne $a.HistText -and @(([string]$a.HistText -split "`n") | Where-Object { $_ -match '"key":"svc:cloudflared"' }).Count -eq 1)
+    Test-CgCase 'C28' 'ⓐ 예외 글(메시지) 0 · 종류만' (-not ((($a.Lines -join "`n") + [string]$a.ReportText).Contains('fake observe failure')))
+    # ⓑ S-D 손 기록 뒤 관측 중 던짐 → 반자동 실패(관측 중단) · 인계
+    $b = Invoke-CgRun -Cfg @{ HandThrowAt = 2500 }
+    Test-CgCase 'C28' 'ⓑ 러너 밖으로 예외 0 · 종료 코드 1' ($null -eq $b.Error -and $b.Exit -eq 1)
+    Assert-CgItem 'C28' $b 'S-D' ($LblD + '반자동 — 실패(관측 중단)')
+    Test-CgCase 'C28' ('ⓑ 머리 = 미합격(반자동 1 실패(관측 중단))(실제 「' + (Get-CgHeader $b) + '」)') ((Get-CgHeader $b) -eq '미합격 — 자동 3 PASS · 반자동 1 실패(관측 중단) · 시험 종료 아님 · 인계 필요(§5-4)')
+    Assert-CgHandoff 'C28' $b
+    Test-CgCase 'C28' 'ⓑ 인계 대상 = 터널 자격증명' (@($b.Lines) -contains '  대상: 터널 자격증명(사람이 무효화)')
+    Test-CgCase 'C28' 'ⓑ 실행 기록 TunnelSecret 1줄' ($null -ne $b.HistText -and @(([string]$b.HistText -split "`n") | Where-Object { $_ -match '"key":"TunnelSecret"' }).Count -eq 1)
+    # ⓒ 정적 — 건 순회(foreach $cat in $catalog)가 try 안 · 그 try 의 finally 가 Complete-RgAbort 를 부름
+    #   (Ctrl+C = 파이프라인 정지 — catch 는 안 돌고 finally 만 돎: 이 PC 5.1 [PowerShell]::Stop() 흉내 실측 · 개발명세서 §4)
+    $tk = $null; $pe = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:RunnerPath, [ref]$tk, [ref]$pe)
+    $tries = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TryStatementAst] }, $true) | Where-Object {
+        $null -ne $_.Finally -and @($_.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.ForEachStatementAst] -and $n.Variable.VariablePath.UserPath -eq 'cat' -and [string]$n.Condition.Extent.Text -eq '$catalog' }, $true)).Count -ge 1
+    })
+    $fin = if ($tries.Count -eq 1) { @($tries[0].Finally.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Complete-RgAbort' }, $true)).Count } else { 0 }
+    Test-CgCase 'C28' 'ⓒ 건 순회 try 의 finally 가 Complete-RgAbort 부름(Ctrl+C 길)' ($tries.Count -eq 1 -and $fin -eq 1)
+}
+
+Invoke-CgCaseBlock 'C29' '[3-V 갈래2] V2 · V6 · 보고서 폴더 장치 경로 · UNC · 상대 · 정션이 (가짜) 저장소 안 → 거절 · 끊기 0 · 폴더 0' {
+    $fx = Get-CgRunnerFunctions -Path $script:RunnerPath -Names @('Test-RgUnderDir', 'Resolve-RgRealPath', 'Test-RgReportDirOutside')
+    Test-CgCase 'C29' '러너 함수 3개 있음' ($fx.Count -eq 3)
+    foreach ($t in @($fx.Values)) { . ([scriptblock]::Create($t)) }
+    $repo = $script:FakeRepo
+    $inP = Join-Path $repo 'tests\cg-p'
+    $drv = $inP.Substring(0, 1)
+    $rest = $inP.Substring(3)
+    # 순수(파일 시스템을 건드리기 전 글자로 거절) — 보안상무 측정 4꼴(ⓑ~ⓔ) + 「/」 꼴 · 드라이브 상대 · 뿌리 상대 · 상대
+    $forms = [ordered]@{
+        'ⓐ 그대로'            = $inP
+        'ⓑ \\?\'              = ('\\?\' + $inP)
+        'ⓒ \\.\'              = ('\\.\' + $inP)
+        'ⓓ \\localhost\C$'    = ('\\localhost\' + $drv.ToUpperInvariant() + '$\' + $rest)
+        'ⓔ \\127.0.0.1\c$'    = ('\\127.0.0.1\' + $drv.ToLowerInvariant() + '$\' + $rest)
+        'ⓕ //localhost/C$/'   = (('//localhost/' + $drv + '$/' + $rest) -replace '\\', '/')
+        'ⓖ 드라이브 상대 C:x' = ($inP.Substring(0, 2) + $rest)
+        'ⓗ 뿌리 상대 \x'      = ('\' + $rest)
+        'ⓘ 상대 cg-rel'       = 'cg-rel'
+    }
+    foreach ($k in $forms.Keys) { Test-CgCase 'C29' ('순수 ' + $k + ' = 거절') (-not (Test-RgReportDirOutside -Dir $forms[$k] -RepoRoot $repo)) }
+    Test-CgCase 'C29' '대조 순수 · 임시 폴더(저장소 밖) = 받음' (Test-RgReportDirOutside -Dir (Join-Path $script:Root 'outside-rd') -RepoRoot $repo)
+    # e2e(가짜 저장소 안 러너 사본 · 가짜 훅) — 장치 경로 2꼴. UNC 꼴은 순수로만(이 PC 관리 공유 접속 0 — 거절이 회귀한 사본이 SMB 로 폴더를 만들지 않게)
+    foreach ($pair in @(@('ⓑ', '\\?\', 'cg-rd-b'), @('ⓒ', '\\.\', 'cg-rd-c'))) {
+        $real = Join-Path $repo ('tests\' + $pair[2])
+        $x = Invoke-CgRun -Runner $script:FakeRunner -ReportDir ($pair[1] + $real)
+        Test-CgCase 'C29' ('e2e ' + $pair[0] + ' 끊기 0 · 폴더 0 · 판정 모드 줄') ($x.W.FakeCuts -eq 0 -and -not [System.IO.Directory]::Exists($real) -and (($x.Lines -join "`n").Contains('판정 모드(보고서 폴더가 저장소 안')))
+    }
+    # 정션(임시 폴더 · 관리자 권한 불요) → 가짜 저장소 tests — 못 만들면 「미측정」(합격으로 안 셈 · 끝에 표시 · 세부 확인 하한에서 뺀 6건)
+    $jx = Join-Path $script:Root 'jx'
+    $made = $false
+    try { $null = New-Item -ItemType Junction -Path $jx -Value (Join-Path $repo 'tests') -ErrorAction Stop; $made = $true }
+    catch {
+        Write-Warning ("정션 못 만듦({0}) — C29 정션 확인 미측정" -f $_.Exception.GetType().Name)
+        $script:Unmeasured.Add(('C29 정션 — 만들기 실패({0}) · 정션 확인 6건 안 함' -f $_.Exception.GetType().Name))
+    }
+    if ($made) {
+        try {
+            Test-CgCase 'C29' '정션 = 재분석 지점' ((([System.IO.File]::GetAttributes($jx)) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+            $rr = Resolve-RgRealPath -Path (Join-Path $jx 'cg-p')
+            Test-CgCase 'C29' '정션 실제 경로 = 가짜 저장소 tests 아래' ([string]::Equals($rr, (Join-Path $repo 'tests\cg-p'), [System.StringComparison]::OrdinalIgnoreCase))
+            Test-CgCase 'C29' '순수 정션 = 거절' (-not (Test-RgReportDirOutside -Dir (Join-Path $jx 'cg-p') -RepoRoot $repo))
+            $y = Invoke-CgRun -Runner $script:FakeRunner -ReportDir (Join-Path $jx 'cg-rd-f')
+            Test-CgCase 'C29' 'e2e 정션 끊기 0' ($y.W.FakeCuts -eq 0)
+            Test-CgCase 'C29' 'e2e 정션 폴더 0(실제 위치)' (-not [System.IO.Directory]::Exists((Join-Path $repo 'tests\cg-rd-f')))
+            Test-CgCase 'C29' 'e2e 정션 판정 모드 줄' (($y.Lines -join "`n").Contains('판정 모드(보고서 폴더가 저장소 안'))
+        } finally {
+            try { [System.IO.Directory]::Delete($jx) } catch { Write-Warning ("정션 지우기 실패({0})" -f $_.Exception.GetType().Name) }
+        }
+    }
+}
+
+Invoke-CgCaseBlock 'C30' '[3-V 갈래2] V3 · 설치본 드라이브 뿌리 거절 · S-C 대상 = 실행 파일 정확 일치 · 끊기 직전 번호 · 경로 재확인' {
+    # ⓐ 모듈 ConvertFrom-CgImagePath — 드라이브 뿌리 · 빈 값 · 상대 · UNC 공유 뿌리 = 없음 / 대조 = 설치본 폴더
+    $wd = 'watchdog\HitPan.Watchdog.exe'
+    Test-CgCase 'C30' 'ⓐ X:\watchdog\… = 없음(드라이브 뿌리)' ($null -eq (ConvertFrom-CgImagePath -ImagePath ('X:\' + $wd)))
+    Test-CgCase 'C30' 'ⓐ 따옴표 · 인자 붙은 뿌리 = 없음' ($null -eq (ConvertFrom-CgImagePath -ImagePath ('"D:\' + $wd + '" --service')))
+    Test-CgCase 'C30' 'ⓐ 빈 값 · 공백 = 없음' ($null -eq (ConvertFrom-CgImagePath -ImagePath '') -and $null -eq (ConvertFrom-CgImagePath -ImagePath '   '))
+    Test-CgCase 'C30' 'ⓐ 상대 경로 = 없음' ($null -eq (ConvertFrom-CgImagePath -ImagePath $wd))
+    Test-CgCase 'C30' 'ⓐ UNC 공유 뿌리 = 없음' ($null -eq (ConvertFrom-CgImagePath -ImagePath ('\\srv\share\' + $wd)))
+    Test-CgCase 'C30' 'ⓐ 대조 = 설치본 폴더' ((ConvertFrom-CgImagePath -ImagePath ('"C:\Program Files\HitPan\' + $wd + '"')) -eq 'C:\Program Files\HitPan')
+    # ⓑ 러너 Test-RgIsInstallApi(순수)
+    $fx = Get-CgRunnerFunctions -Path $script:RunnerPath -Names @('Test-RgIsInstallApi')
+    Test-CgCase 'C30' 'ⓑ 러너 Test-RgIsInstallApi 있음' ($fx.Count -eq 1)
+    foreach ($t in @($fx.Values)) { . ([scriptblock]::Create($t)) }
+    $api = 'api\HitPan.API.exe'
+    Test-CgCase 'C30' 'ⓑ 정확 일치 = 예' (Test-RgIsInstallApi -Path ('C:\HitPan\' + $api) -InstallDir 'C:\HitPan')
+    Test-CgCase 'C30' 'ⓑ 대소문자만 다름 · 설치본 끝 \ = 예' (Test-RgIsInstallApi -Path 'c:\hitpan\API\hitpan.api.EXE' -InstallDir 'C:\HitPan\')
+    Test-CgCase 'C30' 'ⓑ 설치본 아래 다른 슬롯(측정 꼴) = 아니오' (-not (Test-RgIsInstallApi -Path ('C:\HitPan\slot2\' + $api) -InstallDir 'C:\HitPan'))
+    Test-CgCase 'C30' 'ⓑ 설치본 바로 아래(api 폴더 아님) = 아니오' (-not (Test-RgIsInstallApi -Path 'C:\HitPan\HitPan.API.exe' -InstallDir 'C:\HitPan'))
+    Test-CgCase 'C30' 'ⓑ 드라이브 뿌리 설치본(측정 꼴 D:\dev\bin) = 아니오' (-not (Test-RgIsInstallApi -Path 'D:\dev\bin\HitPan.API.exe' -InstallDir 'D:\') -and -not (Test-RgIsInstallApi -Path ('D:\' + $api) -InstallDir 'D:\'))
+    Test-CgCase 'C30' 'ⓑ 이름 비슷한 이웃 폴더 = 아니오' (-not (Test-RgIsInstallApi -Path ('C:\HitPanX\' + $api) -InstallDir 'C:\HitPan'))
+    Test-CgCase 'C30' 'ⓑ 경로 못 읽음 · 설치본 없음 = 아니오' (-not (Test-RgIsInstallApi -Path $null -InstallDir 'C:\HitPan') -and -not (Test-RgIsInstallApi -Path ('C:\HitPan\' + $api) -InstallDir $null))
+    Test-CgCase 'C30' 'ⓑ UNC 설치본 = 아니오' (-not (Test-RgIsInstallApi -Path ('\\srv\share\HitPan\' + $api) -InstallDir '\\srv\share\HitPan'))
+    # ⓒ 러너 실물 훅(GetApiProcesses · GetPortOwner)이 정확 일치를 씀 — 구문 트리(실물 훅 실행 0)
+    $tk = $null; $pe = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:RunnerPath, [ref]$tk, [ref]$pe)
+    $hookFn = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'New-RgRealHooks' }, $true))[0]
+    $hookCalls = if ($null -ne $hookFn) { @($hookFn.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() }) } else { @() }
+    Test-CgCase 'C30' 'ⓒ 실물 훅 = Test-RgIsInstallApi 2곳 · Test-RgUnderDir 0' (@($hookCalls | Where-Object { $_ -eq 'Test-RgIsInstallApi' }).Count -eq 2 -and @($hookCalls | Where-Object { $_ -eq 'Test-RgUnderDir' }).Count -eq 0)
+    # ⓓ e2e 끊기 직전 재확인 — 기준 때 번호 5100 → 재확인 때 다른 번호(pid) / 같은 번호인데 설치본 API 아님(path) → 끊기 0 · 그 자리 정지
+    foreach ($mode in @('pid', 'path')) {
+        $r = Invoke-CgRun -Cfg @{ Api = @{ RecheckMode = $mode } }
+        Assert-CgItem 'C30' $r 'S-C' ($LblC + '측정불가(인스턴스 불일치)')
+        Test-CgCase 'C30' ('ⓓ ' + $mode + ' · S-C 끊기 0 · 재확인 줄 · 종료 1') ([int]$r.W.CutCalls['api'] -eq 0 -and (@($r.Lines) -contains '  끊기 직전 재확인: 프로세스 번호 · 경로가 기준 때와 다름 · 끊지 않음') -and $r.Exit -eq 1)
+        Assert-CgItem 'C30' $r 'S-D' ($LblD + '반자동 — 미실행(앞 건 정지)')
+    }
+    Test-CgCase 'C30' 'ⓓ 대조 C16 = 재확인 같음 줄 · S-C 끊기 1' ((@($script:R16.Lines) -contains '  끊기 직전 재확인: 기준 때와 같음(번호 · 경로)') -and [int]$script:R16.W.CutCalls['api'] -eq 1)
+}
+
+Invoke-CgCaseBlock 'C31' '[3-V 갈래2] V4 · 「진짜 끊기 0」 정적 검사 — 러너 + 모듈 · 별칭 · .Kill( · taskkill · net stop · sc stop' {
+    # ⓐ 검사기 자체(가짜 글 · 파싱만 · 실행 0) — 8꼴 전부 잡음
+    $sample = "spsv x`nkill 1`nspps -Id 1`n`$p.Kill()`ntaskkill /F /IM x`nnet stop x`nsc stop x`nsc.exe stop x`n"
+    $tk = $null; $pe = $null
+    $sAst = [System.Management.Automation.Language.Parser]::ParseInput($sample, [ref]$tk, [ref]$pe)
+    $sh = @(Get-CgCutHits $sAst)
+    Test-CgCase 'C31' ('ⓐ 검사기 = 가짜 글 8꼴 전부 잡음(실제 ' + $sh.Count + ')') ($sh.Count -eq 8)
+    # ⓑ 러너 · 모듈 오늘 판 — 끊기 꼴 0 · 시작 · 재시작 · 실행 명령 0
+    $startBad = @('Start-Service', 'Restart-Service', 'Resume-Service', 'Set-Service', 'New-Service', 'Start-Process', 'saps', 'start', 'Invoke-Expression', 'iex', 'Invoke-Item', 'ii')
+    $asts = @{}
+    foreach ($pair in @(@('러너', $script:RunnerPath), @('모듈', $script:ModulePath))) {
+        $tk = $null; $pe = $null
+        $fAst = [System.Management.Automation.Language.Parser]::ParseFile($pair[1], [ref]$tk, [ref]$pe)
+        $asts[$pair[0]] = $fAst
+        Test-CgCase 'C31' ('ⓑ ' + $pair[0] + ' 구문 오류 0') (@($pe).Count -eq 0)
+        $fh = @(Get-CgCutHits $fAst)
+        Test-CgCase 'C31' ('ⓑ ' + $pair[0] + ' 끊기 꼴 0(실제 ' + ($fh -join ',') + ')') ($fh.Count -eq 0)
+        $names = @($fAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+        $sb = @($names | Where-Object { $startBad -contains $_ })
+        Test-CgCase 'C31' ('ⓑ ' + $pair[0] + ' 시작 · 재시작 · 실행 명령 0(실제 ' + ($sb -join ',') + ')') ($sb.Count -eq 0)
+    }
+    # ⓒ 모듈 — Stop-Service · Stop-Process 0 · .Start() = 읽기 전용 git(Invoke-CgGitRead)의 [System.Diagnostics.Process]::Start 1곳뿐 · .Continue() 0
+    $mAst = $asts['모듈']
+    $mNames = @($mAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+    Test-CgCase 'C31' 'ⓒ 모듈 Stop-Service · Stop-Process 0' (@($mNames | Where-Object { @('Stop-Service', 'Stop-Process') -contains $_ }).Count -eq 0)
+    $mStart = @($mAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and @('Start', 'Continue') -contains ([string]$n.Member.Extent.Text) }, $true))
+    $p = if ($mStart.Count -eq 1) { $mStart[0].Parent } else { $null }
+    while ($null -ne $p -and -not ($p -is [System.Management.Automation.Language.FunctionDefinitionAst])) { $p = $p.Parent }
+    Test-CgCase 'C31' 'ⓒ 모듈 .Start() = Invoke-CgGitRead 안 [System.Diagnostics.Process]::Start 1곳뿐 · .Continue() 0' ($mStart.Count -eq 1 -and $mStart[0].Static -and [string]$mStart[0].Expression.Extent.Text -eq '[System.Diagnostics.Process]' -and $null -ne $p -and $p.Name -eq 'Invoke-CgGitRead')
+}
+
+Invoke-CgCaseBlock 'C32' '[3-V 갈래2] V9 · 손 기록 「누가」 16자 넘는 16진 꼴 거절' {
+    $fx = Get-CgRunnerFunctions -Path $script:RunnerPath -Names @('Format-RgWho')
+    Test-CgCase 'C32' 'ⓐ 러너 Format-RgWho 있음' ($fx.Count -eq 1)
+    foreach ($t in @($fx.Values)) { . ([scriptblock]::Create($t)) }
+    $hex34 = ('0123456789abcdef' * 3).Substring(0, 34)   # 보안상무 측정 꼴(34자 16진) — 실행 중에 만든다(파일 바이트에 자격증명 꼴 0)
+    Test-CgCase 'C32' 'ⓐ 34자 16진 = 거절' ($null -eq (Format-RgWho -Who $hex34))
+    Test-CgCase 'C32' 'ⓐ 17자 16진 = 거절' ($null -eq (Format-RgWho -Who 'abcdef01234567890'))
+    Test-CgCase 'C32' 'ⓐ GUID 꼴(구분 글자 섞음) = 거절' ($null -eq (Format-RgWho -Who ([guid]::NewGuid().ToString())))
+    Test-CgCase 'C32' 'ⓐ 공백 섞은 16진 18자 = 거절' ($null -eq (Format-RgWho -Who 'dead beef cafe babe 01'))
+    Test-CgCase 'C32' 'ⓐ 대조 16자 16진 = 받음(경계)' ((Format-RgWho -Who 'deadbeefcafebabe') -eq 'deadbeefcafebabe')
+    Test-CgCase 'C32' 'ⓐ 대조 사람 이름 = 받음' ((Format-RgWho -Who ' 홍길동 (PM) ') -eq '홍길동 (PM)' -and (Format-RgWho -Who 'PM-kim (QA)') -eq 'PM-kim (QA)' -and (Format-RgWho -Who '시험자') -eq '시험자')
+    Test-CgCase 'C32' 'ⓐ 옛 거절 그대로(41자 · 줄바꿈 · 경로 꼴)' ($null -eq (Format-RgWho -Who ('a' * 41)) -and $null -eq (Format-RgWho -Who "x`ny") -and $null -eq (Format-RgWho -Who 'C:\a'))
+    # ⓑ e2e — 손 기록 「누가」 = 34자 16진 → 손 기록 없음 = 반자동 미실행 · 그 글자 화면 · 보고서 · 실행 기록 0
+    $r = Invoke-CgRun -Cfg @{ HandWho = $hex34 }
+    Assert-CgItem 'C32' $r 'S-D' ($LblD + '반자동 — 미실행(손 기록 없음)')
+    Test-CgCase 'C32' 'ⓑ 손 기록 부름 1 · 미합격 · 종료 1' ($r.W.HandCalls -eq 1 -and -not (Get-CgHeader $r).StartsWith('합격') -and $r.Exit -eq 1)
+    $all = (@($r.Lines) -join "`n") + "`n" + [string]$r.ReportText + "`n" + [string]$r.HistText
+    Test-CgCase 'C32' 'ⓑ 그 글자 0(화면 · 보고서 · 실행 기록)' (-not $all.Contains($hex34))
+    Test-CgCase 'C32' 'ⓑ 실행 기록 TunnelSecret 0' (-not ([string]$r.HistText).Contains('TunnelSecret'))
+}
+
 # ── 부가(경우 번호 밖 · 세부 확인에 셈)
 Invoke-CgCaseBlock '부가' '훅 전부-아니면-멈춤 · 판정 모드 · 보고서 폴더 · 캐시 회피 · 러너 정적 검사' {
     $x = Invoke-CgRun -DropHook @('ReadScmEvents')
@@ -1260,9 +1516,11 @@ Invoke-CgCaseBlock '부가' '훅 전부-아니면-멈춤 · 판정 모드 · 보
     $j = Invoke-CgRun -NoConfirm
     Test-CgCase '부가' '판정 모드(가드 허용) · 끊기 0 · 손 0 · 파일 0' ($j.W.FakeCuts -eq 0 -and $j.W.HandCalls -eq 0 -and -not [System.IO.Directory]::Exists($j.ReportDir))
     Test-CgCase '부가' '판정 모드 · 상태 읽기(외부 GET 가드 통과 뒤)' ($j.W.ExtGets -ge 1 -and (Get-CgHeader $j).StartsWith('미합격(측정 0건)') -and $j.Exit -eq 1)
-    $inRepo = Join-Path $script:RunnerRepo ('tests\scenarios\comms-integrity\cg-no-write-' + $rnd.Substring(0, 8))
-    $q = Invoke-CgRun -ReportDir $inRepo
-    Test-CgCase '부가' '보고서 폴더 = 저장소 안 → 끊기 0 · 폴더 안 만듦' ($q.W.FakeCuts -eq 0 -and -not [System.IO.Directory]::Exists($inRepo) -and (($q.Lines -join "`n").Contains('판정 모드(보고서 폴더가 저장소 안')))
+    # (11/19 [3-V] 갈래2 V6) 저장소 안 = 임시 폴더의 가짜 저장소(러너 사본) — 실제 저장소 경로 0
+    $inRepo = Join-Path $script:FakeRepo ('tests\scenarios\comms-integrity\cg-no-write-' + $rnd.Substring(0, 8))
+    $q = Invoke-CgRun -ReportDir $inRepo -Runner $script:FakeRunner
+    Test-CgCase '부가' '보고서 폴더 = (가짜) 저장소 안 → 끊기 0 · 폴더 안 만듦' ($q.W.FakeCuts -eq 0 -and -not [System.IO.Directory]::Exists($inRepo) -and (($q.Lines -join "`n").Contains('판정 모드(보고서 폴더가 저장소 안')))
+    Test-CgCase '부가' '가짜 저장소 = 임시 폴더 아래(실제 저장소 경로 아님)' ($script:FakeRepo.StartsWith($script:Root, [System.StringComparison]::OrdinalIgnoreCase))
     $r = $script:R16
     Test-CgCase '부가' ('캐시 회피 · no-cache 머리 빠짐 0 · 주소 이상 0(외부 GET ' + $r.W.ExtGets + ')') ($r.W.NoCacheMissing -eq 0 -and $r.W.BadUrls -eq 0 -and $r.W.ExtGets -gt 0)
     Test-CgCase '부가' '캐시 회피 · 쿼리값 매번 다름' ($r.W.Nonces.Count -eq $r.W.ExtGets -and @($r.W.Nonces | Select-Object -Unique).Count -eq $r.W.Nonces.Count)
@@ -1315,16 +1573,23 @@ Invoke-CgCaseBlock 'C17' '보고서 · 화면 · 실행 기록(전체 런) → �
 
 # ─────────────────────────────────────────────── 끝
 
+# (11/19 [3-V] 갈래2 V5) 블록 뒤에 늦게 들어온 어긋남까지 다시 셈 · 안 돈 경우 = 불일치 · 세부 확인 수 하한
+foreach ($k in @($script:CaseOk.Keys)) { Update-CgCaseOk $k }
 $caseIds = @($script:CaseOk.Keys | Where-Object { $_ -ne '부가' })
 $okCases = @($caseIds | Where-Object { $script:CaseOk[$_] }).Count
+$notRun = @($script:CaseOk.Keys | Where-Object { -not $script:CaseRan[$_] })
+$minOk = ($script:DetailTotal -ge $script:MinDetail)
 $real = [int]$global:HitPanCommsRealCutCalls
 if ($script:Fails.Count -gt 0) {
     Write-Host ''
     Write-Host ('어긋난 세부 확인 {0}건:' -f $script:Fails.Count)
     foreach ($f in $script:Fails) { Write-Host ('  - ' + $f) }
 }
+if ($notRun.Count -gt 0) { Write-Host ('실행 안 된 경우(불일치로 셈): ' + ($notRun -join ' · ')) }
+foreach ($u in $script:Unmeasured) { Write-Host ('미측정: ' + $u) }
 if (-not $script:CaseOk['부가']) { Write-Host '부가 확인(경우 번호 밖) 어긋남 — 세부 확인 칸에 셈' }
+Write-Host ('세부 확인 하한 {0} — 실제 {1} · {2}' -f $script:MinDetail, $script:DetailTotal, $(if ($minOk) { '맞음' } else { '모자람(종료 1)' }))
 Write-Host ('걸린 시간 {0}초' -f [math]::Round($sw.Elapsed.TotalSeconds))
 Write-Host ('Test-CommsGuard 끝 — 경우 {0}/{1} 일치 · 세부 확인 {2}/{3} · 진짜 끊기 호출 {4}' -f $okCases, $caseIds.Count, $script:DetailPass, $script:DetailTotal, $real)
-if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq 27 -and $script:DetailPass -eq $script:DetailTotal -and $real -eq 0) { exit 0 }
+if ($okCases -eq $caseIds.Count -and $caseIds.Count -eq $script:CaseMax -and $script:CaseOk['부가'] -and $script:DetailPass -eq $script:DetailTotal -and $minOk -and $real -eq 0) { exit 0 }
 exit 1

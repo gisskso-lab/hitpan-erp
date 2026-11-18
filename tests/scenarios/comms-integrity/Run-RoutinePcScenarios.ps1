@@ -25,6 +25,11 @@
     - PASS 문구 = 「5분 안 복구됨」. 복구 주체는 별도 칸(판정 미반영).
     - 보고서 · 실행 기록(run-history.jsonl)은 -Confirm + 가드 허용 + 보고서 폴더가 저장소 밖일 때만 쓴다.
     - 빈 catch 0(헌법 #15) — catch 마다 Write-Warning / Write-Verbose(예외 종류만 · 메시지 0).
+    - (11/19 [3-V] 갈래2 V1) 건 순회 전체 try/finally — 끊기 뒤 어떤 끝(정상 · 예외 · Ctrl+C)이든 인계 쪽지 · 대상 상태 불명 경고
+      · 실행 기록 · 보고서를 남긴다(PowerShell 은 Ctrl+C 때 catch 는 건너뛰고 finally 는 돈다). 관측 중단이면 종료 코드 1.
+    - (11/19 [3-V] 갈래2 V2 · V3 · V9) 보고서 폴더 = 「X:\」 꼴만 · 정션 · 링크는 실제 경로로 풀어 저장소 대조 /
+      S-C 대상 = {설치본}\api\HitPan.API.exe 정확 일치 · 끊기 직전 번호 · 경로 재확인 / 「누가」 칸 16자 넘는 16진 꼴 거절.
+      근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래2_러너시험_보안상무.md
   인코딩: UTF-8 BOM(Windows PowerShell 5.1 한글 오독 방지).
 #>
 [CmdletBinding()]
@@ -47,6 +52,14 @@ $script:H = $null
 $script:C = $null
 $script:Ctx = $null
 $script:HistPath = $null
+# (11/19 [3-V] V1) 끊기 직전부터 그 건 끝(판정 · 인계 쪽지)까지 = 진행 중 표시. 정상 끝 없이 빠지면 Complete-RgAbort 가 이걸 보고 인계.
+$script:RgInFlight = $null
+$script:RgAborted = $false
+$script:RgAbortKind = $null
+$script:RgEndDone = $false
+$script:RgExit = 1
+$script:RgWriteFiles = $false
+$script:RgReportDir = $null
 
 # ─────────────────────────────────────────────── 실물 끊기(실물 훅에서만 · 시험은 -Hooks 로 가짜만)
 
@@ -77,6 +90,54 @@ function Test-RgUnderDir {
     }
 }
 
+function Test-RgIsInstallApi {
+    # (11/19 [3-V] V3) 설치본 API 실행 파일 = {설치본}\api\HitPan.API.exe 와 정확히 같은가(대소문자 무시 · 「설치본 폴더 하위 아무 곳」 아님).
+    # 근거: installer/HitPan-Universal.iss schtasks /TR {app}\api\HitPan.API.exe · AntivirusExceptions.ps1 같은 경로.
+    # 설치본 폴더가 드라이브 뿌리 · 빈 값 · 「X:\」 꼴 아님(UNC · 장치 경로) · 프로세스 경로 못 읽음 = 아님(안 죽임 · 안전 쪽).
+    param([AllowNull()][string]$Path, [AllowNull()][string]$InstallDir)
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($InstallDir)) { return $false }
+    try {
+        $dir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
+        if ($dir -notmatch '\A[A-Za-z]:\\[^\\]') { return $false }
+        $want = $dir + '\api\HitPan.API.exe'
+        return [string]::Equals([System.IO.Path]::GetFullPath($Path), $want, [System.StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        Write-Verbose ("경로 비교 실패({0}) — 설치본 API 아님으로 처리" -f $_.Exception.GetType().Name)
+        return $false
+    }
+}
+
+function Resolve-RgRealPath {
+    # (11/19 [3-V] V2) 실제 경로 — 드라이브 뿌리부터 한 칸씩 · 있는 칸이 재분석 지점(정션 · 심볼릭 링크)이면 대상으로 바꿔 처음부터 다시(최대 32번).
+    # 없는 칸부터는 글자 그대로 잇는다. 「X:\」 로 시작하지 않음 · 대상이 그 꼴 아님(볼륨 GUID · UNC · 장치 경로) · 대상 못 읽음 = $null(부르는 쪽 = 거절).
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    for ($hop = 0; $hop -le 32; $hop++) {
+        if ($full -notmatch '\A[A-Za-z]:\\') { return $null }
+        $cur = $full.Substring(0, 3)
+        $parts = @($full.Substring(3).Split([char]'\') | Where-Object { $_.Length -gt 0 })
+        $moved = $false
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            $next = [System.IO.Path]::Combine($cur, $parts[$i])
+            if (-not ([System.IO.Directory]::Exists($next) -or [System.IO.File]::Exists($next))) {
+                return [System.IO.Path]::Combine($cur, ($parts[$i..($parts.Count - 1)] -join '\'))
+            }
+            if (([System.IO.File]::GetAttributes($next) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $target = [string](@((Get-Item -LiteralPath $next -Force -ErrorAction Stop).Target) | Select-Object -First 1)
+                if ([string]::IsNullOrWhiteSpace($target)) { return $null }
+                if (-not [System.IO.Path]::IsPathRooted($target)) { $target = [System.IO.Path]::Combine($cur, $target) }
+                $rest = if ($i + 1 -lt $parts.Count) { $parts[($i + 1)..($parts.Count - 1)] -join '\' } else { '' }
+                $full = [System.IO.Path]::GetFullPath($(if ($rest) { [System.IO.Path]::Combine($target, $rest) } else { $target }))
+                $moved = $true
+                break
+            }
+            $cur = $next
+        }
+        if (-not $moved) { return $cur }
+    }
+    return $null
+}
+
 function New-RgRealHooks {
     # 실물 공급자. 읽기 = 서비스 상태 · 프로세스 · 포트 · 이벤트 로그 · 실패 동작 조회 · HTTP GET. 쓰기 = 끊기 두 함수뿐.
     return @{
@@ -98,7 +159,8 @@ function New-RgRealHooks {
             foreach ($p in @(Get-Process -Name 'HitPan.API' -ErrorAction SilentlyContinue)) {
                 $path = $null
                 try { $path = $p.Path } catch { Write-Verbose ("프로세스 경로 못 읽음({0})" -f $_.Exception.GetType().Name) }
-                $list.Add(@{ Pid = [int]$p.Id; UnderInstall = (Test-RgUnderDir -Path $path -Dir $InstallDir) })
+                # (11/19 [3-V] V3) UnderInstall = 설치본 API 실행 파일 정확 일치(칸 이름은 모듈 판정과 같게 둠)
+                $list.Add(@{ Pid = [int]$p.Id; UnderInstall = (Test-RgIsInstallApi -Path $path -InstallDir $InstallDir) })
                 $path = $null
             }
             return $list.ToArray()   # 원소로 내보냄(부르는 쪽이 @() 로 받음)
@@ -110,7 +172,7 @@ function New-RgRealHooks {
             $p = Get-Process -Id ([int]$c.OwningProcess) -ErrorAction Stop
             $path = $null
             try { $path = $p.Path } catch { Write-Verbose ("프로세스 경로 못 읽음({0})" -f $_.Exception.GetType().Name) }
-            $r = @{ Pid = [int]$p.Id; UnderInstall = (Test-RgUnderDir -Path $path -Dir $InstallDir) }
+            $r = @{ Pid = [int]$p.Id; UnderInstall = (Test-RgIsInstallApi -Path $path -InstallDir $InstallDir) }
             $path = $null
             return $r
         }
@@ -180,11 +242,17 @@ function Get-RgRepoRoot { return [System.IO.Path]::GetFullPath((Join-Path $PSScr
 
 function Test-RgReportDirOutside {
     # 보고서 폴더 = 저장소 밖(PM 결재). 상대 경로 · 저장소 안 · 해석 불가 = 거절.
+    # (11/19 [3-V] V2) 받는 꼴 = 드라이브 글자 + 「:\」 로 시작(「/」 는 「\」 로 읽음)만 — 장치 경로(\\?\ · \\.\) · UNC(\\host\share · \\localhost\C$
+    #   · \\127.0.0.1\c$) · 드라이브 상대(C:x) · 뿌리 상대(\x) = 거절(파일 시스템을 건드리기 전 글자로). 정션 · 심볼릭 링크 = 보고서 폴더 · 저장소
+    #   둘 다 실제 경로로 풀어(Resolve-RgRealPath) 대조 · 못 풀면 거절.
     param([AllowNull()][string]$Dir, [Parameter(Mandatory)][string]$RepoRoot)
     if ([string]::IsNullOrWhiteSpace($Dir)) { return $false }
     try {
-        if (-not [System.IO.Path]::IsPathRooted($Dir)) { return $false }
-        return -not (Test-RgUnderDir -Path ([System.IO.Path]::GetFullPath($Dir).TrimEnd('\') + '\') -Dir $RepoRoot)
+        if ($Dir.Replace('/', '\') -notmatch '\A[A-Za-z]:\\') { return $false }
+        $real = Resolve-RgRealPath -Path $Dir
+        $repo = Resolve-RgRealPath -Path $RepoRoot
+        if ($null -eq $real -or $null -eq $repo) { return $false }
+        return -not (Test-RgUnderDir -Path ($real.TrimEnd('\') + '\') -Dir $repo)
     } catch {
         Write-Warning ("보고서 폴더 경로 해석 실패({0}) — 거절" -f $_.Exception.GetType().Name)
         return $false
@@ -276,12 +344,24 @@ function Get-RgServiceInfo {
 }
 
 function Get-RgApiProcs {
-    # 설치본 폴더 하위 HitPan.API 프로세스(번호 · 하위 여부). 못 읽음 = $null.
+    # HitPan.API 프로세스(번호 · 설치본 API 실행 파일 정확 일치 여부 — (11/19 [3-V] V3) 옛: 설치본 폴더 하위). 못 읽음 = $null.
     try { return , @(& $script:H.GetApiProcesses $script:Ctx.InstallDir | Where-Object { $null -ne $_ }) }
     catch {
         Write-Verbose ("API 프로세스 못 읽음({0})" -f $_.Exception.GetType().Name)
         return $null
     }
+}
+
+function Test-RgSamePids {
+    # (11/19 [3-V] V3) S-C 끊기 직전 재확인 — 지금 설치본 API 실행 파일인 번호 집합 = 기준 응답 때 모은 번호 집합인가(번호 · 경로).
+    # 못 읽음 · 하나라도 다름(사라짐 · 새로 생김 · 경로 바뀜) = 아님 → 부르는 쪽이 끊지 않고 멈춤.
+    param([int[]]$OldPids)
+    $now = Get-RgApiProcs
+    if ($null -eq $now) { return $false }
+    $cur = @(@($now | Where-Object { $_.UnderInstall -eq $true } | ForEach-Object { [int]$_.Pid }) | Sort-Object)
+    $old = @(@($OldPids) | Sort-Object)
+    if ($old.Count -eq 0) { return $false }
+    return (($cur -join ',') -eq ($old -join ','))
 }
 
 function Add-RgHistory {
@@ -432,7 +512,7 @@ function Write-RgHandoff {
     # 인계 쪽지(§5-4) + 사람이 할 일 안내(§3-3) — 정지 자리에서 화면 · 보고서 둘 다. 비밀 · 경로 · 명령줄 0.
     param([Parameter(Mandatory)]$V, [Parameter(Mandatory)]$Cat, [int]$CooldownCount)
     $last = if ($V.LastState) { [string]$V.LastState } else { '관측 없음' }
-    $t0 = if ($null -ne $V.T0Utc) { Format-CgUtc -Value $V.T0Utc } else { '없음(멈춤 관측 전)' }
+    $t0 = if ($null -ne $V.T0Utc) { Format-CgUtc -Value $V.T0Utc } elseif ($V.Aborted) { '모름(관측 중단 · 마지막 판정 없음)' } else { '없음(멈춤 관측 전)' }
     $el = if ($null -ne $V.ElapsedSec) { [string]$V.ElapsedSec } else { '0' }
     Write-RgLine ('  ── 인계 쪽지(§5-4) · {0} [{1}]' -f $V.Id, $V.Label)
     Write-RgLine ('  대상: {0}' -f (Get-RgTargetName -Cat $Cat))
@@ -460,10 +540,88 @@ function Write-RgResult {
 }
 
 function Format-RgWho {
+    # 손 기록 「누가」 — 글자 · 숫자 · 공백 · ._()- 1~40자.
+    # (11/19 [3-V] V9) 구분 글자(공백 · ._()-)를 뺀 나머지가 16자 넘는 16진 꼴(토큰 · 해시 · GUID 꼴) = 거절(화면 · 보고서에 안 옮김 · 「손 기록 없음」).
     param([AllowNull()] $Who)
     $w = ([string]$Who).Trim()
     if ($w -notmatch '\A[\p{L}\p{N} ._()\-]{1,40}\z') { return $null }
+    $compact = $w -replace '[ ._()\-]', ''
+    if ($compact.Length -gt 16 -and $compact -match '\A[0-9A-Fa-f]+\z') { return $null }
     return $w
+}
+
+function New-RgAbortVerdict {
+    # (11/19 [3-V] V1) 관측 중단 결과 — 모듈 판정 칸 모양 그대로(Get-Summary 가 읽는 칸) · 모듈을 부르지 않는다(모듈 예외로 빠졌을 수도 있어서).
+    # 자동 = 측정불가(관측 중단) · 반자동 = 실패(관측 중단). 끊기 보냄 · 대상 상태 불명 · 인계 · 그 자리 정지 = 전부 참(fail-closed).
+    param([Parameter(Mandatory)]$Cat, [AllowNull()][string]$Last, [AllowNull()]$Elapsed)
+    $semi = ($Cat.Kind -eq 'semi')
+    return [pscustomobject][ordered]@{
+        Id = $Cat.Id; Label = $Cat.Label
+        Column = $(if ($semi) { '반자동' } else { '측정불가' }); Reason = '관측 중단'; Seconds = $null
+        Display = $(if ($semi) { '반자동 — 실패(관측 중단)' } else { '측정불가(관측 중단)' })
+        SdState = $(if ($semi) { '실패' } else { $null }); Executed = $true; CutIssued = $true; StateUnknown = $true; Handoff = $true; Halt = $true
+        Actor = $null; ActorDetail = $null; Notes = @(); T0Utc = $null
+        LastState = $(if ($Last) { $Last + '(관측 중단 직전)' } else { '관측 없음(관측 중단)' }); ElapsedSec = $Elapsed; SampleCount = 0; Aborted = $true
+    }
+}
+
+function Write-RgEnd {
+    # 종합 · 보고서 — 정상 끝 · 관측 중단 공통(한 번만). 보고서 파일을 화면보다 먼저 쓴다. 관측 중단이면 종료 코드 1 고정(fail-closed).
+    param([Parameter(Mandatory)]$Results)
+    $script:RgEndDone = $true
+    $text = @()
+    try {
+        $sum = Get-Summary -Results $Results.ToArray()
+        $text = @($sum.Text)
+        $script:RgExit = [int]$sum.ExitCode
+    } catch {
+        Write-Warning ("종합 못 냄({0}) — 종료 코드 1" -f $_.Exception.GetType().Name)
+        $text = @('미합격 — 종합 못 냄 · 시험 종료 아님 · 인계 필요(§5-4)')
+        $script:RgExit = 1
+    }
+    if ($script:RgAborted) { $script:RgExit = 1 }
+    $name = $null
+    if ($script:RgWriteFiles) {
+        $ts = [datetime]::UtcNow
+        try { $ts = & $script:H.Now } catch { Write-Verbose ("시계 못 읽음({0}) — 보고서 이름은 이 PC 시계" -f $_.Exception.GetType().Name) }
+        $name = 'routine-pc-{0}.txt' -f ([datetime]$ts).ToString("yyyyMMdd'T'HHmmss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        $body = (@($text) + @('') + $script:RgLog.ToArray()) -join "`r`n"
+        try { [System.IO.File]::WriteAllText((Join-Path $script:RgReportDir $name), $body + "`r`n", (New-Object System.Text.UTF8Encoding($true))) }
+        catch {
+            Write-Warning ("보고서 쓰기 실패({0}) — 화면 출력이 유일한 기록" -f $_.Exception.GetType().Name)
+            $name = $null
+        }
+    }
+    Write-Host ''
+    foreach ($l in $text) { Write-Host $l }
+    if ($name) { Write-Host ('보고서: {0}(보고서 폴더)' -f $name) }
+}
+
+function Complete-RgAbort {
+    # (11/19 [3-V] V1) 건 순회가 정상 끝 없이 빠짐(예외 · Ctrl+C) — 건 순회 finally 에서만 부른다.
+    # 끊기 뒤 · 그 건 끝 전이면: 실행 기록(아직이면) · 결과 = 관측 중단 · 인계 쪽지(대상 상태 불명 경고 포함). 남은 건 = 미실행(앞 건 정지).
+    # 종합 · 보고서는 여기서 바로 쓴다(Ctrl+C 면 스크립트 끝 줄까지 가지 않음).
+    param([Parameter(Mandatory)]$Results, [Parameter(Mandatory)]$Catalog)
+    $script:RgAborted = $true
+    $kind = if ($script:RgAbortKind) { '예외 ' + $script:RgAbortKind } else { '중단 신호(Ctrl+C 등)' }
+    Write-RgLine ('  관측 중단: 정상 끝 없이 빠짐({0}) · 그 자리 정지(R2) · 다음 건은 끊지 않음' -f $kind)
+    $f = $script:RgInFlight
+    $script:RgInFlight = $null
+    $done = @{}
+    foreach ($x in $Results) { if ($null -ne $x -and $x.Id) { $done[[string]$x.Id] = $true } }
+    if ($null -ne $f) {
+        if (-not $f.HistDone) { Add-RgHistory -Utc $f.StartUtc -Key $f.Cat.Key }
+        $v = New-RgAbortVerdict -Cat $f.Cat -Last $f.Last -Elapsed $f.Elapsed
+        if (-not $done.ContainsKey([string]$f.Cat.Id)) { $Results.Add($v); $done[[string]$f.Cat.Id] = $true }
+        Write-RgResult -V $v
+        Write-RgHandoff -V $v -Cat $f.Cat -CooldownCount ([int]$f.Cooldown)
+    }
+    foreach ($cat in @($Catalog)) {
+        if ($done.ContainsKey([string]$cat.Id)) { continue }
+        $Results.Add((Get-ScenarioVerdict -Id $cat.Id -Observation @{ Skip = '앞 건 정지' }))
+        Write-RgLine ('{0} [{1}] 미실행(앞 건 정지)' -f $cat.Id, $cat.Label)
+    }
+    Write-RgEnd -Results $Results
 }
 
 # ─────────────────────────────────────────────── 한 건 — 자동(S-A · S-B · S-C)
@@ -508,9 +666,20 @@ function Invoke-RgAuto {
     # ② 끊기 — 오류를 삼키지 않는다
     $oldPids = @()
     if ($Cat.Kind -eq 'service') { $obs.PreSvcPid = (Get-RgServiceInfo -Name $Cat.Target).Pid }
-    else { $oldPids = @($b.OldPids) }
+    else {
+        $oldPids = @($b.OldPids)
+        # (11/19 [3-V] V3) 끊기 직전 재확인 — 기준 응답 때 모은 번호가 지금도 그대로 설치본 API 실행 파일인가(번호 · 경로). 다르면 끊지 않고 그 자리 정지.
+        if (-not (Test-RgSamePids -OldPids ([int[]]$oldPids))) {
+            Write-RgLine '  끊기 직전 재확인: 프로세스 번호 · 경로가 기준 때와 다름 · 끊지 않음'
+            $res.V = Get-ScenarioVerdict -Id $id -Observation @{ Baseline = @{ Ok = $false; Reason = '인스턴스 불일치' } }
+            return $res
+        }
+        Write-RgLine '  끊기 직전 재확인: 기준 때와 같음(번호 · 경로)'
+    }
     $cutUtc = & $script:H.Now
     $obs.CutUtc = $cutUtc
+    # (11/19 [3-V] V1) 여기부터 이 건 끝(판정 · 인계 쪽지)까지 = 진행 중 — 어떤 끝이든(예외 · Ctrl+C) 건 순회 finally 가 인계 쪽지 · 경고 · 실행 기록 · 보고서
+    $script:RgInFlight = @{ Cat = $Cat; StartUtc = $cutUtc; HistDone = $false; Cooldown = $res.Cooldown; Last = $null; Elapsed = 0 }
     $okCut = $false
     try {
         if ($Cat.Kind -eq 'service') { $null = & $script:H.StopService $Cat.Target }
@@ -521,6 +690,7 @@ function Invoke-RgAuto {
     }
     $obs.Cut = @{ Issued = $true; Ok = $okCut }
     Add-RgHistory -Utc $cutUtc -Key $Cat.Key
+    $script:RgInFlight.HistDone = $true
     Write-RgLine ('  끊기: {0} · {1}' -f $(if ($okCut) { '명령 보냄' } else { '명령 실패' }), (Format-CgUtc -Value $cutUtc))
 
     # ③ 멈춤 관측 · ④ 복구 대기 — 1초 간격 · 회차마다 -Partial 판정 · 정해지면 멈춤
@@ -532,6 +702,9 @@ function Invoke-RgAuto {
             $sm = Get-RgSample -Cat $Cat -CutUtc $cutUtc -OldPids ([int[]]$oldPids)
             $samples.Add($sm)
             $obs.Samples = $samples.ToArray()
+            # (11/19 [3-V] V1) 관측 중단 때 인계 쪽지에 쓸 마지막 관측 상태 · 경과
+            $script:RgInFlight.Last = $(if ($Cat.Kind -eq 'service') { $(if ($sm.Svc) { [string]$sm.Svc } else { '서비스 상태 못 읽음' }) } elseif ($sm.OldAlive) { '끊기 전 프로세스 남음' } else { '끊기 전 프로세스 없음' })
+            $script:RgInFlight.Elapsed = [math]::Round([double]$sm.T)
             $pv = Get-ScenarioVerdict -Id $id -Observation $obs -Partial
             if ($null -ne $pv) { break }
             if ([double]$sm.T -ge $cap) { break }
@@ -579,6 +752,8 @@ function Invoke-RgSemi {
     }
 
     # 손 안내 → 손 기록(누가 · 언제). 도구는 무효화 · 되살림을 하지 않는다(읽기 · 관측만).
+    # (11/19 [3-V] V1) 손 안내부터 이 건 끝까지 = 진행 중(사람이 안내를 보고 무효화한 뒤 손 기록 입력 중에 Ctrl+C 를 눌러도 인계 쪽지가 남게)
+    $script:RgInFlight = @{ Cat = $Cat; StartUtc = (& $script:H.Now); HistDone = $false; Cooldown = $res.Cooldown; Last = $null; Elapsed = 0 }
     Write-RgLine '  손 안내: 정해진 절차대로 시험 PC 터널 자격증명을 사람이 무효화한 뒤, 한 사람(역할 · 이름)을 적는다. 도구는 무효화 · 되살림을 하지 않는다.'
     $hand = $null
     try { $hand = & $script:H.HandRecord } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
@@ -592,6 +767,7 @@ function Invoke-RgSemi {
     }
     $obs.Hand = @{ Who = $who; Utc = $handUtc }
     Add-RgHistory -Utc $handUtc -Key $Cat.Key
+    $script:RgInFlight.HistDone = $true
     Write-RgLine ('  손 기록: {0} · {1}' -f $who, (Format-CgUtc -Value $handUtc))
 
     # (11/19 [3-V] A3) 관측 시작 시각 — 손 기록 바로 뒤 · 첫 회차 전. 모듈이 「손 기록 ≤ 관측 시작 ≤ 손 기록 + 2초」 로 관측 창을 손 기록에 묶는다.
@@ -610,6 +786,8 @@ function Invoke-RgSemi {
         $cr = Get-RgControl -AddrOk ([bool]$tg.AddrOk)
         $rounds.Add(@{ T = $t; Target = @{ Ok = $tOk }; Control = $cr; Skew = ($cStart - $tEnd).TotalSeconds })
         $obs.Rounds = $rounds.ToArray()
+        $script:RgInFlight.Last = $(if ($tOk) { '외부 응답 맞음' } else { '외부 응답 실패' })
+        $script:RgInFlight.Elapsed = [math]::Round([double]$t)
         $pv = Get-ScenarioVerdict -Id $id -Observation $obs -Partial
         if ($null -ne $pv) { break }
         if ($t -ge $cap) { break }
@@ -686,37 +864,40 @@ if (-not $guard.Allowed) {
         foreach ($cat in $catalog) { $results.Add((Get-ScenarioVerdict -Id $cat.Id -Observation @{ Skip = $skip })) }
     } else {
         $writeFiles = $true
+        $script:RgWriteFiles = $true
+        $script:RgReportDir = $ReportDir
         $script:HistPath = Join-Path $ReportDir 'run-history.jsonl'
         $halted = $false
-        foreach ($cat in $catalog) {
-            if ($halted) {
-                $results.Add((Get-ScenarioVerdict -Id $cat.Id -Observation @{ Skip = '앞 건 정지' }))
-                Write-RgLine ('{0} [{1}] 미실행(앞 건 정지)' -f $cat.Id, $cat.Label)
-                continue
+        # (11/19 [3-V] V1) 건 순회 전체 try/finally — 정상 끝($loopEnded) 없이 빠지면(예외 · Ctrl+C) finally 가 Complete-RgAbort:
+        #   끊기 뒤면 인계 쪽지 · 대상 상태 불명 경고 · 실행 기록 · 보고서 · 종료 코드 1. catch 는 예외 종류만 적는다(Ctrl+C 땐 catch 안 돎).
+        $loopEnded = $false
+        try {
+            foreach ($cat in $catalog) {
+                if ($halted) {
+                    $results.Add((Get-ScenarioVerdict -Id $cat.Id -Observation @{ Skip = '앞 건 정지' }))
+                    Write-RgLine ('{0} [{1}] 미실행(앞 건 정지)' -f $cat.Id, $cat.Label)
+                    continue
+                }
+                if ($cat.Kind -eq 'semi') { $r = Invoke-RgSemi -Cat $cat } else { $r = Invoke-RgAuto -Cat $cat }
+                $v = $r.V
+                $results.Add($v)
+                Write-RgResult -V $v
+                if ($v.Handoff) { Write-RgHandoff -V $v -Cat $cat -CooldownCount $r.Cooldown }
+                $script:RgInFlight = $null   # (V1) 이 건 정상 끝 — 판정 · 인계 쪽지까지 남김
+                if ($v.Halt -or ($cat.Kind -eq 'semi' -and $v.Handoff)) {
+                    Write-RgLine '  그 자리 정지(R2) · 다음 건은 끊지 않음'
+                    $halted = $true
+                }
             }
-            if ($cat.Kind -eq 'semi') { $r = Invoke-RgSemi -Cat $cat } else { $r = Invoke-RgAuto -Cat $cat }
-            $v = $r.V
-            $results.Add($v)
-            Write-RgResult -V $v
-            if ($v.Handoff) { Write-RgHandoff -V $v -Cat $cat -CooldownCount $r.Cooldown }
-            if ($v.Halt -or ($cat.Kind -eq 'semi' -and $v.Handoff)) {
-                Write-RgLine '  그 자리 정지(R2) · 다음 건은 끊지 않음'
-                $halted = $true
-            }
+            $loopEnded = $true
+        } catch {
+            $script:RgAbortKind = $_.Exception.GetType().Name
+            Write-Warning ("러너 진행 중 예외({0}) — 그 자리 정지 · 인계 쪽지 · 보고서는 아래" -f $script:RgAbortKind)
+        } finally {
+            if (-not $loopEnded) { Complete-RgAbort -Results $results -Catalog $catalog }
         }
     }
 }
 
-$sum = Get-Summary -Results $results.ToArray()
-Write-Host ''
-foreach ($l in @($sum.Text)) { Write-Host $l }
-
-if ($writeFiles) {
-    $name = 'routine-pc-{0}.txt' -f (& $script:H.Now).ToString("yyyyMMdd'T'HHmmss'Z'", [Globalization.CultureInfo]::InvariantCulture)
-    $body = (@($sum.Text) + @('') + $script:RgLog.ToArray()) -join "`r`n"
-    try {
-        [System.IO.File]::WriteAllText((Join-Path $ReportDir $name), $body + "`r`n", (New-Object System.Text.UTF8Encoding($true)))
-        Write-Host ('보고서: {0}(보고서 폴더)' -f $name)
-    } catch { Write-Warning ("보고서 쓰기 실패({0}) — 화면 출력이 유일한 기록" -f $_.Exception.GetType().Name) }
-}
-exit ([int]$sum.ExitCode)
+if (-not $script:RgEndDone) { Write-RgEnd -Results $results }
+exit ([int]$script:RgExit)
