@@ -27,6 +27,10 @@
 #     ① 모든 하위 명령의 저장소 경로 = guard 와 같은 식 한 줄(장치 폴더 두 단계 위 · 물리 경로) — git rev-parse --show-toplevel 에 묻지 않음 · 그 뒤 git 호출은 -C "$REPO" 그대로
 #     ② guard G5 에 `.git` 이름 항목 단언 — G 범위(두 경로) 안 모든 깊이 + G 범위 경로마다 저장소 뿌리까지 사이 폴더 바로 아래 · 하나라도 있으면(못 읽어도) 빨강
 #       git 에 묻지 않고 디렉터리 항목을 직접 읽음(node · 링크를 따라가지 않음) · 원자료 새 칸 dotgit_none(참거짓) · dotgit_found(경로 이름만) · 외부 명령 새 이름 0
+#   v5 별건 A K2⁷([3-V] K2⁶ 재셈 A1 · A3 · CTO 결-A12 A12-1 · A12-2 · A12-4 — 장치 폴더 · 그 위 폴더를 통째 링크로 바꾸면 위 ② 가 안으로 안 내려감):
+#     ① guard G5 의 같은 node 가 G 범위 두 경로와 그 사슬 폴더(저장소 뿌리 아래 · G_TREE 에서 계산)를 lstat 해 링크면(개발 PC 정션 포함) 빨강 · 못 읽어도 빨강
+#       위 ② 「링크를 따라가지 않음」 은 마지막 이름만이다 · 링크 경로 이름 = 기존 tree_changed 칸(K2⁵ 종류 대조와 같은 뜻) · 원자료 새 칸 0 · 외부 명령 새 이름 0
+#     ② tree.err 비우기를 그 node 앞으로 — node 가 못 읽어 실패한 사유가 작업 폴더 진단 파일에 남음(판정 · 원자료 · 올림 · 단계 로그 무변)
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -407,14 +411,25 @@ NODE
   #     저장소 뿌리 자신의 .git 은 대조 밖(진짜 저장소) · 하나라도 있으면 빨강 · 못 읽어도 빨강(node 실패 = dok 0)
   #     원자료 = dotgit_none 참거짓 · dotgit_found 경로 이름만(저장소 뿌리 기준 · 50개까지 · 빨강일 때만) · 목록 파일 = "$a"(작업 폴더 · 원자료 0)
   #     외부 명령 = node(G1 · 원자료 쓰기와 같은 이름 · G3 바이트 확인 뒤) — 새 이름 0 · 환경 변수 내보내기 0
+  #   v5 별건 A K2⁷([3-V] K2⁶ 재셈 A1 · CTO A12-2): 위 「링크를 따라가지 않음」 은 마지막 이름만이다 — 사이 폴더 · G 범위 뿌리가 링크면 lstat · readdir 은 그 링크를 따라간다
+  #     → 같은 node 가 G 범위 경로마다 저장소 뿌리 아래 사슬(tools · tools/hqa-s4-measure · .github · .github/workflows · 워크플로 파일 자신)을 lstat 해 링크면(개발 PC 정션 포함) link.txt(작업 폴더 · 원자료 0)에
+  #     그 이름은 git 대조 뒤 tree.txt 에 더함(이미 있으면 한 번 · K2⁵ 종류 대조와 같은 뜻 · 원자료 = tree_changed · dotgit_found 에는 `.git` 이름만) · 없음(ENOENT) = 링크 아님 · 그 밖 못 읽음 = node 실패 = 빨강
+  #     외부 명령 = node · grep(이미 G5 셈 안) — 새 이름 0 · 환경 변수 내보내기 0 · 원자료 새 칸 0
+  #   v5 별건 A K2⁷([3-V] K2⁶ 재셈 A3 · CTO A12-4): tree.err 비우기를 node 앞으로 옮김(node 실패 사유가 남음) — 판정 · 원자료 · 올림 · 단계 로그 무변
+  #     옛 글자(K2⁶) = if node - "$REPO" "$a/dotgit.txt" "${G_TREE[@]}" 2>> "$a/tree.err" <<'NODE' · const [repo, out, ...scope] = process.argv.slice(2);
+  #                   local idx; idx="$(cd "$a" && pwd -P)/dev.idx"; rm -f "$idx"; : > "$a/tree.txt"; : > "$a/tree.err"
   if [ $stop = 0 ]; then
     devref=$(g_devref); hok=0; fok=0; rok=0; dok=0
-    if node - "$REPO" "$a/dotgit.txt" "${G_TREE[@]}" 2>> "$a/tree.err" <<'NODE'
+    : > "$a/tree.err"
+    if node - "$REPO" "$a/dotgit.txt" "$a/link.txt" "${G_TREE[@]}" 2>> "$a/tree.err" <<'NODE'
 const fs = require('fs');
 const path = require('path');
-const [repo, out, ...scope] = process.argv.slice(2);
+const [repo, out, linkOut, ...scope] = process.argv.slice(2);
 const found = [];
+const links = [];
 const has = (rel) => { try { fs.lstatSync(path.join(repo, rel)); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
+// K2⁷ A12-2: 저장소 뿌리 아래 사슬의 한 이름이 링크인가(lstat = 그 이름 자신 · 개발 PC 정션 포함) — 없음 = 아님 · 그 밖 못 읽음 = 던짐(빨강)
+const isLink = (rel) => { try { return fs.lstatSync(path.join(repo, rel)).isSymbolicLink(); } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
 const walk = (rel) => {
   for (const d of fs.readdirSync(path.join(repo, rel), { withFileTypes: true })) {
     const r = rel + '/' + d.name;
@@ -424,16 +439,18 @@ const walk = (rel) => {
 };
 for (const p of scope) {
   const parts = p.split('/');
+  for (let i = 1; i <= parts.length; i++) { const r = parts.slice(0, i).join('/'); if (isLink(r)) links.push(r); }
   for (let i = 1; i < parts.length; i++) { const r = parts.slice(0, i).join('/') + '/.git'; if (has(r)) found.push(r); }
   let st = null;
   try { st = fs.lstatSync(path.join(repo, p)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (st && st.isDirectory()) walk(p);
 }
+fs.writeFileSync(linkOut, Array.from(new Set(links)).sort().map((r) => r + '\n').join(''));
 fs.writeFileSync(out, Array.from(new Set(found)).sort().map((r) => r + '\n').join(''));
 NODE
     then [ -s "$a/dotgit.txt" ] || dok=1; fi
     dev=$(g_dev) || { dev=""; t1=1; }
-    local idx; idx="$(cd "$a" && pwd -P)/dev.idx"; rm -f "$idx"; : > "$a/tree.txt"; : > "$a/tree.err"
+    local idx; idx="$(cd "$a" && pwd -P)/dev.idx"; rm -f "$idx"; : > "$a/tree.txt"
     if [ -n "$dev" ] && GIT_INDEX_FILE="$idx" git --no-replace-objects -C "$REPO" read-tree "$dev" 2>> "$a/tree.err"; then
       GIT_INDEX_FILE="$idx" git --no-replace-objects -C "$REPO" diff --name-only "$dev" -- "${G_TREE[@]}" > "$a/tree.txt" 2>> "$a/tree.err" || t1=1
       GIT_INDEX_FILE="$idx" git -C "$REPO" ls-files --others -- "${G_TREE[@]}" >> "$a/tree.txt" 2>> "$a/tree.err" || t2=1
@@ -451,6 +468,8 @@ NODE
         done < "$a/dev-tree.z"
       else t1=1; fi
     fi
+    # K2⁷ A12-2: 링크 이름을 tree.txt 에 더함(이미 있으면 한 번 · 위 종류 대조와 같은 꼴) — node 가 실패해 link.txt 가 없으면 dok 0 으로 이미 빨강
+    if [ -f "$a/link.txt" ]; then while IFS= read -r f; do grep -qxF -- "$f" "$a/tree.txt" || printf '%s\n' "$f" >> "$a/tree.txt"; done < "$a/link.txt"; fi
     hd=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q HEAD 2>> "$a/tree.err") || hd=""
     if [ -n "$dev" ]; then dv=$(git --no-replace-objects -C "$REPO" rev-parse --verify -q "$dev^{commit}" 2>> "$a/tree.err") || dv=""; fi
     if [ -n "$hd" ] && [ "$hd" = "$dv" ]; then hok=1; fi
