@@ -1,0 +1,8 @@
+{
+  "name": "hqa-s4-pw",
+  "private": true,
+  "description": "v5 별건 A — 측정 런 자동화 패키지 잠금(판 고정 1.62.1 · 설치 = npm ci --ignore-scripts)",
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}
