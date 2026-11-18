@@ -137,11 +137,15 @@ public static class PdfFacts
         p["images"] = images;
 
         var draws = new JsonArray();
+        // 🔴 3차(11/19 · [4] F3 · 시안 §2-2 「머리 아래 선」) — 가로 선 사실(rules): 그은 선 = 선 굵기 × CTM 배율 · 채운 얇은 사각 = 높이.
+        //   판정 0(머리 아래 선이 어느 것인지 · 굵기 기준은 judge-print.js). 해석 실패면 rules 를 싣지 않는다(판정기 = 미측정).
+        var rules = new JsonArray();
         try
         {
-            var walker = new ContentWalker(doc, draws);
+            var walker = new ContentWalker(doc, draws, rules, hPt);
             walker.WalkPage(page.Dictionary);
             p["drawsOk"] = true;
+            p["rules"] = rules;
         }
         catch (Exception ex)
         {
@@ -160,18 +164,97 @@ public static class PdfFacts
         private readonly PdfDocument _doc;
         private readonly JsonArray _draws;
 
+        private readonly JsonArray _rules;
+        private readonly double _pageH;
+        private const int MaxRules = 5000;
+
         private sealed class Gs
         {
             public double Ca = 1.0;
             public double Group = 1.0;
             public bool ExtSMask;
-            public Gs Clone() => new() { Ca = Ca, Group = Group, ExtSMask = ExtSMask };
+            // 🔴 3차 — 선 사실용: CTM(a b c d e f) · 선 굵기(w)
+            public double[] Ctm = { 1, 0, 0, 1, 0, 0 };
+            public double Lw = 1.0;
+            public Gs Clone() => new() { Ca = Ca, Group = Group, ExtSMask = ExtSMask, Ctm = (double[])Ctm.Clone(), Lw = Lw };
         }
 
-        public ContentWalker(PdfDocument doc, JsonArray draws)
+        // ⬛ [낡은 줄 · 2차] public ContentWalker(PdfDocument doc, JsonArray draws) { _doc = doc; _draws = draws; }
+        public ContentWalker(PdfDocument doc, JsonArray draws, JsonArray rules, double pageH)
         {
             _doc = doc;
             _draws = draws;
+            _rules = rules;
+            _pageH = pageH;
+        }
+
+        /// <summary>PDF 행렬 곱 — 결과 = m × n(m 이 먼저 적용).</summary>
+        private static double[] Mul(double[] m, double[] n) => new[]
+        {
+            (m[0] * n[0]) + (m[1] * n[2]), (m[0] * n[1]) + (m[1] * n[3]),
+            (m[2] * n[0]) + (m[3] * n[2]), (m[2] * n[1]) + (m[3] * n[3]),
+            (m[4] * n[0]) + (m[5] * n[2]) + n[4], (m[4] * n[1]) + (m[5] * n[3]) + n[5],
+        };
+
+        private static (double X, double Y) Tx(double[] c, double x, double y) => ((c[0] * x) + (c[2] * y) + c[4], (c[1] * x) + (c[3] * y) + c[5]);
+
+        private static bool Num(object o, out double v)
+        {
+            v = 0;
+            return o is string s && double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v);
+        }
+
+        private static double[]? Nums(List<object> ops, int n)
+        {
+            if (ops.Count < n) return null;
+            var r = new double[n];
+            for (var i = 0; i < n; i++)
+            {
+                if (!Num(ops[ops.Count - n + i], out r[i])) return null;
+            }
+            return r;
+        }
+
+        /// <summary>쪽 공간(pt · 왼쪽 아래 원점) → 종이 왼쪽 위 원점 mm 의 가로 선 1개를 적는다.</summary>
+        private void AddRule(double x1, double x2, double yPt, double thickPt, string how)
+        {
+            if (_rules.Count >= MaxRules) return;
+            _rules.Add(new JsonObject
+            {
+                ["x"] = R2(Math.Min(x1, x2) * MmPerPt),
+                ["y"] = R2((_pageH - yPt) * MmPerPt),
+                ["w"] = R2(Math.Abs(x2 - x1) * MmPerPt),
+                ["t"] = Math.Round(thickPt, 3),
+                ["how"] = how,
+            });
+        }
+
+        /// <summary>칠하기 연산자에서 모은 경로를 선 사실로 옮긴다(그은 가로 마디 · 채운 얇은 사각).</summary>
+        private void Paint(List<List<(double X, double Y)>> subs, List<bool> curved, List<((double X, double Y) A, (double X, double Y) B)> segs, Gs gs, bool stroke, bool fill)
+        {
+            if (stroke)
+            {
+                var c = gs.Ctm;
+                var scale = Math.Sqrt(Math.Abs((c[0] * c[3]) - (c[1] * c[2])));
+                foreach (var (a, b) in segs)
+                {
+                    if (Math.Abs(a.Y - b.Y) <= 0.05 && Math.Abs(b.X - a.X) >= 1) AddRule(a.X, b.X, a.Y, gs.Lw * scale, "stroke");
+                }
+            }
+            if (fill)
+            {
+                for (var i = 0; i < subs.Count; i++)
+                {
+                    if (curved[i] || subs[i].Count < 3) continue;
+                    var minX = subs[i].Min(p => p.X);
+                    var maxX = subs[i].Max(p => p.X);
+                    var minY = subs[i].Min(p => p.Y);
+                    var maxY = subs[i].Max(p => p.Y);
+                    var w = maxX - minX;
+                    var h = maxY - minY;
+                    if (h > 0 && h <= 3 && w >= 1 && w >= 3 * h) AddRule(minX, maxX, (minY + maxY) / 2, h, "fill");
+                }
+            }
         }
 
         private IToken? Res(IToken? t)
@@ -234,6 +317,40 @@ public static class PdfFacts
             var gs = start.Clone();
             var operands = new List<object>();
             var lx = new Lexer(content);
+            // 🔴 3차 — 경로 모음(선 사실용): 하위 경로 점들 · 곡선 여부 · 곧은 마디 · 지금 점 · 하위 경로 시작점
+            var subs = new List<List<(double X, double Y)>>();
+            var curved = new List<bool>();
+            var segs = new List<((double X, double Y) A, (double X, double Y) B)>();
+            (double X, double Y) cur = (0, 0);
+            (double X, double Y) startPt = (0, 0);
+            void ClearPath()
+            {
+                subs.Clear();
+                curved.Clear();
+                segs.Clear();
+            }
+            void NewSub((double X, double Y) p)
+            {
+                subs.Add(new List<(double X, double Y)> { p });
+                curved.Add(false);
+                cur = p;
+                startPt = p;
+            }
+            void LineTo((double X, double Y) p)
+            {
+                if (subs.Count == 0) NewSub(cur);
+                segs.Add((cur, p));
+                subs[^1].Add(p);
+                cur = p;
+            }
+            void ClosePath()
+            {
+                if (subs.Count > 0 && cur != startPt)
+                {
+                    segs.Add((cur, startPt));
+                    cur = startPt;
+                }
+            }
             while (lx.Next(out var kind, out var text))
             {
                 if (kind == Lexer.Kind.Operand)
@@ -245,6 +362,50 @@ public static class PdfFacts
                 {
                     case "q": stack.Push(gs.Clone()); break;
                     case "Q": if (stack.Count > 0) gs = stack.Pop(); break;
+                    case "cm":
+                        if (Nums(operands, 6) is { } cmv) gs.Ctm = Mul(cmv, gs.Ctm);
+                        break;
+                    case "w":
+                        if (Nums(operands, 1) is { } wv) gs.Lw = wv[0];
+                        break;
+                    case "m":
+                        if (Nums(operands, 2) is { } mv) NewSub(Tx(gs.Ctm, mv[0], mv[1]));
+                        break;
+                    case "l":
+                        if (Nums(operands, 2) is { } lv) LineTo(Tx(gs.Ctm, lv[0], lv[1]));
+                        break;
+                    case "c":
+                    case "v":
+                    case "y":
+                        {
+                            var n = text == "c" ? 6 : 4;
+                            if (Nums(operands, n) is { } cv)
+                            {
+                                if (subs.Count == 0) NewSub(cur);
+                                for (var k = 0; k < n; k += 2) subs[^1].Add(Tx(gs.Ctm, cv[k], cv[k + 1]));
+                                curved[^1] = true;
+                                cur = subs[^1][^1];
+                            }
+                        }
+                        break;
+                    case "h": ClosePath(); break;
+                    case "re":
+                        if (Nums(operands, 4) is { } rv)
+                        {
+                            var p0 = Tx(gs.Ctm, rv[0], rv[1]);
+                            NewSub(p0);
+                            LineTo(Tx(gs.Ctm, rv[0] + rv[2], rv[1]));
+                            LineTo(Tx(gs.Ctm, rv[0] + rv[2], rv[1] + rv[3]));
+                            LineTo(Tx(gs.Ctm, rv[0], rv[1] + rv[3]));
+                            LineTo(p0);
+                        }
+                        break;
+                    case "S": Paint(subs, curved, segs, gs, true, false); ClearPath(); break;
+                    case "s": ClosePath(); Paint(subs, curved, segs, gs, true, false); ClearPath(); break;
+                    case "f": case "F": case "f*": Paint(subs, curved, segs, gs, false, true); ClearPath(); break;
+                    case "B": case "B*": Paint(subs, curved, segs, gs, true, true); ClearPath(); break;
+                    case "b": case "b*": ClosePath(); Paint(subs, curved, segs, gs, true, true); ClearPath(); break;
+                    case "n": ClearPath(); break;
                     case "gs":
                         if (operands.Count > 0 && operands[^1] is string gname && gname.StartsWith('/'))
                         {
@@ -319,7 +480,14 @@ public static class PdfFacts
             else if (subtype == "Form")
             {
                 var formRes = Dict(Get(d, "Resources")) ?? res;
-                var inner = new Gs { Ca = 1.0, Group = gs.Ca * gs.Group, ExtSMask = gs.ExtSMask };
+                // ⬛ [낡은 줄 · 2차] var inner = new Gs { Ca = 1.0, Group = gs.Ca * gs.Group, ExtSMask = gs.ExtSMask };
+                // 🔴 3차 — 양식 /Matrix × 지금 CTM · 선 굵기 이어받음(선 사실용)
+                var fm = new double[] { 1, 0, 0, 1, 0, 0 };
+                if (Get(d, "Matrix") is ArrayToken ma && ma.Data.Count == 6)
+                {
+                    for (var i = 0; i < 6; i++) fm[i] = Res(ma.Data[i]) is NumericToken nt ? nt.Data : fm[i];
+                }
+                var inner = new Gs { Ca = 1.0, Group = gs.Ca * gs.Group, ExtSMask = gs.ExtSMask, Ctm = Mul(fm, gs.Ctm), Lw = gs.Lw };
                 Walk(formRes, Decode(xo), inner, depth + 1, $"{where}>{name}");
             }
         }

@@ -36,11 +36,19 @@ public static class Program
 
     private static int pass;
     private static int fail;
+    private static int unmeasured;
 
     private static void Check(string id, bool ok, string got)
     {
         if (ok) pass++; else fail++;
         Console.WriteLine($"{(ok ? "🟢 PASS" : "🔴 FAIL")} {id} — {got}");
+    }
+
+    /// <summary>🔴 3차([4] F7) — 잰 것이 아닌 행(예: 이 잡 qpdf 0 의 ⒞)은 통과로 세지 않고 「미측정」 으로 따로 센다(실패도 아님).</summary>
+    private static void Unmeasured(string id, string got)
+    {
+        unmeasured++;
+        Console.WriteLine($"⚪ 미측정 {id} — {got}");
     }
 
     private static int SelfTest(string work)
@@ -96,7 +104,10 @@ public static class Program
         {
             var r = row!.AsObject();
             var v = r["validity"]?.GetValue<string>() ?? "?";
-            Check($"T4 표본 {r["id"]}", v != "무효", $"유효={v} · ⒜={r["a"]} · ⒝={r["b"]} · ⒞={r["c"]} · {r["validityWhy"]}");
+            // ⬛ [낡은 줄 · 2차] Check($"T4 표본 {r["id"]}", v != "무효", …); — 「미측정(이 잡 qpdf 0)」 도 PASS 로 셌다([4] F7)
+            var line = $"유효={v} · ⒜={r["a"]} · ⒝={r["b"]} · ⒞={r["c"]} · {r["validityWhy"]}";
+            if (v.StartsWith("미측정", StringComparison.Ordinal)) Unmeasured($"T4 표본 {r["id"]}", line);
+            else Check($"T4 표본 {r["id"]}", v != "무효", line);
         }
 
         // T5 실효 불투명도 양성 대조(개발명세서 §3 ① · 설계 §1-3 ① ⓒ) — 손으로 짠 PDF:
@@ -140,7 +151,20 @@ public static class Program
             && p4f["ok"]?.GetValue<bool>() == true && p4f["encrypted"]?.GetValue<bool>() == false && p4Word && NameScan.DecodedNames(p4).ContainsKey("Encrypt"),
             $"/Filter {NameScan.RawCount(p4, "/Filter")} · 본문 글자 {NameScan.RawCount(p4, "(/Encrypt) Tj")} · 열림 {p4f["ok"]} · 암호 {p4f["encrypted"]} · 낱말 {p4Word}");
 
-        Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail}");
+        // T7 선 사실(3차 · [4] F3 · 스타일 「머리 아래 선」 굵기 재료) — 손으로 짠 PDF 의 가로 선 5개(그은 선 · 채운 얇은 사각 · CTM 2배 · 상자 가로 마디 2)
+        //   기대(y mm · 굵기 pt): 30.00 · 1.5 / 31.84 · 0.5 / 42.33 · 0.75 / 70.56 · 0.5 / 105.83 · 0.5 · 높이 100pt 채움 = 선 아님
+        var t7 = PdfFacts.Read(HandPdf.RuleProbe());
+        var t7Rules = t7["pages"]?[0]?["rules"]?.AsArray() ?? new JsonArray();
+        var got7 = t7Rules.Select(n => (Y: n?["y"]?.GetValue<double>() ?? -1, T: n?["t"]?.GetValue<double>() ?? -1, W: n?["w"]?.GetValue<double>() ?? -1)).OrderBy(x => x.Y).ToArray();
+        bool Has(double y, double t) => got7.Any(g => Math.Abs(g.Y - y) < 0.05 && Math.Abs(g.T - t) < 0.001 && Math.Abs(g.W - 170) < 0.1);
+        var got7Text = string.Join(" / ", got7.Select(g => $"{g.Y:0.00}·{g.T}"));
+        Check("T7a 그은 선 굵기 1.5", Has(30.00, 1.5), got7Text);
+        Check("T7b 채운 얇은 사각 = 0.5", Has(31.84, 0.5), got7Text);
+        Check("T7c CTM 2배 · 0.375 = 0.75", Has(42.33, 0.75), got7Text);
+        Check("T7d 상자 가로 마디 2 · 두꺼운 채움 = 선 아님 · 모두 5", got7.Length == 5 && Has(70.56, 0.5) && Has(105.83, 0.5), $"선 {got7.Length} · {got7Text}");
+
+        // ⬛ [낡은 줄 · 2차] Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail}");
+        Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail} · 미측정 {unmeasured}");
         return fail == 0 ? 0 : 1;
     }
 }

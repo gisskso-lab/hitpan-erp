@@ -94,6 +94,31 @@ public sealed class HandPdf
     }
 
     /// <summary>
+    /// 🔴 3차(11/19 · [4] F3) T7 선 사실 양성 대조 PDF — A4 1쪽 · 첫 줄 `1 0 0 -1 0 841.89 cm`(위 원점 뒤집기 · Skia 꼴) 뒤:
+    ///   ① 1.5 굵기 그은 선(y 85.04pt = 30.00mm · 폭 170mm) ② 0.5 높이 채운 사각(y 90~90.5pt → 가운데 31.84mm)
+    ///   ③ CTM 2배 안 0.375 굵기 그은 선(= 0.75pt · y 120pt = 42.33mm) ④ 0.5 굵기 그은 사각 상자(위 70.56 · 아래 105.83mm 가로 마디 2)
+    ///   ⑤ 높이 100pt 채운 사각(선 아님 · 음성). 기대 가로 선 5.
+    /// </summary>
+    public static byte[] RuleProbe()
+    {
+        var h = new HandPdf();
+        var catalog = h.Reserve();
+        var pages = h.Reserve();
+        var body = string.Join("\n",
+            "1 0 0 -1 0 841.89 cm",
+            "q 1.5 w 56.69 85.04 m 538.58 85.04 l S Q",
+            "56.69 90 481.89 0.5 re f",
+            "q 2 0 0 2 0 0 cm 0.375 w 28.345 60 m 269.29 60 l S Q",
+            "q 0.5 w 56.69 200 481.89 100 re S Q",
+            "56.69 400 100 100 re f");
+        var content = h.AddStream("", Encoding.ASCII.GetBytes(body));
+        var page = h.Add($"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 595.28 841.89] /Resources << >> /Contents {content} 0 R >>");
+        h.Set(pages, $"<< /Type /Pages /Kids [{page} 0 R] /Count 1 >>");
+        h.Set(catalog, $"<< /Type /Catalog /Pages {pages} 0 R >>");
+        return h.Build(catalog);
+    }
+
+    /// <summary>
     /// ⑨ P4 — 암호 아님 · 비압축 본문(내용 흐름 · `/Filter` 0)에 글자 <paramref name="text"/> 를 `( … ) Tj` 로 찍은 A4 1쪽.
     ///   글꼴 = 표준 14 Helvetica(파일에 글꼴 흐름 0). 원시 바이트에 글자가 그대로 남는다.
     /// </summary>
