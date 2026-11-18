@@ -70,11 +70,14 @@ function fieldWants(i, path) {
 
 const STD_HEAD = ['품명', '수량', '공급가액']; // PdfRenderService.cs:342~346
 /** 스타일 4종 표지(시안 §2-2 · §3-3 M2) — 제목 글자 크기 · 격식 = 명조 글꼴. */
+// ⬛ [낡은 줄 · 2차] { key, titlePt, serif } 만 — [4] F3 머리 배치 · 선 굵기 · 품명 잘림 0 빠짐
+// 🔴 3차(11/19 · [4] F3 · 시안 §2-1 머리 배치 · §2-2 「머리 아래 선」 · 설계 :75 큰글씨 「품명 잘림 0」)
+//   align = 제목 자리(왼쪽 / 가운데) · rules = 머리 아래 선 굵기 pt(격식 = 이중선 굵은 1.5 + 가는 0.5) · noCut = 품명 원문 글자 전부 읽힘
 const STYLES = [
-  { key: 'basic', titlePt: 20, serif: false },
-  { key: 'formal', titlePt: 22, serif: true },
-  { key: 'simple', titlePt: 18, serif: false },
-  { key: 'large', titlePt: 24, serif: false },
+  { key: 'basic', titlePt: 20, serif: false, align: 'left', rules: [1] },
+  { key: 'formal', titlePt: 22, serif: true, align: 'center', rules: [1.5, 0.5] },
+  { key: 'simple', titlePt: 18, serif: false, align: 'left', rules: [0.75] },
+  { key: 'large', titlePt: 24, serif: false, align: 'left', rules: [1.5], noCut: true },
 ];
 
 /** K 경우(설계 §1-2 F2 ⑶ · F12 · 대표 08시②) — 저장 문 본문의 바뀌는 칸. K5 = PDF 양식(C9 · main 문 없음). */
@@ -163,12 +166,16 @@ function plannedCells(opts) {
     // ③(나) 스타일 4종 — 빈 A4 · 그림 0 · 좌표 0 양식 한 행의 styleKey 를 바꿔 가며(G1)
     for (const st of STYLES) {
       for (const p of docPaths) {
+        // 🔴 3차([4] F3) — 큰글씨 = 품명 잘림 0(표지 품목 두 이름) · basic 밖 3종 = 「4종 중 둘이 같은 PDF」 아님(같은 종 · 같은 입구 다른 3종과)
+        const styleChk = { kind: 'style', ...st, noCut: st.noCut ? MARK.items.map((x) => x.name) : undefined };
+        const expect = [{ kind: 'fields', fields: [{ key: 'partner_name', box: null, want: MARK.partner }] }, styleChk];
+        if (st.key !== 'basic') expect.push({ kind: 'distinctFrom', ids: STYLES.filter((x) => x.key !== st.key).map((x) => `ST-${x.key}.${t.key}.${p}`) });
         cells.push({
           id: `ST-${st.key}.${t.key}.${p}`, group: '③(나)', k: `ST-${st.key}`, type: t.key, path: p,
           tpl: { paperMode: 'plain', coords: false, bg: false, printBackground: false, styleKey: st.key },
           mainExpect: st.key === 'basic' ? '초록(회귀)' : '빨강',
           errorIsDefect: t.key === 'sales_return',
-          expect: [{ kind: 'fields', fields: [{ key: 'partner_name', box: null, want: MARK.partner }] }, { kind: 'style', ...st }],
+          expect,
         });
       }
     }
@@ -183,21 +190,27 @@ function plannedCells(opts) {
     }
   });
   // ① 워터마크 — 견적서 한 종(설정 미리보기 · 전표 미리보기 둘 다) · 켬(A) / 끔(B) · 로고 있음(가) / 지운 뒤(나)
-  const wmT = TYPES[0];
+  // ⬛ [낡은 줄 · 2차] const wmT = TYPES[0]; — 견적서 1종만([4] F2 · 작업지시서 :121 Z1 「7종 ①②③」 · :131 「7종마다 … 워터마크 켬/끔」 과 다름)
+  // 🔴 3차(11/19 · PM 「작업지시서 글자 따름」) — 7종마다 · 설정 미리보기 + 그 종의 전표 입구 전부(판매 반품 = ⓘ · ⓙ)
   const logoRef = { sha: logo.sha, quad: logo.quad, aspect: logo.aspect };
-  for (const phase of ['가', '나']) {
-    for (const on of [true, false]) {
-      for (const p of ['settings', 'doc']) {
-        const id = `WM-${phase}-${on ? 'on' : 'off'}.${wmT.key}.${p}`;
-        const expect = [];
-        if (phase === '가' && on) expect.push({ kind: 'watermark', ref: logoRef, alpha: 0.12, tol: 0.02 });
-        else expect.push({ kind: 'image', ref: logoRef, want: 'absent', neg: true });
-        if (phase === '나') expect.push({ kind: 'noWords', words: ['로고', '워터마크'], neg: true });
-        cells.push({
-          id, group: `①(${phase})`, k: `WM-${phase}-${on ? 'on' : 'off'}`, type: wmT.key, path: p,
-          tpl: { paperMode: 'plain', coords: false, bg: false, printBackground: false, showWatermark: on },
-          logoPhase: phase, mainExpect: phase === '가' ? '미확정' : '초록(정답)', expect,
-        });
+  for (const wmT of types) {
+    const wmPaths = ['settings', ...(wmT.entries ? wmT.entries.map((e) => `doc-${e}`) : ['doc'])];
+    for (const phase of ['가', '나']) {
+      for (const on of [true, false]) {
+        for (const p of wmPaths) {
+          const id = `WM-${phase}-${on ? 'on' : 'off'}.${wmT.key}.${p}`;
+          const expect = [];
+          if (phase === '가' && on) expect.push({ kind: 'watermark', ref: logoRef, alpha: 0.12, tol: 0.02 });
+          else expect.push({ kind: 'image', ref: logoRef, want: 'absent', neg: true });
+          if (phase === '나') expect.push({ kind: 'noWords', words: ['로고', '워터마크'], neg: true });
+          cells.push({
+            id, group: `①(${phase})`, k: `WM-${phase}-${on ? 'on' : 'off'}`, type: wmT.key, path: p,
+            tpl: { paperMode: 'plain', coords: false, bg: false, printBackground: false, showWatermark: on },
+            logoPhase: phase, mainExpect: phase === '가' ? '미확정' : '초록(정답)',
+            errorIsDefect: wmT.key === 'sales_return' && p !== 'settings',
+            expect,
+          });
+        }
       }
     }
   }
@@ -211,17 +224,28 @@ function plannedCells(opts) {
 /** 묶음 판정(F9 칸 쪼개기 그대로 · 묶음은 보기용 — 칸 판정을 바꾸지 않는다). */
 function compositeGroups(cells) {
   const ids = (pred) => cells.filter(pred).map((c) => c.id);
-  return [
-    { id: '①(가) 객체 확인 — 켬 A 두 길 있음 · 끔 B 두 길 없음', cells: ids((c) => c.group === '①(가)') },
-    { id: '①(나) 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)', cells: ids((c) => c.group === '①(나)') },
-  ];
+  // ⬛ [낡은 줄 · 2차] ①(가) · ①(나) 묶음 2개(견적서 1종) → 3차: 종마다 묶음(7종 × 2)
+  const out = [];
+  for (const t of TYPES) {
+    const a = ids((c) => c.group === '①(가)' && c.type === t.key);
+    const b = ids((c) => c.group === '①(나)' && c.type === t.key);
+    if (a.length) out.push({ id: `①(가) ${t.label} 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음`, cells: a });
+    if (b.length) out.push({ id: `①(나) ${t.label} 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)`, cells: b });
+  }
+  return out;
 }
 
 /** 런 전 고정 — 판독기 양성 대조 2개(F4 ⑴): main 기본 폼 견적서 · K2 양식지 설정 미리보기. */
-const POSITIVE_CONTROL = {
-  basicForm: { cell: 'WM-가-off.estimate.doc', words: ['품명', '공급가액'] },
-  preprint: { cell: 'K2.estimate.settings' },
-};
+// ⬛ [낡은 줄 · 2차] basicForm = 낱말 2개 있음만 · preprint = 그림 수 > 0 · 글자 수 > 0 만([4] F4 얕음)
+// 🔴 3차(11/19 · [4] F4 · 설계 :88) — 기본 폼 = 「품명」 · 「공급가액」 글자 + 좌표(한 줄 · 왼→오 · 쪽 안) ·
+//   K2 양식지 = 그림이 견적서 차림 그림에서 나옴(해시 · 4분면 순서) + 맞춘 칸 5 전부 상자 안 글자(설정 미리보기 = 견본 값)
+const POSITIVE_CONTROL = (() => {
+  const bg = PNG.formBgPng(0, TYPES[0].mark);
+  return {
+    basicForm: { cell: 'WM-가-off.estimate.doc', words: ['품명', '공급가액'], sameRowMm: 1.5 },
+    preprint: { cell: 'K2.estimate.settings', ref: { sha: bg.sha, quad: bg.quad, aspect: bg.aspect }, fields: fieldWants(0, 'settings') },
+  };
+})();
 
 module.exports = {
   TYPES, FIELDS, MARK, STYLES, K_CASES, STD_HEAD, ROW_PITCH_MM, SHIFT_MM, BOX_TOL_MM,

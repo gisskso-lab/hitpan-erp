@@ -29,5 +29,11 @@
     "nine-a": "E1~E3 = 네이티브 열기 실패 거절 · E4~E8(E7a~c 포함) = 해석 시작 1 + ㉡ 거절 또는 허용",
     "nine-b": "E7 · E7a · E7b 허용",
     "nine-c": "거절은 나나 「해석 시작」 로그 1 · 표지 생성"
+  },
+  "expectedCodes": {
+    "about": "3차(11/19 · [4] F6 · HQA ⑦) — 위 산문을 판정기 code 꼴로 옮긴 것(검출 = 예상 code = 실제 code 글자 그대로). ⑨ code = `누락:<행,…>`(judge-print.js E_ROWS 차례). 잡은 `expect: [키]` 로 가리킴 · code null = 미고정 → 그 키를 가리키는 잡은 계획 거절(plan.js). nine-c = 설계 :263 글자에 행 집합이 없음 → R3 전 PM 고정",
+    "nine-a": { "target": "nine", "code": "누락:E4,E5,E6,E7,E7a,E7b,E7c,E8" },
+    "nine-b": { "target": "nine", "code": "누락:E7,E7a,E7b" },
+    "nine-c": { "target": "nine", "code": null }
   }
 }

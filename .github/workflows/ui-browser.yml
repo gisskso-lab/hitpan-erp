@@ -348,6 +348,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: "[장치] 런 계획 읽기 (print/plan.json → matrix)"
         id: plan
@@ -374,16 +376,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
+      # 3차(11/19 · [3-V] A5) — 패치가 건드리는 파일을 적용 전(plan.js --check-patch) · 적용 뒤(--check-paths) 두 번 본다.
+      #   측정 장치(scripts/) · 워크플로(.github/) 를 건드리면 적용 0 · 이미 바뀌었으면 되돌림 → 이 잡 전 칸 차림 불가.
       - name: "[장치] 변형 패치 적용 (없으면 건너뜀 · 실패 = 전 칸 차림 불가)"
         run: |
           set -uo pipefail
           if [ -z "$PRINT_PATCH" ]; then echo "패치 없음 — 대조판 그대로"; exit 0; fi
-          if git apply --check "$PRINT_PATCH" && git apply "$PRINT_PATCH"; then
-            echo "패치 적용 끝"
+          if node scripts/playwright-audit/ci/print/plan.js --check-patch "$PRINT_PATCH" && git apply --check "$PRINT_PATCH" && git apply "$PRINT_PATCH"; then
+            if { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | node scripts/playwright-audit/ci/print/plan.js --check-paths; then
+              echo "패치 적용 끝"
+            else
+              git checkout HEAD -- scripts .github
+              git clean -fdq -- scripts .github
+              echo "PRINT_PATCH_FAIL=1" >> "$GITHUB_ENV"
+              echo "::warning::[장치] 패치가 측정 장치 · 워크플로를 바꿈 — 되돌림 · 이 잡 전 칸 차림 불가"
+            fi
           else
             echo "PRINT_PATCH_FAIL=1" >> "$GITHUB_ENV"
-            echo "::warning::[장치] 패치 적용 실패 — 이 잡 전 칸 차림 불가"
+            echo "::warning::[장치] 패치 적용 실패 또는 거절 — 이 잡 전 칸 차림 불가"
           fi
 
       - name: "[장치] S0 난수 만들기 · 가림"
@@ -526,7 +539,7 @@ jobs:
       - name: "[장치] 판독기 짓기 · 자체시험 먼저 (PrintProbe T1~T6 · 양성 대조)"
         run: |
           set -uo pipefail
-          dotnet build scripts/playwright-audit/ci/print/tools/PrintProbe/PrintProbe.csproj -c Release -o "$RUNNER_TEMP/probe" -v q
+          dotnet build scripts/playwright-audit/ci/print/tools/PrintProbe/PrintProbe.csproj -c Release --artifacts-path "$RUNNER_TEMP/probe-art" -o "$RUNNER_TEMP/probe" -v q
           if dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" selftest "$RUNNER_TEMP/probe-selftest" > "$RUNNER_TEMP/probe-selftest.log" 2>&1; then
             echo "PRINT_PROBE_OK=1" >> "$GITHUB_ENV"
           else
@@ -551,8 +564,11 @@ jobs:
         run: |
           set -uo pipefail
           shopt -s nullglob
+          mkdir -p "$RUNNER_TEMP/print-unread"
           for f in "$PRINT_OUT"/pdfs/*.pdf; do
             dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" read "$f" "${f%.pdf}.json" || echo "판독기 실패 $(basename "$f")"
+            # 3차([3-V] A12) — 못 읽은 PDF 는 압축 흐름 안을 누출 검사가 못 본다 → 올리지 않는다(사실 JSON 은 남겨 판정 = 미측정)
+            if ! grep -q '^  "ok": true' "${f%.pdf}.json" 2>/dev/null; then mv "$f" "$RUNNER_TEMP/print-unread/"; echo "못 읽은 PDF 업로드 제외 $(basename "$f")"; fi
           done
 
       - name: "[시험] 판정 (양성 대조 먼저 · 칸별 사유)"

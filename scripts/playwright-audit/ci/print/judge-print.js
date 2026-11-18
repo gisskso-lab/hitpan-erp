@@ -65,7 +65,34 @@ function effectiveAlpha(draw) {
   return a;
 }
 
-// ── 기준 하나 재기 → { ok, why } (neg = 「없음」 기준) ──
+// 🔴 3차(11/19 · [4] F6 · HQA ⑦) — 판정 사유를 산문(why)과 따로 **꼴이 고정된 사유 글자(code)** 로도 낸다.
+//   검출 = 런 전 고정한 예상 code 와 실제 code 가 글자 그대로 같을 때만(산문끼리 비교하면 늘 「검출 아님」 이 됨 · [4] F6).
+//   code 꼴: 칸 = 실패한 기준 code 를 「 · 」 로 이은 것(기준 정의 차례) · ⑨ = `누락:<행,…>`(E_ROWS 차례) · 응답 = `응답:<코드>`.
+const failCode = (r, code) => (r.ok ? r : { ...r, code });
+
+/** 스타일 비교 열쇠(F3 「4종 중 둘이 같은 PDF」) — 숫자 든 낱말(일자 · 번호 · 쪽 번호 · 시각)은 뺀다(설계 :75 「날짜 · 쪽번호 같은 아무 차이는 초록 아님」). */
+function styleKey(f) {
+  const words = wordsOf(f).filter((w) => !/\d/.test(String(w.t)));
+  const rules = pagesOf(f).flatMap((p) => (Array.isArray(p.rules) ? p.rules : []));
+  const wk = words.map((w) => `${w.t}@${Math.round(w.x * 2) / 2},${Math.round(w.y * 2) / 2},${typeof w.fs === 'number' ? Math.round(w.fs * 2) / 2 : '-'}`).sort();
+  const rk = rules.map((r) => `${Math.round(r.y * 2) / 2}:${Math.round(r.t * 10) / 10}`).sort();
+  return { n: words.length, key: `${wk.join('|')}#${rk.join('|')}` };
+}
+
+/** 첫 쪽 제목 줄 — 가장 큰 글자 낱말들 중 가장 위 줄(격식 = 자간이 넓어 낱말이 쪼개질 수 있음 · 시안 §2-2). */
+function titleLine(p0) {
+  const words = (p0 && Array.isArray(p0.words) ? p0.words : []).filter((w) => typeof w.fs === 'number');
+  if (words.length === 0) return null;
+  const top = Math.max(...words.map((w) => w.fs));
+  const big = words.filter((w) => Math.abs(w.fs - top) <= 0.25);
+  const y0 = Math.min(...big.map((w) => w.y));
+  const line = big.filter((w) => Math.abs(w.y - y0) <= 2);
+  const x1 = Math.min(...line.map((w) => w.x));
+  const x2 = Math.max(...line.map((w) => w.x + w.w));
+  return { top, x1, x2, cx: (x1 + x2) / 2, bottom: Math.max(...line.map((w) => w.y + w.h)), text: line.map((w) => w.t).join('') };
+}
+
+// ── 기준 하나 재기 → { ok, why, code? } (neg = 「없음」 기준) ──
 function evalCheck(chk, facts, cell, ctx) {
   switch (chk.kind) {
     case 'fields': {
@@ -75,20 +102,20 @@ function evalCheck(chk, facts, cell, ctx) {
         const hit = words.find((w) => inBox(w, f.box) && wordMatches(w.t, f.want));
         if (!hit) miss.push(f.key);
       }
-      return { ok: miss.length === 0, why: miss.length ? `칸 값 없음 또는 상자 밖: ${miss.join(' · ')}` : `칸 ${chk.fields.length}/${chk.fields.length} 상자 안` };
+      return failCode({ ok: miss.length === 0, why: miss.length ? `칸 값 없음 또는 상자 밖: ${miss.join(' · ')}` : `칸 ${chk.fields.length}/${chk.fields.length} 상자 안` }, `칸밖:${miss.join(',')}`);
     }
     case 'noPlaceholder': {
       const bad = wordsOf(facts).filter((w) => isPlaceholder(w.t));
-      return { ok: bad.length === 0, why: bad.length ? `자리표 글자 ${bad.length}` : '자리표 0' };
+      return failCode({ ok: bad.length === 0, why: bad.length ? `자리표 글자 ${bad.length}` : '자리표 0' }, '자리표');
     }
     case 'noStdHeaderOutside': {
       const bad = wordsOf(facts).filter((w) => chk.words.includes(w.t) && !chk.boxes.some((b) => inBox(w, b)));
-      return { ok: bad.length === 0, why: bad.length ? `표준 표 머리 칸 밖 ${bad.map((w) => w.t).join(' · ')}` : '표준 표 머리 칸 밖 0' };
+      return failCode({ ok: bad.length === 0, why: bad.length ? `표준 표 머리 칸 밖 ${bad.map((w) => w.t).join(' · ')}` : '표준 표 머리 칸 밖 0' }, '표준머리');
     }
     case 'image': {
       const hits = imagesOf(facts).map((im) => imageFrom(im, chk.ref)).filter((r) => r.hit);
-      if (chk.want === 'present') return { ok: hits.length > 0, why: hits.length ? `양식 그림 있음(${hits[0].how})` : '양식 그림 0' };
-      return { ok: hits.length === 0, why: hits.length ? `그림 있음(${hits[0].how}) — 없어야 함` : '그 그림 0' };
+      if (chk.want === 'present') return failCode({ ok: hits.length > 0, why: hits.length ? `양식 그림 있음(${hits[0].how})` : '양식 그림 0' }, '그림없음');
+      return failCode({ ok: hits.length === 0, why: hits.length ? `그림 있음(${hits[0].how}) — 없어야 함` : '그 그림 0' }, '그림있음');
     }
     case 'watermark': {
       const imgs = imagesOf(facts);
@@ -104,31 +131,85 @@ function evalCheck(chk, facts, cell, ctx) {
       const alphas = draws.map(effectiveAlpha);
       if (alphas.some((a) => a === null)) return { ok: false, unmeasured: true, why: '소프트 마스크 평균 못 구함' };
       const good = alphas.filter((a) => a > 0 && Math.abs(a - chk.alpha) <= chk.tol);
-      return { ok: good.length > 0, why: `로고 그림 ${fromLogo.length} · 실효 불투명도 ${alphas.map((a) => a.toFixed(3)).join(',')} · 기준 ${chk.alpha}±${chk.tol}` };
+      return failCode({ ok: good.length > 0, why: `로고 그림 ${fromLogo.length} · 실효 불투명도 ${alphas.map((a) => a.toFixed(3)).join(',')} · 기준 ${chk.alpha}±${chk.tol}` }, '워터마크');
     }
     case 'style': {
-      const words = wordsOf(facts).filter((w) => typeof w.fs === 'number');
-      if (words.length === 0) return { ok: false, unmeasured: true, why: '글자 크기 사실 없음(판독기)' };
-      const top = Math.max(...words.map((w) => w.fs));
+      // ⬛ [낡은 줄 · 2차] 제목 크기 + 명조 글꼴만 — [4] F3 「머리 배치 · 선 굵기 · 품명 잘림 0 빠짐」 → 아래 3차
+      // const words = wordsOf(facts).filter((w) => typeof w.fs === 'number');
+      // const top = Math.max(...words.map((w) => w.fs));
+      // const ok = Math.abs(top - chk.titlePt) <= 0.5 && (!chk.serif || serif);
+      // 🔴 3차(11/19 · [4] F3 · 시안 §2-1 · §2-2 · 설계 :75) — 표지 = ⓐ 제목 크기 ⓑ 격식 명조 ⓒ 머리 배치(제목 왼쪽 / 가운데)
+      //   ⓓ 머리 아래 선 굵기(이중선이면 두 줄) ⓔ 큰글씨 품명 잘림 0. 하나라도 틀리면 빨강 · 판독기 사실이 없으면 미측정.
+      const p0 = pagesOf(facts)[0];
+      const tl = titleLine(p0);
+      if (!tl) return { ok: false, unmeasured: true, why: '글자 크기 사실 없음(판독기)' };
+      if (!(p0.wMm > 0)) return { ok: false, unmeasured: true, why: '쪽 폭 사실 없음(판독기)' };
+      if (!Array.isArray(p0.rules)) return { ok: false, unmeasured: true, why: '선 사실 없음(판독기 · rules)' };
+      const bad = [];
+      const parts = [];
+      const sizeOk = Math.abs(tl.top - chk.titlePt) <= 0.5;
+      parts.push(`제목 크기 ${tl.top}pt(기준 ${chk.titlePt})`);
+      if (!sizeOk) bad.push('크기');
       const serif = fontsOf(facts).some((n) => /NotoSerifKR|Noto Serif KR/i.test(String(n).replace(/^[A-Z]{6}\+/, '')));
-      const ok = Math.abs(top - chk.titlePt) <= 0.5 && (!chk.serif || serif);
-      return { ok, why: `제목 크기 ${top}pt(기준 ${chk.titlePt}) · 명조 글꼴 ${serif}${chk.serif ? '(필요)' : ''}` };
+      parts.push(`명조 글꼴 ${serif}${chk.serif ? '(필요)' : ''}`);
+      if (chk.serif && !serif) bad.push('명조');
+      const centered = Math.abs(tl.cx - p0.wMm / 2) <= 10;
+      const left = tl.x1 < p0.wMm * 0.25 && tl.cx < p0.wMm / 2 - 10;
+      const alignOk = chk.align === 'center' ? centered : left;
+      parts.push(`제목 자리 ${tl.x1.toFixed(1)}~${tl.x2.toFixed(1)}mm(기준 ${chk.align === 'center' ? '가운데' : '왼쪽'})`);
+      if (!alignOk) bad.push('배치');
+      if (p0.rules.length === 0) return { ok: false, unmeasured: true, why: `${parts.join(' · ')} · 쪽 선 0(판독기가 선을 못 봄)` };
+      const under = p0.rules.filter((r) => r.y >= tl.bottom - 0.5 && r.y <= tl.bottom + 60 && r.w >= p0.wMm * 0.4).sort((a, b) => a.y - b.y);
+      const want = chk.rules || [];
+      let ruleOk = under.length > 0 && Math.abs(under[0].t - want[0]) <= 0.15;
+      if (ruleOk && want.length > 1) {
+        const second = under.slice(1).find((r) => r.y - under[0].y >= 0.3 && r.y - under[0].y <= 4);
+        ruleOk = !!second && Math.abs(second.t - want[1]) <= 0.15;
+        parts.push(`머리 아래 선 ${under[0].t}pt + ${second ? `${second.t}pt` : '둘째 줄 없음'}(기준 ${want.join(' + ')})`);
+      } else parts.push(`머리 아래 선 ${under.length ? `${under[0].t}pt` : '없음'}(기준 ${want.join(' + ')})`);
+      if (!ruleOk) bad.push('선');
+      if (Array.isArray(chk.noCut) && chk.noCut.length) {
+        const joined = wordsOf(facts).map((w) => String(w.t)).join('');
+        const cut = chk.noCut.filter((name) => !joined.includes(name));
+        parts.push(cut.length ? `품명 잘림 ${cut.join(' · ')}` : '품명 잘림 0');
+        if (cut.length) bad.push('잘림');
+      }
+      return failCode({ ok: bad.length === 0, why: parts.join(' · ') }, `스타일:${bad.join(',')}`);
     }
     case 'sameWords': {
+      // 🔴 3차([3-V] A3) — 두 PDF 글자가 0 이면 열쇠 '' = '' 로 「같음」 초록이 섰다 → 한쪽이라도 글자 0 · 양성 대조 실패 = 미측정
+      if (ctx.pcOk !== true) return { ok: false, unmeasured: true, why: '양성 대조 실패 — 회귀 대조 무효' };
       const other = ctx.factsById[chk.as];
-      if (!other) return { ok: false, unmeasured: true, why: `대조 칸 ${chk.as} 사실 없음` };
+      if (!other || other.ok !== true) return { ok: false, unmeasured: true, why: `대조 칸 ${chk.as} 사실 없음` };
+      if (wordsOf(facts).length === 0 || wordsOf(other).length === 0) return { ok: false, unmeasured: true, why: `글자 0 — ${chk.as} 와 대조 불가(판독기)` };
       const key = (f) => wordsOf(f).map((w) => `${w.t}@${Math.round(w.x * 2) / 2},${Math.round(w.y * 2) / 2}`).sort().join('|');
       const same = key(facts) === key(other);
-      return { ok: same, why: same ? `${chk.as} 와 글자 · 자리 같음` : `${chk.as} 와 글자 · 자리 다름(스타일이 먹음)` };
+      return failCode({ ok: same, why: same ? `${chk.as} 와 글자 · 자리 같음` : `${chk.as} 와 글자 · 자리 다름(스타일이 먹음)` }, '회귀다름');
+    }
+    case 'distinctFrom': {
+      // 🔴 3차([4] F3 · 설계 :75 「4종 중 둘이 같은 PDF」 = 안 됨) — 숫자 든 낱말 뺀 글자 · 자리 · 크기 · 선 열쇠가 같으면 빨강
+      const mine = styleKey(facts);
+      if (mine.n === 0) return { ok: false, unmeasured: true, why: '글자 0 — 스타일 대조 불가(판독기)' };
+      const same = [];
+      const miss = [];
+      for (const id of chk.ids) {
+        const o = ctx.factsById[id];
+        const k = o && o.ok === true ? styleKey(o) : null;
+        if (!k || k.n === 0) miss.push(id);
+        else if (k.key === mine.key) same.push(id);
+      }
+      if (same.length) return { ok: false, why: `같은 PDF(글자 · 자리 · 크기 · 선): ${same.join(' · ')}`, code: '스타일:같은PDF' };
+      if (miss.length) return { ok: false, unmeasured: true, why: `스타일 대조 칸 사실 없음 ${miss.join(' · ')}` };
+      return { ok: true, why: `다른 ${chk.ids.length}종과 다름` };
     }
     case 'uiNoWarn': {
       const n = cell.ui && typeof cell.ui.warnCount === 'number' ? cell.ui.warnCount : null;
       if (n === null) return { ok: false, unmeasured: true, why: '미리보기 창 경고 수 기록 없음' };
-      return { ok: n === 0, why: `미리보기 창 경고 ${n}` };
+      return failCode({ ok: n === 0, why: `미리보기 창 경고 ${n}` }, '경고');
     }
     case 'noWords': {
       const bad = wordsOf(facts).filter((w) => chk.words.some((x) => String(w.t).includes(x)));
-      return { ok: bad.length === 0, why: bad.length ? `글자 있음 ${bad.map((w) => w.t).join(' · ')}` : '안내 · 경고 글자 0' };
+      return failCode({ ok: bad.length === 0, why: bad.length ? `글자 있음 ${bad.map((w) => w.t).join(' · ')}` : '안내 · 경고 글자 0' }, '글자있음');
     }
     case 'uiFacts':
       return { ok: true, record: true, why: cell.ui ? JSON.stringify(cell.ui) : '기록 없음' };
@@ -140,20 +221,41 @@ function evalCheck(chk, facts, cell, ctx) {
 /** 판독기 양성 대조(F4 ⑴) — 「있음」 을 내야 하는 PDF 2개. 하나라도 못 읽으면 음성 기준 전부 무효. */
 function positiveControl(pc, factsById, probeSelftestOk) {
   const why = [];
-  if (probeSelftestOk === false) why.push('판독기 자체시험(T5 포함) 실패');
+  // ⬛ [낡은 줄 · 2차] if (probeSelftestOk === false) why.push('판독기 자체시험(T5 포함) 실패');
+  // 🔴 3차([3-V] A7) — 값이 비어도(기록 없음) 실패로 센다.
+  if (probeSelftestOk !== true) why.push(`판독기 자체시험(T5 포함) 실패 또는 기록 없음(${probeSelftestOk})`);
+  if (!pc || !pc.basicForm || !pc.preprint) return { ok: false, why: '양성 대조 정의 없음' };
   const basic = factsById[pc.basicForm.cell];
   if (!basic || basic.ok !== true) why.push(`기본 폼 PDF 없음(${pc.basicForm.cell})`);
   else {
-    const ws = wordsOf(basic).map((w) => w.t);
-    for (const t of pc.basicForm.words) if (!ws.includes(t)) why.push(`기본 폼에서 「${t}」 못 읽음`);
+    // ⬛ [낡은 줄 · 2차] const ws = wordsOf(basic).map((w) => w.t); — 낱말 있음만 봄
+    // 🔴 3차([4] F4 · 설계 :88 「글자와 좌표」) — 낱말 있음 + 좌표: 쪽 안 · 상자 > 0 · 같은 줄(표 머리) · 왼쪽 → 오른쪽 차례
+    const ws = wordsOf(basic);
+    const found = pc.basicForm.words.map((t) => ws.find((w) => w.t === t));
+    pc.basicForm.words.forEach((t, k) => { if (!found[k]) why.push(`기본 폼에서 「${t}」 못 읽음`); });
+    if (found.every(Boolean)) {
+      const p0 = pagesOf(basic)[0] || {};
+      const inPage = (w) => w.w > 0 && w.h > 0 && w.x >= 0 && w.y >= 0
+        && (!(p0.wMm > 0) || w.x + w.w <= p0.wMm) && (!(p0.hMm > 0) || w.y + w.h <= p0.hMm);
+      if (!found.every(inPage)) why.push('기본 폼 글자 좌표 쪽 밖 또는 상자 0');
+      const ys = found.map((w) => w.y);
+      if (Math.max(...ys) - Math.min(...ys) > (pc.basicForm.sameRowMm || 1.5)) why.push(`기본 폼 「${pc.basicForm.words.join(' · ')}」 한 줄 아님(y ${ys.join(',')})`);
+      if (!found.every((w, k) => k === 0 || found[k - 1].x < w.x)) why.push(`기본 폼 「${pc.basicForm.words.join(' → ')}」 왼쪽 → 오른쪽 차례 아님`);
+    }
   }
   const pre = factsById[pc.preprint.cell];
   if (!pre || pre.ok !== true) why.push(`양식지 PDF 없음(${pc.preprint.cell})`);
   else {
+    // 🔴 3차([4] F4 · 설계 :88 「K2 양식지 = 그림 해시 · 칸 값」 · 하위 기준마다 「있음」)
     if (imagesOf(pre).length === 0) why.push('양식지 미리보기에서 그림 못 읽음');
+    else if (pc.preprint.ref && !imagesOf(pre).some((im) => imageFrom(im, pc.preprint.ref).hit)) why.push('양식지 그림이 차림 그림에서 안 나옴(해시 · 4분면 순서)');
     if (wordsOf(pre).length === 0) why.push('양식지 미리보기에서 글자 못 읽음');
+    if (Array.isArray(pc.preprint.fields) && pc.preprint.fields.length) {
+      const r = evalCheck({ kind: 'fields', fields: pc.preprint.fields }, pre, {}, {});
+      if (!r.ok) why.push(`양식지 ${r.why}`);
+    }
   }
-  return { ok: why.length === 0, why: why.length ? why.join(' · ') : '기본 폼 글자 · 양식지 그림 · 글자 있음' };
+  return { ok: why.length === 0, why: why.length ? why.join(' · ') : '기본 폼 글자 · 좌표 · 양식지 그림 해시 · 칸 값 있음 · 판독기 자체시험 통과' };
 }
 
 /** 칸 하나 판정. */
@@ -164,16 +266,23 @@ function judgeCell(cell, ctx) {
   if (cell.status === 'na') return { cat: CAT.NA, why: cell.reason || '' };
   if (cell.status === 'excluded') return { cat: CAT.EXCLUDED, why: cell.reason || '' };
   if (cell.status === 'unmeasured') return { cat: CAT.UNMEASURED, why: cell.reason || '' };
+  // 🔴 3차 — 기록 칸(S)은 판정이 아니라 기록이라 양성 대조 앞에서 처리(자리만 옮김 · 내용 무변)
+  if (cell.status === 'recorded') {
+    const r = (cell.expect || []).map((c) => evalCheck(c, null, cell, ctx));
+    return { cat: CAT.NA, why: `기록: ${r.map((x) => x.why).join(' · ')}` };
+  }
+  // 🔴 3차([4] F1 · 설계 :88 「하나라도 못 읽으면 판독기 고장 = 그 런 전체 「미측정」」) — 양성 대조 실패(또는 값 없음)면
+  //   판정 칸은 빨강도 남기지 않고 전부 미측정(2차는 음성 기준만 미측정 → main 「기대한 빨강」 이 공허하게 남았다).
+  if (ctx.pcOk !== true) return { cat: CAT.UNMEASURED, why: '양성 대조 실패 — 그 런 전체 미측정(설계 :88 · 빨강도 남기지 않음)' };
   if (cell.status === 'capture-fail') {
     if (cell.errorIsDefect && cell.http && cell.http.status) {
-      return { cat: CAT.RED, why: `응답 ${cell.http.status} · ${String(cell.http.firstLine || '').slice(0, 120)}` };
+      return { cat: CAT.RED, why: `응답 ${cell.http.status} · ${String(cell.http.firstLine || '').slice(0, 120)}`, code: `응답:${cell.http.status}` };
     }
     return { cat: CAT.UNMEASURED, why: cell.reason || 'PDF 못 받음' };
   }
-  if (cell.status === 'recorded') {
-    const r = cell.expect.map((c) => evalCheck(c, null, cell, ctx));
-    return { cat: CAT.NA, why: `기록: ${r.map((x) => x.why).join(' · ')}` };
-  }
+  // ⬛ [낡은 줄 · 2차] if (cell.status === 'recorded') { … } — 위로 옮김
+  // 🔴 3차([3-V] A2) — 기준이 0개인 칸(K5 · YN1 의 merged 판 등)은 열리기만 해도 초록이 섰다 → 「미측정(기준 없음)」
+  if (!Array.isArray(cell.expect) || cell.expect.length === 0) return { cat: CAT.UNMEASURED, why: '기준 없음 — 미측정(기준 0개 칸 · [3-V] A2 · R 런 전 merged 판 기준 정의)' };
   const facts = ctx.factsById[cell.id];
   if (!facts) return { cat: CAT.UNMEASURED, why: '사실 JSON 없음(판독기 미실행)' };
   if (facts.ok !== true) return { cat: CAT.UNMEASURED, why: `판독기 열기 실패 ${facts.error || ''}` };
@@ -181,12 +290,12 @@ function judgeCell(cell, ctx) {
   const posFail = res.filter((x) => !x.c.neg && !x.r.ok && !x.r.unmeasured);
   const unm = res.filter((x) => x.r.unmeasured);
   const negFail = res.filter((x) => x.c.neg && !x.r.ok && !x.r.unmeasured);
-  const hasNeg = res.some((x) => x.c.neg);
   const why = res.map((x) => `${x.r.ok ? '○' : '×'} ${x.r.why}`).join(' · ');
-  if (posFail.length) return { cat: CAT.RED, why };
+  const code = res.filter((x) => !x.r.ok && !x.r.unmeasured).map((x) => x.r.code || x.c.kind).join(' · ');
+  if (posFail.length) return { cat: CAT.RED, why, code };
   if (unm.length) return { cat: CAT.UNMEASURED, why: `판독기 · ${unm.map((x) => x.r.why).join(' · ')}` };
-  if (negFail.length) return ctx.pcOk ? { cat: CAT.RED, why } : { cat: CAT.UNMEASURED, why: `양성 대조 실패 — 음성 기준 무효 · ${why}` };
-  if (hasNeg && !ctx.pcOk) return { cat: CAT.UNMEASURED, why: `양성 대조 실패 — 음성 기준 무효 · ${why}` };
+  // ⬛ [낡은 줄 · 2차] negFail · hasNeg 를 ctx.pcOk 로 갈랐다 — 3차는 위에서 양성 대조 실패를 통째로 미측정으로 돌림
+  if (negFail.length) return { cat: CAT.RED, why, code };
   return { cat: cell.changedShape ? CAT.CHANGED : CAT.GREEN, why };
 }
 
@@ -212,6 +321,8 @@ function composite(group, byId) {
   else if (cats.includes(CAT.UNMEASURED)) cat = CAT.UNMEASURED;
   else if (cats.includes(CAT.RED)) cat = CAT.RED;
   else if (cats.every((c) => c === CAT.NO_DOOR)) cat = CAT.NO_DOOR;
+  // 🔴 3차([3-V] A8) — 칸이 전부 해당 없음 · 판정 제외 · 바뀐 모양이면 묶음 초록이 섰다 → 초록 칸 ≥1 일 때만 묶음 초록
+  else if (!cats.includes(CAT.GREEN)) cat = CAT.UNMEASURED;
   return { id: group.id, cat, cells: group.cells.length };
 }
 
@@ -223,7 +334,19 @@ const E_ROWS = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E7a', 'E7b', 'E7c', '
  * @param board 'main' 이면 문 없음 · 판정 제외(C9 · HQA ⑧)
  */
 function nineCount(manifest, outcomes, board, n1) {
-  if (board === 'main') return { cat: CAT.NO_DOOR, why: 'main = PDF 받기 0(C9) · 분모 밖(HQA ⑧)', omission: null };
+  // 🔴 3차([3-V] A9 · CTO §4-2 조건 7) — qpdf 판을 결과표에 싣도록 셈 결과에 붙인다(manifest 의 qpdfVersion)
+  const qpdf = qpdfOf(manifest);
+  // ⬛ [낡은 줄 · 2차] if (board === 'main') return { cat: CAT.NO_DOOR, why: …, omission: null };
+  if (board === 'main') return { cat: CAT.NO_DOOR, why: 'main = PDF 받기 0(C9) · 분모 밖(HQA ⑧)', omission: null, qpdf, code: '' };
+  const r9 = nineCountCore(manifest, outcomes, n1);
+  return { ...r9, qpdf };
+}
+function qpdfOf(manifest) {
+  if (!manifest) return '매니페스트 없음';
+  if (manifest.qpdfVersion) return String(manifest.qpdfVersion);
+  return manifest.qpdfMissing ? '없음(이 잡 qpdf 0 또는 설치 실패)' : '기록 없음';
+}
+function nineCountCore(manifest, outcomes, n1) {
   const rows = Object.fromEntries((manifest && Array.isArray(manifest.rows) ? manifest.rows : []).map((r) => [r.id, r]));
   const valid = (id) => rows[id] && rows[id].validity === '유효';
   const o = outcomes || {};
@@ -239,14 +362,20 @@ function nineCount(manifest, outcomes, board, n1) {
   const per = {};
   let omission = 0;
   let eValid = 0;
+  let eMeasured = 0;
+  let noResult = 0;
+  const omitted = [];
   for (const id of E_ROWS) {
     if (!valid(id)) { per[id] = `${CAT.UNMEASURED}(표본 ${rows[id] ? rows[id].validity : '없음'})`; continue; }
     eValid++;
     const r = o[id];
-    if (!r || !r.decision) { per[id] = `${CAT.UNMEASURED}(결과 없음)`; continue; }
+    // ⬛ [낡은 줄 · 2차] if (!r || !r.decision) { per[id] = `${CAT.UNMEASURED}(결과 없음)`; continue; } — 누락에도 막힘에도 안 셈 → ⑨ 초록([3-V] A1)
+    // 🔴 3차([3-V] A1 · PM 11/19 「유효 E 행 + 제품 결과 없음 = 누락으로 셈 · 초록 0」) — 결과 없음 수를 따로 적고 누락에 더한다
+    if (!r || !r.decision) { omission++; noResult++; omitted.push(id); per[id] = `${CAT.RED}(누락 · 결과 없음)`; continue; }
+    eMeasured++;
     const trace = (r.parseStart || 0) > 0 || r.marker === true || r.deepWarn === true || r.copy === true;
     const miss = r.decision === '허용' || trace;
-    if (miss) omission++;
+    if (miss) { omission++; omitted.push(id); }
     per[id] = miss ? `${CAT.RED}(누락${trace ? ' · 해석 흔적' : ''})` : CAT.GREEN;
   }
   const overReject = { P4: o.P4 && o.P4.decision === '거절' ? 1 : 0, P2: o.P2 && o.P2.decision === '거절' ? 1 : 0 };
@@ -258,22 +387,24 @@ function nineCount(manifest, outcomes, board, n1) {
   per.P4 = valid('P4') && o.P4 ? (o.P4.decision === '거절' ? `${CAT.GREEN}(과잉 거절 · 받아들임 · 따로 셈)` : CAT.GREEN) : CAT.UNMEASURED;
   per.U1 = valid('U1') && o.U1 ? (o.U1.decision === '거절' && (o.U1.parseStart || 0) === 0 ? CAT.GREEN : CAT.RED) : CAT.UNMEASURED;
   per.U3 = '미측정 · 정적만';
+  // ⬛ [낡은 줄 · 2차] S2 = 유효만 봄 → 3차([3-V] A1): 「유효 + 결과 있음」 기준
+  const has = (id) => valid(id) && o[id] && o[id].decision;
   const s2 = [];
-  if (!(valid('E4') || valid('E5'))) s2.push('E4 · E5 유효 0');
-  if (!(valid('E7') || valid('E7a') || valid('E7b'))) s2.push('E7 · E7a · E7b 유효 0');
-  if (!valid('E7c')) s2.push('E7c 무효');
+  if (!(has('E4') || has('E5'))) s2.push('E4 · E5 유효 · 결과 0');
+  if (!(has('E7') || has('E7a') || has('E7b'))) s2.push('E7 · E7a · E7b 유효 · 결과 0');
+  if (!has('E7c')) s2.push('E7c 무효 또는 결과 없음');
   let cat;
   let why;
   if (eValid === 0) { cat = CAT.UNMEASURED; why = 'E 행 전부 무효 — ⑨ 미측정 · 합격 0'; }
-  else if (omission > 0) { cat = CAT.RED; why = `누락 ${omission} — ㉮ 멈춤 · PM · CTO`; }
+  else if (omission > 0) { cat = CAT.RED; why = `누락 ${omission}${noResult ? `(결과 없음 ${noResult} 포함)` : ''} — ㉮ 멈춤 · PM · CTO`; }
   else if (s2.length) { cat = '부분'; why = `최소 유효 미달(S2): ${s2.join(' · ')} · 합격 0`; }
-  else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid}`; }
+  else { cat = CAT.GREEN; why = `누락 0 · 유효 E ${eValid} · 결과 있음 ${eMeasured}`; }
   const n1Rows = {};
   for (const [k, v] of Object.entries(n1 || {})) {
     if (!v || v.setup !== true) n1Rows[k] = `${CAT.UNMEASURED}(차림 못 세움)`;
     else n1Rows[k] = v.underlay === 0 && v.error === 0 && v.native === 0 ? CAT.GREEN : CAT.RED;
   }
-  return { cat, why, omission, overReject, rows: per, n1: n1Rows };
+  return { cat, why, omission, noResult, eValid, eMeasured, overReject, rows: per, n1: n1Rows, code: omitted.length ? `누락:${omitted.join(',')}` : '' };
 }
 
 /** 심은 결함 검출(HQA ⑦) — 예상 사유(런 전 고정) = 실제 사유일 때만 검출 · 다른 사유 빨강 = 검출 아님. */
@@ -282,6 +413,32 @@ function detection(expectReason, actualReason, cat) {
   if (!expectReason) return { detected: false, why: '예상 사유 미고정 — 검출 0 으로 셈' };
   const same = String(expectReason).trim() === String(actualReason || '').trim();
   return { detected: same, why: same ? '예상 = 실제' : `다른 사유 빨강 = 검출 아님(실제: ${actualReason})` };
+}
+
+/**
+ * 🔴 3차([4] F6 · HQA ⑦) — 검출 규칙을 판정 흐름에 연결. expects = plan.json 이번 잡 `expect` 가 가리키는
+ *   `expectedCodes` 들({ key, target, code }) · target = 칸 id 또는 'nine'. 실제 = 그 칸(또는 ⑨)의 code(꼴 고정).
+ */
+function detectionsFor(expects, res, nine) {
+  return (expects || []).map((e) => {
+    if (!e || typeof e.target !== 'string') return { ...(e || {}), detected: false, why: '예상 꼴 깨짐' };
+    if (e.target === 'nine') {
+      if (!nine) return { ...e, detected: false, why: '⑨ 결과 없음' };
+      return { ...e, actual: nine.code, cat: nine.cat, ...detection(e.code, nine.code, nine.cat) };
+    }
+    const row = res.rows.find((r) => r.id === e.target);
+    if (!row) return { ...e, detected: false, why: `칸 없음 ${e.target}` };
+    return { ...e, actual: row.code || '', cat: row.cat, ...detection(e.code, row.code, row.cat) };
+  });
+}
+
+/** plan.json 에서 이번 런 · 이번 잡의 예상 사유 목록 꺼내기(없으면 빈 목록 · 꼴 깨지면 미고정으로 남김). */
+function expectsFromPlan(plan, run, job) {
+  const r = plan && plan.runs && plan.runs[run];
+  const j = r && Array.isArray(r.jobs) ? r.jobs.find((x) => x.id === job) : null;
+  if (!j || !Array.isArray(j.expect)) return [];
+  const codes = (plan && plan.expectedCodes) || {};
+  return j.expect.map((key) => (codes[key] ? { key, target: codes[key].target, code: codes[key].code } : { key, target: '?', code: null }));
 }
 
 function judgeRun(input) {
@@ -296,15 +453,18 @@ function judgeRun(input) {
   for (const r of rows) counts[r.cat] = (counts[r.cat] || 0) + 1;
   const stops = mainStops(rows, board);
   const denomOut = counts[CAT.NO_DOOR] + counts[CAT.EXCLUDED] + counts[CAT.NA];
-  const pass = board !== 'main' && rows.every((r) => [CAT.GREEN, CAT.NO_DOOR, CAT.NA, CAT.EXCLUDED, CAT.CHANGED].includes(r.cat))
+  // ⬛ [낡은 줄 · 2차] pass 가 양성 대조 결과를 안 봤다([4] F1) → 3차: pc.ok 필수
+  const pass = pc.ok === true && board !== 'main' && rows.every((r) => [CAT.GREEN, CAT.NO_DOOR, CAT.NA, CAT.EXCLUDED, CAT.CHANGED].includes(r.cat))
     && counts[CAT.GREEN] > 0;
   return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass };
 }
 
 function endLine(res) {
   const c = res.counts;
+  const det = Array.isArray(res.detections) && res.detections.length
+    ? ` · 검출 ${res.detections.filter((d) => d.detected).length}/${res.detections.length}` : '';
   return `판정 끝 — 양성 대조 ${res.positive.ok ? '통과' : '실패'} · 초록 ${c[CAT.GREEN]} · 빨강 ${c[CAT.RED]} · 미측정 ${c[CAT.UNMEASURED]} · 차림 불가 ${c[CAT.SETUP]}`
-    + ` · 문 없음 ${c[CAT.NO_DOOR]} · 판정 제외 ${c[CAT.EXCLUDED]} · 해당 없음 ${c[CAT.NA]} · 바뀐 모양 ${c[CAT.CHANGED]} · 분모 밖 ${res.denomOut} · 멈춤 ${res.stops.length}`;
+    + ` · 문 없음 ${c[CAT.NO_DOOR]} · 판정 제외 ${c[CAT.EXCLUDED]} · 해당 없음 ${c[CAT.NA]} · 바뀐 모양 ${c[CAT.CHANGED]} · 분모 밖 ${res.denomOut} · 멈춤 ${res.stops.length}${det}`;
 }
 
 function toMarkdown(meta, res, nine) {
@@ -325,6 +485,18 @@ function toMarkdown(meta, res, nine) {
   if (nine) {
     L.push('');
     L.push(`- ⑨ 셈: **${nine.cat}** — ${nine.why}`);
+    // 🔴 3차([3-V] A9 · CTO §4-2 조건 7 「qpdf --version 을 결과표에」)
+    L.push(`- ⑨ qpdf 판: ${nine.qpdf || '기록 없음'}`);
+  } else if (meta.nineQpdf) {
+    L.push('');
+    L.push(`- ⑨ 표본 qpdf 판: ${meta.nineQpdf}(⑨ 셈 입력 없음)`);
+  }
+  if (Array.isArray(res.detections) && res.detections.length) {
+    // 🔴 3차([4] F6 · HQA ⑦) — 예상 사유(런 전 고정 code) = 실제 code 일 때만 검출
+    L.push('');
+    L.push('| 예상 사유 | 대상 | 예상 code | 실제 code | 판정 | 검출 |');
+    L.push('|---|---|---|---|---|---|');
+    for (const d of res.detections) L.push(`| ${d.key || '-'} | ${d.target || '-'} | ${d.code || '미고정'} | ${d.actual || '-'} | ${d.cat || '-'} | ${d.detected ? '검출' : `아님 — ${d.why}`} |`);
   }
   L.push('');
   L.push(endLine(res));
@@ -358,8 +530,19 @@ function main(outDir) {
       ? JSON.parse(fs.readFileSync(path.join(outDir, doc.nine.manifest), 'utf8')) : null;
     nine = nineCount(mf, doc.nine.outcomes, doc.board, doc.nine.n1);
   }
+  // 🔴 3차([3-V] A9) — ⑨ 셈 입력이 없어도 표본 manifest(워크플로 ⑨ 단계가 `nine/` 에 씀)가 있으면 qpdf 판을 결과표에
+  const nineMf = path.join(outDir, 'nine', 'manifest.json');
+  const nineQpdf = !nine && fs.existsSync(nineMf) ? qpdfOf(JSON.parse(fs.readFileSync(nineMf, 'utf8'))) : null;
+  // 🔴 3차([4] F6) — 이번 잡의 예상 사유(plan.json · 런 전 고정)를 판정 흐름에 연결
+  let plan = null;
+  try {
+    plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'plan.json'), 'utf8'));
+  } catch (e) {
+    console.log(`⚫ [장치] plan.json 못 읽음(${e.name}) — 예상 사유 연결 0`);
+  }
+  res.detections = detectionsFor(expectsFromPlan(plan, doc.run, doc.job), res, nine);
   fs.writeFileSync(path.join(outDir, 'print-result.json'), JSON.stringify({ meta: { run: doc.run, job: doc.job, board: doc.board }, ...res, nine }, null, 2));
-  fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown(doc, res, nine));
+  fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf }, res, nine));
   for (const s of res.stops) console.log(`🔴 멈춤 ${s}`);
   console.log(endLine(res));
   return res.positive.ok ? 0 : 1;
@@ -367,4 +550,7 @@ function main(outDir) {
 
 if (require.main === module) process.exitCode = main(process.argv[2] || process.env.PRINT_OUT || '.');
 
-module.exports = { CAT, evalCheck, judgeCell, judgeRun, positiveControl, nineCount, detection, imageFrom, effectiveAlpha, mainStops, composite, endLine, toMarkdown, main, inBox, wordMatches };
+module.exports = {
+  CAT, evalCheck, judgeCell, judgeRun, positiveControl, nineCount, detection, imageFrom, effectiveAlpha, mainStops, composite, endLine, toMarkdown, main, inBox, wordMatches,
+  detectionsFor, expectsFromPlan, styleKey, titleLine,
+};

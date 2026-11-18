@@ -93,9 +93,21 @@ async function makeDoc(page, t) {
   await fillLines(page);
   await saveDoc(page, t.label);
 }
+/**
+ * 🔴 3차(11/19 · [4] F5) — 판독 입구 줄 고르기. 판매 반품을 거래명세서 [반품하기]로 만들므로 `/deliveries` 목록엔
+ *   표지 거래처 줄이 둘(원 전표 · 반품). 2차는 거래명세서 입구가 `rows => rows` 의 첫 줄이라 목록 정렬에 따라 반품 줄을 집을 수 있었다.
+ *   → 거래명세서 일반 입구 = 「반품」 글자 줄 **뺌**(정렬에 기대지 않음) · ⓙ = 「반품」 글자 줄만 · 그 밖 = 그대로.
+ */
+function entryPick(typeKey, entry) {
+  if (entry === 'doc-j') return (rows) => rows.filter({ hasText: '반품' });
+  if (typeKey === 'delivery') return (rows) => rows.filter({ hasNotText: '반품' });
+  return (rows) => rows;
+}
+
 /** 판매 반품 — 거래명세서 저장(확정) → [반품하기] → 반품 사유 → 저장(DeliveryPage.razor:109 · :1234 · :289). */
 async function makeSalesReturn(page) {
-  await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), (row) => row);
+  // ⬛ [낡은 줄 · 2차] await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), (row) => row);
+  await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick('delivery', 'doc'));
   const ret = button(page, '반품하기').first();
   if (await ret.isDisabled()) throw new S.SetupError('[반품하기] 꺼짐(거래명세서 확정 아님 · :109)');
   await ret.click();
@@ -133,12 +145,23 @@ async function catchPreview(page, click, urlPart) {
 async function warnCount(page) {
   return page.locator('.mud-dialog .mud-alert-text-warning, .mud-dialog .mud-alert-filled-warning, .mud-dialog .mud-alert-outlined-warning').count();
 }
+/** 🔴 3차([3-V] A6 · #15) — 보임 확인이 던지면(창이 죽음 등) 사유 1줄 남기고 「안 보임」 으로 본다(2차 `.catch(() => false)` 3곳). */
+async function visibleOr(loc, what, opts) {
+  try {
+    return await loc.isVisible(opts);
+  } catch (e) {
+    log(`${what} 보임 확인 실패(${L.errorName(e)}) — 안 보임으로 봄`);
+    return false;
+  }
+}
 async function closeDialogs(page) {
   for (let k = 0; k < 3; k++) {
     const dlg = page.locator('.mud-dialog').last();
-    if (!(await dlg.isVisible().catch(() => false))) return;
+    // ⬛ [낡은 줄 · 2차] if (!(await dlg.isVisible().catch(() => false))) return;
+    if (!(await visibleOr(dlg, '창'))) return;
     const close = dlg.getByRole('button', { name: /^(닫기|취소)$/ }).first();
-    if (await close.isVisible().catch(() => false)) await close.click().catch((e) => log(`창 닫기 실패 ${L.errorName(e)}`));
+    // ⬛ [낡은 줄 · 2차] if (await close.isVisible().catch(() => false)) …
+    if (await visibleOr(close, '닫기 단추')) await close.click().catch((e) => log(`창 닫기 실패 ${L.errorName(e)}`));
     else await page.keyboard.press('Escape');
     await sleep(500);
   }
@@ -157,8 +180,9 @@ async function captureSettings(page, t) {
   return { ...r, ui: {} };
 }
 async function captureDoc(page, t, entry) {
-  if (entry === 'doc-j') await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), (rows) => rows.filter({ hasText: '반품' }));
-  else await openFromList(page, t, (rows) => rows, t.returnType);
+  // ⬛ [낡은 줄 · 2차] doc-j = (rows) => rows.filter({ hasText: '반품' }) · 그 밖 = (rows) => rows([4] F5)
+  if (entry === 'doc-j') await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick(t.key, entry));
+  else await openFromList(page, t, entryPick(t.key, entry), t.returnType);
   const r = await catchPreview(page, () => button(page, '인쇄').first().click({ timeout: WAIT }), '/api/documents/');
   await sleep(1200);
   const ui = { warnCount: await warnCount(page) };
@@ -191,7 +215,8 @@ async function deleteLogo(page) {
   const wait = page.waitForResponse((r) => r.request().method() === 'DELETE' && r.url().includes('/api/settings/company-image'), { timeout: WAIT });
   await card.getByRole('button', { name: '삭제', exact: true }).first().click();
   const confirm = page.locator('.mud-dialog').last().getByRole('button', { name: /^(삭제|확인|예)$/ }).first();
-  if (await confirm.isVisible({ timeout: 3000 }).catch(() => false)) await confirm.click();
+  // ⬛ [낡은 줄 · 2차] if (await confirm.isVisible({ timeout: 3000 }).catch(() => false)) await confirm.click();
+  if (await visibleOr(confirm, '로고 지우기 확인 단추', { timeout: 3000 })) await confirm.click();
   const resp = await wait;
   if (resp.status() !== 204 && resp.status() !== 200) throw new S.SetupError(`로고 지우기 응답 ${resp.status()}`);
 }
@@ -400,4 +425,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { safeName, cfgKey };
+module.exports = { safeName, cfgKey, entryPick, visibleOr };
