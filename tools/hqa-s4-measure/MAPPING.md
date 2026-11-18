@@ -194,6 +194,7 @@
 - 값커밋(V4-1~V4-8 · 결-9 乙 · PM 결재 11/17): #3 · #4 · #12 · #15 · #24 · #27 · §9-1 I-8 = 장전 전 공개 v3 §3 글자로 맞춤 · 바꾼 칸마다 「옛 글자」 취소선 보존. △(#3 · #9 · #13 · #15) · ❌(#12) 승격 0.
 - M0 ③b(값커밋 결-13 甲 · 작업지시서 §9): M0 ③ 허용 목록 = 측정 워크플로 · `tools/hqa-s4-measure/` + 비밀 검사 4경로(`.github/workflows/trufflehog.yml` · `.github/scripts/trufflehog/range.sh` · `scan.sh` · `self-test.sh` · 정확히 · 와일드카드 0). 새 단언 `m0_3b_secret_blobs` = ~~그 4경로 중 시험 앱 고정 머리 → HEAD diff 에 있는 경로마다 blob = 고정값(main `b0305286` 판) · 4경로가 diff 에 없으면 해당 없음~~(옛 글자 · 결-15 로 대체) → **값커밋 결-15(작업지시서 §9 · [3-V] 2회차 P3-1 · P3-2)**: 4경로 **모두** 그 나무에 있어야 하고(diff 포함 여부와 무관) 경로마다 모드 `100644` · 종류 blob · blob = 고정값(main `b0305286` 판)이어야 초록 — 4파일 없음 · 모드 다름 · blob 다름 = 빨강(대표 결-1 ⓐ 기계 강제). `--diff-only` 셋째 인자가 `-` 로 시작하면 usage 로 멈춤(P3-3). 「M0 blob 10쌍」(`m0_5_blobs`) 셈과 따로.
 - M0 ③ · ③b 동작 시험 위치(값커밋 결-18 · 작업지시서 §9): 대조군 2 · 심은 위반 6 은 `tools/hqa-s4-measure/selftest-m0.sh` 로 잰다 — **측정 워크플로는 이 파일을 부르지 않는다**(사람 · 검증자 재실행 · 끝줄 원문은 개발명세 · 검증 리뷰서). 측정 런 안의 판독기 자체시험(`selftest-judge.js`)은 c-V3 판 바이트로 되돌렸다(자식 실행 자리 = 고침7 T34 고정값 13 · c-V4~c-V5c 의 결-13 블록 · 결-15~17 허용 검사는 측정 런 실행 면을 넓혀 되돌림 — 커밋은 남김). 측정 런마다 ③b 는 M0 가 실제 나무로 잰다(`m0-assert.json` `m0_3b_secret_blobs`).
+- **v5 의미 변경**(별건 A K5 · 대표 결재 기록 §18(11/18 15:3x) 「둘 다 넣음」 · T9 · T10 「더함」 · 설계 §5-5 ⓕ): 바로 위 줄의 「측정 워크플로는 이 파일을 부르지 않는다」 는 **v4 글자 그대로 보존**한다 — v5 부터 측정 워크플로 ⑤ 단계 `'[장치] 자체시험 — M0 ③ · ③b'`(id `stm0` · 앞 단면 `snap` 바로 뒤 · M1 앞)가 `selftest-m0.sh` 를 **런마다 부른다**. 심은 위반 8(T9 모드 120000 · T10 4경로 자리 나무 040000 더함) · 끝줄 `통과 10/10 · 심은 위반 8/8 · 대조군 2/2` · 결과 = 끝줄 + rc 만 원자료 `negtest/neg-selftest-m0.txt` · ⑤ 빨강이면 판독 · 판정 단계 0(§12-3). `selftest-judge.js` 는 무변(결-13 자리 그대로 · 허용 검사 약속 0) · 경계 = ⑤ 단계 바이트는 장치 커밋으로 고정 · M2 앞.
 
 ### 9-1. 장치 칸 → 정본 행 (거꾸로 · 매핑 안 된 장치 칸이 없는지)
 
@@ -308,3 +309,62 @@
 | Q-H11 | HQA 불수락 · 대표 결재 · 자료 모으는 회차 | 두 판독 식 실행 동등성 — 대표 결재 「가 자료 모으는 회차」 · CTO 판정 H11 甲 |
 | Q-H12 | 조건부 수용(적힌 조건 범위 안에서만) · 댓글 6921942407 | Before/After 같은 관측 창 · 「완전 동등」 주장 금지 · 긴 창이 After 실패를 가리는지 따로 점검. |
 | Q-H13 | HQA 불수락 · 대표 결재 · 자료 모으는 회차 | 브라우저 · 창 크기 — 대표 결재 「가 자료 모으는 회차」 · CTO 판정 H13 甲 |
+
+## 12. v5 별건 A — 측정 런 환경 · 공급망 (작업지시서 20261118작 K1~K5 · 설계 `docs/설계/백오피스/20261118_S4_별건A_측정환경공급망_설계.md` §5 · CTO 결-A9)
+
+> v5 바이트가 더한 단계 · 원자료 · 조건만 적는다. 판정 · 표본 · 기대값 · 판독 코드(`judge.js` · `mask.js` · `hqa-gate.js` · `rules.json`) 변경 0.
+> 합격 판정은 리허설 원자료 · v5 머리 심은빨강 런 · HQA 재판독 대조 뒤다(설계 §6) — 이 절의 어느 글자도 합격 판정이 아니다.
+
+### 12-1. 새 원자료 파일 8개 (전부 json · txt · 이름 22자 미만 · 값 · 해시 · 무결성 글자 0)
+
+| 원자료 파일 | 무엇 | 쓰는 자리 |
+|---|---|---|
+| `m2-installed.txt` | M2 가 새로 깔거나 바꾼 꾸러미 이름 · 판 · 아키텍처(설치 전후 `dpkg-query` 차이) | `boot.sh m2` |
+| `m2-apt-history.txt` | 이번 설치 기록 줄(명령 · 꾸러미 목록) · 못 읽으면 이름 붙은 줄 | `boot.sh m2` |
+| `m2-env-before.txt` | git 설정 범위 · 출처 · 키(값 = system · global 만) · node · git · bash 판 글자 | `boot.sh m2` |
+| `m3-npm-tree.json` | 설치 꾸러미 이름 · 판 · 받은 주소 · 잠금 일치 · 설치 스크립트 칸 · `npm ci` rc · npm 판 · 설치 자리 = 정확히 두 파일(`pw_dir_exact`) · blob 기대값 기준(`dev_ref`) — integrity 글자 0 | `boot.sh m3` |
+| `m3-npm.txt` | 설치 출력(작업 폴더 → 원자료) | `boot.sh m3` |
+| `m3g-guard.json` | M3′ G1~G6 참거짓 · 첫 빨강 · 바뀐 환경 이름 · git 범위 이름 · 실행 파일 이름 · 나무 바뀐 경로 · 장치 커밋 기준(`dev_ref`) · HEAD = 장치 커밋 · 색인 표시 걸린 경로(이름만) | `boot.sh guard`(M3′) |
+| `m7-pin.json` | 판독 코드 4파일 같음 참거짓 · 대조군 잡음 · ok · 모드 | 워크플로 `pin` 단계 |
+| `negtest/neg-selftest-m0.txt` | ⑤ 끝줄 + rc(음성 시험 데이터 · 본 표본과 폴더 · 이름 분리) | 워크플로 `stm0` 단계 |
+
+- 옛 원자료 `m2-packages.txt`(최상위 24개 이름 · 판)는 그대로 남는다.
+- 하위 폴더 `negtest/` 는 M8 가림 · M9 누출 검사 · M10 해시 목록 · 발행 재검이 덮는다(설계 §5-6 C3 원문 대조) — 리허설 첫 런 원자료에서 실측으로 닫는다(안 덮이면 고침 0 · 원자료 뿌리 `neg-` 대안 · C4 런 상한 안).
+
+### 12-2. 새 단계 4 (워크플로 `.github/workflows/hqa-s4-measure.yml`)
+
+| 단계 (id) | 자리 | 조건 | 하는 일 |
+|---|---|---|---|
+| `'[장치] M3′ 앞 단면'` (`snap`) | 판독기 자체시험 뒤 · ⑤ 바로 앞 | 기본 success() | `boot.sh snap` — 앞 단면 저장(작업 폴더 · 원자료 0) |
+| `'[장치] 자체시험 — M0 ③ · ③b'` (`stm0`) | `snap` 뒤 · M1 앞 | `if:` 0 · `continue-on-error` 0 | `selftest-m0.sh` — 끝줄 + rc 만 원자료 |
+| `'[장치] M3′ 설치 뒤 단언'` (`guard`) | M3 뒤 · M4 앞 | 기본 success() | `boot.sh guard` — G1~G6 · 빨강이면 M4 이하 건너뜀 |
+| `'[판독] M7 직전 판독기 고정값'` (`pin`) | M9 뒤 · M7 바로 앞 | `always()` · M0 성공 · 기록 축 | 판독 코드 4파일 sha256 = 단계 본문 기대값 · 같은 단계 대조군(판독기 사본 끝 1바이트 → 「다름」) · 리허설에서도 돎 |
+
+- `pin` 기대값 4개 = 워크플로 `pin` 단계 본문 글자(디스크 · 환경 변수에서 안 읽음) · 장치 나무 blob 바이트 sha256 · v5 SHA 묶음에 같은 값 — 이 표에는 다시 적지 않는다(한 곳).
+
+### 12-3. 조건 (CTO 결-A9 K-a · K-b)
+
+- 판독 축 3곳(M7 · M8′ · M9′) `if:` 끝에 ⑤ 성공 글자 — ⑤ 초록 아니면 판독 0. M7 은 `pin` 성공 글자도 더함 → 판독 직전 고정값이 다르면 판독 0 · verdict 없음 → 회차 줄 「판정 불가/미통과」 · 원자료는 남음.
+- 기록 축 3곳(run.json 조립 · 회차 줄 · `pin`) `if:` 끝에 ⑤ 「성공 또는 건너뜀」 글자 — ⑤ 자신이 빨강일 때만 멈춘다 · 앞 자체시험 빨강으로 ⑤ 가 건너뛴 회차는 지금처럼 run.json · 회차 줄을 남긴다.
+- 을 4곳(M8 · M9 · M10 · 원자료 운반) `if:` = `dcaf4a3f` 바이트 그대로 — M0 빨강 · ⑤ 빨강 회차에도 원자료를 운반한다.
+- 점검 · 항목 `if:` 끝에 `guard` 성공 글자(상태 함수 0 · 암묵 success() 유지). `stm0` · M1~M4 · 점검 · 항목에 `always()` 0.
+- ⑤ 빨강 회차: 조건 글자상 run.json · `verdict-device.json` · `samples.jsonl` · 회차 줄이 생기지 않는다 — 원자료 목록 정적 확인은 [4] 몫(CTO K-c).
+
+### 12-4. 잠금 · 설치 (자동화 패키지)
+
+- 잠금 = `tools/hqa-s4-measure/pw/package.json`(의존 = playwright 1.62.1 한 줄 · 판 범위 기호 0) · `pw/package-lock.json`(lockfileVersion 3 · 꾸러미 3 · integrity sha512 3/3 · `hasInstallScript` 칸 1 = fsevents 2.3.2 · optional · os darwin).
+- `boot.sh m3`: 작업 폴더 `pw/` 비움 → 두 파일 복사 → 장치 커밋 blob 대조 → 폴더 안 = 정확히 두 파일 → 잠금 안 판 = `PW_VERSION` → `npm ci --ignore-scripts --no-audit --no-fund` → 트리 기록 ok 거짓이면 m3 빨강. 옛 설치(`npm install` 판만 고정)는 `boot.sh` 주석으로 남김.
+- 장치 커밋 기준 = `GITHUB_SHA`(M0 `head_is_event` 가 창 앞에서 HEAD = `GITHUB_SHA` 를 단언 · G1 허용 밖 이름) · Actions 밖 로컬 시험만 HEAD(원자료 `dev_ref`).
+- 시스템 꾸러미(M2 `apt-get`)는 판을 고정하지 않는다 — 설치 기록(§12-1)과 M3′ 설치 뒤 단언으로 **잡는다**(막지 않는다).
+
+### 12-5. M3′ 설치 뒤 단언 G1~G6
+
+- 앞 단면 = `snap`(⑤ 바로 앞) · 뒤 = `guard`(M3 뒤). 순서 G1(+G6 대조군) → G2 → G3 → G4 → G5 · 첫 빨강에서 멈춤 · 앞 단면 없으면 빨강(G 판정 전).
+- G1 환경 변수 이름별 값 해시 — 바뀌거나 생기거나 사라진 이름 ⊄ 허용이면 빨강. 허용 9 = `HQA_SRC_DIR` · `HQA_CHROME` · `HQA_PW_DIR` + 실행기 단계별 이름 6(`GITHUB_ACTION` · `GITHUB_ENV` · `GITHUB_OUTPUT` · `GITHUB_PATH` · `GITHUB_STATE` · `GITHUB_STEP_SUMMARY` · 잠정 — 설계 §7 Q3 리허설 첫 런 뒤 PM 고정). `PATH` · `BASH_ENV` · `NODE_OPTIONS` · `LD_PRELOAD` · `GIT_*` 허용 0.
+- G2 git 설정 출처별 내용 · G3 `node` · `git` · `bash` 실행 파일 바이트 · G4 `/etc/ld.so.preload` 있음 · 내용 — 앞뒤 다르면 빨강.
+- G5 장치 폴더 · 측정 워크플로 작업 나무 = 장치 커밋(기준 = §12-4) + HEAD = 장치 커밋 + 색인 표시 전부 `H`(assume-unchanged · skip-worktree 0) — 하나라도 어긋나면 빨강.
+
+### 12-6. 음성 시험 ↔ 본 표본 구분 (HQA 사전협의 회신 6970680614)
+
+- 음성 시험 결과 = `negtest/neg-*` 만. 판독기 입력 = M7 `--samples "$HQA_RAW/samples.jsonl"` 한 경로 → 음성 데이터가 판독에 들어갈 길 0.
+- 판독기 · 항목 · 가림 · 누출 검사 소스(`judge.js` · `mask.js` · `hqa-gate.js` · `rules.json` · `run-items.js` · `probe.js` · `leak-scan.js` · `publish.sh`)에 `negtest` · `neg-` 글자 0(v5 머리 실측).
