@@ -309,7 +309,7 @@ fi
 
 # ── S9·S10 가짜 엔진(#859 후속 ㄱ′-2) ──────────────────────────────────────
 # 실행 때 임시 폴더에 `docker` 실행 파일을 만들고, **그 scan.sh 호출에만** PATH 앞에 끼운다(새 환경 변수 0 ·
-# scan.sh 에 시험용 손잡이 0). 가짜 엔진 = 지정 결과 줄(표준 출력) + 훑은 양 숫자 줄(오류 출력) + 지정 종료 코드.
+# scan.sh 에 시험용 손잡이 0). 가짜 엔진 = 지정 결과 줄(표준 출력) + 훑은 양 기록 줄(오류 출력 · 파일에서 읽음) + 지정 종료 코드.
 # 🔴 출력 격리: S9 는 ANNOTATE=1(운영 꼴)이라 출력이 그대로 잡 로그에 가면 진짜 주석이 된다
 #    → 출력은 F_OUT 파일로만 받고 ALL_LOG 에도 붙이지 않는다. miss 문구에는 숫자·0/1 만 넣는다.
 fake_bin="${root}/fake-bin"
@@ -317,17 +317,22 @@ mkdir -p "$fake_bin"
 cat > "${fake_bin}/docker" <<EOF
 #!/usr/bin/env bash
 cat "${root}/fake.out"
-echo 'level=info msg="finished scanning" {"chunks": 3, "bytes": 120}' >&2
+cat "${root}/fake.err" >&2
 exit "\$(cat "${root}/fake.rc")"
 EOF
 chmod +x "${fake_bin}/docker"
 
 F_OUT="${root}/fake.last"
 f_rc=0 f_state="" f_det=""
-run_fake() {     # 엔진_종료코드 결과_파일 ANNOTATE
+run_fake() {     # 엔진_종료코드 결과_파일 ANNOTATE [기록_줄_파일 — 없으면 기본 한 줄(조각 3)]
   local sum="${root}/fake.sum"
   : > "$sum"
   cp "$2" "${root}/fake.out"
+  if [ -n "${4:-}" ]; then
+    cp "$4" "${root}/fake.err"
+  else
+    printf '%s\n' '{"level":"info-0","logger":"trufflehog","msg":"finished scanning","chunks":3,"bytes":120}' > "${root}/fake.err"
+  fi
   echo "$1" > "${root}/fake.rc"
   set +e
   PATH="${fake_bin}:${PATH}" BASE="$M3" HEAD="$F1" REPO_DIR="$scan_repo" CONFIG_FILE="" EXCLUDE_FILE="" \
@@ -419,6 +424,172 @@ else
   miss "S10 엄격 해석 — 기대 「a~d error/2 · e clean/0 · f error/2 · 깨진 줄 글자 0」 · 실제 ${s10}깨진줄글자(${s10d_can})"
 fi
 
+# ── S11 하한 값 모양(C5-N1 후속): 커밋이 있는 범위 · 엔진 0 · 결과 0줄에서 훑은 양 기록 줄의 모양별 판정 ──
+# 기록 줄은 실행 때 printf 로 만든다(합성 숫자만). 행마다 종료 코드 · 요약 상태 · 문구 종류를 본다.
+#   모양 = 「훑은 양 기록 모양 이상」 1줄 + 「훑은 조각 0」 0줄 · 조각0 = 반대 · 깨끗 = 「판정: 깨끗 — 」 1줄 + 「records=1」 1줄
+# 첫 불일치에서 멈추지 않는다 — 불일치 행마다 miss 1줄(행 · 상태/종료 · 문구 셈 숫자만) · 다 돈 뒤 묶음 끝에서 판정(CTO C2).
+s11_in="${root}/s11.err"
+s11_ok=0 s11_n=0
+# 기록 글자 출력 0(C5-N1 보완 · [3-V] P2-2) — 행 출력(F_OUT) · 요약 파일에 견본 기록 글자(finished scanning · info-0)가 든 줄 수 · 못 읽으면 1
+rec_leak() {
+  local a b
+  a="$(grep -acF -e 'finished scanning' -e 'info-0' "$F_OUT" 2> /dev/null)" || true
+  b="$(grep -acF -e 'finished scanning' -e 'info-0' "${root}/fake.sum" 2> /dev/null)" || true
+  echo $(( ${a:-1} + ${b:-1} ))
+}
+s11_one() {      # 행 기대_상태 기대_종료 기대_문구(모양|조각0|깨끗) (기록 줄은 s11_in)
+  local shape zero clean rec leak ok=0
+  run_fake 0 "$empty_in" 0 "$s11_in"
+  shape="$(fcnt 0 -F -e '훑은 양 기록 모양 이상')"
+  zero="$(fcnt 0 -F -e '훑은 조각 0')"
+  clean="$(fcnt 0 -E '^판정: 깨끗 — ')"
+  rec="$(fcnt 0 -F -e 'records=1')"
+  leak="$(rec_leak)"
+  case "$4" in
+    모양) [ "$shape" -eq 1 ] && [ "$zero" -eq 0 ] && ok=1 ;;
+    조각0) [ "$zero" -eq 1 ] && [ "$shape" -eq 0 ] && ok=1 ;;
+    깨끗) [ "$clean" -eq 1 ] && [ "$rec" -eq 1 ] && ok=1 ;;
+  esac
+  s11_n=$((s11_n + 1))
+  if [ "$f_rc" -eq "$3" ] && [ "$f_state" = "$2" ] && [ "$ok" -eq 1 ] && [ "$leak" -eq 0 ]; then
+    s11_ok=$((s11_ok + 1))
+  else
+    miss "S11${1} — 기대 ${2}/${3} · ${4} · 실제 ${f_state:-?}/${f_rc} · 모양${shape} 조각0${zero} 깨끗${clean} records1${rec} 기록글자${leak}"
+  fi
+}
+# 견본 꼴 = 엔진 JSON 객체 한 줄(C5-N1 보완 §6-1 · 기대 상태 무변). s11_p = 기본 기록 줄의 "chunks" 앞까지 · 각 행 = 그 뒤 꼬리.
+s11_p='{"level":"info-0","logger":"trufflehog","msg":"finished scanning",'
+s11_line() { printf '%s%s\n' "$s11_p" "$1" > "$s11_in"; }
+s11_line '"chunks":0,"chunks":22,"bytes":120}'; s11_one a error 2 모양             # 한 줄 · 값 둘(0 + 22)
+s11_line '"chunks":22,"chunks":0,"bytes":120}'; s11_one b error 2 모양             # 한 줄 · 값 둘(22 + 0)
+s11_line '"unit_chunks":0,"chunks":22,"bytes":120}'; s11_one c error 2 모양        # 접두어 붙은 하위 열쇠
+printf '%s%s\n' "$s11_p" '"chunks":22,"bytes":120}' "$s11_p" '"chunks":0,"bytes":0}' > "$s11_in"; s11_one d error 2 모양    # 기록 줄 둘 22/0
+printf '%s%s\n' "$s11_p" '"chunks":0,"bytes":0}' "$s11_p" '"chunks":22,"bytes":120}' > "$s11_in"; s11_one e error 2 모양    # 기록 줄 둘 0/22
+printf '%s%s\n' "$s11_p" '"chunks":22,"bytes":120}' "$s11_p" '"chunks":22,"bytes":120}' > "$s11_in"; s11_one f error 2 모양 # 기록 줄 둘 22/22
+s11_line '"chunks":007,"bytes":120}'; s11_one g error 2 모양                       # 앞자리 0
+s11_line '"chunks":00,"bytes":120}'; s11_one h error 2 모양                        # 앞자리 0
+s11_line '"chunks":-5,"bytes":120}'; s11_one i error 2 모양                        # 부호
+s11_line '"chunks":+5,"bytes":120}'; s11_one j error 2 모양                        # 부호
+s11_line '"chunks":  22,"bytes":120}'; s11_one k error 2 모양                      # 콜론 뒤 두 칸
+s11_line '"chunks" :22,"bytes":120}'; s11_one l error 2 모양                       # 콜론 앞 공백
+s11_line '"chunks":1234567890,"bytes":120}'; s11_one m error 2 모양                # 10자리
+s11_line '"chunks":12345678901234567890,"bytes":120}'; s11_one n error 2 모양      # 20자리(넘침)
+s11_line '"chunks":"","bytes":120}'; s11_one o error 2 모양                        # 빈 값
+s11_line '"chunks":"22","bytes":120}'; s11_one p error 2 모양                      # 따옴표 숫자
+s11_line '"chunk_count":22,"bytes":120}'; s11_one q error 2 모양                   # 열쇠 이름 바뀜
+: > "$s11_in"; s11_one r error 2 모양                                              # 기록 줄 없음
+s11_line '"chunks":22,"bytes":120}'; s11_one s clean 0 깨끗                        # 대조 · 22 하나
+printf '%s%s\r\n' "$s11_p" '"chunks":22,"bytes":120}' > "$s11_in"; s11_one t clean 0 깨끗   # 대조 · 줄 끝(} 뒤) CR — 옛 뜻(숫자 바로 뒤 CR)은 지금 모양 이상 · S12ak 가 잰다
+s11_line '"chunks":123456789,"bytes":120}'; s11_one u clean 0 깨끗                 # 대조 · 9자리
+s11_line '"chunks":0,"bytes":120}'; s11_one v error 2 조각0                        # 하한 본체 · 0 하나
+s11_line '"chunks":22x,"bytes":120}'; s11_one w error 2 모양                       # 숫자 뒤 글자
+s11_line '"chunks":2.5,"bytes":120}'; s11_one x error 2 모양                       # 소수점
+if [ "$s11_n" -eq 24 ] && [ "$s11_ok" -eq 24 ]; then
+  pass "S11 하한 값 모양 — 여러 값 · 줄 둘 · 앞자리 0 · 부호 · 공백 · 10자리 · 넘침 · 빈 값 · 글자 · 숫자 뒤 글자 = 모양 이상(종료 2) · 정수 하나(CR · 9자리 포함) = 깨끗 · 0 하나 = 조각0(종료 2)"
+elif [ "$s11_n" -ne 24 ]; then
+  miss "S11 하한 값 모양 — 기대 24행 · 실제 ${s11_n}행"
+fi
+
+# ── S12 기록 필드 전체 · 경계(C5-N1 보완 · HQA Q2): 기록 줄을 문법으로 통째 해석 · chunks 필드 전체와 경계 ──
+# 진행 꼴 = S11(엔진 0 · 결과 0줄 · 행마다 종료 · 요약 상태 · 문구 종류 · 불일치 행마다 miss 1줄 숫자만 · 묶음 끝 판정).
+# 견본은 실행 때 printf 로 만든다(합성 숫자 · 고정 낱말만). 탭 · CR · NUL = printf 형식 escape(꼬리를 형식 자리에 넣는다).
+# q 행은 역빗금이 글자로 남았는지(견본 확인) 그 행 안에서 잰다 — 남지 않았으면 그 행 불일치.
+s12_in="${root}/s12.err"
+s12_ok=0 s12_n=0
+s12_one() {      # 행 기대_상태 기대_종료 기대_문구(모양|조각0|깨끗) [견본 확인 1/0 — 기본 1] (기록 줄은 s12_in)
+  local shape zero clean rec leak ok=0 pre="${5:-1}"
+  run_fake 0 "$empty_in" 0 "$s12_in"
+  shape="$(fcnt 0 -F -e '훑은 양 기록 모양 이상')"
+  zero="$(fcnt 0 -F -e '훑은 조각 0')"
+  clean="$(fcnt 0 -E '^판정: 깨끗 — ')"
+  rec="$(fcnt 0 -F -e 'records=1')"
+  leak="$(rec_leak)"
+  case "$4" in
+    모양) [ "$shape" -eq 1 ] && [ "$zero" -eq 0 ] && ok=1 ;;
+    조각0) [ "$zero" -eq 1 ] && [ "$shape" -eq 0 ] && ok=1 ;;
+    깨끗) [ "$clean" -eq 1 ] && [ "$rec" -eq 1 ] && ok=1 ;;
+  esac
+  s12_n=$((s12_n + 1))
+  if [ "$pre" = "1" ] && [ "$f_rc" -eq "$3" ] && [ "$f_state" = "$2" ] && [ "$ok" -eq 1 ] && [ "$leak" -eq 0 ]; then
+    s12_ok=$((s12_ok + 1))
+  else
+    miss "S12${1} — 기대 ${2}/${3} · ${4} · 실제 ${f_state:-?}/${f_rc} · 모양${shape} 조각0${zero} 깨끗${clean} records1${rec} 기록글자${leak} 견본${pre}"
+  fi
+}
+s12_p='{"level":"info-0","logger":"trufflehog","msg":"finished scanning",'
+s12_line() { { printf '%s' "$s12_p"; printf -- "${1}\n"; } > "$s12_in"; }   # 꼬리 = printf 형식(escape 해석)
+s12_old='level=info msg="finished scanning"'                                # 옛 견본 · 열쇠=값 꼴 머리(ag · ah · w)
+s12_line '"chunks":5 0,"bytes":120}'; s12_one a error 2 모양                       # P2-1 · 숫자 사이 공백
+s12_line '"chunks":5\t0,"bytes":120}'; s12_one b error 2 모양                      # P2-1 · 숫자 사이 탭
+s12_line '"chunks":5\r0,"bytes":120}'; s12_one c error 2 모양                      # P2-1 · 줄 가운데 CR
+s12_line '"chunks": 5 0,"bytes":120}'; s12_one d error 2 모양                      # P2-1 원꼴 · 콜론 뒤 공백 + 숫자 사이 공백
+s12_line '"chunks":007,"bytes":120}'; s12_one e error 2 모양                       # 앞자리 0
+s12_line '"chunks":00,"bytes":120}'; s12_one f error 2 모양                        # 앞자리 0
+s12_line '"chunks":-5,"bytes":120}'; s12_one g error 2 모양                        # 부호
+s12_line '"chunks":+5,"bytes":120}'; s12_one h error 2 모양                        # 부호
+s12_line '"chunks":-0,"bytes":120}'; s12_one i error 2 모양                        # 부호 0
+s12_line '"chunks":2.5,"bytes":120}'; s12_one j error 2 모양                       # 소수
+s12_line '"chunks":22.0,"bytes":120}'; s12_one k error 2 모양                      # 소수(정수 값)
+s12_line '"chunks":1e3,"bytes":120}'; s12_one l error 2 모양                       # 지수
+s12_line '"chunks":22E0,"bytes":120}'; s12_one m error 2 모양                      # 지수(정수 값)
+s12_line '"chunks":nan,"bytes":120}'; s12_one n error 2 모양                       # 글자 nan
+s12_line '"chunks":0,"chunks":22,"bytes":120}'; s12_one o error 2 모양             # 키 둘 0 · 22
+s12_line '"chunks":22,"chunks":0,"bytes":120}'; s12_one p error 2 모양             # 키 둘 22 · 0
+s12_line '"\\u0063hunks":0,"chunks":22,"bytes":120}'                               # 역빗금 이스케이프 열쇠 + 맨 열쇠
+s12q_bs="$(LC_ALL=C grep -c -e '"\\u0063hunks":0,"chunks":22,' "$s12_in" 2> /dev/null)" || true   # BRE \\ = 역빗금 한 글자
+s12q_pre=0; [ "${s12q_bs:-0}" = "1" ] && s12q_pre=1
+s12_one q error 2 모양 "$s12q_pre"
+s12_line '"x":{"chunks":0},"chunks":22,"bytes":120}'; s12_one r error 2 모양       # 중첩 열쇠
+s12_line '"chunks":[22,0],"bytes":120}'; s12_one s error 2 모양                    # 값 둘 배열
+printf '%s%s %s%s\n' "$s12_p" '"chunks":22,"bytes":120}' "$s12_p" '"chunks":0,"bytes":120}' > "$s12_in"; s12_one t error 2 모양  # 한 줄 객체 둘
+printf '%s%s\n' "$s12_p" '"chunks":22,"bytes":120}' "$s12_p" '"chunks":0,"bytes":120}' > "$s12_in"; s12_one u error 2 모양    # 기록 줄 둘 22/0
+printf '%s%s\n' "$s12_p" '"chunks":0,"bytes":120}' "$s12_p" '"chunks":22,"bytes":120}' > "$s12_in"; s12_one v error 2 모양    # 기록 줄 둘 0/22
+printf '%s%s\n%s %s\n' "$s12_p" '"chunks":22,"bytes":120}' "$s12_old" '{"chunks": 0, "bytes": 120}' > "$s12_in"; s12_one w error 2 모양  # 기록 줄 둘 JSON 22 / 옛 견본 꼴 0
+s12_line '"chunks":"","bytes":120}'; s12_one x error 2 모양                        # 빈 값
+s12_line '"chunks":null,"bytes":120}'; s12_one y error 2 모양                      # null
+s12_line '"chunks":,"bytes":120}'; s12_one z error 2 모양                          # 깨진 값
+s12_line '"bytes":120}'; s12_one aa error 2 모양                                   # 열쇠 없음
+s12_line '"chunks":1234567890,"bytes":120}'; s12_one ab error 2 모양               # 넘침 10자리
+s12_line '"chunks":9223372036854775808,"bytes":120}'; s12_one ac error 2 모양      # 넘침 19자리
+s12_line '"chunks":18446744073709551616,"bytes":120}'; s12_one ad error 2 모양     # 넘침 20자리
+s12_line '"chunks":22,\000"bytes":120}'; s12_one ae error 2 모양                   # NUL 필드 사이(문자열 밖)
+s12_line '"chunks":22\000,"bytes":120}'; s12_one af error 2 모양                   # NUL 숫자 바로 뒤
+printf '%s %s\n' "$s12_old" 'bytes=120 chunks=22' > "$s12_in"; s12_one ag error 2 모양               # 열쇠=값 꼴
+printf '%s %s\n' "$s12_old" '{"chunks": 22, "bytes": 120}' > "$s12_in"; s12_one ah error 2 모양      # 옛 견본 꼴
+printf '%s\n' '{"level":"info-0","logger":"trufflehog","msg":"finished scanning repo","chunks":22,"bytes":120}' > "$s12_in"; s12_one ai error 2 모양  # msg 다름
+s12_line '"chunks":22,"bytes":120}x'; s12_one aj error 2 모양                      # 객체 뒤 꼬리
+s12_line '"chunks":22\r}'; s12_one ak error 2 모양                                 # 숫자 바로 뒤 CR
+s12_line '"chunks":"22","bytes":120}'; s12_one al error 2 모양                     # 따옴표 숫자
+: > "$s12_in"; s12_one am error 2 모양                                             # 기록 줄 없음
+s12_line '"chunks":22,"bytes":120,"verified_secrets":0,"unverified_secrets":0}'; s12_one an clean 0 깨끗  # 대조 · 정상(필드 더 있음)
+s12_line '"chunks":123456789,"bytes":120}'; s12_one ao clean 0 깨끗                # 대조 · 9자리
+s12_line '"bytes":120,"chunks":22}'; s12_one ap clean 0 깨끗                       # 대조 · 마지막 필드
+s12_line '"chunks":22,"bytes":120}\r'; s12_one aq clean 0 깨끗                     # 대조 · 줄 끝(} 뒤) CR
+printf '%s\n%s%s\n%s\n' '{"level":"info-0","logger":"trufflehog","msg":"scanning repo","chunks":0}' \
+  "$s12_p" '"chunks":22,"bytes":120}' '{"level":"info-0","logger":"trufflehog","msg":"cleanup done"}' > "$s12_in"
+s12_one ar clean 0 깨끗                                                            # 대조 · 앞뒤 다른 JSON 기록 줄(앞 줄에 chunks 0) + 정상 1줄
+s12_line '"chunks":0,"bytes":120}'; s12_one as error 2 조각0                       # 2층 본체 · 0 하나
+# [3-V] 병렬 반증 반영 행(PM 결재 덧붙임) — 미끼 둘 · 다른 필드 문자열 안 제어 글자 · ⓓ 단독 · 같은 msg 둘
+s12_line '"\\u0063hunks":0,"x\\"chunks":22,"bytes":120}'                          # 풀어 쓴 진짜 열쇠(값 0) + 따옴표 미끼 맨 글자(22)
+s12at_bs="$(LC_ALL=C grep -c -e '"\\u0063hunks":0,"x\\"chunks":22,' "$s12_in" 2> /dev/null)" || true
+s12at_pre=0; [ "${s12at_bs:-0}" = "1" ] && s12at_pre=1
+s12_one at error 2 모양 "$s12at_pre"
+s12_line '"\\u0063hunks":0,"x":{"chunks":22},"bytes":120}'                         # 풀어 쓴 진짜 열쇠(값 0) + 중첩 미끼(22)
+s12au_bs="$(LC_ALL=C grep -c -e '"\\u0063hunks":0,"x":{"chunks":22},' "$s12_in" 2> /dev/null)" || true
+s12au_pre=0; [ "${s12au_bs:-0}" = "1" ] && s12au_pre=1
+s12_one au error 2 모양 "$s12au_pre"
+printf '%s\000%s%s\n' '{"level":"info-' '0","logger":"trufflehog","msg":"finished scanning",' '"chunks":22,"bytes":120}' > "$s12_in"; s12_one av error 2 모양  # 다른 필드 문자열 안 NUL · 정상 22
+printf '%s\t%s%s\n' '{"level":"info-' '0","logger":"trufflehog","msg":"finished scanning",' '"chunks":22,"bytes":120}' > "$s12_in"; s12_one aw error 2 모양   # 다른 필드 문자열 안 날 탭 · 정상 22
+s12_line '"x":{"chunks": 0},"chunks":22,"bytes":120}'; s12_one ax error 2 모양     # 중첩(콜론 뒤 공백) + 최상위 22 — ⓓ 단독 포착
+s12_line '"msg":"finished scanning","chunks":22,"bytes":120}'; s12_one ay error 2 모양  # 같은 msg 둘 · 정상 22
+# [4] F-1 반영 행(PM 결재 덧붙임 2) — 같은 msg 둘 중 앞 열쇠만 콜론 앞 공백 · 해석은 뒤 값(finished scanning)만 남음
+printf '%s%s\n' '{"level":"info-0","logger":"trufflehog","msg" :"x",' '"msg":"finished scanning","chunks":22,"bytes":120}' > "$s12_in"; s12_one az error 2 모양  # 같은 msg 둘(앞 열쇠 콜론 앞 공백) · 정상 22
+if [ "$s12_n" -eq 52 ] && [ "$s12_ok" -eq 52 ]; then
+  pass "S12 기록 필드 전체 · 경계 — 숫자 사이 공백·탭·CR · 앞자리 0 · 부호 · 소수 · 지수 · nan · 키 둘 · 이스케이프 열쇠 · 미끼 열쇠 · 중첩 · 배열 · 객체 둘 · 줄 둘 · 빈 값 · null · 넘침 · NUL · 문자열 안 제어 글자 · 열쇠=값 꼴 · 옛 견본 꼴 · msg 다름 · msg 둘 · msg 둘(콜론 앞 공백) · 꼬리 · 숫자 뒤 CR = 모양 이상(종료 2) · 정상 5 = 깨끗 · 0 하나 = 조각0(종료 2) · 행마다 기록 글자 출력 0"
+elif [ "$s12_n" -ne 52 ]; then
+  miss "S12 기록 필드 전체 · 경계 — 기대 52행 · 실제 ${s12_n}행"
+fi
+
 # ── 로그 위생: 가짜 비밀 내용이 하위 출력 어디에도 0회 ─────────────────────
 body="${root}/fake.body"
 : > "$body"
@@ -434,4 +605,4 @@ if [ "$fails" -ne 0 ]; then
   echo "::error title=비밀 탐지 자체시험::${fails}개 실패 — 검사 장치를 믿을 수 없으므로 잡을 빨강으로 끝낸다"
   exit 1
 fi
-echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · 로그 위생 모두 통과"
+echo "자체시험 S1~S4 · S4f·S4g · S6 · S7 · S8 · S9 · S10a~f · S11a~x · S12a~az · 로그 위생 모두 통과"
