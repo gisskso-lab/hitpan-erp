@@ -23,6 +23,10 @@
 #   v5 별건 A K2⁵([3-V] 차이 재셈 A #1 · [4] F10 — git 속성 변환으로 G5 우회):
 #     guard G5 에 작업 나무 원 바이트 대조를 더함 — 장치 커밋 ls-tree -r(--no-replace-objects) 의 경로 · 모드 · blob 이름 ↔ 작업 나무 파일마다 git hash-object --no-filters(속성 변환 없이)
 #       종류 대조(장치 커밋 = 일반 파일인데 작업 나무 = 심볼릭 링크 · 폴더 · 없음 = 빨강) · 임시 색인 diff · ls-files --others 는 그대로(둘 다 같아야 초록) · 원자료 칸 무변(tree_changed = 경로 이름만)
+#   v5 별건 A K2⁶([3-V] 차이 재셈 A1 · PM 판단 P1 — 작업 나무 안 `.git` 이름 항목으로 G5 초록 + guard 뒤 단계의 저장소가 바뀜):
+#     ① 모든 하위 명령의 저장소 경로 = guard 와 같은 식 한 줄(장치 폴더 두 단계 위 · 물리 경로) — git rev-parse --show-toplevel 에 묻지 않음 · 그 뒤 git 호출은 -C "$REPO" 그대로
+#     ② guard G5 에 `.git` 이름 항목 단언 — G 범위(두 경로) 안 모든 깊이 + G 범위 경로마다 저장소 뿌리까지 사이 폴더 바로 아래 · 하나라도 있으면(못 읽어도) 빨강
+#       git 에 묻지 않고 디렉터리 항목을 직접 읽음(node · 링크를 따라가지 않음) · 원자료 새 칸 dotgit_none(참거짓) · dotgit_found(경로 이름만) · 외부 명령 새 이름 0
 set -u -o pipefail
 
 STAGE="${1:?usage: boot.sh <m1|m2|m3|m4|runjson|round> <raw> <work>}"
@@ -31,9 +35,14 @@ WORK="${3:?work dir}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # v5 별건 A K2‴(CTO A11-2): guard 는 저장소 경로를 git 없이 정한다 — 장치 폴더(tools/hqa-s4-measure)의 두 단계 위 · 물리 경로(pwd -P = git 최상위와 같은 꼴 · 심볼릭 링크 풂)
 #   guard 에서 G2 판정 전 git 호출 = G2 자신의 설정 목록 읽기 하나뿐(G1 전 git 0) · 다른 하위 명령은 아래 REPO 줄 바이트 그대로(else 쪽)
-if [ "$STAGE" = guard ]; then REPO="$(cd "$HERE/../.." && pwd -P)"; else
-REPO="$(git -C "$HERE" rev-parse --show-toplevel)"
-fi
+# v5 별건 A K2⁶([3-V] 차이 재셈 A1 · PM 판단 P1): guard 밖 모든 하위 명령도 같은 식 — 위 K2‴ 「else 쪽 · REPO 줄 바이트 그대로」 는 이 차수에서 끝남
+#   git rev-parse --show-toplevel 은 작업 나무 안 `.git` 이름 항목(장치 폴더 안 폴더 · gitdir: 파일 · 장치 폴더 위 tools/.git)을 저장소로 보아
+#   guard 뒤 단계(runjson ls-remote origin · m4 cd)의 저장소를 바꿔 놓았다 → 저장소 경로는 git 에 묻지 않는다 · 그 뒤 git 호출은 -C "$REPO" 그대로
+#   guard 경로 = 다른 하위 명령 경로 = 아래 한 줄(K2‴ A11-1 「식 = 한 곳」 과 같은 꼴 · 따로 단언 줄 · 원자료 칸 0)
+#   옛 글자(K2‴): if [ "$STAGE" = guard ]; then REPO="$(cd "$HERE/../.." && pwd -P)"; else
+#                 REPO="$(git -C "$HERE" rev-parse --show-toplevel)"
+#                 fi
+REPO="$(cd "$HERE/../.." && pwd -P)"
 mkdir -p "$RAW" "$WORK/stages"
 
 # H4-G 값(F″): 릴리스 · 자산 이름 = F″ 앞 8자(옛 …-b967b1b0 대체)
@@ -337,6 +346,7 @@ guard() {
   local s="$WORK/snap" a="$WORK/snap-guard" f have=1 stop=0 r1="" r2="" r3="" r4="" r5="" t1=0 t2=0
   local dev="" devref="" hd="" dv="" hok="" fok=""   # v5 별건 A K2′([3-V] P1-2) — G5 기준 · HEAD = 장치 커밋 · 색인 표시
   local rok=""   # v5 별건 A K2″([3-V] P1 replace 참조) — G5 refs/replace/ 비어 있음
+  local dok=""   # v5 별건 A K2⁶([3-V] 차이 재셈 A1) — G5 `.git` 이름 항목 0(G 범위 안 · 사이 폴더)
   rm -rf "$a"; mkdir -p "$a"
   for f in env.json git-config.txt bins.tsv ld-preload.txt; do [ -f "$s/$f" ] || have=0; done
   [ $have = 1 ] || stop=1
@@ -391,8 +401,37 @@ NODE
   #     종류 대조: 장치 커밋 = 일반 파일(100644 · 100755)인데 작업 나무 = 심볼릭 링크 · 폴더 · 없음이면 다름(hash-object 는 링크를 따라가므로 -L 먼저) · 장치 커밋의 다른 모드 = 대조 불가 = 다름
   #     다른 경로 = tree.txt 에 이름만(이미 있으면 한 번) · 장치 커밋 목록을 못 읽거나 비면 t1=1 · 임시 색인 diff · ls-files --others 는 지우지 않고 함께(둘 다 같아야 초록)
   #     외부 명령 = git(G5) · grep(G5) 만(새 이름 0) · 환경 변수 내보내기 0
+  #   v5 별건 A K2⁶([3-V] 차이 재셈 A1 · PM 판단 P1): git 은 작업 나무를 훑을 때 `.git` 이름 항목을 늘 건너뛴다 — 임시 색인 diff · ls-files --others · 원 바이트 대조(장치 커밋 목록만 돎) 모두 못 본다
+  #     → G5 맨 앞(G5 의 git 호출 전)에 디렉터리 항목을 직접 읽어 `.git` 이름 항목(폴더 · 파일 · 링크 · 종류 무관)을 찾는다 — git 에 묻지 않음 · 링크를 따라가지 않음
+  #     ⓐ G 범위(두 경로) 안: 폴더면 모든 깊이(찾은 `.git` 안으로는 안 내려감) ⓑ G 범위 경로마다 저장소 뿌리까지 사이 폴더(tools · .github · .github/workflows) 바로 아래
+  #     저장소 뿌리 자신의 .git 은 대조 밖(진짜 저장소) · 하나라도 있으면 빨강 · 못 읽어도 빨강(node 실패 = dok 0)
+  #     원자료 = dotgit_none 참거짓 · dotgit_found 경로 이름만(저장소 뿌리 기준 · 50개까지 · 빨강일 때만) · 목록 파일 = "$a"(작업 폴더 · 원자료 0)
+  #     외부 명령 = node(G1 · 원자료 쓰기와 같은 이름 · G3 바이트 확인 뒤) — 새 이름 0 · 환경 변수 내보내기 0
   if [ $stop = 0 ]; then
-    devref=$(g_devref); hok=0; fok=0; rok=0
+    devref=$(g_devref); hok=0; fok=0; rok=0; dok=0
+    if node - "$REPO" "$a/dotgit.txt" "${G_TREE[@]}" 2>> "$a/tree.err" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const [repo, out, ...scope] = process.argv.slice(2);
+const found = [];
+const has = (rel) => { try { fs.lstatSync(path.join(repo, rel)); return true; } catch (e) { if (e.code === 'ENOENT') return false; throw e; } };
+const walk = (rel) => {
+  for (const d of fs.readdirSync(path.join(repo, rel), { withFileTypes: true })) {
+    const r = rel + '/' + d.name;
+    if (d.name === '.git') found.push(r);
+    else if (d.isDirectory()) walk(r);
+  }
+};
+for (const p of scope) {
+  const parts = p.split('/');
+  for (let i = 1; i < parts.length; i++) { const r = parts.slice(0, i).join('/') + '/.git'; if (has(r)) found.push(r); }
+  let st = null;
+  try { st = fs.lstatSync(path.join(repo, p)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && st.isDirectory()) walk(p);
+}
+fs.writeFileSync(out, Array.from(new Set(found)).sort().map((r) => r + '\n').join(''));
+NODE
+    then [ -s "$a/dotgit.txt" ] || dok=1; fi
     dev=$(g_dev) || { dev=""; t1=1; }
     local idx; idx="$(cd "$a" && pwd -P)/dev.idx"; rm -f "$idx"; : > "$a/tree.txt"; : > "$a/tree.err"
     if [ -n "$dev" ] && GIT_INDEX_FILE="$idx" git --no-replace-objects -C "$REPO" read-tree "$dev" 2>> "$a/tree.err"; then
@@ -418,11 +457,11 @@ NODE
     git -C "$REPO" ls-files -v -- "${G_TREE[@]}" > "$a/flags.txt" 2>> "$a/tree.err" || t2=1
     if [ -s "$a/flags.txt" ] && ! grep -qv '^H ' "$a/flags.txt"; then fok=1; fi
     if git --no-replace-objects -C "$REPO" for-each-ref --format='%(refname)' refs/replace/ > "$a/replace.txt" 2>> "$a/tree.err"; then [ -s "$a/replace.txt" ] || rok=1; else t2=1; fi
-    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ] && [ $hok = 1 ] && [ $fok = 1 ] && [ $rok = 1 ]; then r5=1; else r5=0; fi
+    if [ $t1 = 0 ] && [ $t2 = 0 ] && [ ! -s "$a/tree.txt" ] && [ $hok = 1 ] && [ $fok = 1 ] && [ $rok = 1 ] && [ $dok = 1 ]; then r5=1; else r5=0; fi
   fi
-  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "$hok" "$fok" "$devref" "$rok" "${G_ALLOW[@]}" <<'NODE'
+  node - "$s" "$a" "$RAW/m3g-guard.json" "$have" "$r1" "$r2" "$r3" "$r4" "$r5" "$hok" "$fok" "$devref" "$rok" "$dok" "${G_ALLOW[@]}" <<'NODE'
 const fs = require('fs');
-const [s, a, out, have, r1, r2, r3, r4, r5, hok, fok, devref, rok, ...allow] = process.argv.slice(2);
+const [s, a, out, have, r1, r2, r3, r4, r5, hok, fok, devref, rok, dok, ...allow] = process.argv.slice(2);
 const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
 const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.trim()) : []);
 const tri = (r) => (r === '1' ? true : r === '0' ? false : null);
@@ -467,6 +506,9 @@ const doc = {
   index_flagged: fok === '0' ? lines(a + '/flags.txt').filter((l) => !l.startsWith('H ')).map((l) => l.slice(2)).slice(0, 50) : [],
   // v5 별건 A K2″([3-V] P1 replace 참조): refs/replace/ 비어 있음 — 참거짓만(참조 이름 · 개체 이름 0)
   replace_refs_none: tri(rok),
+  // v5 별건 A K2⁶([3-V] 차이 재셈 A1): `.git` 이름 항목 0(G 범위 안 · 사이 폴더) — 참거짓 · 빨강이면 경로 이름만(저장소 뿌리 기준 · 50개까지 · 내용 0)
+  dotgit_none: tri(dok),
+  dotgit_found: dok === '0' ? lines(a + '/dotgit.txt').slice(0, 50) : [],
   values: 'names and true/false only - no values, no hashes (snapshot stays in the work folder)',
 };
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
