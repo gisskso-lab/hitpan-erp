@@ -89,6 +89,15 @@ public sealed class PdfRenderService : IPdfRenderService
         //   저장된 양식을 **그대로 쓰고** 그 위에 **이번 한 번만** 바꿀 값을 얹는다.
         //   🔴 저장하지 않는다 — 고객이 미리보기에서 만진 값이 양식으로 굳으면 안 된다.
         //   🔴 옵션이 null 이면 아무것도 안 바뀐다 ⇒ **지금 인쇄와 같은 종이**(#1).
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 대표 §49 · 구별 기준 §1-3 C 「저장값 조건」]
+        //   Y 템플릿 판정(아래 `isYTemplate`)은 **저장된** `print_background` 로 본다 — 바로 아래
+        //   `ApplyPrintOptions` 는 전표 미리보기 옵션으로 이번 한 번 `PrintBackground` 를 **같은 객체에
+        //   덮어쓸** 수 있다. 덮은 값으로 보면 옛 좌표가 남은 빈 A4(K4 · 저장값 0)가 그 한 번만
+        //   칸 모양이 된다 ⇒ 덮기 전에 값(bool)을 떠 둔다.
+        //   🔴 그림 깔기 판정(`ResolveFormBackground`)은 종전대로 덮은 값을 쓴다 — 이 줄은 그 판정을 안 바꾼다.
+        //   🔴 양식정보설정 미리보기(`overrides.Template`)에서는 편집 중 값이 이 자리에 온다 — 편집창이
+        //     빈 A4 좌표를 null 로 보내므로(좌표 0) 그 미리보기의 종이는 이 값과 상관없이 종전과 같다.
+        var savedPrintBackground = template?.PrintBackground == true;
         template = ApplyPrintOptions(template, overrides?.Options);
         var isPreprint = template?.PaperMode == "preprint";
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
@@ -109,7 +118,10 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 좌표가 있으면 용지 · 방향이 A4 세로로 묶인다(`ResolvePageSize` 의 좌표 울타리) —
         //     좌표는 어느 종이에 대고 쟀는지가 전제이기 때문이다. 이제 `plain` 좌표 양식도 그 안이다.
         //   🔴 칸 맞춤 화면은 양식지 전용 그대로다(설계 §3 P2 안 가져옴 · 편집창 무변).
-        var useCoords = (template?.FieldCoords.Count ?? 0) > 0;
+        // 🔴🔴 [2026-11-19 고침1 · 대표 §49] **위 「K4 가 기본 폼 → 좌표 모양으로 바뀌는 것은 Q12 받아들임」 은
+        //   좁혀졌다** — 대표 §49 「옛 좌표가 남은 빈 A4 = 기본 폼 유지」. 칸 모양은 양식지와 Y 템플릿에만이다.
+        //   위 주석은 이력으로 남긴다(지운 것 0). 판정 줄(`useCoords`)은 아래 그림 읽기(`bgImage`) **뒤로**
+        //   내렸다 — Y 템플릿 판정에 「그 그림이 실제로 읽혔나」 가 들어가기 때문이다(구별 기준 §3).
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
         // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
         //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
@@ -128,6 +140,24 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 「등재만 · 이번에 안 한다」였던 §13-10 이 **사장님 오더로 열렸다** —
         //     내가 임의로 넓힌 것이 아니다. 근거는 20261026작1 작업지시서 §C-3.
         var bgImage = ResolveFormBackground(overrides, template);
+
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 대표 §49 「옛 좌표가 남은 빈 A4 = 기본 폼 유지」 · 구별 기준 §1-3 C · PM 결재 11/19]
+        //   종전 식(갈래 A 첫 판) = `(template?.FieldCoords.Count ?? 0) > 0`  (main = `isPreprint && …`)
+        //   [그대로 두면 무슨 일이 나나] 옛 좌표만 남은 빈 A4(K4)도 칸 모양으로 나가 자사 이름 · 제목 ·
+        //     머리글이 빠지고, 한 쪽을 넘친 품목이 잘리고, 계산서 · 영수증도 같았다([3-V] P2-1 · P2-2 · [4] #1 · #2 · #5).
+        //   [이제] 칸 모양 = 양식지(종전대로) **또는** Y 템플릿. Y 템플릿 = 아래 다섯 조건이 **모두** 참:
+        //     ① `paper_mode` = "plain"(글자 그대로 · 모르는 값은 Y 아님) ② **저장된** `print_background` = 켬(위에서 떠 둔 값)
+        //     ③ 그림 경로가 비지 않음 ④ 칸 좌표 1개 이상(`useCoords` 의 앞 조건) ⑤ 그 그림이 실제로 읽힘(`bgImage` != null)
+        //   🔴 나머지 빈 A4(K4 · 좌표 0 · 그림을 못 읽은 Y)는 **main 과 같은 기본 폼**이다(#1 · 머리글 · 쪽번호 · 용지 · 여백 모두).
+        //   🔴 ⑤ 는 이번 인쇄에 실제로 깔리는 그림이다 — 파일이 없어졌거나 못 읽으면, 또는 전표 미리보기 옵션으로
+        //     그림을 끈 한 번은 기본 폼으로 나간다. 값만 흩어진 흰 종이보다 머리글 · 자사 이름 · 표가 있는 종이가 낫다(#20 · #25).
+        //   🔴 한계(PM 결재 기록): 저장 문을 직접 불러 네 칸을 Y 와 똑같이 채운 행은 자료가 Y 와 글자까지 같아 못 가른다 → Y 로 본다.
+        //   🔴 세금계산서 `plain` 은 아래 법정 작성기 분기(`&& !isPreprint`)에서 이 값을 쓰기 전에 먼저 빠진다 — 무변.
+        var isYTemplate = string.Equals(template?.PaperMode, "plain", StringComparison.Ordinal)
+            && savedPrintBackground
+            && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
+            && bgImage is not null;
+        var useCoords = (template?.FieldCoords.Count ?? 0) > 0 && (isPreprint || isYTemplate);
 
         // 🔴 로고 워터마크 (20261026작1 §C-2 · DB-148 · 사장님 오더 10/25 ④).
         //   사장님: *"모든 양식지에 고객사 로고 워터마크 넣기 옵션 추가. 위치 = 정중앙 크게.
@@ -178,6 +208,41 @@ public sealed class PdfRenderService : IPdfRenderService
             var taxBytes = RenderTaxInvoiceDocument(data, company, copyMode, showTearLine,
                 marginTop, marginLeft, marginRight, marginBottom);
             return (taxBytes, $"{KoLabel(documentType)}_{data.DocNo}.pdf");
+        }
+
+        // 🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 구별 기준 §2 안 (가) · PM 결재 11/19] Y 템플릿 품목 넘침 = **서버 경고 로그 1줄**.
+        //   칸 모양은 한 쪽(297mm)에 고정이고 `max_rows` 를 넘친 품목은 잘린다(`ComposeBodyCoords` · 원래 양식지 main 과 같은 모양).
+        //   🔴 **종이는 안 바꾼다** — 자르기 · 자리 · 종이 위 알림 모두 그대로(옛 결재 Q-4 「나머지 9종 종이 무변화」 · R-2 반려 이력).
+        //     고객 알림(종이 · 화면)은 대표 재질문 거리라 이 차수 0 — 원격 진단 길만 둔다.
+        //   🔴 `ComposeBodyCoords` 서명은 그대로다(시험이 반사로 부른다) — 줄 수 셈은 여기서 같은 규칙으로 한 번 더 한다.
+        //   🔴 품목 이름 · 금액 등 **값은 적지 않는다** — 줄 수 · 테넌트 · 종 · 전표 id 만.
+        //   🔴 양식지(`preprint`)는 이 줄을 안 탄다 — 양식지 로그도 main 과 같다. 세금계산서 `plain` 은 위에서 이미 빠졌다.
+        //   🔴 「종이 안」 줄 수는 어림이다 — 가장 아래 품목 칸의 첫 줄 자리에서 줄 간격으로 297mm 앞까지 센다(글자 높이 안 셈).
+        if (useCoords && isYTemplate && data.Lines.Count > 0)
+        {
+            var yCoords = template!.FieldCoords;
+            var yLineCoords = yCoords
+                .Where(fc => fc.Key.StartsWith("line.", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (yLineCoords.Count > 0)
+            {
+                var yMaxRows = yCoords.FirstOrDefault(fc =>
+                    fc.Key.Equals("max_rows", StringComparison.OrdinalIgnoreCase))?.XMm ?? 0f;
+                var yRowLimit = yMaxRows > 0 ? (int)yMaxRows : data.Lines.Count;
+                var yPitch = yCoords.FirstOrDefault(fc =>
+                    fc.Key.Equals("row_pitch", StringComparison.OrdinalIgnoreCase))?.YMm ?? 0f;
+                if (yPitch <= 0f) yPitch = 6f;
+                var yLowest = yLineCoords.Max(fc => fc.YMm);
+                var yOnPaper = yLowest >= 297f ? 0 : (int)MathF.Ceiling((297f - yLowest) / yPitch);
+                var yShown = Math.Min(Math.Min(data.Lines.Count, yRowLimit), yOnPaper);
+                if (data.Lines.Count > yShown)
+                {
+                    _logger.LogWarning(
+                        "[PDF] 좌표 양식(빈 A4 + 양식 그림)의 품목이 한 쪽에 다 안 들어간다 — 품목 {Total}줄 중 {Shown}줄만 종이에 나간다"
+                        + "(줄 수 설정 {RowLimit} · 종이 안 어림 {OnPaper}). 종이는 그대로 그린다. tenant={Tenant} type={Type} id={Id}",
+                        data.Lines.Count, yShown, yRowLimit, yOnPaper, tenantId, documentType, documentId);
+                }
+            }
         }
 
         var bytes = Document.Create(c =>
@@ -2173,10 +2238,12 @@ public sealed class PdfRenderService : IPdfRenderService
         //     이번 차수에서 가장 위험한 자리였다(고객은 전표가 안 나간 줄도 모른다).
         //   🔴 좌표는 **어느 종이에 대고 쟀는지**가 전제다. 그 전제를 코드가 혼자 바꾸지 않는다.
         //     용지를 바꾸려면 고객이 좌표를 다시 맞춰야 하고, 그건 화면이 안내할 일이다(등재).
+        //   🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · [4] #6] 로그 문구만 「양식용지 좌표」 → 「좌표 양식」 —
+        //     이제 빈 A4 Y 템플릿(그림 있는 빈 A4)도 이 길을 탄다. 판정 · 반환 값 무변 · 고객 노출 0.
         if (useCoords && !IsA4Portrait(template))
         {
             _logger.LogWarning(
-                "[PDF] 양식용지 좌표가 맞춰져 있어 용지·방향을 바꾸지 않는다 — A4 세로로 그린다. "
+                "[PDF] 좌표 양식(양식지 · 빈 A4 + 양식 그림)은 칸 좌표가 맞춰져 있어 용지·방향을 바꾸지 않는다 — A4 세로로 그린다. "
                 + "용지를 바꾸려면 좌표를 다시 맞춰 주십시오.");
             return PageSizes.A4;
         }
@@ -3128,9 +3195,11 @@ public sealed class PdfRenderService : IPdfRenderService
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
+            // 🔴 [2026-11-19 갈래 A 고침1 · [4] #6] 이 함수의 로그 세 줄 문구만 「양식용지 좌표」 → 「좌표 양식의 칸 좌표」 —
+            //   빈 A4 Y 템플릿도 좌표를 탄다. 판정 · 건너뛰기 · 경계값(`x > 420 || y > 594`) 무변 · 고객 노출 0.
             if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
             {
-                _logger.LogWarning("양식용지 좌표가 목록 형태가 아니다 — 기본 배치로 인쇄한다.");
+                _logger.LogWarning("좌표 양식의 칸 좌표가 목록 형태가 아니다 — 기본 배치로 인쇄한다.");
                 return list;
             }
 
@@ -3148,7 +3217,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 // 종이 밖 좌표는 조용히 사라진다 — 고객이 왜 안 나오는지 모르므로 남긴다.
                 if (x < 0 || y < 0 || x > 420 || y > 594)
                 {
-                    _logger.LogWarning("양식용지 좌표가 종이 밖이다 — key={Key} x={X}mm y={Y}mm, 이 칸은 건너뛴다.", key, x, y);
+                    _logger.LogWarning("좌표 양식의 칸 좌표가 종이 밖이다 — key={Key} x={X}mm y={Y}mm, 이 칸은 건너뛴다.", key, x, y);
                     continue;
                 }
 
@@ -3165,7 +3234,7 @@ public sealed class PdfRenderService : IPdfRenderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "양식용지 좌표를 읽지 못했다 — 기본 배치로 인쇄한다.");
+            _logger.LogWarning(ex, "좌표 양식의 칸 좌표를 읽지 못했다 — 기본 배치로 인쇄한다.");
             return new List<FieldCoord>();
         }
         return list;
