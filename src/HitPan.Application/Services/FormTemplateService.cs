@@ -143,6 +143,14 @@ public class FormTemplateService : IFormTemplateService
                 tenantId, request.FormType);
             throw new InvalidOperationException(DuplicateTemplateMessage(ex));
         }
+        // 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 부분 · 고침 1·2 좁은 재셈 [4] P3-A · PM 판단] 교착(1213)도 사람 말 · 500 0.
+        //   트랜잭션은 DB 가 이미 되돌렸다 = 행 0. 고객은 잠시 뒤 다시 저장하면 된다(1062 줄 옆 1줄 · 컨트롤러 무변 = 400 + 문구).
+        catch (MySqlException ex) when (ex.ErrorCode == MySqlErrorCode.LockDeadlock)
+        {
+            _logger.LogWarning(ex, "[양식] 저장 거절 — 교착(1213) · 행 0 · tenant={Tenant} type={Type}",
+                tenantId, request.FormType);
+            throw new InvalidOperationException(SaveDeadlockMessage);
+        }
     }
 
     // 종전 `CreateAsync` 본문(W-G1-51 F-1 — 이름만 옮김 · 트랜잭션 인자 더함 · 양식지 그림 찍기 0 강제 더함).
@@ -277,6 +285,15 @@ public class FormTemplateService : IFormTemplateService
             _logger.LogWarning(ex, "[양식] 저장 거절 — 유일 키 충돌(1062) · 행 0 · tenant={Tenant} template={Template}",
                 tenantId, templateId);
             throw new InvalidOperationException(DuplicateTemplateMessage(ex));
+        }
+        // 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 부분 · [4] P3-A · PM 판단] 교착(1213) — 고침 2 로 잠금 순서가
+        //   「내 행 FOR UPDATE → 같은 종 다른 행」 이 되어, 기본 지정 저장과 옮기기 1회가 같은 순간 같은 종을 잡으면 날 수 있다.
+        //   사람 말 · 500 0 · 행 0(DB 가 트랜잭션을 되돌림) · 1062 줄 옆 1줄.
+        catch (MySqlException ex) when (ex.ErrorCode == MySqlErrorCode.LockDeadlock)
+        {
+            _logger.LogWarning(ex, "[양식] 저장 거절 — 교착(1213) · 행 0 · tenant={Tenant} template={Template}",
+                tenantId, templateId);
+            throw new InvalidOperationException(SaveDeadlockMessage);
         }
     }
 
@@ -1209,6 +1226,10 @@ public class FormTemplateService : IFormTemplateService
         }
         return keep;
     }
+
+    /// <summary>1213(교착) 사람 말(#23 — 개발 용어 · 원문 0). 다음 할 일 = 잠시 뒤 다시 저장.</summary>
+    private const string SaveDeadlockMessage =
+        "다른 작업과 같은 순간에 겹쳐 저장하지 못했습니다. 잠시 뒤 다시 저장해 주십시오.";
 
     /// <summary>1062 사람 말(#23 — 개발 용어 · 키 이름 · 원문 0). 어느 키에 걸렸는지만 보고 두 문구 중 하나.</summary>
     private static string DuplicateTemplateMessage(MySqlException ex)
