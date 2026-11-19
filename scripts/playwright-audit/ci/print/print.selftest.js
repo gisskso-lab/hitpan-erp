@@ -2291,8 +2291,43 @@ guardAsync(TF3, async () => {
     업로드0: run.includes('find "$UI_OUT"'), 사유: run.includes('PRINT_FONT_WHY='), 판정env: ls.slice(iJudge, iJudge + 5).join('\n').includes('PRINT_FONT_OUTCOME: ${{ steps.font.outcome }}'),
     G0없음: !/fc-match|fc-cache/.test(job), 줄수: pyLines <= 90, 보존8: keep === '0,7,8,9,11,12,13,14', 중립: py.includes("'PrintSubstitute-Regular'") && py.includes("'PrintSubstitute-Bold'"),
   };
+  // 🔴 12차 S11-3 · S11-4 · S11-5 · P3-D — 주석(⬛) 뺀 줄로 셈(옛 줄 주석이 대신 맞는 것 막음) · 맨위 도 주석 뺀 줄로 다시 셈
+  const live12 = run.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const iTrap = live12.indexOf(`trap 'rm -rf "$W"' EXIT`);
+  Object.assign(ck, {
+    맨위: live12.includes(' /usr/share/fonts/ || fail "글꼴 단계 — 시스템 폴더 복사 실패"; else fail "${why:-글꼴 단계 — 이름 고침 실패}"; fi'),
+    trap: iTrap > 0 && iTrap < live12.indexOf('mkdir -p "$W"'),
+    한줄: live12.includes(`w=$(printf '%s' "$1" | tr '\\r\\n' '  '); echo "PRINT_FONT_WHY=$w" >> "$GITHUB_ENV"`) && !live12.includes('PRINT_FONT_WHY=$1'),
+  });
   const bad = Object.entries(ck).filter(([, v]) => !v).map(([k]) => k);
   check(TF3, bad.length === 0, `어긋남 ${bad.join(' · ') || '0'} · 단계 줄 ${iFont} · continue-on-error ${coe} · python ${pyLines}줄`);
+});
+
+// T-FG5 12차 S11-4 · S11-5(동작) — 실제 글꼴 단계 줄(set · fail · W · trap)을 bash -e 로: 여러 줄 사유 → GITHUB_ENV 1줄(끼어든 이름 0) · 일찍 exit 1 → 작업 폴더 지워짐
+const TF5 = 'T-FG5 12차 글꼴 단계 동작 — 여러 줄 사유 = env 1줄 · 일찍 exit 1 에도 작업 폴더 지움(trap)';
+guard(TF5, () => {
+  const run = stepRun7(printJob7(), '[장치] 측정 글꼴') || '';
+  const live = run.split('\n').filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+  const pick = (re) => live.find((l) => re.test(l)) || '';
+  const lines = [pick(/^set -uo pipefail/), pick(/^bad=0; fail\(\)/), pick(/^W="\$RUNNER_TEMP\/font-work"/), pick(/^trap /)].filter(Boolean);
+  const root = fs.mkdtempSync(path.join(OS.tmpdir(), 'tf5-'));
+  let r = null;
+  let envLines = [];
+  let left = null;
+  try {
+    const script = path.join(root, 'step.sh');
+    fs.writeFileSync(script, [...lines, 'mkdir -p "$W"; : > "$W/regular.ttf"', 'fail "$(printf \'line1\\r\\nline2\\nPRINT_X=injected\')"', 'exit 1', ''].join('\n'));
+    const envFile = path.join(root, 'env.txt');
+    const env = { ...process.env, RUNNER_TEMP: root, UI_OUT: path.join(root, 'out'), GITHUB_ENV: envFile };
+    r = CP.spawnSync(bash7(), ['--noprofile', '--norc', '-e', script], { env, encoding: 'utf8', timeout: 60000 });
+    envLines = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+    left = fs.existsSync(path.join(root, 'font-work'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  const one = envLines.length === 1 && /^PRINT_FONT_WHY=line1 +line2 PRINT_X=injected$/.test(envLines[0]) && !envLines.some((l) => /^PRINT_X=/.test(l));
+  check(TF5, lines.length === 4 && r && r.status === 1 && one && left === false,
+    `줄 ${lines.length}/4 · 끝 코드 ${r ? r.status : '없음'} · env 줄 ${envLines.length}(${envLines.map((l) => l.slice(0, 40)).join(' / ')}) · 작업 폴더 남음 ${left}${r && r.stderr ? ` · ${r.stderr.slice(0, 80)}` : ''}`);
 });
 
 // T-FG1 11차 D2′(고침 1 §8-3 · §1-11-0 · §1-11-8 · 고침 2 §2 · §3 · §5 · PM L5) — 글꼴 관문(순수): ⑷ 만 통과 · ⑴⑵⑶ · ⓓ · 다시 셈 · 변이 V-G1 · V-G2 · V-G3 · V-L5
@@ -2324,6 +2359,11 @@ guard(TF1, () => {
     ['family 다름', run({ facts: facts((f) => { f.files[0].names[2].v = 'Other Gothic'; }) }), (r) => !r.ok && /regular family ≠ Malgun Gothic/.test(r.why)],
     ['보존 다름', run({ facts: facts((f) => { f.files[1].preserveSame = false; }) }), (r) => !r.ok && /bold 보존 기록 다름/.test(r.why)],
     ['굵게 견본 없음 = 보통으로만 통과 + 미측정 표시', run({ t8: t8({ bold: null }) }), (r) => r.ok && /굵게 견본 없음/.test(r.boldNote)],
+    // 🔴 12차 [4] P2-A — 보통 칸 = 중립 이름 + 다른 이름 1 → 초록 아님(조임 `some` 을 지킴 · `every` 로 약하게 하면 이 경우가 빨강)
+    ['P2-A 보통 칸 = 중립 + 다른 이름 1 → 초록 아님', run({ t8: t8({ regular: [`ABCDEF+${N.regular}`, 'GHIJKL+DejaVuSans'] }) }), (r) => !r.ok && r.cell === '⑵ T8 하네스 결함' && /보통 \[PrintSubstitute-Regular, DejaVuSans\]/.test(r.why)],
+    // 🔴 12차 [4] P3-C — T8 빨강 + 글꼴 단계 사유 있음 → 칸 이름 = 그 첫 사유(⑴/⑵ 아님) · 한글 있음 · 없음 둘 다
+    ['P3-C 단계 사유 + T8 빨강(한글 있음) → 칸 = 사유', run({ stepWhy: '글꼴 단계 — 파일 사실 불일치(regular 금지 낱말 1)', outcome: 'failure', t8: t8({ regular: ['ABCDEF+NanumGothic'] }) }), (r) => !r.ok && r.cell === '글꼴 단계 — 파일 사실 불일치(regular 금지 낱말 1)'],
+    ['P3-C 다시 셈 사유 + T8 빨강(한글 없음) → 칸 = 사유', run({ facts: facts((f) => { f.files[1].preserveSame = false; }), t8: t8({ regular: ['ABCDEF+Lato-Regular'] }), basicHangul: false }), (r) => !r.ok && r.cell === '글꼴 단계 — 파일 사실 불일치(bold 보존 기록 다름)'],
   ];
   const bad = cases.filter(([, r, f]) => !f(r)).map(([n, r]) => `${n} 「${r.cell} · ${String(r.why).slice(0, 80)}」`);
   check(TF1, bad.length === 0 && N.regular === 'PrintSubstitute-Regular' && N.bold === 'PrintSubstitute-Bold' && J.FONT_KEEP_IDS.join() === '0,7,8,9,11,12,13,14', bad.join(' / ') || `경우 ${cases.length} 모두 맞음`);
@@ -2382,6 +2422,56 @@ guard(TFG4, () => {
     && md.includes('- (기록만 · 판정 아님) 런 PDF 글꼴 이름(접두 뗀 값) = PrintSubstitute-Regular, PrintSubstitute-Bold · 굵게 이름 있음 = 예') // 🔴 PM 판단 ①
     && plan.run === 'R6' && r6.jobs.length === 1 && job.id === 'r6-main-read' && job.board === 'main' && job.tenant === 'A' && job.phase === 'read' && job.patch === '' && job.qpdf === false && !r6.blocked;
   check(TFG4, ok, `꼬리표 ${tagOk ? '○' : '×'} · 머리 ${md.includes(`〔${J.FONT_TAG}〕`) ? '○' : '×'} · ㉤ ${md.includes('요청 이름 = Malgun Gothic') ? '○' : '×'} · 600 ${md.includes('usWeightClass = 600') ? '○' : '×'} · 계획 ${plan.run} · ${job.id || '잡 없음'} · qpdf ${job.qpdf}`);
+});
+
+// T-PD1 12차 PM 보충(법무 재확인 3줄 질문 3 「아니오」 · S11-2) — 판정기(워크플로 진입점)가 사실 뒤 업로드 뿌리 PDF 지움(하위 폴더 · 대문자 확장자) · 사실 파일 그대로 ·
+//   결과표 · json 에 지운 수 · 같은 뿌리에 S10(누출 검사 프로세스) = 누출 0 · 못 지움 = 이름 붙은 사유 · ㉤ 행 글자(PM 보충 ⓑ)
+const TPD1 = 'T-PD1 12차 PDF 업로드 0 — 판정기가 사실 뒤 PDF 지움 · 사실 그대로 · 결과표 지운 수 · S10 누출 0 · 못 지움 사유 · ㉤ 행 글자';
+guard(TPD1, () => {
+  const root = fs.mkdtempSync(path.join(OS.tmpdir(), 'tpd1-'));
+  const dir = path.join(root, 'main');
+  const o = { code: null, md: '', drop: null, left: -1, facts: false, s10: null };
+  try {
+    fs.mkdirSync(path.join(dir, 'pdfs'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'nine'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pdfs', 'a.pdf'), '%PDF-1.7 selftest');
+    fs.writeFileSync(path.join(dir, 'pdfs', 'a.json'), '{"ok":true}');
+    fs.writeFileSync(path.join(dir, 'nine', 'B.PDF'), '%PDF-1.4 selftest');
+    fs.writeFileSync(path.join(dir, 'cells.json'), JSON.stringify({ schema: 'print-cells/1', run: 'tpd1', job: 'tpd1', board: 'main', probeSelftestOk: true, positive: F.POSITIVE_CONTROL, groups: [], setup: {}, cells: [] }));
+    const env = { ...process.env };
+    delete env.GITHUB_ACTIONS;
+    delete env.PRINT_FONT_OUTCOME;
+    delete env.PRINT_FONT_WHY;
+    const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', env, timeout: 60000 });
+    o.code = j.status;
+    o.md = fs.readFileSync(path.join(dir, 'print-result.md'), 'utf8');
+    o.drop = JSON.parse(fs.readFileSync(path.join(dir, 'print-result.json'), 'utf8')).pdfDrop || null;
+    o.left = ['pdfs/a.pdf', 'nine/B.PDF'].filter((p) => fs.existsSync(path.join(dir, p))).length;
+    o.facts = fs.existsSync(path.join(dir, 'pdfs', 'a.json'));
+    const s0 = Object.fromEntries(require('../lib').S0_NAMES.map((n, i) => [n, `TPD1_DUMMY_VALUE_${i}`]));
+    const sr = CP.spawnSync(process.execPath, [path.join(__dirname, '..', 'leak-scan.js'), root], { encoding: 'utf8', env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...s0 }, timeout: 60000 });
+    o.s10 = { code: sr.status, out: `${sr.stdout || ''}` };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  // 못 지움 = 이름 붙은 사유(지우기 함수 주입 · 실제 잠김 파일은 이 PC 에서 못 만듦)
+  const d2 = fs.mkdtempSync(path.join(OS.tmpdir(), 'tpd1b-'));
+  let bad2 = null;
+  try {
+    fs.writeFileSync(path.join(d2, 'x.pdf'), '%PDF-1.7 selftest');
+    bad2 = J.dropPdfs(d2, () => { const e = new Error('잠김'); e.code = 'EPERM'; throw e; });
+  } finally {
+    fs.rmSync(d2, { recursive: true, force: true });
+  }
+  const base = J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [], fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬', pdfFonts: [], boldWeight: 600 } });
+  const md2 = J.toMarkdown({ run: 'R6', job: 'r6-main-read', board: 'main' }, { ...base, pdfDrop: bad2 }, null);
+  const e5 = J.FONT_E5 === 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+  const ok = o.code !== null && o.left === 0 && o.facts && o.drop && o.drop.removed === 2 && o.drop.failed.length === 0
+    && o.md.includes('- PDF 업로드 0(법무 재확인 3 · 결과표 · 사실 파일만): 사실 뽑은 뒤 지운 PDF 2 · 못 지움 0')
+    && o.s10 && o.s10.code === 0 && /🟢 PASS 누출 0/.test(o.s10.out) && !/PDF 파일/.test(o.s10.out)
+    && bad2 && bad2.removed === 0 && bad2.failed.join() === 'x.pdf(EPERM)' && md2.includes('못 지움 1 — PDF 못 지움(x.pdf(EPERM)) · S10 이 막음(업로드 0)')
+    && e5 && md2.includes(`- ㉤ ${J.FONT_E5}`);
+  check(TPD1, ok, `판정기 끝 코드 ${o.code} · 남은 PDF ${o.left} · 사실 그대로 ${o.facts} · 지움 ${o.drop ? `${o.drop.removed}/${o.drop.failed.length}` : '기록 없음'} · S10 끝 코드 ${o.s10 ? o.s10.code : '없음'}${o.s10 && o.s10.code !== 0 ? ` 「${o.s10.out.split('\n').filter((l) => /잡힘|FAIL/.test(l)).join(' / ').slice(0, 160)}」` : ''} · 못 지움 ${bad2 ? bad2.failed.join() : '없음'} · ㉤ 글자 ${e5}`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;

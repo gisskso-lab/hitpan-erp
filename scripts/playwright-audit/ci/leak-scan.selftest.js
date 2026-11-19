@@ -683,6 +683,17 @@ const c18Want = (file, yml, picks, kind) => picks.map((s) => `${file}:${yml.inde
   const ok = r.code === 1 && /잡힘: 글꼴 파일\(법무 ㉠\) · 꼴=font · 자리=글꼴 · main\/blob\.bin/.test(r.out) && !fs.existsSync(path.join(root, 'main'));
   check('C19b 확장자 아닌데 머리 바이트만 글꼴(OTTO) → 빨강 · main/ 지움', ok, `code=${r.code}`);
 }
+// ── 🔴 12차(W-G1-51 PM 보충 · 법무 재확인 3 「아니오」 · S11-2) C20a — 업로드 뿌리 안 PDF = 빨강 · 그 폴더 지움 ──
+{ // C20a PDF 1개(하위 폴더 · 대문자 확장자) + zip 안 확장자 없는 PDF 머리 1 → 둘 다 잡힘
+  const root = fresh('c20a');
+  fs.mkdirSync(path.join(root, 'main', 'pdfs'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'main', 'pdfs', 'cell.PDF'), '%PDF-1.7 selftest');
+  fs.writeFileSync(path.join(root, 'trace', 'p.zip'), makeZip([{ name: 'blob', data: Buffer.from('%PDF-1.4 selftest', 'latin1') }]));
+  const r = run(root);
+  const ok = r.code === 1 && /잡힘: PDF 파일\(법무 재확인 3\) · 꼴=pdf · 자리=PDF · main\/pdfs[\\/]cell\.PDF/.test(r.out) && /잡힘: PDF 파일\(법무 재확인 3\) · 꼴=pdf · 자리=PDF · trace\/p\.zip!\/blob/.test(r.out)
+    && !fs.existsSync(path.join(root, 'main')) && !fs.existsSync(path.join(root, 'trace'));
+  check('C20a PDF(.PDF · 하위 폴더) · zip 안 %PDF- 머리 → 빨강 · 사유 「PDF 파일(법무 재확인 3)」 · main/ · trace/ 지움(업로드 0)', ok, `code=${r.code}`);
+}
 
 // ── 🔴 8차(10/29 · §0-12-6 + PM 조건 ②) C15 — 외부 차단 처리기 닫힌 창 처리 거절 ─────────────────
 //   Promise 를 기다려야 하므로 합계 줄은 C15 뒤(아래 async 묶음 끝)로 옮긴다.

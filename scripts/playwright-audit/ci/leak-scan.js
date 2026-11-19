@@ -140,6 +140,8 @@ function scanFolder(folder, secrets, sub = path.basename(folder)) {
   // 🔴 11차(고침 1 · PM 결재 ① · 법무 ㉠) — 글꼴 파일(확장자 .ttf .otf .ttc 또는 머리 4바이트 00010000 · OTTO · ttcf · zip 안 포함) 1개 이상 = 빨강
   const FONT_HEAD = ['00010000', '4f54544f', '74746366'];
   for (const b of blobs) if (/\.(ttf|otf|ttc)$/i.test(b.label) || FONT_HEAD.includes(b.buf.subarray(0, 4).toString('hex'))) hits.push({ label: '글꼴 파일(법무 ㉠)', form: 'font', file: b.label, where: '글꼴' });
+  // 🔴 12차(W-G1-51 PM 보충 · 법무 재확인 3 「아니오」 · S11-2) — PDF(확장자 .pdf 또는 머리 %PDF- · zip 안 포함) 1개 이상 = 빨강(업로드 = 결과표 · 사실 파일만)
+  for (const b of blobs) if (/\.pdf$/i.test(b.label) || b.buf.subarray(0, 5).toString('latin1') === '%PDF-') hits.push({ label: 'PDF 파일(법무 재확인 3)', form: 'pdf', file: b.label, where: 'PDF' });
   for (const s of secrets) {
     for (const { form, bufs } of needlesFor(s.value)) {
       for (const b of blobs) {

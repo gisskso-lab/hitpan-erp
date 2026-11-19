@@ -574,6 +574,34 @@ const FONT_NEUTRAL = { regular: 'PrintSubstitute-Regular', bold: 'PrintSubstitut
 const FONT_KEEP_IDS = [0, 7, 8, 9, 11, 12, 13, 14];
 const FONT_BAN = /nanum|naver|나눔|네이버/i;
 const stripSubset = (s) => String(s || '').replace(/^[A-Z]{6}\+/, '');
+// 🔴 12차 PM 보충 ⓑ(법무 재확인 3줄 · 질문 3 「아니오」 · PM 판단 S11-1 (나)) — 결과표 ㉤ 행 글자 그대로
+const FONT_E5 = 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+/** 🔴 12차 PM 보충 ⓐ(S11-2) — 사실을 다 읽은 뒤 root 아래 .pdf(대소문자 무시 · 하위 폴더) 전부 지움 → { removed · failed[] } · 사실 파일(.json) 그대로 · rm = 시험 주입용 */
+function dropPdfs(root, rm = (p) => fs.rmSync(p)) {
+  const out = { removed: 0, failed: [] };
+  const walk = (d) => {
+    let ents = [];
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch (e) {
+      out.failed.push(`${path.relative(root, d) || '.'}(${e.code || e.name})`);
+    }
+    for (const ent of ents) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (/\.pdf$/i.test(ent.name)) {
+        try {
+          rm(p);
+          out.removed += 1;
+        } catch (e) {
+          out.failed.push(`${path.relative(root, p)}(${e.code || e.name})`);
+        }
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
 /** 단계 사실 파일(font-facts/1) → 사유 목록(빈 = 이상 없음). 단계 도구 사유 + 판정기 다시 셈(6 ID 만 세는 구현을 막음). */
 function fontFactsWhy(facts) {
   if (!facts || !Array.isArray(facts.files)) return ['사실 파일 없음'];
@@ -614,7 +642,9 @@ function fontGate(g) {
   const kor = o.basicHangul === true;
   let cell;
   if (!t8) cell = 'ⓓ T8 기록 없음';
-  else if (t8Why) cell = kor ? '⑵ T8 하네스 결함' : '⑴ 이름 바꾼 글꼴이 렌더에 안 잡힘';
+  // ⬛ [낡은 줄 · 11차 D2′] else if (t8Why) cell = kor ? '⑵ T8 하네스 결함' : '⑴ 이름 바꾼 글꼴이 렌더에 안 잡힘';
+  // 🔴 12차 [4] P3-C — T8 빨강인데 글꼴 단계 사유가 있으면 칸 이름 = 그 첫 사유(진짜 원인 = 단계 · ⑴/⑵ 아님) · 판정 0 무변
+  else if (t8Why) cell = step.length ? step[0] : kor ? '⑵ T8 하네스 결함' : '⑴ 이름 바꾼 글꼴이 렌더에 안 잡힘';
   else if (step.length) cell = step.includes('사실 파일 없음') ? 'ⓓ 사실 파일 없음' : 'ⓓ 글꼴 단계 사실 실패인데 T8 초록';
   else if (!kor) cell = '⑶ 단계 차례 · 제품만의 글꼴 길';
   else cell = '⑷ 글꼴 섬';
@@ -674,7 +704,10 @@ function toMarkdown(meta, res, nine) {
     L.push(`- 요청 이름 = Malgun Gothic · PDF 실제 글꼴 칸(사실 파일 값 그대로) = ${(res.fontGate.pdfFonts || []).join(', ') || '기록 없음'}`);
     L.push(`- 굵게 요청 → 600 파일: 굵게 파일 usWeightClass = ${res.fontGate.boldWeight == null ? '기록 없음' : res.fontGate.boldWeight}(기대 600 · 700 아님)`);
     if (res.fontGate.runFonts) L.push(`- (기록만 · 판정 아님) 런 PDF 글꼴 이름(접두 뗀 값) = ${res.fontGate.runFonts.names.join(', ') || '없음'} · 굵게 이름 있음 = ${res.fontGate.runFonts.bold ? '예' : '아니오'}`); // 🔴 PM 판단 ①
+    L.push(`- ㉤ ${FONT_E5}`); // 🔴 12차 PM 보충 ⓑ
   }
+  // 🔴 12차 PM 보충 ⓐ — PDF 업로드 0(사실 뒤 지움) · 못 지움 = 이름 붙은 사유(S10 이 PDF >0 이면 빨강 · 업로드 0)
+  if (res.pdfDrop) L.push(`- PDF 업로드 0(법무 재확인 3 · 결과표 · 사실 파일만): 사실 뽑은 뒤 지운 PDF ${res.pdfDrop.removed} · 못 지움 ${res.pdfDrop.failed.length}${res.pdfDrop.failed.length ? ` — PDF 못 지움(${res.pdfDrop.failed.slice(0, 5).join(', ')}) · S10 이 막음(업로드 0)` : ''}`);
   L.push('- 대표 DB 조건 재현 = 미측정(고정 줄 · 작업지시서 §4-2 HQA ④)');
   if (res.stops.length) L.push(`- 🔴 멈춤: ${res.stops.join(' / ')}`);
   L.push('');
@@ -786,6 +819,9 @@ function main(outDir) {
     console.log(`⚫ [장치] plan.json 못 읽음(${e.name}) — 예상 사유 연결 0`);
   }
   res.detections = detectionsFor(expectsFromPlan(plan, doc.run, doc.job), res, nine);
+  // 🔴 12차 PM 보충 ⓐ(S11-2 · 법무 재확인 3) — 사실 · 표본 목록 · 계획을 다 읽은 뒤 · 결과 파일 쓰기 전 = PDF 지움(업로드에 PDF 0 · 7일 보존 PDF 없어짐)
+  res.pdfDrop = dropPdfs(outDir);
+  if (res.pdfDrop.failed.length) console.log(`⚫ FAIL [장치] PDF 못 지움 ${res.pdfDrop.failed.length} — S10 이 PDF >0 으로 막음(업로드 0)`);
   fs.writeFileSync(path.join(outDir, 'print-result.json'), JSON.stringify({ meta: { run: doc.run, job: doc.job, board: doc.board }, ...res, nine }, null, 2));
   // ⬛ [낡은 줄 · 3차] fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf }, res, nine));
   fs.writeFileSync(path.join(outDir, 'print-result.md'), toMarkdown({ ...doc, nineQpdf, nineQpdfBundled }, res, nine));
@@ -805,4 +841,6 @@ module.exports = {
   FONT_TAG, COORD_KINDS, fontTag,
   // 🔴 11차 D2′ — 글꼴 관문(자체시험 T-FG1 · T-FG2)
   FONT_NEUTRAL, FONT_KEEP_IDS, fontFactsWhy, fontGate,
+  // 🔴 12차 PM 보충 — ㉤ 행 글자 · PDF 지움(자체시험 T-PD1)
+  FONT_E5, dropPdfs,
 };
