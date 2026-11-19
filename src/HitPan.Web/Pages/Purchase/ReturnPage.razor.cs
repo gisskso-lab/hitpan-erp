@@ -374,7 +374,38 @@ public partial class ReturnPage : ComponentBase
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task PrintAsync() { await PrintPreview.ShowAsync("return", _draft?.Id, "반품서"); }
+    // ─────────────────────────────────────────────────────────────────
+    // 🔴 W-G1-51 갈래 E⑴ (설계 C8 · 대표 11/18 Q3 · PM Q9) — 판매반품 유형은 판매반품 양식 종으로 보낸다.
+    //   종전: 미리보기·PDF 가 "return" 고정 → 서버가 purchase_return 으로 바꿔
+    //         **판매반품 id 를 매입반품 표에서 찾았다**(못 찾음). 이메일 키도 purchase_receipt 고정.
+    //   지금: 반품유형이 「판매반품」 일 때만 아래 두 키로 가지를 나눈다.
+    //         매입반품은 종전 줄 그대로다(#1 덮어쓰기 금지 — 더하기·가지 나누기만).
+    //   키 근거(#13 정적 대조): 미리보기 = DocumentController.PrintTypeToDocumentType "sales-return" → "sales_return"
+    //         · 이메일 = PdfRenderService.LoadDocumentAsync "sales_return" · 양식 종 = FormTemplateService
+    //         DefaultFormTypes "sales_return" · 출하 DDL form_templates.form_type 주석 "sales_return".
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>판매반품 화면 키(하이픈 꼴) — PDF 문이 받는 이름. 미리보기는 같은 글자를 직접 적는다(게이트 축⑥).</summary>
+    private const string SalesReturnPrintType = "sales-return";
+
+    /// <summary>판매반품 렌더 키(밑줄 꼴) — 이메일은 이 키를 렌더러에 그대로 넘긴다.</summary>
+    private const string SalesReturnEmailTypeKey = "sales_return";
+
+    /// <summary>반품유형이 「판매반품」 인가 — 저장·확정·취소·삭제와 같은 판정(<c>_returnType</c>)을 쓴다.</summary>
+    private bool IsSalesReturnSelected => _returnType == "sales_return";
+
+    private async Task PrintAsync()
+    {
+        if (IsSalesReturnSelected)
+        {
+            // ⚠️ 글자 그대로 둔다(상수 아님) — 인쇄 게이트 축⑥ 이 `PrintPreview.ShowAsync("…")` 글자를 긁어
+            //   서버 문·로더가 그 종을 아는지 본다(DocumentPrintPreviewGateTests.WiredDocTypes).
+            await PrintPreview.ShowAsync("sales-return", _draft?.Id, "반품서");
+            return;
+        }
+
+        await PrintPreview.ShowAsync("return", _draft?.Id, "반품서");
+    }
 
     /// <summary>
     /// 이메일 발송 다이얼로그를 연다.
@@ -384,7 +415,8 @@ public partial class ReturnPage : ComponentBase
         var parameters = new DialogParameters
         {
             ["DocumentType"] = "반품처리서",
-            ["DocumentTypeKey"] = "purchase_receipt",
+            // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키 · 매입반품은 종전 "purchase_receipt" 그대로(#1).
+            ["DocumentTypeKey"] = IsSalesReturnSelected ? SalesReturnEmailTypeKey : "purchase_receipt",
             ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
             ["DocumentId"] = _draft?.Id ?? "",
             ["PartnerId"] = _draft?.PartnerId ?? ""
@@ -400,6 +432,15 @@ public partial class ReturnPage : ComponentBase
     private async Task DownloadPdfAsync()
     {
         if (_draft is null || string.IsNullOrWhiteSpace(_draft.Id)) { Snackbar.Add("저장된 문서를 먼저 선택해주세요.", Severity.Warning); return; }
+        // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키. ⚠️ 이 단추는 옛 /pdf 길(DocumentController
+        //   LoadDocumentAsync)을 탄다 — 거기엔 아직 "sales-return" 적재가 없어 빈 문서가 나온다(설계 C8 ⑷).
+        //   그 파일은 착수준비표 P-2 로 Z5 뒤다. 키만 먼저 맞춰 둔다.
+        if (IsSalesReturnSelected)
+        {
+            await DocService.DownloadPdfAsync(SalesReturnPrintType, _draft.Id);
+            return;
+        }
+
         await DocService.DownloadPdfAsync("return", _draft.Id);
     }
 
