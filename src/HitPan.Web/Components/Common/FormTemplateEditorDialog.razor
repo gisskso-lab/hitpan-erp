@@ -308,7 +308,14 @@
                     쓰시는 양식용지를 그림으로 올리면, 그 위에 값이 어떻게 찍히는지 바로 보실 수 있습니다.
                 </MudText>
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    @* 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1 · [3-V] 지적 2] 「저장 중…」(_busy)에는 그림을 **올리지도 빼지도 못한다** —
+                         저장이 보낸 경로와 화면 값이 그 사이에 갈라지면 저장 뒤 지우기가 방금 저장한 그림을 지울 수 있었다.
+                         올리기는 고르는 칸 자체를 끈다(아래 단추의 「올리는 중」 끄기는 글자 그대로 둔다).
+                       ⬛ 고침 1 판 두 줄(주석 보존 · #1):
+                         <MudFileUpload T="IBrowserFile" Accept="@FormBackgroundLimits.AcceptAttribute"
+                                        FilesChanged="OnBackgroundFileChangedAsync"> *@
                     <MudFileUpload T="IBrowserFile" Accept="@FormBackgroundLimits.AcceptAttribute"
+                                   Disabled="_busy"
                                    FilesChanged="OnBackgroundFileChangedAsync">
                         <ActivatorContent>
                             <MudButton Variant="Variant.Outlined"
@@ -320,9 +327,11 @@
                     </MudFileUpload>
                     @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
                     {
+                        @* 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1] 「저장 중…」에도 끈다 — 위 올리기와 같은 까닭.
+                           ⬛ 고침 1 판 줄(주석 보존 · #1): Disabled="_bgBusy" *@
                         <MudButton Variant="Variant.Text" Color="Color.Error"
                                    StartIcon="@Icons.Material.Filled.Delete"
-                                   Disabled="_bgBusy"
+                                   Disabled="@(_bgBusy || _busy)"
                                    OnClick="RemoveBackgroundAsync">그림 지우기</MudButton>
                     }
                     @if (_form.PaperMode != "preprint")
@@ -340,7 +349,10 @@
                      올리기는 **파일만 받는** 것이고 양식에 적히는 것은 「저장」을 누를 때다.
                      스낵바 한 줄은 지나가 버리므로 **화면에 남는 꼬리표**로 한 번 더 말한다.
                      🔴 즉시 양식 행에 적는 길은 열지 않는다 — 「취소」가 취소가 아니게 된다. *@
-                @if (_bgUnsaved)
+                @* 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P3-3] 뺀 그림을 주소 칸에 도로 적어 **불러온 그림으로 돌아왔으면** 꼬리표를 안 띄운다
+                     (양식은 저장된 그대로다 — 없는 것을 있다고 말하지 않는다). 글자는 그대로 · 새 글자 0.
+                   ⬛ 고침 1 판 줄(주석 보존 · #1): @if (_bgUnsaved) *@
+                @if (BgUnsavedNow)
                 {
                     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-1">
                         <MudText Typo="Typo.subtitle1"><b>아직 양식에 반영되지 않았습니다</b></MudText>
@@ -493,7 +505,8 @@
                 <MudText Typo="Typo.subtitle2">미리보기 — 예시 자료입니다 (실제 거래 내용이 아닙니다)</MudText>
                 @* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 미리보기에 **「저장 안 됨」 꼬리표** —
                      미리보기에 그림이 보이는 것과 전표에 나오는 것은 다르다. 그 차이를 이름으로 부른다. *@
-                @if (_bgUnsaved)
+                @* 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P3-3] 위 꼬리표와 같은 가름. ⬛ 고침 1 판 줄(주석 보존 · #1): @if (_bgUnsaved) *@
+                @if (BgUnsavedNow)
                 {
                     <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled">저장 안 됨</MudChip>
                 }
@@ -514,7 +527,11 @@
         <MudSpacer />
         @* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 저장 안 한 그림이 있으면 **되묻는다**.
              옛 줄(주석 보존 · #1): <MudButton OnClick="Cancel">취소</MudButton> *@
-        <MudButton OnClick="CancelAsync">취소</MudButton>
+        @* 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-2 · [3-V] 지적 4] 「저장 중…」에는 [취소] 를 끈다 —
+             저장이 이미 나갔는데 「취소」로 닫히면 목록이 새로 안 읽혀, 다시 「수정」할 때 지워진 그림 경로가 되살아났다.
+             저장이 실패하면 끄기가 풀린다(다시 저장 · 취소 그대로).
+           ⬛ 고침 1 판 줄(주석 보존 · #1): <MudButton OnClick="CancelAsync">취소</MudButton> *@
+        <MudButton Disabled="_busy" OnClick="CancelAsync">취소</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
     </DialogActions>
 </MudDialog>
@@ -1034,6 +1051,34 @@
     /// <summary>기다리는 것이 「뺀 그림」인가 — 꼬리표 · 닫기 되묻기의 문구를 가른다(올린 그림과 다른 말을 한다).</summary>
     private bool BgRemoveUnsaved => _bgUnsaved && string.IsNullOrWhiteSpace(_form.BackgroundImageUrl);
 
+    // ── 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P3-1 · P3-3 · [3-V] 지적 3 · PM 판단 2026-11-20] ─────────
+    //
+    // 🔴 그림 경로 「같다」 판정은 **한 곳**에서만 한다 — 저장 뒤 지우기의 건너뛰기 · 대기 목록 중복 확인 · 꼬리표 가름.
+    //   앞뒤 공백을 자르고 대소문자를 가리지 않는다(서버 보관소 울타리가 대소문자를 가리지 않는 쪽과 맞춘다).
+    //   종전(Ordinal)에는 주소 칸에 대소문자 · 공백만 다르게 도로 적으면 「다른 경로」로 읽어 방금 저장한 그림을 지웠다.
+    //   🔴 구분자(/ · \) 맞추기 등 경로 정규화는 하지 않는다 — 서버 몫.
+
+    /// <summary>두 그림 경로가 같은가 — 앞뒤 공백 자름 · 대소문자 무시. 어느 한쪽이 비었으면 「같지 않다」.</summary>
+    private static bool SameBackgroundPath(string? a, string? b)
+        => !string.IsNullOrWhiteSpace(a)
+           && !string.IsNullOrWhiteSpace(b)
+           && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 뺀 그림을 주소 칸에 도로 적어 <b>불러온 그림으로 돌아왔나</b> — 지금 화면 값이 대기 목록의 경로와 같고
+    /// 그 값이 불러온 양식의 그림이면 참. 이때 양식은 저장된 그대로다 = 「뺀 그림」도 「받은 그림」도 아니다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [4] P3-3 — 종전에는 이 상태에서 「올리신 그림이 … 지금 닫으면 전표에 나오지 않습니다」라고 되물었다(사실과 반대).
+    /// 🔴 대기 목록의 경로가 <b>이번에 올린 그림</b>이면(불러온 그림과 다름) 그대로 「받은 그림」 갈래다 — 그 말은 참이다.
+    /// </remarks>
+    private bool BgRemoveUndone =>
+        _bgRemovePending.Exists(p => SameBackgroundPath(p, _form.BackgroundImageUrl))
+        && SameBackgroundPath(_form.BackgroundImageUrl, Template?.BackgroundImageUrl);
+
+    /// <summary>꼬리표 · 「저장 안 됨」 표 · 닫기 되묻기를 띄울까 — 기다리는 그림이 있고, 불러온 그림으로 돌아온 것이 아닐 때.</summary>
+    private bool BgUnsavedNow => _bgUnsaved && !BgRemoveUndone;
+
     /// <summary>
     /// 🔴 [20261025작3 절 가-1] 「빈 A4 용지」에서 <b>양식용지로 바꿔 주는 한 단추</b>.
     /// </summary>
@@ -1068,6 +1113,8 @@
     private async Task OnBackgroundFileChangedAsync(IBrowserFile? file)
     {
         if (file is null) return;
+        // 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1] 「저장 중…」에는 받지 않는다 — 고르는 칸을 껐지만(위 Disabled) 한 번 더 막는다.
+        if (_busy) return;
 
         _bgBusy = true;
         try
@@ -1137,9 +1184,15 @@
     /// </remarks>
     private async Task RemoveBackgroundAsync()
     {
+        // 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1] 「저장 중…」에는 빼지 않는다 — 단추를 껐지만(Disabled) 한 번 더 막는다.
+        if (_busy) return;
+
         var path = _form.BackgroundImageUrl;
+        // ⬛ 고침 1 판 줄(주석 보존 · #1) — 중복 확인이 글자 그대로(Ordinal) 비교였다:
+        //     && !_bgRemovePending.Exists(p => string.Equals(p, path, StringComparison.Ordinal)))
+        // 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P3-1] 저장 뒤 건너뛰기와 **같은 비교**(SameBackgroundPath)로 맞춘다.
         if (!string.IsNullOrWhiteSpace(path)
-            && !_bgRemovePending.Exists(p => string.Equals(p, path, StringComparison.Ordinal)))
+            && !_bgRemovePending.Exists(p => SameBackgroundPath(p, path)))
         {
             _bgRemovePending.Add(path);
         }
@@ -1205,15 +1258,24 @@
     /// 🔴 지금 저장한 값이 그 경로를 다시 가리키면(주소 칸에 도로 적은 경우) 지우지 않는다.
     /// 🔴 실패해도 저장은 이미 끝났다 — 경고만 하고 닫는다. 남은 파일은 어느 양식도 안 가리켜 무해하다.
     ///   (멈추면 고객은 「저장이 안 됐나」로 읽는다 — 저장은 됐다.)
+    /// 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1 · [3-V] 지적 2 · 5] 건너뛰기는 <b>저장이 보낸 경로</b>(<paramref name="savedPath"/>)와
+    ///   비교한다 — 지금 화면 값이 아니다(저장이 도는 사이 화면 값이 바뀌면 방금 저장한 그림을 지울 수 있었다).
+    ///   목록은 <b>복사본</b>으로 돈다(도는 사이 목록이 바뀌어도 「컬렉션 변경」 예외로 「저장 실패」가 뜨지 않게).
     /// </remarks>
-    private async Task DeleteRemovedBackgroundsAsync()
+    /// <param name="savedPath">저장 요청 직전에 따로 잡아 둔 그림 경로 — 양식 행이 이제 가리키는 값.</param>
+    // ⬛ 고침 1 판 줄(주석 보존 · #1):
+    // private async Task DeleteRemovedBackgroundsAsync()
+    private async Task DeleteRemovedBackgroundsAsync(string? savedPath)
     {
         if (_bgRemovePending.Count == 0) return;
 
         var failed = 0;
-        foreach (var path in _bgRemovePending)
+        // ⬛ 고침 1 판 두 줄(주석 보존 · #1) — 목록을 그대로 돌고 · 지금 화면 값과 글자 그대로 비교했다:
+        // foreach (var path in _bgRemovePending)
+        //     if (string.Equals(path, _form.BackgroundImageUrl, StringComparison.Ordinal)) continue;
+        foreach (var path in _bgRemovePending.ToArray())
         {
-            if (string.Equals(path, _form.BackgroundImageUrl, StringComparison.Ordinal)) continue;
+            if (SameBackgroundPath(path, savedPath)) continue;
             try
             {
                 using var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/form-templates/background")
@@ -1409,6 +1471,11 @@
         ApplyWatermarkToForm();
 
         _busy = true;
+        // 🔴🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-1 · [3-V] 지적 2] 저장이 **보내는** 그림 경로를 요청 직전에 따로 잡는다 —
+        //   저장 뒤 지우기는 이 값과 비교한다(지금 화면 값이 아니다).
+        // 🔴 _busy 는 여기부터 저장 뒤 지우기 · 창 닫기(MudDialog.Close)까지 참이다 — 아래 finally 가 Close 뒤에 내린다.
+        //   그동안 [취소] · 「그림 지우기」 · 「양식용지 그림 올리기」가 꺼진다. 저장 실패면 finally 가 내려 다시 저장 · 취소할 수 있다.
+        var sentBackgroundPath = _form.BackgroundImageUrl;
         try
         {
             HttpResponseMessage resp;
@@ -1428,7 +1495,8 @@
                 Snackbar.Add("저장되었습니다.", Severity.Success);
                 // 🔴🔴 [W-G1-51 갈래 B · 고침 1] 이제야 뺀 그림 파일을 지운다 — 양식 행이 더는 그 파일을 가리키지 않는다.
                 //   저장 실패(아래 else · catch)에는 이 줄에 오지 않는다 = 파일 그대로 · 다시 저장하거나 취소할 수 있다.
-                await DeleteRemovedBackgroundsAsync();
+                // ⬛ 고침 1 판 줄(주석 보존 · #1): await DeleteRemovedBackgroundsAsync();
+                await DeleteRemovedBackgroundsAsync(sentBackgroundPath);
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
@@ -1461,7 +1529,12 @@
     /// </remarks>
     private async Task CancelAsync()
     {
-        if (!_bgUnsaved)
+        // 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P2-2 · [3-V] 지적 4] 「저장 중…」에는 닫지 않는다 — 단추를 껐지만(Disabled) 한 번 더 막는다.
+        if (_busy) return;
+
+        // ⬛ 고침 1 판 줄(주석 보존 · #1): if (!_bgUnsaved)
+        // 🔴 [W-G1-51 갈래 B · 고침 2 · [4] P3-3] 불러온 그림으로 돌아왔으면 되묻지 않는다(양식은 저장된 그대로다).
+        if (!BgUnsavedNow)
         {
             Cancel();
             return;
