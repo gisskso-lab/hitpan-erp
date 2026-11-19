@@ -1448,8 +1448,10 @@ CREATE TABLE `form_templates` (
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
   `default_key` tinyint(4) GENERATED ALWAYS AS (if(`is_default` = 1 and `is_active` = 1,1,NULL)) VIRTUAL COMMENT '활성 기본 하나 보장용 (DB-150). 활성 기본일 때만 1, 아니면 NULL — 값을 직접 쓰지 않는다',
   PRIMARY KEY (`template_id`),
-  UNIQUE KEY `uk_form_templates_one_default` (`tenant_id`,`form_type`,`default_key`),
-  KEY `idx_form_templates_type` (`tenant_id`,`form_type`,`is_active`,`is_default`)
+  -- 고침 1([3-V] P3-2): 새 유일 키 줄을 DB-150 이 키를 더하는 순서(기존 idx_form_templates_type 뒤)로 옮김 · 옛 자리 글자:
+  --   UNIQUE KEY `uk_form_templates_one_default` (`tenant_id`,`form_type`,`default_key`),
+  KEY `idx_form_templates_type` (`tenant_id`,`form_type`,`is_active`,`is_default`),
+  UNIQUE KEY `uk_form_templates_one_default` (`tenant_id`,`form_type`,`default_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='양식정보설정 — paper_mode 분기 박제 (사장님 헌법 2026-05-31)';
 
 --
