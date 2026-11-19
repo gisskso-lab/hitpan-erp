@@ -62,6 +62,18 @@ public sealed class PdfPreviewOverrides
     public bool IsFormDesignPreview { get; set; }
 
     /// <summary>
+    /// 🔴🔴 <b>전표 [인쇄] 문에서 부른 인쇄인가</b> — 대표 §59 「그림만 + 안내」(빈 A4 + 양식 그림 + 칸 0 = 그림만) 를 켤지 가른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · PM 결재 ① (가)] <b>인쇄 문(<c>DocumentController.PreviewPdf</c>)에서만 참</b>으로 세운다.
+    ///   메일 · 팩스 · 설정 미리보기 · 4인자 호출은 이 칸을 안 세운다(기본 거짓) ⇒ 그 종이는 지금 그대로다(#1) —
+    ///   거래처가 데이터 없는 그림만 메일로 받는 길을 막는다.
+    /// 🔴 <b>대리 판정 0</b> — 「overrides 가 왔으면 인쇄 문」 처럼 다른 값으로 미루어 정하지 않는다
+    ///   (<see cref="IsFormDesignPreview"/> 의 재검증 C-3 교훈과 같다). 그림만 판정은 <c>PdfRenderService.IsNoCoordsImageOnly</c> 한 자리다.
+    /// </remarks>
+    public bool NoCoordsImageOnly { get; set; }
+
+    /// <summary>
     /// 🔴 이번 인쇄에만 적용할 옵션 (결-2 · 7종 공통). <b>null 이면 저장된 양식 그대로</b>.
     /// </summary>
     public PrintOptionOverrides? Options { get; set; }

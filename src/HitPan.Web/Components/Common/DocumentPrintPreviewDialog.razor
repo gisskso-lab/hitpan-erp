@@ -39,6 +39,16 @@
             </MudText>
         }
 
+        @* 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ③ ④]
+             빈 A4 + 양식 그림 + 칸 0 양식이면 종이에 그림만 나간다 → 「인쇄」 를 누르기 전 반드시 보는 이 자리에 고정 안내 1개.
+             🔴 접힘 · 닫기 · 사라짐 0(스낵바는 몇 초 뒤 사라진다) · 인쇄 단추를 막지 않는다(#20) · 고장이 아니라 안내(파란 꼴).
+             🔴 판정은 서버 문 하나(렌더와 같은 함수)가 한다 — 이 화면은 셈하지 않는다. 글자 = PM 결재 ④ 정정 글자 그대로.
+             🔴 종이에는 안 찍는다 — 안내는 이 창에만. *@
+        @if (_noCoordsNotice)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">아직 칸을 안 맞췄습니다. 이 양식으로 인쇄하면 올린 양식 그림만 나오고 전표 내용은 찍히지 않습니다. 칸을 맞추려면 「양식 템플릿」 메뉴의 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다 · 관리자).</MudAlert>
+        }
+
         @if (_previewUrl is not null)
         {
             @* 🔴 이 틀에 보이는 것이 곧 인쇄물이다. 인쇄할 때 다시 그리지 않는다. *@
@@ -72,6 +82,11 @@
     private ElementReference _frame;
 
     /// <summary>
+    /// 🔴 [W-G1-51 갈래 §59] 이 양식으로 인쇄하면 그림만 나오나 — 서버 안내 문이 정한다. 기본 = 안 띄움.
+    /// </summary>
+    private bool _noCoordsNotice;
+
+    /// <summary>
     /// 🔴 인쇄 매수·절취선은 <b>두 벌을 찍는 문서</b>의 축이다(DB-90·DB-147).
     /// 나머지 종에서는 <b>흐리게</b> 둔다 — 숨기지 않는다(결-2).
     /// </summary>
@@ -80,7 +95,42 @@
 
     private bool SupportsTearLine => SupportsCopyMode && _copyMode == "both";
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // ⬛ 종전: protected override async Task OnInitializedAsync() => await LoadAsync();
+    // 🔴 [2026-11-20 W-G1-51 갈래 §59] 창이 열릴 때 인쇄 전 안내를 **한 번** 묻는다 — 미리보기 그리기와 함께 띄우고 기다리지 않는다.
+    //   안내가 늦거나 실패해도 미리보기 · 인쇄는 안 기다린다(#20). 옵션을 바꿔 다시 그릴 때는 다시 묻지 않는다(양식은 그대로).
+    protected override async Task OnInitializedAsync()
+    {
+        _ = LoadNoticeAsync();
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · PM 결재 ②] 서버 안내 문(<c>GET api/documents/{type}/print-notice</c>)에 묻는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 실패하면 안내 없이 둔다 + 화면 콘솔 한 줄(#15) — 스낵바 0(고객에게 뜻 없는 오류를 안 띄운다 · 미리보기 · 인쇄는 그대로).
+    /// 🔴 판정을 화면에서 다시 셈하지 않는다 — 참/거짓만 받는다.
+    /// </remarks>
+    private async Task LoadNoticeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(DocType)) return;
+        try
+        {
+            var said = await Http.GetFromJsonAsync<PrintNoticeSaid>($"api/documents/{DocType}/print-notice");
+            _noCoordsNotice = said?.NoCoordsImageOnly == true;
+        }
+        catch (Exception ex)
+        {
+            _noCoordsNotice = false;
+            Console.Error.WriteLine($"[DocPreview.Notice] 인쇄 전 안내를 묻지 못했습니다 — 안내 없이 둡니다: {ex.Message}");
+        }
+        if (_noCoordsNotice) StateHasChanged();
+    }
+
+    private sealed class PrintNoticeSaid
+    {
+        public bool NoCoordsImageOnly { get; set; }
+    }
 
     /// <summary>
     /// 지금 고른 옵션으로 <b>정본 통로</b>에 그려 달라고 한다.

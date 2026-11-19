@@ -32,4 +32,16 @@ public interface IPdfRenderService
     Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType,
         string documentId, PdfPreviewOverrides? overrides, CancellationToken ct = default)
         => RenderDocumentAsync(tenantId, documentType, documentId, ct);
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ②] 이 문서 종류의 저장된 양식으로
+    /// 전표 [인쇄] 를 하면 <b>그림만</b> 나오나 — 전표 인쇄 미리보기 창이 「아직 칸을 안 맞췄습니다」 안내를 띄울지 묻는다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 판정은 렌더와 <b>같은 정적 함수</b> 한 자리다(화면 쪽 두 번째 판정 0).
+    /// 🔴 기본 구현 = 거짓(위 미리보기 메서드의 기본 구현 꼴) — 기존 구현체 · 시험 Stub 는 한 글자도 안 고쳤다(#1 · #12).
+    ///   실제 판정은 <c>PdfRenderService</c> 가 재정의해서 한다.
+    /// </remarks>
+    Task<bool> IsNoCoordsImageOnlyAsync(string tenantId, string documentType, CancellationToken ct = default)
+        => Task.FromResult(false);
 }

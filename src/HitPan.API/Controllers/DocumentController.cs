@@ -837,6 +837,8 @@ public class DocumentController : ControllerBase
             //   저장 안 한 전표의 id 는 화면이 만든 GUID 라 DB 에 없다. 단추 8곳 말고
             //   **이 문 자체**를 세워야 API 직타·로더 없는 종까지 같이 막힌다.
             RequireExisting = true,
+            // 🔴 [W-G1-51 §59 · PM ① (가)] 「그림만」 판정은 이 문(전표 [인쇄])에서만 켠다 — 메일 · 팩스 무변.
+            NoCoordsImageOnly = true,
             Options = req?.Options
         };
 
@@ -857,6 +859,35 @@ public class DocumentController : ControllerBase
         // 🔴 inline — 틀 안에서 바로 보여야 한다(내려받기면 미리보기가 아니다).
         Response.Headers["Content-Disposition"] = "inline";
         return File(bytes, "application/pdf", fileName);
+    }
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ② · ③] 전표 인쇄 미리보기 창이
+    /// 「아직 칸을 안 맞췄습니다」 안내를 띄울지 묻는 문 — 참/거짓만 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 판정은 렌더와 <b>같은 정적 함수</b>(<c>PdfRenderService.IsNoCoordsImageOnly</c>) 한 자리다 — 화면은 셈하지 않는다.
+    ///   응답 머리글로 판정을 실어 보내는 길은 쓰지 않는다(반려 이력 · 「보내는 문 ≠ 받는 문」).
+    /// 🔴 <c>tenant_id</c> 는 <b>JWT 클레임에서만</b>(#2). 급여명세서 · 모르는 종 = 400(<see cref="PrintTypeToDocumentType"/> 그대로) ·
+    ///   받은 글자를 되적지 않는다(#23). 양식 값 · 그림 경로 · 파일 이름은 응답에 0.
+    /// 🔴 이 문이 실패해도 미리보기 · 인쇄는 그대로다 — 창이 안내만 안 띄운다(#20).
+    /// </remarks>
+    [HttpGet("{type}/print-notice")]
+    [Authorize]
+    public async Task<IActionResult> PrintNotice(string type, CancellationToken ct = default)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var documentType = PrintTypeToDocumentType(type);
+        if (documentType is null)
+        {
+            return BadRequest(new { message = "인쇄 안내를 지원하지 않는 문서입니다." });
+        }
+
+        var noCoordsImageOnly = await _pdfRenderService
+            .IsNoCoordsImageOnlyAsync(tenantId, documentType, ct).ConfigureAwait(false);
+        return Ok(new { noCoordsImageOnly });
     }
 
     /// <summary>

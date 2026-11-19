@@ -158,6 +158,13 @@ public sealed class PdfRenderService : IPdfRenderService
             && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
             && bgImage is not null;
         var useCoords = (template?.FieldCoords.Count ?? 0) > 0 && (isPreprint || isYTemplate);
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ① (가) · ⑥ (나)]
+        //   K3 = Y 판정 다섯 칸 중 ①②③⑤ 참(`isYTemplate`) **그리고** 칸 0 **그리고** 전표 [인쇄] 문 · 설정 미리보기 아님 · 법정 3종 아님.
+        //   참이면 아래 머리글 · 본문 · 쪽번호를 건너뛰고 그림 겹(배경)만 남긴다 — 종이에 올린 양식 그림만 · 데이터 없음.
+        //   🔴 위 두 문장(`isYTemplate` · `useCoords`)은 한 글자도 안 바꿨다 — 편집창 판정 게이트가 그 글자를 읽는다.
+        //   🔴 판정은 `IsNoCoordsImageOnly` 한 자리다 — 인쇄 미리보기 창의 안내 문(`IsNoCoordsImageOnlyAsync`)도 그 함수만 부른다.
+        //   🔴 위 :112 「좌표가 0개인 양식은 한 글자도 안 바뀐다」 는 K3(인쇄 문)에 한해 틀리게 됐다 — 그 줄은 이력으로 둔다(지운 것 0).
+        var noCoordsImageOnly = IsNoCoordsImageOnly(documentType, overrides, isYTemplate, template);
 
         // 🔴 로고 워터마크 (20261026작1 §C-2 · DB-148 · 사장님 오더 10/25 ④).
         //   사장님: *"모든 양식지에 고객사 로고 워터마크 넣기 옵션 추가. 위치 = 정중앙 크게.
@@ -372,7 +379,10 @@ public sealed class PdfRenderService : IPdfRenderService
                 //     「견적서 / 문서번호 / 회사이름」 이 **겹쳐 찍힌다** ⇒ 「기본 폼이 나온다」 의 재발.
                 //   🔴 `preprint` 는 종전에도 안 그렸다 — 그 종이는 안 바뀐다(#1).
                 //   🔴 좌표가 0개인 `plain` 양식도 안 바뀐다 — `useCoords` 가 `false` 다(#1).
-                if (!isPreprint && !useCoords && showHeader)
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3(인쇄 문 · 빈 A4 + 그림 + 칸 0)는 머리글을 안 그린다 — 그림만.
+                //   위 「좌표가 0개인 `plain` 양식도 안 바뀐다」 는 K3 에 한해 틀리게 됐다(이력으로 둔다).
+                //   ⬛ 종전 식: if (!isPreprint && !useCoords && showHeader)
+                if (!isPreprint && !useCoords && showHeader && !noCoordsImageOnly)
                 {
                     // 🔴 [2026-11-20 갈래 E⑵] 스타일 양식일 때만 새 머리를 더했다 — basic 은 아래 옛 줄 그대로(#1).
                     if (printStyle is not null)
@@ -380,7 +390,15 @@ public sealed class PdfRenderService : IPdfRenderService
                     else
                         page.Header().Element(e => ComposeHeader(e, data, company));
                 }
-                if (useCoords)
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3 = **빈 본문**(표 · 품목 · 합계 0) — 갈래 하나를 맨 앞에 더했다.
+                //   본문을 안 채운 쪽은 그림 겹(위 배경)만 남는다. 나머지 세 갈래는 그대로다(#1).
+                //   🔴 안내 글자를 종이에 찍지 않는다(장치 §4 금지 · PM 결재 ③) — 안내는 인쇄 미리보기 창에만.
+                if (noCoordsImageOnly)
+                {
+                    /* 빈 본문 */
+                }
+                // ⬛ 종전 줄: if (useCoords)
+                else if (useCoords)
                     page.Content().Element(e => ComposeBodyCoords(e, data, template!.FieldCoords));
                 // 🔴 [2026-11-20 갈래 E⑵] 스타일 양식(순백지 · 좌표 경로 아님)일 때만 새 본문 — 칸 하나 더함 · 옛 두 갈래 무변.
                 //   `printStyle` 은 `preprint` 에서 늘 null 이다(`ResolvePrintStyle` ②) ⇒ 양식지는 아래 옛 줄로 간다.
@@ -391,7 +409,10 @@ public sealed class PdfRenderService : IPdfRenderService
                 // 🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1] 쪽번호도 좌표 경로에서는 안 찍는다 —
                 //   종전 식 = `!isPreprint` · 여백 0 이라 양식 그림의 맨 아랫칸을 덮는다(머리글과 같은 까닭).
                 //   좌표 0개 양식 · `preprint` 는 종전과 같다(#1).
-                if (!isPreprint && !useCoords)
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3 는 쪽번호도 안 찍는다(「Page 1 / 1」 0) — 그림만.
+                //   위 「좌표 0개 양식 … 종전과 같다」 는 K3 에 한해 틀리게 됐다(이력으로 둔다).
+                //   ⬛ 종전 식: if (!isPreprint && !useCoords)
+                if (!isPreprint && !useCoords && !noCoordsImageOnly)
                 {
                     // 🔴 [2026-11-20 갈래 E⑵ · 시안 §2-2 쪽 번호 8 · 8 · 8 · 9] 글자 크기만 값으로 받는다.
                     //   ⬛ 종전: t.Span("Page ").FontSize(8); t.CurrentPageNumber().FontSize(8);
@@ -2938,6 +2959,33 @@ public sealed class PdfRenderService : IPdfRenderService
     }
 
     /// <summary>
+    /// 🔴🔴 이 인쇄가 대표 §59 K3 라 <b>그림만</b> 찍나 — 참이면 머리글 · 본문 · 쪽번호를 건너뛴다(그림 겹은 그대로).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · 작업지시서 §1 · PM 결재 ① (가) · ⑥ (나) · ⑦]
+    ///   K3 = 아래가 <b>모두</b> 참:
+    ///   ① <c>paper_mode</c> = <c>"plain"</c> ② <b>저장된</b> 그림 찍기 = 켬 ③ 그림 경로 있음 ④ 그 그림이 이번 인쇄에 실제로 읽힘
+    ///   — ①~④ 는 렌더의 <paramref name="isYTemplate"/> 그대로 받는다(새 판정을 따로 짓지 않음 · 어긋남 0)
+    ///   ⑤ 칸 좌표 0개(<c>useCoords</c> 앞 조건과 같은 셈 — K3 = <c>isYTemplate &amp;&amp; 칸 0</c> 은 Y 좌표 경로의 정확한 여집합)
+    ///   ⑥ 법정 서식(또는 그 후보) <see cref="LegalFormDocTypes"/>(세금계산서 · 면세계산서 · 입금표)가 아님 — PM ⑥ (나) · 법무 판정 전까지 막는 쪽
+    ///   ⑦ 전표 [인쇄] 문에서 부름(<see cref="PdfPreviewOverrides.NoCoordsImageOnly"/>) · 설정 미리보기(<c>IsFormDesignPreview</c>) 아님.
+    /// 🔴 <b>판정 유일 자리</b> — 렌더(<c>RenderDocumentAsync</c>)와 인쇄 미리보기 창의 안내 문(<see cref="IsNoCoordsImageOnlyAsync"/>)이
+    ///   이 함수만 부른다. 화면이 양식 행을 읽어 스스로 셈하는 두 번째 판정은 없다(PM 결재 ②).
+    /// 🔴 메일 · 팩스 · 설정 미리보기 · 4인자 호출은 ⑦ 이 거짓 ⇒ 지금 그대로(#1).
+    /// 🔴 스타일(<see cref="ResolvePrintStyle"/>)과 겹침 0 — K3 는 ③ 참이라 스타일이 이미 null 이다. 스타일 키는 이 판정에 없다.
+    /// 🔴 <b>로그 0</b>.
+    /// 🔴 작업지시서 §3-1 글자는 <c>internal static</c> 이다 — <see cref="FormTemplateInfo"/> 가 <c>private</c> 중첩형이라
+    ///   <c>internal</c> 메서드 인자로 쓰면 빌드가 안 된다(CS0051) ⇒ <c>private static</c>(시험은 반사로 부른다 · 개발명세서 §2-4 다-1).
+    /// </remarks>
+    private static bool IsNoCoordsImageOnly(string documentType, PdfPreviewOverrides? overrides, bool isYTemplate,
+        FormTemplateInfo? template)
+        => overrides?.NoCoordsImageOnly == true
+           && overrides.IsFormDesignPreview != true
+           && isYTemplate
+           && (template?.FieldCoords.Count ?? 0) == 0
+           && !LegalFormDocTypes.Contains(documentType);
+
+    /// <summary>
     /// 🔴 양식지 그림을 읽어 올 수 있는 <b>유일한 폴더</b> (R-4 경로 가둠).
     /// 보관소·업로드 통로가 생기면 그 통로가 여기에 넣는다 — 그때 <b>이 코드는 안 바뀐다.</b>
     /// </summary>
@@ -3862,6 +3910,42 @@ public sealed class PdfRenderService : IPdfRenderService
                                        System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
             }
             return null;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ②] 이 종류의 저장된 양식으로 전표 [인쇄] 를 하면
+    /// <b>그림만</b> 나오나 — 전표 인쇄 미리보기 창이 「아직 칸을 안 맞췄습니다」 안내를 띄울지 묻는 문(<c>GET …/print-notice</c>)이 부른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 렌더(<c>RenderDocumentAsync</c>)와 <b>같은 차례 · 같은 함수</b>로 센다:
+    ///   양식 읽기(<see cref="TryLoadTemplateAsync"/> 그대로) → 저장된 그림 찍기 → 그림 읽기(<see cref="ResolveFormBackground"/> · 인쇄 문 꼴)
+    ///   → Y 네 칸(렌더 <c>isYTemplate</c> 과 같은 셈) → <see cref="IsNoCoordsImageOnly"/>(판정 유일 자리).
+    /// 🔴 Y 네 칸 변수 이름을 <c>yTemplate</c> 로 둔다 — <c>var isYTemplate =</c> 로 시작하는 줄을 새로 만들면
+    ///   편집창 판정 게이트(<c>FormYTemplateCoordsKeepGateTests</c>)가 첫 줄을 읽는 자리가 흐려진다.
+    /// 🔴 실패하면 경고 1줄 + 거짓(#15) — 안내가 안 뜰 뿐 미리보기 · 인쇄는 그대로다(#20).
+    /// 🔴 전표 미리보기 옵션(<c>Options</c>)은 안 받는다 — 창은 그림 찍기 옵션을 보내지 않는다(작업지시서 §3-2 · 개발명세서 §9 3).
+    /// </remarks>
+    public async Task<bool> IsNoCoordsImageOnlyAsync(string tenantId, string documentType, CancellationToken ct = default)
+    {
+        try
+        {
+            var template = await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+            // 인쇄 문(`DocumentController.PreviewPdf`)이 세우는 꼴 그대로 — 설정 미리보기 아님 · 인쇄 문 참.
+            var printDoor = new PdfPreviewOverrides { NoCoordsImageOnly = true };
+            var savedPrintBackground = template?.PrintBackground == true;
+            var bgImage = ResolveFormBackground(printDoor, template);
+            var yTemplate = string.Equals(template?.PaperMode, "plain", StringComparison.Ordinal)
+                && savedPrintBackground
+                && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
+                && bgImage is not null;
+            return IsNoCoordsImageOnly(documentType, printDoor, yTemplate, template);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 인쇄 전 안내(그림만) 판정을 못 했다 — 안내 없이 둔다. tenant={Tenant} type={Type}",
+                tenantId, documentType);
+            return false;
         }
     }
 
