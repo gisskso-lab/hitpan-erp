@@ -318,7 +318,7 @@ NODE
 #     실행기 몫 8개 확정 — 런 44467400813(GitHub 위 첫 guard) env_changed 실측 = 실행기 주입 이름 GITHUB_ARTIFACTS · GITHUB_ARTIFACTS_LIST 2 더함(6 → 8 · 값 무검사 · CTO 재판정 (가)) · 옛 글자 = MAPPING §12-5
 #     PATH · BASH_ENV · NODE_OPTIONS · LD_PRELOAD · GIT_* 는 허용에 넣지 않는다
 #   v5 별건 A K2‴(CTO 결-A11 (B) · A11-1): G1 에 장치 이름 3개 값 단언 — 뒤 단면의 HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR 값 = V_SRC_DIR · V_CHROME · V_PW_DIR(M1 · M3 가 쓴 식 그대로)
-#     다르거나 없으면 G1 빨강(first_red=G1 · 새 G 번호 0) · 원자료 = env_values_ok 참거짓 하나(값 · 해시 0) · 실행기 몫 6개는 값 무검사(이름만)
+#     다르거나 없으면 G1 빨강(first_red=G1 · 새 G 번호 0) · 원자료 = env_values_ok 참거짓 하나(값 · 해시 0) · 실행기 몫 8개는 값 무검사(이름만)
 #   순서 = G1(+G6 대조군) → G2 → G3 → G4 → G5 · 하나라도 빨강이면 뒤는 안 돎(설정이 바뀌었으면 git 을 부르기 전에 멈춤)
 G_ALLOW=(HQA_SRC_DIR HQA_CHROME HQA_PW_DIR GITHUB_ACTION GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STATE GITHUB_STEP_SUMMARY GITHUB_ARTIFACTS GITHUB_ARTIFACTS_LIST)
 G_BINS=(node git bash)
