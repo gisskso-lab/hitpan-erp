@@ -162,9 +162,21 @@ else
         }
     }
 
+    // 🔴 [W-G1-51 갈래 B · PM 판단 덧붙임] 편집창은 **[취소] 의 되묻기 길로만** 닫힌다.
+    //   그림을 올리고 저장 안 한 채면 편집창은 [취소] 에서 되묻는다(설계 P3 「닫을 때 되묻기」).
+    //   MudBlazor 9.3 DialogOptions 기본값 = BackdropClick true(패키지 문서 「Defaults to true」).
+    //   창 바깥 누르기 · Esc 로 닫히면 그 되묻기를 건너뛰어 「올렸는데 전표에 안 나온다」 가 다시 생긴다
+    //   ⇒ 이 화면이 여는 편집창 두 자리에서만 그 두 길을 끈다(다른 대화창 0줄).
+    private static readonly DialogOptions EditorDialogOptions = new()
+    {
+        BackdropClick = false,
+        CloseOnEscapeKey = false
+    };
+
     private async Task OpenCreateDialog()
     {
-        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("신규 양식");
+        // ⬛ 옛 줄(주석 보존 · #1): var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("신규 양식");
+        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("신규 양식", EditorDialogOptions);
         var result = await dialog.Result;
         if (result is { Canceled: false }) await LoadAsync();
     }
@@ -172,7 +184,8 @@ else
     private async Task OpenEditDialog(FormTemplateDto dto)
     {
         var parameters = new DialogParameters { ["Template"] = dto };
-        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("양식 수정", parameters);
+        // ⬛ 옛 줄(주석 보존 · #1): var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("양식 수정", parameters);
+        var dialog = await DialogService.ShowAsync<FormTemplateEditorDialog>("양식 수정", parameters, EditorDialogOptions);
         var result = await dialog.Result;
         if (result is { Canceled: false }) await LoadAsync();
     }
