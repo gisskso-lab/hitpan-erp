@@ -241,6 +241,23 @@ async function ensureStock(sess, items, need, warehouseId, doCall = call) {
   const bal = await doCall(sess, 'GET', '/api/stock/balance', undefined, [200]);
   return stockVerdict(items, need, bal);
 }
+/**
+ * 🔴 10차 2단 D8 ⓒ(PM 결재 9번 · 읽기만 · 쓰기 0 · 시험 테넌트 토큰 그대로 · 테넌트 값을 장치가 보내지 않음) — 재고 조정용 창고 id
+ *   = 제품 문 GET /api/warehouses(WarehouseController.cs:26 · JWT 테넌트의 활성 창고 목록 · 칸 warehouseId · isActive) 의 첫 활성 창고.
+ *   0개면 만들지 않음 → 「재고 선행 — 창고 없음」(판매 반품 칸만 막음).
+ */
+async function pickWarehouse(sess, doCall = call) {
+  const j = await doCall(sess, 'GET', '/api/warehouses', undefined, [200]);
+  const rows = Array.isArray(j) ? j : (j && typeof j === 'object' && Array.isArray(j.items) ? j.items : []);
+  const shape = (r) => {
+    const low = new Map(Object.keys(r || {}).map((k) => [k.toLowerCase(), r[k]]));
+    const a = low.get('isactive');
+    return { id: String(low.get('warehouseid') ?? low.get('id') ?? ''), active: !(a === false || a === 0 || a === '0') };
+  };
+  const w = rows.map(shape).find((x) => x.id && x.active);
+  if (!w) throw new SetupError(`재고 선행 — 창고 없음(목록 ${rows.length}건 · 활성 id 0)`);
+  return w.id;
+}
 /** 잔량 확인(순수) — 줄마다 itemId · 수량 칸(currentQty 꼴 · 대소문자 무시)을 품목별로 더해 need 와 견줌. */
 function stockVerdict(items, need, bal) {
   const rows = Array.isArray(bal) ? bal : (bal && typeof bal === 'object' && Array.isArray(bal.items) ? bal.items : []);
@@ -421,4 +438,6 @@ module.exports = {
   confirmTerms,
   // 🔴 10차 D8 ⓒ
   ensureStock, stockVerdict,
+  // 🔴 10차 2단 D8 ⓒ(PM 결재 9번)
+  pickWarehouse,
 };

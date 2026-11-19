@@ -632,8 +632,9 @@ async function main(deps = realDeps()) {
   }
   // 🔴 10차 D8 ⓒ(PM 판단 = API 재고 조정) — 판매 반품용 거래명세서 확정 앞 재고 선행 · 실패 = 판매 반품 칸만 차림 불가(⑤ 에서 이름 붙은 사유) · 다른 칸 계속
   //   창고 id = 기존 차림 값에서만(PM 조건) → 지금 기존 차림(setup-api · fixture)에 창고 값 없음 → 빈 값 = 「창고 id 없음」(명세서 §1-10 남은 것 · PM 결재 대기)
-  const STOCK_WAREHOUSE = '';
+  // ⬛ [낡은 줄 · 10차 1단] const STOCK_WAREHOUSE = ''; — PM 결재 9번 전 빈 값
   try {
+    const STOCK_WAREHOUSE = await S.pickWarehouse(sess); // 🔴 10차 2단(PM 결재 9번) — GET /api/warehouses 읽기 1회 · 0개 = 「재고 선행 — 창고 없음」(아래 catch · 판매 반품 칸만)
     doc.setup.stock = await S.ensureStock(sess, itemIds, Math.max(...F.MARK.items.map((x) => Number(x.qty) || 0)) * 10, STOCK_WAREHOUSE);
   } catch (e) {
     doc.setup.stock = { ok: false, why: e.message || L.errorName(e) };

@@ -2192,6 +2192,37 @@ guardAsync(TD7, async () => {
   check(TD7, ok, `빨강 ${red.tag || '-'} · 초록 ${grn.tag || '-'} · 그림 ${img.tag || '-'} · 차림 불가 ${setup.tag || '-'} · 런 행 ${run.rows.map((r) => r.cat).join('/')} · 좌표 행 ${coordRows.length} · 꼬리표 없음 ${untagged} · 결과표 ${md.includes(`〔${J.FONT_TAG}〕`) ? '○' : '×'}`);
 });
 
+// T-D8e 10차 2단 D8 ⓒ(PM 결재 9번) — 창고 id = GET /api/warehouses 첫 활성 창고(읽기 1회 · 쓰기 0 · 경로에 테넌트 0) · 0개 = 「창고 없음」 · 비활성만 = 「창고 없음」 · 고른 id 로 재고 선행 끝까지
+const TD8E = 'T-D8e 10차 2단 D8 ⓒ 창고 id = 활성 창고 목록 첫 id(읽기만) · 0개 · 비활성만 → 「창고 없음」 · 재고 선행 끝까지';
+guardAsync(TD8E, async () => {
+  const mk = (list) => {
+    const st = { calls: [], adj: new Map() };
+    return {
+      st,
+      call: async (sess, m, p, body) => {
+        st.calls.push(`${m} ${p}${body === undefined ? '' : ' +본문'}`);
+        if (m === 'GET' && p === '/api/warehouses') return list;
+        if (m === 'POST' && p === '/api/stock/adjust') { st.adj.set(body.itemId, body.warehouseId === 'w-2' ? body.actualQty : 0); return {}; }
+        if (m === 'GET' && p === '/api/stock/balance') return [...st.adj.entries()].map(([itemId, q]) => ({ itemId, currentQty: q }));
+        throw new Error(`모르는 문 ${m} ${p}`);
+      },
+    };
+  };
+  const msg = async (fn) => { try { return `값 ${await fn()}`; } catch (e) { return e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`; } };
+  const a = mk([{ warehouseId: 'w-0', isActive: false }, { WarehouseId: 'w-2', IsActive: 1 }]);
+  const id = await S.pickWarehouse({}, a.call);
+  const items = F.MARK.items.map((it, k) => ({ name: it.name, id: `it-${k}` }));
+  const end = await msg(async () => (await S.ensureStock({}, items, 70, await S.pickWarehouse({}, a.call), a.call)).ok);
+  const b = mk([]);
+  const rb = await msg(() => S.pickWarehouse({}, b.call));
+  const c = mk([{ warehouseId: 'w-9', isActive: 0 }]);
+  const rc = await msg(() => S.pickWarehouse({}, c.call));
+  const readOnly = [...a.st.calls, ...b.st.calls, ...c.st.calls].filter((x) => x.startsWith('GET /api/warehouses')).every((x) => x === 'GET /api/warehouses');
+  const ok = id === 'w-2' && end === '값 true' && /재고 선행 — 창고 없음/.test(rb) && b.st.calls.length === 1 && /재고 선행 — 창고 없음/.test(rc) && readOnly
+    && !a.st.calls.some((x) => /tenant/i.test(x));
+  check(TD8E, ok, `고른 창고 ${id} · 재고 선행 「${end}」 · 0개 「${rb}」 · 비활성만 「${rc}」 · 읽기 꼴 ${readOnly ? '○' : '×'} · 부름 ${a.st.calls.join(' · ')}`);
+});
+
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
 // 🔴 4차 — 비동기 경우(가짜 fetch)를 차례로 끝낸 뒤 같은 끝 줄
 (async () => {
