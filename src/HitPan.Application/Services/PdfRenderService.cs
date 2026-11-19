@@ -184,7 +184,10 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 null = basic = 옛 `ComposeHeader` · `ComposeBody` · 쪽번호 줄을 **그대로** 탄다(한 글자도 안 바뀜 · #1).
         //   🔴 양식지 · 좌표 경로(Y 템플릿 포함) · 그림 있는 양식(§59 K3 포함) · 모르는 키 = null(조건은 `ResolvePrintStyle`).
         //   🔴 세금계산서는 바로 아래 법정 작성기 분기에서 먼저 빠진다 — 이 값을 안 읽는다. 급여명세서는 다른 함수다.
-        var printStyle = ResolvePrintStyle(template, useCoords);
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1 · [3-V] P1-1] 문서 종류를 같이 넘긴다 —
+        //   법정 서식(또는 그 후보) `LegalFormDocTypes`(세금계산서 · 면세계산서 · 입금표)는 스타일을 안 먹는다(조건 ⑥).
+        // ⬛ 종전: var printStyle = ResolvePrintStyle(template, useCoords);
+        var printStyle = ResolvePrintStyle(template, useCoords, documentType);
 
         // 🔴 20261021작 절 B-3 — 세금계산서 전용(법정) 작성기.
         //   양식용지(preprint)·좌표 경로는 **종전 그대로** 간다(아래 공용 흐름).
@@ -2768,10 +2771,17 @@ public sealed class PdfRenderService : IPdfRenderService
     /// 🔴 ③ 을 저장된 칸 수가 아니라 <paramref name="useCoords"/> 로 보는 까닭: 설정 미리보기에서 편집창이
     ///   빈 A4 좌표를 null 로 보낸다 — 저장 칸 수로 가르면 옛 좌표만 남은 빈 A4(K4)의 미리보기 ≠ 종이가 된다.
     /// 🔴 <b>로그 0</b> — 모르는 키 경고는 <see cref="ResolveStyleKey"/> 가 이미 적는다.
+    /// 🔴🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1 · [3-V] P1-1] 조건 ⑥ 을 더했다 —
+    ///   ⑥ 문서 종류가 <see cref="LegalFormDocTypes"/>(세금계산서 · 면세계산서 · 입금표)가 <b>아님</b>.
+    ///   위 「다섯 조건」 은 이제 여섯이다(이력으로 둔다). 용지 판정(<see cref="ResolvePageSize"/>)과 <b>같은 목록</b>을 그대로 쓴다
+    ///   — 새 목록 0. 법정성 판정은 법무팀장 몫이고 그 전까지는 <b>막는 쪽</b>(2026-10-25 재검증 S-3 과 같은 까닭).
+    ///   법무 판정이 나오면 이 한 줄로 다시 연다.
     /// </remarks>
-    private static PrintStyle? ResolvePrintStyle(FormTemplateInfo? template, bool useCoords)
+    // ⬛ 종전 서명(갈래 E⑵ 고침 1 전): private static PrintStyle? ResolvePrintStyle(FormTemplateInfo? template, bool useCoords)
+    private static PrintStyle? ResolvePrintStyle(FormTemplateInfo? template, bool useCoords, string? documentType)
     {
         if (template is null || useCoords) return null;
+        if (LegalFormDocTypes.Contains(documentType ?? string.Empty)) return null;
         if (!string.Equals(template.PaperMode, "plain", StringComparison.Ordinal)) return null;
         if (!string.IsNullOrWhiteSpace(template.BackgroundImageUrl)) return null;
         return NormalizeStyleKey(template.StyleKey) switch
@@ -3960,6 +3970,7 @@ public sealed class PdfRenderService : IPdfRenderService
         /// 종전에는 저장·조회만 되고 <b>작성기가 읽지 않았다</b>.
         /// 🔴 [2026-11-20 W-G1-51 갈래 E⑵] 위 「지금은 무엇이 와도 basic」 은 낡았다(이력으로 둔다) —
         /// 순백지 양식에 한해 <c>formal</c> · <c>simple</c> · <c>large</c> 를 그린다(<c>ResolvePrintStyle</c>).
+        /// 🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1] 법정 서식(또는 그 후보) 3종(세금계산서 · 면세계산서 · 입금표)은 빼고.
         /// </summary>
         public string StyleKey { get; set; } = "basic";
 

@@ -535,7 +535,10 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.Equal(a4.Height, got.Height, 1);
     }
 
-    [Theory(DisplayName = "축⒠ 🔴 스타일은 아직 **무엇이 와도 basic** (4종 디자인 미확정 · 배선만)")]
+    // ⬛ 종전 표시 이름(갈래 E⑵ 고침 1 전 · 4종 시안 승인 전): "축⒠ 🔴 스타일은 아직 **무엇이 와도 basic** (4종 디자인 미확정 · 배선만)"
+    //   🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 1 · PM 판단 §72 E-4 · [3-V] P2-1 · [4] F8] 이름만 지금 동작으로 고쳤다 —
+    //     넣는 값 4개 · 단언(`"basic"`) · 메서드 이름은 그대로. 허용 4값(formal · simple · large)을 그리는 시험은 `FormStyleRenderGateTests`.
+    [Theory(DisplayName = "축⒠ 🔴 허용 4값 밖 · 빈 값 스타일은 **basic** 으로 떨어진다 (basic 은 basic · 모르는 값은 경고 뒤 basic)")]
     [InlineData("basic")]
     [InlineData("modern")]
     [InlineData("")]

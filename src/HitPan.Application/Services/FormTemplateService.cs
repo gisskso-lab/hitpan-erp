@@ -159,6 +159,8 @@ public class FormTemplateService : IFormTemplateService
     private async Task<FormTemplateDto> CreateCoreAsync(string tenantId, CreateFormTemplateRequest request, DbTransaction tx, CancellationToken ct)
     {
         ValidatePaperMode(request.PaperMode);
+        // 🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 1 · PM 판단 §72 E-5 · [3-V] P2-3] 스타일 허용 4값 — DB 줄 **전**에 거절(행 0 · 500 0).
+        var styleKeyToSave = ResolveStyleKeyToSave(request.StyleKey);
 
         var templateId = Guid.NewGuid().ToString();
         var db = _unitOfWork.GetDbConnection();
@@ -216,7 +218,8 @@ public class FormTemplateService : IFormTemplateService
                 // 요청에 값이 없으면(옛 화면·API 호출) 그 양식의 기본 매수를 쓴다.
                 //   세금계산서·계산서를 recipient 로 만들면 법정 2매 요건을 어기게 된다.
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
-                StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                // ⬛ 종전(갈래 E⑵ 고침 1 전): StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                StyleKey = styleKeyToSave,   // 갈래 E⑵ 고침 1 — 허용 4값(맨 앞에서 검사 · 빈 값 = basic 그대로)
                 ShowTearLine = request.ShowTearLine ? 1 : 0,
                 // 🔴 DB-148 — 수치 셋은 null 을 **null 그대로** 넣는다.
                 //   null = 「공통값을 따른다」이므로 여기서 기본값을 채워 넣으면
@@ -258,7 +261,8 @@ public class FormTemplateService : IFormTemplateService
             // DB 에 실제로 저장된 값과 같아야 한다 — 요청이 비었을 때 서버가 정한 기본을 그대로 돌려준다.
             //   여기서 request 값을 그냥 넘기면 화면은 recipient 로 알고 DB 는 both 인 어긋남이 난다.
             PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
-            StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+            // ⬛ 종전(갈래 E⑵ 고침 1 전): StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+            StyleKey = styleKeyToSave,   // 갈래 E⑵ 고침 1 — DB 에 넣은 값과 같음
             ShowTearLine = request.ShowTearLine,
             // DB-148 — 위 INSERT 에 넣은 값과 같아야 한다(요청값을 그대로 돌려준다).
             // 종전: PrintBackground = request.PrintBackground,
@@ -305,6 +309,8 @@ public class FormTemplateService : IFormTemplateService
     private async Task<FormTemplateDto> UpdateCoreAsync(string tenantId, string templateId, UpdateFormTemplateRequest request, DbTransaction tx, CancellationToken ct)
     {
         ValidatePaperMode(request.PaperMode);
+        // 🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 1 · PM 판단 §72 E-5] 만들기와 같은 검사 — FOR UPDATE 읽기 **전**에 거절(행 0 · 500 0).
+        var styleKeyToSave = ResolveStyleKeyToSave(request.StyleKey);
 
         var db = _unitOfWork.GetDbConnection();
         // 🔴 W-G1-51 F-1 — 양식지 저장 = `print_background` 0 강제(CreateCoreAsync 와 같은 규칙 · 측정 ⓘ-11).
@@ -368,7 +374,8 @@ public class FormTemplateService : IFormTemplateService
                 ShowCompanySeal = request.ShowCompanySeal ? 1 : 0,
                 ShowBorder = request.ShowBorder ? 1 : 0,
                 PrintCopyMode = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode),
-                StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                // ⬛ 종전(갈래 E⑵ 고침 1 전): StyleKey = string.IsNullOrWhiteSpace(request.StyleKey) ? "basic" : request.StyleKey,
+                StyleKey = styleKeyToSave,   // 갈래 E⑵ 고침 1 — 허용 4값(맨 앞에서 검사 · 빈 값 = basic 그대로)
                 ShowTearLine = request.ShowTearLine ? 1 : 0,
                 // 🔴 DB-148 — 수치 셋은 null 을 null 그대로 넘긴다(「공통값을 따른다」를 지키려면).
                 // 종전: PrintBackground = request.PrintBackground ? 1 : 0,
@@ -1348,4 +1355,35 @@ public class FormTemplateService : IFormTemplateService
             throw new InvalidOperationException($"paper_mode는 'plain' 또는 'preprint'만 허용됩니다. (입력: {paperMode})");
         }
     }
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 1 · PM 판단 §72 E-5 · [3-V] P2-3] 저장 문 스타일 허용 목록(4값).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>왜</b> — 스타일 고르는 화면이 아직 없어(갈래 E⑷) 저장 문이 고르는 유일한 길인데, 종전에는 빈 값만
+    ///   <c>basic</c> 으로 바꾸고 그 밖은 그대로 넣었다. 출하 DDL <c>style_key varchar(20)</c> 을 넘는 값은
+    ///   DB 저장 오류(500)가 될 수 있었고, 모르는 값은 조용히 저장됐다.
+    /// 🔴 빈 값 · 없음 · 공백 = <c>basic</c>(종전 그대로) · 허용 4값 = 그 글자 그대로 · 밖 = 사람 말 거절
+    ///   (컨트롤러 기존 catch = 400 + 문구 · 컨트롤러 무변).
+    /// 🔴 글자 그대로(Ordinal) 비교 — 옆 <see cref="ValidatePaperMode"/> · <see cref="ValidatePrintCopyMode"/> 와 같은 꼴.
+    ///   렌더 쪽은 옛 행 보호로 대소문자를 무시한다(그쪽은 안 바뀐다).
+    /// 🔴 입력 값을 문구에 되적지 않는다 — 긴 값 · 이상한 글자를 화면 · 로그에 다시 싣지 않는다.
+    /// 🔴 기존 행은 안 건드린다(마이그 0) — 이 검사는 저장 요청에만 닿는다.
+    /// </remarks>
+    private static string ResolveStyleKeyToSave(string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested)) return "basic";
+        foreach (var allowed in AllowedStyleKeys)
+        {
+            if (string.Equals(requested, allowed, StringComparison.Ordinal)) return allowed;
+        }
+
+        throw new InvalidOperationException(StyleKeyRejectMessage);
+    }
+
+    /// <summary>저장 문 스타일 허용 4값 — 렌더 <c>PdfRenderService.KnownStyleKeys</c> 와 같은 넷(시안 §3-1).</summary>
+    private static readonly string[] AllowedStyleKeys = { "basic", "formal", "simple", "large" };
+
+    private const string StyleKeyRejectMessage =
+        "양식 스타일은 기본 · 격식 · 간결 · 큰글씨 네 가지 중에서만 고를 수 있습니다.";
 }
