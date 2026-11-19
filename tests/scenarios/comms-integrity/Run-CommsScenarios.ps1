@@ -25,6 +25,11 @@ param(
     [string]$ReportDir    = "$PSScriptRoot\reports",
     [string]$MarkerPath   = "C:\HitPanTest\HITPAN_TEST_ENV.marker"  # 봉합① 화이트리스트 마커
 )
+# ── W-G1-53 ㉤ (2026-11-19) 옛 도구 거절 — 우회 스위치 0 · 아래 본문(가드 판정 기록 포함) 보존(설계 §6) ──
+Write-Host '[거절] 이 옛 러너는 쓰지 않습니다(W-G1-53). 거짓 PASS 길이 있어 새 러너로 바꿨습니다.'
+Write-Host '[거절] 새 러너 = 같은 폴더 Run-RoutinePcScenarios.ps1(가드 7칸 · -Confirm 없으면 판정만) · 안내 = 같은 폴더 README_테스트환경구축.md'
+exit 1
+# ── W-G1-53 ㉤ 거절 블록 끝 ──
 
 $ErrorActionPreference = 'Continue'
 

@@ -70,6 +70,11 @@ param(
     # 실제 변경 없이 가드/경로/파일 존재만 점검
     [switch]$WhatIfOnly
 )
+# ── W-G1-53 ㉤ (2026-11-19) 옛 도구 거절 — 우회 스위치 0 · 아래 본문 보존(설계 §6 · PM 결재 작업지시서 §8 #6) ──
+Write-Host '[거절] 이 슬롯 구축 스크립트는 쓰지 않습니다(W-G1-53). DB 생성 · 서비스 등록 = 헌법 #29 인프라 조작이고 가드가 없습니다.'
+Write-Host '[거절] 장애 시험 = 같은 폴더 Run-RoutinePcScenarios.ps1(가드 7칸 · -Confirm 없으면 판정만) · 안내 = 같은 폴더 README_테스트환경구축.md'
+exit 1
+# ── W-G1-53 ㉤ 거절 블록 끝 ──
 
 $ErrorActionPreference = 'Stop'
 

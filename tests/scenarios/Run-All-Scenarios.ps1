@@ -11,6 +11,11 @@ param(
     [switch]$SkipDestructive,      # S02·S03·S04 강제 종료 생략 (운영 PC 보호)
     [string[]]$Only                # 특정 시나리오만 (예: "S07","S10")
 )
+# --- W-G1-53 (2026-11-19): old tool disabled. No bypass switch. Body below is kept as record (design s6). ---
+Write-Host '[blocked] This old test tool is disabled (W-G1-53). It has no guard and can change a real PC.'
+Write-Host '[blocked] Use tests/scenarios/comms-integrity/Run-RoutinePcScenarios.ps1 (guarded; without -Confirm it only judges).'
+exit 1
+# --- end of W-G1-53 block ---
 
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Path $ReportDir -Force | Out-Null

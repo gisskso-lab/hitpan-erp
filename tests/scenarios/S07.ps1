@@ -1,5 +1,10 @@
 # S07 — Windows Defender 격리 시뮬 (EICAR 표준 테스트 파일)
 param([string]$HealthUrl)
+# --- W-G1-53 (2026-11-19): old tool disabled. No bypass switch. Body below is kept as record (design s6). ---
+Write-Host '[blocked] This old test tool is disabled (W-G1-53). It has no guard and can change a real PC.'
+Write-Host '[blocked] Use tests/scenarios/comms-integrity/Run-RoutinePcScenarios.ps1 (guarded; without -Confirm it only judges).'
+exit 1
+# --- end of W-G1-53 block ---
 $dir = "C:\Program Files\HitPan\test"
 New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $path = Join-Path $dir "eicar.com"
