@@ -1,7 +1,7 @@
 {
   "schema": "print-plan/1",
   "about": "W-G1-51 인쇄 작3 갈래 Z 런 계획 — 작업지시서 §4-1 그대로 · 상한 Z 4 · 고침 6 · 런마다 run 칸만 바꿔 커밋(yml 무변) · 개발명세서 §3 ⑧ · §4",
-  "run": "Z3",
+  "run": "Z4",
   "cap": { "Z": 4, "fix": 6 },
   "runs": {
     "Z1": {
@@ -21,7 +21,12 @@
         { "id": "z3-main-read", "board": "main", "tenant": "A", "phase": "read", "patch": "", "qpdf": false }
       ]
     },
-    "Z4": { "what": "예비 · 쓰면 PM 보고", "blocked": "Z3 결과 뒤", "jobs": [] },
+    "Z4": {
+      "what": "예비(Z 마지막 런) · Z3 런 44444478932 = 161 칸 전부 양식 저장 500(장치 빈 글자 · 개발명세서 §1-5-0) → 5차 · 6차 장치(89fb454a) · Z3 와 같은 꼴 잡 1 · 차림 기대 = §2 「5차 고정 · Z4 차림 기대」 행 · 쓰기 전 대표 보고",
+      "jobs": [
+        { "id": "z4-main-read", "board": "main", "tenant": "A", "phase": "read", "patch": "", "qpdf": false }
+      ]
+    },
     "R1": { "what": "고친 합류본 · A · B · §1 전체 · ㉮ 경우(⑨ 표본 · qpdf) 등", "blocked": "갈래 A~F 코드 뒤", "jobs": [] },
     "R2": { "what": "심은 결함 묶음 M 6", "blocked": "갈래 A~F 코드 뒤 · 예상 실패 사유 런 전 고정", "jobs": [] },
     "R3": { "what": "심은 결함 묶음 S 11(⑨ⓐⓑⓒ 포함 · qpdf)", "blocked": "갈래 A~F 코드 뒤 · 예상 실패 사유 런 전 고정", "jobs": [] },
