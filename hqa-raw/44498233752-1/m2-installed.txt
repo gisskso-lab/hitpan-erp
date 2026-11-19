@@ -1,0 +1,7 @@
+# M2 새로 깔리거나 바뀐 꾸러미 — v5 별건 A(설계 §5-3) · 설치 전후 dpkg-query 차이 · 이름 · 판 · 아키텍처
+# before=1217 after=1218 changed=5
+fonts-wqy-zenhei	0.9.45-8	all
+libgbm1	25.2.8-0ubuntu0.24.04.5	amd64
+libgl1-mesa-dri	25.2.8-0ubuntu0.24.04.5	amd64
+libglx-mesa0	25.2.8-0ubuntu0.24.04.5	amd64
+mesa-libgallium	25.2.8-0ubuntu0.24.04.5	amd64

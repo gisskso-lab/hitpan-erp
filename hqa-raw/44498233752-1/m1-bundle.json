@@ -1,0 +1,43 @@
+{
+  "stage": "M1",
+  "ok": true,
+  "release": "https://github.com/gisskso-lab/hitpan-erp/releases/download/hqa-s4-fixture-88085da1",
+  "checks": [
+    {
+      "check": "sha256",
+      "name": "chrome-headless-shell-linux64.zip",
+      "ok": true,
+      "detail": "got=3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14 expected=3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14 release=3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14"
+    },
+    {
+      "check": "sha256",
+      "name": "chrome-linux64.zip",
+      "ok": true,
+      "detail": "got=ae8736ac28bc69278551500f219fc749575648263c43ec5990749eff43b9fcf8 expected=ae8736ac28bc69278551500f219fc749575648263c43ec5990749eff43b9fcf8 release=ae8736ac28bc69278551500f219fc749575648263c43ec5990749eff43b9fcf8"
+    },
+    {
+      "check": "sha256",
+      "name": "hqa-s4-fixture-linux-x64-88085da1.tar.gz",
+      "ok": true,
+      "detail": "got=c137b436af20dcc5a8375067af1be1d53757a500e3707d83cf9e3b3aff05343e expected=c137b436af20dcc5a8375067af1be1d53757a500e3707d83cf9e3b3aff05343e release=c137b436af20dcc5a8375067af1be1d53757a500e3707d83cf9e3b3aff05343e"
+    },
+    {
+      "check": "sha256",
+      "name": "hqa-s4-fixture-src-88085da1.tar.gz",
+      "ok": true,
+      "detail": "got=58a705516419dfd3de5c8b6f659d323db4903b9a17244e96e8d2e92b2f2ebacf expected=58a705516419dfd3de5c8b6f659d323db4903b9a17244e96e8d2e92b2f2ebacf release=58a705516419dfd3de5c8b6f659d323db4903b9a17244e96e8d2e92b2f2ebacf"
+    },
+    {
+      "check": "src_nonregular",
+      "name": "-",
+      "ok": true,
+      "detail": "count=0"
+    },
+    {
+      "check": "src_vs_tree",
+      "name": "-",
+      "ok": true,
+      "detail": "tree_files=41 tar_files=41 norm_match=41 raw_match=41 filter_only_match=0 tree_only=0 tar_only=0"
+    }
+  ]
+}
