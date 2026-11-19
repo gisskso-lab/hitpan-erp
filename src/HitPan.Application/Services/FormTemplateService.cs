@@ -797,6 +797,11 @@ public class FormTemplateService : IFormTemplateService
         // 종전(고침 1 전): var srcHash = await HashFileAsync(picture.FullPath, ct);
         var srcHash = srcRead.Hash;
         string? reuseId = null;
+        // 🔴 고침 1([4] P2-2 · PM 판단) — 이어 쓰기 비교에 용지(크기 · 방향) · 여백 4 · 매수(print_copy_mode) · 스타일(style_key) ·
+        //   워터마크 4 칸을 더한다 · 하나라도 다르면 새 Y(모양 유지 · 대표 Q14). 위 「여백 · 워터마크는 판정에 안 쓴다(§7-3)」 줄은
+        //   이 PM 판단으로 바뀜(설계 글자 고침 = 설계팀장 몫). 「출처 칸 안 둠」(§7-4) 그대로 — 새 칸 · DDL 0.
+        //   비교는 SQL 안에서 원본 행(s)과 null 안전 같음(<=>) — 여백 · 워터마크 decimal 이 C# 를 거치지 않는다.
+        //   EXISTS 안의 `form_templates.` = 바깥 후보 행(안쪽은 별칭 s 만 보임 · 표준 상관 이름 규칙).
         var candidates = await db.QueryAsync<(string TemplateId, string? BackgroundImageUrl)>(new CommandDefinition(
             @"SELECT template_id AS TemplateId, background_image_url AS BackgroundImageUrl
               FROM form_templates
@@ -804,6 +809,21 @@ public class FormTemplateService : IFormTemplateService
                 AND paper_mode = 'plain' AND print_background = 1 AND is_active = 1
                 AND field_coords_json <=> @FieldCoordsJson
                 AND template_id <> @TemplateId
+                AND EXISTS (
+                      SELECT 1 FROM form_templates s
+                      WHERE s.tenant_id = @TenantId AND s.template_id = @TemplateId
+                        AND s.paper_size          <=> form_templates.paper_size
+                        AND s.orientation         <=> form_templates.orientation
+                        AND s.margin_top_mm       <=> form_templates.margin_top_mm
+                        AND s.margin_left_mm      <=> form_templates.margin_left_mm
+                        AND s.margin_right_mm     <=> form_templates.margin_right_mm
+                        AND s.margin_bottom_mm    <=> form_templates.margin_bottom_mm
+                        AND s.print_copy_mode     <=> form_templates.print_copy_mode
+                        AND s.style_key           <=> form_templates.style_key
+                        AND s.show_watermark      <=> form_templates.show_watermark
+                        AND s.watermark_opacity   <=> form_templates.watermark_opacity
+                        AND s.watermark_saturate  <=> form_templates.watermark_saturate
+                        AND s.watermark_scale_pct <=> form_templates.watermark_scale_pct)
               ORDER BY template_id",
             new { TenantId = tenantId, src.FormType, src.FieldCoordsJson, TemplateId = templateId },
             transaction: tx, cancellationToken: ct));
