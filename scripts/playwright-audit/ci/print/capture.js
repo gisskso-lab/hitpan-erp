@@ -57,11 +57,23 @@ async function errorToasts(page) {
   return page.locator('.mud-snackbar.mud-alert-filled-error, .mud-snackbar.mud-alert-filled-warning, .mud-snackbar-error, .mud-snackbar-warning').count();
 }
 
+/**
+ * 🔴 7차 R-3(CTO 재판정 §5-1 · Z4 〔가〕② 13칸) — 품목표 수량 머리 글자. 정확 일치만(부분 일치 = 「반품수량」 말고 다른 칸까지 잡을 수 있어 안 씀).
+ *   근거(제품 .razor MudTh 원문 · C5 시험이 런마다 대조): 「수량」 = QuotationGrid · DeliveryGrid · SalesOrderGrid · PurchaseOrderGrid · PurchaseReceiptGrid
+ *   · 「반품수량」 = PurchaseReturnGrid.razor:39(매입 반품 — makeDoc → fillLines 길) · SalesReturnGrid.razor:40(판매 반품 = [반품하기] 길 · fillLines 안 지남)
+ */
+const QTY_HEADERS = ['수량', '반품수량'];
+function qtyColumn(headers) {
+  return headers.findIndex((h) => QTY_HEADERS.includes(String(h).trim()));
+}
+
 /** 전표 줄 2개 — [추가] 두 번 → 줄마다 품명(자동완성) · 수량. */
 async function fillLines(page) {
   const headers = await page.locator('th').allInnerTexts();
-  const qtyCol = headers.findIndex((h) => h.trim() === '수량');
-  if (qtyCol < 0) throw new S.SetupError('품목표에 「수량」 머리 없음');
+  // ⬛ [낡은 줄 · 1~6차] const qtyCol = headers.findIndex((h) => h.trim() === '수량');
+  // ⬛ [낡은 줄 · 1~6차] if (qtyCol < 0) throw new S.SetupError('품목표에 「수량」 머리 없음');
+  const qtyCol = qtyColumn(headers);
+  if (qtyCol < 0) throw new S.SetupError(`품목표에 수량 머리(${QTY_HEADERS.join(' · ')}) 없음 — 머리 ${headers.length}: ${L.sanitize(headers.map((h) => String(h).trim()).join('|'), 160)}`);
   for (let k = 0; k < F.MARK.items.length; k++) {
     await button(page, '추가').first().click({ timeout: WAIT });
     await sleep(400);
@@ -121,6 +133,43 @@ async function makeSalesReturn(page) {
   await saveDoc(page, '판매 반품');
 }
 
+/**
+ * 🔴 7차 R-4(CTO 재판정 §5-1 「두 가지만」 · W4) — ① 목록 줄이 나타날 때까지 기다린다(전엔 0.8초 쉬고 한 번 셈)
+ *   ② 못 찾으면 글자 진단만 남긴다: 줄 수 · 기간 값 · 브라우저 시간대 · 창 글 소독본(L.sanitize 200자 · 제어 글자 빈칸). 화면 사진 0(W4 · 누출 검사가 그림을 못 읽음).
+ *   기간 · 시간대는 근거가 없어 값을 바꾸지 않는다(기록만). 기다림 상한 = LIST_WAIT(10초) — 못 찾는 칸이 39 이어도 캡처 단계 70분 상한에 6.5분 이하(C7 · 명세서 §1-7).
+ */
+const LIST_WAIT = 10000;
+const CTL_ALL = /[\u0000-\u001f\u007f]/g;
+async function listDiag(page, dlg) {
+  const part = [];
+  const take = async (what, fn) => {
+    try {
+      part.push(`${what} ${await fn()}`);
+    } catch (e) {
+      part.push(`${what} 못 읽음(${L.errorName(e)})`); // 진단 실패도 사유 글에 남김(#15)
+    }
+  };
+  await take('줄 수', async () => `${await dlg.locator('tr').count()}(표지 줄 ${await dlg.locator('tr').filter({ hasText: F.MARK.partner }).count()})`);
+  await take('기간 값', async () => {
+    const v = await dlg.locator('input').evaluateAll((els) => els.map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}/.test(x)));
+    return v.length ? v.map((x) => L.sanitize(x, 40)).join(' ~ ') : '없음';
+  });
+  await take('브라우저 시간대', async () => page.evaluate(() => `${Intl.DateTimeFormat().resolvedOptions().timeZone} · 분 차 ${-new Date().getTimezoneOffset()}`));
+  await take('창 글', async () => `「${L.sanitize(String(await dlg.innerText()).replace(/\s+/g, ' '), 200).replace(CTL_ALL, ' ')}」`);
+  return part.join(' · ');
+}
+async function waitListRows(page, dlg, t, pick, wait = LIST_WAIT) {
+  const marked = dlg.locator('tr').filter({ hasText: F.MARK.partner });
+  try {
+    await marked.first().waitFor({ state: 'visible', timeout: wait });
+  } catch (e) {
+    log(`${t.listTitle} 표지 줄 기다림 끝(${L.errorName(e)}) — 진단 남김`);
+  }
+  const rows = pick(marked);
+  if ((await rows.count()) > 0) return rows;
+  throw new S.SetupError(`${t.listTitle} 에 표지 거래처 줄 없음 — ${await listDiag(page, dlg)}`);
+}
+
 /** [목록] → 창에서 표지 거래처 줄 두 번 누름 → 창 닫힘. pick = 줄 고르기(판매 반품 ⓙ = 반품 줄). */
 async function openFromList(page, t, pick, returnType) {
   await goto(page, t.route);
@@ -128,9 +177,10 @@ async function openFromList(page, t, pick, returnType) {
   await button(page, '목록').first().click({ timeout: WAIT });
   const dlg = page.locator('.mud-dialog').filter({ hasText: t.listTitle }).last();
   await dlg.waitFor({ state: 'visible', timeout: WAIT });
-  await sleep(800);
-  const rows = pick(dlg.locator('tr').filter({ hasText: F.MARK.partner }));
-  if ((await rows.count()) === 0) throw new S.SetupError(`${t.listTitle} 에 표지 거래처 줄 없음`);
+  // ⬛ [낡은 줄 · 1~6차] await sleep(800);
+  // ⬛ [낡은 줄 · 1~6차] const rows = pick(dlg.locator('tr').filter({ hasText: F.MARK.partner }));
+  // ⬛ [낡은 줄 · 1~6차] if ((await rows.count()) === 0) throw new S.SetupError(`${t.listTitle} 에 표지 거래처 줄 없음`);
+  const rows = await waitListRows(page, dlg, t, pick);
   await rows.first().locator('td').filter({ hasText: F.MARK.partner }).first().dblclick();
   await dlg.waitFor({ state: 'hidden', timeout: WAIT }).catch((e) => log(`목록 창 안 닫힘(${L.errorName(e)}) — 계속`));
   await sleep(1200);
@@ -480,4 +530,5 @@ if (require.main === module) {
 }
 
 // ⬛ [낡은 줄 · 3~4차] module.exports = { safeName, cfgKey, entryPick, visibleOr };
-module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps }; // 🔴 5차 ⓔ3 — 배선 시험(T-Z28)이 main 을 가짜 손으로 돌림
+// ⬛ [낡은 줄 · 5~6차] module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps }; // 🔴 5차 ⓔ3 — 배선 시험(T-Z28)이 main 을 가짜 손으로 돌림
+module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps, QTY_HEADERS, qtyColumn, waitListRows, listDiag, LIST_WAIT }; // 🔴 7차 — R-3 · R-4 시험(T-Z35 · T-Z36)

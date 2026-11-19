@@ -514,7 +514,8 @@ jobs:
           code=000
           for i in $(seq 1 90); do
             if ! kill -0 "$pid" 2>/dev/null; then echo "::error::[장치] API 프로세스가 기동 중 끝났다"; exit 1; fi
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$UI_BASE/index.html" || echo 000)
+            # ⬛ [낡은 줄 · 2~6차] code 받기 줄 뒤 echo 000 대체 — 7차 C4: 같은 동작(기다림 중 값 대체 · 90초 뒤 ::error:: 로 단계 실패는 그대로)
+            if ! code=$(curl -s -o /dev/null -w '%{http_code}' "$UI_BASE/index.html"); then code=000; fi
             if [ "$code" = "200" ]; then echo "API·화면 ready (${i}s)"; exit 0; fi
             sleep 1
           done
@@ -545,7 +546,8 @@ jobs:
           else
             echo "::warning::[장치] 판독기 자체시험 실패 — 이 잡 음성 기준 전부 미측정"
           fi
-          grep -E '^(🔴 FAIL|자체시험 끝)' "$RUNNER_TEMP/probe-selftest.log" || echo "자체시험 끝 줄 없음"
+          # ⬛ [낡은 줄 · 2~6차] grep 줄 뒤 echo 대체(「자체시험 끝 줄 없음」) — 7차 C4: 같은 동작 · 실패 기록 줄(⚫)로 바꿈 · 단계 실패로 안 바꿈(뒤 캡처 단계에 if 가 없어 런 전체가 0 이 됨 · C7)
+          if ! grep -E '^(🔴 FAIL|자체시험 끝)' "$RUNNER_TEMP/probe-selftest.log"; then echo "⚫ FAIL [장치] 판독기 자체시험 끝 줄 없음(프로세스가 끝 줄 전에 멈춤)"; fi
           cp "$RUNNER_TEMP/probe-selftest.log" "$PRINT_OUT/probe-selftest.log"
 
       - name: "[장치] qpdf 설치 · ⑨ 표본 만들기 (⑨ 를 재는 잡만)"
@@ -553,7 +555,8 @@ jobs:
         run: |
           set -uo pipefail
           if sudo timeout 240 apt-get install -y qpdf; then qpdf --version | head -1; else echo "::warning::[장치] qpdf 설치 실패 — 이 런 ⑨ 칸만 미측정(설치 실패)"; fi
-          PRINT_QPDF=1 dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" samples "$PRINT_OUT/nine" || echo "::warning::[장치] ⑨ 표본 만들기 실패"
+          # ⬛ [낡은 줄 · 3~6차] samples 줄 뒤 echo 대체(경고만) — 7차 C4: 경고 + 실패 기록 줄(⚫) · 단계 실패로 안 바꿈(같은 까닭 · C7)
+          if ! PRINT_QPDF=1 dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" samples "$PRINT_OUT/nine"; then echo "::warning::[장치] ⑨ 표본 만들기 실패"; echo "⚫ FAIL [장치] ⑨ 표본 만들기 실패 — 이 잡 ⑨ 칸 미측정"; fi
 
       - name: "[시험] 차림 · 판독 입구 (화면 단추 응답만)"
         timeout-minutes: 70
@@ -565,11 +568,19 @@ jobs:
           set -uo pipefail
           shopt -s nullglob
           mkdir -p "$RUNNER_TEMP/print-unread"
+          # 7차 R-2(C4) — 판독기 실패를 삼키지 않는다: 파일마다 끝까지 돌고(한 장 실패로 멈추지 않음) 실패 수를 센 뒤 1 이상이면 이 단계 실패.
+          #   뒤 단계(판정 · API 멈춤 · 누출 검사 · 업로드)는 모두 if: always() 라 그대로 돈다(폭발 반경 = 이 단계 빨강 + 그 칸 미측정).
+          n=0
+          bad=0
           for f in "$PRINT_OUT"/pdfs/*.pdf; do
-            dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" read "$f" "${f%.pdf}.json" || echo "판독기 실패 $(basename "$f")"
+            n=$((n + 1))
+            # ⬛ [낡은 줄 · 3~6차] dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" read "$f" "${f%.pdf}.json" (뒤에 echo 대체 = 실패 삼킴 · Z4 108/108)
+            if ! dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" read "$f" "${f%.pdf}.json"; then bad=$((bad + 1)); echo "⚫ FAIL [장치] 판독기 실패 $(basename "$f")"; fi
             # 3차([3-V] A12) — 못 읽은 PDF 는 압축 흐름 안을 누출 검사가 못 본다 → 올리지 않는다(사실 JSON 은 남겨 판정 = 미측정)
             if ! grep -q '^  "ok": true' "${f%.pdf}.json" 2>/dev/null; then mv "$f" "$RUNNER_TEMP/print-unread/"; echo "못 읽은 PDF 업로드 제외 $(basename "$f")"; fi
           done
+          echo "사실 뽑기 끝 — PDF ${n} · 판독기 실패 ${bad}"
+          if [ "$bad" -gt 0 ]; then echo "::error::[장치] 판독기 실패 ${bad}/${n} — 그 칸 미측정 · 판정 단계는 그대로 돈다"; echo "⚫ FAIL [장치] 사실 뽑기 실패 ${bad}/${n}"; exit 1; fi
 
       - name: "[시험] 판정 (양성 대조 먼저 · 칸별 사유)"
         if: always()
@@ -578,7 +589,8 @@ jobs:
       - name: "[장치] API 멈춤 (로그 마무리)"
         if: always()
         run: |
-          if [ -f "$RUNNER_TEMP/ui-api.pid" ]; then kill "$(cat "$RUNNER_TEMP/ui-api.pid")" 2>/dev/null || echo "API 이미 멈춤"; sleep 2; fi
+          # ⬛ [낡은 줄 · 2~6차] kill 줄 뒤 echo 대체(「API 이미 멈춤」) — 7차 C4: 같은 동작(이미 멈춘 경우 = 실패 아님 · 정리 단계)
+          if [ -f "$RUNNER_TEMP/ui-api.pid" ]; then if ! kill "$(cat "$RUNNER_TEMP/ui-api.pid")" 2>/dev/null; then echo "API 이미 멈춤"; fi; sleep 2; fi
 
       - name: "[장치] S10 누출 검사 (3꼴 · 올리기 전)"
         id: leak

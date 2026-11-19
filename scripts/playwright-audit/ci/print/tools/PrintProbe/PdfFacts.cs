@@ -100,7 +100,8 @@ public static class PdfFacts
 
         var fonts = new JsonArray();
         foreach (var f in page.Letters.Select(l => l.FontName ?? "").Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
-            fonts.Add(f);
+            // ⬛ [낡은 줄 · 1~6차] fonts.Add(f); — 일반형 Add<T> 가 JsonValueCustomized 를 만들어 리졸버 없는 Pretty 직렬화에서 예외(Z4 108/108 · 7차 R-1)
+            fonts.Add(JsonValue.Create(f));
         p["fonts"] = fonts;
 
         var images = new JsonArray();
@@ -127,7 +128,8 @@ public static class PdfFacts
                 {
                     io["decode"] = "ok";
                     var q = new JsonArray();
-                    foreach (var m in luma.QuadrantMeans()) q.Add(Math.Round(m, 4));
+                    // ⬛ [낡은 줄 · 1~6차] foreach (var m in luma.QuadrantMeans()) q.Add(Math.Round(m, 4)); — 같은 까닭(7차 R-1 · 값 꼴 = 원시 JsonValue)
+                    foreach (var m in luma.QuadrantMeans()) q.Add(JsonValue.Create(Math.Round(m, 4)));
                     io["quad"] = q;
                 }
             }

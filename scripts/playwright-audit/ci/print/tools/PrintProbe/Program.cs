@@ -2,6 +2,10 @@
 //   read <pdf> <out.json>   PDF 사실 뽑기(판정 0)
 //   samples <dir>           ⑨ 표본 만들기 + manifest.json(⒜ · ⒝ · ⒞ · 유효 조건)
 //   selftest <workdir>      판독기 자체시험(이름 풀기 · PNG · 글자 좌표 · 표본 유효 조건) — DB · 앱 · 네트워크 0
+//   render <spec> <out.pdf> 🔴 7차(C3) — 제품과 같은 라이브러리 · 글꼴 이름으로 PDF 만들기(ProductLikeRender · 판정 0)
+//   🔴 7차 T8(C1 · C2) — selftest 가 node chain.js 를 프로세스로 부르고, chain.js 는 워크플로와 같은 명령줄
+//      (dotnet PrintProbe.dll read <pdf> <out> · node judge-print.js <dir>)로 「PDF → read → 사실 파일 → 판정기 → 양성 대조」 사슬을 끝까지 지난다
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using UglyToad.PdfPig.Core;
@@ -12,15 +16,38 @@ namespace PrintProbe;
 
 public static class Program
 {
-    private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    // ⬛ [낡은 줄 · 1~6차] private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    //   🔴 7차 R-1 — 리졸버 없는 옵션은 원시 아닌 노드 값(JsonValueCustomized)을 쓸 때 MakeReadOnly 에서 던졌다(Z4 108/108 · 이 PC 재현 끝).
+    //   값 꼴(PdfFacts 원시 JsonValue)도 고쳤고, 앞으로 원시 아닌 값이 들어와도 쓰이게 기본 리졸버를 단다.
+    private static readonly JsonSerializerOptions Pretty = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+    };
 
     public static int Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         if (args.Length >= 3 && args[0] == "read")
         {
-            var facts = PdfFacts.Read(File.ReadAllBytes(args[1]));
-            File.WriteAllText(args[2], facts.ToJsonString(Pretty));
+            // ⬛ [낡은 줄 · 1~6차] 예외를 받지 않아 프로세스가 처리 안 된 예외로 끝났다(일부 Aborted (core dumped)) — 7차: 사유 1줄 + 끝 코드 3(실패는 그대로 실패)
+            try
+            {
+                var facts = PdfFacts.Read(File.ReadAllBytes(args[1]));
+                File.WriteAllText(args[2], facts.ToJsonString(Pretty));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                var msg = ex.Message.Length > 160 ? ex.Message[..160] : ex.Message;
+                Console.Error.WriteLine($"⚫ FAIL [장치] 판독기 read 예외 {ex.GetType().Name}: {msg.ReplaceLineEndings(" ")}");
+                return 3;
+            }
+        }
+        if (args.Length >= 3 && args[0] == "render")
+        {
+            File.WriteAllBytes(args[2], ProductLikeRender.Render(args[1]));
             return 0;
         }
         if (args.Length >= 2 && args[0] == "samples")
@@ -30,7 +57,7 @@ public static class Program
             return 0;
         }
         if (args.Length >= 2 && args[0] == "selftest") return SelfTest(args[1]);
-        Console.Error.WriteLine("쓰는 법: read <pdf> <out.json> | samples <dir> | selftest <workdir>");
+        Console.Error.WriteLine("쓰는 법: read <pdf> <out.json> | samples <dir> | selftest <workdir> | render <spec.json> <out.pdf>");
         return 2;
     }
 
@@ -169,8 +196,65 @@ public static class Program
         Check("T7c CTM 2배 · 0.375 = 0.75", Has(42.33, 0.75), got7Text);
         Check("T7d 상자 가로 마디 2 · 두꺼운 채움 = 선 아님 · 모두 5", got7.Length == 5 && Has(70.56, 0.5) && Has(105.83, 0.5), $"선 {got7.Length} · {got7Text}");
 
+        // T8 7차(C1 · C2 · C3) — 사슬 시험: node chain.js <이 dll> <work/chain> 를 프로세스로 부른다.
+        //   chain.js = fixture.js 양성 대조 정의 → render(제품 라이브러리 · 글꼴) → dotnet <dll> read <pdf> <out>(워크플로 같은 명령줄)
+        //            → cells.json → node judge-print.js <dir>(같은 진입점) → 양성 대조 통과 · 깨뜨린 표본 2 = 실패(빨강/미측정)
+        ChainTest(work);
+
         // ⬛ [낡은 줄 · 2차] Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail}");
         Console.WriteLine($"자체시험 끝 — 통과 {pass} · 실패 {fail} · 미측정 {unmeasured}");
         return fail == 0 ? 0 : 1;
+    }
+
+    /// <summary>T8 — 사슬 시험을 프로세스로. node 가 없거나 chain.js 를 못 찾으면 실패(통과로 치지 않음 · 미측정으로도 숨기지 않음).</summary>
+    private static void ChainTest(string work)
+    {
+        var chainJs = Environment.GetEnvironmentVariable("PRINT_CHAIN_JS");
+        if (string.IsNullOrWhiteSpace(chainJs)) chainJs = Path.GetFullPath(Path.Combine("scripts", "playwright-audit", "ci", "print", "chain.js"));
+        var dll = typeof(Program).Assembly.Location;
+        if (!File.Exists(chainJs))
+        {
+            Check("T8 사슬 시험(PDF → read → 사실 파일 → 판정기 → 양성 대조)", false, $"chain.js 없음({chainJs}) — 레포 뿌리에서 부르거나 PRINT_CHAIN_JS");
+            return;
+        }
+        var psi = new ProcessStartInfo("node")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
+        };
+        psi.ArgumentList.Add(chainJs);
+        psi.ArgumentList.Add(dll);
+        psi.ArgumentList.Add(Path.Combine(work, "chain"));
+        string outText;
+        string errText;
+        int code;
+        try
+        {
+            using var proc = Process.Start(psi)!;
+            var errTask = proc.StandardError.ReadToEndAsync();
+            outText = proc.StandardOutput.ReadToEnd();
+            if (!proc.WaitForExit(300_000))
+            {
+                proc.Kill(true);
+                Check("T8 사슬 시험(PDF → read → 사실 파일 → 판정기 → 양성 대조)", false, "300초 넘김 — 끊음");
+                return;
+            }
+            errText = errTask.Result;
+            code = proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Check("T8 사슬 시험(PDF → read → 사실 파일 → 판정기 → 양성 대조)", false, $"node 실행 실패 {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+        var lines = outText.ReplaceLineEndings("\n").Split('\n').Where(l => l.Length > 0).ToArray();
+        foreach (var l in lines.Where(l => l.StartsWith("  ", StringComparison.Ordinal))) Console.WriteLine(l);
+        var end = lines.LastOrDefault(l => l.StartsWith("사슬 시험 끝", StringComparison.Ordinal)) ?? "끝 줄 없음";
+        var errTail = string.Join(" | ", errText.ReplaceLineEndings("\n").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).TakeLast(3));
+        Check("T8 사슬 시험(PDF → read → 사실 파일 → 판정기 → 양성 대조)", code == 0 && end.EndsWith("실패 0", StringComparison.Ordinal),
+            $"끝 코드 {code} · {end}{(errTail.Length > 0 && code != 0 ? $" · stderr {errTail}" : "")}");
     }
 }
