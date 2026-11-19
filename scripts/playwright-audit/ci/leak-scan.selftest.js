@@ -667,6 +667,23 @@ const c18Want = (file, yml, picks, kind) => picks.map((s) => `${file}:${yml.inde
   check('C18e 알고 받는 오탐(조건식 속 트리거 낱말 1줄) → 잡힘 정확히 1(트리거)', ok, `잡힘 ${r.hits.length} · 기대와 같음=${got.join('|') === want.join('|')}`);
 }
 
+// ── 🔴 11차(W-G1-51 고침 1 · PM 결재 ① · 법무 ㉠) C19 — 업로드 뿌리 안 글꼴 파일 = 빨강(확장자 · 머리 바이트) · 그 폴더 지움 ──
+{ // C19a 글꼴 파일 1개 심음(.ttf · TrueType 머리)
+  const root = fresh('c19a');
+  fs.mkdirSync(path.join(root, 'main', 'fonts'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'main', 'fonts', 'substitute.ttf'), Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x80]));
+  const r = run(root);
+  const ok = r.code === 1 && /잡힘: 글꼴 파일\(법무 ㉠\) · 꼴=font · 자리=글꼴 · main\/fonts[\\/]substitute\.ttf/.test(r.out) && /누출 발견/.test(r.out) && !fs.existsSync(path.join(root, 'main'));
+  check('C19a 글꼴 파일 1개 심음(.ttf) → 빨강 · 사유 「글꼴 파일(법무 ㉠)」 · main/ 지움(업로드 0)', ok, `code=${r.code}`);
+}
+{ // C19b 확장자는 글꼴 아님 · 머리 4바이트만 글꼴(OTTO = CFF OpenType)
+  const root = fresh('c19b');
+  fs.writeFileSync(path.join(root, 'main', 'blob.bin'), Buffer.concat([Buffer.from('OTTO', 'latin1'), Buffer.from([0x00, 0x09, 0x00, 0x80])]));
+  const r = run(root);
+  const ok = r.code === 1 && /잡힘: 글꼴 파일\(법무 ㉠\) · 꼴=font · 자리=글꼴 · main\/blob\.bin/.test(r.out) && !fs.existsSync(path.join(root, 'main'));
+  check('C19b 확장자 아닌데 머리 바이트만 글꼴(OTTO) → 빨강 · main/ 지움', ok, `code=${r.code}`);
+}
+
 // ── 🔴 8차(10/29 · §0-12-6 + PM 조건 ②) C15 — 외부 차단 처리기 닫힌 창 처리 거절 ─────────────────
 //   Promise 를 기다려야 하므로 합계 줄은 C15 뒤(아래 async 묶음 끝)로 옮긴다.
 // ⬛ [낡은 줄 · 6~7차] const bad = results.filter((x) => !x.ok).length;

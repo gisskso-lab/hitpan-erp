@@ -137,6 +137,9 @@ function collectBlobs(root) {
 function scanFolder(folder, secrets, sub = path.basename(folder)) {
   const { blobs, errors } = collectBlobs(folder);
   const hits = [];
+  // 🔴 11차(고침 1 · PM 결재 ① · 법무 ㉠) — 글꼴 파일(확장자 .ttf .otf .ttc 또는 머리 4바이트 00010000 · OTTO · ttcf · zip 안 포함) 1개 이상 = 빨강
+  const FONT_HEAD = ['00010000', '4f54544f', '74746366'];
+  for (const b of blobs) if (/\.(ttf|otf|ttc)$/i.test(b.label) || FONT_HEAD.includes(b.buf.subarray(0, 4).toString('hex'))) hits.push({ label: '글꼴 파일(법무 ㉠)', form: 'font', file: b.label, where: '글꼴' });
   for (const s of secrets) {
     for (const { form, bufs } of needlesFor(s.value)) {
       for (const b of blobs) {
