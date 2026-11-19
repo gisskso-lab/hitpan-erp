@@ -5,6 +5,7 @@
 //   못 덮는 것(미측정): 실제 화면 차림 · 실제 PDF 판독(그건 PrintProbe selftest T1~T6 · CI 런)
 //   쓰는 법: node print.selftest.js   — 끝 줄 「인쇄 자체시험 끝 — 통과 n · 실패 m」 · 실패 1 이상이면 끝 코드 1
 //   🔴 8차(명세서 §1-8) — T-C1a · T-C1b 는 capture.js 를 자식 프로세스로 돌린다: 나가는 연결 = 127.0.0.1 의 닫힌 포트 시도만(밖 네트워크 · 브라우저 · DB · 앱 0 · 관찰 손이 셈)
+//   🔴 9차(명세서 §1-9) — 관찰 손은 허용 주소(그 닫힌 포트) 밖 연결을 기록한 뒤 던진다(연결 0) · T-C1d 는 이 시험이 127.0.0.1 에 연 포트로 막힘을 확인(제품 포트 · DB 아님)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -1438,9 +1439,18 @@ function observer8() {
   const cp0 = require('child_process');
   const put = (s) => fs0.appendFileSync(process.env.W51_TC1_REC, `${s}\n`);
   const con = net0.Socket.prototype.connect;
+  // 🔴 9차 [3-V] P3-2 — 기록 뒤 던짐: 허용 주소(W51_TC1_ALLOW = 127.0.0.1:{닫힌 포트} · 비면 전부 막음) 밖 연결은 기록하고 연결 안 함
+  //   (장치가 깨져 다른 주소로 새도 이 PC 실물 5257 · 3306 등에 가짜 로그인 시도 0)
+  const allow = String(process.env.W51_TC1_ALLOW || '');
   net0.Socket.prototype.connect = function connect8(...a) {
     const o = Array.isArray(a[0]) ? a[0][0] : a[0];
     put(o && typeof o === 'object' ? `connect ${o.host || o.path || '?'}:${o.port || ''}` : `connect ${typeof a[1] === 'string' ? a[1] : '?'}:${o}`);
+    // ⬛ [낡은 줄 · 8차] return con.apply(this, a);
+    const where = o && typeof o === 'object' ? `${o.host || o.path || '?'}:${o.port || ''}` : `${typeof a[1] === 'string' ? a[1] : '?'}:${o}`;
+    if (where !== allow) {
+      put(`blocked ${where}`);
+      throw Object.assign(new Error(`T-C1 관찰 손 막음 ${where}`), { code: 'W51_TC1_BLOCKED' });
+    }
     return con.apply(this, a);
   };
   const load = Module0._load;
@@ -1469,6 +1479,8 @@ function runCapture8(cmd, extra) {
       UI_LOGIN_PARENT: 'selftest-parent', UI_PW_PARENT: 'selftest-tc1-pw',
       NODE_OPTIONS: `--require "${obs.split(path.sep).join('/')}"`, W51_TC1_REC: rec,
     }, extra);
+    // 🔴 9차 [3-V] P3-2 — 관찰 손이 허용하는 연결 = UI_BASE(닫힌 포트) 하나 · 그 밖 = 기록 뒤 던짐
+    if (!env.W51_TC1_ALLOW) { const u = /^http:\/\/(127\.0\.0\.1:\d+)\/?$/.exec(String(env.UI_BASE || '')); env.W51_TC1_ALLOW = u ? u[1] : ''; }
     const parts = String(cmd || '').split(/\s+/).filter(Boolean);
     const r = parts[0] === 'node' && parts.length === 2
       ? CP.spawnSync(process.execPath, parts.slice(1), { cwd: REPO7, env, encoding: 'utf8', timeout: 90000 })
@@ -1526,6 +1538,142 @@ guardAsync('T-C1b 8차 Z8-1 ⓑ capture.js 프로세스 · 닫힌 포트 → 차
     && loginFail > 0 && noDoor + loginFail === f.cells.length && !f.dev && f.connects.length >= 1 && f.other === 0 && f.product === 0 && f.pw === 0 && f.child === 0;
   check('T-C1b 8차 Z8-1 ⓑ capture.js 프로세스 · 닫힌 포트 → 차림 불가 · 브라우저 0 · 제품 포트 0', ok,
     `닫힘 확인 ${cp.refused} · 끝 코드 ${r.code}(기대 ${TC1_B_CODE}) · OUT 의 cells.json ${r.doc !== null} · 칸 ${f.cells.length}/${f.planned} · pending ${f.pending} · 사유 없음 ${f.noReason} · 로그인 실패 ${loginFail} + 문 없음 ${noDoor} · 사유 「${LIB.sanitize(why1, 80)}」 · ⚫ ${f.dev} · TCP ${f.connects.length}(닫힌 포트 밖 ${f.other} · 제품 포트 · DB ${f.product}) · playwright ${f.pw} · 자식 ${f.child}`);
+});
+
+// ════ 9차(11/19 · [4] 8차 좁은 재셈 리뷰서 끝 「PM 판단」 「수용 · 9차」 · 명세서 §1-9 · 시험 파일만) ════
+const STEP9 = '- name: "[시험] 차림 · 판독 입구';
+/** T-C1 대상 단계 머리 칸(들여쓰기 = 단계 + 2) · 그 잡 defaults · 워크플로 defaults. */
+function stepShape9(job, yml) {
+  const L9 = job.split('\n');
+  const i = L9.findIndex((l) => l.includes(STEP9));
+  if (i < 0) return null;
+  const ind = L9[i].indexOf('- ');
+  const keys = {};
+  for (let k = i + 1; k < L9.length; k++) {
+    const l = L9[k];
+    if (l.trim() === '' || /^\s*#/.test(l)) continue;
+    const d = l.length - l.trimStart().length;
+    if (d <= ind) break; // 다음 단계(같은 들여쓰기 「- 」) · 잡 끝
+    const m = d === ind + 2 ? /^\s*([\w-]+):\s*(.*)$/.exec(l) : null;
+    if (m) keys[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
+  }
+  const next = job.slice(1).search(/\n {2}[\w-]+:\s*(\n|$)/);
+  const jobOnly = next < 0 ? job : job.slice(0, next + 1);
+  return { keys, jobDefaults: /\n {4}defaults:/.test(jobOnly), wfDefaults: /(^|\n)defaults:/.test(yml) };
+}
+/** 시험(runCapture8 — cwd 레포 뿌리 · 새로 짠 환경 · 셸 없이 node)과 다른 칸 목록 · 빈 배열 = 같음. */
+function diffFromTest9(s) {
+  if (!s) return ['단계 못 찾음'];
+  const d = [];
+  const wd = s.keys['working-directory'];
+  if (wd !== undefined && !['.', './', '${{ github.workspace }}'].includes(wd)) d.push(`working-directory ${wd}`);
+  if (s.keys.shell !== undefined && s.keys.shell !== 'bash') d.push(`shell ${s.keys.shell}`);
+  if (s.keys.env !== undefined) d.push('단계 env 있음');
+  if (s.jobDefaults) d.push('잡 defaults 있음');
+  if (s.wfDefaults) d.push('워크플로 defaults 있음');
+  return d;
+}
+
+// T-C1c 9차 F8-2 — T-C1 은 run: 한 줄만 봤다(단계에 working-directory: scripts 를 끼운 변이 X2 생존) → 대상 단계의 working-directory · shell · env 와 잡 · 워크플로 defaults 가 없음/같음
+//   시험 안 대조(원본 무변 · 글자 사본에 한 줄 끼움): working-directory: scripts · env: · shell: pwsh = 다름 / working-directory: . · shell: bash = 같음
+const TC1C = 'T-C1c 9차 F8-2 T-C1 대상 단계 working-directory · shell · env · defaults = 없음/같음(시험 = cwd 레포 뿌리 · 새 환경 · 셸 없이 node)';
+guard(TC1C, () => {
+  const yml = fs.existsSync(YML7) ? fs.readFileSync(YML7, 'utf8').split('\r\n').join('\n') : '';
+  const job = printJob7();
+  const real = diffFromTest9(stepShape9(job, yml));
+  const ins = (line) => {
+    const L = job.split('\n');
+    const i = L.findIndex((l) => l.includes(STEP9));
+    if (i < 0) return job;
+    const pad = ' '.repeat(L[i].indexOf('- ') + 2);
+    L.splice(i + 1, 0, ...line.split('\n').map((x) => pad + x));
+    return L.join('\n');
+  };
+  const differ = [['working-directory: scripts', 'working-directory scripts'], ['env:\n  W51_X: "1"', '단계 env 있음'], ['shell: pwsh', 'shell pwsh']]
+    .map(([line, want]) => diffFromTest9(stepShape9(ins(line), yml)).includes(want));
+  const same = ['working-directory: .', 'shell: bash'].map((line) => diffFromTest9(stepShape9(ins(line), yml)).length === 0);
+  const ok = yml.length > 0 && real.length === 0 && differ.every(Boolean) && same.every(Boolean);
+  check(TC1C, ok,
+    `실제 단계 다름 [${real.join(',')}] · 대조 다름 가름(wd scripts ${differ[0]} · env ${differ[1]} · shell pwsh ${differ[2]}) · 대조 같음 가름(wd . ${same[0]} · shell bash ${same[1]})`);
+});
+
+/** 탐침(관찰 손을 실은 자식 안에서 돎) — 허용 밖 열린 포트로 net.connect · fetch · 허용 닫힌 포트로 net.connect → 결과 JSON 한 줄. */
+function probe9() {
+  const net = require('net');
+  const open = Number(process.env.W51_OPEN);
+  const closed = Number(process.env.W51_CLOSED);
+  const tryNet = (port) => new Promise((ok) => {
+    let s;
+    try { s = net.connect(port, '127.0.0.1'); } catch (e) { ok(`던짐 ${e.code || e.name}`); return; }
+    s.once('connect', () => { s.destroy(); ok('연결됨'); });
+    s.once('error', (e) => ok(`오류 ${e.code || e.name}`));
+  });
+  (async () => {
+    const out = {};
+    out.net = await tryNet(open);
+    try { await fetch(`http://127.0.0.1:${open}/`); out.fetch = '응답'; } catch (e) { out.fetch = `거절 ${(e.cause && (e.cause.code || e.cause.name)) || e.name}`; }
+    out.allow = await tryNet(closed);
+    process.stdout.write(JSON.stringify(out));
+  })();
+}
+/** observer8 을 실은 node 자식으로 probe9 실행 · 비동기(부모 쪽 열린 포트가 연결을 받을 수 있게) · 30초 상한 · 임시 폴더 지움. */
+function runObserved9(extra) {
+  const root = fs.mkdtempSync(path.join(OS.tmpdir(), 'w51-tc1d-'));
+  const rec = path.join(root, 'rec.log');
+  const obs = path.join(root, 'observer.js');
+  const probe = path.join(root, 'probe.js');
+  fs.writeFileSync(obs, `'use strict';\n(${observer8.toString()})();\n`);
+  fs.writeFileSync(probe, `'use strict';\n(${probe9.toString()})();\n`);
+  fs.writeFileSync(rec, '');
+  const env = {};
+  for (const k of ['PATH', 'SystemRoot', 'TEMP', 'TMP', 'TMPDIR']) if (process.env[k]) env[k] = process.env[k];
+  Object.assign(env, { NODE_OPTIONS: `--require "${obs.split(path.sep).join('/')}"`, W51_TC1_REC: rec }, extra);
+  return new Promise((ok) => {
+    let so = '';
+    let se = '';
+    const c = CP.spawn(process.execPath, [probe], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const t = setTimeout(() => c.kill(), 30000);
+    c.stdout.on('data', (d) => { so += d; });
+    c.stderr.on('data', (d) => { se += d; });
+    c.on('error', (e) => { clearTimeout(t); ok({ code: null, so, se: `${se}${e.name}: ${e.message}` }); });
+    c.on('close', (code) => { clearTimeout(t); ok({ code, so, se }); });
+  }).then((r) => {
+    try {
+      return { ...r, lines: fs.readFileSync(rec, 'utf8').split('\n').filter(Boolean) };
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+// T-C1d 9차 [3-V] P3-2 — 관찰 손 = 기록 뒤 막음 양성 대조: 허용 밖 주소(이 시험이 연 127.0.0.1 열린 포트 · 제품 포트 · DB 아님)로 net.connect · fetch
+//   → 둘 다 기록 + 막음 · 그 포트가 받은 연결 0 / 허용 주소(닫힌 포트) = 기록 · 안 막음(ECONNREFUSED) — 관찰 손을 8차 꼴(기록만)로 되돌리면 빨강
+const TC1D = 'T-C1d 9차 [3-V] P3-2 T-C1 관찰 손 = 기록 뒤 막음(허용 밖 연결 0 · 양성 대조)';
+guardAsync(TC1D, async () => {
+  const cp = await closedPort8();
+  let accepted = 0;
+  const srv = NET8.createServer((s) => { accepted += 1; s.destroy(); });
+  await new Promise((ok, no) => { srv.once('error', no); srv.listen(0, '127.0.0.1', ok); });
+  const open = srv.address().port;
+  let r;
+  try {
+    r = await runObserved9({ W51_TC1_ALLOW: `127.0.0.1:${cp.port}`, W51_OPEN: String(open), W51_CLOSED: String(cp.port) });
+    await sleep8(200); // 늦게 닿은 연결도 셈
+  } finally {
+    await new Promise((ok) => srv.close(ok));
+  }
+  let out = {};
+  try {
+    out = JSON.parse(r.so);
+  } catch (e) {
+    out = { parse: e.name };
+  }
+  const at = (p, kind) => r.lines.filter((l) => l === `${kind} 127.0.0.1:${p}`).length;
+  const ok = cp.refused && ![cp.port, open].some((p) => PRODUCT_PORTS8.includes(p)) && r.code === 0
+    && accepted === 0 && out.net === '던짐 W51_TC1_BLOCKED' && out.fetch === '거절 W51_TC1_BLOCKED' && out.allow === '오류 ECONNREFUSED'
+    && at(open, 'connect') >= 2 && at(open, 'blocked') >= 2 && at(cp.port, 'connect') === 1 && at(cp.port, 'blocked') === 0;
+  check(TC1D, ok,
+    `열린 포트 받은 연결 ${accepted} · net 「${out.net}」 · fetch 「${out.fetch}」 · 허용(닫힌 포트) 「${out.allow}」 · 기록 열린 포트 connect ${at(open, 'connect')} / blocked ${at(open, 'blocked')} · 닫힌 포트 connect ${at(cp.port, 'connect')} / blocked ${at(cp.port, 'blocked')} · 자식 끝 코드 ${r.code}${r.code !== 0 ? ` · ${LIB.sanitize(r.se, 120)}` : ''}`);
 });
 
 // T-Z35b 8차 Z8-2 ⓐ — qtyColumn 동치: T-Z35 가 읽는 그 .razor MudTh 원문의 「수량」 5종 × (원문 · 공백 둘러쌈 · 앞에 부분 일치 미끼 머리) = 옛 규칙(정확 일치 「수량」) 위치
@@ -1753,6 +1901,37 @@ guardAsync('T-Z36d 8차 Z8-4 listDiag 읽기 3칸 · 가짜 창 H1~H4 가름 · 
     && /창 밖 날짜 못 읽음\(DiagTimeout\)/.test(hangMsg) && hangMs <= 5000 && hw.st.shots === 0;
   check('T-Z36d 8차 Z8-4 listDiag 읽기 3칸 · 가짜 창 H1~H4 가름 · 성공 길 진단 0 · 시간 상한', ok,
     `가름 ${cls.join('/')} · H1 진단 ${res.H1.st.diag} · 시간 ${['H2', 'H3', 'H4'].map((k) => `${k} ${res[k].ms}ms`).join(' ')} · 안 끝나는 칸 ${hangMs}ms 「${(/창 밖 날짜 [^·]*/.exec(hangMsg) || [''])[0].trim()}」 · H4 「${(/첫 3줄 [^·]*/.exec(m('H4')) || [''])[0].trim().slice(0, 60)}」`);
+});
+
+// T-Z36e 9차 F8-3 — 창 밖 날짜 = .mud-dialog 밖 입력만(창 밖 거르기를 걷은 변이 X5 생존): 가짜 창 H2 · H3 은 창 안 날짜가 섞여도 같은 가름이 났다
+//   → 창 안 **범위 밖** 날짜(2026-10-31) · 창 밖 **범위 안** 날짜(2026-11-19) · 입력 차례 = 실물 문서 차례(창 먼저 — App.razor <MudDialogProvider /> 가 Router 앞)
+//   → 가름 H3 · 창 밖 날짜 칸 = 2026-11-19 하나 · 거르기를 걷으면 창 안 값이 섞여 H2 로 잘못 가름 = 빨강 · fakeList8 원본 무변(이 경우 안에서 page.locator 만 갈아 끼움)
+const TZ36E = 'T-Z36e 9차 F8-3 창 밖 날짜 = 창 밖 입력만(창 안 범위 밖 · 창 밖 범위 안 · 창 먼저 차례) → H3';
+guardAsync(TZ36E, async () => {
+  const CAPR = require('./capture');
+  const t = F.TYPES.find((x) => x.key === 'delivery');
+  const pick = CAPR.entryPick('delivery', 'doc');
+  const none = '조회된 거래명세서가 없습니다.';
+  const dlgIn = ['2026-11-01', '2026-11-19', '2026-10-31'];
+  const pageIn = ['2026-11-19'];
+  const w = fakeList8({ rows: [{ head: true, text: '일자\t전표번호\t업체\t작성자\t상태\t금액' }, { text: none }], dlgInputs: dlgIn, pageInputs: pageIn, dlgText: `판매 목록 조회\n${none}` });
+  w.page.locator = () => ({
+    evaluateAll: async (fn) => {
+      w.st.diag += 1;
+      return fn([...dlgIn.map((value) => ({ value, closest: () => ({}) })), ...pageIn.map((value) => ({ value, closest: () => null }))]);
+    },
+  });
+  let r;
+  try {
+    await CAPR.waitListRows(w.page, w.dlg, t, pick, 300);
+    r = { rows: true };
+  } catch (e) {
+    r = { msg: String(e.message), setup: e instanceof S.SetupError };
+  }
+  const cls = classify8(r);
+  const outField = ((/창 밖 날짜 ([^·]*)/.exec(r.msg || '') || [])[1] || '').trim();
+  const ok = r.setup === true && cls === 'H3' && outField === '2026-11-19' && (r.msg || '').includes('기간 값 2026-11-01 ~ 2026-11-19') && w.st.shots === 0;
+  check(TZ36E, ok, `가름 ${cls} · 창 밖 날짜 「${outField}」 · 「${((/기간 값 [^·]*/.exec(r.msg || '') || [''])[0]).trim()}」 · 사진 ${w.st.shots}`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
