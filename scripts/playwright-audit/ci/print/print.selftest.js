@@ -938,6 +938,7 @@ function wireWorld(opts = {}) {
     editorFacts: uiStep('editorFacts', () => ({ coordTableVisible: false, pdfAccept: false })),
     closeDialogs: uiStep('closeDialogs'),
   };
+  if (opts.uiOverride) opts.uiOverride(ui, st); // 🔴 7차 C7(T-Z37) — 심은 실패 손
   const files = new Map();
   const memFs = { mkdirSync: () => undefined, writeFileSync: (f, data) => { files.set(path.normalize(f), data); } };
   const context = { route: async () => undefined, newPage: async () => ({}), on: () => undefined };
@@ -1187,6 +1188,221 @@ guardAsync('T-Z34 6차 E3 동의 뒤 확인 기록 글 = 요구 판 대조 아�
     && !/hasAgreed 참 · 판/.test(rec.confirm) && rec.ok === true && rec.confirmed.hasAgreed === true && rec.confirmed.termsVersion === 'v2.0.0'
     && recNoVer.confirm === '동의 뒤 GET /api/auth/terms/status 200 · 동의 행 기록 확인 · 기록된 판 칸 없음(요구 판 대조 아님)' && recNoVer.ok === true;
   check('T-Z34 6차 E3 동의 뒤 확인 기록 글 = 요구 판 대조 아님', ok, `글 「${String(rec.confirm).slice(0, 80)}」 · 판 없음 글 ${recNoVer.confirm.endsWith('칸 없음(요구 판 대조 아님)')} · 통과 그대로 ${rec.ok === true && recNoVer.ok === true}`);
+});
+
+// ════ 7차(11/19 · CTO 재판정 §5 · R-2 · R-3 · R-4 · C4 · C5 · C7) ════
+const CP = require('child_process');
+const OS = require('os');
+const REPO7 = path.join(__dirname, '..', '..', '..', '..');
+const YML7 = path.join(REPO7, '.github', 'workflows', 'ui-browser.yml');
+function printJob7() {
+  const yml = fs.existsSync(YML7) ? fs.readFileSync(YML7, 'utf8').split('\r\n').join('\n') : '';
+  const a = yml.indexOf('\n  ui-print:');
+  return a < 0 ? '' : yml.slice(a);
+}
+/** 단계 이름으로 run: | 덩이를 꺼냄(들여쓰기 걷음). */
+function stepRun7(job, name) {
+  const L7 = job.split('\n');
+  const i = L7.findIndex((l) => l.includes(`- name: "${name}`));
+  if (i < 0) return null;
+  const j = L7.findIndex((l, k) => k > i && /^\s+run: \|\s*$/.test(l));
+  if (j < 0) return null;
+  const out = [];
+  let ind = null;
+  for (let k = j + 1; k < L7.length; k++) {
+    const l = L7[k];
+    if (l.trim() === '') { out.push(''); continue; }
+    const n = l.length - l.trimStart().length;
+    if (ind === null) ind = n;
+    if (n < ind) break;
+    out.push(l.slice(ind));
+  }
+  return out.join('\n');
+}
+function bash7() {
+  if (process.env.PRINT_BASH) return process.env.PRINT_BASH;
+  if (process.platform === 'win32') {
+    const g = 'C:\\Program Files\\Git\\bin\\bash.exe';
+    if (fs.existsSync(g)) return g; // WSL bash.exe(System32) 를 피함
+  }
+  return 'bash';
+}
+/** 실제 단계 덩이를 GitHub 기본 셸 꼴(bash -e)로 돌림 · dotnet = 가짜(이름이 bad 로 시작하면 끝 코드 3). */
+function runReadStep7(block, names) {
+  const root = fs.mkdtempSync(path.join(OS.tmpdir(), 'w51-s7-'));
+  const out = path.join(root, 'out');
+  fs.mkdirSync(path.join(out, 'pdfs'), { recursive: true });
+  for (const n of names) fs.writeFileSync(path.join(out, 'pdfs', n), '%PDF-1.7 selftest');
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  const fake = '#!/usr/bin/env bash\n# 가짜 dotnet — <dll> read <pdf> <out>\necho "$3" >> "$FAKE_LOG"\ncase "$(basename "$3")" in bad*) echo "가짜 판독기 예외" >&2; exit 3;; esac\nprintf \'{\\n  "ok": true\\n}\\n\' > "$4"\n';
+  fs.writeFileSync(path.join(bin, 'dotnet'), fake, { mode: 0o755 });
+  const script = path.join(root, 'step.sh');
+  fs.writeFileSync(script, block + '\n');
+  const log = path.join(root, 'calls.log');
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, RUNNER_TEMP: root, PRINT_OUT: out, FAKE_LOG: log };
+  const r = CP.spawnSync(bash7(), ['--noprofile', '--norc', '-e', script], { env, encoding: 'utf8', timeout: 60000 });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0;
+  const moved = fs.existsSync(path.join(root, 'print-unread')) ? fs.readdirSync(path.join(root, 'print-unread')) : [];
+  const res = { code: r.status, out: `${r.stdout || ''}`, err: `${r.stderr || ''}${r.error ? r.error.message : ''}`, calls, moved };
+  fs.rmSync(root, { recursive: true, force: true });
+  return res;
+}
+
+// T-W2 C4 글자 셈 — ui-print 잡(주석 줄 뺌)에 `|| echo` · `|| true` · `|| :` · continue-on-error 0 · PrintProbe.dll 부르는 줄에 `||` 0
+//   · 사실 뽑기 단계 = 실패 수 셈 + 1 이상이면 exit 1 꼴
+{
+  const job = printJob7();
+  const live = job.split('\n').filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+  const swallow = live.filter((l) => /\|\|\s*(echo|true|:)(\s|$|;|\))/.test(l) || /continue-on-error/.test(l));
+  const probeLines = live.filter((l) => /PrintProbe\.dll/.test(l));
+  const probeOr = probeLines.filter((l) => /\|\|/.test(l));
+  const read = stepRun7(job, '[시험] PDF 사실 뽑기') || '';
+  const readShape = /if ! dotnet "\$RUNNER_TEMP\/probe\/PrintProbe\.dll" read "\$f" "\$\{f%\.pdf\}\.json"; then bad=\$\(\(bad \+ 1\)\); echo "⚫ FAIL \[장치\] 판독기 실패/.test(read)
+    && /if \[ "\$bad" -gt 0 \]; then .*⚫ FAIL \[장치\] 사실 뽑기 실패 \$\{bad\}\/\$\{n\}"; exit 1; fi/.test(read);
+  check('T-W2 7차 C4 ui-print 잡 조용한 실패 글자 0 · 판독기 줄 || 0 · 사실 뽑기 = 실패 수 → exit 1 꼴',
+    job.length > 0 && swallow.length === 0 && probeLines.length >= 3 && probeOr.length === 0 && readShape,
+    `잡 ${job.length > 0} · 삼킴 꼴 ${swallow.length}${swallow.length ? `(${swallow.map((l) => l.trim().slice(0, 50)).join(' / ')})` : ''} · 판독기 줄 ${probeLines.length}(|| ${probeOr.length}) · 사실 뽑기 꼴 ${readShape}`);
+}
+
+// T-W3 C4 동작 — 실제 「[시험] PDF 사실 뽑기」 덩이를 bash -e 로: 판독기 실패 1 심으면 단계 실패 · 3장 다 시도 · ⚫ 줄 · 그 PDF 만 업로드 제외 / 대조(실패 0) = 성공
+//   + 고치기 전 꼴(6차 줄 · echo 대체)을 같은 셸로 돌려 「삼킴」 재현(단계 성공) — 시험이 그 꼴을 가르는지 보임
+{
+  const block = stepRun7(printJob7(), '[시험] PDF 사실 뽑기');
+  if (!block) {
+    check('T-W3 7차 C4 판독기 실패 심음 → 단계 실패(동작)', false, '단계 덩이 못 찾음');
+  } else {
+    const bad = runReadStep7(block, ['a.pdf', 'bad-1.pdf', 'c.pdf']);
+    const good = runReadStep7(block, ['a.pdf', 'c.pdf']);
+    const old = ['set -uo pipefail', 'shopt -s nullglob', 'mkdir -p "$RUNNER_TEMP/print-unread"', 'for f in "$PRINT_OUT"/pdfs/*.pdf; do',
+      '  dotnet "$RUNNER_TEMP/probe/PrintProbe.dll" read "$f" "${f%.pdf}.json" || echo "판독기 실패 $(basename "$f")"',
+      '  if ! grep -q \'^  "ok": true\' "${f%.pdf}.json" 2>/dev/null; then mv "$f" "$RUNNER_TEMP/print-unread/"; echo "못 읽은 PDF 업로드 제외 $(basename "$f")"; fi', 'done'].join('\n');
+    const oldBad = runReadStep7(old, ['a.pdf', 'bad-1.pdf', 'c.pdf']);
+    const ok = bad.code !== 0 && bad.code !== null && bad.calls === 3 && /⚫ FAIL \[장치\] 판독기 실패 bad-1\.pdf/.test(bad.out) && /⚫ FAIL \[장치\] 사실 뽑기 실패 1\/3/.test(bad.out)
+      && bad.moved.length === 1 && bad.moved[0] === 'bad-1.pdf'
+      && good.code === 0 && good.calls === 2 && !/⚫/.test(good.out) && /사실 뽑기 끝 — PDF 2 · 판독기 실패 0/.test(good.out)
+      && oldBad.code === 0;
+    check('T-W3 7차 C4 판독기 실패 심음 → 단계 실패(동작)', ok,
+      `심음: 끝 코드 ${bad.code} · 시도 ${bad.calls}/3 · ⚫ 판독기 줄 ${/⚫ FAIL \[장치\] 판독기 실패 bad-1/.test(bad.out)} · ⚫ 수 줄 ${/사실 뽑기 실패 1\/3/.test(bad.out)} · 업로드 제외 [${bad.moved.join(',')}] / 대조: 끝 코드 ${good.code} · 시도 ${good.calls} · ⚫ ${/⚫/.test(good.out)} / 고치기 전 꼴: 끝 코드 ${oldBad.code}(0 = 삼킴 재현)${bad.err && bad.code === null ? ` · ${bad.err.slice(0, 80)}` : ''}`);
+  }
+}
+
+// T-Z35 7차 R-3 · C5 — 장치가 찾는 수량 머리 ↔ 제품 .razor MudTh 원문 정적 대조(경로 = 화면 주소 → @page 쪽 → 그 쪽의 …Grid 부품 → MudTh)
+//   fillLines 를 지나는 종 = F.TYPES 중 판매 반품(=[반품하기] 길) 뺀 전부. 옛 맞춤(「수량」 정확 일치)은 매입 반품에서 -1 = 빨강이어야 함
+guard('T-Z35 7차 R-3 · C5 수량 머리 ↔ .razor MudTh 정적 대조 · 옛 맞춤 매입 반품 빨강', () => {
+  const CAPR = require('./capture');
+  const web = path.join(REPO7, 'src', 'HitPan.Web');
+  const files = [];
+  const walk = (d) => {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) { if (e.name !== 'obj' && e.name !== 'bin') walk(path.join(d, e.name)); } else if (e.name.endsWith('.razor')) files.push(path.join(d, e.name));
+    }
+  };
+  walk(web);
+  const text = new Map(files.map((f) => [f, fs.readFileSync(f, 'utf8')]));
+  const pageOf = (route) => files.find((f) => text.get(f).includes(`@page "${route}"`));
+  const comp = (name) => files.find((f) => path.basename(f) === `${name}.razor`);
+  const heads = (src) => [...src.matchAll(/<MudTh[^>]*>([^<]*)<\/MudTh>/g)].map((m) => m[1].trim()).concat([...src.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1].trim()));
+  const rows = F.TYPES.filter((t) => t.key !== 'sales_return').map((t) => {
+    const pg = pageOf(t.route);
+    const grids = pg ? [...new Set([...text.get(pg).matchAll(/<([A-Z]\w*Grid)\b/g)].map((m) => m[1]).filter((n) => n !== 'MudGrid'))] : [];
+    const hs = grids.flatMap((g) => (comp(g) ? heads(text.get(comp(g))) : []));
+    return { key: t.key, grids, hs, now: CAPR.qtyColumn(hs), old: hs.findIndex((h) => h.trim() === '수량') };
+  });
+  const allNow = rows.length >= 6 && rows.every((r) => r.grids.length > 0 && r.now >= 0);
+  const pr = rows.find((r) => r.key === 'purchase_return') || {};
+  const oldRed = pr.old === -1 && pr.now >= 0 && pr.hs && pr.hs[pr.now] === '반품수량';
+  const mutate = CAPR.qtyColumn(['No', '품명', '반품 수량']) === -1 && CAPR.qtyColumn(['No', '수량합계']) === -1; // 띄어쓰기 · 부분 일치는 안 잡음(정확 일치)
+  check('T-Z35 7차 R-3 · C5 수량 머리 ↔ .razor MudTh 정적 대조 · 옛 맞춤 매입 반품 빨강',
+    files.length > 0 && allNow && oldRed && mutate,
+    `.razor ${files.length} · ${rows.map((r) => `${r.key}=${r.grids.join('+') || '부품 없음'}:${r.now >= 0 ? r.hs[r.now] : '없음'}`).join(' · ')} · 옛 맞춤 매입 반품 ${pr.old}(빨강 ${oldRed}) · 띄어쓰기·부분 일치 거름 ${mutate}`);
+});
+
+// T-Z36 7차 R-4 — 목록 줄 기다림 · 못 찾으면 글자 진단(줄 수 · 기간 값 · 시간대 · 창 글 소독) · 사진 0 · 기다림 상한 = LIST_WAIT
+guardAsync('T-Z36 7차 R-4 목록 줄 기다림 · 글자 진단 · 사진 0', async () => {
+  const CAPR = require('./capture');
+  const t = F.TYPES.find((x) => x.key === 'delivery');
+  const mk = (appear) => {
+    const st = { shots: 0, timeout: null, waited: 0 };
+    let seen = false;
+    const marked = {
+      first: () => ({ waitFor: async ({ timeout }) => { st.timeout = timeout; st.waited += 1; if (!appear) { const e = new Error('Timeout 10000ms exceeded'); e.name = 'TimeoutError'; throw e; } seen = true; } }),
+      count: async () => (appear && seen ? 1 : 0),
+    };
+    const trs = { filter: () => marked, count: async () => 3 };
+    const dlg = {
+      locator: (sel) => (sel === 'tr' ? trs : { evaluateAll: async (fn) => fn([{ value: '2026-11-01' }, { value: '2026-11-19' }, { value: '' }]) }),
+      innerText: async () => '판매 목록 조회\n기간\t2026-11-01 ~ 2026-11-19\n조회 결과가 없습니다',
+      screenshot: async () => { st.shots += 1; },
+    };
+    const page = { evaluate: async () => 'UTC · 분 차 0', screenshot: async () => { st.shots += 1; } };
+    return { st, dlg, page };
+  };
+  const a = mk(true);
+  const rowsA = await CAPR.waitListRows(a.page, a.dlg, t, (r) => r);
+  const okA = (await rowsA.count()) === 1 && a.st.waited === 1 && a.st.timeout === CAPR.LIST_WAIT;
+  const b = mk(false);
+  let msg = '';
+  let isSetup = false;
+  try {
+    await CAPR.waitListRows(b.page, b.dlg, t, (r) => r);
+  } catch (e) {
+    msg = String(e.message);
+    isSetup = e instanceof S.SetupError;
+  }
+  const okB = isSetup && msg.includes('판매 목록 조회 에 표지 거래처 줄 없음') && msg.includes('줄 수 3(표지 줄 0)') && msg.includes('기간 값 2026-11-01 ~ 2026-11-19')
+    && msg.includes('브라우저 시간대 UTC · 분 차 0') && msg.includes('창 글 「판매 목록 조회 기간 2026-11-01 ~ 2026-11-19 조회 결과가 없습니다」') && !/[\u0000-\u001f]/.test(msg);
+  check('T-Z36 7차 R-4 목록 줄 기다림 · 글자 진단 · 사진 0', okA && okB && a.st.shots === 0 && b.st.shots === 0 && CAPR.LIST_WAIT <= 10000,
+    `나타남: 셈 1 · 기다림 ${a.st.waited} · 상한 ${a.st.timeout} / 안 나타남: 차림 불가 ${isSetup} · 진단 「${msg.slice(0, 160)}」 · 사진 ${a.st.shots + b.st.shots}`);
+});
+
+// T-Z37 7차 C7 폭발 반경 — 매입 반품 전표 차림 실패(R-3 꼴) + 거래명세서 목록 실패(R-4 꼴 · 거래명세서 · 판매 반품 ⓘⓙ)를 심어 capture main(가짜 손)을 돌리고
+//   그 결과 cells.json 을 실제 판정기 진입점(node judge-print.js <dir>)으로 판정 → 그 칸만 차림 불가 · 양성 대조 두 칸 captured · 양성 대조 통과
+guardAsync('T-Z37 7차 C7 폭발 반경 — R-3 · R-4 실패 = 그 칸만 차림 불가 · 양성 대조 무사', async () => {
+  const r = await runWire({
+    uiOverride: (ui) => {
+      const md = ui.makeDoc;
+      ui.makeDoc = async (page, t) => { if (t && t.key === 'purchase_return') throw new S.SetupError('품목표에 수량 머리(수량 · 반품수량) 없음 — 심은 R-3 꼴'); return md(page, t); };
+      const cd = ui.captureDoc;
+      ui.captureDoc = async (page, t, entry) => {
+        if (t && (t.key === 'delivery' || t.key === 'sales_return')) throw new S.SetupError('판매 목록 조회 에 표지 거래처 줄 없음 — 줄 수 3(표지 줄 0) · 심은 R-4 꼴');
+        return cd(page, t, entry);
+      };
+    },
+  });
+  const pc = F.POSITIVE_CONTROL;
+  const cells = r.cells || [];
+  const pcCells = cells.filter((c) => c.id === pc.basicForm.cell || c.id === pc.preprint.cell);
+  const failed = cells.filter((c) => c.status === 'setup-fail');
+  const wrongFail = failed.filter((c) => !['purchase_return', 'delivery', 'sales_return'].includes(c.type));
+  const r3 = failed.filter((c) => c.type === 'purchase_return');
+  const r4 = failed.filter((c) => c.type === 'delivery' || c.type === 'sales_return');
+  // 실제 판정기 진입점으로(디스크 임시 폴더 · 양성 대조 두 칸만 사실 파일)
+  const dir = fs.mkdtempSync(path.join(OS.tmpdir(), 'w51-c7-'));
+  let judge = { code: null, end: '' };
+  let res = null;
+  try {
+    fs.mkdirSync(path.join(dir, 'pdfs'), { recursive: true });
+    for (const c of pcCells) {
+      if (!c.pdf) continue;
+      const fp = path.join(dir, c.pdf.replace(/\.pdf$/i, '.json'));
+      fs.mkdirSync(path.dirname(fp), { recursive: true });
+      fs.writeFileSync(fp, JSON.stringify(pcFacts[c.id]));
+    }
+    fs.writeFileSync(path.join(dir, 'cells.json'), JSON.stringify({ ...r.doc, probeSelftestOk: true }));
+    const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', timeout: 60000 });
+    judge = { code: j.status, end: String(j.stdout || '').split(/\r?\n/).filter((l) => l.startsWith('판정 끝')).pop() || '' };
+    res = JSON.parse(fs.readFileSync(path.join(dir, 'print-result.json'), 'utf8'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  const rowOf = (id) => ((res && res.rows) || []).find((x) => x.id === id) || {};
+  const setupRows = ((res && res.rows) || []).filter((x) => x.cat === C.SETUP).length;
+  const ok = r.code === 0 && pcCells.length === 2 && pcCells.every((c) => c.status === 'captured') && wrongFail.length === 0 && r3.length > 0 && r4.length > 0
+    && judge.code === 0 && /양성 대조 통과/.test(judge.end) && rowOf(pc.basicForm.cell).cat !== C.SETUP && rowOf(pc.preprint.cell).cat !== C.SETUP && setupRows === failed.length;
+  check('T-Z37 7차 C7 폭발 반경 — R-3 · R-4 실패 = 그 칸만 차림 불가 · 양성 대조 무사', ok,
+    `capture 끝 코드 ${r.code} · 차림 불가 ${failed.length}(매입 반품 ${r3.length} · 거래명세서·판매 반품 ${r4.length} · 그 밖 ${wrongFail.length}) · 양성 칸 ${pcCells.map((c) => c.status).join('/')} · 판정 끝 코드 ${judge.code} · ${judge.end.slice(0, 60)} · 판정 차림 불가 ${setupRows}`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
