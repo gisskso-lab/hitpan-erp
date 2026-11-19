@@ -122,6 +122,14 @@ function main(dll, work) {
   const bw = ((g.facts.basic && g.facts.basic.pages && g.facts.basic.pages[0] && g.facts.basic.pages[0].words) || []).map((w) => w.t);
   const fonts = (g.facts.basic && g.facts.basic.pages && g.facts.basic.pages[0] && g.facts.basic.pages[0].fonts) || [];
   const preP = (g.facts.pre && g.facts.pre.pages && g.facts.pre.pages[0]) || {};
+  // 🔴 11차 D2′(고침 1 §8-3 2 · 고침 2 §5) — T8 글꼴 칸 기록(판정 = judge-print.js fontGate · 이 사슬 셈은 무변) · 보통 = 두 표본 글꼴 칸 그대로(접두 포함)
+  //   · 굵게 = 이 그리기에 굵게 견본 없음(PrintProbe 0줄 결재) → null · 한글 = 「품명」 · 「공급가액」 읽힘 · 자리 = $PRINT_OUT(워크플로) 또는 작업 폴더
+  const t8 = { schema: 't8-font/1', regular: [...new Set([...fonts, ...(preP.fonts || [])])], bold: null, hangul: bw.includes('품명') && bw.includes('공급가액') };
+  try {
+    fs.writeFileSync(path.join(process.env.PRINT_OUT || work, 't8-font.json'), JSON.stringify(t8));
+  } catch (e) {
+    console.log(`  ⚫ T8 글꼴 칸 기록 못 씀(${e.code || e.name}) — 판정기 「T8 기록 없음」 = 판정 0`);
+  }
   const imgs = preP.images || [];
   const J = require('./judge-print');
   const hit = imgs.map((im) => J.imageFrom(im, F.POSITIVE_CONTROL.preprint.ref)).find((h) => h.hit);

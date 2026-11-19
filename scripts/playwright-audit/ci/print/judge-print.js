@@ -566,9 +566,66 @@ function expectsFromPlan(plan, run, job) {
   return j.expect.map((key) => (codes[key] ? { key, target: codes[key].target, code: codes[key].code } : { key, target: '?', code: null }));
 }
 
+// 🔴 11차 D2′(고침 1 §8-3 · §3-3′ · §1-11-0 2×2 / 고침 2 §2 · §3 · §5 / PM L5) — 글꼴 관문. 판정 관문 = T8 하나(사슬 시험이 남긴 T8 글꼴 칸) ·
+//   단계 사실(font-facts.json) = 기록 + 다시 셈(보존 8 ID 뺀 모든 기록) · 단계 사실 실패인데 T8 초록 = ⓓ · G0(fc-match) 0. 실패 = 판정 0(양성 대조 실패와 같은 길 · 전 칸 미측정)
+const FONT_NEUTRAL = { regular: 'PrintSubstitute-Regular', bold: 'PrintSubstitute-Bold' };
+const FONT_KEEP_IDS = [0, 7, 8, 9, 11, 12, 13, 14];
+const FONT_BAN = /nanum|naver|나눔|네이버/i;
+const stripSubset = (s) => String(s || '').replace(/^[A-Z]{6}\+/, '');
+/** 단계 사실 파일(font-facts/1) → 사유 목록(빈 = 이상 없음). 단계 도구 사유 + 판정기 다시 셈(6 ID 만 세는 구현을 막음). */
+function fontFactsWhy(facts) {
+  if (!facts || !Array.isArray(facts.files)) return ['사실 파일 없음'];
+  const why = Array.isArray(facts.why) ? facts.why.map(String) : [];
+  for (const role of ['regular', 'bold']) {
+    const f = facts.files.find((x) => x && x.role === role);
+    if (!f) { why.push(`글꼴 단계 — 파일 사실 불일치(${role} 기록 없음)`); continue; }
+    const names = Array.isArray(f.names) ? f.names : [];
+    const recount = names.filter((r) => !FONT_KEEP_IDS.includes(r.id) && (FONT_BAN.test(r.v) || ([4, 6].includes(r.id) && /malgun/i.test(r.v)))).length;
+    const ban = Math.max(Number(f.banned) || 0, recount);
+    const fam = names.filter((r) => r.id === 1 || r.id === 16).map((r) => r.v);
+    if (!fam.length || fam.some((v) => v !== 'Malgun Gothic')) why.push(`글꼴 단계 — 파일 사실 불일치(${role} family ≠ Malgun Gothic)`);
+    if (ban > 0) why.push(`글꼴 단계 — 파일 사실 불일치(${role} 금지 낱말 ${ban})`);
+    if (f.preserveSame !== true) why.push(`글꼴 단계 — 파일 사실 불일치(${role} 보존 기록 다름)`);
+    if (names.some((r) => r.id === 21 || r.id === 22) || Number(f.id21_22) > 0) why.push(`이름 고친 뒤 ID 21 또는 22 있음(${role})`);
+  }
+  return [...new Set(why)];
+}
+/** 글꼴 관문(순수) — g = { t8 · facts · stepWhy · outcome · probeOk · basicHangul } → { ok · cell(2×2) · why · t8Why · step · boldNote }. */
+function fontGate(g) {
+  const o = g || {};
+  const step = fontFactsWhy(o.facts);
+  const env = String(o.stepWhy || '').trim();
+  if (env) step.unshift(env);
+  else if (o.outcome !== 'success') step.unshift(`글꼴 단계 중단(시간 초과 등 · outcome ${o.outcome || '없음'})`); // L5 — continue-on-error 가 삼킨 실패를 이름으로
+  const t8 = o.t8 && typeof o.t8 === 'object' ? o.t8 : null;
+  let t8Why = '';
+  if (t8) {
+    const reg = (Array.isArray(t8.regular) ? t8.regular : []).map(stripSubset);
+    const bold = Array.isArray(t8.bold) ? t8.bold.map(stripSubset) : null;
+    if (o.probeOk !== true) t8Why = 'T8 빨강(판독기 자체시험 실패 또는 기록 없음)';
+    else if (!reg.length || reg.some((x) => x !== FONT_NEUTRAL.regular)) t8Why = `T8 글꼴 칸 ≠ 중립 이름(보통 [${reg.join(', ')}])`;
+    else if (bold && (!bold.length || bold.some((x) => x !== FONT_NEUTRAL.bold))) t8Why = `T8 글꼴 칸 ≠ 중립 이름(굵게 [${bold.join(', ')}])`;
+    else if (t8.hangul !== true) t8Why = 'T8 한글 낱말 글리프 없음';
+  }
+  const kor = o.basicHangul === true;
+  let cell;
+  if (!t8) cell = 'ⓓ T8 기록 없음';
+  else if (t8Why) cell = kor ? '⑵ T8 하네스 결함' : '⑴ 이름 바꾼 글꼴이 렌더에 안 잡힘';
+  else if (step.length) cell = step.includes('사실 파일 없음') ? 'ⓓ 사실 파일 없음' : 'ⓓ 글꼴 단계 사실 실패인데 T8 초록';
+  else if (!kor) cell = '⑶ 단계 차례 · 제품만의 글꼴 길';
+  else cell = '⑷ 글꼴 섬';
+  const ok = cell === '⑷ 글꼴 섬';
+  const detail = [t8Why, ...step].filter(Boolean).join(' · ').slice(0, 400);
+  const boldNote = t8 && !Array.isArray(t8.bold) ? '굵게 견본 없음 — T8 굵게 대조 미측정(사슬 그리기에 굵게 0)' : '';
+  return { ok, cell, why: ok ? `글꼴 관문 통과 — 2×2 ${cell}` : `글꼴 관문 실패 — 2×2 ${cell}${detail ? `(${detail})` : ''}`, t8Why, step, boldNote };
+}
+
 function judgeRun(input) {
   const { cells, board, factsById, positive, probeSelftestOk, groups } = input;
-  const pc = positiveControl(positive, factsById, probeSelftestOk);
+  // ⬛ [낡은 줄 · 1~10차] const pc = positiveControl(positive, factsById, probeSelftestOk);
+  const pc0 = positiveControl(positive, factsById, probeSelftestOk);
+  const fg = input.fontGate || null; // 🔴 11차 D2′ — 글꼴 관문 실패 = 판정 0(전 칸 미측정 · 사유 앞머리 = 2×2 칸 이름)
+  const pc = fg && fg.ok !== true ? { ok: false, why: `${fg.why} · ${pc0.why}` } : pc0;
   const ctx = { board, factsById, pcOk: pc.ok };
   // ⬛ [낡은 줄 · 1~9차] const rows = cells.map((c) => ({ id: c.id, group: c.group, k: c.k, type: c.type, path: c.path, mainExpect: c.mainExpect, ...judgeCell(c, ctx) }));
   const rows = cells.map((c) => ({ id: c.id, group: c.group, k: c.k, type: c.type, path: c.path, mainExpect: c.mainExpect, ...fontTag(c, judgeCell(c, ctx)) })); // 🔴 10차 D7
@@ -587,7 +644,8 @@ function judgeRun(input) {
   const pendingLeft = rows.filter((r) => r.pending === true).length;
   const pass = pc.ok === true && board !== 'main' && rows.every((r) => [CAT.GREEN, CAT.NO_DOOR, CAT.NA, CAT.EXCLUDED, CAT.CHANGED].includes(r.cat))
     && counts[CAT.GREEN] > 0 && pendingLeft === 0;
-  return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass, pendingLeft };
+  // ⬛ [낡은 줄 · 6~10차] return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass, pendingLeft };
+  return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass, pendingLeft, fontGate: fg }; // 🔴 11차 D2′
 }
 
 function endLine(res) {
@@ -605,6 +663,7 @@ function toMarkdown(meta, res, nine) {
   L.push(`# 인쇄 측정 결과 — 런 ${meta.run || '?'} · 잡 ${meta.job || '?'} · 판 ${meta.board || '?'}`);
   L.push('');
   L.push(`- 판독기 양성 대조(먼저 · F4 ⑴ · HQA ②): **${res.positive.ok ? '통과' : '실패'}** — ${res.positive.why}`);
+  if (res.fontGate) L.push(`- 글꼴 관문(T8 · 판정 관문): **${res.fontGate.ok ? '통과' : '실패 — 판정 0'}** — ${res.fontGate.why}${res.fontGate.boldNote ? ` · ${res.fontGate.boldNote}` : ''}`); // 🔴 11차 D2′
   L.push('- 대표 DB 조건 재현 = 미측정(고정 줄 · 작업지시서 §4-2 HQA ④)');
   if (res.stops.length) L.push(`- 🔴 멈춤: ${res.stops.join(' / ')}`);
   L.push('');
@@ -661,9 +720,29 @@ function main(outDir) {
     const fp = path.join(outDir, c.pdf.replace(/\.pdf$/i, '.json'));
     if (fs.existsSync(fp)) factsById[c.id] = JSON.parse(fs.readFileSync(fp, 'utf8'));
   }
+  // 🔴 11차 D2′(PM L5) — 판정 단계 env 에 글꼴 단계 outcome 칸이 있으면(워크플로) 글꼴 관문을 켬 · 칸이 비어도 켬(outcome 없음 = 사유) ·
+  //   사슬 시험 안 판정기 · 이 PC 시험은 그 칸 없음 = 끔(T-FG2)
+  let fontGate0 = null;
+  if (Object.prototype.hasOwnProperty.call(process.env, 'PRINT_FONT_OUTCOME')) {
+    const rd = (n) => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(outDir, n), 'utf8'));
+      } catch (e) {
+        console.log(`⚫ [장치] ${n} 못 읽음(${e.code || e.name}) — 글꼴 관문 기록 없음으로 셈`);
+        return null;
+      }
+    };
+    const bf = doc.positive && doc.positive.basicForm ? factsById[doc.positive.basicForm.cell] : null;
+    fontGate0 = fontGate({
+      t8: rd('t8-font.json'), facts: rd('font-facts.json'), stepWhy: process.env.PRINT_FONT_WHY, outcome: process.env.PRINT_FONT_OUTCOME,
+      probeOk: doc.probeSelftestOk === true, basicHangul: !!bf && wordsOf(bf).some((w) => /[가-힣]/.test(String(w.t))),
+    });
+    console.log(fontGate0.why);
+  }
+  // ⬛ [낡은 줄 · 1~10차] const res = judgeRun({ cells: doc.cells, board: doc.board, factsById, positive: doc.positive, groups: doc.groups, probeSelftestOk: doc.probeSelftestOk });
   const res = judgeRun({
     cells: doc.cells, board: doc.board, factsById, positive: doc.positive, groups: doc.groups,
-    probeSelftestOk: doc.probeSelftestOk,
+    probeSelftestOk: doc.probeSelftestOk, fontGate: fontGate0,
   });
   let nine = null;
   if (doc.nine) {
@@ -703,4 +782,6 @@ module.exports = {
   qpdfOf, qpdfBundledOf,
   // 🔴 10차 D7 — 꼬리표(자체시험 T-D7)
   FONT_TAG, COORD_KINDS, fontTag,
+  // 🔴 11차 D2′ — 글꼴 관문(자체시험 T-FG1 · T-FG2)
+  FONT_NEUTRAL, FONT_KEEP_IDS, fontFactsWhy, fontGate,
 };

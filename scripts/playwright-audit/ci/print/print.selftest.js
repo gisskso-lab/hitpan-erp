@@ -1276,7 +1276,7 @@ function runReadStep7(block, names) {
   const job = printJob7();
   const live = job.split('\n').filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
   // ⬛ [낡은 줄 · 7차] const swallow = live.filter((l) => /\|\|\s*(echo|true|:)(\s|$|;|\))/.test(l) || /continue-on-error/.test(l));
-  // 🔴 11차(고침 2 PM 결재 ① · L5) — 글꼴 단계 안의 continue-on-error 1줄만 뺌(그 단계 실패는 판정기가 outcome · 사유로 드러냄 = T-F1 · 잡 전체 1개 = T-F3) · 다른 자리는 그대로 셈
+  // 🔴 11차(고침 2 PM 결재 ① · L5) — 글꼴 단계 안의 continue-on-error 1줄만 뺌(그 단계 실패는 판정기가 outcome · 사유로 드러냄 = T-FG1 · 잡 전체 1개 = T-FG3) · 다른 자리는 그대로 셈
   const jl = job.split('\n');
   const fi = jl.findIndex((l) => l.includes('- name: "[장치] 측정 글꼴'));
   const fontCoe = fi < 0 ? null : jl.slice(fi, jl.findIndex((l, k) => k > fi && /^\s+- name: /.test(l))).find((l) => /^\s+continue-on-error: true\s*$/.test(l));
@@ -2265,9 +2265,9 @@ guardAsync(TD8E, async () => {
   check(TD8E, ok, `고른 창고 ${id} · 재고 선행 「${end}」 · 0개 「${rb}」 · 비활성만 「${rc}」 · 읽기 꼴 ${readOnly ? '○' : '×'} · 부름 ${a.st.calls.join(' · ')}`);
 });
 
-// T-F3 11차 D1′(고침 1 §8-1 · 고침 2 §1 · PM ① · L5) — ui-print 글꼴 단계 꼴(정적 · 이 PC 에서 단계는 못 돎 = C6 G1′ · G5): S5 뒤 · S6 앞 · id font · 25분 · continue-on-error = 이 단계 하나만
+// T-FG3 11차 D1′(고침 1 §8-1 · 고침 2 §1 · PM ① · L5) — ui-print 글꼴 단계 꼴(정적 · 이 PC 에서 단계는 못 돎 = C6 G1′ · G5): S5 뒤 · S6 앞 · id font · 25분 · continue-on-error = 이 단계 하나만
 //   · apt 3회 꼴 · --no-install-recommends 꾸러미 2 · pip 0 · /usr/bin/python3 · 맨 위 · 작업 폴더 지움 · 업로드 뿌리 글꼴 0 확인 · 판정 단계 env outcome · fc-match · fc-cache 0 · font-rename.py ≤ 90줄 · 보존 8 ID · 중립 이름
-const TF3 = 'T-F3 11차 D1′ 글꼴 단계 꼴(S5 뒤 · S6 앞 · id · 25분 · continue-on-error 하나 · 꾸러미 2 · 절대경로 python · 맨 위) · 판정 단계 outcome env · font-rename.py ≤90줄';
+const TF3 = 'T-FG3 11차 D1′ 글꼴 단계 꼴(S5 뒤 · S6 앞 · id · 25분 · continue-on-error 하나 · 꾸러미 2 · 절대경로 python · 맨 위) · 판정 단계 outcome env · font-rename.py ≤90줄';
 guardAsync(TF3, async () => {
   const job = printJob7();
   const ls = job.split('\n');
@@ -2289,6 +2289,70 @@ guardAsync(TF3, async () => {
   };
   const bad = Object.entries(ck).filter(([, v]) => !v).map(([k]) => k);
   check(TF3, bad.length === 0, `어긋남 ${bad.join(' · ') || '0'} · 단계 줄 ${iFont} · continue-on-error ${coe} · python ${pyLines}줄`);
+});
+
+// T-FG1 11차 D2′(고침 1 §8-3 · §1-11-0 · §1-11-8 · 고침 2 §2 · §3 · §5 · PM L5) — 글꼴 관문(순수): ⑷ 만 통과 · ⑴⑵⑶ · ⓓ · 다시 셈 · 변이 V-G1 · V-G2 · V-G3 · V-L5
+const TF1 = 'T-FG1 11차 D2′ 글꼴 관문 — ⑷ 만 통과 · ⑴⑵⑶ · ⓓ(T8 기록 없음 · 사실 파일 없음 · 단계 사실 실패인데 T8 초록) · ID 20 다시 셈 · ID 21 · 굵게 다른 이름 · L5';
+guard(TF1, () => {
+  const N = J.FONT_NEUTRAL;
+  const rec = (role) => ({
+    role, weight: role === 'bold' ? 600 : 400, banned: 0, id21_22: 0, preserveSame: true,
+    names: [{ id: 0, p: 3, l: 1033, v: 'Copyright (c) 2011 NHN Corporation.' }, { id: 7, p: 3, l: 1033, v: 'NanumGothic Regular is a registered trademark of NHN Corporation.' },
+      { id: 1, p: 3, l: 1033, v: 'Malgun Gothic' }, { id: 16, p: 3, l: 1033, v: 'Malgun Gothic' }, { id: 6, p: 3, l: 1033, v: N[role] }],
+  });
+  const facts = (mut) => { const f = { schema: 'font-facts/1', why: [], files: [rec('regular'), rec('bold')] }; if (mut) mut(f); return f; };
+  const t8 = (o) => ({ schema: 't8-font/1', regular: [`ABCDEF+${N.regular}`], bold: [`GHIJKL+${N.bold}`], hangul: true, ...(o || {}) });
+  const run = (o) => J.fontGate({ t8: t8(), facts: facts(), stepWhy: '', outcome: 'success', probeOk: true, basicHangul: true, ...o });
+  const cases = [
+    ['좋음 = ⑷(ID 7 예약 이름 = 보존 · 셈 밖)', run({}), (r) => r.ok && r.cell === '⑷ 글꼴 섬'],
+    ['V-G1 ID 20 만 남김(banned 칸 0 거짓)', run({ facts: facts((f) => f.files[0].names.push({ id: 20, p: 1, l: 65535, v: 'NanumGothic-KSCpc-EUC-H' })) }), (r) => !r.ok && r.cell === 'ⓓ 글꼴 단계 사실 실패인데 T8 초록' && /regular 금지 낱말 1/.test(r.why)],
+    ['V-G2 ID 21 있음', run({ facts: facts((f) => f.files[1].names.push({ id: 21, p: 3, l: 1033, v: 'Print Substitute' })) }), (r) => !r.ok && /이름 고친 뒤 ID 21 또는 22 있음\(bold\)/.test(r.why)],
+    ['V-G3 굵게 칸 다른 이름(기본 폼 한글 있음 = ⑵)', run({ t8: t8({ bold: ['XYZABC+DejaVuSans-Bold'] }) }), (r) => !r.ok && r.cell === '⑵ T8 하네스 결함' && /굵게 \[DejaVuSans-Bold\]/.test(r.why)],
+    ['보통 다른 이름 · 기본 폼 한글 없음 = ⑴', run({ t8: t8({ regular: ['ABCDEF+Lato-Regular'] }), basicHangul: false }), (r) => !r.ok && r.cell === '⑴ 이름 바꾼 글꼴이 렌더에 안 잡힘'],
+    ['V-L5 outcome failure · 사유 없음', run({ outcome: 'failure' }), (r) => !r.ok && /글꼴 단계 중단\(시간 초과 등 · outcome failure\)/.test(r.why) && /^ⓓ/.test(r.cell)],
+    ['outcome 빈 값', run({ outcome: '' }), (r) => !r.ok && /outcome 없음/.test(r.why)],
+    ['단계 사유 있음 + T8 초록 = ⓓ(L5 줄 안 겹침)', run({ stepWhy: '글꼴 단계 — 꾸러미 설치 실패', outcome: 'failure' }), (r) => !r.ok && r.cell === 'ⓓ 글꼴 단계 사실 실패인데 T8 초록' && /꾸러미 설치 실패/.test(r.why) && !/글꼴 단계 중단/.test(r.why)],
+    ['T8 기록 없음 = ⓓ', run({ t8: null }), (r) => !r.ok && r.cell === 'ⓓ T8 기록 없음'],
+    ['사실 파일 없음 = ⓓ', run({ facts: null }), (r) => !r.ok && r.cell === 'ⓓ 사실 파일 없음'],
+    ['T8 한글 없음 = T8 빨강', run({ t8: t8({ hangul: false }) }), (r) => !r.ok && /T8 한글 낱말 글리프 없음/.test(r.why)],
+    ['판독기 자체시험 실패 = T8 빨강', run({ probeOk: false }), (r) => !r.ok && /T8 빨강/.test(r.why)],
+    ['기본 폼 한글 없음 · T8 초록 = ⑶', run({ basicHangul: false }), (r) => !r.ok && r.cell === '⑶ 단계 차례 · 제품만의 글꼴 길'],
+    ['family 다름', run({ facts: facts((f) => { f.files[0].names[2].v = 'Other Gothic'; }) }), (r) => !r.ok && /regular family ≠ Malgun Gothic/.test(r.why)],
+    ['보존 다름', run({ facts: facts((f) => { f.files[1].preserveSame = false; }) }), (r) => !r.ok && /bold 보존 기록 다름/.test(r.why)],
+    ['굵게 견본 없음 = 보통으로만 통과 + 미측정 표시', run({ t8: t8({ bold: null }) }), (r) => r.ok && /굵게 견본 없음/.test(r.boldNote)],
+  ];
+  const bad = cases.filter(([, r, f]) => !f(r)).map(([n, r]) => `${n} 「${r.cell} · ${String(r.why).slice(0, 80)}」`);
+  check(TF1, bad.length === 0 && N.regular === 'PrintSubstitute-Regular' && N.bold === 'PrintSubstitute-Bold' && J.FONT_KEEP_IDS.join() === '0,7,8,9,11,12,13,14', bad.join(' / ') || `경우 ${cases.length} 모두 맞음`);
+});
+
+// T-FG2 11차 D2′(PM L5) — 판정기 프로세스(워크플로 명령줄): env PRINT_FONT_OUTCOME 칸 있으면 관문 켬(T8 · 사실 파일 없음 → 판정 0 · 결과표 줄 · 끝 코드 1) · 칸 없으면 끔 · judgeRun 관문 통과 = 양성 대조 그대로 · 실패 = 사유 앞머리
+const TF2 = 'T-FG2 11차 D2′ 판정기 프로세스 — outcome 칸 있으면 글꼴 관문 켬(판정 0 · 결과표 줄) · 없으면 끔 · 관문 통과 = 양성 대조 그대로';
+guardAsync(TF2, async () => {
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'tf2-'));
+  const out = {};
+  try {
+    const doc = { schema: 'print-cells/1', run: 'tf2', job: 'tf2', board: 'main', probeSelftestOk: true, positive: F.POSITIVE_CONTROL, groups: [], setup: {}, cells: [] };
+    fs.writeFileSync(path.join(dir, 'cells.json'), JSON.stringify(doc));
+    const spawn = (extra) => {
+      const env = { ...process.env, ...extra };
+      if (!extra.PRINT_FONT_OUTCOME && extra.PRINT_FONT_OUTCOME !== '') delete env.PRINT_FONT_OUTCOME;
+      delete env.PRINT_FONT_WHY;
+      const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', env, timeout: 60000 });
+      return { code: j.status, out: j.stdout || '', md: fs.readFileSync(path.join(dir, 'print-result.md'), 'utf8') };
+    };
+    out.off = spawn({});
+    out.on = spawn({ PRINT_FONT_OUTCOME: 'failure' });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  const base = { cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [] };
+  const r0 = J.judgeRun(base);
+  const rOk = J.judgeRun({ ...base, fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬' } });
+  const rBad = J.judgeRun({ ...base, fontGate: { ok: false, why: '글꼴 관문 실패 — 2×2 ⓓ T8 기록 없음' } });
+  const onLine = (out.on.md.match(/- 글꼴 관문[^\n]*/) || [''])[0];
+  const ok = !/글꼴 관문/.test(out.off.md) && /\*\*실패 — 판정 0\*\*/.test(onLine) && /ⓓ T8 기록 없음/.test(onLine) && /글꼴 단계 중단\(시간 초과 등 · outcome failure\)/.test(onLine)
+    && out.on.code === 1 && /글꼴 관문 실패/.test(out.on.out) && rOk.positive.why === r0.positive.why && rBad.positive.ok === false && /^글꼴 관문 실패 — 2×2 ⓓ/.test(rBad.positive.why);
+  check(TF2, ok, `끔 ${/글꼴 관문/.test(out.off.md) ? '줄 있음(틀림)' : '줄 없음'} · 켬 끝 코드 ${out.on.code} · 「${onLine.slice(0, 120)}」 · 통과 = 그대로 ${rOk.positive.why === r0.positive.why} · 실패 앞머리 ${String(rBad.positive.why).slice(0, 30)}`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
