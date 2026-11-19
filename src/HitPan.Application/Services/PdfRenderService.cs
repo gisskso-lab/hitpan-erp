@@ -182,7 +182,20 @@ public sealed class PdfRenderService : IPdfRenderService
         // 🔴 20261021작 절 B-3 — 세금계산서 전용(법정) 작성기.
         //   양식용지(preprint)·좌표 경로는 **종전 그대로** 간다(아래 공용 흐름).
         //   나머지 9종도 아래 공용 흐름 그대로 — 이 분기 안에서만 갈라진다(#1).
-        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint)
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 F-1 · 착수 전 질문 (나) · PM 결재 11/19 20:3x · 착수준비표 P-8]
+        //   종전 식 = `string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint`
+        //   [그대로 두면 무슨 일이 나나] 「종이에도 함께 인쇄」 를 켠 세금계산서 양식지를 옮겨 만든 Y 템플릿
+        //     (빈 A4 · 그림 찍음 · 칸 좌표)이 이 분기로 빠져 **히트판 법정 표준 서식**(그림 0 · 좌표 0)으로 나갔다 —
+        //     대표 Q14 「그림까지 인쇄하던 모양 유지」 와 어긋난다(이름은 「(양식 그림 포함)」 인데 그림이 없음).
+        //   [이제] Y 템플릿(위 `isYTemplate` 다섯 조건 = `isYTemplate && useCoords`)은 이 분기 **앞에서** 갈라
+        //     아래 공용 흐름(그림 + 칸 값 · 한 쪽 · 넘치면 종이 알림 한 줄 = main 의 양식지+켬 세금계산서와 같은 종이)으로 간다.
+        //   🔴 Y 아닌 `plain` 세금계산서는 한 글자도 안 바뀐다(#1) — 그림을 못 읽은 Y(⑤ 거짓)도 종전대로 법정 작성기.
+        //   🔴 정정 줄: 위 :116 「세금계산서는 이 변화가 안 닿는다」 · :155 「세금계산서 `plain` … 무변」 ·
+        //     아래 :219 「세금계산서 `plain` 은 위에서 이미 빠졌다」 는 **Y 세금계산서에 한해 틀리게 됐다** — 그 줄들은 이력으로 둔다(지운 것 0).
+        //   🔴 법정성 판정 = 법무팀장 1줄(F-1 머지 전 · 착수 전 질문 §3 (나) 질문 글자) — 「안 됨」 이면 (다)로 대표께.
+        //   🔴 워터마크는 계속 0 — 종 판정(결-K)이라 Y 세금계산서도 막힌다.
+        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint
+            && !(isYTemplate && useCoords))
         {
             // 양식 행이 없으면 법정 2매가 기본이다(FormTemplateService 의 TwoCopyFormTypes).
             var copyMode = template?.PrintCopyMode ?? "both";
