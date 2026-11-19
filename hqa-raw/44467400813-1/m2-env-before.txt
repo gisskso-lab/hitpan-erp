@@ -1,0 +1,20 @@
+# M2 앞 환경 기록 — v5 별건 A(설계 §5-3 · §5-4 #1) · git 설정 = 범위 · 출처 · 키 · 값(system · global 만) / 실행 파일 판 글자
+# git config --list --show-origin --show-scope
+system	file:/etc/gitconfig	safe.directory=*
+system	file:/etc/gitconfig	filter.lfs.required=true
+system	file:/etc/gitconfig	filter.lfs.clean=git-lfs clean -- %f
+system	file:/etc/gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+system	file:/etc/gitconfig	filter.lfs.process=git-lfs filter-process
+local	file:.git/config	core.<가림:7>
+local	file:.git/config	core.filemode
+local	file:.git/config	core.bare
+local	file:.git/config	core.logallrefupdates
+local	file:.git/config	remote.origin.url
+local	file:.git/config	remote.origin.fetch
+local	file:.git/config	gc.auto
+local	file:.git/config	branch.hqa/20261116-S4-gh실측-장치.remote
+local	file:.git/config	branch.hqa/20261116-S4-gh실측-장치.merge
+# 실행 파일 판
+node	v22.23.5
+git	git version 2.56.1
+bash	GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)

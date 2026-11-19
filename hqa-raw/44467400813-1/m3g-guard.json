@@ -1,0 +1,57 @@
+{
+  "stage": "M3prime",
+  "ok": false,
+  "snap_present": true,
+  "first_red": "G1",
+  "order": "G1(+G6 control) > G2 > G3 > G4 > G5 - stop at first red",
+  "checks": {
+    "G1": false,
+    "G6": true,
+    "G2": null,
+    "G3": null,
+    "G4": null,
+    "G5": null
+  },
+  "env_changed": [
+    "GITHUB_ACTION",
+    "GITHUB_ARTIFACTS",
+    "GITHUB_ARTIFACTS_LIST",
+    "GITHUB_ENV",
+    "GITHUB_OUTPUT",
+    "GITHUB_PATH",
+    "GITHUB_STATE",
+    "GITHUB_STEP_SUMMARY",
+    "HQA_CHROME",
+    "HQA_PW_DIR",
+    "HQA_SRC_DIR"
+  ],
+  "env_disallowed": [
+    "GITHUB_ARTIFACTS",
+    "GITHUB_ARTIFACTS_LIST"
+  ],
+  "env_allow": [
+    "HQA_SRC_DIR",
+    "HQA_CHROME",
+    "HQA_PW_DIR",
+    "GITHUB_ACTION",
+    "GITHUB_ENV",
+    "GITHUB_OUTPUT",
+    "GITHUB_PATH",
+    "GITHUB_STATE",
+    "GITHUB_STEP_SUMMARY"
+  ],
+  "env_values_ok": true,
+  "git_scopes": [],
+  "bins_changed": [],
+  "ld_preload": null,
+  "tree_changed_n": 0,
+  "tree_changed": [],
+  "dev_ref": null,
+  "head_is_dev": null,
+  "index_flags_ok": null,
+  "index_flagged": [],
+  "replace_refs_none": null,
+  "dotgit_none": null,
+  "dotgit_found": [],
+  "values": "names and true/false only - no values, no hashes (snapshot stays in the work folder)"
+}
