@@ -92,12 +92,157 @@ async function fillLines(page) {
     await sleep(300);
   }
 }
-async function saveDoc(page, what) {
-  const before = await errorToasts(page);
-  await button(page, '저장').first().click({ timeout: WAIT });
-  await sleep(2500);
-  const after = await errorToasts(page);
-  if (after > before) throw new S.SetupError(`${what} 저장 뒤 경고 · 오류 알림 ${after - before}`);
+// ⬛ [낡은 덩이 · 1~9차] saveDoc — 오류 알림 수만 셈(성공 · 확인 창 · 번호 안 봄 → 거래명세서 「수주서 자동 생성」 창이 열린 채 ok · [1-V] 판매 39 E4 · E5)
+// async function saveDoc(page, what) {
+//   const before = await errorToasts(page);
+//   await button(page, '저장').first().click({ timeout: WAIT });
+//   await sleep(2500);
+//   const after = await errorToasts(page);
+//   if (after > before) throw new S.SetupError(`${what} 저장 뒤 경고 · 오류 알림 ${after - before}`);
+// }
+
+/**
+ * 🔴 10차 D4 · D8 ⓐ(작업지시서 §1-2 · [1-V] 판매 39 §3 조건 1 · 2 · 명세서 §1-10-0 (4) · (5)) — 저장 성공 = 확인 창 안 남음 · 오류 알림 0 · 저장 응답 2xx
+ *   · 성공 알림(제품 원문) · 번호(알림 글 → 응답 번호 칸 → 응답 id 차례) 모두일 때만. 오류 알림 0 ≠ 성공.
+ *   url = 화면 단추가 보내는 저장 POST(제품 Web 원문) · toast = 성공 알림 원문 · confirm = 저장 앞 확인 창(창 범위 안 단추) · after = 저장 뒤 화면 이동.
+ */
+const SAVE_WAIT = 20000;
+const TOAST_WAIT = 6000;
+const SAVE_OK = {
+  // QuotationPage.razor.cs:299 · 저장 = QuotationService.cs:148 POST api/quotations · 응답 { id }(QuotationController.cs:95)
+  estimate: { url: '/api/quotations', toast: /견적서 저장이 완료되었습니다/ },
+  // DeliveryPage.razor:647 · 창 :624~628 · 저장 = DeliveryService.cs:82 POST api/sales/deliveries · 응답 documentNumber · id · autoCreatedOrderNo(DeliveryModels.cs:268)
+  delivery: {
+    url: '/api/sales/deliveries', toast: /저장 완료: *([^\s|]+)/,
+    confirm: { title: '수주서 자동 생성', text: '수주서가 없는 거래입니다. 수주서를 자동 생성합니다.', yes: '저장', no: '취소' },
+  },
+  // SalesOrderPage.razor.cs:290 · 저장 = DeliveryService.cs:137 POST api/sales/orders · 응답 documentNumber · id
+  sales_order: { url: '/api/sales/orders', toast: /수주서 저장이 완료되었습니다/ },
+  // PurchaseOrderPage.razor.cs:317 · 저장 = POST api/purchase/orders · 응답 id(PurchaseOrderPage.razor.cs:798)
+  purchase_order: { url: '/api/purchase/orders', toast: /발주서가 서버에 저장되었습니다/ },
+  // PurchaseReceiptPage.razor.cs:386 · 저장 = POST api/purchase/receipts · 응답 id(PurchaseReceiptPage.razor.cs:913)
+  receipt: { url: '/api/purchase/receipts', toast: /매입명세서가 서버에 저장되었습니다/ },
+  // ReturnPage.razor.cs:255 「{docLabel}을 저장했습니다.」 · 저장 = POST api/purchase/returns · 응답 returnId · returnNo(ReturnPage.razor.cs:284~287)
+  purchase_return: { url: '/api/purchase/returns', toast: /을 저장했습니다/ },
+  // DeliveryPage.razor:346 「반품 저장 완료: {번호}」 뒤 :347 forceLoad 이동 → 알림이 지워질 수 있어 알림 대신 이동(/deliveries) · 저장 = DeliveryService.cs:858 POST api/sales/returns · 응답 returnId · returnNo
+  sales_return: { url: '/api/sales/returns', toast: null, after: /\/deliveries(\?|#|$)/ },
+};
+const AUTO_SO = /수주서 (\S+) 가 자동 생성되었습니다/; // DeliveryPage.razor:652
+const NO_KEYS = ['documentNumber', 'documentNo', 'returnNo', 'receiptNo', 'orderNo', 'quotationNo', 'deliveryNo'];
+const ID_KEYS = ['id', 'returnId', 'receiptId', 'orderId', 'quotationId', 'deliveryId'];
+const clean1 = (s, cap) => L.sanitize(String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim(), cap);
+/** 응답 본문 → { no(번호 칸) · id · auto(자동 생성 수주 번호) } — 칸 이름 대소문자 무시 · data 한 겹까지. */
+function numberFrom(body) {
+  const base = body && typeof body === 'object' ? body : {};
+  const o = base.data && typeof base.data === 'object' ? { ...base.data, ...base } : base;
+  const low = new Map(Object.keys(o).map((k) => [k.toLowerCase(), o[k]]));
+  const first = (keys) => {
+    for (const k of keys) {
+      const v = low.get(k.toLowerCase());
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    }
+    return '';
+  };
+  return { no: first(NO_KEYS), id: first(ID_KEYS), auto: first(['autoCreatedOrderNo']) };
+}
+/** 저장 판정(순수) — 차례: 확인 창 남음 → 오류 알림 → 응답 없음 · 실패 → 성공 알림 → 이동 → 번호. pick = 목록 줄 고르기용 원 번호(D8 ⓓ · 기록은 소독본). */
+function saveVerdict(what, ok, s) {
+  if (s.dialogLeft != null) return { ok: false, why: `${what} 확인 창 남음(창 머리 「${clean1(s.dialogLeft, 60)}」)` };
+  if (s.errDelta > 0) return { ok: false, why: `${what} 저장 뒤 경고 · 오류 알림 ${s.errDelta}` };
+  if (!s.resp) return { ok: false, why: `${what} 저장 요청 응답 없음` };
+  if (!(s.resp.status >= 200 && s.resp.status < 300)) return { ok: false, why: `${what} 저장 응답 ${s.resp.status}` };
+  if (ok.toast && !ok.toast.test(String(s.toastText || ''))) return { ok: false, why: `${what} 저장 성공 알림 없음` };
+  if (ok.after && !ok.after.test(String(s.url || ''))) return { ok: false, why: `${what} 저장 뒤 화면 이동 없음` };
+  const m = ok.toast ? ok.toast.exec(String(s.toastText || '')) : null;
+  const n = numberFrom(s.resp.body);
+  const docNo = (m && m[1]) || n.no;
+  const no = docNo || n.id;
+  if (!no) return { ok: false, why: `${what} 전표 번호 없음` };
+  const a = AUTO_SO.exec(String(s.toastText || ''));
+  return { ok: true, no: clean1(no, 40), docNo: clean1(docNo, 40), id: clean1(n.id, 40), auto: String(n.auto || (a && a[1]) || '').slice(0, 60), pick: String(docNo || '').slice(0, 60) };
+}
+/** 저장 손(실물 화면) — 자체시험(T-D4a · T-D4b · T-D8a)은 같은 꼴의 가짜 손을 넣는다. */
+function saveIo(page) {
+  return {
+    errors: () => errorToasts(page),
+    clickSave: () => button(page, '저장').first().click({ timeout: WAIT }),
+    waitResp: (urlPart) => page.waitForResponse((r) => {
+      if (r.request().method() !== 'POST') return false;
+      try {
+        return new URL(r.url()).pathname.replace(/\/+$/, '').endsWith(urlPart);
+      } catch (e) {
+        log(`저장 응답 주소 못 읽음(${L.errorName(e)})`);
+        return false;
+      }
+    }, { timeout: SAVE_WAIT }).then(async (r) => {
+      let body = null;
+      try {
+        body = await r.json();
+      } catch (e) {
+        body = { jsonErr: L.errorName(e) };
+      }
+      return { status: r.status(), body };
+    }, (e) => {
+      log(`저장 응답 기다림 끝(${L.errorName(e)})`);
+      return null;
+    }),
+    confirmDialog: async (c) => {
+      const dlg = page.locator('.mud-dialog').filter({ hasText: c.title }).last();
+      try {
+        await dlg.waitFor({ state: 'visible', timeout: 10000 });
+      } catch (e) {
+        log(`확인 창 「${c.title}」 안 보임(${L.errorName(e)})`);
+        return { seen: false };
+      }
+      const text = clean1(await dlg.innerText(), 120);
+      await button(dlg, c.yes).first().click({ timeout: WAIT }); // 창 범위 안 단추(화면 [저장] 과 이름이 같음)
+      return { seen: true, text };
+    },
+    dialogLeft: async () => {
+      const d = page.locator('.mud-dialog').last();
+      if (!(await visibleOr(d, '저장 뒤 창'))) return null;
+      return String(await d.innerText()).split('\n')[0] || '창';
+    },
+    toasts: async (re, ms) => {
+      const t0 = Date.now();
+      let last = '';
+      while (Date.now() - t0 < ms) {
+        try {
+          last = (await page.locator('.mud-snackbar').allInnerTexts()).map((x) => String(x)).join(' | ');
+        } catch (e) {
+          log(`알림 읽기 실패(${L.errorName(e)})`);
+        }
+        if (re.test(last)) return last;
+        await sleep(250);
+      }
+      return last;
+    },
+    waitUrl: async (re) => {
+      try {
+        await page.waitForURL(re, { timeout: SAVE_WAIT });
+      } catch (e) {
+        log(`저장 뒤 이동 기다림 끝(${L.errorName(e)})`);
+      }
+    },
+    url: () => page.url(),
+  };
+}
+async function saveDoc(page, what, key, io = saveIo(page)) {
+  const ok = SAVE_OK[key];
+  if (!ok) throw new S.SetupError(`${what} 저장 판정 꼴 없음(${key})`);
+  const before = await io.errors();
+  const resp = io.waitResp(ok.url);
+  await io.clickSave();
+  const dialog = ok.confirm ? await io.confirmDialog(ok.confirm) : null;
+  const r = await resp;
+  const toastText = ok.toast ? await io.toasts(ok.toast, TOAST_WAIT) : '';
+  if (ok.after) await io.waitUrl(ok.after);
+  const v = saveVerdict(what, ok, { dialogLeft: await io.dialogLeft(), errDelta: (await io.errors()) - before, resp: r, toastText, url: io.url() });
+  if (!v.ok) throw new S.SetupError(dialog && dialog.seen === false ? `${v.why} · 확인 창 「${ok.confirm.title}」 안 보임` : v.why);
+  if (dialog) v.dialog = dialog; // [1-V] PM 미확인 「창이 실제로 떴나」 → 창 글(소독본) 기록 · 화면 사진 0(W4)
+  v.status = r.status;
+  return v;
 }
 
 /** 화면별 전표 1건(거래처 · 품목 2줄) — 화면으로 저장. */
@@ -106,31 +251,128 @@ async function makeDoc(page, t) {
   if (t.returnType === '매입반품') await pickSelect(page, '반품유형', '매입반품');
   await pickAutocomplete(page, inputByLabel(page, t.partnerLabel), F.MARK.partner);
   await fillLines(page);
-  await saveDoc(page, t.label);
+  // ⬛ [낡은 줄 · 1~9차] await saveDoc(page, t.label);
+  return saveDoc(page, t.label, t.key); // 🔴 10차 D4 — 번호를 돌려줌(main 이 기록 · D8 ⓓ 고르기)
 }
 /**
  * 🔴 3차(11/19 · [4] F5) — 판독 입구 줄 고르기. 판매 반품을 거래명세서 [반품하기]로 만들므로 `/deliveries` 목록엔
  *   표지 거래처 줄이 둘(원 전표 · 반품). 2차는 거래명세서 입구가 `rows => rows` 의 첫 줄이라 목록 정렬에 따라 반품 줄을 집을 수 있었다.
  *   → 거래명세서 일반 입구 = 「반품」 글자 줄 **뺌**(정렬에 기대지 않음) · ⓙ = 「반품」 글자 줄만 · 그 밖 = 그대로.
  */
-function entryPick(typeKey, entry) {
+// ⬛ [낡은 줄 · 3~9차] function entryPick(typeKey, entry) {
+function entryPick(typeKey, entry, nos) {
+  if (nos) return pickByNo(typeKey, entry, nos); // 🔴 10차 D8 ⓓ — 번호가 있으면 번호로 · 없으면(옛 부름 · 자체시험 T-Z36 꼴) 3차 규칙 그대로
   if (entry === 'doc-j') return (rows) => rows.filter({ hasText: '반품' });
   if (typeKey === 'delivery') return (rows) => rows.filter({ hasNotText: '반품' });
   return (rows) => rows;
 }
 
-/** 판매 반품 — 거래명세서 저장(확정) → [반품하기] → 반품 사유 → 저장(DeliveryPage.razor:109 · :1234 · :289). */
-async function makeSalesReturn(page) {
-  // ⬛ [낡은 줄 · 2차] await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), (row) => row);
-  await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick('delivery', 'doc'));
-  const ret = button(page, '반품하기').first();
-  if (await ret.isDisabled()) throw new S.SetupError('[반품하기] 꺼짐(거래명세서 확정 아님 · :109)');
-  await ret.click();
-  await page.waitForURL(/returnOf=/, { timeout: WAIT });
-  await page.locator('.mud-main-content, main').first().waitFor({ timeout: WAIT });
-  await sleep(1500);
-  await pickSelect(page, '반품 사유', '고객 단순 반품');
-  await saveDoc(page, '판매 반품');
+/**
+ * 🔴 10차 D8 ⓓ([1-V] 판매 39 §3 조건 5 · 명세서 §1-10-0 (5)) — 입구 줄 = 장치가 만든 전표 번호 글자가 든 줄.
+ *   수주서: 거래명세서 저장이 표지 거래처 수주를 하나 더 만듦(DeliveryPage.razor:650~653) → 제 번호 줄 · 제 번호를 못 받았으면 자동 생성 번호 줄을 뺌 · 둘 다 없으면 차림 불가(첫 줄로 안 물러섬)
+ *   거래명세서: 제 번호 + 「반품」 글자 뺌(반품 줄은 「{원전표} 의 반품」 으로 원전표 번호를 품음 · SalesListDialog.razor 반품 줄) · ⓙ = 「반품」 줄(반품 번호가 있으면 그 번호까지)
+ *   견적: 응답 = { id } 만(QuotationController.cs:95 · id 는 목록에 안 보임) → 번호 칸이 있을 때만 거름 · 없으면 표지 줄(장치가 만드는 견적 = 1건 · 자동 생성 견적 길 없음)
+ */
+function pickByNo(typeKey, entry, nos) {
+  const docNo = (k) => (nos[k] && nos[k].pick) || '';
+  if (entry === 'doc-j') {
+    const rn = docNo('sales_return');
+    return (rows) => (rn ? rows.filter({ hasText: '반품' }).filter({ hasText: rn }) : rows.filter({ hasText: '반품' }));
+  }
+  if (typeKey === 'delivery') {
+    const n = docNo('delivery');
+    if (!n) throw new S.SetupError('거래명세서 입구 — 번호 없음(첫 줄로 물러서지 않음)');
+    return (rows) => rows.filter({ hasNotText: '반품' }).filter({ hasText: n });
+  }
+  if (typeKey === 'sales_order') {
+    const n = docNo('sales_order');
+    const auto = (nos.delivery && nos.delivery.auto) || '';
+    if (n) return (rows) => rows.filter({ hasText: n });
+    if (auto) return (rows) => rows.filter({ hasNotText: auto });
+    throw new S.SetupError('수주서 입구 — 번호 없음 · 자동 생성 수주 번호도 없음(첫 줄로 물러서지 않음)');
+  }
+  if (typeKey === 'estimate') {
+    const n = docNo('estimate');
+    return n ? (rows) => rows.filter({ hasText: n }) : (rows) => rows;
+  }
+  return (rows) => rows;
+}
+
+// ⬛ [낡은 덩이 · 3~9차] makeSalesReturn(page) — 확정 단계 없음 · 표지 첫 줄 · saveDoc 오류 알림만([1-V] 판매 39 §3 조건 3 · 4)
+// /** 판매 반품 — 거래명세서 저장(확정) → [반품하기] → 반품 사유 → 저장(DeliveryPage.razor:109 · :1234 · :289). */
+// async function makeSalesReturn(page) {
+//   // ⬛ [낡은 줄 · 2차] await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), (row) => row);
+//   await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick('delivery', 'doc'));
+//   const ret = button(page, '반품하기').first();
+//   if (await ret.isDisabled()) throw new S.SetupError('[반품하기] 꺼짐(거래명세서 확정 아님 · :109)');
+//   await ret.click();
+//   await page.waitForURL(/returnOf=/, { timeout: WAIT });
+//   await page.locator('.mud-main-content, main').first().waitFor({ timeout: WAIT });
+//   await sleep(1500);
+//   await pickSelect(page, '반품 사유', '고객 단순 반품');
+//   await saveDoc(page, '판매 반품');
+// }
+
+/**
+ * 🔴 10차 D8 ⓑ([1-V] 판매 39 §3 조건 3) — 판매 목록 창(SalesListDialog.razor)에서 번호 줄 체크 → 「판매확정」(:120~124) → 확인 창(:361~366) 「판매확정」
+ *   → 알림 「{n}건 확정 완료」(:389) · 「{n}건 확정 실패 — {사유}」(:395 · 재고 부족이면 자동발주 창이 뒤따름 → 닫고 사유로 남김).
+ */
+const CONFIRM_OK = { button: '판매확정', ask: /판매확정 처리하시겠습니까/, yes: '판매확정', done: /(\d+)건 확정 완료/, fail: /(\d+)건 확정 실패 — ([^|]*)/ };
+function confirmVerdict(text) {
+  const s = String(text || '');
+  const bad = CONFIRM_OK.fail.exec(s);
+  if (bad) return { ok: false, why: clean1(`${bad[1]}건 확정 실패 — ${bad[2]}`, 120) };
+  const good = CONFIRM_OK.done.exec(s);
+  if (good && Number(good[1]) >= 1) return { ok: true, n: Number(good[1]) };
+  return { ok: false, why: '확정 알림 없음' };
+}
+async function confirmDelivery(page, t, n) {
+  await goto(page, t.route);
+  await button(page, '목록').first().click({ timeout: WAIT });
+  const dlg = page.locator('.mud-dialog').filter({ hasText: t.listTitle }).last();
+  await dlg.waitFor({ state: 'visible', timeout: WAIT });
+  const rows = await waitListRows(page, dlg, t, (r) => r.filter({ hasNotText: '반품' }).filter({ hasText: n }));
+  await rows.first().locator('input[type="checkbox"]').first().check({ timeout: WAIT, force: true });
+  await button(dlg, CONFIRM_OK.button).first().click({ timeout: WAIT });
+  const ask = page.locator('.mud-dialog').filter({ hasText: CONFIRM_OK.ask }).last();
+  await ask.waitFor({ state: 'visible', timeout: WAIT });
+  await button(ask, CONFIRM_OK.yes).first().click({ timeout: WAIT });
+  const v = confirmVerdict(await saveIo(page).toasts(/건 확정 (완료|실패)/, TOAST_WAIT));
+  await closeDialogs(page);
+  if (!v.ok) throw new S.SetupError(`거래명세서 확정 실패 — ${v.why}`);
+  return v;
+}
+
+/**
+ * 🔴 10차 D8 ⓑ · ⓒ · ⓓ — 판매 반품: 재고 선행 결과 확인 → 거래명세서 확정(번호 줄) → 번호 줄 두 번 누름 → [반품하기](확정일 때만 켜짐 · DeliveryPage.razor:109)
+ *   → 반품 사유 → 저장(D4 · 응답 번호 + /deliveries 이동). steps = 화면 손(자체시험 T-D8b 는 가짜 손 · 확정을 걷으면 [반품하기] 꺼짐).
+ */
+async function makeSalesReturn(page, nos = {}, stock = null, steps = salesReturnSteps(page)) {
+  if (!stock || stock.ok !== true) throw new S.SetupError(`재고 선행 실패 — ${(stock && stock.why) || '기록 없음'}`);
+  const t = F.TYPES.find((x) => x.key === 'delivery');
+  const n = nos.delivery && nos.delivery.pick;
+  if (!n) throw new S.SetupError('판매 반품 — 거래명세서 번호 없음(D4 기록 없음 · 첫 줄로 물러서지 않음)');
+  await steps.confirm(t, n);
+  await steps.open(t, entryPick('delivery', 'doc', nos));
+  if (!(await steps.returnEnabled())) throw new S.SetupError('[반품하기] 꺼짐(거래명세서 확정 아님 · :109)');
+  await steps.clickReturn();
+  await steps.pickReason();
+  return steps.save();
+}
+function salesReturnSteps(page) {
+  return {
+    confirm: (t, n) => confirmDelivery(page, t, n),
+    open: (t, pick) => openFromList(page, t, pick),
+    returnEnabled: async () => !(await button(page, '반품하기').first().isDisabled()),
+    clickReturn: async () => {
+      await button(page, '반품하기').first().click();
+      await page.waitForURL(/returnOf=/, { timeout: WAIT });
+      await page.locator('.mud-main-content, main').first().waitFor({ timeout: WAIT });
+      await sleep(1500);
+    },
+    pickReason: () => pickSelect(page, '반품 사유', '고객 단순 반품'),
+    save: () => saveDoc(page, '판매 반품', 'sales_return'),
+  };
 }
 
 /**
@@ -177,7 +419,11 @@ async function listDiag(page, dlg) {
   await take('창 글', async () => `「${clean(await dlg.innerText(), 200)}」`);
   // ── 8차 Z8-4 (i) 창 밖 날짜(뒤 화면 · `.mud-dialog` 밖 입력의 yyyy-mm-dd 꼴 값 · 최대 3)
   await take('창 밖 날짜', async () => {
-    const v = await page.locator('input').evaluateAll((els) => els.filter((x) => !x.closest('.mud-dialog')).map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}/.test(x)).slice(0, 3));
+    // ⬛ [낡은 줄 · 8~9차] const v = await page.locator('input').evaluateAll((els) => els.filter((x) => !x.closest('.mud-dialog')).map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}/.test(x)).slice(0, 3));
+    // 🔴 10차 D5(F9-1) — 거래명세서 「판매일자」 MudDatePicker 는 DateFormat 없음(DeliveryPage.razor:69 · 문화권 짧은 날짜 꼴 = 구성 요소 판 · 전역화 자료가 정함)
+    //   목록 창 기간 칸만 DateFormat="yyyy-MM-dd"(SalesListDialog.razor:20 · :27) → 창 밖 후보 꼴 2(yyyy-MM-dd · yyyy. M. d.)를 함께 잡음 · 실물 값 = CI 에서만(C6 「F9-1 실물 값」)
+    //   (거름 글자는 브라우저 안에서 도는 함수라 바깥 이름을 못 씀 → 글자 그대로)
+    const v = await page.locator('input').evaluateAll((els) => els.filter((x) => !x.closest('.mud-dialog')).map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}|\d{4}\. ?\d{1,2}\. ?\d{1,2}\.?/.test(x)).slice(0, 3));
     return v.length ? v.map((x) => clean(x, 40)).join(' / ') : '없음';
   });
   // ── 8차 Z8-4 (ii) 창 머리 줄 · 첫 3줄(머리 = th 가 든 줄 · 나머지 = 몸 줄 · 빈 목록 문구 줄도 몸 줄로 셈)
@@ -272,10 +518,14 @@ async function captureSettings(page, t) {
   const r = await catchPreview(page, () => dlg.getByRole('button', { name: '미리보기', exact: true }).click(), '/form-templates/');
   return { ...r, ui: {} };
 }
-async function captureDoc(page, t, entry) {
+// ⬛ [낡은 줄 · 3~9차] async function captureDoc(page, t, entry) {
+async function captureDoc(page, t, entry, nos) {
   // ⬛ [낡은 줄 · 2차] doc-j = (rows) => rows.filter({ hasText: '반품' }) · 그 밖 = (rows) => rows([4] F5)
-  if (entry === 'doc-j') await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick(t.key, entry));
-  else await openFromList(page, t, entryPick(t.key, entry), t.returnType);
+  // ⬛ [낡은 줄 · 3~9차] if (entry === 'doc-j') await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick(t.key, entry));
+  // ⬛ [낡은 줄 · 3~9차] else await openFromList(page, t, entryPick(t.key, entry), t.returnType);
+  // 🔴 10차 D8 ⓓ — nos(D4 번호)로 입구 줄 고르기
+  if (entry === 'doc-j') await openFromList(page, F.TYPES.find((x) => x.key === 'delivery'), entryPick(t.key, entry, nos));
+  else await openFromList(page, t, entryPick(t.key, entry, nos), t.returnType);
   const r = await catchPreview(page, () => button(page, '인쇄').first().click({ timeout: WAIT }), '/api/documents/');
   await sleep(1200);
   const ui = { warnCount: await warnCount(page) };
@@ -361,6 +611,8 @@ async function main(deps = realDeps()) {
 
   // ① 저장 문 차림 — 로그인 · 거래처 · 품목
   let sess;
+  const itemIds = []; // 🔴 10차 D8 ⓒ — 재고 선행에 품목 id
+  const nos = {}; // 🔴 10차 D4 — 종마다 저장 번호(D8 ⓓ 입구 고르기)
   // 🔴 4차 ⓐ(개발명세서 §4-a) — 로그인 직후 약관 동의 차림(로그인 응답 표지가 참일 때만 · 화면과 같은 문) · 결과 = doc.setup.terms
   const terms = {};
   doc.setup.terms = terms;
@@ -369,13 +621,22 @@ async function main(deps = realDeps()) {
     await S.ensureTerms(sess, terms);
     await S.confirmTerms(sess, terms); // 🔴 5차 ⓔ6([3-V] 4차 D4) — 동의 뒤 GET /api/auth/terms/status 다시 확인 · 아직 필요 = 차림 불가
     await S.createPartner(sess, F.MARK.partner);
-    for (const it of F.MARK.items) await S.createItem(sess, it.name, it.price);
+    // ⬛ [낡은 줄 · 1~9차] for (const it of F.MARK.items) await S.createItem(sess, it.name, it.price);
+    for (const it of F.MARK.items) itemIds.push({ name: it.name, id: await S.createItem(sess, it.name, it.price) }); // 🔴 10차 D8 ⓒ
     doc.setup.master = { ok: true };
   } catch (e) {
     doc.setup.master = { ok: false, why: e.message };
     failAll(() => true, `기초 자료 차림 실패 — ${e.message}`);
     save();
     return 0;
+  }
+  // 🔴 10차 D8 ⓒ(PM 판단 = API 재고 조정) — 판매 반품용 거래명세서 확정 앞 재고 선행 · 실패 = 판매 반품 칸만 차림 불가(⑤ 에서 이름 붙은 사유) · 다른 칸 계속
+  //   창고 id = 기존 차림 값에서만(PM 조건) → 지금 기존 차림(setup-api · fixture)에 창고 값 없음 → 빈 값 = 「창고 id 없음」(명세서 §1-10 남은 것 · PM 결재 대기)
+  const STOCK_WAREHOUSE = '';
+  try {
+    doc.setup.stock = await S.ensureStock(sess, itemIds, Math.max(...F.MARK.items.map((x) => Number(x.qty) || 0)) * 10, STOCK_WAREHOUSE);
+  } catch (e) {
+    doc.setup.stock = { ok: false, why: e.message || L.errorName(e) };
   }
 
   // ② 종마다 양식 그림 · 경쟁 양식(이름순 앞섬 · 비기본) · 시험 양식(기본) — 슬롯 ㉠
@@ -456,9 +717,13 @@ async function main(deps = realDeps()) {
     for (const t of F.TYPES) {
       if (cells.every((c) => c.type !== t.key || c.status !== 'pending')) continue;
       try {
-        if (t.key === 'sales_return') await makeSalesReturn(page);
-        else await makeDoc(page, t);
-        doc.setup[`doc.${t.key}`] = { ok: true };
+        // ⬛ [낡은 줄 · 1~9차] if (t.key === 'sales_return') await makeSalesReturn(page);
+        // ⬛ [낡은 줄 · 1~9차] else await makeDoc(page, t);
+        // ⬛ [낡은 줄 · 1~9차] doc.setup[`doc.${t.key}`] = { ok: true };
+        // 🔴 10차 D4 · D8 — 저장 번호 기록 · 판매 반품 = 번호 · 재고 선행 결과를 넘김(가짜 손이 값을 안 돌리면 옛 기록 꼴 그대로)
+        const v = t.key === 'sales_return' ? await makeSalesReturn(page, nos, doc.setup.stock) : await makeDoc(page, t);
+        if (v && v.ok) nos[t.key] = v;
+        doc.setup[`doc.${t.key}`] = v && v.ok ? { ok: true, no: v.no, docNo: v.docNo, id: v.id, auto: clean1(v.auto, 40), status: v.status, dialog: v.dialog } : { ok: true };
       } catch (e) {
         doc.setup[`doc.${t.key}`] = { ok: false, why: e.message || L.errorName(e) };
         failAll((c) => c.type === t.key && c.path !== 'settings' && c.path !== 'editor', `전표 차림 실패 — ${e.message || L.errorName(e)}`);
@@ -511,7 +776,8 @@ async function main(deps = realDeps()) {
         for (const c of group) {
           n += 1;
           try {
-            const r = c.path === 'settings' ? await captureSettings(page, t) : await captureDoc(page, t, c.path);
+            // ⬛ [낡은 줄 · 1~9차] const r = c.path === 'settings' ? await captureSettings(page, t) : await captureDoc(page, t, c.path);
+            const r = c.path === 'settings' ? await captureSettings(page, t) : await captureDoc(page, t, c.path, nos); // 🔴 10차 D8 ⓓ
             c.ui = r.ui;
             c.http = { status: r.status };
             if (r.status === 200 && r.body.subarray(0, 5).toString('latin1') === '%PDF-') {
@@ -571,4 +837,9 @@ if (require.main === module) {
 
 // ⬛ [낡은 줄 · 3~4차] module.exports = { safeName, cfgKey, entryPick, visibleOr };
 // ⬛ [낡은 줄 · 5~6차] module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps }; // 🔴 5차 ⓔ3 — 배선 시험(T-Z28)이 main 을 가짜 손으로 돌림
-module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps, QTY_HEADERS, qtyColumn, waitListRows, listDiag, LIST_WAIT }; // 🔴 7차 — R-3 · R-4 시험(T-Z35 · T-Z36)
+// ⬛ [낡은 줄 · 7~9차] module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps, QTY_HEADERS, qtyColumn, waitListRows, listDiag, LIST_WAIT }; // 🔴 7차 — R-3 · R-4 시험(T-Z35 · T-Z36)
+module.exports = {
+  safeName, cfgKey, entryPick, visibleOr, main, realDeps, QTY_HEADERS, qtyColumn, waitListRows, listDiag, LIST_WAIT,
+  // 🔴 10차 — D4 · D8 시험(T-D4a · T-D4b · T-D8a~d · T-D5)
+  SAVE_OK, CONFIRM_OK, numberFrom, saveVerdict, saveDoc, pickByNo, confirmVerdict, makeSalesReturn,
+};

@@ -226,6 +226,43 @@ async function createItem(sess, name, price) {
   return j && (j.id || j.itemId);
 }
 
+/**
+ * 🔴 10차 D8 ⓒ(작업지시서 §1-2 D8 · [1-V] 판매 39 §3 조건 4 · PM 판단 = API 재고 조정) — 판매 반품용 거래명세서 확정 앞 재고 선행.
+ *   확정은 회사 합산 재고 − 수량 < 0 이면 막힘(SalesService.cs:458~465). 표지 품목마다 실사 수량 = need 로 조정(StockController.cs:43 POST /api/stock/adjust ·
+ *   StockAdjustRequest = itemId · warehouseId · actualQty) → GET /api/stock/balance(:20)로 품목마다 잔량 합 ≥ need 를 값으로 확인.
+ *   창고 id = 기존 차림 값에서만(PM 조건) — 비면 부르기 0 · 이름 붙은 사유(「창고 id 없음」).
+ */
+async function ensureStock(sess, items, need, warehouseId, doCall = call) {
+  if (!warehouseId) throw new SetupError('재고 선행 — 창고 id 없음(기존 차림 값에 없음 · PM 결재 대기)');
+  for (const it of items) {
+    if (!it.id) throw new SetupError(`재고 선행 — 품목 id 없음(${L.sanitize(String(it.name || ''), 40)})`);
+    await doCall(sess, 'POST', '/api/stock/adjust', { itemId: it.id, warehouseId, actualQty: need, reason: 'W-G1-51 인쇄 측정 차림 재고 선행' }, [200]);
+  }
+  const bal = await doCall(sess, 'GET', '/api/stock/balance', undefined, [200]);
+  return stockVerdict(items, need, bal);
+}
+/** 잔량 확인(순수) — 줄마다 itemId · 수량 칸(currentQty 꼴 · 대소문자 무시)을 품목별로 더해 need 와 견줌. */
+function stockVerdict(items, need, bal) {
+  const rows = Array.isArray(bal) ? bal : (bal && typeof bal === 'object' && Array.isArray(bal.items) ? bal.items : []);
+  const QTY = ['currentQty', 'qty', 'balanceQty', 'stockQty', 'quantity'];
+  const pick = (r, keys) => {
+    const low = new Map(Object.keys(r || {}).map((k) => [k.toLowerCase(), r[k]]));
+    for (const k of keys) if (low.has(k.toLowerCase())) return low.get(k.toLowerCase());
+    return undefined;
+  };
+  const per = items.map((it) => {
+    const mine = rows.filter((r) => String(pick(r, ['itemId']) ?? '') === String(it.id));
+    const qty = mine.reduce((s, r) => {
+      const q = Number(pick(r, QTY));
+      return s + (Number.isFinite(q) ? q : 0);
+    }, 0);
+    return { name: L.sanitize(String(it.name || ''), 40), rows: mine.length, qty };
+  });
+  const short = per.filter((p) => !(p.qty >= need));
+  if (short.length) throw new SetupError(`재고 선행 — 잔량 모자람 ${short.map((p) => `${p.name} ${p.qty}/${need}(줄 ${p.rows})`).join(' · ')}`);
+  return { ok: true, need, items: per };
+}
+
 /** 양식 그림 올리기 — multipart `file` · 받은 storedPath(저장은 안 됨 · 본문에 넣어 저장). */
 async function uploadBackground(sess, png, fileName) {
   const fd = new FormData();
@@ -382,4 +419,6 @@ module.exports = {
   screenSession, screenLoginVerdict, watchLoginResponse, waitSeen, handoffToScreen,
   // 🔴 5차 ⓔ6
   confirmTerms,
+  // 🔴 10차 D8 ⓒ
+  ensureStock, stockVerdict,
 };

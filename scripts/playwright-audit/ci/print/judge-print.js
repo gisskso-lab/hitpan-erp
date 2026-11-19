@@ -347,6 +347,19 @@ function judgeCell(cell, ctx) {
   return { cat: cell.changedShape ? CAT.CHANGED : CAT.GREEN, why };
 }
 
+/**
+ * 🔴 10차 D7(작업지시서 §1-2 D7 · CTO §2-2 G3 · R11 · 명세서 §1-10-0 (7)) — 「대체 글꼴 기준」 꼬리표.
+ *   CI 리눅스 판에는 실물 맑은 고딕이 없어 줄바꿈 · 잘림 · 좌표가 대체 글꼴로 잡힌다 → 그 기준(fields 칸 상자 · noStdHeaderOutside 상자 밖 · style 잘림)을 쓴
+ *   판정 행(빨강 · 초록 · 바뀐 모양)에 꼬리표. 판정 칸(cat)은 안 바꿈(꼬리표 = 읽는 법). 절대 좌표 판정은 이 PC(윈도우 · 실물 맑은 고딕) 몫.
+ */
+const FONT_TAG = '대체 글꼴 기준';
+const COORD_KINDS = ['fields', 'noStdHeaderOutside', 'style'];
+function fontTag(cell, r) {
+  if (![CAT.RED, CAT.GREEN, CAT.CHANGED].includes(r.cat)) return r;
+  if (!(cell.expect || []).some((c) => c && COORD_KINDS.includes(c.kind))) return r;
+  return { ...r, tag: FONT_TAG };
+}
+
 /** main 대조 규칙(설계 §1-3 대조군 · F2 ⑶) — main 에서 빨강 기대인데 초록 = 그 측정이 실패를 못 잡음 → 멈춤 ⓐ. */
 function mainStops(rows, board) {
   if (board !== 'main') return [];
@@ -557,7 +570,8 @@ function judgeRun(input) {
   const { cells, board, factsById, positive, probeSelftestOk, groups } = input;
   const pc = positiveControl(positive, factsById, probeSelftestOk);
   const ctx = { board, factsById, pcOk: pc.ok };
-  const rows = cells.map((c) => ({ id: c.id, group: c.group, k: c.k, type: c.type, path: c.path, mainExpect: c.mainExpect, ...judgeCell(c, ctx) }));
+  // ⬛ [낡은 줄 · 1~9차] const rows = cells.map((c) => ({ id: c.id, group: c.group, k: c.k, type: c.type, path: c.path, mainExpect: c.mainExpect, ...judgeCell(c, ctx) }));
+  const rows = cells.map((c) => ({ id: c.id, group: c.group, k: c.k, type: c.type, path: c.path, mainExpect: c.mainExpect, ...fontTag(c, judgeCell(c, ctx)) })); // 🔴 10차 D7
   const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
   const comp = (groups || []).map((g) => composite(g, byId));
   const counts = {};
@@ -596,7 +610,8 @@ function toMarkdown(meta, res, nine) {
   L.push('');
   L.push('| 칸 | 묶음 | main 기대 | 판정 | 사유 |');
   L.push('|---|---|---|---|---|');
-  for (const r of res.rows) L.push(`| ${r.id} | ${r.group} | ${r.mainExpect || '-'} | ${r.cat} | ${String(r.why).replace(/\|/g, '/').slice(0, 300)} |`);
+  // ⬛ [낡은 줄 · 1~9차] for (const r of res.rows) L.push(`| ${r.id} | ${r.group} | ${r.mainExpect || '-'} | ${r.cat} | ${String(r.why).replace(/\|/g, '/').slice(0, 300)} |`);
+  for (const r of res.rows) L.push(`| ${r.id} | ${r.group} | ${r.mainExpect || '-'} | ${r.cat} | ${r.tag ? `〔${r.tag}〕 ` : ''}${String(r.why).replace(/\|/g, '/').slice(0, 300)} |`); // 🔴 10차 D7
   L.push('');
   L.push('| 묶음 판정 | 판정 | 칸 수 |');
   L.push('|---|---|---|');
@@ -686,4 +701,6 @@ module.exports = {
   detectionsFor, expectsFromPlan, styleKey, titleLine,
   // 🔴 3차-a(PM 11/19 판단 3) — 판 기록 두 칸(자체시험 T-Z14)
   qpdfOf, qpdfBundledOf,
+  // 🔴 10차 D7 — 꼬리표(자체시험 T-D7)
+  FONT_TAG, COORD_KINDS, fontTag,
 };

@@ -1934,6 +1934,264 @@ guardAsync(TZ36E, async () => {
   check(TZ36E, ok, `가름 ${cls} · 창 밖 날짜 「${outField}」 · 「${((/기간 값 [^·]*/.exec(r.msg || '') || [''])[0]).trim()}」 · 사진 ${w.st.shots}`);
 });
 
+// ── 🔴 10차(명세서 §1-10) — D4 저장 성공 · D8 판매 차림 · D5 창 밖 날짜 실물 꼴 후보 · D7 꼬리표 (node 만 · 제품 원문 읽기만 · 화면 · DB · 앱 0)
+const CAP10 = require('./capture');
+const REPO10 = path.resolve(__dirname, '../../../..');
+const readSrc10 = (rel) => fs.readFileSync(path.join(REPO10, rel), 'utf8');
+function webText10() {
+  const out = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(cs|razor)$/.test(e.name)) out.push(fs.readFileSync(p, 'utf8'));
+    }
+  };
+  for (const d of ['src/HitPan.Web/Pages', 'src/HitPan.Web/Services', 'src/HitPan.Web/Components']) walk(path.join(REPO10, d));
+  return out.join('\n');
+}
+/** 가짜 저장 손 — sc: { toast · body · status · needYes(창 「저장」 을 눌러야 응답) · skipYes(창이 떴는데 안 누름) · noResp · err · url } */
+function fakeSaveIo10(sc) {
+  const st = { clicks: 0, yes: [] };
+  let fire;
+  const respP = new Promise((ok) => { fire = ok; });
+  const resp = () => (sc.noResp ? null : { status: sc.status || 200, body: sc.body });
+  const io = {
+    errors: async () => (st.clicks ? sc.err || 0 : 0),
+    clickSave: async () => { st.clicks += 1; if (!sc.needYes) fire(resp()); },
+    waitResp: (u) => { st.url = u; return Promise.race([respP, new Promise((ok) => setTimeout(() => ok(null), 200))]); },
+    confirmDialog: async (c) => {
+      if (sc.skipYes) return { seen: true, text: c.title };
+      st.yes.push(c.yes);
+      if (sc.needYes) fire(resp());
+      return { seen: true, text: `${c.title} ${c.text}` };
+    },
+    dialogLeft: async () => (sc.needYes && (sc.skipYes || st.yes.length === 0) ? '수주서 자동 생성' : null),
+    toasts: async () => sc.toast || '',
+    waitUrl: async () => undefined,
+    url: () => sc.url || 'http://127.0.0.1:5234/x',
+  };
+  return { io, st };
+}
+const SAVE10 = {
+  estimate: { toast: '견적서 저장이 완료되었습니다.', body: { id: 'q-1' }, want: 'q-1' },
+  delivery: { needYes: true, toast: '저장 완료: 명-20261119-001 | 수주서 수-20261119-002 가 자동 생성되었습니다.', body: { id: 'd-1', documentNumber: '명-20261119-001', autoCreatedOrderNo: '수-20261119-002' }, want: '명-20261119-001', auto: '수-20261119-002' },
+  sales_order: { toast: '수주서 저장이 완료되었습니다.', body: { id: 's-1', documentNumber: '수-20261119-003' }, want: '수-20261119-003' },
+  purchase_order: { toast: '발주서가 서버에 저장되었습니다.', body: { id: 'p-1' }, want: 'p-1' },
+  receipt: { toast: '매입명세서가 서버에 저장되었습니다.', body: { Id: 'r-1' }, want: 'r-1' },
+  purchase_return: { toast: '매입반품을 저장했습니다.', body: { returnId: 'rt-1', returnNo: '반-20261119-001' }, want: '반-20261119-001' },
+  sales_return: { url: 'http://127.0.0.1:5234/deliveries', body: { returnId: 'sr-1', returnNo: '반-20261119-002' }, want: '반-20261119-002' },
+};
+
+// T-D4a 10차 D4 — 7종 저장 성공 = 창 · 오류 · 응답 · 성공 알림 · 번호(견적 양성 대조 칸 길 포함) · 거래명세서 = 창 안 「저장」 을 눌러야 응답
+const TD4A = 'T-D4a 10차 D4 저장 성공 = 확인 창 · 오류 · 응답 · 성공 알림 · 번호 — 7종(견적 양성 대조 길 · 거래명세서 창 안 「저장」)';
+guardAsync(TD4A, async () => {
+  const got = [];
+  let good = true;
+  for (const t of F.TYPES) {
+    const s = SAVE10[t.key];
+    const { io, st } = fakeSaveIo10(s);
+    let v;
+    try {
+      v = await CAP10.saveDoc({}, t.label, t.key, io);
+    } catch (e) {
+      v = { ok: false, why: e.message };
+    }
+    const ok = v.ok === true && v.no === s.want && (!s.auto || v.auto === s.auto) && st.url === CAP10.SAVE_OK[t.key].url
+      && (t.key === 'delivery' ? st.yes.join() === '저장' && v.pick === s.want : st.yes.length === 0);
+    if (!ok) good = false;
+    got.push(`${t.key} ${ok ? v.no : `✗ ${v.why || v.no}`}`);
+  }
+  check(TD4A, good && got.length === 7, got.join(' · '));
+});
+
+// T-D4b 10차 D4 변이 꼴 3(+2) — 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 응답 500 → 전부 이름 붙은 차림 불가(오류 알림 0 이어도)
+const TD4B = 'T-D4b 10차 D4 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 500 → 전부 빨강(오류 알림 0 ≠ 성공)';
+guardAsync(TD4B, async () => {
+  const est = F.TYPES.find((x) => x.key === 'estimate');
+  const del = F.TYPES.find((x) => x.key === 'delivery');
+  const cases = [
+    ['성공 알림 없음', est, { toast: '', body: { id: 'q-1' } }, /견적서 저장 성공 알림 없음/],
+    ['번호 빈 값', est, { toast: '견적서 저장이 완료되었습니다.', body: { id: '' } }, /견적서 전표 번호 없음/],
+    ['확인 창 안 누름', del, { needYes: true, skipYes: true, toast: '', body: { id: 'd-1', documentNumber: 'x' } }, /거래명세서 확인 창 남음/],
+    ['응답 없음', est, { noResp: true, toast: '견적서 저장이 완료되었습니다.' }, /견적서 저장 요청 응답 없음/],
+    ['응답 500', est, { status: 500, toast: '견적서 저장이 완료되었습니다.', body: { id: 'q' } }, /견적서 저장 응답 500/],
+  ];
+  const got = [];
+  let good = true;
+  for (const [name, ty, s, re] of cases) {
+    const { io } = fakeSaveIo10(s);
+    let why;
+    try {
+      await CAP10.saveDoc({}, ty.label, ty.key, io);
+      why = '통과(거짓 초록)';
+    } catch (e) {
+      why = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+    }
+    const ok = re.test(why);
+    if (!ok) good = false;
+    got.push(`${name} ${ok ? '빨강' : `✗ ${why}`}`);
+  }
+  check(TD4B, good, got.join(' · '));
+});
+
+// T-D4c 10차 D4 — 성공 알림 · 저장 주소 = 제품 Web 원문 대조(6종 알림 · 7종 주소) · 판매 반품 = 알림 대신 이동(forceLoad 원문 확인)
+const TD4C = 'T-D4c 10차 D4 성공 알림 6종 · 저장 주소 7종 = 제품 원문 · 판매 반품 forceLoad 이동';
+guardAsync(TD4C, async () => {
+  const web = webText10();
+  const del = readSrc10('src/HitPan.Web/Pages/Sales/DeliveryPage.razor');
+  const got = [];
+  let good = true;
+  for (const t of F.TYPES) {
+    const ok10 = CAP10.SAVE_OK[t.key];
+    const urlOk = web.includes(`"${ok10.url.replace(/^\//, '')}"`);
+    const toastOk = ok10.toast ? ok10.toast.test(web) : (/반품 저장 완료: \{result\.DocumentNumber\}/.test(del) && /NavigateTo\("\/deliveries", forceLoad: true\)/.test(del));
+    if (!(urlOk && toastOk)) good = false;
+    got.push(`${t.key} 주소 ${urlOk ? '○' : '×'} 알림 ${toastOk ? '○' : '×'}`);
+  }
+  check(TD4C, good, got.join(' · '));
+});
+
+// T-D8a 10차 D8 ⓐ — 「수주서 자동 생성」 창 글자(제목 · 문구 · 단추) = DeliveryPage.razor 원문 · 판매확정 창 · 알림 = SalesListDialog.razor 원문 · 동작 = 창 안 「저장」 뒤에만 저장 요청
+const TD8A = 'T-D8a 10차 D8 ⓐ 확인 창 글자 = 제품 원문(거래명세서 · 판매확정) · 창 안 「저장」 뒤에만 저장 요청';
+guardAsync(TD8A, async () => {
+  const del = readSrc10('src/HitPan.Web/Pages/Sales/DeliveryPage.razor');
+  const lst = readSrc10('src/HitPan.Web/Components/Sales/SalesListDialog.razor');
+  const c = CAP10.SAVE_OK.delivery.confirm;
+  const boxes = [...del.matchAll(/ShowMessageBoxAsync\(\s*"([^"]*)",\s*"([^"]*)",\s*yesText:\s*"([^"]*)",\s*noText:\s*"([^"]*)"\s*\)/g)].map((m) => m.slice(1, 5));
+  const box = boxes.find((b) => b[0] === c.title);
+  const textOk = !!box && box[1] === c.text && box[2] === c.yes && box[3] === c.no;
+  const k = CAP10.CONFIRM_OK;
+  const listOk = lst.includes(`>${k.button}</MudButton>`) && k.ask.test(lst) && lst.includes(`yesText: "${k.yes}"`) && /건 확정 완료/.test(lst) && lst.includes('건 확정 실패 — ');
+  const s = SAVE10.delivery;
+  const { io, st } = fakeSaveIo10(s);
+  const v = await CAP10.saveDoc({}, '거래명세서', 'delivery', io);
+  const actOk = v.ok === true && st.clicks === 1 && st.yes.join() === '저장' && /수주서 자동 생성/.test(v.dialog.text);
+  check(TD8A, textOk && listOk && actOk, `창 ${box ? `「${box.join(' / ')}」` : '못 찾음'} · 판매확정 원문 ${listOk ? '○' : '×'} · 동작 클릭 ${st.clicks} · 창 단추 ${st.yes.join() || '0'} · 번호 ${v.no}`);
+});
+
+// T-D8b 10차 D8 ⓑ — 확정 판정(완료 · 실패 사유 · 알림 없음) · 판매 반품 차례 = 확정 → 번호 줄 → [반품하기] → 사유 → 저장 · 확정을 빼면 [반품하기] 꺼짐 · 재고 선행 실패 · 번호 없음 = 이름 붙은 사유
+const TD8B = 'T-D8b 10차 D8 ⓑ 확정 판정 · 판매 반품 차례(확정 먼저) · 확정 0 → [반품하기] 꺼짐 · 재고 선행 실패 · 번호 없음';
+guardAsync(TD8B, async () => {
+  const cv = [CAP10.confirmVerdict('1건 확정 완료'), CAP10.confirmVerdict('1건 확정 실패 — 재고가 부족합니다.'), CAP10.confirmVerdict('')];
+  const nos = { delivery: { pick: '명-20261119-001', auto: '수-20261119-002' } };
+  const mk = (opt = {}) => {
+    const st = { confirmed: false, order: [] };
+    return {
+      st,
+      steps: {
+        confirm: async (t, n) => { st.order.push(`확정 ${n}`); if (!opt.noConfirm) st.confirmed = true; },
+        open: async (t, pick) => { st.order.push(`열기 ${typeof pick}`); },
+        returnEnabled: async () => st.confirmed,
+        clickReturn: async () => { st.order.push('반품하기'); },
+        pickReason: async () => { st.order.push('사유'); },
+        save: async () => { st.order.push('저장'); return { ok: true, no: '반-20261119-002', pick: '반-20261119-002' }; },
+      },
+    };
+  };
+  const msg = async (fn) => { try { await fn(); return '통과(거짓 초록)'; } catch (e) { return e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`; } };
+  const a = mk();
+  const ra = await CAP10.makeSalesReturn({}, nos, { ok: true }, a.steps);
+  const rb = await msg(() => CAP10.makeSalesReturn({}, nos, { ok: true }, mk({ noConfirm: true }).steps));
+  const rc = await msg(() => CAP10.makeSalesReturn({}, nos, { ok: false, why: '재고 선행 — 창고 id 없음' }, mk().steps));
+  const rd = await msg(() => CAP10.makeSalesReturn({}, {}, { ok: true }, mk().steps));
+  const ok = cv[0].ok === true && cv[0].n === 1 && cv[1].ok === false && /재고가 부족합니다/.test(cv[1].why) && cv[2].ok === false && /확정 알림 없음/.test(cv[2].why)
+    && ra.no === '반-20261119-002' && a.st.order.join('>') === '확정 명-20261119-001>열기 function>반품하기>사유>저장'
+    && /\[반품하기\] 꺼짐/.test(rb) && /재고 선행 실패 — 재고 선행 — 창고 id 없음/.test(rc) && /거래명세서 번호 없음/.test(rd);
+  check(TD8B, ok, `판정 ${cv.map((x) => (x.ok ? '완료' : x.why)).join(' / ')} · 차례 ${a.st.order.join('>')} · 확정 0 「${rb}」 · 재고 「${rc}」 · 번호 「${rd}」`);
+});
+
+// T-D8c 10차 D8 ⓒ — 재고 선행: 창고 id 없음 = 부르기 0 · 품목마다 조정 → 잔량 확인 · 잔량 모자람 = 이름 붙은 사유(가짜 저장 문 · 잔량 = 조정 값)
+const TD8C = 'T-D8c 10차 D8 ⓒ 재고 선행 = 조정 → 잔량 값 확인 · 창고 id 없음 → 부르기 0 · 모자람 → 빨강';
+guardAsync(TD8C, async () => {
+  const items = F.MARK.items.map((it, k) => ({ name: it.name, id: `it-${k}` }));
+  const need = 70;
+  const mkCall = (opt = {}) => {
+    const st = { calls: [], adj: new Map() };
+    return {
+      st,
+      call: async (sess, m, p, body) => {
+        st.calls.push(`${m} ${p}`);
+        if (m === 'POST' && p === '/api/stock/adjust') { st.adj.set(body.itemId, opt.half ? body.actualQty / 2 : body.actualQty); return { itemId: body.itemId }; }
+        if (m === 'GET' && p === '/api/stock/balance') return [...st.adj.entries()].map(([itemId, q]) => ({ itemId, warehouseId: 'w-1', currentQty: q }));
+        throw new Error(`모르는 문 ${m} ${p}`);
+      },
+    };
+  };
+  const msg = async (fn) => { try { await fn(); return '통과(거짓 초록)'; } catch (e) { return e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`; } };
+  const a = mkCall();
+  const ra = await S.ensureStock({}, items, need, 'w-1', a.call);
+  const b = mkCall();
+  const rb = await msg(() => S.ensureStock({}, items, need, '', b.call));
+  const c = mkCall({ half: true });
+  const rc = await msg(() => S.ensureStock({}, items, need, 'w-1', c.call));
+  const ok = ra.ok === true && ra.items.every((x) => x.qty >= need) && a.st.calls.length === items.length + 1 && /창고 id 없음/.test(rb) && b.st.calls.length === 0 && /잔량 모자람/.test(rc);
+  check(TD8C, ok, `조정 ${a.st.calls.join(' · ')} · 잔량 ${ra.items.map((x) => x.qty).join('/')} · 창고 없음 「${rb}」(부르기 ${b.st.calls.length}) · 모자람 「${rc.slice(0, 60)}」`);
+});
+
+// T-D8d 10차 D8 ⓓ — 번호 고르기: 수주서 = 제 번호(자동 생성 수주가 첫 줄이어도) · 제 번호 없으면 자동 생성 뺌 · 둘 다 없으면 번호 없음 · 거래명세서 = 제 번호 + 반품 뺌 · ⓙ = 반품 줄 · 견적 = id 뿐이면 표지 줄
+const TD8D = 'T-D8d 10차 D8 ⓓ 입구 번호 고르기(수주서 자동 생성 첫 줄 피함 · 거래명세서 · ⓙ · 견적)';
+guardAsync(TD8D, async () => {
+  const fakeRows = (arr) => ({
+    filter: (o) => fakeRows(arr.filter((x) => (o.hasText === undefined || x.includes(o.hasText)) && (o.hasNotText === undefined || !x.includes(o.hasNotText)))),
+    first: () => arr[0],
+    all: arr,
+  });
+  const so = fakeRows(['2026-11-19 수-20261119-002 ' + F.MARK.partner, '2026-11-19 수-20261119-003 ' + F.MARK.partner]);
+  const nos = { sales_order: { pick: '수-20261119-003' }, delivery: { pick: '명-20261119-001', auto: '수-20261119-002' }, sales_return: { pick: '반-20261119-002' } };
+  const p1 = CAP10.entryPick('sales_order', 'doc', nos)(so).first();
+  const p2 = CAP10.entryPick('sales_order', 'doc', { delivery: nos.delivery })(so).first();
+  let p3 = '';
+  try { CAP10.entryPick('sales_order', 'doc', {}); p3 = '통과(거짓 초록)'; } catch (e) { p3 = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`; }
+  const dl = fakeRows(['명-20261119-001 ' + F.MARK.partner, '└ 반-20261119-002 명-20261119-001 의 반품 ' + F.MARK.partner]);
+  const p4 = CAP10.entryPick('delivery', 'doc', nos)(dl).all;
+  const p5 = CAP10.entryPick('sales_return', 'doc-j', nos)(dl).all;
+  const p6 = CAP10.entryPick('estimate', 'doc', {})(fakeRows(['견적 ' + F.MARK.partner])).all.length;
+  const ok = String(p1).includes('-003') && String(p2).includes('-003') && /번호 없음/.test(p3) && p4.length === 1 && !p4[0].includes('반품') && p5.length === 1 && p5[0].includes('반품') && p6 === 1;
+  check(TD8D, ok, `수주서 「${String(p1).slice(11, 26)}」 · 자동 뺌 「${String(p2).slice(11, 26)}」 · 둘 다 없음 「${p3.slice(0, 30)}」 · 거래명세서 ${p4.length} · ⓙ ${p5.length} · 견적 ${p6}`);
+});
+
+// T-D5 10차 D5(F9-1) — 판매일자 선언 = DateFormat · Culture 없음(정적으로 꼴 못 닫음 → 후보 꼴 2) · 목록 창 기간 = DateFormat yyyy-MM-dd 2 · 창 밖 날짜가 후보 꼴 둘 다 잡음
+const TD5 = 'T-D5 10차 D5 F9-1 판매일자 선언 원문 · 창 밖 날짜 = 후보 꼴 2(yyyy-MM-dd · yyyy. M. d.) 모두 기록';
+guardAsync(TD5, async () => {
+  const del = readSrc10('src/HitPan.Web/Pages/Sales/DeliveryPage.razor');
+  const lst = readSrc10('src/HitPan.Web/Components/Sales/SalesListDialog.razor');
+  const decl = (/<MudDatePicker[^>]*Label="판매일자"[^>]*\/>/.exec(del) || [''])[0];
+  const listFmt = (lst.match(/DateFormat="yyyy-MM-dd"/g) || []).length;
+  const t = F.TYPES.find((x) => x.key === 'delivery');
+  const pick = CAP10.entryPick('delivery', 'doc');
+  const none = '조회된 거래명세서가 없습니다.';
+  const forms = ['2026-11-19', '2026. 11. 19.'];
+  const out = [];
+  for (const v of forms) {
+    const dlgIn = ['2026-10-20', '2026-11-19'];
+    const w = fakeList8({ rows: [{ head: true, text: '일자\t전표번호\t업체\t작성자\t상태\t금액' }, { text: none }], dlgInputs: dlgIn, pageInputs: [v], dlgText: `판매 목록 조회\n${none}` });
+    w.page.locator = () => ({ evaluateAll: async (fn) => fn([...dlgIn.map((value) => ({ value, closest: () => ({}) })), { value: v, closest: () => null }]) });
+    let m = '';
+    try { await CAP10.waitListRows(w.page, w.dlg, t, pick, 300); } catch (e) { m = String(e.message); }
+    out.push(((/창 밖 날짜 ([^·]*)/.exec(m) || [])[1] || '').trim());
+  }
+  const ok = decl !== '' && !/DateFormat|Culture/.test(decl) && listFmt === 2 && out[0] === forms[0] && out[1] === forms[1];
+  check(TD5, ok, `판매일자 「${decl.slice(0, 90)}」 · 목록 기간 DateFormat ${listFmt} · 창 밖 날짜 ${out.map((x) => `「${x}」`).join(' / ')}`);
+});
+
+// T-D7 10차 D7 — 좌표 · 잘림 기준(fields · noStdHeaderOutside · style) 판정 행 = 꼬리표 · 그 밖 · 차림 불가 = 꼬리표 0 · judgeRun 행 · 결과표 글에 꼬리표 · 꼬리표 없는 좌표 판정 0
+const TD7 = 'T-D7 10차 D7 「대체 글꼴 기준」 꼬리표 — 좌표 판정 행 100% · 그 밖 0 · 결과표 글';
+guardAsync(TD7, async () => {
+  const red = J.fontTag({ expect: [{ kind: 'fields' }] }, { cat: C.RED, why: 'x' });
+  const grn = J.fontTag({ expect: [{ kind: 'style' }, { kind: 'docIs' }] }, { cat: C.GREEN, why: 'x' });
+  const img = J.fontTag({ expect: [{ kind: 'image' }] }, { cat: C.RED, why: 'x' });
+  const setup = J.fontTag({ expect: [{ kind: 'fields' }] }, { cat: C.SETUP, why: 'x' });
+  const cell = { id: 'd7-a', group: 'g', status: 'captured', expect: [{ kind: 'fields', fields: [{ key: 'partner_name', box: null, want: F.MARK.partner }] }] };
+  const pcf = typeof pcFacts !== 'undefined' ? pcFacts : {};
+  const run = J.judgeRun({ cells: [cell], board: 'main', factsById: { ...pcf, [cell.id]: facts([{ words: [word(F.MARK.partner, 30, 40)] }]) }, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [] });
+  const coordRows = run.rows.filter((r) => [C.RED, C.GREEN, C.CHANGED].includes(r.cat));
+  const untagged = coordRows.filter((r) => r.tag !== J.FONT_TAG).length;
+  const md = J.toMarkdown({ run: 'R?', job: 'd7', board: 'main' }, run, undefined);
+  const ok = red.tag === J.FONT_TAG && grn.tag === J.FONT_TAG && !img.tag && !setup.tag && coordRows.length === 1 && untagged === 0 && md.includes(`〔${J.FONT_TAG}〕`);
+  check(TD7, ok, `빨강 ${red.tag || '-'} · 초록 ${grn.tag || '-'} · 그림 ${img.tag || '-'} · 차림 불가 ${setup.tag || '-'} · 런 행 ${run.rows.map((r) => r.cat).join('/')} · 좌표 행 ${coordRows.length} · 꼬리표 없음 ${untagged} · 결과표 ${md.includes(`〔${J.FONT_TAG}〕`) ? '○' : '×'}`);
+});
+
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
 // 🔴 4차 — 비동기 경우(가짜 fetch)를 차례로 끝낸 뒤 같은 끝 줄
 (async () => {
