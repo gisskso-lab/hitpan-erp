@@ -281,6 +281,24 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   다음 사람이 「두 번 그렸나」로 읽는다. 한 번만 부른다.
                 var pageSize = ResolvePageSize(template, documentType, useCoords);
                 page.Size(pageSize);
+                // 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §4 R-4 · R-5 · PM 결재 §74] 폭 모자람 대체.
+                //   큰글씨는 고정 칸 합 427pt + 품명 최소 32pt = 본문 폭 459pt 가 있어야 그린다.
+                //   [그대로 두면 무슨 일이 나나] 고정 칸 합이 본문 폭을 넘으면 품명(상대 칸) 폭이 0 아래로 간다 —
+                //     배치 엔진 동작 미측정 · 예외면 전표가 안 나간다(#20). 그래서 모자라면 큰글씨 대신 basic(옛 작성기 ·
+                //     머리 · 본문 · 쪽번호 모두)으로 그리고 경고 1줄을 남긴다(A5 세로 = 늘 · A4 세로는 좌우 여백 24mm 언저리부터).
+                //   🔴 W = 바로 위 `pageSize`(용지 · 방향 결과 · `ResolvePageSize` 1번 부름 그대로) 폭 − 좌우 여백(빈 칸 = 20mm) — 미리보기와 종이가 같은 셈(R-5).
+                //   🔴 좌표 경로는 `printStyle` 이 이미 null(조건 ③)이라 여기 안 걸린다. 격식 · 간결은 문턱 0 = 검사 0.
+                //   🔴 아래 머리 · 본문 · 쪽번호 줄이 이 값을 읽는다 — 이 칸 뒤에서 다시 바꾸지 않는다.
+                if (printStyle is not null
+                    && IsBodyTooNarrowForStyle(printStyle, pageSize.Width, marginLeft, marginRight))
+                {
+                    _logger.LogWarning(
+                        "[PDF] 양식 스타일 {Style} 은 본문 폭 {Need}pt 이상에서만 그린다 — 이 용지 · 여백의 본문 폭은 {Width}pt 라 기본 모양으로 그린다. "
+                        + "좌우 여백을 줄이거나 방향을 가로로 바꾸면 그 모양으로 나온다.",
+                        printStyle.Key, printStyle.MinBodyWidth,
+                        MathF.Round(BodyWidthPt(pageSize.Width, marginLeft, marginRight), 1));
+                    printStyle = null;
+                }
                 // 🔴 스타일 칸을 **읽는다** — 지금은 늘 basic 이다(배선만 · 4종 디자인 미확정).
                 //   종전에는 저장·조회만 되고 작성기가 이 칸을 아예 몰랐다. 모르는 값이 오면
                 //   ResolveStyleKey 가 적어 둔다 — 조용히 넘어가지 않는다.
@@ -549,6 +567,7 @@ public sealed class PdfRenderService : IPdfRenderService
     /// <remarks>
     /// 🔴 basic 인스턴스는 없다 — basic 은 옛 작성기를 그대로 탄다(위 주석).
     /// 🔴 시안 표에 없는 값(간격 · 비고 안쪽 6 · 비고 표제 반굵게 · 열 너비)은 basic 값 그대로다.
+    /// 🔴 ⬛ 정정(2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 · PM 결재 §74): 열 너비 · 숫자 칸 안쪽은 <b>큰글씨만</b> 따로다 — 격식 · 간결은 basic 값 그대로.
     /// 🔴 글자는 모두 검정 · 강조색 0(시안 §0 「색」 · §2 「글자는 모두 #000」).
     /// </remarks>
     private sealed record PrintStyle
@@ -610,9 +629,30 @@ public sealed class PdfRenderService : IPdfRenderService
         /// <summary>
         /// 🔴 품명 : 규격 비율 — 지금 4종 모두 basic 과 같은 3 : 2.
         /// 큰글씨 품명 칸 넓힘 폭은 <b>문서에 수치가 없어</b> 짐작하지 않았다(개발명세서 §3 멈춤 · 대표 §11 #3 「둘 다 허용」).
+        /// ⬛ 정정(고침 2 · 큰글씨 시안 정정 §2-1): 큰글씨는 규격이 고정 칸(<c>SpecColumnWidth</c> 51)이라 품명이 남는 폭을 다 받는다(비율 1).
         /// </summary>
         public float ItemNameRelative { get; init; } = 3;
         public float SpecRelative { get; init; } = 2;
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 · §4 R-4 · PM 결재 §74] 열 너비 · 숫자 칸 안쪽 · 폭 문턱.
+        //   🔴 기본값 = basic 열 너비(30 · 3:2 · 60 · 80 · 90 · 70 · 90) · 지금 안쪽 그대로 ⇒ 값을 안 적는 격식 · 간결 종이는 안 바뀐다(#1).
+        /// <summary>순 칸 폭(pt).</summary>
+        public float SeqColumnWidth { get; init; } = 30;
+        /// <summary>비움 = 규격도 상대 칸(<c>SpecRelative</c>). 값 = 고정 칸 폭(pt) — 큰글씨 51(한글 4자 · 정정 §2-2).</summary>
+        public float? SpecColumnWidth { get; init; }
+        public float QtyColumnWidth { get; init; } = 60;
+        public float UnitPriceColumnWidth { get; init; } = 80;
+        public float SupplyColumnWidth { get; init; } = 90;
+        public float VatColumnWidth { get; init; } = 70;
+        public float TotalColumnWidth { get; init; } = 90;
+        /// <summary>
+        /// 숫자 칸(수량 · 단가 · 공급가액 · 부가세 · 합계 · 머리 포함) 좌우 안쪽. 비움 = 글자 칸과 같은 <c>CellPadHorizontal</c>.
+        /// </summary>
+        public float? NumberCellPadHorizontal { get; init; }
+        /// <summary>
+        /// 이 스타일을 그릴 수 있는 가장 좁은 본문 폭(pt). 0 = 검사 없음.
+        /// 큰글씨 = 459(고정 칸 27 + 51 + 61 + 72 × 4 = 427 + 품명 최소 32 · 정정 §4 R-4) — 모자라면 basic 으로 그린다(<c>IsBodyTooNarrowForStyle</c>).
+        /// </summary>
+        public float MinBodyWidth { get; init; }
         // 🔴 큰글씨 품명 줄바꿈(잘림 0 · 대표 §11 #3) = QuestPDF 배치 엔진 기본 동작이다 — 긴 낱말도 칸 안에서 접는다.
         //   `WrapAnywhere()` 는 2024.3 판부터 쓰지 않는 칸(CS0618 「layout engine 이 알아서 다룬다」 · 이 저장소 2026.2.4)이라 안 쓴다.
         //   🔴 그래서 품명 칸에 줄 수 제한(`ClampLines`) · 높이 고정을 **걸지 않는 것**이 잘림 0 의 조건이다.
@@ -677,13 +717,34 @@ public sealed class PdfRenderService : IPdfRenderService
         PartnerLabelSize = 11, PartnerNameSize = 12, PartnerOtherSize = 11,
         TableOuterLine = 0.75f, TableOuterColor = "#757575",
         HeadBackground = "#E0E0E0", HeadLine = 0.75f, HeadLineColor = "#757575", HeadTextSize = 11,
-        BodyLine = 0.5f, BodyLineColor = "#9E9E9E", BodyTextSize = 11,
+        // 🔴🔴 [2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 1안 · PM 결재 §74] 표 본문 11 → 10.5 · 안쪽 6 → 글자 칸 3 · 숫자 칸 2 · 위아래 5 ·
+        //   큰글씨 전용 열 너비 · 폭 문턱 459. 까닭 = 시안 값(11 · 안쪽 6)으로는 부가세 9자리 · 수량 큰 수가 칸을 넘어 줄이 바뀌고
+        //   품명 2자/줄 · 규격 1자/줄([4] F1 · F3) — 1안 = 10자리 금액 · 수량 1,000,000.0 · 규격 한글 4자 줄바꿈 0 · 품명 4자/줄(정적 셈 · 정정 §2-2).
+        //   ⬛ 종전: BodyLine = 0.5f, BodyLineColor = "#9E9E9E", BodyTextSize = 11,
+        BodyLine = 0.5f, BodyLineColor = "#9E9E9E", BodyTextSize = 10.5f,
         ZebraEvenBackground = "#F2F2F2",
-        CellPadVertical = 6, CellPadHorizontal = 6,
+        //   ⬛ 종전: CellPadVertical = 6, CellPadHorizontal = 6,
+        CellPadVertical = 5, CellPadHorizontal = 3, NumberCellPadHorizontal = 2,
+        SeqColumnWidth = 27, ItemNameRelative = 1, SpecColumnWidth = 51,
+        QtyColumnWidth = 61, UnitPriceColumnWidth = 72, SupplyColumnWidth = 72, VatColumnWidth = 72, TotalColumnWidth = 72,
+        MinBodyWidth = 459,
         SumSize = 12, TotalSize = 16, TotalRule = 1.5f,
         RemarkLine = 0.75f, RemarkLineColor = "#757575", RemarkSize = 11,
         PageNumberSize = 9,
     };
+
+    /// <summary>
+    /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §4 R-5] 본문 폭(pt) = 종이 폭 − 좌우 여백(mm · 1mm = 72/25.4pt).
+    /// </summary>
+    private static float BodyWidthPt(float pageWidthPt, float marginLeftMm, float marginRightMm) =>
+        pageWidthPt - (marginLeftMm + marginRightMm) * 72f / 25.4f;
+
+    /// <summary>
+    /// 🔴 [고침 2 · 정정 §4 R-4] 이 스타일의 고정 칸이 본문 폭에 다 안 드나 — 참이면 그 스타일 대신 basic 으로 그린다.
+    /// </summary>
+    /// <remarks>문턱 0(격식 · 간결) = 늘 거짓. 큰글씨 = 459pt.</remarks>
+    private static bool IsBodyTooNarrowForStyle(PrintStyle style, float pageWidthPt, float marginLeftMm, float marginRightMm) =>
+        style.MinBodyWidth > 0 && BodyWidthPt(pageWidthPt, marginLeftMm, marginRightMm) < style.MinBodyWidth;
 
     /// <summary>
     /// 🔴 스타일 양식의 머리(매 쪽 반복). basic 은 옛 <see cref="ComposeHeader"/> 를 탄다.
@@ -761,6 +822,7 @@ public sealed class PdfRenderService : IPdfRenderService
     /// </summary>
     /// <remarks>
     /// 🔴 칸 순서 · 항목 · 열 너비(고정 칸) · 숫자 서식(`N1` · `N0`)은 basic 과 같다 — 바뀌는 것은 글자 크기 · 선 · 면 · 안쪽뿐(시안 §0).
+    /// 🔴 ⬛ 정정(고침 2 · 큰글씨 시안 정정 §2 · §5): <b>큰글씨만</b> 열 너비 · 숫자 칸 안쪽이 따로다(묶음 값) — 칸 순서 · 항목 · 숫자 서식은 4종 공통.
     /// 🔴 <c>show_border=0</c>(시안 :109 「4종 모두 지금 규칙 그대로」) = basic 이 끄는 자리와 같은 자리만 끈다 —
     ///   거래처 선(간결 = 표제 밑줄) · 표 선(바깥 · 머리 · 본문) 0 · 면(머리 · 줄무늬) 끔 · 칸 안쪽 +1.
     ///   머리 아래 선 · 총 합계 위 선 · 비고 선은 basic 처럼 그대로 둔다.
@@ -771,6 +833,8 @@ public sealed class PdfRenderService : IPdfRenderService
         var plus = showBorder ? 0f : 1f;
         var padV = s.CellPadVertical + plus;
         var padH = s.CellPadHorizontal + plus;
+        // 🔴 [고침 2] 숫자 칸(오른쪽 맞춤 5칸 · 머리 포함) 좌우 안쪽 — 묶음이 비우면 글자 칸과 같다(격식 · 간결 무변).
+        var padHNum = (s.NumberCellPadHorizontal ?? s.CellPadHorizontal) + plus;
 
         e.PaddingTop(10).Column(col =>
         {
@@ -809,14 +873,25 @@ public sealed class PdfRenderService : IPdfRenderService
             {
                 tbl.ColumnsDefinition(cd =>
                 {
-                    cd.ConstantColumn(30);                    // 순번
+                    // 🔴 [고침 2 · 정정 §2-1] 열 너비 = 묶음 값(기본값 = 아래 옛 숫자 그대로 · 큰글씨만 따로).
+                    // ⬛ 종전: cd.ConstantColumn(30);                    // 순번
+                    cd.ConstantColumn(s.SeqColumnWidth);      // 순번
                     cd.RelativeColumn(s.ItemNameRelative);    // 품명
-                    cd.RelativeColumn(s.SpecRelative);        // 규격
-                    cd.ConstantColumn(60);                    // 수량
-                    cd.ConstantColumn(80);                    // 단가
-                    cd.ConstantColumn(90);                    // 공급가
-                    cd.ConstantColumn(70);                    // 부가세
-                    cd.ConstantColumn(90);                    // 합계
+                    // ⬛ 종전: cd.RelativeColumn(s.SpecRelative);        // 규격
+                    if (s.SpecColumnWidth is float specWidth)
+                        cd.ConstantColumn(specWidth);         // 규격(큰글씨 = 고정 51)
+                    else
+                        cd.RelativeColumn(s.SpecRelative);    // 규격
+                    // ⬛ 종전: cd.ConstantColumn(60);                    // 수량
+                    // ⬛ 종전: cd.ConstantColumn(80);                    // 단가
+                    // ⬛ 종전: cd.ConstantColumn(90);                    // 공급가
+                    // ⬛ 종전: cd.ConstantColumn(70);                    // 부가세
+                    // ⬛ 종전: cd.ConstantColumn(90);                    // 합계
+                    cd.ConstantColumn(s.QtyColumnWidth);      // 수량
+                    cd.ConstantColumn(s.UnitPriceColumnWidth); // 단가
+                    cd.ConstantColumn(s.SupplyColumnWidth);   // 공급가
+                    cd.ConstantColumn(s.VatColumnWidth);      // 부가세
+                    cd.ConstantColumn(s.TotalColumnWidth);    // 합계
                 });
                 tbl.Header(h =>
                 {
@@ -837,11 +912,17 @@ public sealed class PdfRenderService : IPdfRenderService
                     Body(tbl.Cell(), even).AlignCenter().Text($"{seq}").FontSize(s.BodyTextSize);
                     Body(tbl.Cell(), even).Text(line.ItemName).FontSize(s.BodyTextSize);   // 줄 수 제한 0 = 잘림 0
                     Body(tbl.Cell(), even).Text(line.Spec ?? "").FontSize(s.BodyTextSize);
-                    Body(tbl.Cell(), even).AlignRight().Text(line.Qty.ToString("N1")).FontSize(s.BodyTextSize);
-                    Body(tbl.Cell(), even).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(s.BodyTextSize);
-                    Body(tbl.Cell(), even).AlignRight().Text(line.Supply.ToString("N0")).FontSize(s.BodyTextSize);
-                    Body(tbl.Cell(), even).AlignRight().Text(line.Vat.ToString("N0")).FontSize(s.BodyTextSize);
-                    Body(tbl.Cell(), even).AlignRight().Text(line.Total.ToString("N0")).FontSize(s.BodyTextSize);
+                    // 🔴 [고침 2] 숫자 5칸 = 숫자 칸 안쪽(`number: true`) · 글자 · 서식 · 맞춤 무변.
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Qty.ToString("N1")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Supply.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Vat.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Total.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Qty.ToString("N1")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Supply.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Vat.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Total.ToString("N0")).FontSize(s.BodyTextSize);
                 }
                 if (d.Lines.Count == 0)
                 {
@@ -879,18 +960,23 @@ public sealed class PdfRenderService : IPdfRenderService
             if (showBorder && s.HeadBackground is not null) x = x.Background(s.HeadBackground);
             var w = showBorder ? s.HeadLine : 0f;
             x = s.HeadLineBottomOnly ? x.BorderBottom(w) : x.Border(w);
-            x = x.BorderColor(s.HeadLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            // ⬛ 종전: x = x.BorderColor(s.HeadLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            // 🔴 [고침 2] 오른쪽 맞춤 머리 = 숫자 칸 → 숫자 칸 안쪽.
+            x = x.BorderColor(s.HeadLineColor).PaddingVertical(padV).PaddingHorizontal(alignRight ? padHNum : padH);
             if (alignRight) x = x.AlignRight();
             x.Text(text).FontSize(s.HeadTextSize).Bold();
         }
 
-        IContainer Body(IContainer cell, bool even)
+        // ⬛ 종전: IContainer Body(IContainer cell, bool even)
+        // 🔴 [고침 2] `number` = 숫자 칸(숫자 칸 안쪽) · 기본 거짓 = 글자 칸(순 · 품명 · 규격 · 「품목 정보 없음」).
+        IContainer Body(IContainer cell, bool even, bool number = false)
         {
             var x = cell;
             if (showBorder && even && s.ZebraEvenBackground is not null) x = x.Background(s.ZebraEvenBackground);
             var w = showBorder ? s.BodyLine : 0f;
             x = s.BodyLineHorizontalOnly ? x.BorderBottom(w) : x.Border(w);
-            return x.BorderColor(s.BodyLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            // ⬛ 종전: return x.BorderColor(s.BodyLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            return x.BorderColor(s.BodyLineColor).PaddingVertical(padV).PaddingHorizontal(number ? padHNum : padH);
         }
     }
 
@@ -2716,6 +2802,9 @@ public sealed class PdfRenderService : IPdfRenderService
     ///   4종 시안 승인(대표 §11 #1). 이제 허용 4개(<c>basic</c> · <c>formal</c> · <c>simple</c> · <c>large</c> · 대소문자 무시)는
     ///   소문자 키로 돌려준다. 모르는 값 · 빈 값은 <b>지금 그대로</b>(모르는 값 = 경고 한 줄 + basic · 빈 값 = basic).
     ///   🔴 이 함수는 경고만 맡는다 — 그리는 값 묶음은 <see cref="ResolvePrintStyle"/>(순백지에만)이 정한다.
+    /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · E⑷ 작업지시서 E4-6 · §7] 위에 옮겨 적은 출하 DDL 주석 <i>"4종 확정 전까지 basic 단일"</i> 도 낡았다(이력으로 둔다) —
+    ///   그 주석 새 글자 = <i>"디자인 스타일 (DB-90). basic·formal·simple·large — 빈 A4 순백지이고 양식 그림이 없는 양식에만 쓰임(그 밖은 basic 모양)"</i>
+    ///   (E⑷ §7 · DDL 주석만 · 마이그 0 · DDL 손질은 E⑷ 몫).
     /// </remarks>
     private string ResolveStyleKey(FormTemplateInfo? template)
     {
@@ -3971,6 +4060,8 @@ public sealed class PdfRenderService : IPdfRenderService
         /// 🔴 [2026-11-20 W-G1-51 갈래 E⑵] 위 「지금은 무엇이 와도 basic」 은 낡았다(이력으로 둔다) —
         /// 순백지 양식에 한해 <c>formal</c> · <c>simple</c> · <c>large</c> 를 그린다(<c>ResolvePrintStyle</c>).
         /// 🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1] 법정 서식(또는 그 후보) 3종(세금계산서 · 면세계산서 · 입금표)은 빼고.
+        /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · E⑷ E4-6 · §7] 위에 옮겨 적은 DDL 주석 <i>"4종 확정 전까지 basic 단일"</i> 도 낡았다(이력으로 둔다) —
+        /// 새 글자 = <i>"디자인 스타일 (DB-90). basic·formal·simple·large — 빈 A4 순백지이고 양식 그림이 없는 양식에만 쓰임(그 밖은 basic 모양)"</i>.
         /// </summary>
         public string StyleKey { get; set; } = "basic";
 
