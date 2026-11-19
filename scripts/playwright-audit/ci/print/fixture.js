@@ -115,7 +115,15 @@ const K_CASES = [
   { k: 'K5', noDoorAtMain: 'PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)', mainExpect: '문 없음' },
 ];
 
-/** 저장 문 본문(같은 문 · 같은 본문 = main · 고친 판 공통 · F2 ⑴). */
+/**
+ * 저장 문 본문(같은 문 · 같은 본문 = main · 고친 판 공통 · F2 ⑴).
+ * 🔴 5차 ⓔ1(11/19 · Z3 런 44444478932 · 161칸 차림 불가 「POST /api/settings/form-templates 응답 500」 ·
+ *   API 로그 `CONSTRAINT form_templates.field_coords_json failed` · `FormTemplateService.cs:136` INSERT)
+ *   빈 글자 '' 는 `CHECK (json_valid(field_coords_json))`(`installer/hitpan_db_clean.sql:1428`) 위반 → 500.
+ *   화면 저장 길(`FormTemplateEditorDialog.razor` `SaveAsync` :1218 → `BuildCoordsJson` :809~ · :812 · :827)은 좌표 없음 = **null**
+ *   · 그림 없음 = **null**(`FormTemplatesPage.razor:215` 기본 null · 편집창 지우기 :1040 · :1045 = null) → 장치를 화면 꼴로 맞춤.
+ *   대조 표(칸마다 화면 값 · 장치 값) = 개발명세서 §1-5 ⓔ1.
+ */
 function templateBody(t, i, over) {
   const o = over || {};
   return {
@@ -128,8 +136,10 @@ function templateBody(t, i, over) {
     marginLeftMm: 0,
     marginRightMm: 0,
     marginBottomMm: 0,
-    fieldCoordsJson: o.coords ? coordsJson(i) : '',
-    backgroundImageUrl: o.bgPath || '',
+    // ⬛ [낡은 줄 · 1~4차] fieldCoordsJson: o.coords ? coordsJson(i) : '',
+    // ⬛ [낡은 줄 · 1~4차] backgroundImageUrl: o.bgPath || '',
+    fieldCoordsJson: o.coords ? coordsJson(i) : null, // 🔴 5차 ⓔ1 — 좌표 없음 = null(화면 :812 · :827)
+    backgroundImageUrl: o.bgPath || null, // 🔴 5차 ⓔ1 — 그림 없음 = null(화면 기본 · 지우기와 같음)
     showCompanyLogo: true,
     showCompanySeal: false,
     showBorder: true,

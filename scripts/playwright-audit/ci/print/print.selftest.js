@@ -773,6 +773,344 @@ guardAsync('T-Z26 ⓒ 넘김 순서 · 409 차림 불가 · 뒤 차림 = 화면 
     `409 순서 ${badOrder} · 409 md ${m.cat}(${/화면 로그인 응답 409/.test(m.row)}) · 200 순서 ${goodOrder} · 판정 ${good.h.verdict.ok} · 뒤 차림 화면 세션 ${!!viaScreen}`);
 });
 
+// ════ 5차(11/19 · 개발명세서 §1-5 ⓔ1~ⓔ6 · Z3 런 44444478932) ════
+//   Z3 = 161칸 차림 불가 「양식 차림 실패 — POST /api/settings/form-templates 응답 500」 · API 로그 `CONSTRAINT form_templates.field_coords_json failed`
+//   원인 = 장치 본문 fieldCoordsJson '' (화면은 null · FormTemplateEditorDialog.razor:812 · :827) → 출하 DDL CHECK(json_valid) 위반
+//   각 경우 = 「고치기 전 장치(f50a1c05)에서 실패 · 고친 판에서 통과」 · 네트워크 · 브라우저 · DB · 앱 0
+
+// T-Z27 ⓔ2 — 차림이 보낼 수 있는 양식 본문 전수(경쟁 · 시험 처음 · 칸 차림마다 · 양식지 거침 · 편집창): JSON 칸 = null 또는 해석되는 배열 · 빈 글자 칸 0
+guard('T-Z27 ⓔ2 양식 본문 JSON 칸 = null 또는 배열 · 빈 글자 칸 0', () => {
+  const bodies = [];
+  const planned = F.plannedCells();
+  F.TYPES.forEach((t, i) => {
+    bodies.push(['경쟁', F.competitorBody(t)]);
+    bodies.push(['시험 처음 · 편집창', F.templateBody(t, i, { paperMode: 'plain' })]);
+    const seen = new Set();
+    for (const c of planned.cells.filter((x) => x.type === t.key && x.tpl)) {
+      const key = JSON.stringify(c.tpl);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const over = { ...c.tpl, bgPath: c.tpl.bg ? 'form-bg/selftest.png' : '' }; // capture.js ⑥ 과 같은 꼴(그림 없음 = '')
+      if (c.tpl.via === 'preprint') bodies.push([`${c.k} 양식지 거침`, F.templateBody(t, i, { ...over, paperMode: 'preprint' })]);
+      bodies.push([c.k, F.templateBody(t, i, over)]);
+    }
+  });
+  const bad = [];
+  for (const [what, b] of bodies) {
+    const empty = Object.keys(b).filter((k) => b[k] === '');
+    const fc = b.fieldCoordsJson;
+    let fcOk = fc === null;
+    if (typeof fc === 'string') {
+      try {
+        fcOk = Array.isArray(JSON.parse(fc));
+      } catch (e) {
+        fcOk = false;
+        bad.push(`${b.formType}/${what} 좌표 해석 실패 ${e.name}`);
+      }
+    }
+    const bgOk = b.backgroundImageUrl === null || (typeof b.backgroundImageUrl === 'string' && b.backgroundImageUrl.length > 0);
+    if (empty.length || !fcOk || !bgOk) bad.push(`${b.formType}/${what}: 빈 글자 칸 ${empty.join(',') || '0'} · 좌표 ${fcOk} · 그림 ${bgOk}`);
+  }
+  const withCoords = bodies.filter(([, b]) => typeof b.fieldCoordsJson === 'string' && b.fieldCoordsJson.length > 0).length;
+  check('T-Z27 ⓔ2 양식 본문 JSON 칸 = null 또는 배열 · 빈 글자 칸 0',
+    bodies.length > 0 && withCoords > 0 && bad.length === 0,
+    `본문 ${bodies.length} · 좌표 실음 ${withCoords} · 어긋남 ${bad.length}${bad.length ? ` (${bad.slice(0, 2).join(' | ')})` : ''}`);
+});
+
+// ── T-Z28 ⓔ3 배선 시험 — capture.js main 을 그대로 돌린다(가짜 K 응답 = 가짜 fetch · 가짜 화면 손 · 메모리 fs · 가짜 브라우저) ──
+//   가짜 문(제품 꼴만 흉내): 로그인(약관 표지) · 약관 동의 · 상태 · 세션(로그아웃 토큰 = 401 · SessionValidityMiddleware 꼴)
+//   · 약관 미들웨어(미동의 = 403 forbidden_terms_consent) · 양식 저장(CHECK json_valid · uk_form_templates_default · 기본 내림)
+//   · 화면 로그인(API PC 세션이 살아 있으면 409 · 한 PC 규칙) · 로고 상태. 기록 = 요청 차례 · 쓴 세션 · 죽은 토큰 사용 수.
+const CAPW = require('./capture');
+const K35 = require('../kit35');
+const WIRE_OUT = path.join(path.sep, 'selftest-wire-out');
+function wireWorld(opts = {}) {
+  const CUR = 'v2.0.0'; // TermsConsentMiddleware.cs:13
+  const st = { n: 0, reqs: [], events: [], sessions: new Map(), agreedVer: null, logo: false, tpls: [], bodies: [], tplPostN: 0, dead: 0, ui: {}, seen: null, tok: null };
+  const json = (status, o, extra) => new Response(o === undefined ? '' : JSON.stringify(o), { status, headers: { 'content-type': 'application/json', ...(extra || {}) } });
+  const issue = (kind) => {
+    st.n += 1;
+    const t = `selftest-wire-${kind}-${st.n}`;
+    st.sessions.set(t, { kind, alive: true });
+    return t;
+  };
+  const z3 = () => json(500, { error: '서버 오류가 발생했습니다. 관리자에게 아래 번호를 알려주세요.', traceId: 'selftest' });
+  const saveTpl = (id, b) => {
+    st.bodies.push({ m: id ? 'PUT' : 'POST', body: b });
+    if (!b || !b.formType || !b.templateName || !b.paperMode) return json(400, { title: 'One or more validation errors occurred.' });
+    const fc = b.fieldCoordsJson;
+    if (fc !== null && fc !== undefined) {
+      try {
+        JSON.parse(fc); // MariaDB json_valid 꼴 — '' = 무효(hitpan_db_clean.sql:1428 CHECK)
+      } catch (e) {
+        st.events.push(`json_valid 실패 ${e.name}`);
+        return z3();
+      }
+    }
+    const row = id ? st.tpls.find((x) => x.templateId === id) : { templateId: `tpl-${st.tpls.length + 1}` };
+    if (!row) return json(400, { error: '양식 템플릿을 찾을 수 없습니다.' });
+    const next = { ...row, formType: b.formType, templateName: b.templateName, paperMode: b.paperMode, fieldCoordsJson: fc ?? null, backgroundImageUrl: b.backgroundImageUrl ?? null, isDefault: !!b.isDefault, isActive: b.isActive === undefined ? true : !!b.isActive };
+    const others = st.tpls.filter((x) => x.templateId !== next.templateId);
+    if (next.isDefault) others.filter((x) => x.formType === next.formType).forEach((x) => { x.isDefault = false; }); // FormTemplateService.cs:126~131 · :236~244
+    if (others.some((x) => x.formType === next.formType && x.isDefault === next.isDefault && x.isActive === next.isActive)) return z3(); // uk_form_templates_default
+    if (id) Object.assign(row, next); else st.tpls.push(next);
+    return json(id ? 200 : 201, next);
+  };
+  const fetchFake = async (url, init = {}) => {
+    const u = new URL(url);
+    const p = u.pathname;
+    const m = String(init.method || 'GET').toUpperCase();
+    const h = init.headers || {};
+    const auth = h.Authorization || h.authorization || '';
+    const tok = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    const s = tok ? st.sessions.get(tok) : null;
+    const who = !tok ? 'none' : !s ? 'unknown' : s.alive ? s.kind : `dead-${s.kind}`;
+    const rec = { m, p, who, status: null };
+    st.reqs.push(rec);
+    st.events.push(`${m} ${p} ${who}`);
+    const done = (r) => { rec.status = r.status; return r; };
+    const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : null;
+    if (p === '/api/auth/login' && m === 'POST') {
+      const t = issue('api');
+      return done(json(200, { accessToken: t, refreshToken: `${t}-r`, deviceId: 'dev-api', requiresTermsConsent: st.agreedVer !== CUR }));
+    }
+    if (!s || !s.alive) {
+      if (s) st.dead += 1;
+      return done(json(401, undefined, { 'www-authenticate': 'Bearer' }));
+    }
+    if (p === '/api/auth/logout' && m === 'POST') { s.alive = false; return done(json(200, {})); }
+    if (p === '/api/auth/terms/agree' && m === 'POST') { st.agreedVer = body && body.termsVersion; return done(json(201, { consentId: 'c' })); }
+    if (p === '/api/auth/terms/status' && m === 'GET') {
+      return done(json(200, { hasAgreed: opts.statusSaysNo ? false : st.agreedVer !== null, termsVersion: st.agreedVer, required: ['service', 'privacy', 'subscription', 'data_ownership'] }));
+    }
+    if (st.agreedVer !== CUR) return done(new Response(TERMS_403, { status: 403, headers: { 'content-type': 'application/json' } }));
+    if (p === '/api/partners' && m === 'POST') return done(json(201, { partnerId: 'p-1' }));
+    if (p === '/api/items' && m === 'POST') return done(json(201, { id: `item-${st.reqs.length}` }));
+    if (p === '/api/settings/form-templates/background' && m === 'POST') return done(json(200, { storedPath: `form-bg/selftest-${st.reqs.length}.png` }));
+    if (p === '/api/settings/form-templates' && m === 'POST') {
+      st.tplPostN += 1;
+      if (opts.firstTplPost500 && st.tplPostN === 1) return done(z3());
+      return done(saveTpl(null, body));
+    }
+    const put = p.match(/^\/api\/settings\/form-templates\/([^/]+)$/);
+    if (put && m === 'PUT') return done(saveTpl(decodeURIComponent(put[1]), body));
+    if (p === '/api/settings/form-templates' && m === 'GET') {
+      const ft = u.searchParams.get('formType');
+      return done(json(200, st.tpls.filter((x) => x.formType === ft && x.isActive)));
+    }
+    if (p === '/api/settings/company-image-state' && m === 'GET') return done(json(200, { logo: st.logo ? 'present' : 'missing', seal: 'missing', header: 'missing' }));
+    return done(json(404, { message: `모르는 문 ${m} ${p}` }));
+  };
+  // 넘김 손(setup-api handoffToScreen 의 d) — API 로그아웃 = 실제 K.apiLogout(가짜 fetch 로 나감) · 화면 로그인 = 한 PC 규칙 흉내
+  const handoffD = {
+    apiLogout: K35.apiLogout,
+    watchTokens: (c, tok) => { st.tok = tok; },
+    watchLoginResponse: () => { st.seen = { status: null, firstLine: '', n: 0, done: Promise.resolve() }; return st.seen; },
+    screenLogin: async () => {
+      st.events.push('SCREEN login');
+      const apiAlive = [...st.sessions.values()].some((x) => x.kind === 'api' && x.alive);
+      if (opts.screen409 || apiAlive) {
+        st.seen.status = 409;
+        st.seen.firstLine = '{"message":"다른 PC에서 사용 중입니다."}';
+        return { where: null, path: '/login' };
+      }
+      st.tok.access = issue('screen');
+      st.tok.deviceId = 'dev-scr';
+      st.tok.masked = 2;
+      st.seen.status = 200;
+      return st.agreedVer === CUR ? { where: 'main', path: '/' } : { where: 'terms', path: '/terms' };
+    },
+    waitMasked: async (tok) => tok.masked,
+    waitSeen: S.waitSeen,
+  };
+  const uiStep = (name, ret) => async () => { st.ui[name] = (st.ui[name] || 0) + 1; st.events.push(`UI ${name}`); return typeof ret === 'function' ? ret() : ret; };
+  const pdf = () => Buffer.from('%PDF-1.7 selftest');
+  const ui = {
+    uploadLogo: uiStep('uploadLogo', () => { st.logo = true; }),
+    deleteLogo: uiStep('deleteLogo', () => { st.logo = false; }),
+    makeDoc: uiStep('makeDoc'),
+    makeSalesReturn: uiStep('makeSalesReturn'),
+    captureSettings: uiStep('captureSettings', () => ({ status: 200, body: pdf(), ui: {} })),
+    captureDoc: uiStep('captureDoc', () => ({ status: 200, body: pdf(), ui: { warnCount: 0 } })),
+    editorFacts: uiStep('editorFacts', () => ({ coordTableVisible: false, pdfAccept: false })),
+    closeDialogs: uiStep('closeDialogs'),
+  };
+  const files = new Map();
+  const memFs = { mkdirSync: () => undefined, writeFileSync: (f, data) => { files.set(path.normalize(f), data); } };
+  const context = { route: async () => undefined, newPage: async () => ({}), on: () => undefined };
+  const browser = { newContext: async () => context, close: async () => { st.events.push('browser close'); } };
+  const logs = [];
+  const deps = {
+    K: K35, S: { ...S, handoffToScreen: (a) => S.handoffToScreen(a, handoffD) }, F, PNG: P, fs: memFs, OUT: WIRE_OUT,
+    log: (x) => { logs.push(String(x)); }, loadPlaywright: () => ({ chromium: { launch: async () => browser } }), ui,
+  };
+  return { st, deps, files, logs, fetchFake };
+}
+const WIRE_ENV = ['GITHUB_ENV', 'PRINT_PATCH_FAIL', 'UI_PW_PARENT', 'UI_LOGIN_PARENT', 'PRINT_RUN', 'PRINT_JOB', 'PRINT_BOARD', 'PRINT_PROBE_OK'];
+async function runWire(opts) {
+  const w = wireWorld(opts);
+  const kept = WIRE_ENV.map((k) => [k, Object.prototype.hasOwnProperty.call(process.env, k), process.env[k]]);
+  for (const k of WIRE_ENV) delete process.env[k]; // GITHUB_ENV 비움 = 가짜 토큰이 CI 다음 단계 검색 대상에 안 섞임(noEnvFile 과 같은 까닭)
+  process.env.UI_PW_PARENT = 'selftest-wire-pw';
+  let code = null;
+  try {
+    code = await withFetch(w.fetchFake, () => CAPW.main(w.deps));
+  } finally {
+    for (const [k, had, v] of kept) {
+      if (had) process.env[k] = v;
+      else delete process.env[k];
+    }
+  }
+  const raw = w.files.get(path.normalize(path.join(WIRE_OUT, 'cells.json')));
+  const doc = raw ? JSON.parse(raw) : null;
+  const cells = doc ? doc.cells : [];
+  const by = (s) => cells.filter((c) => c.status === s).length;
+  const ix = (e) => w.st.events.indexOf(e);
+  const screenAt = ix('SCREEN login');
+  const afterScreen = screenAt < 0 ? [] : w.st.events.slice(screenAt + 1).filter((e) => /^(GET|POST|PUT|DELETE) /.test(e));
+  return { ...w, code, doc, cells, by, ix, screenAt, afterScreen };
+}
+
+// T-Z28a 정상 — 차례(로그인 → 동의 → 상태 확인 → 기초 자료 → 양식 → API 로그아웃 → 화면 로그인 → 화면 세션만 → 끝 로그아웃 = 화면 세션) · 차림 불가 0 · 본문 = 화면 꼴
+guardAsync('T-Z28a ⓔ3 배선 정상 — 차례 · 화면 세션만 · 끝 로그아웃 · 차림 불가 0', async () => {
+  const r = await runWire({});
+  const e = r.st.events;
+  const seq = r.ix('POST /api/auth/login none') >= 0 && r.ix('POST /api/auth/login none') < r.ix('POST /api/auth/terms/agree api')
+    && r.ix('POST /api/auth/terms/agree api') < r.ix('GET /api/auth/terms/status api') && r.ix('GET /api/auth/terms/status api') < r.ix('POST /api/partners api')
+    && r.ix('POST /api/auth/logout api') > r.ix('POST /api/settings/form-templates api') && r.ix('POST /api/auth/logout api') < r.screenAt;
+  const onlyScreen = r.afterScreen.length > 0 && r.afterScreen.every((x) => x.endsWith(' screen'));
+  const lastReq = [...e].reverse().find((x) => /^(GET|POST|PUT|DELETE) /.test(x));
+  const su = (r.doc && r.doc.setup) || {};
+  const t = su.terms || {};
+  const noDoor = r.by('no-door');
+  const wantCap = r.cells.length - noDoor - 1;
+  const badBody = r.st.bodies.filter(({ body }) => Object.values(body).some((v) => v === '') || (typeof body.fieldCoordsJson === 'string' && !Array.isArray(JSON.parse(body.fieldCoordsJson))));
+  const ok = r.code === 0 && !!r.doc && seq && onlyScreen && r.st.dead === 0 && lastReq === 'POST /api/auth/logout screen'
+    && t.required === true && t.asked === true && t.ok === true && !!t.confirmed && t.confirmed.hasAgreed === true
+    && su.apiLogout && su.apiLogout.ok === true && su.screenLogin && su.screenLogin.ok === true && su.logoutEnd && su.logoutEnd.ok === true && /^화면 /.test(su.logoutEnd.got)
+    && r.by('setup-fail') === 0 && r.by('capture-fail') === 0 && r.by('unmeasured') === 0 && r.by('pending') === 0
+    && r.by('captured') === wantCap && r.by('recorded') === 1 && noDoor === 16 && r.st.bodies.length > 0 && badBody.length === 0;
+  const firstFail = r.cells.find((c) => c.status === 'setup-fail' || c.status === 'capture-fail');
+  check('T-Z28a ⓔ3 배선 정상 — 차례 · 화면 세션만 · 끝 로그아웃 · 차림 불가 0', ok,
+    `차례 ${seq} · 화면 뒤 화면 세션만 ${onlyScreen}(${r.afterScreen.length}) · 죽은 토큰 ${r.st.dead} · 끝 「${lastReq}」 · 약관 ${t.ok}/${!!t.confirmed} · 차림 불가 ${r.by('setup-fail')} · 못 받음 ${r.by('capture-fail')} · PDF ${r.by('captured')}/${wantCap} · 기록 ${r.by('recorded')} · 문 없음 ${noDoor} · 양식 본문 ${r.st.bodies.length}(어긋남 ${badBody.length})${firstFail ? ` · 첫 사유 「${String(firstFail.reason).slice(0, 70)}」` : ''}`);
+});
+
+// T-Z28b 화면 로그인 409 — 전 칸 차림 불가(사유 = 판정 글) · 화면 손 0 · 화면 로그인 뒤 요청 0 · 끝 로그아웃 = 연 세션 없음(API 세션은 넘김에서 닫음)
+guardAsync('T-Z28b ⓔ3 배선 화면 409 — 차림 불가 · 화면 손 0 · 뒤 요청 0', async () => {
+  const r = await runWire({ screen409: true });
+  const su = (r.doc && r.doc.setup) || {};
+  const live = r.cells.filter((c) => c.status !== 'no-door');
+  const allWhy = live.length > 0 && live.every((c) => c.status === 'setup-fail' && /^화면 로그인 응답 409 · 본문 「\{"message":"다른 PC/.test(c.reason || ''));
+  const uiN = Object.entries(r.st.ui).filter(([k]) => k !== 'closeDialogs').reduce((a, [, v]) => a + v, 0);
+  const ok = r.code === 0 && allWhy && uiN === 0 && r.afterScreen.length === 0 && r.st.dead === 0
+    && r.ix('POST /api/auth/logout api') >= 0 && r.ix('POST /api/auth/logout api') < r.screenAt
+    && su.logoutEnd && su.logoutEnd.ok === true && su.logoutEnd.got === '연 세션 없음';
+  check('T-Z28b ⓔ3 배선 화면 409 — 차림 불가 · 화면 손 0 · 뒤 요청 0', ok,
+    `전 칸 사유 409 ${allWhy}(${live.length}) · 화면 손 ${uiN} · 화면 로그인 뒤 요청 ${r.afterScreen.length} · 죽은 토큰 ${r.st.dead} · 끝 「${su.logoutEnd ? su.logoutEnd.got : '-'}」`);
+});
+
+// T-Z28c 첫 양식 저장 500 — 그 종 칸 전부 차림 불가(사유 = 「양식 차림 실패 — POST … 응답 500 · 본문 「…」 · content-type」) · 다른 종은 그대로
+guardAsync('T-Z28c ⓔ3 배선 첫 양식 저장 500 = 그 종 차림 불가 사유', async () => {
+  const r = await runWire({ firstTplPost500: true });
+  const su = (r.doc && r.doc.setup) || {};
+  const est = r.cells.filter((c) => c.type === 'estimate' && c.status !== 'no-door');
+  const rest = r.cells.filter((c) => c.type !== 'estimate' && c.status !== 'no-door');
+  const why = /^양식 차림 실패 — POST \/api\/settings\/form-templates 응답 500 · 본문 「\{"error":"서버 오류/;
+  const estOk = est.length > 0 && est.every((c) => c.status === 'setup-fail' && why.test(c.reason || '') && /content-type=application\/json/.test(c.reason || ''));
+  const restOk = rest.length > 0 && rest.every((c) => c.status === 'captured' || c.status === 'recorded');
+  const m = mdRowFor((est[0] && est[0].reason) || '');
+  const ok = r.code === 0 && estOk && restOk && su['tpl.estimate'] && su['tpl.estimate'].ok === false && su['tpl.delivery'] && su['tpl.delivery'].ok === true
+    && m.cat === C.SETUP && /응답 500 · 본문/.test(m.row);
+  check('T-Z28c ⓔ3 배선 첫 양식 저장 500 = 그 종 차림 불가 사유', ok,
+    `견적서 칸 사유 ${estOk}(${est.length}) · 다른 종 그대로 ${restOk}(${rest.length}) · tpl.estimate ${su['tpl.estimate'] ? su['tpl.estimate'].ok : '-'} · md ${m.cat}`);
+});
+
+// T-Z28d ⓔ6 — 동의 2xx 뒤 상태 문이 아직 필요(hasAgreed 거짓) = 전 칸 차림 불가(사유 = 약관 동의 실패 · §2 꼴 ①) · 기초 자료 부름 0
+guardAsync('T-Z28d ⓔ6 배선 동의 뒤 상태 아직 필요 = 차림 불가 · 기초 자료 0', async () => {
+  const r = await runWire({ statusSaysNo: true });
+  const su = (r.doc && r.doc.setup) || {};
+  const live = r.cells.filter((c) => c.status !== 'no-door');
+  const allWhy = live.length > 0 && live.every((c) => c.status === 'setup-fail' && /^기초 자료 차림 실패 — 약관 동의 실패 — 동의 뒤 GET \/api\/auth\/terms\/status 응답 200 · hasAgreed 참 아님/.test(c.reason || ''));
+  const ok = r.code === 0 && allWhy && r.ix('POST /api/partners api') < 0 && su.terms && su.terms.ok === false && su.terms.confirmed && su.terms.confirmed.hasAgreed === false;
+  check('T-Z28d ⓔ6 배선 동의 뒤 상태 아직 필요 = 차림 불가 · 기초 자료 0', ok,
+    `전 칸 사유 ${allWhy}(${live.length}) · 거래처 부름 ${r.ix('POST /api/partners api') >= 0} · terms.ok ${su.terms ? su.terms.ok : '-'}`);
+});
+
+// T-Z29 ⓔ4([3-V] 4차 D2) — message 칸 = 소독 뒤 자르기(120자 경계에 걸친 등록값 앞부분 0) · 상한 · www-authenticate 소독
+guardAsync('T-Z29 ⓔ4 D2 message 소독 뒤 자르기 · www-authenticate 소독', async () => {
+  const p1 = 'selftest-d2-planted-message-value';
+  const p2 = 'selftest-d2-planted-authhdr-value';
+  noEnvFile(() => { LIB.maskAndRegister('SELFTEST_D2A', p1); LIB.maskAndRegister('SELFTEST_D2B', p2); });
+  // 앞 110자 + 심은 값 → 자른 뒤 소독(4차)이면 120자 안 앞 10자 「selftest-d」 가 안 가려진 채 남는다
+  const r1 = S.failReason('POST /x', S.responseFacts(400, JSON.stringify({ message: `${'가'.repeat(110)}${p1} 꼬리` }), { 'content-type': 'application/json' }));
+  const long = S.failReason('POST /x', S.responseFacts(400, JSON.stringify({ title: 'y'.repeat(300) }), { 'content-type': 'application/json' }));
+  const longMsg = long.split(' · ')[1] || '';
+  const r2 = S.failReason('GET /y', S.responseFacts(401, '', { 'www-authenticate': `Bearer error="invalid_token", error_description="${p2}"` }));
+  const msgOk = !r1.includes(p1.slice(0, 10)) && (r1.split(' · ')[1] || '').includes('***');
+  const capOk = longMsg.startsWith('y'.repeat(120)) && longMsg.length <= 120 + '…(이하 생략)'.length;
+  const authOk = !r2.includes(p2) && /www-authenticate=Bearer error="invalid_token", error_description="\*\*\*"/.test(r2);
+  check('T-Z29 ⓔ4 D2 message 소독 뒤 자르기 · www-authenticate 소독', msgOk && capOk && authOk,
+    `경계 걸친 값 앞부분 0 ${msgOk} · message 상한 ${capOk}(${longMsg.length}자) · www-authenticate 가림 ${authOk}`);
+});
+
+// T-Z30 ⓔ5([3-V] 4차 D3) — 로그인 토큰 가림이 상태 검사 **앞**(200 아닌 응답 본문에 토큰이 실려도 사유에 원문 0) · 기기 승인 대기 길도 등록됨
+guardAsync('T-Z30 ⓔ5 D3 로그인 토큰 가림 = 상태 검사 앞', async () => {
+  const a1 = 'selftest-d3-access-value-0001';
+  const r1 = 'selftest-d3-refresh-value-0001';
+  const a2 = 'selftest-d3-access-value-0002';
+  let m409 = '';
+  try {
+    noEnvFile(() => S.loginSession(S.responseFacts(409, JSON.stringify({ accessToken: a1, refreshToken: r1, message: 'busy' }), { 'content-type': 'application/json' })));
+  } catch (e) {
+    m409 = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+  }
+  let mDev = '';
+  try {
+    noEnvFile(() => S.loginSession(S.responseFacts(200, JSON.stringify({ accessToken: a2, deviceAwaitingApproval: true }), { 'content-type': 'application/json' })));
+  } catch (e) {
+    mDev = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+  }
+  const ok = /응답 409/.test(m409) && !m409.includes(a1) && !m409.includes(r1) && m409.includes('***')
+    && /기기 승인 대기/.test(mDev) && LIB.sanitize(a1) === '***' && LIB.sanitize(r1) === '***' && LIB.sanitize(a2) === '***';
+  check('T-Z30 ⓔ5 D3 로그인 토큰 가림 = 상태 검사 앞', ok,
+    `409 사유 ${/응답 409/.test(m409)} · 사유에 토큰 원문 0 ${!m409.includes(a1) && !m409.includes(r1)} · 기기 승인 대기 ${/기기 승인 대기/.test(mDev)} · 등록 ${LIB.sanitize(a1) === '***'}/${LIB.sanitize(a2) === '***'}`);
+});
+
+// T-Z31 ⓔ6([3-V] 4차 D4) — confirmTerms 단위: 동의 안 불렀으면 부름 0 · 제품 문(GET /api/auth/terms/status) · 아직 필요 · 판 다름 · 문 실패 = 「약관 동의 실패 — …」 · 실제 call 길
+guardAsync('T-Z31 ⓔ6 D4 동의 뒤 상태 문 다시 확인', async () => {
+  const sess = { who: 'print', token: 'selftest-d4-tok', deviceId: 'dev-d4' };
+  const calls = [];
+  const fakeWith = (ret) => async (s, method, p, body, okc) => { calls.push({ method, p, body, okc }); if (ret instanceof Error) throw ret; return ret; };
+  const r0 = await S.confirmTerms(sess, { asked: false }, fakeWith({ hasAgreed: true }));
+  const n0 = calls.length;
+  const rOk = await S.confirmTerms(sess, { asked: true, ok: true }, fakeWith({ hasAgreed: true, termsVersion: 'v2.0.0' }));
+  const callOk = calls.length === 1 && calls[0].method === 'GET' && calls[0].p === '/api/auth/terms/status' && calls[0].body === undefined && calls[0].okc.length === 1 && calls[0].okc[0] === 200;
+  const thrown = async (rec, fake) => {
+    try {
+      await S.confirmTerms(sess, rec, fake);
+      return '던지지 않음';
+    } catch (e) {
+      return e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+    }
+  };
+  const recNo = { asked: true };
+  const mNo = await thrown(recNo, fakeWith({ hasAgreed: false }));
+  const mVer = await thrown({ asked: true }, fakeWith({ hasAgreed: true, termsVersion: 'v2.1.0' }));
+  const mDoor = await thrown({ asked: true }, fakeWith(new S.SetupError('GET /api/auth/terms/status 응답 401 · 본문 없음 · content-type=없음')));
+  let seen = null;
+  const recReal = { asked: true };
+  await withFetch(async (url, init) => { seen = { url, init }; return new Response('{"hasAgreed":true,"termsVersion":"v2.0.0"}', { status: 200, headers: { 'content-type': 'application/json' } }); },
+    () => S.confirmTerms(sess, recReal));
+  const realOk = seen && /\/api\/auth\/terms\/status$/.test(seen.url) && seen.init.method === 'GET' && seen.init.headers.Authorization === `Bearer ${sess.token}` && recReal.confirmed && recReal.confirmed.hasAgreed === true;
+  const md = mdRowFor(`기초 자료 차림 실패 — ${mNo}`);
+  const ok = n0 === 0 && r0.confirm === '동의 부름 0 — 다시 확인 안 함' && rOk.confirmed.hasAgreed === true && callOk
+    && /^약관 동의 실패 — 동의 뒤 GET \/api\/auth\/terms\/status 응답 200 · hasAgreed 참 아님/.test(mNo) && recNo.ok === false
+    && /^약관 동의 실패 — 동의 뒤 GET \/api\/auth\/terms\/status 판 v2\.1\.0 ≠ 보낸 판 v2\.0\.0/.test(mVer)
+    && /^약관 동의 실패 — 동의 뒤 확인 GET \/api\/auth\/terms\/status 응답 401/.test(mDoor) && !!realOk && md.cat === C.SETUP && /hasAgreed 참 아님/.test(md.row);
+  check('T-Z31 ⓔ6 D4 동의 뒤 상태 문 다시 확인', ok,
+    `부름 0(안 불렀을 때) ${n0 === 0} · 문 ${callOk} · 아직 필요 ${/hasAgreed 참 아님/.test(mNo)} · 판 다름 ${/판 v2\.1\.0/.test(mVer)} · 문 실패 ${/응답 401/.test(mDoor)} · 실제 call 길 ${!!realOk} · md ${md.cat}`);
+});
+
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
 // 🔴 4차 — 비동기 경우(가짜 fetch)를 차례로 끝낸 뒤 같은 끝 줄
 (async () => {

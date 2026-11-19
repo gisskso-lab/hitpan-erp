@@ -10,6 +10,7 @@
 //      (본문 = Terms.razor:117~125 · seed-children.js:55~61 과 같은 꼴) — DB 직접 쓰기 · 설정 끄기 · 헤더 위조 0
 //   ⓑ 차림 실패 사유 = 상태 · 본문 첫 줄 160자 · content-type · www-authenticate(있을 때) — 전부 L.sanitize 통과 · call · uploadBackground 둘 다
 //   ⓒ 화면 로그인 전 API 로그아웃(한 PC 규칙 409 덫 · seed-children.js:62~66 선례) → 화면 뒤 API 차림 = 화면 세션 토큰(handoffToScreen)
+// 🔴 5차(11/19 · 개발명세서 §1-5 · [3-V] 4차 D2 · D4) — failReason message 칸 = 소독 뒤 자르기 · 동의 뒤 상태 문 다시 확인(confirmTerms)
 const K = require('../kit35');
 const L = require('../lib');
 
@@ -51,7 +52,9 @@ function responseFacts(status, text, headers) {
 function failReason(what, r) {
   const parts = [`${what} 응답 ${r.status}`];
   const j = r.json;
-  const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title).slice(0, 120)).replace(CTL, ' ') : '';
+  // ⬛ [낡은 줄 · 4차] const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title).slice(0, 120)).replace(CTL, ' ') : '';
+  // 🔴 5차 ⓔ4([3-V] 4차 D2) — 자른 **뒤** 소독하면 120자 경계에 걸친 등록값 앞부분이 안 가려진다 → 소독 **뒤** 자르기(L.sanitize 상한 = firstLine 과 같은 순서)
+  const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title), 120).replace(CTL, ' ') : '';
   if (msg) parts.push(msg);
   parts.push(r.text ? `본문 「${firstLine(r.text)}」` : '본문 없음');
   parts.push(`content-type=${r.ctype ? L.sanitize(r.ctype, 60).replace(CTL, ' ') : '없음'}`);
@@ -133,6 +136,45 @@ async function ensureTerms(sess, rec = {}, doCall = call) {
   }
   rec.ok = true;
   rec.got = '동의 응답 2xx(화면과 같은 문 POST /api/auth/terms/agree · 판 v2.0.0)';
+  return rec;
+}
+/**
+ * 🔴 5차 ⓔ6([3-V] 4차 D4) — 동의 **뒤** 제품 문 그대로 다시 확인: GET /api/auth/terms/status(TermsConsentController.cs:20~55).
+ *   「아직 필요」 판단 = 화면과 같은 규칙 `HasAgreed != true`(TermsConsentBanner.razor:64~65) → 차림 불가(사유 = 「약관 동의 실패 — …」 = §2 다섯 꼴 ①).
+ *   동의를 부르지 않았으면(rec.asked 거짓 = 로그인 표지 거짓) 다시 확인 0 — 동의 뒤 확인이라서.
+ *   한계(명세서 §1-5): 상태 문은 현재 요구 판을 돌려주지 않는다(TermsConsentDto.cs:25~31 · 가장 최근 동의 행의 판만) →
+ *   제품 판이 v2.0.0 에서 오르면 이 확인은 통과하고 기초 자료 403 `forbidden_terms_consent`(§2 꼴 ⑤ · required_version)로 드러난다.
+ *   판 칸이 오면 보낸 판(TERMS_BODY)과 다를 때도 차림 불가. doCall = 자체시험 가짜 손 자리(기본 = call).
+ */
+async function confirmTerms(sess, rec = {}, doCall = call) {
+  if (!rec.asked) {
+    rec.confirm = '동의 부름 0 — 다시 확인 안 함';
+    return rec;
+  }
+  let st;
+  try {
+    st = await doCall(sess, 'GET', '/api/auth/terms/status', undefined, [200]);
+  } catch (e) {
+    rec.ok = false;
+    rec.why = `동의 뒤 확인 ${e instanceof SetupError ? e.message : `${L.errorName(e)} ${L.sanitize(e && e.message ? e.message : '', 120)}`}`;
+    throw new SetupError(`약관 동의 실패 — ${rec.why}`);
+  }
+  const o = st && typeof st === 'object' ? st : {};
+  const agreed = o.hasAgreed === true || o.HasAgreed === true;
+  const verRaw = o.termsVersion || o.TermsVersion;
+  const ver = verRaw ? L.sanitize(String(verRaw), 40).replace(CTL, ' ') : null;
+  rec.confirmed = { hasAgreed: agreed, termsVersion: ver };
+  if (!agreed) {
+    rec.ok = false;
+    rec.why = '동의 뒤 GET /api/auth/terms/status 응답 200 · hasAgreed 참 아님(아직 필요 · 화면 규칙 HasAgreed != true)';
+    throw new SetupError(`약관 동의 실패 — ${rec.why}`);
+  }
+  if (ver && ver !== TERMS_BODY.termsVersion) {
+    rec.ok = false;
+    rec.why = `동의 뒤 GET /api/auth/terms/status 판 ${ver} ≠ 보낸 판 ${TERMS_BODY.termsVersion}`;
+    throw new SetupError(`약관 동의 실패 — ${rec.why}`);
+  }
+  rec.confirm = `동의 뒤 GET /api/auth/terms/status 200 · hasAgreed 참 · 판 ${ver || '칸 없음'}`;
   return rec;
 }
 
@@ -328,4 +370,6 @@ module.exports = {
   // 🔴 4차 ⓐ~ⓒ
   firstLine, responseFacts, failReason, rawCall, loginSession, TERMS_BODY, ensureTerms, call,
   screenSession, screenLoginVerdict, watchLoginResponse, waitSeen, handoffToScreen,
+  // 🔴 5차 ⓔ6
+  confirmTerms,
 };

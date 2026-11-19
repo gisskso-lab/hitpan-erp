@@ -9,6 +9,7 @@
 //   🔴 이 PC 에서 돌리지 않는다 — CI 시험 잡(ui-print)에서만(이 PC = 실물 정식설치 PC)
 //   🔴 4차(11/19 · 개발명세서 §4-a ⓐ · ⓒ) — 차림 순서: API 로그인 → 약관 동의(표지 참일 때만) → 기초 자료 · 양식(API 세션)
 //      → API 로그아웃 → 화면 로그인(응답 · 자리 · 토큰 판정 · 200 아니면 차림 불가) → 로고 · 전표(화면) · 양식 바꾸기 · 확인(화면 세션 토큰) → 끝 로그아웃(화면 세션)
+//   🔴 5차(11/19 · 개발명세서 §1-5) — ⓔ6 동의 뒤 상태 문 다시 확인(S.confirmTerms · 약관 동의 바로 뒤) · ⓔ3 main 손 주입(realDeps · 동작 순서 무변)
 //   쓰는 법: node capture.js   (환경: PRINT_OUT · UI_BASE · UI_LOGIN_PARENT · UI_PW_PARENT · PRINT_RUN · PRINT_JOB · PRINT_BOARD · PRINT_PATCH_FAIL · PRINT_PROBE_OK)
 const fs = require('fs');
 const path = require('path');
@@ -228,7 +229,24 @@ function cfgKey(tpl) {
   return JSON.stringify(tpl || {});
 }
 
-async function main() {
+/**
+ * 🔴 5차 ⓔ3([3-V] 4차 D1 · [4] 4차 F1 — 자체시험이 이 차림 흐름을 안 돌려 배선 변이가 초록이던 길) — 손 주입.
+ *   기본 = 실제 손(아래 그대로 · `node capture.js` 동작 무변). 자체시험 T-Z28 은 가짜 K 응답(가짜 fetch) · 가짜 화면 손 · 메모리 fs 를 넣어
+ *   main 본문을 **그대로** 돌린다. main 안 이름(K · S · F · PNG · fs · OUT · log · 화면 손 8)은 주입된 손을 가리키고 본문 글자 · 차례는 4차와 같다.
+ */
+function realDeps() {
+  return {
+    K, S, F, PNG, fs, OUT, log,
+    loadPlaywright: () => require('playwright'),
+    ui: { uploadLogo, deleteLogo, makeDoc, makeSalesReturn, captureSettings, captureDoc, editorFacts, closeDialogs },
+  };
+}
+
+// ⬛ [낡은 줄 · 1~4차] async function main() {
+async function main(deps = realDeps()) {
+  // 🔴 5차 ⓔ3 — 주입된 손(이름 같음 · 아래 본문 무변)
+  const { K, S, F, PNG, fs, OUT, log } = deps;
+  const { uploadLogo, deleteLogo, makeDoc, makeSalesReturn, captureSettings, captureDoc, editorFacts, closeDialogs } = deps.ui;
   fs.mkdirSync(path.join(OUT, 'pdfs'), { recursive: true });
   fs.mkdirSync(path.join(OUT, 'fixture'), { recursive: true });
   const plan = F.plannedCells();
@@ -259,6 +277,7 @@ async function main() {
   try {
     sess = await S.login();
     await S.ensureTerms(sess, terms);
+    await S.confirmTerms(sess, terms); // 🔴 5차 ⓔ6([3-V] 4차 D4) — 동의 뒤 GET /api/auth/terms/status 다시 확인 · 아직 필요 = 차림 불가
     await S.createPartner(sess, F.MARK.partner);
     for (const it of F.MARK.items) await S.createItem(sess, it.name, it.price);
     doc.setup.master = { ok: true };
@@ -290,7 +309,8 @@ async function main() {
   // ③ 브라우저 · 화면 로그인
   let chromium;
   try {
-    ({ chromium } = require('playwright'));
+    // ⬛ [낡은 줄 · 1~4차] ({ chromium } = require('playwright'));
+    ({ chromium } = deps.loadPlaywright()); // 🔴 5차 ⓔ3 — 기본 = require('playwright')(realDeps)
   } catch (e) {
     failAll(() => true, `playwright 없음 ${L.errorName(e)}`);
     save();
@@ -459,4 +479,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { safeName, cfgKey, entryPick, visibleOr };
+// ⬛ [낡은 줄 · 3~4차] module.exports = { safeName, cfgKey, entryPick, visibleOr };
+module.exports = { safeName, cfgKey, entryPick, visibleOr, main, realDeps }; // 🔴 5차 ⓔ3 — 배선 시험(T-Z28)이 main 을 가짜 손으로 돌림
