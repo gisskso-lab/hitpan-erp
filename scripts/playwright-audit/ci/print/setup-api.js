@@ -11,6 +11,7 @@
 //   ⓑ 차림 실패 사유 = 상태 · 본문 첫 줄 160자 · content-type · www-authenticate(있을 때) — 전부 L.sanitize 통과 · call · uploadBackground 둘 다
 //   ⓒ 화면 로그인 전 API 로그아웃(한 PC 규칙 409 덫 · seed-children.js:62~66 선례) → 화면 뒤 API 차림 = 화면 세션 토큰(handoffToScreen)
 // 🔴 5차(11/19 · 개발명세서 §1-5 · [3-V] 4차 D2 · D4) — failReason message 칸 = 소독 뒤 자르기 · 동의 뒤 상태 문 다시 확인(confirmTerms)
+// 🔴 6차(11/19 · 개발명세서 §1-6 · [4] 5차 F4 · [3-V] 5차 E3) — failReason 이 제품 오류 본문 `error` 칸도 읽음(해석한 값 · 소독 뒤 자르기) · confirmTerms 기록 글 = 「요구 판 대조 아님」
 const K = require('../kit35');
 const L = require('../lib');
 
@@ -49,12 +50,18 @@ function responseFacts(status, text, headers) {
   return { status, text: t, json, jsonErr, ctype: h('content-type'), wwwAuth: h('www-authenticate') };
 }
 /** 실패 사유 — `{what} 응답 {상태} · {message|title} · 본문 「첫 줄」 · content-type=… · www-authenticate=…(있을 때)`. */
+//   🔴 6차 F4 — 둘째 칸 = message|title|error(error 는 글일 때만 · 아래 몸통)
 function failReason(what, r) {
   const parts = [`${what} 응답 ${r.status}`];
   const j = r.json;
   // ⬛ [낡은 줄 · 4차] const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title).slice(0, 120)).replace(CTL, ' ') : '';
   // 🔴 5차 ⓔ4([3-V] 4차 D2) — 자른 **뒤** 소독하면 120자 경계에 걸친 등록값 앞부분이 안 가려진다 → 소독 **뒤** 자르기(L.sanitize 상한 = firstLine 과 같은 순서)
-  const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title), 120).replace(CTL, ' ') : '';
+  // ⬛ [낡은 줄 · 5차] const msg = j && typeof j === 'object' && (j.message || j.title) ? L.sanitize(String(j.message || j.title), 120).replace(CTL, ' ') : '';
+  // 🔴 6차 F4([4] 5차) — 제품 오류 본문 `{"error":"…"}`(Z3 500 · 약관 403 꼴)은 message/title 이 없어 사유가 본문 첫 줄의 `\uXXXX` 탈출 글자뿐이었다 →
+  //   `error` 칸(글일 때만)도 읽는다. 값은 JSON.parse 가 탈출을 푼 글이라 한글 사유가 보인다. 차례 = message → title → error(앞 칸이 있으면 그대로).
+  //   순서는 앞 칸과 같다 = 소독(등록값 가림) **뒤** 자르기(120자) → 제어 글자 빈칸. 본문 첫 줄(firstLine)은 무변(탈출 꼴 그대로 · [3-V] 5차 E1 = R1 전).
+  const pick = j && typeof j === 'object' ? (j.message || j.title || (typeof j.error === 'string' ? j.error : '')) : '';
+  const msg = pick ? L.sanitize(String(pick), 120).replace(CTL, ' ') : '';
   if (msg) parts.push(msg);
   parts.push(r.text ? `본문 「${firstLine(r.text)}」` : '본문 없음');
   parts.push(`content-type=${r.ctype ? L.sanitize(r.ctype, 60).replace(CTL, ' ') : '없음'}`);
@@ -174,7 +181,10 @@ async function confirmTerms(sess, rec = {}, doCall = call) {
     rec.why = `동의 뒤 GET /api/auth/terms/status 판 ${ver} ≠ 보낸 판 ${TERMS_BODY.termsVersion}`;
     throw new SetupError(`약관 동의 실패 — ${rec.why}`);
   }
-  rec.confirm = `동의 뒤 GET /api/auth/terms/status 200 · hasAgreed 참 · 판 ${ver || '칸 없음'}`;
+  // ⬛ [낡은 줄 · 5차] rec.confirm = `동의 뒤 GET /api/auth/terms/status 200 · hasAgreed 참 · 판 ${ver || '칸 없음'}`;
+  // 🔴 6차 E3([3-V] 5차 · 글자만 · 동작 무변) — 상태 문은 판과 상관없이 동의 행이 있으면 hasAgreed 참이고 판 = 장치가 방금 보낸 판(자기 대조)
+  //   → 「요구 판까지 확인됨」 으로 읽히지 않게. 판 오름은 기초 자료 403 forbidden_terms_consent(§2 꼴 ⑤)로 드러난다.
+  rec.confirm = `동의 뒤 GET /api/auth/terms/status 200 · 동의 행 기록 확인 · 기록된 판 ${ver || '칸 없음'}(요구 판 대조 아님)`;
   return rec;
 }
 

@@ -5,6 +5,7 @@
 //   쓰는 법: node judge-print.js <out 폴더>   — <out>/cells.json(capture.js 가 씀) + 칸마다 PDF 옆 사실 JSON(PrintProbe read)
 //            → <out>/print-result.json · <out>/print-result.md · 끝 줄 1개
 //   끝 코드: 0 = 판정표를 냄(빨강이 있어도 — main 대조판은 빨강이 기대) · 1 = 장치 고장(판독기 양성 대조 실패 · 입력 꼴 깨짐)
+//   🔴 6차(11/19 · 개발명세서 §1-6 · [4] 5차 미측정) — 남은 pending 칸 = 「미측정(시간 상한 · 차림 순서 못 끝냄)」 · 끝 줄에 수 · 합격 불가
 const fs = require('fs');
 const path = require('path');
 
@@ -295,6 +296,10 @@ function positiveControl(pc, factsById, probeSelftestOk) {
 function judgeCell(cell, ctx) {
   const board = ctx.board;
   if (cell.noDoorAtMain && board === 'main') return { cat: CAT.NO_DOOR, why: cell.noDoorAtMain };
+  // 🔴 6차([4] 5차 미측정 · PM 판단 「고침(6차 · Z4 전)」) — 캡처 단계가 시간 상한(70분) 등으로 끊기면 cells.json 은 10칸마다 저장이라
+  //   capture.js 끝 「차림 순서에서 빠짐」 줄에 못 가고 `pending` 칸이 남는다. 5차까지는 아래 길(사실 JSON 없음 · 양성 대조 실패 등)로
+  //   다른 사유를 달고 미측정이 됐다 → 「미측정(시간 상한 · 차림 순서 못 끝냄)」 으로 바로 셈(초록 · 빨강 어느 쪽에도 안 넣음 · 합격 불가 · 끝 줄에 수).
+  if (cell.status === 'pending') return { cat: CAT.UNMEASURED, why: '미측정(시간 상한 · 차림 순서 못 끝냄) — 칸 상태 pending', pending: true };
   if (cell.status === 'setup-fail') return { cat: CAT.SETUP, why: cell.reason || '차림 실패' };
   if (cell.status === 'na') return { cat: CAT.NA, why: cell.reason || '' };
   if (cell.status === 'excluded') return { cat: CAT.EXCLUDED, why: cell.reason || '' };
@@ -561,16 +566,23 @@ function judgeRun(input) {
   const stops = mainStops(rows, board);
   const denomOut = counts[CAT.NO_DOOR] + counts[CAT.EXCLUDED] + counts[CAT.NA];
   // ⬛ [낡은 줄 · 2차] pass 가 양성 대조 결과를 안 봤다([4] F1) → 3차: pc.ok 필수
+  // ⬛ [낡은 줄 2 · 3차~5차] const pass = pc.ok === true && board !== 'main' && rows.every((r) => [CAT.GREEN, CAT.NO_DOOR, CAT.NA, CAT.EXCLUDED, CAT.CHANGED].includes(r.cat))
+  // ⬛     && counts[CAT.GREEN] > 0;
+  // ⬛ [낡은 줄 · 3차~5차] return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass };
+  // 🔴 6차([4] 5차 미측정) — 남은 pending 칸 수(미측정 안의 「시간 상한 · 차림 순서 못 끝냄」) · 합격은 그 수가 0 일 때만(미측정 칸 규칙과 겹쳐 지킴 · fail-open 0)
+  const pendingLeft = rows.filter((r) => r.pending === true).length;
   const pass = pc.ok === true && board !== 'main' && rows.every((r) => [CAT.GREEN, CAT.NO_DOOR, CAT.NA, CAT.EXCLUDED, CAT.CHANGED].includes(r.cat))
-    && counts[CAT.GREEN] > 0;
-  return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass };
+    && counts[CAT.GREEN] > 0 && pendingLeft === 0;
+  return { positive: pc, rows, composite: comp, counts, stops, denomOut, pass, pendingLeft };
 }
 
 function endLine(res) {
   const c = res.counts;
   const det = Array.isArray(res.detections) && res.detections.length
     ? ` · 검출 ${res.detections.filter((d) => d.detected).length}/${res.detections.length}` : '';
-  return `판정 끝 — 양성 대조 ${res.positive.ok ? '통과' : '실패'} · 초록 ${c[CAT.GREEN]} · 빨강 ${c[CAT.RED]} · 미측정 ${c[CAT.UNMEASURED]} · 차림 불가 ${c[CAT.SETUP]}`
+  // ⬛ [낡은 줄 · 3차~5차] return `판정 끝 — 양성 대조 ${res.positive.ok ? '통과' : '실패'} · 초록 ${c[CAT.GREEN]} · 빨강 ${c[CAT.RED]} · 미측정 ${c[CAT.UNMEASURED]} · 차림 불가 ${c[CAT.SETUP]}`
+  // 🔴 6차([4] 5차 미측정) — 미측정 수 바로 뒤에 그중 「시간 상한 · 차림 순서 못 끝냄」(남은 pending) 수를 늘 적음(0 도 적음)
+  return `판정 끝 — 양성 대조 ${res.positive.ok ? '통과' : '실패'} · 초록 ${c[CAT.GREEN]} · 빨강 ${c[CAT.RED]} · 미측정 ${c[CAT.UNMEASURED]}(그중 시간 상한 · 차림 순서 못 끝냄 ${res.pendingLeft || 0}) · 차림 불가 ${c[CAT.SETUP]}`
     + ` · 문 없음 ${c[CAT.NO_DOOR]} · 판정 제외 ${c[CAT.EXCLUDED]} · 해당 없음 ${c[CAT.NA]} · 바뀐 모양 ${c[CAT.CHANGED]} · 분모 밖 ${res.denomOut} · 멈춤 ${res.stops.length}${det}`;
 }
 

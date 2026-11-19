@@ -632,9 +632,12 @@ guardAsync('T-Z22 ⓑ 403 forbidden_terms_consent 본문 → 차림 사유 → �
   // capture.js ① 과 같은 사유 꼴 → 칸(차림 불가) → 판정 → md
   const m = mdRowFor(`기초 자료 차림 실패 — ${msg}`);
   check('T-Z22 ⓑ 403 forbidden_terms_consent 본문 → 차림 사유 → 결과표 md',
-    /^POST \/api\/partners 응답 403 · 본문 「\{"error":"forbidden_terms_consent"/.test(msg) && /content-type=application\/json/.test(msg)
+    // ⬛ [낡은 줄 · 4차~5차] /^POST \/api\/partners 응답 403 · 본문 「\{"error":"forbidden_terms_consent"/.test(msg) && /content-type=application\/json/.test(msg)
+    // 🔴 6차 F4 — 사유 둘째 칸 = 본문 error 칸(forbidden_terms_consent) · 그 뒤 본문 첫 줄 그대로
+    /^POST \/api\/partners 응답 403 · forbidden_terms_consent · 본문 「\{"error":"forbidden_terms_consent"/.test(msg) && /content-type=application\/json/.test(msg)
       && m.cat === C.SETUP && /forbidden_terms_consent/.test(m.row) && /content-type=application\/json/.test(m.row),
-    `사유 꼴 ${/응답 403 · 본문/.test(msg)} · md 칸 ${m.cat} · md 에 forbidden_terms_consent ${/forbidden_terms_consent/.test(m.row)} · content-type ${/content-type=/.test(m.row)}`);
+    // ⬛ [낡은 줄 · 4차~5차] `사유 꼴 ${/응답 403 · 본문/.test(msg)} · md 칸 ${m.cat} · md 에 forbidden_terms_consent ${/forbidden_terms_consent/.test(m.row)} · content-type ${/content-type=/.test(m.row)}`);
+    `사유 꼴 ${/응답 403 · forbidden_terms_consent · 본문/.test(msg)} · md 칸 ${m.cat} · md 에 forbidden_terms_consent ${/forbidden_terms_consent/.test(m.row)} · content-type ${/content-type=/.test(m.row)}`); // 🔴 6차 F4
 });
 
 // T-Z23 ⓑ — 그림 올리기(사유 = 「응답 401」 뿐이던 길) · www-authenticate · 본문 첫 줄만 · 160자 · 등록값 가림
@@ -1015,12 +1018,15 @@ guardAsync('T-Z28c ⓔ3 배선 첫 양식 저장 500 = 그 종 차림 불가 사
   const su = (r.doc && r.doc.setup) || {};
   const est = r.cells.filter((c) => c.type === 'estimate' && c.status !== 'no-door');
   const rest = r.cells.filter((c) => c.type !== 'estimate' && c.status !== 'no-door');
-  const why = /^양식 차림 실패 — POST \/api\/settings\/form-templates 응답 500 · 본문 「\{"error":"서버 오류/;
+  // ⬛ [낡은 줄 · 5차] const why = /^양식 차림 실패 — POST \/api\/settings\/form-templates 응답 500 · 본문 「\{"error":"서버 오류/;
+  // 🔴 6차 F4 — 사유 둘째 칸 = 본문 error 칸(해석한 한글) · 그 뒤 본문 첫 줄 그대로
+  const why = /^양식 차림 실패 — POST \/api\/settings\/form-templates 응답 500 · 서버 오류가 발생했습니다\. 관리자에게 아래 번호를 알려주세요\. · 본문 「\{"error":"서버 오류/;
   const estOk = est.length > 0 && est.every((c) => c.status === 'setup-fail' && why.test(c.reason || '') && /content-type=application\/json/.test(c.reason || ''));
   const restOk = rest.length > 0 && rest.every((c) => c.status === 'captured' || c.status === 'recorded');
   const m = mdRowFor((est[0] && est[0].reason) || '');
   const ok = r.code === 0 && estOk && restOk && su['tpl.estimate'] && su['tpl.estimate'].ok === false && su['tpl.delivery'] && su['tpl.delivery'].ok === true
-    && m.cat === C.SETUP && /응답 500 · 본문/.test(m.row);
+    // ⬛ [낡은 줄 · 5차] && m.cat === C.SETUP && /응답 500 · 본문/.test(m.row);
+    && m.cat === C.SETUP && /응답 500 · 서버 오류가 발생했습니다\. 관리자에게 아래 번호를 알려주세요\. · 본문/.test(m.row); // 🔴 6차 F4
   check('T-Z28c ⓔ3 배선 첫 양식 저장 500 = 그 종 차림 불가 사유', ok,
     `견적서 칸 사유 ${estOk}(${est.length}) · 다른 종 그대로 ${restOk}(${rest.length}) · tpl.estimate ${su['tpl.estimate'] ? su['tpl.estimate'].ok : '-'} · md ${m.cat}`);
 });
@@ -1109,6 +1115,78 @@ guardAsync('T-Z31 ⓔ6 D4 동의 뒤 상태 문 다시 확인', async () => {
     && /^약관 동의 실패 — 동의 뒤 확인 GET \/api\/auth\/terms\/status 응답 401/.test(mDoor) && !!realOk && md.cat === C.SETUP && /hasAgreed 참 아님/.test(md.row);
   check('T-Z31 ⓔ6 D4 동의 뒤 상태 문 다시 확인', ok,
     `부름 0(안 불렀을 때) ${n0 === 0} · 문 ${callOk} · 아직 필요 ${/hasAgreed 참 아님/.test(mNo)} · 판 다름 ${/판 v2\.1\.0/.test(mVer)} · 문 실패 ${/응답 401/.test(mDoor)} · 실제 call 길 ${!!realOk} · md ${md.cat}`);
+});
+
+// ════ 6차(11/19 · 개발명세서 §1-6) — [4] 5차 F4 · [4] 5차 미측정 · [3-V] 5차 E3. 각 경우 = 고치기 전 장치(12972928)에서 빨강 · 고친 판에서 초록 ════
+// 제품 JSON 꼴 흉내 — 서버 기본 인코더처럼 ASCII 밖 글자를 `\uXXXX` 로 탈출(Z3 결과표 사유가 탈출 글자로 찍힌 꼴 · 명세서 §1-5-4 6)
+const escJson = (o) => JSON.stringify(o).replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+
+// T-Z32 F4 — 제품 오류 본문 `{"error":"…"}`(탈출 꼴) → 사유 둘째 칸 = 해석한 한글 원문 · 등록값 가림 · 소독 뒤 자르기 · message/title 우선 · 글 아닌 error 무시 · 실제 call 길 → 결과표 md
+guardAsync('T-Z32 6차 F4 error 칸 읽기 — 한글 원문 · 가림 · 소독 뒤 자르기', async () => {
+  const p1 = 'selftest-f4-planted-error-value';
+  const p2 = 'selftest-f4-planted-boundary-value';
+  noEnvFile(() => { LIB.maskAndRegister('SELFTEST_F4A', p1); LIB.maskAndRegister('SELFTEST_F4B', p2); });
+  const ko = '가짜 거절 사유 — 한글 원문';
+  const ct = { 'content-type': 'application/json; charset=utf-8' };
+  const body1 = escJson({ error: `${ko} ${p1}`, traceId: 'selftest-f4' });
+  const r1 = S.failReason('POST /api/settings/form-templates', S.responseFacts(400, body1, ct));
+  const seg1 = r1.split(' · ')[1] || '';
+  const koOk = body1.includes('\\uAC00') && !body1.includes(ko) && seg1.startsWith(ko) && seg1.includes('***') && !r1.includes(p1);
+  // 앞 110자 + 심은 값 → 자른 뒤 소독이면 120자 안 앞 10자가 안 가려진 채 남는다(T-Z29 와 같은 꼴 · error 칸)
+  const r2 = S.failReason('POST /x', S.responseFacts(400, escJson({ error: `${'가'.repeat(110)}${p2} 꼬리` }), ct));
+  const seg2 = r2.split(' · ')[1] || '';
+  const r3 = S.failReason('POST /x', S.responseFacts(400, escJson({ error: '나'.repeat(300) }), ct));
+  const seg3 = r3.split(' · ')[1] || '';
+  const cutOk = !r2.includes(p2.slice(0, 10)) && seg2.includes('***') && seg3.startsWith('나'.repeat(120)) && seg3.length <= 120 + '…(이하 생략)'.length;
+  const r4 = S.failReason('POST /x', S.responseFacts(400, JSON.stringify({ message: 'm-first', error: 'e-second' }), ct));
+  const r5 = S.failReason('POST /x', S.responseFacts(400, JSON.stringify({ error: { code: 7 } }), ct));
+  const orderOk = r4.split(' · ')[1] === 'm-first' && (r4.split(' · ')[2] || '').startsWith('본문 「') && (r5.split(' · ')[1] || '').startsWith('본문 「') && !r5.includes('[object Object]');
+  let msg = '';
+  await withFetch(async () => new Response(escJson({ error: '서버 오류가 발생했습니다. 관리자에게 아래 번호를 알려주세요.', traceId: 'selftest' }), { status: 500, headers: { 'content-type': 'application/json' } }), async () => {
+    try {
+      await S.createPartner({ who: 'x', token: null, deviceId: null }, '시험 거래처');
+    } catch (e) {
+      msg = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+    }
+  });
+  const md = mdRowFor(`기초 자료 차림 실패 — ${msg}`);
+  const realOk = /^POST \/api\/partners 응답 500 · 서버 오류가 발생했습니다\. 관리자에게 아래 번호를 알려주세요\. · 본문 「\{"error":"\\uC11C/.test(msg)
+    && md.cat === C.SETUP && md.row.includes('서버 오류가 발생했습니다');
+  check('T-Z32 6차 F4 error 칸 읽기 — 한글 원문 · 가림 · 소독 뒤 자르기', koOk && cutOk && orderOk && realOk,
+    `한글 원문 · 가림 ${koOk}(「${seg1.slice(0, 24)}」) · 소독 뒤 자르기 · 상한 ${cutOk}(${seg3.length}자) · message 우선 · 글 아닌 error 무시 ${orderOk} · 실제 call 길 → md ${realOk}(${md.cat})`);
+});
+
+// T-Z33 미측정 — 캡처 단계가 시간 상한에서 끊겨 남은 pending 칸 = 「미측정(시간 상한 · 차림 순서 못 끝냄)」 · 초록 · 빨강 0 · 끝 줄(md 끝 줄 = 콘솔 끝 줄)에 수 · 합격 불가 · 양성 대조 실패여도 같은 셈
+guard('T-Z33 6차 남은 pending = 미측정(시간 상한) · 끝 줄 수 · 합격 불가', () => {
+  const planned = F.plannedCells({ types: ['estimate'] });
+  const st = { ...planned.cells.find((c) => c.id === 'ST-basic.estimate.doc'), status: 'captured' };
+  const left = planned.cells.filter((c) => c.id !== st.id && !c.noDoorAtMain && c.path !== 'editor').slice(0, 3).map((c) => ({ ...c, status: 'pending' }));
+  const fb = { ...pcFacts, [st.id]: styleGood(F.STYLES[0]) };
+  const base = { board: 'merged', positive: F.POSITIVE_CONTROL, groups: [] };
+  const only = J.judgeRun({ ...base, cells: [st], factsById: fb, probeSelftestOk: true });
+  const run = J.judgeRun({ ...base, cells: [st, ...left], factsById: fb, probeSelftestOk: true });
+  const runPc = J.judgeRun({ ...base, cells: [st, ...left], factsById: fb, probeSelftestOk: false });
+  const pRows = run.rows.filter((r) => left.some((c) => c.id === r.id));
+  const line = J.endLine(run);
+  const mdLast = J.toMarkdown({ run: 'Z4', job: 'x', board: 'merged' }, run, null).split('\n').pop();
+  const want = `미측정 ${left.length}(그중 시간 상한 · 차림 순서 못 끝냄 ${left.length})`;
+  const cntOk = left.length === 3 && pRows.length === 3 && pRows.every((r) => r.cat === C.UNMEASURED && /시간 상한 · 차림 순서 못 끝냄/.test(r.why))
+    && run.counts[C.UNMEASURED] === 3 && run.counts[C.GREEN] === 1 && run.counts[C.RED] === 0 && run.pendingLeft === 3;
+  const ok = only.pass === true && cntOk && run.pass === false && line.includes(want) && mdLast === line
+    && runPc.pendingLeft === 3 && runPc.pass === false && /그중 시간 상한 · 차림 순서 못 끝냄 0\)/.test(J.endLine(only));
+  check('T-Z33 6차 남은 pending = 미측정(시간 상한) · 끝 줄 수 · 합격 불가', ok,
+    `대조(pending 0) 합격 ${only.pass} · pending ${left.length} → 미측정 ${run.counts[C.UNMEASURED]} · 초록 ${run.counts[C.GREEN]} · 빨강 ${run.counts[C.RED]} · 셈 ${run.pendingLeft} · 합격 ${run.pass} · 끝 줄 수 ${line.includes(want)} · md 끝 줄 = 끝 줄 ${mdLast === line} · 양성 대조 실패 셈 ${runPc.pendingLeft}`);
+});
+
+// T-Z34 E3 — 동의 뒤 확인 기록 글 = 「동의 행 기록 확인 · 기록된 판 vX(요구 판 대조 아님)」 · 동작 무변(통과 · 기록 칸 그대로 · 던짐 길 = T-Z31)
+guardAsync('T-Z34 6차 E3 동의 뒤 확인 기록 글 = 요구 판 대조 아님', async () => {
+  const sess = { who: 'print', token: 'selftest-e3-tok', deviceId: 'dev-e3' };
+  const rec = await S.confirmTerms(sess, { asked: true, ok: true }, async () => ({ hasAgreed: true, termsVersion: 'v2.0.0' }));
+  const recNoVer = await S.confirmTerms(sess, { asked: true, ok: true }, async () => ({ hasAgreed: true }));
+  const ok = rec.confirm === '동의 뒤 GET /api/auth/terms/status 200 · 동의 행 기록 확인 · 기록된 판 v2.0.0(요구 판 대조 아님)'
+    && !/hasAgreed 참 · 판/.test(rec.confirm) && rec.ok === true && rec.confirmed.hasAgreed === true && rec.confirmed.termsVersion === 'v2.0.0'
+    && recNoVer.confirm === '동의 뒤 GET /api/auth/terms/status 200 · 동의 행 기록 확인 · 기록된 판 칸 없음(요구 판 대조 아님)' && recNoVer.ok === true;
+  check('T-Z34 6차 E3 동의 뒤 확인 기록 글 = 요구 판 대조 아님', ok, `글 「${String(rec.confirm).slice(0, 80)}」 · 판 없음 글 ${recNoVer.confirm.endsWith('칸 없음(요구 판 대조 아님)')} · 통과 그대로 ${rec.ok === true && recNoVer.ok === true}`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
