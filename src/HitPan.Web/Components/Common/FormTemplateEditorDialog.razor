@@ -344,9 +344,21 @@
                 {
                     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-1">
                         <MudText Typo="Typo.subtitle1"><b>아직 양식에 반영되지 않았습니다</b></MudText>
+                        @* 🔴🔴 [W-G1-51 갈래 B · 고침 1 · [3-V] P1] 「그림 지우기」도 이제 **화면 값만** 비운다 —
+                             기다리는 것이 「뺀 그림」이면 「받았습니다」라고 말하지 않는다(없는 것을 있다고 말하지 않는다).
+                             아래 「받았습니다」 줄은 글자 그대로 두고 갈래만 나눴다(#1). *@
+                        @if (BgRemoveUnsaved)
+                        {
+                            <MudText Typo="Typo.body2">
+                                그림을 뺐습니다. 「저장」을 누르셔야 양식에서 빠집니다. 「취소」하시면 그림은 그대로 남습니다.
+                            </MudText>
+                        }
+                        @if (!BgRemoveUnsaved)
+                        {
                         <MudText Typo="Typo.body2">
                             그림을 받았습니다. 「저장」을 누르셔야 전표에 나옵니다.
                         </MudText>
+                        }
                     </MudAlert>
                 }
 
@@ -1007,6 +1019,21 @@
     /// <summary>올렸지만 아직 저장하지 않은 그림이 있나 — 꼬리표·닫기 되묻기의 근거.</summary>
     private bool _bgUnsaved;
 
+    // ── 🔴🔴 [W-G1-51 갈래 B · 고침 1 · [3-V] P1 · [4] P3 · PM 판단 2026-11-19] ─────────
+    //
+    // 🔴 [무엇이 사고였나] 「그림 지우기」가 **누르는 즉시** 서버 보관소의 파일을 지웠다.
+    //   그 뒤 「취소」를 누르면 양식 행은 **이미 지워진 파일**을 가리킨 채 남았고 되묻기도 안 떴다
+    //   ⇒ 인쇄 때 그림을 못 읽어 조용히 기본 폼으로 떨어졌다. 「취소가 취소가 아니었다」.
+    // 🔴 이제 「그림 지우기」 = **화면 값만** 비우고 「저장 안 됨」을 표시한다.
+    //   파일 지우기는 **저장이 된 뒤에만** 한다(양식 행이 더는 그 파일을 가리키지 않을 때).
+    //   취소 = 파일 · 행 그대로 · 저장 실패 = 파일 그대로 · 저장 뒤 지우기 실패 = 경고만(남은 파일은 어느 양식도 안 가리킴).
+
+    /// <summary>뺐지만 아직 보관소에서 지우지 않은 그림 경로 — <see cref="SaveAsync"/> 가 성공한 뒤에만 지운다.</summary>
+    private readonly List<string> _bgRemovePending = new();
+
+    /// <summary>기다리는 것이 「뺀 그림」인가 — 꼬리표 · 닫기 되묻기의 문구를 가른다(올린 그림과 다른 말을 한다).</summary>
+    private bool BgRemoveUnsaved => _bgUnsaved && string.IsNullOrWhiteSpace(_form.BackgroundImageUrl);
+
     /// <summary>
     /// 🔴 [20261025작3 절 가-1] 「빈 A4 용지」에서 <b>양식용지로 바꿔 주는 한 단추</b>.
     /// </summary>
@@ -1094,48 +1121,125 @@
         await PreviewAsync();
     }
 
-    /// <summary>올린 그림을 뺀다 — 파일도 지우고 칸도 비우고 미리보기를 다시 그린다.</summary>
-    /// <remarks>🔴 파일 지우기가 실패해도 칸은 비운다 — 고객이 「그림 없이」로 갈 길을 막지 않는다.</remarks>
+    // ⬛ 옛 머리글(주석 보존 · #1):
+    // /// <summary>올린 그림을 뺀다 — 파일도 지우고 칸도 비우고 미리보기를 다시 그린다.</summary>
+    // /// <remarks>🔴 파일 지우기가 실패해도 칸은 비운다 — 고객이 「그림 없이」로 갈 길을 막지 않는다.</remarks>
+
+    /// <summary>
+    /// 🔴🔴 [W-G1-51 갈래 B · 고침 1] 올린 그림을 뺀다 — <b>화면 값만</b> 비우고 미리보기를 다시 그린다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 서버 파일은 <b>여기서 지우지 않는다</b> — 경로를 <c>_bgRemovePending</c> 에 적어 두고
+    ///   「저장」이 성공한 뒤 <see cref="DeleteRemovedBackgroundsAsync"/> 가 지운다.
+    ///   (즉시 지우면 「취소」 뒤 양식 행이 없는 파일을 가리킨다 — [3-V] P1.)
+    /// 🔴 「저장 안 됨」은 <b>저장된 양식과 달라졌을 때만</b> 켠다 — 불러온 양식에 그림이 있었으면 켜고,
+    ///   없던 양식에 이번에 올린 그림을 다시 뺀 것이면 양식은 저장된 그대로이므로 끈다(없는 것을 있다고 말하지 않는다).
+    /// </remarks>
     private async Task RemoveBackgroundAsync()
     {
         var path = _form.BackgroundImageUrl;
-        _bgBusy = true;
-        try
+        if (!string.IsNullOrWhiteSpace(path)
+            && !_bgRemovePending.Exists(p => string.Equals(p, path, StringComparison.Ordinal)))
         {
-            if (!string.IsNullOrWhiteSpace(path))
+            _bgRemovePending.Add(path);
+        }
+
+        _form.BackgroundImageUrl = null;
+        _bgFileName = null;
+        _bgUnsaved = !string.IsNullOrWhiteSpace(Template?.BackgroundImageUrl);
+        if (_bgUnsaved)
+        {
+            Snackbar.Add("그림을 뺐습니다. 아직 양식에 반영되지 않았습니다 — "
+                       + "「저장」을 누르셔야 양식에서 빠집니다.", Severity.Info);
+        }
+
+        await PreviewAsync();
+    }
+
+    // ⬛ 옛 몸통(주석 보존 · #1) — 누르는 즉시 서버 파일을 지웠다([3-V] P1 · 고침 1 로 저장 뒤로 옮김):
+    // {
+    //     var path = _form.BackgroundImageUrl;
+    //     _bgBusy = true;
+    //     try
+    //     {
+    //         if (!string.IsNullOrWhiteSpace(path))
+    //         {
+    //             var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/form-templates/background")
+    //             {
+    //                 Content = JsonContent.Create(new { StoredPath = path })
+    //             };
+    //             var resp = await Http.SendAsync(req);
+    //             if (!resp.IsSuccessStatusCode)
+    //             {
+    //                 var why = await ReadServerMessageAsync(resp);
+    //                 // 🔴 알리되 멈추지 않는다 — 칸을 비우는 것이 고객의 뜻이다.
+    //                 Snackbar.Add(why ?? "그림 파일을 지우지 못했습니다. 칸만 비웁니다.", Severity.Warning);
+    //             }
+    //         }
+    //
+    //         _form.BackgroundImageUrl = null;
+    //         _bgFileName = null;
+    //         // 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 올려 둔 그림을 뺐으니 **기다리는 그림이 없다** —
+    //         //   꼬리표도 닫기 되묻기도 함께 내린다(없는 것을 있다고 말하지 않는다).
+    //         _bgUnsaved = false;
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         _form.BackgroundImageUrl = null;
+    //         _bgFileName = null;
+    //         _bgUnsaved = false;
+    //         Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+    //     }
+    //     finally
+    //     {
+    //         _bgBusy = false;
+    //     }
+    //
+    //     await PreviewAsync();
+    // }
+
+    /// <summary>
+    /// 🔴🔴 [W-G1-51 갈래 B · 고침 1] 저장이 <b>성공한 뒤에만</b> 뺀 그림 파일을 보관소에서 지운다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 지금 저장한 값이 그 경로를 다시 가리키면(주소 칸에 도로 적은 경우) 지우지 않는다.
+    /// 🔴 실패해도 저장은 이미 끝났다 — 경고만 하고 닫는다. 남은 파일은 어느 양식도 안 가리켜 무해하다.
+    ///   (멈추면 고객은 「저장이 안 됐나」로 읽는다 — 저장은 됐다.)
+    /// </remarks>
+    private async Task DeleteRemovedBackgroundsAsync()
+    {
+        if (_bgRemovePending.Count == 0) return;
+
+        var failed = 0;
+        foreach (var path in _bgRemovePending)
+        {
+            if (string.Equals(path, _form.BackgroundImageUrl, StringComparison.Ordinal)) continue;
+            try
             {
-                var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/form-templates/background")
+                using var req = new HttpRequestMessage(HttpMethod.Delete, "api/settings/form-templates/background")
                 {
                     Content = JsonContent.Create(new { StoredPath = path })
                 };
                 var resp = await Http.SendAsync(req);
                 if (!resp.IsSuccessStatusCode)
                 {
-                    var why = await ReadServerMessageAsync(resp);
-                    // 🔴 알리되 멈추지 않는다 — 칸을 비우는 것이 고객의 뜻이다.
-                    Snackbar.Add(why ?? "그림 파일을 지우지 못했습니다. 칸만 비웁니다.", Severity.Warning);
+                    failed++;
+                    Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 거절 ({(int)resp.StatusCode})");
                 }
             }
+            catch (Exception ex)
+            {
+                failed++;
+                Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 실패: {ex.Message}");
+            }
+        }
+        _bgRemovePending.Clear();
 
-            _form.BackgroundImageUrl = null;
-            _bgFileName = null;
-            // 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 올려 둔 그림을 뺐으니 **기다리는 그림이 없다** —
-            //   꼬리표도 닫기 되묻기도 함께 내린다(없는 것을 있다고 말하지 않는다).
-            _bgUnsaved = false;
-        }
-        catch (Exception ex)
+        if (failed > 0)
         {
-            _form.BackgroundImageUrl = null;
-            _bgFileName = null;
-            _bgUnsaved = false;
-            Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+            Snackbar.Add("저장은 되었습니다. 다만 뺀 그림 파일을 보관소에서 지우지 못했습니다 — "
+                       + "양식과 전표에는 영향이 없습니다.", Severity.Warning);
         }
-        finally
-        {
-            _bgBusy = false;
-        }
-
-        await PreviewAsync();
     }
 
     /// <summary>서버가 돌려준 까닭 한 줄을 꺼낸다. 🔴 못 꺼내면 null — 억지로 만들지 않는다.</summary>
@@ -1322,6 +1426,9 @@
                 // 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 이제 **참으로** 양식에 들어갔다 — 꼬리표를 내린다.
                 _bgUnsaved = false;
                 Snackbar.Add("저장되었습니다.", Severity.Success);
+                // 🔴🔴 [W-G1-51 갈래 B · 고침 1] 이제야 뺀 그림 파일을 지운다 — 양식 행이 더는 그 파일을 가리키지 않는다.
+                //   저장 실패(아래 else · catch)에는 이 줄에 오지 않는다 = 파일 그대로 · 다시 저장하거나 취소할 수 있다.
+                await DeleteRemovedBackgroundsAsync();
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
@@ -1360,11 +1467,27 @@
             return;
         }
 
+        // ⬛ 옛 줄(주석 보존 · #1) — 문구가 「올리신 그림」 하나뿐이었다:
+        // var go = await Dialogs.ShowMessageBoxAsync(
+        //     "저장하지 않고 닫습니다",
+        //     "올리신 양식용지 그림이 아직 양식에 반영되지 않았습니다.\n"
+        //     + "지금 닫으면 전표에 나오지 않습니다.\n\n"
+        //     + "반영하시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오.",
+        //     yesText: "그래도 닫기",
+        //     cancelText: "계속 편집");
+
+        // 🔴🔴 [W-G1-51 갈래 B · 고침 1] 「그림 지우기」도 저장 전까지 기다리므로 되묻는다 —
+        //   다만 「올리신 그림」이라고 말하지 않는다. 닫으면 파일 · 양식 행은 그대로다(아무것도 안 지웠다).
+        var message = BgRemoveUnsaved
+            ? "빼신 양식용지 그림이 아직 양식에서 빠지지 않았습니다.\n"
+              + "지금 닫으면 양식은 그림이 있는 그대로 남습니다.\n\n"
+              + "빼시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오."
+            : "올리신 양식용지 그림이 아직 양식에 반영되지 않았습니다.\n"
+              + "지금 닫으면 전표에 나오지 않습니다.\n\n"
+              + "반영하시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오.";
         var go = await Dialogs.ShowMessageBoxAsync(
             "저장하지 않고 닫습니다",
-            "올리신 양식용지 그림이 아직 양식에 반영되지 않았습니다.\n"
-            + "지금 닫으면 전표에 나오지 않습니다.\n\n"
-            + "반영하시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오.",
+            message,
             yesText: "그래도 닫기",
             cancelText: "계속 편집");
         if (go != true) return;
