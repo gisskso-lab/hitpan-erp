@@ -30,6 +30,9 @@
     - (11/19 [3-V] 갈래2 V2 · V3 · V9) 보고서 폴더 = 「X:\」 꼴만 · 정션 · 링크는 실제 경로로 풀어 저장소 대조 /
       S-C 대상 = {설치본}\api\HitPan.API.exe 정확 일치 · 끊기 직전 번호 · 경로 재확인 / 「누가」 칸 16자 넘는 16진 꼴 거절.
       근거 docs/검증/병렬이슈/20261119_3V_WG1-53_갈래2_러너시험_보안상무.md
+    - (11/19 [3-V] 재반증 N1 · N2) 「누가」 칸 가운뎃점 허용 · 빈 칸 아닌 입력이 거절되면 한 번 다시 묻고 또 거절이면 「무효화했음 · 누가 = 거절됨」
+      (실행 기록 · S-D 실패 · 인계) / 관측 중단 종합 첫 줄 = 「관측 중단 — 미합격 …」.
+      근거 docs/검증/병렬이슈/20261119_3V_WG1-53_고침판_재반증_보안상무.md 끝 「PM 판단」(main 449dfd1f)
   인코딩: UTF-8 BOM(Windows PowerShell 5.1 한글 오독 방지).
 #>
 [CmdletBinding()]
@@ -56,6 +59,7 @@ $script:HistPath = $null
 $script:RgInFlight = $null
 $script:RgAborted = $false
 $script:RgAbortKind = $null
+$script:RgAbortHandoff = $false   # (11/19 [3-V] N2) 관측 중단 때 진행 중 건의 인계 쪽지를 썼는가
 $script:RgEndDone = $false
 $script:RgExit = 1
 $script:RgWriteFiles = $false
@@ -223,7 +227,11 @@ function New-RgRealHooks {
             return (($o | ForEach-Object { [string]$_ }) -join "`n")
         }
         HandRecord         = {
-            $who = Read-Host '무효화를 한 사람(역할 · 이름) — 하지 않았으면 빈 칸으로 Enter'
+            # (11/19 [3-V] N1) $Try 2 = 다시 묻기(첫 입력이 빈 칸이 아닌데 「누가」 형식이 틀림) — 이때 빈 칸은 「하지 않음」 이 아니라 「누가 = 거절됨」(인계)
+            param([int]$Try = 1)
+            $ask = '무효화를 한 사람(역할 · 이름) — 하지 않았으면 빈 칸으로 Enter'
+            if ($Try -gt 1) { $ask = '다시 적기 — 무효화를 한 사람(역할 · 이름 · 글자 · 숫자 · 공백 · ._()- 40자까지) · 이번에도 안 맞으면 「누가 = 거절됨」 으로 인계' }
+            $who = Read-Host $ask
             if ([string]::IsNullOrWhiteSpace($who)) { return $null }
             return @{ Who = $who.Trim(); Utc = [datetime]::UtcNow }
         }
@@ -540,12 +548,13 @@ function Write-RgResult {
 }
 
 function Format-RgWho {
-    # 손 기록 「누가」 — 글자 · 숫자 · 공백 · ._()- 1~40자.
-    # (11/19 [3-V] V9) 구분 글자(공백 · ._()-)를 뺀 나머지가 16자 넘는 16진 꼴(토큰 · 해시 · GUID 꼴) = 거절(화면 · 보고서에 안 옮김 · 「손 기록 없음」).
+    # 손 기록 「누가」 — 글자 · 숫자 · 공백 · ._()- · 가운뎃점(U+00B7) 1~40자.
+    # (11/19 [3-V] V9) 구분 글자(공백 · ._()- · 가운뎃점)를 뺀 나머지가 16자 넘는 16진 꼴(토큰 · 해시 · GUID 꼴) = 거절(화면 · 보고서에 안 옮김).
+    # (11/19 [3-V] N1) 가운뎃점 허용 — 손 안내 · 입력 문구가 「역할 · 이름」 꼴이라 안내대로 적은 입력이 거절되지 않게. 거절 뒤 처리 = Invoke-RgSemi(다시 묻기 1회).
     param([AllowNull()] $Who)
     $w = ([string]$Who).Trim()
-    if ($w -notmatch '\A[\p{L}\p{N} ._()\-]{1,40}\z') { return $null }
-    $compact = $w -replace '[ ._()\-]', ''
+    if ($w -notmatch '\A[\p{L}\p{N} ._()\-·]{1,40}\z') { return $null }
+    $compact = $w -replace '[ ._()\-·]', ''
     if ($compact.Length -gt 16 -and $compact -match '\A[0-9A-Fa-f]+\z') { return $null }
     return $w
 }
@@ -565,6 +574,26 @@ function New-RgAbortVerdict {
     }
 }
 
+function Format-RgAbortSummary {
+    # (11/19 [3-V] N2) 관측 중단 종합 — 첫 줄을 「관측 중단 — 미합격 …」 으로(처음 보는 사람은 첫 줄만 읽는다).
+    #   옛 머리가 「미합격 …」 이면 앞에 「관측 중단 — 」 만 붙이고, 「합격 …」 이면(마지막 건 판정 뒤 · 진행 중 표시를 지우기 전 좁은 창에서
+    #   중단 — 결과는 이미 들어가 관측 중단 결과가 안 들어감) 머리를 미합격 줄로 바꾼다. 그때 인계 쪽지를 썼으면(InFlightHandoff)
+    #   종합에 상태 불명 경고 줄 · 인계 끝 줄이 없을 때 더한다(글자 = 모듈 Get-Summary 와 같음). 정상 끝 종합은 이 함수를 안 거친다.
+    param([AllowEmptyCollection()][string[]]$Text, [bool]$InFlightHandoff)
+    $warn = '⚠ 대상 상태 불명 · 사람 확인 필요'
+    $end = '시험 종료 아님 · 인계 필요(§5-4)'
+    $t = New-Object System.Collections.Generic.List[string]
+    foreach ($l in @($Text)) { if ($null -ne $l) { $t.Add([string]$l) } }
+    if ($t.Count -eq 0) { $t.Add('미합격 — 종합 없음') }
+    if ($t[0].StartsWith('미합격')) { $t[0] = '관측 중단 — ' + $t[0] }
+    elseif (-not $t[0].StartsWith('관측 중단 — 미합격')) { $t[0] = '관측 중단 — 미합격(정상 끝 없이 빠짐 · 칸별 줄 = 끝난 건 결과)' }
+    if ($InFlightHandoff) {
+        if (-not $t.Contains($warn)) { $t.Insert([math]::Min(2, $t.Count), $warn) }
+        if ($t[$t.Count - 1] -ne $end) { $t.Add($end) }
+    }
+    return $t.ToArray()
+}
+
 function Write-RgEnd {
     # 종합 · 보고서 — 정상 끝 · 관측 중단 공통(한 번만). 보고서 파일을 화면보다 먼저 쓴다. 관측 중단이면 종료 코드 1 고정(fail-closed).
     param([Parameter(Mandatory)]$Results)
@@ -579,7 +608,11 @@ function Write-RgEnd {
         $text = @('미합격 — 종합 못 냄 · 시험 종료 아님 · 인계 필요(§5-4)')
         $script:RgExit = 1
     }
-    if ($script:RgAborted) { $script:RgExit = 1 }
+    if ($script:RgAborted) {
+        $script:RgExit = 1
+        # (11/19 [3-V] N2) 첫 줄 · 종료 코드 · 본문(인계 쪽지)을 맞춘다 — 관측 중단이면 첫 줄 = 「관측 중단 — 미합격 …」
+        $text = @(Format-RgAbortSummary -Text ([string[]]$text) -InFlightHandoff ([bool]$script:RgAbortHandoff))
+    }
     $name = $null
     if ($script:RgWriteFiles) {
         $ts = [datetime]::UtcNow
@@ -610,6 +643,7 @@ function Complete-RgAbort {
     $done = @{}
     foreach ($x in $Results) { if ($null -ne $x -and $x.Id) { $done[[string]$x.Id] = $true } }
     if ($null -ne $f) {
+        $script:RgAbortHandoff = $true   # (11/19 [3-V] N2) 인계 쪽지를 쓴다 → 종합에 경고 줄 · 인계 끝 줄(Format-RgAbortSummary)
         if (-not $f.HistDone) { Add-RgHistory -Utc $f.StartUtc -Key $f.Cat.Key }
         $v = New-RgAbortVerdict -Cat $f.Cat -Last $f.Last -Elapsed $f.Elapsed
         if (-not $done.ContainsKey([string]$f.Cat.Id)) { $Results.Add($v); $done[[string]$f.Cat.Id] = $true }
@@ -756,9 +790,32 @@ function Invoke-RgSemi {
     $script:RgInFlight = @{ Cat = $Cat; StartUtc = (& $script:H.Now); HistDone = $false; Cooldown = $res.Cooldown; Last = $null; Elapsed = 0 }
     Write-RgLine '  손 안내: 정해진 절차대로 시험 PC 터널 자격증명을 사람이 무효화한 뒤, 한 사람(역할 · 이름)을 적는다. 도구는 무효화 · 되살림을 하지 않는다.'
     $hand = $null
-    try { $hand = & $script:H.HandRecord } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
+    try { $hand = & $script:H.HandRecord 1 } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
     $who = $null; $handUtc = $null
     if ($null -ne $hand) { $who = Format-RgWho -Who $hand.Who; $handUtc = ConvertTo-CgUtc -Value $hand.Utc }
+    # (11/19 [3-V] N1) 빈 칸이 아닌 입력 = 무효화했다는 뜻. 그런데 「누가」 가 거절되면(형식 · 시각) 한 번 다시 묻는다(무효화는 다시 하지 않음).
+    #   다시 물어도 거절(빈 칸 · 형식 · 못 받음 포함) = 「무효화했음 · 누가 = 거절됨」 → 실행 기록 · S-D 실패 · 상태 불명 · 인계(모듈 HandRejected).
+    #   거절된 글자는 화면 · 보고서 · 실행 기록에 옮기지 않는다. 첫 입력이 빈 칸(또는 못 받음)일 때만 옛 그대로 「손 기록 없음」 = 미실행.
+    $began = ($null -ne $hand -and -not [string]::IsNullOrWhiteSpace([string]$hand.Who))
+    if ($began -and (-not $who -or $null -eq $handUtc)) {
+        $firstUtc = $handUtc
+        Write-RgLine '  손 기록: 「누가」 형식이 맞지 않음(글자 · 숫자 · 공백 · ._()- · 가운뎃점 40자까지 · 긴 16진 꼴 안 됨) — 한 번 더 묻는다(무효화는 다시 하지 않음)'
+        $hand = $null; $who = $null; $handUtc = $null
+        try { $hand = & $script:H.HandRecord 2 } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
+        if ($null -ne $hand) { $who = Format-RgWho -Who $hand.Who; $handUtc = ConvertTo-CgUtc -Value $hand.Utc }
+        if (-not $who -or $null -eq $handUtc) {
+            $recUtc = $firstUtc
+            if ($null -eq $recUtc) { $recUtc = & $script:H.Now }
+            Write-RgLine '  손 기록: 「누가」 두 번 거절 — 무효화했음으로 다룸(누가 = 거절됨 · 관측 안 함 · 인계)'
+            $obs.Hand = $null
+            $obs.HandRejected = @{ Utc = $recUtc }
+            Add-RgHistory -Utc $recUtc -Key $Cat.Key
+            $script:RgInFlight.HistDone = $true
+            $script:RgInFlight.Last = '손 기록 「누가」 두 번 거절'
+            $res.V = Get-ScenarioVerdict -Id $id -Observation $obs
+            return $res
+        }
+    }
     if (-not $who -or $null -eq $handUtc) {
         Write-RgLine '  손 기록: 없음'
         $obs.Hand = $null

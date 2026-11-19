@@ -814,10 +814,23 @@ function Complete-CgVerdict {
         '반자동'         {
             if ($V.SdState -eq '완료') { $V.Display = ('반자동 — 완료(첫 실패 뒤 {0}초 복귀 · 손 1회)' -f [math]::Round([double]$V.Seconds)) }
             else { $V.Display = ('반자동 — {0}({1})' -f $V.SdState, $V.Reason) }
+            Set-CgSdHandoff -V $V
         }
     }
     $V.Executed = (@('미실행', '측정불가(가드)') -notcontains $V.Column) -and -not ($V.Column -eq '반자동' -and $V.SdState -eq '미실행')
     return $V
+}
+
+function Set-CgSdHandoff {
+    # (11/19 [3-V] N1 · A13) S-D 인계 · 대상 상태 불명 = 이 한 곳에서만 정한다(Resolve-CgSdVerdict 의 길마다 따로 켜지 않음).
+    #   규칙: 「무효화가 시작됐다는 표지가 하나라도 있고 복구 확인이 없으면 인계 참」.
+    #   복구 확인 = 상태 「완료」. 무효화 시작 안 함이 확실 = 상태 「미실행」(건너뜀 · 손 기록 빈 칸 = 「누가」 를 적지 않음)뿐.
+    #   「실패」 = 무효화 표지(손 기록 있음 · 빈 칸 아닌 「누가」 두 번 거절 — N1) 또는 표지 애매(기준 실패 — 손 안내 전이나
+    #   과경고 유지 · 안전 쪽 · A13) → 인계 참 · 상태 불명. 상태가 비어 있으면(정해지지 않음) 역시 참(fail-closed).
+    param($V)
+    $sure = (@('완료', '미실행') -contains [string]$V.SdState)
+    $V.StateUnknown = -not $sure
+    $V.Handoff = -not $sure
 }
 
 function Set-CgSkip {
@@ -982,7 +995,8 @@ function Resolve-CgSdVerdict {
     $c = $script:CgConst
     $v = New-CgVerdict -Cat $Cat
     $v.Column = '반자동'
-    $fail = { param([string]$Why) $v.SdState = '실패'; $v.Reason = $Why; $v.StateUnknown = $true; $v.Handoff = $true }
+    # (11/19 [3-V] N1 · A13) 인계 · 상태 불명은 여기서 켜지 않는다 — Complete-CgVerdict → Set-CgSdHandoff 한 곳(상태 「실패」 = 인계 참)
+    $fail = { param([string]$Why) $v.SdState = '실패'; $v.Reason = $Why }
     if ($Obs.Skip) {
         $v.SdState = '미실행'
         $v.Reason = if ($Obs.Skip -eq '가드') { '가드 거절' } else { [string]$Obs.Skip }
@@ -990,6 +1004,16 @@ function Resolve-CgSdVerdict {
     }
     $b = $Obs.SdBaseline
     if ($null -eq $b -or -not $b.TargetOk -or -not $b.ControlOk) { & $fail '측정불가(기준 응답 없음)'; return (Complete-CgVerdict $v) }
+    # (11/19 [3-V] N1) 빈 칸이 아닌 「누가」 가 두 번 거절됨(러너가 HandRejected = @{ Utc } 를 채움) = 무효화했음 · 누가 = 거절됨.
+    #   「미실행」 으로 끝내지 않는다 — 관측 없이 실패 · 상태 불명 · 인계(터널 자격증명이 죽은 채 방치되는 길을 막음 · V1 과 같은 뜻).
+    if ($null -ne $Obs.HandRejected) {
+        $v.CutIssued = $true
+        $v.T0Utc = ConvertTo-CgUtc -Value $Obs.HandRejected.Utc
+        $v.LastState = '관측 안 함(손 기록 「누가」 두 번 거절)'
+        $v.ElapsedSec = 0
+        & $fail '무효화했음 · 누가 = 거절됨'
+        return (Complete-CgVerdict $v)
+    }
     $hand = $Obs.Hand
     if ($null -eq $hand -or [string]::IsNullOrWhiteSpace([string]$hand.Who) -or $null -eq (ConvertTo-CgUtc -Value $hand.Utc)) {
         $v.SdState = '미실행'; $v.Reason = '손 기록 없음'
@@ -1075,6 +1099,7 @@ function Get-ScenarioVerdict {
         · Samples[{T,Svc,SvcPid,Ext{AddrOk,Status,Version},Origin{Ok,Status,DatabaseOk,Version,UnderInstall,Pid},OldAlive}]
         · Evidence{E1Utc,E1Failure,E2Utc,E3,E4} / S-D: SdBaseline{TargetOk,ControlOk,Version} · Hand{Who,Utc}
         · ObsStartUtc(11/19 [3-V] A3 · 손 기록 바로 뒤 · 첫 회차 전 시각) · Rounds[{T,Target{Ok},Control{Ok}|$null,Skew}]
+        · HandRejected{Utc}(11/19 [3-V] N1 · 빈 칸 아닌 「누가」 두 번 거절 = 무효화했음 · 누가 = 거절됨 → 실패 · 인계)
       (11/19 [3-V] A2) T = 끊기(S-D: 손 기록) 뒤 초 · 수 · 유한 · 0 이상 · 엄격 증가 — 아니면 측정불가(관측 기록 무효). Skew = 수 · 0~2초.
     #>
     [CmdletBinding()]
@@ -1102,8 +1127,13 @@ function Get-Summary {
     # 상태 불명 경고 · 인계 끝 줄은 중복분까지 전부 보고 정한다(어느 쪽에 FAIL · 인계가 있어도 사라지지 않게).
     $allIn = New-Object System.Collections.Generic.List[object]
     $dupCount = [ordered]@{}
+    # (11/19 [3-V] N3) 카탈로그 밖 ID · 빈 ID · 빈 결과($null) = 결과 무효 — 말없이 빼지 않는다 → 종합 「미합격(결과 무효 …)」 · 종료 1.
+    #   ID 는 카탈로그 글자와 정확히 같아야 한다(대소문자 · 앞뒤 공백 포함). 무효 결과의 상태 불명 · 인계 표지는 그대로 셈(안전 쪽).
+    $catIds = @($script:CgCatalog | ForEach-Object { [string]$_.Id })
+    $invalidN = 0
     foreach ($r in @($Results)) {
-        if ($null -eq $r -or -not $r.Id) { continue }
+        if ($null -eq $r) { $invalidN++; continue }
+        if ($catIds -cnotcontains [string]$r.Id) { $invalidN++; $allIn.Add($r); continue }
         $allIn.Add($r)
         $rid = [string]$r.Id
         if ($byId.ContainsKey($rid)) { $dupCount[$rid] = 1 + [int]$dupCount[$rid]; continue }
@@ -1129,7 +1159,10 @@ function Get-Summary {
 
     $exit = 1
     $dupText = if ($dupCount.Count -gt 0) { (@($dupCount.Keys | ForEach-Object { '{0} {1}건' -f $_, (1 + [int]$dupCount[$_]) }) -join ' · ') } else { $null }
-    if ($dupText) {
+    if ($invalidN -gt 0) {
+        # (11/19 [3-V] N3) 결과 무효(카탈로그 밖 · 빈 ID)가 하나라도 있으면 다른 칸이 어떻든 「합격」 · 종료 0 없음
+        $header = ('미합격(결과 무효 · {0}건) — 카탈로그 밖 · 빈 ID 결과 · 판정 거절 · 칸별 사유 · 반자동 {1}' -f $invalidN, $sdState)
+    } elseif ($dupText) {
         # (11/19 [3-V] A4) 결과 중복이면 다른 칸이 어떻든 「합격」 · 종료 0 없음
         $header = ('미합격(결과 중복 · {0}) — 같은 ID 결과 둘 이상 · 판정 거절 · 칸별 사유 · 반자동 {1}' -f $dupText, $sdState)
     } elseif ($allAutoPass -and $sdState -eq '완료') {
@@ -1170,7 +1203,7 @@ function Get-Summary {
     return [pscustomobject][ordered]@{
         Header = $header; FixedLine = $fixed; Warning = $warn; Handoff = $handoff; Counts = $counts
         Executed = $n; Cuts = $cuts; ExitCode = $exit; Results = $list; Text = $text.ToArray()
-        DuplicateIds = @($dupCount.Keys); DuplicateWarning = $dupWarn
+        DuplicateIds = @($dupCount.Keys); DuplicateWarning = $dupWarn; InvalidCount = $invalidN
     }
 }
 
