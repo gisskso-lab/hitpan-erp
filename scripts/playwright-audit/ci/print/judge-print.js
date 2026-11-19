@@ -598,6 +598,8 @@ function fontGate(g) {
   const step = fontFactsWhy(o.facts);
   const env = String(o.stepWhy || '').trim();
   if (env) step.unshift(env);
+  // ⬛ [낡은 줄 · 11차 D2′] else if (o.outcome !== 'success') step.unshift(…) — PM 판단 ② : 입력 없음이면 그 사유 하나로(outcome 없음과 겹치지 않게)
+  else if (o.noInput) step.unshift('글꼴 관문 입력 없음(판정 단계 env PRINT_FONT_OUTCOME 없음 · 워크플로 줄 확인)'); // 🔴 PM 판단 ② — 조용히 꺼짐 막기
   else if (o.outcome !== 'success') step.unshift(`글꼴 단계 중단(시간 초과 등 · outcome ${o.outcome || '없음'})`); // L5 — continue-on-error 가 삼킨 실패를 이름으로
   const t8 = o.t8 && typeof o.t8 === 'object' ? o.t8 : null;
   let t8Why = '';
@@ -671,6 +673,7 @@ function toMarkdown(meta, res, nine) {
   if (res.fontGate) {
     L.push(`- 요청 이름 = Malgun Gothic · PDF 실제 글꼴 칸(사실 파일 값 그대로) = ${(res.fontGate.pdfFonts || []).join(', ') || '기록 없음'}`);
     L.push(`- 굵게 요청 → 600 파일: 굵게 파일 usWeightClass = ${res.fontGate.boldWeight == null ? '기록 없음' : res.fontGate.boldWeight}(기대 600 · 700 아님)`);
+    if (res.fontGate.runFonts) L.push(`- (기록만 · 판정 아님) 런 PDF 글꼴 이름(접두 뗀 값) = ${res.fontGate.runFonts.names.join(', ') || '없음'} · 굵게 이름 있음 = ${res.fontGate.runFonts.bold ? '예' : '아니오'}`); // 🔴 PM 판단 ①
   }
   L.push('- 대표 DB 조건 재현 = 미측정(고정 줄 · 작업지시서 §4-2 HQA ④)');
   if (res.stops.length) L.push(`- 🔴 멈춤: ${res.stops.join(' / ')}`);
@@ -731,7 +734,10 @@ function main(outDir) {
   // 🔴 11차 D2′(PM L5) — 판정 단계 env 에 글꼴 단계 outcome 칸이 있으면(워크플로) 글꼴 관문을 켬 · 칸이 비어도 켬(outcome 없음 = 사유) ·
   //   사슬 시험 안 판정기 · 이 PC 시험은 그 칸 없음 = 끔(T-FG2)
   let fontGate0 = null;
-  if (Object.prototype.hasOwnProperty.call(process.env, 'PRINT_FONT_OUTCOME')) {
+  // ⬛ [낡은 줄 · 11차 D2′] if (Object.prototype.hasOwnProperty.call(process.env, 'PRINT_FONT_OUTCOME')) {
+  // 🔴 11차 PM 판단 ② — CI(GITHUB_ACTIONS=true)인데 칸이 없으면 켜고 사유 「글꼴 관문 입력 없음」 = 판정 0 · 사슬 시험 안 판정기(cells.json run = chain)만 뺌
+  const gateIn = Object.prototype.hasOwnProperty.call(process.env, 'PRINT_FONT_OUTCOME');
+  if (gateIn || (process.env.GITHUB_ACTIONS === 'true' && doc.run !== 'chain')) {
     const rd = (n) => {
       try {
         return JSON.parse(fs.readFileSync(path.join(outDir, n), 'utf8'));
@@ -743,13 +749,16 @@ function main(outDir) {
     const bf = doc.positive && doc.positive.basicForm ? factsById[doc.positive.basicForm.cell] : null;
     fontGate0 = fontGate({
       t8: rd('t8-font.json'), facts: rd('font-facts.json'), stepWhy: process.env.PRINT_FONT_WHY, outcome: process.env.PRINT_FONT_OUTCOME,
-      probeOk: doc.probeSelftestOk === true, basicHangul: !!bf && wordsOf(bf).some((w) => /[가-힣]/.test(String(w.t))),
+      probeOk: doc.probeSelftestOk === true, basicHangul: !!bf && wordsOf(bf).some((w) => /[가-힣]/.test(String(w.t))), noInput: !gateIn,
     });
     console.log(fontGate0.why);
     // 🔴 11차 D7′ — ㉤ PDF 실제 글꼴 칸(전 사실 파일 · 값 그대로 · 12 까지) · 굵게 파일 굵기(사실 파일)
     const ff = rd('font-facts.json');
     fontGate0.pdfFonts = [...new Set(Object.values(factsById).flatMap((f) => pagesOf(f).flatMap((p) => (Array.isArray(p.fonts) ? p.fonts : []))))].slice(0, 12);
     fontGate0.boldWeight = ff && Array.isArray(ff.files) ? (ff.files.find((x) => x && x.role === 'bold') || {}).weight : undefined;
+    // 🔴 11차 PM 판단 ①(나) — 굵게 = 기록만(판정 아님): 런 사실 파일 글꼴 칸(접두 뗀 값) 집합 · 굵게 이름 있음
+    const fams = [...new Set(Object.values(factsById).flatMap((f) => pagesOf(f).flatMap((p) => (Array.isArray(p.fonts) ? p.fonts : []))).map(stripSubset))];
+    fontGate0.runFonts = { names: fams.slice(0, 12), bold: fams.some((x) => /bold/i.test(x)) };
   }
   // ⬛ [낡은 줄 · 1~10차] const res = judgeRun({ cells: doc.cells, board: doc.board, factsById, positive: doc.positive, groups: doc.groups, probeSelftestOk: doc.probeSelftestOk });
   const res = judgeRun({

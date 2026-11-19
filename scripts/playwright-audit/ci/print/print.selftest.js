@@ -1421,7 +1421,11 @@ guardAsync('T-Z37 7차 C7 폭발 반경 — R-3 · R-4 실패 = 그 칸만 차�
       fs.writeFileSync(fp, JSON.stringify(pcFacts[c.id]));
     }
     fs.writeFileSync(path.join(dir, 'cells.json'), JSON.stringify({ ...r.doc, probeSelftestOk: true }));
-    const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', timeout: 60000 });
+    // ⬛ [낡은 줄 · 8차] const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', timeout: 60000 });
+    const jEnv = { ...process.env }; // 🔴 11차 PM 판단 ② — CI 에서 돌아도 이 PC 와 같은 뜻(글꼴 관문 끔 = 이 시험 범위 밖)
+    delete jEnv.GITHUB_ACTIONS;
+    delete jEnv.PRINT_FONT_OUTCOME;
+    const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', timeout: 60000, env: jEnv });
     judge = { code: j.status, end: String(j.stdout || '').split(/\r?\n/).filter((l) => l.startsWith('판정 끝')).pop() || '' };
     res = JSON.parse(fs.readFileSync(path.join(dir, 'print-result.json'), 'utf8'));
   } finally {
@@ -2336,12 +2340,16 @@ guardAsync(TF2, async () => {
     const spawn = (extra) => {
       const env = { ...process.env, ...extra };
       if (!extra.PRINT_FONT_OUTCOME && extra.PRINT_FONT_OUTCOME !== '') delete env.PRINT_FONT_OUTCOME;
+      if (!extra.GITHUB_ACTIONS) delete env.GITHUB_ACTIONS; // 🔴 PM 판단 ② — CI 에서 돌아도 같은 뜻
       delete env.PRINT_FONT_WHY;
       const j = CP.spawnSync(process.execPath, [path.join(__dirname, 'judge-print.js'), dir], { encoding: 'utf8', env, timeout: 60000 });
       return { code: j.status, out: j.stdout || '', md: fs.readFileSync(path.join(dir, 'print-result.md'), 'utf8') };
     };
     out.off = spawn({});
     out.on = spawn({ PRINT_FONT_OUTCOME: 'failure' });
+    out.ci = spawn({ GITHUB_ACTIONS: 'true' }); // 🔴 PM 판단 ② — 워크플로 env 줄 지움 꼴(CI 인데 칸 없음)
+    fs.writeFileSync(path.join(dir, 'cells.json'), JSON.stringify({ ...doc, run: 'chain' }));
+    out.chain = spawn({ GITHUB_ACTIONS: 'true' }); // 사슬 시험 안 판정기 = 뺌
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -2350,7 +2358,11 @@ guardAsync(TF2, async () => {
   const rOk = J.judgeRun({ ...base, fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬' } });
   const rBad = J.judgeRun({ ...base, fontGate: { ok: false, why: '글꼴 관문 실패 — 2×2 ⓓ T8 기록 없음' } });
   const onLine = (out.on.md.match(/- 글꼴 관문[^\n]*/) || [''])[0];
-  const ok = !/글꼴 관문/.test(out.off.md) && /\*\*실패 — 판정 0\*\*/.test(onLine) && /ⓓ T8 기록 없음/.test(onLine) && /글꼴 단계 중단\(시간 초과 등 · outcome failure\)/.test(onLine)
+  const ciLine = (out.ci.md.match(/- 글꼴 관문[^\n]*/) || [''])[0];
+  const pm2 = /\*\*실패 — 판정 0\*\*/.test(ciLine) && /글꼴 관문 입력 없음/.test(ciLine) && out.ci.code === 1 && !/글꼴 관문/.test(out.chain.md) && /\(기록만 · 판정 아님\) 런 PDF 글꼴 이름/.test(out.on.md);
+  if (!pm2) console.log(`  · T-FG2 PM 판단 ② · ① — CI 칸 없음 「${ciLine.slice(0, 100)}」 끝 코드 ${out.ci.code} · 사슬 ${/글꼴 관문/.test(out.chain.md) ? '켜짐(틀림)' : '꺼짐'}`);
+  // ⬛ [낡은 줄 · 11차 D2′] const ok = !/글꼴 관문/.test(out.off.md) && /\*\*실패 — 판정 0\*\*/.test(onLine) …(아래 줄 앞머리에 pm2 더함)
+  const ok = pm2 && !/글꼴 관문/.test(out.off.md) && /\*\*실패 — 판정 0\*\*/.test(onLine) && /ⓓ T8 기록 없음/.test(onLine) && /글꼴 단계 중단\(시간 초과 등 · outcome failure\)/.test(onLine)
     && out.on.code === 1 && /글꼴 관문 실패/.test(out.on.out) && rOk.positive.why === r0.positive.why && rBad.positive.ok === false && /^글꼴 관문 실패 — 2×2 ⓓ/.test(rBad.positive.why);
   check(TF2, ok, `끔 ${/글꼴 관문/.test(out.off.md) ? '줄 있음(틀림)' : '줄 없음'} · 켬 끝 코드 ${out.on.code} · 「${onLine.slice(0, 120)}」 · 통과 = 그대로 ${rOk.positive.why === r0.positive.why} · 실패 앞머리 ${String(rBad.positive.why).slice(0, 30)}`);
 });
@@ -2358,7 +2370,7 @@ guardAsync(TF2, async () => {
 // T-FG4 11차 D7′ · D6(고침 1 §8-4 · 고침 2 §5 · §1-10-0 (8)) — 꼬리표 글자(법무 ㉣) · 결과표 머리 · ㉤ 두 칸 · 굵게 요청 → 600 파일 · R6 계획 글자
 const TFG4 = 'T-FG4 11차 D7′ 꼬리표 글자 · 결과표 머리 · ㉤ 두 칸 · 굵게 600 칸 · D6 R6 계획(run R6 · 잡 r6-main-read · qpdf false)';
 guard(TFG4, () => {
-  const base = J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [], fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬', pdfFonts: ['ABCDEF+PrintSubstitute-Regular'], boldWeight: 600 } });
+  const base = J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [], fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬', pdfFonts: ['ABCDEF+PrintSubstitute-Regular'], boldWeight: 600, runFonts: { names: ['PrintSubstitute-Regular', 'PrintSubstitute-Bold'], bold: true } } });
   const md = J.toMarkdown({ run: 'R6', job: 'r6-main-read', board: 'main' }, base, null);
   const mdNoGate = J.toMarkdown({ run: 'R6', job: 'x', board: 'main' }, J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [] }), null);
   const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'plan.json'), 'utf8'));
@@ -2367,6 +2379,7 @@ guard(TFG4, () => {
   const tagOk = J.FONT_TAG === '대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1, © NAVER Corp.)';
   const ok = tagOk && md.includes(`- 〔${J.FONT_TAG}〕`) && mdNoGate.includes(`- 〔${J.FONT_TAG}〕`)
     && md.includes('- 요청 이름 = Malgun Gothic · PDF 실제 글꼴 칸(사실 파일 값 그대로) = ABCDEF+PrintSubstitute-Regular') && md.includes('- 굵게 요청 → 600 파일: 굵게 파일 usWeightClass = 600')
+    && md.includes('- (기록만 · 판정 아님) 런 PDF 글꼴 이름(접두 뗀 값) = PrintSubstitute-Regular, PrintSubstitute-Bold · 굵게 이름 있음 = 예') // 🔴 PM 판단 ①
     && plan.run === 'R6' && r6.jobs.length === 1 && job.id === 'r6-main-read' && job.board === 'main' && job.tenant === 'A' && job.phase === 'read' && job.patch === '' && job.qpdf === false && !r6.blocked;
   check(TFG4, ok, `꼬리표 ${tagOk ? '○' : '×'} · 머리 ${md.includes(`〔${J.FONT_TAG}〕`) ? '○' : '×'} · ㉤ ${md.includes('요청 이름 = Malgun Gothic') ? '○' : '×'} · 600 ${md.includes('usWeightClass = 600') ? '○' : '×'} · 계획 ${plan.run} · ${job.id || '잡 없음'} · qpdf ${job.qpdf}`);
 });
