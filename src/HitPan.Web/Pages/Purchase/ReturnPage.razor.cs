@@ -50,6 +50,7 @@ public partial class ReturnPage : ComponentBase
             ManagerName = "담당자",
             Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
         };
+        ClearLoadedReturn(); // 🔴 W-G1-51 갈래 E 고침1 — 첫 새 전표 = 붙잡은 전표 없음(G7)
         RefreshWorkflow();
         RecalculateSummary();
 
@@ -155,6 +156,7 @@ public partial class ReturnPage : ComponentBase
     {
         if (_draft is null) return;
         _draft.Id = Guid.NewGuid().ToString();
+        ClearLoadedReturn(); // 🔴 W-G1-51 갈래 E 고침1 — 복사본 = 새 id · 저장 전 새 전표(G7)
         _draft.DocumentNumber = null;
         _draft.SalesDate = DateTime.Today;
         _isNew = true;
@@ -229,7 +231,8 @@ public partial class ReturnPage : ComponentBase
         // 14차 P0 봉합(B안): 반품유형에 따라 매출반품(api/sales/returns)·매입반품(api/purchase/returns)
         //   경로로 분기한다. 종전엔 _returnType 무시하고 항상 매입반품으로 저장해, 판매반품 선택 시
         //   재고·잔액·회계가 3중 역방향으로 오염됐다(헌법 #20). 백엔드는 13차에 양쪽 다 완비됨.
-        var isSalesReturn = _returnType == "sales_return";
+        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표의 수정(PUT)은 그 전표의 종으로 · 새 전표(POST)는 선택칸(종전과 같음).
+        var isSalesReturn = IsCurrentDocSalesReturn;
         var basePath = isSalesReturn ? "api/sales/returns" : "api/purchase/returns";
         var docLabel = isSalesReturn ? "매출반품" : "매입반품";
 
@@ -246,11 +249,14 @@ public partial class ReturnPage : ComponentBase
                     return;
                 }
                 var created = await resp.Content.ReadFromJsonAsync<ReturnCreatedResponse>();
+                // 🔴 W-G1-51 갈래 E 고침1 — 저장 길에서 붙잡은 값을 끄고(G7), 방금 저장한 전표(서버 id · 저장한 종)로 다시 붙잡는다.
+                ClearLoadedReturn();
                 if (created is not null)
                 {
                     _draft.Id = created.ReturnId;
                     _draft.DocumentNumber = created.ReturnNo;
                     _isNew = false;
+                    BindLoadedReturn(created.ReturnId, isSalesReturn);
                 }
                 Snackbar.Add($"{docLabel}을 저장했습니다.", Severity.Success);
             }
@@ -299,6 +305,7 @@ public partial class ReturnPage : ComponentBase
                 ManagerName = "담당자",
                 Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
             };
+            ClearLoadedReturn(); // 🔴 W-G1-51 갈래 E 고침1 — 새 전표로 초기화(G7)
             _isNew = true;
             RecalculateSummary();
             RefreshWorkflow();
@@ -332,7 +339,8 @@ public partial class ReturnPage : ComponentBase
             try
             {
                 // 14차 P0 봉합(B안): 반품유형에 따라 삭제 경로 분기.
-                var deletePath = _returnType == "sales_return" ? "api/sales/returns" : "api/purchase/returns";
+                // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
+                var deletePath = IsCurrentDocSalesReturn ? "api/sales/returns" : "api/purchase/returns";
                 using var resp = await Http.DeleteAsync($"{deletePath}/{Uri.EscapeDataString(_draft.Id)}");
                 if (!resp.IsSuccessStatusCode)
                 {
@@ -365,6 +373,7 @@ public partial class ReturnPage : ComponentBase
             ManagerName = "담당자",
             Lines = new List<DeliveryLineModel> { new() { No = 1, IsPlaceholder = true } }
         };
+        ClearLoadedReturn(); // 🔴 W-G1-51 갈래 E 고침1 — 삭제 뒤 새 전표로 초기화(G7)
         _isNew = true;
         _selectedLine = null;
         _hasUnsavedChanges = false;
@@ -391,16 +400,65 @@ public partial class ReturnPage : ComponentBase
     /// <summary>판매반품 렌더 키(밑줄 꼴) — 이메일은 이 키를 렌더러에 그대로 넘긴다.</summary>
     private const string SalesReturnEmailTypeKey = "sales_return";
 
-    /// <summary>반품유형이 「판매반품」 인가 — 저장·확정·취소·삭제와 같은 판정(<c>_returnType</c>)을 쓴다.</summary>
-    private bool IsSalesReturnSelected => _returnType == "sales_return";
+    // ─────────────────────────────────────────────────────────────────
+    // 🔴 W-G1-51 갈래 E 고침1 ([3-V] P2-E1 · [4] P3 E-3 · PM 판단 11/19) — 종은 「불러온 전표」 에 묶는다.
+    //   종전(고침 전): 인쇄·PDF·이메일·저장·삭제·확정·취소가 모두 선택칸 `_returnType` 으로 종을 갈랐다.
+    //         선택칸은 전표를 불러온 뒤에도 바뀐다 → 매입반품을 불러온 뒤 「판매반품」 으로 바꾸고 [이메일]
+    //         = 판매반품 키 + 매입반품 id → 「원본 문서를 찾을 수 없습니다」 종이가 거래처로 나갔다.
+    //   지금: 서버에서 읽어 온(또는 그 종으로 저장한) 전표의 **id 와 종을 따로 붙잡는다**.
+    //         `/deliveries` 의 `_openedSalesReturnIdForPrint`(G7)와 같은 원칙 — 판정은 「붙잡은 id == 지금 _draft.Id」 일 때만.
+    //         선택칸은 잠그지 않는다 — [목록] 이 선택칸으로 매입/판매 목록을 고르므로, 잠그면 불러온 뒤
+    //         다른 종 목록으로 못 넘어간다(새 전표 단추가 없는 화면). 선택칸의 뜻 = 「목록 종류 · 새 전표의 종」.
+    //   켬: LoadReturnAsync 읽기 성공 · SaveAsync 새로 저장 성공(그 종 · 서버 id).
+    //   끔: 첫 화면 · 복사(새 id) · 취소(새 전표 초기화) · 삭제 뒤 초기화 · 새로 저장 길(끈 뒤 저장한 전표로 다시 켬).
+    //   id 로 묶었으므로 끄는 자리를 하나 빠뜨려도 _draft.Id 가 바뀌면 판정이 저절로 거짓이 된다.
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>불러온(또는 방금 새로 저장한) 반품 전표의 서버 id. 비면 「붙잡은 전표 없음」.</summary>
+    private string? _loadedReturnId;
+
+    /// <summary>위 전표가 판매반품인가 — 읽어 온 목록 종(또는 저장한 경로)에서 정한다. 선택칸을 바꿔도 안 바뀐다.</summary>
+    private bool _loadedReturnIsSales;
+
+    /// <summary>붙잡은 전표가 지금 화면의 전표인가(서수 비교).</summary>
+    private bool IsLoadedReturnOnScreen =>
+        !string.IsNullOrWhiteSpace(_loadedReturnId)
+        && string.Equals(_loadedReturnId, _draft?.Id, StringComparison.Ordinal);
+
+    /// <summary>
+    /// [인쇄] · [PDF] · [이메일] 판정 — 화면의 전표가 **불러온 판매반품**일 때만 참.
+    /// 그 밖(매입반품 · 저장 안 한 새 전표)은 종전 매입반품 키 그대로(#1 · `/deliveries` G7 과 같은 꼴).
+    /// </summary>
+    private bool IsLoadedSalesReturnForPrint => IsLoadedReturnOnScreen && _loadedReturnIsSales;
+
+    /// <summary>
+    /// 저장 · 삭제 · 확정 · 확정취소 판정 — 불러온 전표면 그 전표의 종, 새 전표면 선택칸(종전과 같음).
+    /// 선택칸 = 불러온 종인 보통 흐름에서는 종전과 같은 경로다(바뀌는 것은 선택칸을 바꾼 뒤뿐).
+    /// </summary>
+    private bool IsCurrentDocSalesReturn =>
+        IsLoadedReturnOnScreen ? _loadedReturnIsSales : _returnType == "sales_return";
+
+    private void BindLoadedReturn(string returnId, bool isSales)
+    {
+        _loadedReturnId = returnId;
+        _loadedReturnIsSales = isSales;
+    }
+
+    private void ClearLoadedReturn()
+    {
+        _loadedReturnId = null;
+        _loadedReturnIsSales = false;
+    }
 
     private async Task PrintAsync()
     {
-        if (IsSalesReturnSelected)
+        if (IsLoadedSalesReturnForPrint)
         {
             // ⚠️ 글자 그대로 둔다(상수 아님) — 인쇄 게이트 축⑥ 이 `PrintPreview.ShowAsync("…")` 글자를 긁어
             //   서버 문·로더가 그 종을 아는지 본다(DocumentPrintPreviewGateTests.WiredDocTypes).
-            await PrintPreview.ShowAsync("sales-return", _draft?.Id, "반품서");
+            // 🔴 고침1 E-2 — 창 제목 = 양식 종 이름 「판매반품」(FormTemplateService · `/deliveries` 와 같게).
+            //   매입반품 쪽 「반품서」 는 아래 종전 줄 그대로(#1).
+            await PrintPreview.ShowAsync("sales-return", _draft?.Id, "판매반품");
             return;
         }
 
@@ -416,7 +474,8 @@ public partial class ReturnPage : ComponentBase
         {
             ["DocumentType"] = "반품처리서",
             // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키 · 매입반품은 종전 "purchase_receipt" 그대로(#1).
-            ["DocumentTypeKey"] = IsSalesReturnSelected ? SalesReturnEmailTypeKey : "purchase_receipt",
+            //   고침1 — 판정은 불러온 전표의 종 · id(선택칸 아님 · P2-E1).
+            ["DocumentTypeKey"] = IsLoadedSalesReturnForPrint ? SalesReturnEmailTypeKey : "purchase_receipt",
             ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
             ["DocumentId"] = _draft?.Id ?? "",
             ["PartnerId"] = _draft?.PartnerId ?? ""
@@ -435,7 +494,8 @@ public partial class ReturnPage : ComponentBase
         // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키. ⚠️ 이 단추는 옛 /pdf 길(DocumentController
         //   LoadDocumentAsync)을 탄다 — 거기엔 아직 "sales-return" 적재가 없어 빈 문서가 나온다(설계 C8 ⑷).
         //   그 파일은 착수준비표 P-2 로 Z5 뒤다. 키만 먼저 맞춰 둔다.
-        if (IsSalesReturnSelected)
+        //   고침1 — 판정은 불러온 전표의 종 · id(선택칸 아님 · P2-E1).
+        if (IsLoadedSalesReturnForPrint)
         {
             await DocService.DownloadPdfAsync(SalesReturnPrintType, _draft.Id);
             return;
@@ -615,6 +675,9 @@ public partial class ReturnPage : ComponentBase
             Status = detail.Status,
             Lines = lines
         };
+        // 🔴 W-G1-51 갈래 E 고침1 — 켬(읽기 성공 · _draft 를 그 전표로 바꿔 넣은 뒤에만).
+        //   종 = 읽어 온 목록 종(isSalesReturn) · id = 서버가 돌려준 ReturnId. 실패하면 위에서 빠져 종전 값 유지.
+        BindLoadedReturn(detail.ReturnId, isSalesReturn);
         _status = string.Equals(detail.Status, "confirmed", StringComparison.OrdinalIgnoreCase)
             ? "Confirmed" : "Draft";
         _isNew = false;
@@ -662,7 +725,8 @@ public partial class ReturnPage : ComponentBase
 
         // 14차 P0 봉합(B안): 매출반품은 재고가 증가(Reverse IN), 매입반품은 차감(Reverse OUT).
         //   확정 다이얼로그 문구·확정 API를 반품유형에 맞게 분기한다.
-        var isSalesReturn = _returnType == "sales_return";
+        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
+        var isSalesReturn = IsCurrentDocSalesReturn;
         var confirmTitle = isSalesReturn ? "⚠ 매출반품 확정 (Reverse IN)" : "⚠ 매입반품 확정 (Reverse OUT)";
         var stockLine = isSalesReturn
             ? $"→ 재고 {totalQty:N1}개 증가 (고객 반품 입고)\n→ 재고원장에 Reverse IN 기록\n"
@@ -719,7 +783,8 @@ public partial class ReturnPage : ComponentBase
             return;
         }
 
-        var isSalesReturn = _returnType == "sales_return";
+        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
+        var isSalesReturn = IsCurrentDocSalesReturn;
         var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
         var cancelTitle = isSalesReturn ? "⚠ 매출반품 취소 (확정 되돌림)" : "⚠ 매입반품 취소 (확정 되돌림)";
         var stockLine = isSalesReturn
