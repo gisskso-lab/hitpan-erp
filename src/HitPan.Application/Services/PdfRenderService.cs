@@ -188,6 +188,20 @@ public sealed class PdfRenderService : IPdfRenderService
         //   법정 서식(또는 그 후보) `LegalFormDocTypes`(세금계산서 · 면세계산서 · 입금표)는 스타일을 안 먹는다(조건 ⑥).
         // ⬛ 종전: var printStyle = ResolvePrintStyle(template, useCoords);
         var printStyle = ResolvePrintStyle(template, useCoords, documentType);
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 3] 격식 제목 글꼴(내장)을 그리기 전에 등록한다 —
+        //   실패(리소스 없음 · 읽기 오류)면 경고 1줄 + 이 전표는 제목을 기본 글꼴로 그린다(#20 · 전표는 나간다).
+        if (printStyle?.TitleFontFamily is not null)
+        {
+            try
+            {
+                EnsureEmbeddedFontsRegistered();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PDF] 격식 제목 글꼴을 등록하지 못했다 — 제목을 기본 글꼴로 그린다.");
+                printStyle = printStyle with { TitleFontFamily = null };
+            }
+        }
 
         // 🔴 20261021작 절 B-3 — 세금계산서 전용(법정) 작성기.
         //   양식용지(preprint)·좌표 경로는 **종전 그대로** 간다(아래 공용 흐름).
@@ -561,6 +575,37 @@ public sealed class PdfRenderService : IPdfRenderService
 
     private const string StyleInk = "#000000";
 
+    // ─── 격식 제목 글꼴 (2026-11-20 W-G1-51 갈래 E⑵ 고침 3) ─────────────────────
+    //   근거: 대표 §11 #2(Noto Serif KR 내장 승인) · 착수준비표 P-5(어셈블리 내장 리소스) · 법무 1줄 ①~⑥ + 해석 덧붙임 · PM §74.
+    //   🔴 원본 1개 손질 0 — notofonts/noto-cjk 태그 Serif2.003 · 커밋 9b0f1436e455d902de067a2501422e5dc71ad16b ·
+    //     Serif/SubsetOTF/KR/NotoSerifKR-Bold.otf · SHA-256 = 개발명세서 §고침 3 · 시험 `FormalTitleFontEmbedGateTests` 가 저장소 · 내장 둘 다 대조.
+    //   🔴 고지 = 저장소 글꼴 옆 `NotoSerifKR-OFL.txt` → api 출력 · 게시 `licenses\`(HitPan.API.csproj · 설치 · 업데이트 스크립트 0줄).
+    //   🔴 이름을 바꿔 등록하지 않는다(`RegisterFontWithCustomName` 안 씀) — 파일의 가족 이름(이름 기록 ID 1)으로 등록된다.
+
+    /// <summary>내장 리소스 이름 — <c>HitPan.Application.csproj</c> 의 <c>EmbeddedResource LogicalName</c> 과 같은 글자.</summary>
+    private const string FormalTitleFontResourceName = "HitPan.Application.Resources.Fonts.NotoSerifKR-Bold.otf";
+
+    /// <summary>글꼴 파일 이름 기록 ID 1(가족 이름) 글자 그대로 — 격식 제목에만 쓴다.</summary>
+    private const string FormalTitleFontFamily = "Noto Serif KR";
+
+    /// <summary>
+    /// 🔴 내장 글꼴 등록 — 처음 쓸 때 <b>1번</b>(스레드 안전). 실패(리소스 없음 · 읽기 오류)는 값에 담겨 부를 때마다 다시 던진다.
+    /// </summary>
+    private static readonly Lazy<bool> EmbeddedFontRegistration =
+        new(RegisterEmbeddedFonts, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>내장 글꼴이 등록돼 있게 한다 — 실패면 예외(제품 길은 <c>RenderDocumentAsync</c> 가 경고 1줄 + 기본 글꼴로 내림).</summary>
+    private static void EnsureEmbeddedFontsRegistered() => _ = EmbeddedFontRegistration.Value;
+
+    private static bool RegisterEmbeddedFonts()
+    {
+        using var stream = typeof(PdfRenderService).Assembly.GetManifestResourceStream(FormalTitleFontResourceName)
+            ?? throw new InvalidOperationException(
+                $"격식 제목 글꼴 내장 리소스({FormalTitleFontResourceName})가 없다 — 빌드 산출물을 확인해 주십시오.");
+        QuestPDF.Drawing.FontManager.RegisterFont(stream);
+        return true;
+    }
+
     /// <summary>
     /// 🔴 양식 디자인 스타일 값 묶음 — 시안 §2-2 표를 <b>그대로</b> 옮겼다(formal · simple · large).
     /// </summary>
@@ -582,6 +627,7 @@ public sealed class PdfRenderService : IPdfRenderService
         /// <summary>
         /// 🔴 비움 = 본문 글꼴(맑은 고딕). 격식 = Noto Serif KR 은 <b>글꼴 파일 들이기 뒤</b>
         /// (착수준비표 P-5 「법무팀장 1줄 = 들이기 전」 · 개발명세서 §2 멈춤) — 그때 이 값 + 등록 줄만 더한다.
+        /// ⬛ 정정(2026-11-20 고침 3): 들임 끝 — 격식 = <c>Noto Serif KR</c>(내장 · 처음 쓸 때 등록). 간결 · 큰글씨 = 비움 그대로.
         /// </summary>
         public string? TitleFontFamily { get; init; }
         public float DocMetaSize { get; init; }
@@ -675,6 +721,8 @@ public sealed class PdfRenderService : IPdfRenderService
     {
         Key = "formal",
         TitleCentered = true, TitleSize = 22, TitleLetterSpacing = 6f / 22f,
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 3 · 대표 §11 #2 · 시안 §3-2] 격식 제목 글꼴 — 제목 한 줄에만(본문 · 거래처 · 합계 = 맑은 고딕 그대로).
+        TitleFontFamily = FormalTitleFontFamily,
         DocMetaSize = 9, CompanyNameSize = 12, CompanyIdSize = 9, CompanyContactSize = 8,
         RuleWidth = 1.5f, RuleSecondGap = 1.5f, RuleSecondWidth = 0.5f,
         PartnerBoxed = true, PartnerLine = 0.75f, PartnerPad = 8,
@@ -787,7 +835,14 @@ public sealed class PdfRenderService : IPdfRenderService
         var title = x.Text(KoLabel(d.DocType));
         title.FontSize(s.TitleSize).Bold();
         if (s.TitleLetterSpacing > 0) title.LetterSpacing(s.TitleLetterSpacing);
-        if (s.TitleFontFamily is not null) title.FontFamily(s.TitleFontFamily);
+        // ⬛ 종전: if (s.TitleFontFamily is not null) title.FontFamily(s.TitleFontFamily);
+        // 🔴 [고침 3] 글꼴을 쓰기 전에 내장 글꼴 등록을 확인한다(처음 1번) — 시험의 반사 길도 실제 글꼴로 그린다.
+        //   제품 길은 `RenderDocumentAsync` 가 먼저 확인해 실패면 이 칸을 비워 보낸다 ⇒ 여기서 던질 일 0.
+        if (s.TitleFontFamily is not null)
+        {
+            EnsureEmbeddedFontsRegistered();
+            title.FontFamily(s.TitleFontFamily);
+        }
     }
 
     private static void StyledDocMeta(ColumnDescriptor left, DocumentSnapshot d, PrintStyle s, bool withTitle)

@@ -119,4 +119,13 @@
     <None Update="Rollback\local-swap.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 🔴 2026-11-20 W-G1-51 갈래 E⑵ 고침 3 (법무 1줄 ③ · 해석 덧붙임 ㉮~㉱ · [1-V] §0 ② · PM §74):
+         격식 제목 글꼴(HitPan.Application 내장) 고지 파일을 api 출력 · 게시 폴더의 licenses\ 한 단에 평문 그대로 싣는다.
+         · 설치 = .iss api 폴더 재귀 복사 · 업데이트 판 = api 폴더 통째 — 설치 · 업데이트 스크립트 · 워크플로 0줄(#43).
+         · 원본은 저장소 글꼴 옆 한 벌(Link) — 두 벌로 두지 않는다. 선례 = 위 local-swap.ps1 줄(CopyToPublishDirectory).
+         · 이 줄이 빠진 판이 한 번이라도 나가면 그 PC 의 글꼴은 고지 없는 사본이 된다(법무 ㉱) — 지우지 마라. -->
+    <None Include="..\HitPan.Application\Resources\Fonts\NotoSerifKR-OFL.txt" Link="licenses\NotoSerifKR-OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
