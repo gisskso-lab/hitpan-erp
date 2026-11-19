@@ -2465,7 +2465,8 @@ guard(TPD1, () => {
   }
   const base = J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [], fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬', pdfFonts: [], boldWeight: 600 } });
   const md2 = J.toMarkdown({ run: 'R6', job: 'r6-main-read', board: 'main' }, { ...base, pdfDrop: bad2 }, null);
-  const e5 = J.FONT_E5 === 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+  // ⬛ [낡은 줄 · 12차 · S12-1 줄인 글자] const e5 = J.FONT_E5 === 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+  const e5 = J.FONT_E5 === 'FontName = 측정 · FontFamily = [1-V] ③ ⑤ 원문상 이 경로(Type0/CID)에선 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)'; // 🔴 13차 S12-1
   const ok = o.code !== null && o.left === 0 && o.facts && o.drop && o.drop.removed === 2 && o.drop.failed.length === 0
     && o.md.includes('- PDF 업로드 0(법무 재확인 3 · 결과표 · 사실 파일만): 사실 뽑은 뒤 지운 PDF 2 · 못 지움 0')
     && o.s10 && o.s10.code === 0 && /🟢 PASS 누출 0/.test(o.s10.out) && !/PDF 파일/.test(o.s10.out)

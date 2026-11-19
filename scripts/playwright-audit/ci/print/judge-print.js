@@ -575,7 +575,8 @@ const FONT_KEEP_IDS = [0, 7, 8, 9, 11, 12, 13, 14];
 const FONT_BAN = /nanum|naver|나눔|네이버/i;
 const stripSubset = (s) => String(s || '').replace(/^[A-Z]{6}\+/, '');
 // 🔴 12차 PM 보충 ⓑ(법무 재확인 3줄 · 질문 3 「아니오」 · PM 판단 S11-1 (나)) — 결과표 ㉤ 행 글자 그대로
-const FONT_E5 = 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+// ⬛ [낡은 줄 · 12차 · S12-1 줄인 글자] const FONT_E5 = 'FontName = 측정 · FontFamily = 원문상 이 경로에서 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)';
+const FONT_E5 = 'FontName = 측정 · FontFamily = [1-V] ③ ⑤ 원문상 이 경로(Type0/CID)에선 안 씀 · 런 실측 미측정 · 내장본 이름 표 ID 1 「Malgun Gothic」 남음(원문)'; // 🔴 13차 S12-1 · 법무 ⓑ = PM 판단 글자 그대로
 /** 🔴 12차 PM 보충 ⓐ(S11-2) — 사실을 다 읽은 뒤 root 아래 .pdf(대소문자 무시 · 하위 폴더) 전부 지움 → { removed · failed[] } · 사실 파일(.json) 그대로 · rm = 시험 주입용 */
 function dropPdfs(root, rm = (p) => fs.rmSync(p)) {
   const out = { removed: 0, failed: [] };
