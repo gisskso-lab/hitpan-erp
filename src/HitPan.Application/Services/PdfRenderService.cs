@@ -94,7 +94,22 @@ public sealed class PdfRenderService : IPdfRenderService
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
-        var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
+        //
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1 · 대표 11/18 Q12] **`isPreprint &&` 제약을 뺐다.**
+        //   종전 식 = `isPreprint && (template?.FieldCoords.Count ?? 0) > 0`
+        //   [그대로 두면 무슨 일이 나나] 빈 A4(`plain`) 양식에 칸 좌표가 있어도 이 한 줄이
+        //     좌표를 통째로 버렸다 ⇒ 값은 늘 히트판 표준 표(`ComposeBody`)로 갔다(설계 §2 C1 · C2).
+        //     대표 11/18 08시② 의 Y 템플릿(흰 종이 + 양식 그림 + 칸 값)은 좌표를 타야 서는 모양이다.
+        //   🔴 **좌표가 0개인 양식은 한 글자도 안 바뀐다** — 그때 이 값은 여전히 `false` 이고
+        //     그 종이는 종전과 똑같다(#1). 바뀌는 것은 **좌표가 남은 빈 A4 양식**(Y 템플릿 · K4)뿐이고,
+        //     K4 가 기본 폼 → 좌표 모양으로 바뀌는 것은 대표 11/18 Q12 「받아들임」 이다.
+        //   🔴 양식지(`preprint`)는 종전에도 좌표를 탔다 — 그 종이는 안 바뀐다.
+        //   🔴 세금계산서는 이 변화가 **안 닿는다** — `plain` 세금계산서는 아래 전용 작성기
+        //     분기(`&& !isPreprint`)에서 이 값을 쓰기 전에 먼저 빠진다(법정 서식).
+        //   🔴 좌표가 있으면 용지 · 방향이 A4 세로로 묶인다(`ResolvePageSize` 의 좌표 울타리) —
+        //     좌표는 어느 종이에 대고 쟀는지가 전제이기 때문이다. 이제 `plain` 좌표 양식도 그 안이다.
+        //   🔴 칸 맞춤 화면은 양식지 전용 그대로다(설계 §3 P2 안 가져옴 · 편집창 무변).
+        var useCoords = (template?.FieldCoords.Count ?? 0) > 0;
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
         // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
         //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
@@ -228,7 +243,14 @@ public sealed class PdfRenderService : IPdfRenderService
                 }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
-                if (!isPreprint && showHeader)
+                // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1] **좌표 경로는 머리글을 안 그린다.**
+                //   종전 식 = `!isPreprint && showHeader`
+                //   [그대로 두면 무슨 일이 나나] 좌표 경로는 여백이 **0** 이다(위 `useCoords` 분기).
+                //     그 종이에 표준 머리글을 또 그리면 Y 템플릿 양식 그림의 맨 윗칸 위에
+                //     「견적서 / 문서번호 / 회사이름」 이 **겹쳐 찍힌다** ⇒ 「기본 폼이 나온다」 의 재발.
+                //   🔴 `preprint` 는 종전에도 안 그렸다 — 그 종이는 안 바뀐다(#1).
+                //   🔴 좌표가 0개인 `plain` 양식도 안 바뀐다 — `useCoords` 가 `false` 다(#1).
+                if (!isPreprint && !useCoords && showHeader)
                 {
                     page.Header().Element(e => ComposeHeader(e, data, company));
                 }
@@ -236,7 +258,10 @@ public sealed class PdfRenderService : IPdfRenderService
                     page.Content().Element(e => ComposeBodyCoords(e, data, template!.FieldCoords));
                 else
                     page.Content().Element(e => ComposeBody(e, data, isPreprint, showBorder));
-                if (!isPreprint)
+                // 🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1] 쪽번호도 좌표 경로에서는 안 찍는다 —
+                //   종전 식 = `!isPreprint` · 여백 0 이라 양식 그림의 맨 아랫칸을 덮는다(머리글과 같은 까닭).
+                //   좌표 0개 양식 · `preprint` 는 종전과 같다(#1).
+                if (!isPreprint && !useCoords)
                 {
                     page.Footer().AlignCenter().Text(t =>
                     {
@@ -1926,6 +1951,22 @@ public sealed class PdfRenderService : IPdfRenderService
         //     그 판정은 화면이 먼저 말려 주고(갈래 D), 여기서는 고객이 고른 대로 그린다.
         //     「우리가 몰래 끈다」는 길은 안 만든다(반자동 원칙 · 고객이 정한다).
         if (overrides?.IsFormDesignPreview != true && template?.PrintBackground != true) return null;
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §5 A 줄 · 대표 11/18 Q11 · Q14 · 08시②] **양식지 안전망 — 한 줄 더했다.**
+        //   위 줄은 그대로 두고(#1 · 지운 것 0) 이 줄을 **더해** 판정을 좁혔다. 두 줄을 합친 판정:
+        //     깐다 ⇔ 설계 미리보기 **또는** (`print_background`=1 **그리고** 양식지 아님)
+        //   [그대로 두면 무슨 일이 나나] 대표 결정 「양식지 = 늘 데이터만」(08시②) 인데
+        //     `print_background`=1 로 남은 양식지 행은 전표 인쇄에 그림이 또 찍힌다(이중 인쇄).
+        //     그 행은 업데이트 때 Y 템플릿으로 복제되고(대표 Q14 · 갈래 F) 원래 양식지는
+        //     데이터만으로 남아야 한다 — **옮기기가 실패한 행도** 여기서 이중 인쇄 0 이 된다.
+        //   🔴 칸 좌표 유무와 **상관없이** 본다 — 양식지는 칸이 있든 없든 데이터만이다.
+        //   🔴 양식정보설정 미리보기(`IsFormDesignPreview`)는 종전대로 깐다 — 겹침 미리보기는
+        //     그 화면에만 있다(대표 Q11 ⑴). 전표 [인쇄] 미리보기 창 = 데이터만 = 인쇄 바이트.
+        //   🔴 빈 A4(`plain`) + 켬(Y 템플릿)은 종전대로 깐다 — 미리보기 바이트 = 인쇄 바이트.
+        //   🔴 바뀌는 행 = 양식지 + `print_background`=1 행의 **전표 쪽** 종이뿐이다(기본값 0 행 무변).
+        //   🔴 위 주석의 「preprint 가 켜면 고객이 고른 대로 그린다 · 몰래 끄는 길은 안 만든다」(작1 결-D)는
+        //     대표 11/18 08시② 「종이에도 함께 인쇄」 선택 없앰 · Y 템플릿으로 대신 으로 바뀌었다 —
+        //     옛 주석은 이력으로 남기고(지운 것 0) 판정은 이 줄이 정한다.
+        if (overrides?.IsFormDesignPreview != true && template?.PaperMode == "preprint") return null;
         return TryLoadFormBackground(template?.BackgroundImageUrl);
     }
 
