@@ -1247,9 +1247,18 @@ public class FormTemplateService : IFormTemplateService
             return false;
         }
 
+        // 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 고침 2 · §63 G-1 · [4] P3-① · [3-V] P3-B · PM 판단] 그림 경로 「무변」 판정을
+        //   편집창 `SameBackgroundPath` 와 같은 기준으로(<see cref="SameBackgroundPath"/> — 어느 한쪽이 비었으면 「같지 않다」 ·
+        //   앞뒤 공백 자름 · 대소문자 무시). 종전 Ordinal 은 옛 행 경로를 공백 · 대소문자만 다르게 다시 적은 저장에서
+        //   화면은 「같다」(확인창 0) · 서버는 「다르다」(그림 찍기 0) → Y 제안이 조용히 사라졌다(고침 1 이 연 길).
+        //   paper_mode 비교는 무변.
+        // ⬛ 옛 줄(주석 보존 · #1):
+        //    var keep = string.Equals(current.PaperMode, "preprint", StringComparison.Ordinal)
+        //               && current.PrintBackground
+        //               && string.Equals(current.BackgroundImageUrl, request.BackgroundImageUrl, StringComparison.Ordinal);
         var keep = string.Equals(current.PaperMode, "preprint", StringComparison.Ordinal)
                    && current.PrintBackground
-                   && string.Equals(current.BackgroundImageUrl, request.BackgroundImageUrl, StringComparison.Ordinal);
+                   && SameBackgroundPath(current.BackgroundImageUrl, request.BackgroundImageUrl);
         if (keep)
         {
             _logger.LogInformation(
@@ -1282,6 +1291,19 @@ public class FormTemplateService : IFormTemplateService
     /// </remarks>
     private static string? TrimBackgroundPath(string? path)
         => string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+    /// <summary>
+    /// 두 그림 경로가 같은가 — 앞뒤 공백 자름 · 대소문자 무시. 어느 한쪽이 비었으면 「같지 않다」.
+    /// 편집창 `SameBackgroundPath`(FormTemplateEditorDialog.razor)와 같은 기준.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 2 · §63 G-1 · PM 판단] 고치기 저장의 「그림 찍기 유지」 판정에서만 쓴다.
+    ///   구분자(/ · \) 맞추기 등 그 밖의 정규화는 하지 않는다(<see cref="TrimBackgroundPath"/> 와 같은 선).
+    /// </remarks>
+    private static bool SameBackgroundPath(string? a, string? b)
+        => !string.IsNullOrWhiteSpace(a)
+           && !string.IsNullOrWhiteSpace(b)
+           && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>「예」 길 1213(교착) 사람 말 — 개발 용어 · 원문 0.</summary>
     private const string YTemplateDeadlockMessage =

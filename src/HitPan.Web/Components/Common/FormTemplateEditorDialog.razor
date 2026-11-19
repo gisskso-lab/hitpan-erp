@@ -341,6 +341,15 @@
                                    OnClick="SwitchToPreprint">양식용지로 바꾸기</MudButton>
                     }
                 </MudStack>
+                @* 🔴🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 고침 2 · §63 G-3 ⓐ · [4] P3-③ · [3-V] P3-D · PM 판단] 「양식 그림 포함」(빈 A4) 양식이면
+                     그림 칸 옆에 고정 글 1줄 — 그림을 바꾸기 **전에** 칸이 그대로라는 것을 말한다(저장 뒤 안내는 늦고 사라진다).
+                     조건 = `KeepLoadedYCoords`(저장 · 미리보기가 불러온 칸 좌표를 지키는 조건과 같음) — 양식용지로 바꾸거나 그림을 지우면 이 줄도 사라진다. *@
+                @if (KeepLoadedYCoords)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+                        이 양식에서는 칸 위치를 바꿀 수 없습니다. 그림을 바꿔도 칸은 지금 자리에 찍힙니다.
+                    </MudText>
+                }
                 @if (!string.IsNullOrWhiteSpace(_bgFileName))
                 {
                     <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
@@ -1571,7 +1580,12 @@
                 //   위 확인창(양식용지일 때만)과 겹치는 경우 0 — 이 갈래는 빈 A4 · 저 갈래는 양식용지.
                 if (sentKeepsYCoords && !SameBackgroundPath(sentBackgroundPath, Template?.BackgroundImageUrl))
                 {
-                    Snackbar.Add("그림만 바꾸고 칸 위치는 그대로 두었습니다. 칸 위치를 새 그림에 맞추시려면 양식용지 양식에서 칸을 맞추고 그림을 올려 저장해 주십시오.",
+                    // 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 고침 2 · §63 G-3 ⓑ · [4] P3-③ · [3-V] P3-D · PM 판단] 글자를 사실대로 —
+                    //   다음 할 일의 끝(「예」)과 그 결과(양식이 하나 더 생김)를 말한다. 조건 · 자리 · 알림 종류 무변.
+                    // ⬛ 옛 줄(주석 보존 · #1):
+                    //    Snackbar.Add("그림만 바꾸고 칸 위치는 그대로 두었습니다. 칸 위치를 새 그림에 맞추시려면 양식용지 양식에서 칸을 맞추고 그림을 올려 저장해 주십시오.",
+                    //        Severity.Info);
+                    Snackbar.Add("그림만 바꾸었습니다. 칸은 지금 자리 그대로 찍힙니다. 새 그림에 칸을 맞추려면 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다).",
                         Severity.Info);
                 }
                 MudDialog.Close(DialogResult.Ok(true));
