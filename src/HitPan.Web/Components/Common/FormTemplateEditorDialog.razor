@@ -5,6 +5,9 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 저장 안 한 그림이 있는 채로 닫으려 하면 **되묻는다**.
+     스낵바는 지나가 버리므로 「닫으면 전표에 안 나온다」를 멈춰 세워 말할 자리가 필요하다. *@
+@inject IDialogService Dialogs
 
 <MudDialog>
     <DialogContent>
@@ -333,6 +336,19 @@
                 {
                     <MudText Typo="Typo.caption" Class="mt-1">올린 그림: @_bgFileName</MudText>
                 }
+                @* 🔴🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 「올렸습니다」가 거짓이 되지 않게 —
+                     올리기는 **파일만 받는** 것이고 양식에 적히는 것은 「저장」을 누를 때다.
+                     스낵바 한 줄은 지나가 버리므로 **화면에 남는 꼬리표**로 한 번 더 말한다.
+                     🔴 즉시 양식 행에 적는 길은 열지 않는다 — 「취소」가 취소가 아니게 된다. *@
+                @if (_bgUnsaved)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mt-1">
+                        <MudText Typo="Typo.subtitle1"><b>아직 양식에 반영되지 않았습니다</b></MudText>
+                        <MudText Typo="Typo.body2">
+                            그림을 받았습니다. 「저장」을 누르셔야 전표에 나옵니다.
+                        </MudText>
+                    </MudAlert>
+                }
 
                 @if (!string.IsNullOrWhiteSpace(_form.BackgroundImageUrl))
                 {
@@ -463,6 +479,12 @@
             <MudDivider Class="my-3" />
             <div class="d-flex align-center mb-2" style="gap:8px;">
                 <MudText Typo="Typo.subtitle2">미리보기 — 예시 자료입니다 (실제 거래 내용이 아닙니다)</MudText>
+                @* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 미리보기에 **「저장 안 됨」 꼬리표** —
+                     미리보기에 그림이 보이는 것과 전표에 나오는 것은 다르다. 그 차이를 이름으로 부른다. *@
+                @if (_bgUnsaved)
+                {
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled">저장 안 됨</MudChip>
+                }
                 <MudSpacer />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
                                Title="미리보기 닫기" OnClick="ClosePreviewAsync" />
@@ -478,7 +500,9 @@
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility"
                    Disabled="_previewBusy" OnClick="PreviewAsync">@(_previewBusy ? "그리는 중…" : "미리보기")</MudButton>
         <MudSpacer />
-        <MudButton OnClick="Cancel">취소</MudButton>
+        @* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 저장 안 한 그림이 있으면 **되묻는다**.
+             옛 줄(주석 보존 · #1): <MudButton OnClick="Cancel">취소</MudButton> *@
+        <MudButton OnClick="CancelAsync">취소</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
     </DialogActions>
 </MudDialog>
@@ -664,6 +688,16 @@
                 IsActive = Template.IsActive
             };
             LoadCoords(Template.FieldCoordsJson);
+            // 🔴🔴 [W-G1-51 갈래 B · 설계 §7-3 · YN5 · 구별 기준 §4 B-1 · B-2] 이 창을 **열 때의 저장값**으로
+            //   Y 템플릿인지 한 번 정해 둔다. 판정 네 칸 = 서버 렌더 Y 판정(`PdfRenderService.cs` isYTemplate ①~④)과 같은 칸.
+            //   🔴 그림 찍기 칸은 지금 칸 값이 아니라 **불러온 저장값**으로 본다(B-1) — 지금 칸 값으로 보면
+            //     좌표가 남은 빈 A4(K4 · 그림 찍기 0)에서 칸만 켜고 저장해도 좌표가 살아 Y 가 되는 새 길이 열린다.
+            //   🔴 ⑤(그림이 실제로 읽힘)는 화면이 잴 수 없다 — 서버가 인쇄 때 다시 본다(못 읽으면 기본 폼).
+            _loadedYTemplate = string.Equals(Template.PaperMode, "plain", StringComparison.Ordinal)
+                && Template.PrintBackground
+                && !string.IsNullOrWhiteSpace(Template.BackgroundImageUrl)
+                && _coords.Count > 0;
+            _loadedCoordsJson = Template.FieldCoordsJson;
             // 🔴 수치가 하나라도 들어 있으면 「이 양식만 따로」로 열어 준다 —
             //   그렇게 저장해 둔 고객이 창을 열었을 때 「공통값 따름」으로 보이면
             //   아무것도 안 바꾸고 저장만 해도 그 값이 지워진다.
@@ -805,11 +839,42 @@
         }
     }
 
+    // ── 🔴🔴 [W-G1-51 갈래 B] Y 템플릿 칸 좌표 지킴 (설계 §7-3 · YN5 · 구별 기준 §4 B-1 · B-2) ──
+    //
+    // 🔴 [무엇이 사고였나] 이 창은 양식지가 아니면 좌표를 비워 보낸다(아래 BuildCoordsJson 첫 줄).
+    //   그런데 Y 템플릿(빈 A4 + 양식 그림 + 칸 좌표 + 그림 찍기 켬)은 **빈 A4 인데 좌표가 본체**다.
+    //   ⇒ Y 템플릿을 열어 이름만 바꿔 저장해도 칸이 사라져 「기본 폼 + 그림」 이 됐다.
+    // 🔴 고치는 것은 **이것 하나** — Y 템플릿이면 불러온 좌표를 **글자 그대로** 다시 보낸다.
+    //   좌표표는 여전히 양식지에서만 보인다(설계 P2 안 가져옴 · 축⒧-1 개정 0).
+    //   글자 그대로 보내는 까닭 = 표로 다시 적으면 글자가 바뀌어, 같은 양식 판정(좌표 글자 같음)이 어긋난다.
+
+    /// <summary>창을 열 때 이 양식이 Y 템플릿이었나 — <b>불러온 저장값</b>으로 한 번 정한다(B-1).</summary>
+    private bool _loadedYTemplate;
+
+    /// <summary>창을 열 때 불러온 좌표 글자 — Y 템플릿이면 이 글자를 그대로 다시 보낸다.</summary>
+    private string? _loadedCoordsJson;
+
+    /// <summary>
+    /// 🔴 지금 저장(또는 미리보기)하려는 값이 <b>여전히 Y 템플릿</b>인가 — 그러면 불러온 좌표를 지킨다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 불러온 저장값이 Y(B-1) <b>그리고</b> 지금 값도 빈 A4 · 그림 찍기 켬 · 그림 경로 있음.
+    ///   지금 값에서 하나라도 빠지면(그림 찍기를 끔 · 그림을 지움 · 양식지로 바꿈) 옛 판과 같이 좌표를 비운다
+    ///   — 빈 A4 + 그림 찍기 0 은 좌표를 비운다(설계 YN5-3 · main 과 같음).
+    /// </remarks>
+    private bool KeepLoadedYCoords
+        => _loadedYTemplate
+        && string.Equals(_form.PaperMode, "plain", StringComparison.Ordinal)
+        && _form.PrintBackground
+        && !string.IsNullOrWhiteSpace(_form.BackgroundImageUrl);
+
     /// <summary>표를 서버가 읽는 JSON 으로 바꾼다.</summary>
     private string? BuildCoordsJson()
     {
         // 양식용지가 아니면 좌표는 의미가 없다 — 남겨 두면 나중에 모드만 바꿨을 때 엉뚱하게 살아난다.
-        if (_form.PaperMode != "preprint") return null;
+        // 🔴 [W-G1-51 갈래 B · YN5] 다만 Y 템플릿은 빈 A4 라도 좌표가 본체다 — 불러온 좌표를 글자 그대로 보낸다.
+        // 옛 줄(주석 보존 · #1): if (_form.PaperMode != "preprint") return null;
+        if (_form.PaperMode != "preprint") return KeepLoadedYCoords ? _loadedCoordsJson : null;
 
         var rows = _coords
             .Where(c => !string.IsNullOrWhiteSpace(c.Key))
@@ -933,6 +998,15 @@
     private bool _bgBusy;
     private string? _bgFileName;
 
+    // ── 🔴🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] ────────────────────
+    //
+    // 🔴 「올렸습니다」가 거짓이 되지 않게. 올리기는 **파일만 받는 것**이고
+    //   양식 행에 적히는 것은 「저장」을 누를 때다. 그 사이 상태를 **이름으로 부른다.**
+    //   (즉시 행에 적는 길은 열지 않는다 — 「취소」가 취소가 아니게 된다.)
+
+    /// <summary>올렸지만 아직 저장하지 않은 그림이 있나 — 꼬리표·닫기 되묻기의 근거.</summary>
+    private bool _bgUnsaved;
+
     /// <summary>
     /// 🔴 [20261025작3 절 가-1] 「빈 A4 용지」에서 <b>양식용지로 바꿔 주는 한 단추</b>.
     /// </summary>
@@ -997,7 +1071,13 @@
 
             _form.BackgroundImageUrl = saved.StoredPath;
             _bgFileName = file.Name;
-            Snackbar.Add("양식용지 그림을 올렸습니다. 아래 미리보기로 확인하십시오.", Severity.Success);
+            // 🔴🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 종전 문구는 「올렸습니다」로 끝났다.
+            //   고객은 그것을 「양식에 들어갔다」로 읽고 창을 닫았고, 전표에는 아무것도 없었다.
+            //   ⇒ 같은 창 `SwitchToPreprint`(위)가 이미 쓰는 **규율 그대로** 말한다.
+            // 옛 줄(주석 보존 · #1): Snackbar.Add("양식용지 그림을 올렸습니다. 아래 미리보기로 확인하십시오.", Severity.Success);
+            _bgUnsaved = true;
+            Snackbar.Add("그림을 받았습니다. 아직 양식에 반영되지 않았습니다 — "
+                       + "「저장」을 누르셔야 전표에 나옵니다.", Severity.Info);
         }
         catch (Exception ex)
         {
@@ -1039,11 +1119,15 @@
 
             _form.BackgroundImageUrl = null;
             _bgFileName = null;
+            // 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 올려 둔 그림을 뺐으니 **기다리는 그림이 없다** —
+            //   꼬리표도 닫기 되묻기도 함께 내린다(없는 것을 있다고 말하지 않는다).
+            _bgUnsaved = false;
         }
         catch (Exception ex)
         {
             _form.BackgroundImageUrl = null;
             _bgFileName = null;
+            _bgUnsaved = false;
             Console.Error.WriteLine($"[FormBackground] {ex.Message}");
         }
         finally
@@ -1235,6 +1319,8 @@
 
             if (resp.IsSuccessStatusCode)
             {
+                // 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 이제 **참으로** 양식에 들어갔다 — 꼬리표를 내린다.
+                _bgUnsaved = false;
                 Snackbar.Add("저장되었습니다.", Severity.Success);
                 MudDialog.Close(DialogResult.Ok(true));
             }
@@ -1255,4 +1341,34 @@
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>
+    /// 🔴🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 올려 두고 <b>저장 안 한 그림</b>이 있으면 <b>되묻는다</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [무엇이 사고였나] 올리기는 「올렸습니다」로 끝났고 고객은 창을 닫았다. 양식 행에는
+    ///   아무것도 안 적혔고 전표는 종전과 같았다 — <b>화면이 한 말과 서버가 한 일이 달랐다.</b>
+    /// 🔴 <b>닫는 길을 막지 않는다</b> — 되묻고, 고객이 「그래도 닫기」를 고르면 그대로 닫는다.
+    ///   (올려 둔 그림 파일은 보관소에 남는다 · 청소는 이 갈래 밖.)
+    /// 🔴 즉시 양식 행에 적는 길은 <b>열지 않는다</b> — 「취소」가 취소가 아니게 된다.
+    /// </remarks>
+    private async Task CancelAsync()
+    {
+        if (!_bgUnsaved)
+        {
+            Cancel();
+            return;
+        }
+
+        var go = await Dialogs.ShowMessageBoxAsync(
+            "저장하지 않고 닫습니다",
+            "올리신 양식용지 그림이 아직 양식에 반영되지 않았습니다.\n"
+            + "지금 닫으면 전표에 나오지 않습니다.\n\n"
+            + "반영하시려면 「계속 편집」을 누른 뒤 「저장」을 눌러 주십시오.",
+            yesText: "그래도 닫기",
+            cancelText: "계속 편집");
+        if (go != true) return;
+
+        Cancel();
+    }
 }
