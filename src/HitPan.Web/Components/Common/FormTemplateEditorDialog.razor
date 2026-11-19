@@ -387,26 +387,34 @@
                     }
                     else
                     {
-                        <MudCheckBox T="bool" @bind-Value="_form.PrintBackground" Class="mt-1"
-                                     Label="이 그림을 종이에도 함께 인쇄하기" Dense="true" />
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            @if (_form.PrintBackground && _form.PaperMode == "preprint")
-                            {
-                                <text>
-                                    <b>양식용지에는 양식이 이미 인쇄되어 있습니다.</b> 켜 두시면 그 위에
-                                    같은 모양이 한 번 더 찍혀 두 겹으로 보입니다 — 보통은 꺼 두십니다.
-                                </text>
-                            }
-                            else if (_form.PrintBackground)
-                            {
-                                <text>빈 종이에 이 그림을 함께 인쇄합니다. 양식용지를 따로 사실 필요가 없습니다.</text>
-                            }
-                            else if (_form.PaperMode == "preprint")
+                        @* 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · 대표 11/18 08시② · 작업지시서 §2 F 줄] 「종이에도 함께 인쇄」 **선택을 없앤다** —
+                             그림까지 찍는 종이는 양식지 저장 뒤 확인창 「예」로 만드는 「양식 그림 포함」 양식(Y 템플릿)이 대신한다.
+                             🔴 값은 불러온 그대로 보낸다(새 양식 = 끔). 양식지는 서버가 DB 현재값으로 정한다(CTO F-1 Ⓐ (나) 조건 1 · 요청값 안 읽음).
+                             🔴 설명 글은 남긴다 — 지금 이 양식이 종이에 그림을 찍는지 **참을 말한다**(R-1 봉합 유지 · 아래 세 갈래 = 옛 글자 그대로).
+                           ⬛ 옛 줄(주석 보존 · #1) — 선택칸과 「켜 두시면 두 겹」 갈래:
+                             <MudCheckBox T="bool" @bind-Value="_form.PrintBackground" Class="mt-1"
+                                          Label="이 그림을 종이에도 함께 인쇄하기" Dense="true" />
+                             <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                 @if (_form.PrintBackground && _form.PaperMode == "preprint")
+                                 {
+                                     <text>
+                                         <b>양식용지에는 양식이 이미 인쇄되어 있습니다.</b> 켜 두시면 그 위에
+                                         같은 모양이 한 번 더 찍혀 두 겹으로 보입니다 — 보통은 꺼 두십니다.
+                                     </text>
+                                 }
+                                 else if (_form.PrintBackground)
+                                 ... (아래 세 갈래와 같은 글자) *@
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
+                            @if (_form.PaperMode == "preprint")
                             {
                                 <text>
                                     양식용지에 이미 인쇄된 모양이 있으니 종이에는 찍지 않습니다.
                                     이 그림은 아래 미리보기에서 <b>자리를 맞추는 데만</b> 쓰입니다.
                                 </text>
+                            }
+                            else if (_form.PrintBackground)
+                            {
+                                <text>빈 종이에 이 그림을 함께 인쇄합니다. 양식용지를 따로 사실 필요가 없습니다.</text>
                             }
                             else
                             {
@@ -532,7 +540,10 @@
              저장이 실패하면 끄기가 풀린다(다시 저장 · 취소 그대로).
            ⬛ 고침 1 판 줄(주석 보존 · #1): <MudButton OnClick="CancelAsync">취소</MudButton> *@
         <MudButton Disabled="_busy" OnClick="CancelAsync">취소</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
+        @* 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · 갈래 B 개발명세서 §12 넘길 것 ①] 그림을 **올리는 중**(_bgBusy)에도 「저장」을 끈다 —
+             올리기가 저장 뒤에 끝나면 새 그림은 저장 안 된 채 창이 닫혔다(고객은 올렸다고 믿는다).
+           ⬛ 옛 줄(주석 보존 · #1): <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton> *@
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_busy || _bgBusy)" OnClick="SaveAsync">@(_busy ? "저장 중…" : "저장")</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -1019,9 +1030,18 @@
     /// 🔴 두 목록을 한데 묶으면 다시 거짓이 된다 — 그래서 일부러 갈라 둔다.
     ///   (용지·방향을 묶는 쪽은 <c>LegalFormTypes</c> 3종이고, 그림을 아예 안 쓰는 쪽은 이 1종이다.)
     /// </remarks>
+    // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · 착수 전 질문 세금계산서 Y (나) · PM 결재] 세금계산서 **Y 템플릿**은
+    //   법정 작성기로 가지 않는다(렌더 `PdfRenderService.cs` 법정 분기 `&& !(isYTemplate && useCoords)`) = 그림 + 칸 값이 찍힌다.
+    //   ⇒ 화면도 같은 예외 1개 — 아니면 「종이에도, 미리보기에도 나오지 않습니다」가 거짓이 된다.
+    //   「지금 Y 인가」 = `KeepLoadedYCoords`(불러온 Y + 지금도 빈 A4 · 그림 찍기 · 그림 경로) — 저장 · 미리보기가 좌표를 보내는 조건과 같다
+    //   (좌표를 보내야 서버 `useCoords` 가 참). 법무팀장 1줄 = F-1 머지 전(착수 전 질문 끝 PM 결재).
+    // ⬛ 옛 줄(주석 보존 · #1):
+    //     => _form.PaperMode != "preprint"
+    //     && string.Equals(_form.FormType, "tax_invoice", StringComparison.Ordinal);
     private bool IsLegalOnlyComposer
         => _form.PaperMode != "preprint"
-        && string.Equals(_form.FormType, "tax_invoice", StringComparison.Ordinal);
+        && string.Equals(_form.FormType, "tax_invoice", StringComparison.Ordinal)
+        && !KeepLoadedYCoords;
 
     // ── 양식용지 그림 올리기 (사장님 오더 2026-10-24) ─────────────────
     private bool _bgBusy;
@@ -1458,11 +1478,20 @@
 
     private async Task SaveAsync()
     {
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · 갈래 B §12 넘길 것 ①] 단추를 껐지만(Disabled) 한 번 더 막는다 —
+        //   그림을 올리는 중이면 저장하지 않는다 · 이미 저장 중이면 두 번 보내지 않는다.
+        if (_busy || _bgBusy) return;
+
         if (string.IsNullOrWhiteSpace(_form.FormType) || string.IsNullOrWhiteSpace(_form.TemplateName))
         {
             Snackbar.Add("양식 유형과 이름은 필수입니다.", Severity.Warning);
             return;
         }
+
+        // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · PM 판단 덧붙임] 그림 경로 **앞뒤 공백을 자르고** 보낸다 —
+        //   앞 공백이 붙은 경로가 행에 그대로 적히면 인쇄 때 그림을 못 찾아 **조용히 빠졌다**.
+        //   공백만 남으면 비운다(「그림 지우기」와 같은 null). 확인창 「바꿈」 판정 · 저장 뒤 지우기 모두 자른 값을 본다.
+        _form.BackgroundImageUrl = TrimBackgroundPath(_form.BackgroundImageUrl);
 
         // 표에 적은 위치를 서버가 읽는 형태로 바꿔 담는다 (사장님 지시 2026-08-12).
         _form.FieldCoordsJson = BuildCoordsJson();
@@ -1476,6 +1505,8 @@
         // 🔴 _busy 는 여기부터 저장 뒤 지우기 · 창 닫기(MudDialog.Close)까지 참이다 — 아래 finally 가 Close 뒤에 내린다.
         //   그동안 [취소] · 「그림 지우기」 · 「양식용지 그림 올리기」가 꺼진다. 저장 실패면 finally 가 내려 다시 저장 · 취소할 수 있다.
         var sentBackgroundPath = _form.BackgroundImageUrl;
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 부분] 확인창 판정도 **보낸 값**으로 한다(저장 중 「양식용지로 바꾸기」를 눌러도 어긋나지 않게).
+        var sentPaperMode = _form.PaperMode;
         try
         {
             HttpResponseMessage resp;
@@ -1497,12 +1528,31 @@
                 //   저장 실패(아래 else · catch)에는 이 줄에 오지 않는다 = 파일 그대로 · 다시 저장하거나 취소할 수 있다.
                 // ⬛ 고침 1 판 줄(주석 보존 · #1): await DeleteRemovedBackgroundsAsync();
                 await DeleteRemovedBackgroundsAsync(sentBackgroundPath);
+                // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · 대표 11/18 08시② · Q17 PM 답] 양식지 그림을 **새로 올리거나 바꾼** 저장이면
+                //   「빈 A4 양식도 만들까요?」(예/아니오)를 묻는다 — 저장마다 묻지 않는다(묻을 때마다 Y 가 늘어난다).
+                //   저장이 끝난 **뒤에** 묻는다(Y 는 저장된 행을 복사한다 · 설계 §7-3 「한 함수」).
+                if (PictureNewOrChangedOnSave(sentPaperMode, sentBackgroundPath))
+                {
+                    var savedId = await ReadSavedTemplateIdAsync(resp) ?? _form.TemplateId;
+                    if (!string.IsNullOrEmpty(savedId))
+                    {
+                        await AskAndCreateYTemplateAsync(savedId);
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("[FormYTemplate] 저장 응답에서 양식 번호를 못 읽어 확인창을 띄우지 않았다");
+                    }
+                }
                 MudDialog.Close(DialogResult.Ok(true));
             }
             else
             {
                 var body = await resp.Content.ReadAsStringAsync();
-                Snackbar.Add($"저장 실패 ({(int)resp.StatusCode}): {body}", Severity.Error);
+                // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분 · CTO Q1 · [4] P3-A] 서버가 사람 말(1062 · 1213 · 그 밖 거절)을 주면 **그 말만** 보인다 —
+                //   종전에는 응답 글자(JSON)를 통째로 붙여 고객 화면에 괄호 · 따옴표가 나왔다. 못 꺼내면 종전 줄 그대로.
+                // ⬛ 옛 줄(주석 보존 · #1): Snackbar.Add($"저장 실패 ({(int)resp.StatusCode}): {body}", Severity.Error);
+                var why = ReadServerError(body);
+                Snackbar.Add(why is null ? $"저장 실패 ({(int)resp.StatusCode}): {body}" : $"저장 실패: {why}", Severity.Error);
             }
         }
         catch (Exception ex)
@@ -1513,6 +1563,130 @@
         {
             _busy = false;
         }
+    }
+
+    // ── 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 부분] 양식지 저장 뒤 확인창 「빈 A4 양식도 만들까요?」 ─────────
+    //
+    // 🔴 [언제] 보낸 용지 = 양식용지 **그리고** 보낸 그림 경로가 있고 **그리고** 불러온 경로와 글자가 다를 때(새 양식이면 그림이 있을 때).
+    //   서버 저장 문의 「그림 찍기 유지」 판정(CTO F-1 Ⓐ (나) 조건 1 · 2 — DB 의 그림 경로와 요청 경로 글자 같음 · Ordinal)과 **같은 기준**이다
+    //   → 서버가 0 으로 내린 「그림 바꾼 저장」 = 이 확인창이 맡는 저장 · 그림 그대로 저장 = 옮기기가 맡음(한 행을 두 길이 함께 맡는 경우 0 · CTO §3).
+    //   올리기는 서버가 늘 새 이름을 만든다 = 다시 올리면 늘 「바뀜」. 경로는 저장 앞에서 공백을 잘랐다(TrimBackgroundPath).
+    // 🔴 [세금계산서] 양식지도 묻는다 — 그 Y 는 법정 작성기 예외(착수 전 질문 (나))라 그림 + 칸 값이 찍힌다.
+    // 🔴 「아니오」 · 창 닫음 = 아무것도 안 만든다(고객의 명시 거절 · 저장이 이미 그림 찍기를 0 으로 내려 옮기기도 다시 안 봄).
+    // 🔴 「예」 = 서버 `CreateYTemplateAsync`(옮기기와 같은 몸통). 결과 글자는 여기서 정한다(서버는 결과 이름만 · #23).
+
+    /// <summary>그림 경로 앞뒤 공백을 자른다 — 공백만이면 null(「그림 지우기」와 같은 빈 값).</summary>
+    private static string? TrimBackgroundPath(string? path)
+        => string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+    /// <summary>이 저장이 양식지 그림을 <b>새로 올리거나 바꾼</b> 저장인가(Q17) — 보낸 값으로만 본다.</summary>
+    private bool PictureNewOrChangedOnSave(string? sentPaperMode, string? sentPath)
+        => string.Equals(sentPaperMode, "preprint", StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(sentPath)
+        && !string.Equals(sentPath, Template?.BackgroundImageUrl, StringComparison.Ordinal);
+
+    /// <summary>예/아니오를 묻고 「예」면 Y 템플릿을 만든다. 🔴 무엇이 잘못돼도 저장은 이미 끝났다 — 「저장 실패」로 말하지 않는다.</summary>
+    private async Task AskAndCreateYTemplateAsync(string templateId)
+    {
+        try
+        {
+            var message = "양식용지 그림을 새로 올리셨습니다.\n\n"
+                        + "이 그림을 빈 A4 용지에 값과 함께 인쇄하는 양식을 하나 더 만들어 둘까요?\n"
+                        + "지금 양식은 그대로 두며, 양식용지에는 값만 인쇄됩니다.";
+            if (_form.IsDefault)
+            {
+                // 🔴 Y 는 실효 기본을 이어받는다(설계 Q16 · 한 함수) — 기본 양식이 바뀌는 것을 미리 말한다.
+                message += "\n\n지금 양식이 기본 양식이라, 새로 만드는 양식이 기본 양식을 이어받습니다.";
+            }
+            var yes = await Dialogs.ShowMessageBoxAsync(
+                "빈 A4 양식도 만들까요?",
+                message,
+                yesText: "예",
+                noText: "아니오");
+            if (yes != true) return;
+
+            var resp = await Http.PostAsync($"api/settings/form-templates/{Uri.EscapeDataString(templateId)}/y-template", null);
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode)
+            {
+                // 1062 등 서버 사람 말이 있으면 그 말 · 없으면 결과 줄(응답 글자를 통째로 붙이지 않는다).
+                var why = ReadServerError(body);
+                Snackbar.Add(why is null
+                        ? $"빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다. ({(int)resp.StatusCode})"
+                        : $"빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다. {why}",
+                    Severity.Warning);
+                return;
+            }
+
+            var (text, severity) = ReadJsonText(body, "outcome") switch
+            {
+                "Created" => ("빈 A4 양식을 만들었습니다. 목록에 「양식 그림 포함」 양식이 더해졌습니다.", Severity.Success),
+                "Reused" => ("같은 그림 · 같은 칸 위치의 빈 A4 양식이 이미 있어 그 양식을 그대로 씁니다.", Severity.Info),
+                "NoPicture" => ("양식용지 그림 파일을 찾지 못해 빈 A4 양식을 만들지 못했습니다. 그림을 다시 올려 저장해 주십시오.", Severity.Warning),
+                // 🔴 [F-1 개발명세서 §8-7 ④] 그림을 지금 읽지 못함(잠김 · 접근 거부) — 다음 할 일까지 말한다.
+                "PictureUnreadable" => ("양식용지 그림을 지금 읽지 못해 빈 A4 양식을 만들지 못했습니다. 잠시 뒤 그림을 다시 올려 저장하시면 다시 여쭙니다.", Severity.Warning),
+                "OutsideTenantRoot" => ("이 그림은 「양식용지 그림 올리기」로 올린 그림이 아니어서 빈 A4 양식을 만들지 못했습니다. 그 단추로 올린 뒤 저장해 주십시오.", Severity.Warning),
+                _ => ("빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다.", Severity.Warning),
+            };
+            Snackbar.Add(text, severity);
+        }
+        catch (Exception ex)
+        {
+            // 🔴 빈 catch 금지(#15) — 저장은 끝났으니 「저장 실패」가 아니라 이 한 줄.
+            Console.Error.WriteLine($"[FormYTemplate] 빈 A4 양식 만들기 실패: {ex.Message}");
+            Snackbar.Add("빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다.", Severity.Warning);
+        }
+    }
+
+    /// <summary>저장 응답(만든 · 고친 양식)에서 양식 번호를 꺼낸다. 못 꺼내면 null.</summary>
+    private static async Task<string?> ReadSavedTemplateIdAsync(HttpResponseMessage resp)
+    {
+        try
+        {
+            var saved = await resp.Content.ReadFromJsonAsync<SavedTemplate>();
+            return string.IsNullOrWhiteSpace(saved?.TemplateId) ? null : saved!.TemplateId;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[FormYTemplate] 저장 응답을 읽지 못했다: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>서버 거절 본문의 사람 말(<c>error</c> 또는 <c>message</c>)을 꺼낸다. 못 꺼내면 null — 억지로 만들지 않는다.</summary>
+    private static string? ReadServerError(string? body)
+        => ReadJsonText(body, "error") ?? ReadJsonText(body, "message");
+
+    /// <summary>JSON 본문의 글자 칸 하나를 꺼낸다(이름 대소문자 무시). 못 꺼내면 null.</summary>
+    private static string? ReadJsonText(string? body, string name)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)
+                    && p.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var s = p.Value.GetString();
+                    return string.IsNullOrWhiteSpace(s) ? null : s;
+                }
+            }
+            return null;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            // 🔴 빈 catch 금지(#15) — JSON 이 아닌 본문(예: 서버 오류 쪽)은 null 로 떨어져 종전 줄을 쓴다.
+            Console.Error.WriteLine($"[FormTemplate] 응답 본문이 JSON 이 아니다: {ex.Message}");
+            return null;
+        }
+    }
+
+    private sealed class SavedTemplate
+    {
+        public string? TemplateId { get; set; }
     }
 
     private void Cancel() => MudDialog.Cancel();
