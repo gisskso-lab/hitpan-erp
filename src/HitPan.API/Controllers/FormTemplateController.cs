@@ -80,6 +80,34 @@ public class FormTemplateController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 부분] 양식지 저장 뒤 확인창의 「예」 — 그 양식지로 Y 템플릿을 만든다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <c>tenant_id</c> 는 JWT 클레임에서만(#2) — 본문 · 쿼리로 받지 않는다. 남의 회사 양식 id 면 결과 = <c>NotFound</c>(행 0).
+    /// 🔴 결과는 이름(<c>outcome</c>)만 돌려준다 — 고객 글자는 화면이 정한다(#23).
+    /// 🔴 1062 = 서비스가 사람 말 <see cref="InvalidOperationException"/> → 400 + 문구(저장 문과 같은 꼴 · 500 0).
+    /// 🔴 저장 문과 같은 역할로 묶는다(양식을 고치는 사람만).
+    /// </remarks>
+    [HttpPost("{templateId}/y-template")]
+    [Authorize(Roles = "system_admin,tenant_admin")]
+    public async Task<IActionResult> CreateYTemplate(string templateId, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        try
+        {
+            var result = await _service.CreateYTemplateAsync(tenantId, templateId, ct);
+            return Ok(new { outcome = result.Outcome.ToString(), yTemplateId = result.YTemplateId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "FormTemplate Y create rejected: tenant={Tenant} template={Template}", tenantId, templateId);
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpDelete("{templateId}")]
     [Authorize(Roles = "system_admin,tenant_admin")]
     public async Task<IActionResult> Deactivate(string templateId, CancellationToken ct)
