@@ -904,6 +904,10 @@ function wireWorld(opts = {}) {
       return done(json(200, st.tpls.filter((x) => x.formType === ft && x.isActive)));
     }
     if (p === '/api/settings/company-image-state' && m === 'GET') return done(json(200, { logo: st.logo ? 'present' : 'missing', seal: 'missing', header: 'missing' }));
+    // 🔴 11차 P2-1(고침 1 PM 결재 L2) — 재고 선행 문(opts.stock 일 때만 · 활성 창고 1 · 조정 본문 기록 · 잔량 = 조정 값) · 없으면 옛 꼴 그대로(404)
+    if (opts.stock && p === '/api/warehouses' && m === 'GET') return done(json(200, [{ warehouseId: 'wh-wire-1', isActive: true }]));
+    if (opts.stock && p === '/api/stock/adjust' && m === 'POST') { (st.adj = st.adj || []).push(body); return done(json(200, { itemId: body && body.itemId })); }
+    if (opts.stock && p === '/api/stock/balance' && m === 'GET') return done(json(200, (st.adj || []).map((b) => ({ itemId: b.itemId, warehouseId: b.warehouseId, currentQty: b.actualQty }))));
     return done(json(404, { message: `모르는 문 ${m} ${p}` }));
   };
   // 넘김 손(setup-api handoffToScreen 의 d) — API 로그아웃 = 실제 K.apiLogout(가짜 fetch 로 나감) · 화면 로그인 = 한 PC 규칙 흉내
@@ -1043,6 +1047,21 @@ guardAsync('T-Z28d ⓔ6 배선 동의 뒤 상태 아직 필요 = 차림 불가 �
   const ok = r.code === 0 && allWhy && r.ix('POST /api/partners api') < 0 && su.terms && su.terms.ok === false && su.terms.confirmed && su.terms.confirmed.hasAgreed === false;
   check('T-Z28d ⓔ6 배선 동의 뒤 상태 아직 필요 = 차림 불가 · 기초 자료 0', ok,
     `전 칸 사유 ${allWhy}(${live.length}) · 거래처 부름 ${r.ix('POST /api/partners api') >= 0} · terms.ok ${su.terms ? su.terms.ok : '-'}`);
+});
+
+// T-Z28e 11차 P2-1(고침 1 L2) — main 재고 선행 배선: 창고 = 목록 id · 조정 수량 = 표지 최대 × 10 · doc.setup.stock.ok · 판매 반품 손이 받은 값 = doc.setup.stock
+//   살아남았던 변이 셋(창고 '' · 수량 × 0 · 넘김 값 { ok: true })을 잡는다(리뷰서 §2-2 V-D8⑥ · X5 · X6)
+const TZ28E = 'T-Z28e 11차 P2-1 배선 재고 선행 — 창고 = 목록 id · 수량 = 표지 최대 × 10 · stock.ok · 판매 반품 손이 받은 값 = doc.setup.stock';
+guardAsync(TZ28E, async () => {
+  const got = { n: 0, stock: undefined };
+  const r = await runWire({ stock: true, uiOverride: (ui) => { const f = ui.makeSalesReturn; ui.makeSalesReturn = async (page, nos, stock) => { got.n += 1; got.stock = stock; return f(); }; } });
+  const stock = (r.doc && r.doc.setup && r.doc.setup.stock) || {};
+  const want = Math.max(...F.MARK.items.map((x) => Number(x.qty) || 0)) * 10;
+  const adj = r.st.adj || [];
+  const bodyOk = adj.length === F.MARK.items.length && adj.every((b) => b.warehouseId === 'wh-wire-1' && b.actualQty === want && !!b.itemId);
+  const passOk = got.n === 1 && JSON.stringify(got.stock) === JSON.stringify(stock);
+  const ok = r.code === 0 && stock.ok === true && stock.need === want && bodyOk && passOk;
+  check(TZ28E, ok, `stock.ok ${stock.ok}(${String(stock.why || '').slice(0, 50)}) · need ${stock.need}/${want} · 조정 ${adj.map((b) => `${b.warehouseId}×${b.actualQty}`).join(' · ') || '0'} · 판매 반품 손 ${got.n}회 · 받은 값 같음 ${passOk}`);
 });
 
 // T-Z29 ⓔ4([3-V] 4차 D2) — message 칸 = 소독 뒤 자르기(120자 경계에 걸친 등록값 앞부분 0) · 상한 · www-authenticate 소독
@@ -2006,7 +2025,9 @@ guardAsync(TD4A, async () => {
 });
 
 // T-D4b 10차 D4 변이 꼴 3(+2) — 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 응답 500 → 전부 이름 붙은 차림 불가(오류 알림 0 이어도)
-const TD4B = 'T-D4b 10차 D4 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 500 → 전부 빨강(오류 알림 0 ≠ 성공)';
+// ⬛ [낡은 줄 · 10차 1단] const TD4B = 'T-D4b 10차 D4 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 500 → 전부 빨강(오류 알림 0 ≠ 성공)';
+// 🔴 11차 P2-3 — 「응답 2xx · 번호 있음 · 오류 알림 1」 꼴 더함(판정 차례 2번째 오류 알림 걷음 변이 X9 를 잡음)
+const TD4B = 'T-D4b 10차 D4 성공 알림 없음 · 번호 빈 값 · 확인 창 안 누름 · 응답 없음 · 500 · (11차) 2xx·번호 있음·오류 알림 1 → 전부 빨강(오류 알림 0 ≠ 성공)';
 guardAsync(TD4B, async () => {
   const est = F.TYPES.find((x) => x.key === 'estimate');
   const del = F.TYPES.find((x) => x.key === 'delivery');
@@ -2016,6 +2037,7 @@ guardAsync(TD4B, async () => {
     ['확인 창 안 누름', del, { needYes: true, skipYes: true, toast: '', body: { id: 'd-1', documentNumber: 'x' } }, /거래명세서 확인 창 남음/],
     ['응답 없음', est, { noResp: true, toast: '견적서 저장이 완료되었습니다.' }, /견적서 저장 요청 응답 없음/],
     ['응답 500', est, { status: 500, toast: '견적서 저장이 완료되었습니다.', body: { id: 'q' } }, /견적서 저장 응답 500/],
+    ['2xx·번호 있음·오류 알림 1', est, { err: 1, toast: '견적서 저장이 완료되었습니다.', body: { id: 'q-1' } }, /견적서 저장 뒤 경고 · 오류 알림 1/], // 🔴 11차 P2-3
   ];
   const got = [];
   let good = true;
@@ -2036,7 +2058,9 @@ guardAsync(TD4B, async () => {
 });
 
 // T-D4c 10차 D4 — 성공 알림 · 저장 주소 = 제품 Web 원문 대조(6종 알림 · 7종 주소) · 판매 반품 = 알림 대신 이동(forceLoad 원문 확인)
-const TD4C = 'T-D4c 10차 D4 성공 알림 6종 · 저장 주소 7종 = 제품 원문 · 판매 반품 forceLoad 이동';
+// ⬛ [낡은 줄 · 10차 1단] const TD4C = 'T-D4c 10차 D4 성공 알림 6종 · 저장 주소 7종 = 제품 원문 · 판매 반품 forceLoad 이동';
+// 🔴 11차 P2-2 — 판매 반품 저장 전 주소(?returnOf=) 원문 확인 + 그 주소 그대로면 「이동 없음」 빨강(옛 꼴 공회전 · 변이 X7 · X7b 를 잡음)
+const TD4C = 'T-D4c 10차 D4 성공 알림 6종 · 저장 주소 7종 = 제품 원문 · 판매 반품 forceLoad 이동 · (11차) 저장 전 주소 ?returnOf= 그대로 → 빨강';
 guardAsync(TD4C, async () => {
   const web = webText10();
   const del = readSrc10('src/HitPan.Web/Pages/Sales/DeliveryPage.razor');
@@ -2049,6 +2073,13 @@ guardAsync(TD4C, async () => {
     if (!(urlOk && toastOk)) good = false;
     got.push(`${t.key} 주소 ${urlOk ? '○' : '×'} 알림 ${toastOk ? '○' : '×'}`);
   }
+  // 🔴 11차 P2-2 — 제품 저장 전 주소 원문(NavigateTo $"/deliveries?returnOf=…") · 그 주소 그대로 = 「저장 뒤 화면 이동 없음」
+  const sr = F.TYPES.find((x) => x.key === 'sales_return');
+  const preOk = /NavigateTo\(\$"\/deliveries\?returnOf=/.test(del);
+  let stay = '';
+  try { await CAP10.saveDoc({}, sr.label, sr.key, fakeSaveIo10({ ...SAVE10.sales_return, url: 'http://127.0.0.1:5234/deliveries?returnOf=d-1' }).io); stay = '통과(거짓 초록)'; } catch (e) { stay = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`; }
+  if (!(preOk && /저장 뒤 화면 이동 없음/.test(stay))) good = false;
+  got.push(`저장 전 주소 원문 ${preOk ? '○' : '×'} · ?returnOf= 그대로 「${stay.slice(0, 40)}」`);
   check(TD4C, good, got.join(' · '));
 });
 
@@ -2147,7 +2178,9 @@ guardAsync(TD8D, async () => {
   const p4 = CAP10.entryPick('delivery', 'doc', nos)(dl).all;
   const p5 = CAP10.entryPick('sales_return', 'doc-j', nos)(dl).all;
   const p6 = CAP10.entryPick('estimate', 'doc', {})(fakeRows(['견적 ' + F.MARK.partner])).all.length;
-  const ok = String(p1).includes('-003') && String(p2).includes('-003') && /번호 없음/.test(p3) && p4.length === 1 && !p4[0].includes('반품') && p5.length === 1 && p5[0].includes('반품') && p6 === 1;
+  const p7 = CAP10.entryPick('delivery', 'doc', nos)(fakeRows(['명-20261119-009 ' + F.MARK.partner, ...dl.all])).all; // 🔴 11차 P3-1 — 반품 아닌 표지 줄 2 · 번호로만 가름(X13)
+  // ⬛ [낡은 줄 · 10차 1단] const ok = String(p1).includes('-003') && String(p2).includes('-003') && /번호 없음/.test(p3) && p4.length === 1 && !p4[0].includes('반품') && p5.length === 1 && p5[0].includes('반품') && p6 === 1;
+  const ok = p7.length === 1 && p7[0].includes('-001') && String(p1).includes('-003') && String(p2).includes('-003') && /번호 없음/.test(p3) && p4.length === 1 && !p4[0].includes('반품') && p5.length === 1 && p5[0].includes('반품') && p6 === 1;
   check(TD8D, ok, `수주서 「${String(p1).slice(11, 26)}」 · 자동 뺌 「${String(p2).slice(11, 26)}」 · 둘 다 없음 「${p3.slice(0, 30)}」 · 거래명세서 ${p4.length} · ⓙ ${p5.length} · 견적 ${p6}`);
 });
 

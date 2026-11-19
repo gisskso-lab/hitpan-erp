@@ -125,7 +125,9 @@ const SAVE_OK = {
   // ReturnPage.razor.cs:255 「{docLabel}을 저장했습니다.」 · 저장 = POST api/purchase/returns · 응답 returnId · returnNo(ReturnPage.razor.cs:284~287)
   purchase_return: { url: '/api/purchase/returns', toast: /을 저장했습니다/ },
   // DeliveryPage.razor:346 「반품 저장 완료: {번호}」 뒤 :347 forceLoad 이동 → 알림이 지워질 수 있어 알림 대신 이동(/deliveries) · 저장 = DeliveryService.cs:858 POST api/sales/returns · 응답 returnId · returnNo
-  sales_return: { url: '/api/sales/returns', toast: null, after: /\/deliveries(\?|#|$)/ },
+  // ⬛ [낡은 줄 · 10차 1단] sales_return: { url: '/api/sales/returns', toast: null, after: /\/deliveries(\?|#|$)/ },
+  // 🔴 11차 P2-2 — 저장 전 주소 `/deliveries?returnOf=…`(DeliveryPage.razor:1234)가 옛 꼴에 이미 맞아 이동 판정 · waitForURL 공회전 → 「returnOf 없는 /deliveries」(:347 NavigateTo("/deliveries") 글자)만
+  sales_return: { url: '/api/sales/returns', toast: null, after: /\/deliveries(?![^#]*[?&]returnOf=)(?:[?#]|$)/ },
 };
 const AUTO_SO = /수주서 (\S+) 가 자동 생성되었습니다/; // DeliveryPage.razor:652
 const NO_KEYS = ['documentNumber', 'documentNo', 'returnNo', 'receiptNo', 'orderNo', 'quotationNo', 'deliveryNo'];
