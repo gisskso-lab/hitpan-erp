@@ -828,6 +828,8 @@ public class FormTemplateService : IFormTemplateService
         //   이 PM 판단으로 바뀜(설계 글자 고침 = 설계팀장 몫). 「출처 칸 안 둠」(§7-4) 그대로 — 새 칸 · DDL 0.
         //   비교는 SQL 안에서 원본 행(s)과 null 안전 같음(<=>) — 여백 · 워터마크 decimal 이 C# 를 거치지 않는다.
         //   EXISTS 안의 `form_templates.` = 바깥 후보 행(안쪽은 별칭 s 만 보임 · 표준 상관 이름 규칙).
+        // 🔴 고침 2(PM 판단) — 로고 · 직인 · 테두리 · 자르는 선 4칸도 더함(16칸) · 원칙 = 모양 칸이 하나라도 다르면 새 Y(Q14).
+        //   설계 §7-3 글자 정정 대기 → 지금 근거는 PM 판단(설계 정정 = 설계팀장 따로).
         var candidates = await db.QueryAsync<(string TemplateId, string? BackgroundImageUrl)>(new CommandDefinition(
             @"SELECT template_id AS TemplateId, background_image_url AS BackgroundImageUrl
               FROM form_templates
@@ -846,6 +848,10 @@ public class FormTemplateService : IFormTemplateService
                         AND s.margin_bottom_mm    <=> form_templates.margin_bottom_mm
                         AND s.print_copy_mode     <=> form_templates.print_copy_mode
                         AND s.style_key           <=> form_templates.style_key
+                        AND s.show_company_logo   <=> form_templates.show_company_logo
+                        AND s.show_company_seal   <=> form_templates.show_company_seal
+                        AND s.show_border         <=> form_templates.show_border
+                        AND s.show_tear_line      <=> form_templates.show_tear_line
                         AND s.show_watermark      <=> form_templates.show_watermark
                         AND s.watermark_opacity   <=> form_templates.watermark_opacity
                         AND s.watermark_saturate  <=> form_templates.watermark_saturate
