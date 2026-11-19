@@ -287,7 +287,10 @@ public class FormTemplateService : IFormTemplateService
 
         var db = _unitOfWork.GetDbConnection();
         // 🔴 W-G1-51 F-1 — 양식지 저장 = `print_background` 0 강제(CreateCoreAsync 와 같은 규칙 · 측정 ⓘ-11).
-        var printBackgroundToSave = ResolvePrintBackgroundToSave(request.PaperMode, request.PrintBackground);
+        // 종전(고침 2 전): var printBackgroundToSave = ResolvePrintBackgroundToSave(request.PaperMode, request.PrintBackground);
+        //   🔴 고침 2(Ⓐ · CTO 판정 (나) 조건 7) — 고치기는 서버가 DB 현재값으로 정한다(같은 트랜잭션 FOR UPDATE 읽기 → C# 판정 → 아래 UPDATE).
+        //   이미 켬 · 그림 무변인 양식지는 1 유지(옮기기가 내리고 Y 를 만듦 · Q14 · Q16) · 그 밖 양식지 = 0(ⓘ-11 「새로 켜는 요청」).
+        var printBackgroundToSave = await ResolvePrintBackgroundToSaveOnUpdateAsync(db, tx, tenantId, templateId, request, ct);
 
         if (request.IsDefault)
         {
@@ -1151,6 +1154,55 @@ public class FormTemplateService : IFormTemplateService
     /// <summary>양식지(`preprint`)는 그림 찍기 0 으로 저장한다(W-G1-51 F-1 · 측정 ⓘ-11). 빈 A4 는 요청값 그대로.</summary>
     private static bool ResolvePrintBackgroundToSave(string paperMode, bool requested)
         => !string.Equals(paperMode, "preprint", StringComparison.Ordinal) && requested;
+
+    /// <summary>
+    /// 🔴 고침 2 — Ⓐ 옮기기 전 창([4] P1-1 · CTO 판정 (나) 조건 7 · PM 22:3x 수용). 고치기 저장의 그림 찍기 값을
+    /// **서버 · DB 현재값**으로 정한다(조건 1). 양식지 요청이면:
+    /// DB 현재 `paper_mode`='preprint' 그리고 `print_background`=1 그리고 `background_image_url` 무변 → 1 유지 / 아니면 0
+    /// (그림을 바꾼 저장 = 0 · ⓘ-11 그대로 · 조건 2). 양식지에서는 요청의 `PrintBackground` 를 읽지 않는다.
+    /// 빈 A4 요청은 종전 규칙(<see cref="ResolvePrintBackgroundToSave"/> · 서명 무변 · 조건 3) 그대로.
+    /// </summary>
+    /// <remarks>
+    /// 조건 4 — 한 UPDATE 문의 SET 안 CASE 로 하지 않는다: MariaDB 는 SET 을 왼쪽부터 적용해 뒤 칸이 앞 칸의 **새 값**을 본다
+    ///   (`paper_mode` · `background_image_url` 이 `print_background` 보다 앞) → 「무변」 이 늘 참. 그래서 읽기 → 판정 → 쓰기를 나눈다.
+    /// 조건 5 — 같은 트랜잭션 안 `FOR UPDATE` 로 읽는다 → 옮기기(그 종 행 잠금 뒤 대상 다시 뜸)와 순서가 선다.
+    /// 조건 6 — 키 칸(`is_default` · `is_active`) 처리는 무변(옛 키 아래 새 1062 길 0) · 1 로 남기면 이름 붙은 정보 로그 1줄.
+    /// </remarks>
+    private async Task<bool> ResolvePrintBackgroundToSaveOnUpdateAsync(
+        DbConnection db, DbTransaction tx, string tenantId, string templateId,
+        UpdateFormTemplateRequest request, CancellationToken ct)
+    {
+        if (!string.Equals(request.PaperMode, "preprint", StringComparison.Ordinal))
+        {
+            return ResolvePrintBackgroundToSave(request.PaperMode, request.PrintBackground);
+        }
+
+        // 같은 표 행 모양(YSourceRow)에 필요한 세 칸만 읽는다 — 회사 조건(#2).
+        var current = await db.QueryFirstOrDefaultAsync<YSourceRow>(new CommandDefinition(
+            @"SELECT paper_mode AS PaperMode, print_background AS PrintBackground,
+                     background_image_url AS BackgroundImageUrl
+              FROM form_templates
+              WHERE tenant_id = @TenantId AND template_id = @TemplateId
+              FOR UPDATE",
+            new { TenantId = tenantId, TemplateId = templateId },
+            transaction: tx, cancellationToken: ct));
+        if (current is null)
+        {
+            // 그 회사 행 없음 — 아래 UPDATE 가 0행 → 종전 「찾을 수 없음」 길 · 값은 종전 규칙(양식지 = 0)과 같다.
+            return false;
+        }
+
+        var keep = string.Equals(current.PaperMode, "preprint", StringComparison.Ordinal)
+                   && current.PrintBackground
+                   && string.Equals(current.BackgroundImageUrl, request.BackgroundImageUrl, StringComparison.Ordinal);
+        if (keep)
+        {
+            _logger.LogInformation(
+                "[양식] 옮기기 대기 중 저장 — 그림 찍기 켬을 그대로 두었다 · 다음 옮기기에서 Y 템플릿으로 만듦 · tenant={Tenant} template={Template}",
+                tenantId, templateId);
+        }
+        return keep;
+    }
 
     /// <summary>1062 사람 말(#23 — 개발 용어 · 키 이름 · 원문 0). 어느 키에 걸렸는지만 보고 두 문구 중 하나.</summary>
     private static string DuplicateTemplateMessage(MySqlException ex)
