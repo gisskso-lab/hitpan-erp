@@ -504,6 +504,29 @@ jobs:
       - name: "[장치] S5 시드 부모계정 (seed-parent 실물 길 · 테넌트 A)"
         run: node scripts/playwright-audit/ci/seed-parent.js
 
+      - name: "[장치] 측정 글꼴 — 이름표 고친 대체 글꼴 2개(고침 1 §8-1 · 판정 0 · 사실만 · 실패 = 이름 붙은 사유 · 칸 판정은 T8)"
+        id: font
+        timeout-minutes: 25
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          bad=0; fail() { bad=1; echo "PRINT_FONT_WHY=$1" >> "$GITHUB_ENV"; echo "⚫ FAIL [장치] $1 — 칸 판정은 T8 이 막음"; }
+          W="$RUNNER_TEMP/font-work"; case "$W" in "$UI_OUT"*) fail "글꼴 단계 — 작업 폴더가 업로드 뿌리 안"; exit 1;; esac
+          ok=0
+          for i in 1 2 3; do
+            if sudo timeout 240 apt-get update && sudo timeout 240 apt-get install -y --no-install-recommends fonts-nanum python3-fonttools; then ok=1; break; fi
+            echo "::warning::글꼴 apt 시도 $i 실패 — 재시도"; sleep 10
+          done
+          if [ "$ok" != "1" ]; then fail "글꼴 단계 — 꾸러미 설치 실패"; exit 1; fi
+          dpkg-query -W fonts-nanum python3-fonttools > "$PRINT_OUT/font-packages.txt"
+          N=/usr/share/fonts/truetype/nanum; mkdir -p "$W"
+          if ! cp "$N/NanumGothic.ttf" "$W/regular.ttf" || ! cp "$N/NanumGothicBold.ttf" "$W/bold.ttf"; then fail "글꼴 단계 — 원본 파일 없음(경로 다름)"; exit 1; fi
+          if why=$(/usr/bin/python3 scripts/playwright-audit/ci/print/font-rename.py "$W" "$PRINT_OUT/font-facts.json"); then sudo cp "$W"/print-substitute-regular.ttf "$W"/print-substitute-bold.ttf /usr/share/fonts/; else fail "${why:-글꼴 단계 — 이름 고침 실패}"; fi
+          rm -rf "$W"
+          if find "$UI_OUT" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) | grep -q .; then fail "업로드 뿌리 글꼴 파일 >0"; fi
+          if ! ls -l /usr/share/fonts/print-substitute-*.ttf; then echo "⚫ [장치] 고친 글꼴 맨 위에 없음(사실 · 판정은 판정기)"; fi
+          exit "$bad"
+
       - name: "[장치] S6 API 기동 (Production · 본사 길 닫힌 포트)"
         run: |
           set -uo pipefail
@@ -584,6 +607,8 @@ jobs:
 
       - name: "[시험] 판정 (양성 대조 먼저 · 칸별 사유)"
         if: always()
+        env:
+          PRINT_FONT_OUTCOME: ${{ steps.font.outcome }}
         run: node scripts/playwright-audit/ci/print/judge-print.js "$PRINT_OUT"
 
       - name: "[장치] API 멈춤 (로그 마무리)"

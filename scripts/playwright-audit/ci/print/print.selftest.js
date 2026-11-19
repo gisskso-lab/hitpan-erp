@@ -1275,7 +1275,16 @@ function runReadStep7(block, names) {
 {
   const job = printJob7();
   const live = job.split('\n').filter((l) => l.trim() !== '' && !l.trim().startsWith('#'));
-  const swallow = live.filter((l) => /\|\|\s*(echo|true|:)(\s|$|;|\))/.test(l) || /continue-on-error/.test(l));
+  // ⬛ [낡은 줄 · 7차] const swallow = live.filter((l) => /\|\|\s*(echo|true|:)(\s|$|;|\))/.test(l) || /continue-on-error/.test(l));
+  // 🔴 11차(고침 2 PM 결재 ① · L5) — 글꼴 단계 안의 continue-on-error 1줄만 뺌(그 단계 실패는 판정기가 outcome · 사유로 드러냄 = T-F1 · 잡 전체 1개 = T-F3) · 다른 자리는 그대로 셈
+  const jl = job.split('\n');
+  const fi = jl.findIndex((l) => l.includes('- name: "[장치] 측정 글꼴'));
+  const fontCoe = fi < 0 ? null : jl.slice(fi, jl.findIndex((l, k) => k > fi && /^\s+- name: /.test(l))).find((l) => /^\s+continue-on-error: true\s*$/.test(l));
+  let allowCoe = fontCoe ? 1 : 0;
+  const swallow = live.filter((l) => {
+    if (allowCoe && l === fontCoe) { allowCoe = 0; return false; }
+    return /\|\|\s*(echo|true|:)(\s|$|;|\))/.test(l) || /continue-on-error/.test(l);
+  });
   const probeLines = live.filter((l) => /PrintProbe\.dll/.test(l));
   const probeOr = probeLines.filter((l) => /\|\|/.test(l));
   const read = stepRun7(job, '[시험] PDF 사실 뽑기') || '';
@@ -2254,6 +2263,32 @@ guardAsync(TD8E, async () => {
   const ok = id === 'w-2' && end === '값 true' && /재고 선행 — 창고 없음/.test(rb) && b.st.calls.length === 1 && /재고 선행 — 창고 없음/.test(rc) && readOnly
     && !a.st.calls.some((x) => /tenant/i.test(x));
   check(TD8E, ok, `고른 창고 ${id} · 재고 선행 「${end}」 · 0개 「${rb}」 · 비활성만 「${rc}」 · 읽기 꼴 ${readOnly ? '○' : '×'} · 부름 ${a.st.calls.join(' · ')}`);
+});
+
+// T-F3 11차 D1′(고침 1 §8-1 · 고침 2 §1 · PM ① · L5) — ui-print 글꼴 단계 꼴(정적 · 이 PC 에서 단계는 못 돎 = C6 G1′ · G5): S5 뒤 · S6 앞 · id font · 25분 · continue-on-error = 이 단계 하나만
+//   · apt 3회 꼴 · --no-install-recommends 꾸러미 2 · pip 0 · /usr/bin/python3 · 맨 위 · 작업 폴더 지움 · 업로드 뿌리 글꼴 0 확인 · 판정 단계 env outcome · fc-match · fc-cache 0 · font-rename.py ≤ 90줄 · 보존 8 ID · 중립 이름
+const TF3 = 'T-F3 11차 D1′ 글꼴 단계 꼴(S5 뒤 · S6 앞 · id · 25분 · continue-on-error 하나 · 꾸러미 2 · 절대경로 python · 맨 위) · 판정 단계 outcome env · font-rename.py ≤90줄';
+guardAsync(TF3, async () => {
+  const job = printJob7();
+  const ls = job.split('\n');
+  const at = (s) => ls.findIndex((l) => l.includes(s));
+  const iFont = at('- name: "[장치] 측정 글꼴');
+  const iJudge = at('- name: "[시험] 판정');
+  const run = stepRun7(job, '[장치] 측정 글꼴') || '';
+  const head = ls.slice(iFont, iFont + 5).join('\n');
+  const coe = (fs.readFileSync(YML7, 'utf8').match(/continue-on-error:/g) || []).length;
+  const py = fs.readFileSync(path.join(__dirname, 'font-rename.py'), 'utf8');
+  const pyLines = py.replace(/\r?\n$/, '').split(/\r?\n/).length;
+  const keep = ((/KEEP = \{([^}]*)\}/.exec(py) || [])[1] || '').replace(/\s/g, '');
+  const ck = {
+    차례: iFont > at('S5 시드 부모계정') && at('S5 시드 부모계정') >= 0 && iFont < at('S6 API 기동'), id: /\n\s+id: font\n/.test(head), 시간25: /\n\s+timeout-minutes: 25\n/.test(head),
+    coe하나: coe === 1 && /continue-on-error: true/.test(head), apt: /for i in 1 2 3/.test(run) && run.includes('sudo timeout 240 apt-get install -y --no-install-recommends fonts-nanum python3-fonttools') && !/\bpip3? /.test(run),
+    python: run.includes('/usr/bin/python3 scripts/playwright-audit/ci/print/font-rename.py'), 맨위: run.includes(' /usr/share/fonts/;'), 지움: run.includes('rm -rf "$W"'),
+    업로드0: run.includes('find "$UI_OUT"'), 사유: run.includes('PRINT_FONT_WHY='), 판정env: ls.slice(iJudge, iJudge + 5).join('\n').includes('PRINT_FONT_OUTCOME: ${{ steps.font.outcome }}'),
+    G0없음: !/fc-match|fc-cache/.test(job), 줄수: pyLines <= 90, 보존8: keep === '0,7,8,9,11,12,13,14', 중립: py.includes("'PrintSubstitute-Regular'") && py.includes("'PrintSubstitute-Bold'"),
+  };
+  const bad = Object.entries(ck).filter(([, v]) => !v).map(([k]) => k);
+  check(TF3, bad.length === 0, `어긋남 ${bad.join(' · ') || '0'} · 단계 줄 ${iFont} · continue-on-error ${coe} · python ${pyLines}줄`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
