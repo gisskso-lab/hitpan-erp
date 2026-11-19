@@ -231,8 +231,7 @@ public partial class ReturnPage : ComponentBase
         // 14차 P0 봉합(B안): 반품유형에 따라 매출반품(api/sales/returns)·매입반품(api/purchase/returns)
         //   경로로 분기한다. 종전엔 _returnType 무시하고 항상 매입반품으로 저장해, 판매반품 선택 시
         //   재고·잔액·회계가 3중 역방향으로 오염됐다(헌법 #20). 백엔드는 13차에 양쪽 다 완비됨.
-        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표의 수정(PUT)은 그 전표의 종으로 · 새 전표(POST)는 선택칸(종전과 같음).
-        var isSalesReturn = IsCurrentDocSalesReturn;
+        var isSalesReturn = _returnType == "sales_return";
         var basePath = isSalesReturn ? "api/sales/returns" : "api/purchase/returns";
         var docLabel = isSalesReturn ? "매출반품" : "매입반품";
 
@@ -339,8 +338,7 @@ public partial class ReturnPage : ComponentBase
             try
             {
                 // 14차 P0 봉합(B안): 반품유형에 따라 삭제 경로 분기.
-                // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
-                var deletePath = IsCurrentDocSalesReturn ? "api/sales/returns" : "api/purchase/returns";
+                var deletePath = _returnType == "sales_return" ? "api/sales/returns" : "api/purchase/returns";
                 using var resp = await Http.DeleteAsync($"{deletePath}/{Uri.EscapeDataString(_draft.Id)}");
                 if (!resp.IsSuccessStatusCode)
                 {
@@ -401,8 +399,8 @@ public partial class ReturnPage : ComponentBase
     private const string SalesReturnEmailTypeKey = "sales_return";
 
     // ─────────────────────────────────────────────────────────────────
-    // 🔴 W-G1-51 갈래 E 고침1 ([3-V] P2-E1 · [4] P3 E-3 · PM 판단 11/19) — 종은 「불러온 전표」 에 묶는다.
-    //   종전(고침 전): 인쇄·PDF·이메일·저장·삭제·확정·취소가 모두 선택칸 `_returnType` 으로 종을 갈랐다.
+    // 🔴 W-G1-51 갈래 E 고침1 ([3-V] P2-E1 · [4] P3 E-3 · PM 판단 11/19) — 인쇄·PDF·이메일 종은 「불러온 전표」 에 묶는다.
+    //   종전(고침 전): 인쇄·PDF·이메일이 선택칸 `_returnType` 으로 종을 갈랐다.
     //         선택칸은 전표를 불러온 뒤에도 바뀐다 → 매입반품을 불러온 뒤 「판매반품」 으로 바꾸고 [이메일]
     //         = 판매반품 키 + 매입반품 id → 「원본 문서를 찾을 수 없습니다」 종이가 거래처로 나갔다.
     //   지금: 서버에서 읽어 온(또는 그 종으로 저장한) 전표의 **id 와 종을 따로 붙잡는다**.
@@ -412,6 +410,8 @@ public partial class ReturnPage : ComponentBase
     //   켬: LoadReturnAsync 읽기 성공 · SaveAsync 새로 저장 성공(그 종 · 서버 id).
     //   끔: 첫 화면 · 복사(새 id) · 취소(새 전표 초기화) · 삭제 뒤 초기화 · 새로 저장 길(끈 뒤 저장한 전표로 다시 켬).
     //   id 로 묶었으므로 끄는 자리를 하나 빠뜨려도 _draft.Id 가 바뀌면 판정이 저절로 거짓이 된다.
+    //   고침1-a(PM 불수용): 저장·삭제·확정·확정취소는 이 판정을 쓰지 않는다 — 원장·문서 상태 길이라
+    //         이 갈래 근거 밖. 선택칸 기준 그대로(종전 · main 과 같음) · 불일치 위험은 PM 별건.
     // ─────────────────────────────────────────────────────────────────
 
     /// <summary>불러온(또는 방금 새로 저장한) 반품 전표의 서버 id. 비면 「붙잡은 전표 없음」.</summary>
@@ -430,13 +430,6 @@ public partial class ReturnPage : ComponentBase
     /// 그 밖(매입반품 · 저장 안 한 새 전표)은 종전 매입반품 키 그대로(#1 · `/deliveries` G7 과 같은 꼴).
     /// </summary>
     private bool IsLoadedSalesReturnForPrint => IsLoadedReturnOnScreen && _loadedReturnIsSales;
-
-    /// <summary>
-    /// 저장 · 삭제 · 확정 · 확정취소 판정 — 불러온 전표면 그 전표의 종, 새 전표면 선택칸(종전과 같음).
-    /// 선택칸 = 불러온 종인 보통 흐름에서는 종전과 같은 경로다(바뀌는 것은 선택칸을 바꾼 뒤뿐).
-    /// </summary>
-    private bool IsCurrentDocSalesReturn =>
-        IsLoadedReturnOnScreen ? _loadedReturnIsSales : _returnType == "sales_return";
 
     private void BindLoadedReturn(string returnId, bool isSales)
     {
@@ -725,8 +718,7 @@ public partial class ReturnPage : ComponentBase
 
         // 14차 P0 봉합(B안): 매출반품은 재고가 증가(Reverse IN), 매입반품은 차감(Reverse OUT).
         //   확정 다이얼로그 문구·확정 API를 반품유형에 맞게 분기한다.
-        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
-        var isSalesReturn = IsCurrentDocSalesReturn;
+        var isSalesReturn = _returnType == "sales_return";
         var confirmTitle = isSalesReturn ? "⚠ 매출반품 확정 (Reverse IN)" : "⚠ 매입반품 확정 (Reverse OUT)";
         var stockLine = isSalesReturn
             ? $"→ 재고 {totalQty:N1}개 증가 (고객 반품 입고)\n→ 재고원장에 Reverse IN 기록\n"
@@ -783,8 +775,7 @@ public partial class ReturnPage : ComponentBase
             return;
         }
 
-        // 🔴 W-G1-51 갈래 E 고침1 (E-3) — 불러온 전표면 그 전표의 종(선택칸을 바꿔도 안 바뀜).
-        var isSalesReturn = IsCurrentDocSalesReturn;
+        var isSalesReturn = _returnType == "sales_return";
         var totalQty = _draft.Lines.Where(l => !l.IsPlaceholder).Sum(l => l.Quantity);
         var cancelTitle = isSalesReturn ? "⚠ 매출반품 취소 (확정 되돌림)" : "⚠ 매입반품 취소 (확정 되돌림)";
         var stockLine = isSalesReturn
