@@ -230,7 +230,8 @@ function New-RgRealHooks {
             # (11/19 [3-V] N1) $Try 2 = 다시 묻기(첫 입력이 빈 칸이 아닌데 「누가」 형식이 틀림) — 이때 빈 칸은 「하지 않음」 이 아니라 「누가 = 거절됨」(인계)
             param([int]$Try = 1)
             $ask = '무효화를 한 사람(역할 · 이름) — 하지 않았으면 빈 칸으로 Enter'
-            if ($Try -gt 1) { $ask = '다시 적기 — 무효화를 한 사람(역할 · 이름 · 글자 · 숫자 · 공백 · ._()- 40자까지) · 이번에도 안 맞으면 「누가 = 거절됨」 으로 인계' }
+            # (11/19 [3-V] M4) 문구만 — 예시와 허용 글자를 따로 · 허용 글자 = 화면 줄(Invoke-RgSemi 다시 묻기 줄)과 같은 글자(가운뎃점 포함)
+            if ($Try -gt 1) { $ask = '다시 적기 — 무효화를 한 사람 [예: QA · 홍길동] [쓸 수 있는 글자: 글자 · 숫자 · 공백 · ._()- · 가운뎃점(·) · 40자까지 · 긴 16진 꼴 안 됨] — 이번에도 안 맞으면 「누가 = 거절됨」 으로 인계' }
             $who = Read-Host $ask
             if ([string]::IsNullOrWhiteSpace($who)) { return $null }
             return @{ Who = $who.Trim(); Utc = [datetime]::UtcNow }
@@ -790,16 +791,20 @@ function Invoke-RgSemi {
     $script:RgInFlight = @{ Cat = $Cat; StartUtc = (& $script:H.Now); HistDone = $false; Cooldown = $res.Cooldown; Last = $null; Elapsed = 0 }
     Write-RgLine '  손 안내: 정해진 절차대로 시험 PC 터널 자격증명을 사람이 무효화한 뒤, 한 사람(역할 · 이름)을 적는다. 도구는 무효화 · 되살림을 하지 않는다.'
     $hand = $null
-    try { $hand = & $script:H.HandRecord 1 } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
+    $handThrew = $false
+    try { $hand = & $script:H.HandRecord 1 } catch { $handThrew = $true; Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
     $who = $null; $handUtc = $null
     if ($null -ne $hand) { $who = Format-RgWho -Who $hand.Who; $handUtc = ConvertTo-CgUtc -Value $hand.Utc }
     # (11/19 [3-V] N1) 빈 칸이 아닌 입력 = 무효화했다는 뜻. 그런데 「누가」 가 거절되면(형식 · 시각) 한 번 다시 묻는다(무효화는 다시 하지 않음).
     #   다시 물어도 거절(빈 칸 · 형식 · 못 받음 포함) = 「무효화했음 · 누가 = 거절됨」 → 실행 기록 · S-D 실패 · 상태 불명 · 인계(모듈 HandRejected).
-    #   거절된 글자는 화면 · 보고서 · 실행 기록에 옮기지 않는다. 첫 입력이 빈 칸(또는 못 받음)일 때만 옛 그대로 「손 기록 없음」 = 미실행.
-    $began = ($null -ne $hand -and -not [string]::IsNullOrWhiteSpace([string]$hand.Who))
+    #   거절된 글자는 화면 · 보고서 · 실행 기록에 옮기지 않는다. 첫 입력이 빈 칸일 때만 옛 그대로 「손 기록 없음」 = 미실행.
+    # (11/19 [3-V] M3) 첫 부름 예외(못 받음) = 손 안내를 찍은 뒤라 무효화했을 수 있음(표지 애매) → A13 안전 쪽 규칙(Set-CgSdHandoff)과 같게
+    #   표지가 선 것으로 보고 같은 다시 묻기 길로 보낸다 — 또 못 받거나 거절이면 HandRejected = 인계 참(옛 = 미실행 · 인계 0).
+    $began = ($handThrew -or ($null -ne $hand -and -not [string]::IsNullOrWhiteSpace([string]$hand.Who)))
     if ($began -and (-not $who -or $null -eq $handUtc)) {
         $firstUtc = $handUtc
-        Write-RgLine '  손 기록: 「누가」 형식이 맞지 않음(글자 · 숫자 · 공백 · ._()- · 가운뎃점 40자까지 · 긴 16진 꼴 안 됨) — 한 번 더 묻는다(무효화는 다시 하지 않음)'
+        if ($handThrew) { Write-RgLine '  손 기록: 입력을 못 받음 — 무효화했을 수 있어 한 번 더 묻는다(무효화는 다시 하지 않음 · 또 못 받으면 인계)' }
+        else { Write-RgLine '  손 기록: 「누가」 형식이 맞지 않음(글자 · 숫자 · 공백 · ._()- · 가운뎃점 40자까지 · 긴 16진 꼴 안 됨) — 한 번 더 묻는다(무효화는 다시 하지 않음)' }
         $hand = $null; $who = $null; $handUtc = $null
         try { $hand = & $script:H.HandRecord 2 } catch { Write-Warning ("손 기록 못 받음({0})" -f $_.Exception.GetType().Name) }
         if ($null -ne $hand) { $who = Format-RgWho -Who $hand.Who; $handUtc = ConvertTo-CgUtc -Value $hand.Utc }

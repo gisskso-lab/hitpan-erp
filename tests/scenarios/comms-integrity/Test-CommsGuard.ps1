@@ -16,7 +16,10 @@
     -ModulePath  판정 모듈 경로(기본 = 같은 폴더 CommsGuard.psm1) — 「가드 한 줄 깬 사본」 대조군용
     -RunnerPath  러너 경로(기본 = 같은 폴더 Run-RoutinePcScenarios.ps1)
 
-  끝 줄: 「Test-CommsGuard 끝 — 경우 38/38 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치 · 세부 확인 하한 이상 · 임시 저장소 도장 같음 · CI 미측정 0) / 1.
+  끝 줄: 「Test-CommsGuard 끝 — 경우 40/40 일치 · 세부 확인 k/k · 진짜 끊기 호출 0」 · 종료 코드 0(전부 일치 · 세부 확인 하한 이상 · 임시 저장소 도장 같음 · CI 미측정 0) / 1.
+    (11/19 [4] 4회차 F15 · F16 · [3-V] 4회차 M3) 경우 C39(옛 도구 9파일 거절 블록 · 구문 트리로만 · 실행 0) · C40(커밋된 빈 허용목록 → G4 「허용목록 밖」) ·
+    C32 ⓖ ⓗ(첫 손 기록 부름 예외 = 다시 묻기 · 또 못 받으면 인계) — 옛 끝 줄 「경우 38/38」.
+    근거 docs/검증/20261119_WG1-53_4회차_차이재셈_작업리뷰서.md · docs/검증/병렬이슈/20261119_3V_WG1-53_4회차_고침묶음_갈래3_5_6_보안상무.md 끝 「PM 판단」(이 가지에 없음 · F12 와 같이 PM 몫).
     (11/19 [3-V] 재반증 N1 · A13 · N2 · N3 · N9 · N4+F13) C32 기대값 고침(두 번 거절 = 인계 · 다시 묻기 경우 더함) · C28 머리 「관측 중단 — 」 ·
     경우 C36~C38 · CI 미측정 = 종료 1 · 임시 저장소 도장 시작 ↔ 끝 대조 — 옛 끝 줄 「경우 35/35」.
     근거 docs/검증/병렬이슈/20261119_3V_WG1-53_고침판_재반증_보안상무.md 끝 「PM 판단」 · docs/검증/20261119_WG1-53_고침판_차이재셈_작업리뷰서.md 끝 「PM 판단」(main 449dfd1f).
@@ -269,6 +272,8 @@ class CgWorld {
     [string] FailureActions([string]$name) { return [string]$this.Cfg.FailureText }
     [object] Hand() {
         $this.HandCalls++
+        # (11/19 [3-V] M3 · C32) HandThrowCalls = 그 번째 부름에서 던짐(실물 Read-Host 예외 흉내 — 비대화 호스트 · 입력 막힘)
+        if (@($this.Cfg.HandThrowCalls) -contains [int]$this.HandCalls) { throw 'fake hand failure' }
         if ($this.Cfg.HandMode -eq 'none') { return $null }
         $who = if ([string]$this.Cfg.HandWho) { [string]$this.Cfg.HandWho } else { '시험자' }   # (갈래2 V9 · C32) 「누가」 칸 바꿔 넣기
         # (11/19 [3-V] N1 · C32) HandWhoSeq = 부를 때마다 차례로 줄 「누가」(다시 묻기) · '' = 빈 칸 Enter · 끝을 넘기면 마지막 값
@@ -286,7 +291,7 @@ class CgWorld {
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 # (11/19 [3-V] 갈래2 V5) 경우 수 · 세부 확인 수 하한 — 경우 블록이 지워지거나 안 불리면 불일치 · 세부 확인이 줄면 종료 1
-$script:CaseMax = 38      # (11/19 [4] F8~F10) 32 → 35(C33~C35) · (11/19 [3-V] 재반증) 35 → 38(C36~C38)
+$script:CaseMax = 40      # (11/19 [4] F8~F10) 32 → 35(C33~C35) · (11/19 [3-V] 재반증) 35 → 38(C36~C38) · (11/19 [4] 4회차 F15 · F16) 38 → 40(C39 · C40)
 $script:MinDetail = 613   # 이 커밋 기준 세부 확인 수 619 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 561(567 − 6) · 524(530 − 6) · 420 이상 — 늘리기만 한다
 if (-not $ModulePath) { $ModulePath = Join-Path $PSScriptRoot 'CommsGuard.psm1' }
 if (-not $RunnerPath) { $RunnerPath = Join-Path $PSScriptRoot 'Run-RoutinePcScenarios.ps1' }
@@ -551,6 +556,7 @@ function New-CgCfg {
         HandMode = 'record'
         ObsThrowAt = -1; HandThrowAt = -1; HandWho = ''   # (11/19 [3-V] 갈래2 · C28 · C32) 기본 = 끔
         HandWhoSeq = @()   # (11/19 [3-V] N1 · C32) 기본 = 끔(HandWho 그대로)
+        HandThrowCalls = @()   # (11/19 [3-V] M3 · C32) 기본 = 끔
         OriginFail = ''   # (11/19 [4] F8 · C33) 기본 = 끔
     }
     if ($null -ne $Over) {
@@ -1586,7 +1592,7 @@ Invoke-CgCaseBlock 'C31' '[3-V 갈래2] V4 · 「진짜 끊기 0」 정적 검�
     Test-CgCase 'C31' 'ⓒ 모듈 .Start() = Invoke-CgGitRead 안 [System.Diagnostics.Process]::Start 1곳뿐 · .Continue() 0' ($mStart.Count -eq 1 -and $mStart[0].Static -and [string]$mStart[0].Expression.Extent.Text -eq '[System.Diagnostics.Process]' -and $null -ne $p -and $p.Name -eq 'Invoke-CgGitRead')
 }
 
-Invoke-CgCaseBlock 'C32' '[3-V 갈래2] V9 · [3-V 재반증] N1 · 손 기록 「누가」 16진 꼴 거절 · 안내 꼴(가운뎃점) 받음 · 거절 → 다시 묻기 1회 · 두 번 거절 = 무효화했음(인계)' {
+Invoke-CgCaseBlock 'C32' '[3-V 갈래2] V9 · [3-V 재반증] N1 · 손 기록 「누가」 16진 꼴 거절 · 안내 꼴(가운뎃점) 받음 · 거절 → 다시 묻기 1회 · 두 번 거절 = 무효화했음(인계) · [3-V 4회차] M3 첫 부름 예외 = 다시 묻기' {
     $fx = Get-CgRunnerFunctions -Path $script:RunnerPath -Names @('Format-RgWho')
     Test-CgCase 'C32' 'ⓐ 러너 Format-RgWho 있음' ($fx.Count -eq 1)
     foreach ($t in @($fx.Values)) { . ([scriptblock]::Create($t)) }
@@ -1636,6 +1642,15 @@ Invoke-CgCaseBlock 'C32' '[3-V 갈래2] V9 · [3-V 재반증] N1 · 손 기록 �
     $vr = Get-ScenarioVerdict -Id 'S-D' -Observation @{ SdBaseline = @{ TargetOk = $true; ControlOk = $true; Version = $script:VV }; HandRejected = @{ Utc = $script:Base } }
     Assert-CgV 'C32' 'ⓕ 모듈 HandRejected' $vr $rej
     Test-CgCase 'C32' 'ⓕ 인계 · 상태 불명 · 끊기 보냄 칸 · 실행됨 · t0 = 손 기록 시각' ($vr.Handoff -and $vr.StateUnknown -and $vr.CutIssued -and $vr.Executed -and $vr.T0Utc -eq $script:Base)
+    # (11/19 [3-V] 4회차 M3) ⓖ 첫 손 기록 부름 예외(손 안내 뒤 · 표지 애매) → 다시 묻기 · 둘째도 예외 = 무효화했음 · 누가 = 거절됨 · 인계 · 실행 기록(옛 = 미실행(손 기록 없음) · 인계 0)
+    $reaskErr = '  손 기록: 입력을 못 받음 — '
+    $g = Invoke-CgRun -Cfg @{ HandThrowCalls = @(1, 2) } -History $skipAuto
+    Assert-CgItem 'C32' $g 'S-D' ($LblD + $rej)
+    Test-CgCase 'C32' 'ⓖ 첫 부름 예외 → 못 받음 줄 1 · 부름 2 · 또 예외 = 두 번 거절 줄 · 경고 줄 · 인계 끝 줄 · 실행 기록 TunnelSecret 1줄 · 종료 1' ($g.W.HandCalls -eq 2 -and @(@($g.Lines) | Where-Object { ([string]$_).StartsWith($reaskErr) }).Count -eq 1 -and (@($g.Lines) -contains $twice) -and (@($g.Lines) -contains $WarnLine) -and (Get-CgSummaryEnd $g) -eq $HandoffEnd -and @(([string]$g.HistText -split "`n") | Where-Object { $_ -match '"key":"TunnelSecret"' }).Count -eq 1 -and $g.Exit -eq 1)
+    # ⓗ 첫 부름 예외 → 다시 물어 받음 = 관측 · 완료(형식 거절 줄 0 · 두 번 거절 줄 0)
+    $h = Invoke-CgRun -Cfg @{ HandThrowCalls = @(1) } -History $skipAuto
+    Assert-CgItem 'C32' $h 'S-D' ($LblD + '반자동 — 완료(') -Prefix
+    Test-CgCase 'C32' 'ⓗ 첫 부름 예외 → 다시 물어 받음 = 부름 2 · 못 받음 줄 1 · 형식 거절 줄 0 · 두 번 거절 줄 0 · 손 기록 = 시험자' ($h.W.HandCalls -eq 2 -and @(@($h.Lines) | Where-Object { ([string]$_).StartsWith($reaskErr) }).Count -eq 1 -and @(@($h.Lines) | Where-Object { ([string]$_).StartsWith($reask) }).Count -eq 0 -and -not (@($h.Lines) -contains $twice) -and @(@($h.Lines) | Where-Object { ([string]$_).StartsWith('  손 기록: 시험자 · ') }).Count -eq 1)
 }
 
 # ─────────────────────────────────────────────── 경우 C36~C38 — (11/19) [3-V] 재반증 N2 · N3 · A13(+N1 한 규칙)
@@ -1767,6 +1782,89 @@ Invoke-CgCaseBlock 'C35' '[4] F10 · 이름 풀이 주소 IPv6 루프백 ::1 →
     Assert-CgNoPass 'C35' $b 'S-A'
     Test-CgCase 'C35' 'ⓑ 끊기 0 · 외부 GET 0 · 종료 1' ($b.W.FakeCuts -eq 0 -and $b.W.ExtGets -eq 0 -and $b.Exit -eq 1)
     Assert-CgItem 'C35' $b 'S-B' ($LblB + '미실행(앞 건 정지)')
+}
+
+# ─────────────────────────────────────────────── 경우 C39 · C40 — (11/19) [4] 4회차 F15 · F16(PM 판단 「고침」)
+# 근거 docs/검증/20261119_WG1-53_4회차_차이재셈_작업리뷰서.md §2 F15 · F16 · 끝 「PM 판단」. 옛 도구 = 구문 트리로만(실행 · 점 소싱 0) · 허용목록 = 모듈 Read-CgAllowlist 로 읽기만.
+
+# 옛 도구 9파일 = 작업지시서 §2 ㉤ 목록 · ㉤ 커밋 7489bffb 의 9파일(이 파일 폴더 기준 상대 경로)
+$script:OldTools = @('..\Run-All-Scenarios.ps1', '..\S06.ps1', '..\S07.ps1', '..\S10.ps1', '..\S14.ps1', '..\S15.ps1', '..\S16.ps1', 'Run-CommsScenarios.ps1', 'Build-TestSlot.ps1')
+
+function Get-CgOldToolBlockFault {
+    # ㉤ 거절 블록 모양 — param 블록 있음 · begin · process · dynamicparam 0 · 끝 블록 첫 문장 둘 = Write-Host '글자 상수'(안내) · 셋째 = exit 1. 맞으면 '' · 아니면 사유.
+    param($Ast)
+    if ($null -eq $Ast) { return '구문 트리 없음' }
+    if ($null -eq $Ast.ParamBlock) { return 'param 블록 없음' }
+    if ($null -ne $Ast.BeginBlock -or $null -ne $Ast.ProcessBlock -or $null -ne $Ast.DynamicParamBlock) { return 'begin · process · dynamicparam 블록 있음' }
+    $st = if ($null -ne $Ast.EndBlock) { @($Ast.EndBlock.Statements) } else { @() }
+    if ($st.Count -lt 3) { return ('param 뒤 문장 ' + $st.Count + '개') }
+    for ($i = 0; $i -lt 2; $i++) {
+        $p = $st[$i]
+        $ok = ($p -is [System.Management.Automation.Language.PipelineAst] -and @($p.PipelineElements).Count -eq 1 -and $p.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst])
+        if ($ok) {
+            $c = $p.PipelineElements[0]
+            $ok = ($c.GetCommandName() -eq 'Write-Host' -and @($c.CommandElements).Count -eq 2 -and $c.CommandElements[1] -is [System.Management.Automation.Language.StringConstantExpressionAst])
+        }
+        if (-not $ok) { return ('param 뒤 ' + ($i + 1) + '번째 문장이 안내(Write-Host 글자 상수) 아님') }
+    }
+    $x = $st[2]
+    if (-not ($x -is [System.Management.Automation.Language.ExitStatementAst]) -or $null -eq $x.Pipeline -or [string]$x.Pipeline.Extent.Text -ne '1') { return 'param 뒤 셋째 문장이 exit 1 아님' }
+    return ''
+}
+
+Invoke-CgCaseBlock 'C39' '[4] F15 · 옛 도구 9파일 거절 블록(구문 트리로만 · 실행 0) — param 바로 뒤 안내 2 · 셋째 문장 exit 1 · 읽는 법 2(이 호스트 · UTF-8)' {
+    # ⓐ 검사기 자체(가짜 글 · 파싱만 · 실행 0) — 맞는 꼴 = 통과 · 블록 지움 · 블록 앞 문장 · 조건 안 exit · 안내 자리 식 · begin 블록 = 잡음
+    $samples = @(
+        @('맞는 꼴 = 통과', "param([string]`$X)`nWrite-Host 'a'`nWrite-Host 'b'`nexit 1`nGet-Item -Path `$X`n", $true),
+        @('블록 지움 = 잡음', "param([string]`$X)`nGet-Item -Path `$X`n", $false),
+        @('블록 앞 문장 = 잡음', "param([string]`$X)`n`$y = 1`nWrite-Host 'a'`nWrite-Host 'b'`nexit 1`n", $false),
+        @('조건 안 exit = 잡음', "param([string]`$X)`nWrite-Host 'a'`nWrite-Host 'b'`nif (`$X) { exit 1 }`n", $false),
+        @('안내 자리 식 = 잡음', "param([string]`$X)`nWrite-Host (Get-Item -Path `$X)`nWrite-Host 'b'`nexit 1`n", $false),
+        @('begin 블록 = 잡음', "param([string]`$X)`nbegin { Get-Item -Path `$X }`nend { Write-Host 'a'; Write-Host 'b'; exit 1 }`n", $false)
+    )
+    foreach ($sm in $samples) {
+        $tk = $null; $pe = $null
+        $sa = [System.Management.Automation.Language.Parser]::ParseInput([string]$sm[1], [ref]$tk, [ref]$pe)
+        $fault = Get-CgOldToolBlockFault $sa
+        Test-CgCase 'C39' ('ⓐ 검사기 · ' + $sm[0] + '(실제 「' + $fault + '」)') (($fault -eq '') -eq [bool]$sm[2])
+    }
+    # ⓑ 9파일 — 이 호스트가 읽는 대로(ParseFile · BOM 없으면 이 PC ANSI 코드 페이지) + UTF-8(BOM 빼고) 두 번 · 실행 · 점 소싱 0
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $n = 0
+    foreach ($rel in $script:OldTools) {
+        $p = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $rel))
+        $name = [System.IO.Path]::GetFileName($p)
+        if (-not [System.IO.File]::Exists($p)) { Test-CgCase 'C39' ('ⓑ ' + $name + ' 파일 있음') $false; continue }
+        $n++
+        $tk = $null; $pe = $null
+        $f1 = Get-CgOldToolBlockFault ([System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$tk, [ref]$pe))
+        Test-CgCase 'C39' ('ⓑ ' + $name + ' · 이 호스트 읽기 = 거절 블록(실제 「' + $f1 + '」)') ($f1 -eq '')
+        $bytes = [System.IO.File]::ReadAllBytes($p)
+        $off = if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { 3 } else { 0 }
+        $tk = $null; $pe = $null
+        $f2 = Get-CgOldToolBlockFault ([System.Management.Automation.Language.Parser]::ParseInput($utf8.GetString($bytes, $off, $bytes.Length - $off), [ref]$tk, [ref]$pe))
+        Test-CgCase 'C39' ('ⓑ ' + $name + ' · UTF-8 읽기 = 거절 블록(실제 「' + $f2 + '」)') ($f2 -eq '')
+    }
+    Test-CgCase 'C39' ('ⓒ 9파일 다 읽음(실제 ' + $n + ')') ($n -eq 9 -and $script:OldTools.Count -eq 9)
+}
+
+Invoke-CgCaseBlock 'C40' '[4] F16 · 커밋된 허용목록 파일(빈 목록)을 모듈로 읽음 → G4 「허용목록 밖」 거절(나머지 6칸 통과) · 대조 = 같은 스냅숏 · 임시 저장소 목록이면 허용' {
+    # ⓐ 이 폴더의 커밋된 파일 그대로(사본 아님 · 읽기만)
+    $al = Read-CgAllowlist -Path (Join-Path $PSScriptRoot 'test-pc-allowlist.json')
+    Test-CgCase 'C40' ('ⓐ 커밋된 파일 = 있음 · 형식 맞음 · 줄 0(실제 ' + $al.Exists + ' · ' + $al.Valid + ' · ' + @($al.Entries).Count + '줄)') ($al.Exists -eq $true -and $al.Valid -eq $true -and @($al.Entries).Count -eq 0)
+    # ⓑ 나머지 가드 칸이 맞는 가짜 PC 스냅숏(임시 저장소 repo-ok · 읽기만) — 허용목록 칸만 커밋된 파일 읽은 값으로 바꿔 판정
+    & $script:GitCacheInstall $script:GitCache $script:GitCacheStat
+    $w = [CgWorld]::new($script:Base, (New-CgCfg -Over $null))
+    $e = New-CgCaseEnv -Opt @{}
+    $snap = Get-EnvSnapshot -Providers (New-CgProviders -W $w -E $e -Repo $script:RepoOk) -NowUtc $script:Base
+    $g0 = Get-GuardDecision -Snapshot $snap -NowUtc $script:Base
+    Test-CgCase 'C40' 'ⓒ 대조 — 임시 저장소 목록(이 가짜 PC 한 줄) = 허용' ([bool]$g0.Allowed)
+    $snap.Allowlist = $al
+    $g = Get-GuardDecision -Snapshot $snap -NowUtc $script:Base
+    $fails = @($g.Checks | Where-Object { -not $_.Pass })
+    Test-CgCase 'C40' ('ⓑ 거절 칸 = G4 하나(실제 ' + (@($fails | ForEach-Object { $_.Id }) -join ',') + ')') ($fails.Count -eq 1 -and $fails[0].Id -eq 'G4')
+    Test-CgCase 'C40' 'ⓑ G4 사유 = 허용목록 밖(도메인 · 테넌트 해시 쌍 불일치)' ($fails.Count -eq 1 -and [string]$fails[0].Reason -eq '허용목록 밖(도메인 · 테넌트 해시 쌍 불일치)')
+    Test-CgCase 'C40' 'ⓑ 가드 = 거절(Allowed 거짓) · 판정 칸 7' ($g.Allowed -eq $false -and @($g.Checks).Count -eq 7)
 }
 
 # ── 부가(경우 번호 밖 · 세부 확인에 셈)
