@@ -581,5 +581,208 @@ guard('T-Z21 [3-V] B4 uiFacts 기본값 = 미측정', () => {
     `판정 길 S ${r.cat} · 기록 S ${rec.cat}`);
 });
 
-console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`);
-process.exitCode = fail === 0 ? 0 : 1;
+// ════ 4차(11/19 · 개발명세서 §4-a ⓐ~ⓓ · Z1 런 44434115123) — 차림(setup-api.js) 경우 ════
+//   네트워크 0 — fetch 는 가짜 손(경우 끝나면 되돌림) · 화면 손(K.screenLogin 등)도 가짜 · 브라우저 · DB · 앱 0
+//   고치기 전 setup-api.js(aea9b892)엔 이 함수들이 없다 → 부르면 던짐 → 그 경우 실패로 센다(guard · guardAsync)
+//   가림 등록(L.maskAndRegister)은 GITHUB_ENV 를 잠시 비운 채 부른다 — 자체시험 가짜 값이 CI 다음 단계 검색 대상에 섞이지 않게
+const S = require('./setup-api');
+const LIB = require('../lib');
+const asyncCases = [];
+function guardAsync(id, fn) {
+  asyncCases.push([id, fn]);
+}
+async function withFetch(fake, fn) {
+  const real = global.fetch;
+  global.fetch = fake;
+  try {
+    return await fn();
+  } finally {
+    global.fetch = real;
+  }
+}
+function noEnvFile(fn) {
+  const had = Object.prototype.hasOwnProperty.call(process.env, 'GITHUB_ENV');
+  const old = process.env.GITHUB_ENV;
+  delete process.env.GITHUB_ENV;
+  try {
+    return fn();
+  } finally {
+    if (had) process.env.GITHUB_ENV = old;
+  }
+}
+const TERMS_403 = '{"error":"forbidden_terms_consent","required_version":"v2.0.0","redirect":"/terms"}'; // TermsConsentMiddleware.cs:100~102 꼴
+const k2Main = () => ({ ...F.plannedCells({ types: ['estimate'] }).cells.find((c) => c.id === 'K2.estimate.doc') });
+function mdRowFor(reason) {
+  const cell = { ...k2Main(), status: 'setup-fail', reason };
+  const run = J.judgeRun({ cells: [cell], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [] });
+  const md = J.toMarkdown({ run: 'Z3', job: 'z1-main-read', board: 'main' }, run, null);
+  return { cat: run.rows[0].cat, row: md.split('\n').find((l) => l.startsWith(`| ${cell.id} |`)) || '' };
+}
+
+// T-Z22 ⓑ — Z1 사유 「POST /api/partners 응답 403」 뿐(본문 버림) → 403 forbidden_terms_consent 본문이 결과표 md 까지 가나
+guardAsync('T-Z22 ⓑ 403 forbidden_terms_consent 본문 → 차림 사유 → 결과표 md', async () => {
+  let msg = '';
+  await withFetch(async () => new Response(TERMS_403, { status: 403, headers: { 'content-type': 'application/json' } }), async () => {
+    try {
+      await S.createPartner({ who: 'x', token: null, deviceId: null }, '시험 거래처');
+    } catch (e) {
+      msg = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+    }
+  });
+  // capture.js ① 과 같은 사유 꼴 → 칸(차림 불가) → 판정 → md
+  const m = mdRowFor(`기초 자료 차림 실패 — ${msg}`);
+  check('T-Z22 ⓑ 403 forbidden_terms_consent 본문 → 차림 사유 → 결과표 md',
+    /^POST \/api\/partners 응답 403 · 본문 「\{"error":"forbidden_terms_consent"/.test(msg) && /content-type=application\/json/.test(msg)
+      && m.cat === C.SETUP && /forbidden_terms_consent/.test(m.row) && /content-type=application\/json/.test(m.row),
+    `사유 꼴 ${/응답 403 · 본문/.test(msg)} · md 칸 ${m.cat} · md 에 forbidden_terms_consent ${/forbidden_terms_consent/.test(m.row)} · content-type ${/content-type=/.test(m.row)}`);
+});
+
+// T-Z23 ⓑ — 그림 올리기(사유 = 「응답 401」 뿐이던 길) · www-authenticate · 본문 첫 줄만 · 160자 · 등록값 가림
+guardAsync('T-Z23 ⓑ 그림 올리기 401 · www-authenticate · 첫 줄 160자 · 등록값 가림', async () => {
+  const planted = 'selftest-z23-planted-value';
+  noEnvFile(() => LIB.maskAndRegister('SELFTEST_Z23', planted));
+  const text = `{"message":"x ${planted} ${'가'.repeat(300)}"}\n둘째 줄`;
+  let msg = '';
+  await withFetch(async () => new Response(text, { status: 401, headers: { 'content-type': 'application/json; charset=utf-8', 'www-authenticate': 'Bearer error="invalid_token"' } }), async () => {
+    try {
+      await S.uploadBackground({ who: 'x', token: 'x', deviceId: null }, Buffer.from([1, 2, 3]), 'a.png');
+    } catch (e) {
+      msg = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+    }
+  });
+  const body = (msg.match(/본문 「([^」]*)」/) || [])[1] || '';
+  const noBody = S.failReason('GET /x', S.responseFacts(500, '', {}));
+  check('T-Z23 ⓑ 그림 올리기 401 · www-authenticate · 첫 줄 160자 · 등록값 가림',
+    /^그림 올리기 응답 401/.test(msg) && /www-authenticate=Bearer error="invalid_token"/.test(msg) && /content-type=application\/json; charset=utf-8/.test(msg)
+      && !msg.includes(planted) && body.includes('***') && !msg.includes('둘째 줄') && body.length <= 160 + '…(이하 생략)'.length
+      && noBody === 'GET /x 응답 500 · 본문 없음 · content-type=없음',
+    `401 ${/응답 401/.test(msg)} · www-authenticate ${/www-authenticate=/.test(msg)} · 가림 ${!msg.includes(planted)} · 둘째 줄 0 ${!msg.includes('둘째 줄')} · 본문 ${body.length}자 · 빈 본문 ${noBody === 'GET /x 응답 500 · 본문 없음 · content-type=없음'}`);
+});
+
+// T-Z24 ⓐ — 로그인 응답 표지 → 화면과 같은 문 · 같은 본문(Terms.razor:117~125) · 표지 거짓 = 부름 0 · 동의 실패 = 차림 사유 · 실제 call 길(가짜 fetch)
+guardAsync('T-Z24 ⓐ 약관 표지 → 동의 문 · 본문 · 표지 거짓 부름 0 · 실패 사유', async () => {
+  const lr = (o) => S.responseFacts(200, JSON.stringify(o), { 'content-type': 'application/json' });
+  const s1 = noEnvFile(() => S.loginSession(lr({ accessToken: 'selftest-a1', refreshToken: 'selftest-r1', deviceId: 'dev-1', requiresTermsConsent: true })));
+  const s0 = noEnvFile(() => S.loginSession(lr({ accessToken: 'selftest-a0', deviceId: 'dev-0', requiresTermsConsent: false })));
+  const sNo = noEnvFile(() => S.loginSession(lr({ accessToken: 'selftest-a2', deviceId: 'dev-2' })));
+  let l409 = '';
+  try {
+    noEnvFile(() => S.loginSession(S.responseFacts(409, '{"message":"busy"}', { 'content-type': 'application/json' })));
+  } catch (e) {
+    l409 = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+  }
+  const want = { agreeService: true, agreePrivacy: true, agreeSubscription: true, agreeDataOwnership: true, agreeMarketing: false, termsVersion: 'v2.0.0' };
+  const calls = [];
+  const fake = async (sess, method, p, body, ok) => { calls.push({ method, p, body, ok }); return { consentId: 'c' }; };
+  const r1 = await S.ensureTerms(s1, {}, fake);
+  const r0 = await S.ensureTerms(s0, {}, fake);
+  const one = calls.length === 1 && calls[0].method === 'POST' && calls[0].p === '/api/auth/terms/agree'
+    && JSON.stringify(calls[0].body) === JSON.stringify(want) && calls[0].ok.includes(200) && calls[0].ok.includes(201);
+  const failRec = {};
+  let failMsg = '';
+  try {
+    await S.ensureTerms(s1, failRec, async () => { throw new S.SetupError('POST /api/auth/terms/agree 응답 400 · 필수 약관'); });
+  } catch (e) {
+    failMsg = e instanceof S.SetupError ? e.message : `다른 예외 ${e.name}`;
+  }
+  // 실제 call 길 — 가짜 fetch 가 받은 주소 · 방법 · 본문 · 머리(값은 찍지 않음 · 같은지만)
+  let seen = null;
+  const rec2 = {};
+  await withFetch(async (url, init) => { seen = { url, init }; return new Response('{"consentId":"c"}', { status: 201, headers: { 'content-type': 'application/json' } }); },
+    () => S.ensureTerms(s1, rec2));
+  const realOk = seen && /\/api\/auth\/terms\/agree$/.test(seen.url) && seen.init.method === 'POST' && JSON.stringify(JSON.parse(seen.init.body)) === JSON.stringify(want)
+    && seen.init.headers.Authorization === `Bearer ${s1.token}` && seen.init.headers['X-HitPan-Device-Id'] === 'dev-1' && rec2.ok === true;
+  check('T-Z24 ⓐ 약관 표지 → 동의 문 · 본문 · 표지 거짓 부름 0 · 실패 사유',
+    s1.terms === true && s0.terms === false && sNo.terms === false && /응답 409 · busy · 본문/.test(l409)
+      && one && r1.required === true && r1.asked === true && r1.ok === true && r0.required === false && r0.asked === false && r0.ok === true
+      && failRec.ok === false && /^약관 동의 실패 — POST \/api\/auth\/terms\/agree 응답 400/.test(failMsg) && realOk,
+    `표지 참 ${s1.terms} · 거짓 ${s0.terms} · 없음 ${sNo.terms} · 로그인 409 사유 ${/응답 409/.test(l409)} · 부름 ${calls.length}(문 · 본문 ${one}) · 실패 rec ${failRec.ok} · 실제 call 길 ${!!realOk}`);
+});
+
+// T-Z25 ⓒ — 화면 로그인 판정(순수) · 화면 세션 토큰이 갱신을 따라감 · 응답 지켜보기 = 200 본문 안 읽음 · 409 첫 줄
+guardAsync('T-Z25 ⓒ 화면 로그인 판정 · 화면 세션 따라감 · 응답 지켜보기', async () => {
+  const v409 = S.screenLoginVerdict({ status: 409, firstLine: '{"message":"busy"}' });
+  const vNone = S.screenLoginVerdict({ status: null, err: 'TimeoutError' });
+  const vTerms = S.screenLoginVerdict({ status: 200, where: 'terms', path: '/terms', access: 'a' });
+  const vNoTok = S.screenLoginVerdict({ status: 200, where: 'main', path: '/', access: null });
+  const vOk = S.screenLoginVerdict({ status: 200, where: 'main', path: '/', access: 'a' });
+  const tok = { access: 'a1', deviceId: 'd1', masked: 1 };
+  const scr = S.screenSession(tok);
+  const t1 = scr.token === 'a1' && scr.deviceId === 'd1';
+  tok.access = 'a2';
+  const t2 = scr.token === 'a2';
+  // 응답 지켜보기 — 가짜 문맥 · 가짜 응답(200 은 text() 를 부르면 표지)
+  const handlers = [];
+  const ctx = { on: (ev, cb) => { if (ev === 'response') handlers.push(cb); } };
+  const seen = S.watchLoginResponse(ctx);
+  let read200 = 0;
+  const res = (url, method, status, text) => ({
+    url: () => url, request: () => ({ method: () => method }), status: () => status,
+    text: async () => { if (status === 200) read200 += 1; return text; },
+  });
+  for (const h of handlers) await h(res('http://127.0.0.1:18080/api/auth/me', 'GET', 200, '{}'));
+  for (const h of handlers) await h(res('http://127.0.0.1:18080/api/auth/login', 'GET', 405, ''));
+  const before = seen.status;
+  for (const h of handlers) await h(res('http://127.0.0.1:18080/api/auth/login', 'POST', 409, '{"message":"busy"}\nx'));
+  const s409 = seen.status === 409 && seen.firstLine === '{"message":"busy"}';
+  const seen2 = S.watchLoginResponse(ctx);
+  for (const h of handlers.slice(1)) await h(res('http://127.0.0.1:18080/api/auth/login', 'POST', 200, '{"accessToken":"t"}'));
+  await S.waitSeen(seen2, 1000);
+  check('T-Z25 ⓒ 화면 로그인 판정 · 화면 세션 따라감 · 응답 지켜보기',
+    !v409.ok && v409.why === '화면 로그인 응답 409 · 본문 「{"message":"busy"}」' && !vNone.ok && /못 봄/.test(vNone.why) && !vTerms.ok && /자리 terms@\/terms/.test(vTerms.why)
+      && !vNoTok.ok && vOk.ok && t1 && t2 && before === null && s409 && seen2.status === 200 && seen2.firstLine === '' && read200 === 0,
+    `409 ${v409.ok} · 못 봄 ${vNone.ok} · 약관 자리 ${vTerms.ok} · 토큰 0 ${vNoTok.ok} · 정상 ${vOk.ok} · 갱신 따라감 ${t2} · 딴 응답 거름 ${before === null} · 409 첫 줄 ${s409} · 200 본문 읽음 ${read200}`);
+});
+
+// T-Z26 ⓒ — 넘김 순서(API 로그아웃 → 토큰 · 응답 지켜보기 → 화면 로그인) · 409 = 차림 불가 사유(md) · 통과 = 뒤 차림이 화면 세션 토큰
+guardAsync('T-Z26 ⓒ 넘김 순서 · 409 차림 불가 · 뒤 차림 = 화면 세션', async () => {
+  const sess = { who: 'print', token: 'selftest-api', deviceId: 'dev-api' };
+  const run = async (status, firstLine, access) => {
+    const log = [];
+    const ctx = {};
+    const d = {
+      apiLogout: async (s) => { log.push(`apiLogout:${s.who}`); return { ok: true, got: `${s.who} status=200` }; },
+      watchTokens: (c, tok) => { log.push('watchTokens'); c.tok = tok; },
+      watchLoginResponse: (c) => { log.push('watchLoginResponse'); c.seen = { status: null, firstLine: '', done: Promise.resolve() }; return c.seen; },
+      screenLogin: async () => {
+        log.push('screenLogin');
+        ctx.seen.status = status;
+        ctx.seen.firstLine = firstLine;
+        if (access) { ctx.tok.access = access; ctx.tok.deviceId = 'dev-scr'; ctx.tok.masked = 1; }
+        return status === 200 ? { where: 'main', path: '/' } : { where: null, path: '/login' };
+      },
+      waitMasked: async () => { log.push('waitMasked'); return 1; },
+      waitSeen: S.waitSeen,
+    };
+    const h = await S.handoffToScreen({ sess, context: ctx, page: {}, loginId: 'ci-parent', password: 'x' }, d);
+    return { h, log, ctx };
+  };
+  const bad = await run(409, '{"message":"busy"}', null);
+  const badOrder = bad.log.join('>') === 'apiLogout:print>watchTokens>watchLoginResponse>screenLogin';
+  const m = mdRowFor(bad.h.verdict.why);
+  const good = await run(200, '', 'selftest-scr');
+  const goodOrder = good.log.join('>') === 'apiLogout:print>watchTokens>watchLoginResponse>screenLogin>waitMasked';
+  // 뒤 차림(로고 상태 확인)이 화면 세션 토큰 · 기기 번호로 나가나 — 가짜 fetch 가 받은 머리(값은 같은지만)
+  let hdr = null;
+  await withFetch(async (url, init) => { hdr = init.headers; return new Response('{"hasLogo":true}', { status: 200, headers: { 'content-type': 'application/json' } }); },
+    () => S.logoState(good.h.api));
+  const viaScreen = hdr && hdr.Authorization === `Bearer ${good.ctx.tok.access}` && hdr.Authorization !== `Bearer ${sess.token}` && hdr['X-HitPan-Device-Id'] === 'dev-scr';
+  check('T-Z26 ⓒ 넘김 순서 · 409 차림 불가 · 뒤 차림 = 화면 세션',
+    badOrder && !bad.h.verdict.ok && bad.h.api === null && m.cat === C.SETUP && /화면 로그인 응답 409 · 본문 「\{"message":"busy"\}」/.test(m.row)
+      && goodOrder && good.h.verdict.ok && good.h.api !== null && good.h.apiLogout.ok === true && !!viaScreen,
+    `409 순서 ${badOrder} · 409 md ${m.cat}(${/화면 로그인 응답 409/.test(m.row)}) · 200 순서 ${goodOrder} · 판정 ${good.h.verdict.ok} · 뒤 차림 화면 세션 ${!!viaScreen}`);
+});
+
+// ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
+// 🔴 4차 — 비동기 경우(가짜 fetch)를 차례로 끝낸 뒤 같은 끝 줄
+(async () => {
+  for (const [id, fn] of asyncCases) {
+    try {
+      await fn();
+    } catch (e) {
+      check(id, false, `예외 ${e.name}: ${String(e.message).slice(0, 80)}`);
+    }
+  }
+  console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`);
+  process.exitCode = fail === 0 ? 0 : 1;
+})();

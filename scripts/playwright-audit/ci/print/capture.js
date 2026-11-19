@@ -7,6 +7,8 @@
 //      로고 지우기 = 인쇄 설정 화면 회사 로고 「삭제」(회사정보 화면엔 지우기 단추 없음 · PrintSettingsPage.razor:55~72)
 //   🔴 양식 = 저장 문(setup-api.js) · 차림 실패 = 「차림 불가(사유)」 · PDF 못 받음 · 시간 넘김 = 「미측정」(판매 반품 = 오류가 곧 결함 · C8)
 //   🔴 이 PC 에서 돌리지 않는다 — CI 시험 잡(ui-print)에서만(이 PC = 실물 정식설치 PC)
+//   🔴 4차(11/19 · 개발명세서 §4-a ⓐ · ⓒ) — 차림 순서: API 로그인 → 약관 동의(표지 참일 때만) → 기초 자료 · 양식(API 세션)
+//      → API 로그아웃 → 화면 로그인(응답 · 자리 · 토큰 판정 · 200 아니면 차림 불가) → 로고 · 전표(화면) · 양식 바꾸기 · 확인(화면 세션 토큰) → 끝 로그아웃(화면 세션)
 //   쓰는 법: node capture.js   (환경: PRINT_OUT · UI_BASE · UI_LOGIN_PARENT · UI_PW_PARENT · PRINT_RUN · PRINT_JOB · PRINT_BOARD · PRINT_PATCH_FAIL · PRINT_PROBE_OK)
 const fs = require('fs');
 const path = require('path');
@@ -251,8 +253,12 @@ async function main() {
 
   // ① 저장 문 차림 — 로그인 · 거래처 · 품목
   let sess;
+  // 🔴 4차 ⓐ(개발명세서 §4-a) — 로그인 직후 약관 동의 차림(로그인 응답 표지가 참일 때만 · 화면과 같은 문) · 결과 = doc.setup.terms
+  const terms = {};
+  doc.setup.terms = terms;
   try {
     sess = await S.login();
+    await S.ensureTerms(sess, terms);
     await S.createPartner(sess, F.MARK.partner);
     for (const it of F.MARK.items) await S.createItem(sess, it.name, it.price);
     doc.setup.master = { ok: true };
@@ -295,14 +301,32 @@ async function main() {
   const blocked = {};
   await K.blockExternal(context, blocked, {});
   const page = await context.newPage();
+  // 🔴 4차 ⓒ — 끝에 닫을 세션(화면 로그인 전 = API 세션 · 넘김 뒤 = 화면 세션 또는 0) · 화면 뒤 API 차림이 쓰는 세션 = api
+  let closeAtEnd = sess;
+  let api = null;
   try {
-    try {
-      await K.screenLogin(page, process.env.UI_LOGIN_PARENT || 'ci-parent', process.env.UI_PW_PARENT);
-    } catch (e) {
-      failAll(() => true, `화면 로그인 실패 ${L.errorName(e)}`);
+    // ⬛ [낡은 덩이 · 2~3차] API 세션을 연 채 화면 로그인 · 결과(자리 · 응답 상태)를 안 봄 → 한 PC 규칙 409 덫(§4-a 잠복 원인)
+    // try {
+    //   await K.screenLogin(page, process.env.UI_LOGIN_PARENT || 'ci-parent', process.env.UI_PW_PARENT);
+    // } catch (e) {
+    //   failAll(() => true, `화면 로그인 실패 ${L.errorName(e)}`);
+    //   save();
+    //   return 0;
+    // }
+    // 🔴 4차 ⓒ — ① API 로그아웃 → ② 토큰 가로채기 · 로그인 응답 지켜보기 → ③ 화면 로그인 → ④ 응답 · 토큰 가림 기다림 → ⑤ 판정(setup-api.js handoffToScreen)
+    const h = await S.handoffToScreen({
+      sess, context, page, loginId: process.env.UI_LOGIN_PARENT || 'ci-parent', password: process.env.UI_PW_PARENT,
+    });
+    doc.setup.apiLogout = h.apiLogout;
+    doc.setup.screenLogin = h.verdict;
+    closeAtEnd = h.tok && h.tok.access ? S.screenSession(h.tok) : null;
+    log(`API 로그아웃(화면 로그인 전) ${h.apiLogout ? h.apiLogout.got : '-'} · ${h.verdict.why}`);
+    if (!h.verdict.ok) {
+      failAll(() => true, h.verdict.why);
       save();
       return 0;
     }
+    api = h.api;
 
     // ④ 로고(화면) — 회사정보 「로고 등록」
     const logo = plan.logo;
@@ -310,7 +334,8 @@ async function main() {
     fs.writeFileSync(logoFile, logo.png);
     try {
       await uploadLogo(page, logoFile);
-      const st = await S.logoState(sess);
+      // ⬛ [낡은 줄 · 2~3차] const st = await S.logoState(sess);
+      const st = await S.logoState(api);
       doc.setup.logo = { ok: true, sha: logo.sha, state: st };
     } catch (e) {
       doc.setup.logo = { ok: false, why: e.message || L.errorName(e) };
@@ -339,7 +364,8 @@ async function main() {
       if (phase === '나') {
         try {
           await deleteLogo(page);
-          doc.setup.logoDeleted = { ok: true, state: await S.logoState(sess) };
+          // ⬛ [낡은 줄 · 2~3차] doc.setup.logoDeleted = { ok: true, state: await S.logoState(sess) };
+          doc.setup.logoDeleted = { ok: true, state: await S.logoState(api) }; // 🔴 4차 ⓒ 화면 세션
         } catch (e) {
           doc.setup.logoDeleted = { ok: false, why: e.message || L.errorName(e) };
           failAll((c) => c.logoPhase === '나', `로고 지우기 차림 실패 — ${e.message || L.errorName(e)}`);
@@ -358,10 +384,14 @@ async function main() {
         const tpl = group[0].tpl;
         try {
           const over = { ...tpl, bgPath: tpl.bg ? bgPaths[t.key] : '' };
-          if (tpl.via === 'preprint') await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, i, { ...over, paperMode: 'preprint' }));
-          await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, i, over));
+          // ⬛ [낡은 줄 · 2~3차] if (tpl.via === 'preprint') await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, i, { ...over, paperMode: 'preprint' }));
+          // ⬛ [낡은 줄 · 2~3차] await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, i, over));
+          // ⬛ [낡은 줄 · 2~3차] const sc = await S.savedCoordCount(sess, t.key, tplIds[t.key]);
+          // 🔴 4차 ⓒ — 아래 셋 = 화면 세션(api)
+          if (tpl.via === 'preprint') await S.updateTemplate(api, tplIds[t.key], F.templateBody(t, i, { ...over, paperMode: 'preprint' }));
+          await S.updateTemplate(api, tplIds[t.key], F.templateBody(t, i, over));
           if (tpl.coords) {
-            const sc = await S.savedCoordCount(sess, t.key, tplIds[t.key]);
+            const sc = await S.savedCoordCount(api, t.key, tplIds[t.key]);
             if (sc.n !== F.FIELDS.length) throw new S.SetupError(`저장된 칸 수 ${sc.n} ≠ N ${F.FIELDS.length}`);
           }
         } catch (e) {
@@ -398,7 +428,8 @@ async function main() {
     for (const c of cells.filter((x) => x.status === 'pending' && x.path === 'editor')) {
       try {
         const t = F.TYPES.find((x) => x.key === c.type);
-        await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, F.TYPES.indexOf(t), { paperMode: 'plain' }));
+        // ⬛ [낡은 줄 · 2~3차] await S.updateTemplate(sess, tplIds[t.key], F.templateBody(t, F.TYPES.indexOf(t), { paperMode: 'plain' }));
+        await S.updateTemplate(api, tplIds[t.key], F.templateBody(t, F.TYPES.indexOf(t), { paperMode: 'plain' })); // 🔴 4차 ⓒ 화면 세션
         c.ui = await editorFacts(page, t);
         c.status = 'recorded';
       } catch (e) {
@@ -412,7 +443,10 @@ async function main() {
   } finally {
     save();
     await browser.close().catch((e) => log(`브라우저 닫기 실패 ${L.errorName(e)}`));
-    await K.apiLogout(sess);
+    // ⬛ [낡은 줄 · 2~3차] await K.apiLogout(sess);
+    // 🔴 4차 ⓒ — 열린 세션 하나만 닫음(넘김 전 = API 세션 · 넘김 뒤 = 화면 세션 · 넘김에서 이미 닫은 API 세션은 다시 안 닫음)
+    doc.setup.logoutEnd = await K.apiLogout(closeAtEnd);
+    save();
   }
   log(`차림 · 판독 입구 끝 — 칸 ${cells.length} · PDF ${cells.filter((c) => c.status === 'captured').length} · 차림 불가 ${cells.filter((c) => c.status === 'setup-fail').length} · 못 받음 ${cells.filter((c) => c.status === 'capture-fail').length}`);
   return 0;
