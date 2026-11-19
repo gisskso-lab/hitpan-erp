@@ -315,12 +315,12 @@ NODE
 # ---- v5 별건 A(설계 §5-2-1 · §5-6 C1 · 결-A8 (나)): M3′ 앞 단면(snap · ⑤ 바로 앞) · 설치 뒤 단언(guard · M3 뒤 · M4 앞) ----
 #   앞 단면 = 작업 폴더 snap/(원자료 밖) · 환경 변수는 이름별 값 sha256 만(값 0) · 결과 원자료 = m3g-guard.json(참거짓 · 이름만 · 값 · 해시 0)
 #   G1 허용 = M1 · M3 가 to_env 로 쓰는 이름 3(HQA_SRC_DIR = C1 로 창이 ⑤ 앞까지 넓어져 더함) + 실행기가 단계마다 바꾸는 이름
-#     실행기 몫 6개는 잠정 — 설계 §7 Q3(리허설 첫 런 m3g-guard.json env_changed 실측 뒤 PM 고정)
+#     실행기 몫 8개 확정 — 런 44467400813(GitHub 위 첫 guard) env_changed 실측 = 실행기 주입 이름 GITHUB_ARTIFACTS · GITHUB_ARTIFACTS_LIST 2 더함(6 → 8 · 값 무검사 · CTO 재판정 (가)) · 옛 글자 = MAPPING §12-5
 #     PATH · BASH_ENV · NODE_OPTIONS · LD_PRELOAD · GIT_* 는 허용에 넣지 않는다
 #   v5 별건 A K2‴(CTO 결-A11 (B) · A11-1): G1 에 장치 이름 3개 값 단언 — 뒤 단면의 HQA_SRC_DIR · HQA_CHROME · HQA_PW_DIR 값 = V_SRC_DIR · V_CHROME · V_PW_DIR(M1 · M3 가 쓴 식 그대로)
 #     다르거나 없으면 G1 빨강(first_red=G1 · 새 G 번호 0) · 원자료 = env_values_ok 참거짓 하나(값 · 해시 0) · 실행기 몫 6개는 값 무검사(이름만)
 #   순서 = G1(+G6 대조군) → G2 → G3 → G4 → G5 · 하나라도 빨강이면 뒤는 안 돎(설정이 바뀌었으면 git 을 부르기 전에 멈춤)
-G_ALLOW=(HQA_SRC_DIR HQA_CHROME HQA_PW_DIR GITHUB_ACTION GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STATE GITHUB_STEP_SUMMARY)
+G_ALLOW=(HQA_SRC_DIR HQA_CHROME HQA_PW_DIR GITHUB_ACTION GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STATE GITHUB_STEP_SUMMARY GITHUB_ARTIFACTS GITHUB_ARTIFACTS_LIST)
 G_BINS=(node git bash)
 G_TREE=(tools/hqa-s4-measure .github/workflows/hqa-s4-measure.yml)
 g_env() { node -e 'const c=require("crypto"),e=process.env,o={};for(const k of Object.keys(e).sort())o[k]=c.createHash("sha256").update(e[k]).digest("hex");process.stdout.write(JSON.stringify(o)+"\n");' > "$1"; }
