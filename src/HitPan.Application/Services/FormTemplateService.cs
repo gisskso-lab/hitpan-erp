@@ -130,6 +130,8 @@ public class FormTemplateService : IFormTemplateService
     //   🔴 화면 응답 = 컨트롤러가 이미 `InvalidOperationException` 을 400 + 그 문구로 돌려준다(컨트롤러 무변).
     public async Task<FormTemplateDto> CreateAsync(string tenantId, CreateFormTemplateRequest request, CancellationToken ct = default)
     {
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-5 · PM 판단] 그림 경로 앞뒤 공백은 서버 저장 입구에서도 자른다.
+        request.BackgroundImageUrl = TrimBackgroundPath(request.BackgroundImageUrl);
         await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
         try
         {
@@ -273,6 +275,8 @@ public class FormTemplateService : IFormTemplateService
     // 🔴 [2026-11-19 W-G1-51 갈래 F-1] `CreateAsync` 와 같은 까닭 — 1062 = 사람 말 · 500 0 · 행 0(한 트랜잭션).
     public async Task<FormTemplateDto> UpdateAsync(string tenantId, string templateId, UpdateFormTemplateRequest request, CancellationToken ct = default)
     {
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-5 · PM 판단] 만들기와 같은 자름(아래 그림 찍기 유지 판정도 자른 값을 본다).
+        request.BackgroundImageUrl = TrimBackgroundPath(request.BackgroundImageUrl);
         await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
         try
         {
@@ -474,27 +478,31 @@ public class FormTemplateService : IFormTemplateService
     // 고침 1([4] 참고-3) — 판 글자를 못 읽어 옮기기가 안 도는 경우 경고를 프로세스당 한 번만 남긴다(30초 회차마다 0).
     private static int s_versionTextUnreadableWarned;
 
-    /// <summary>Y 템플릿 만들기 결과.</summary>
-    public enum YTemplateOutcome
-    {
-        /// <summary>새 Y 를 만들었다.</summary>
-        Created,
-        /// <summary>같은 그림(해시) · 같은 칸 좌표의 Y 가 이미 있어 새로 만들지 않았다(재전진 멱등 · ⓘ-10 · D-12).</summary>
-        Reused,
-        /// <summary>원본 그림 경로가 비었거나 파일이 없다 — 복제 0 · 원본 print_background=0(설계 §7-3 멱등 줄 · ⓘ-6).</summary>
-        NoPicture,
-        /// <summary>원본 그림이 그 회사 그림 폴더 밖이거나 링크를 지난다 — 복제 0 · 원본 무변(결정적 실패 · CTO Q2).</summary>
-        OutsideTenantRoot,
-        /// <summary>그 회사에 그 양식이 없다(남의 회사 양식 id 포함 · ⓘ-8).</summary>
-        NotFound,
-        /// <summary>양식지가 아니거나 꺼진 양식 — 대상 아님 · 원본 무변.</summary>
-        NotTarget,
-        /// <summary>
-        /// 원본(또는 이어 쓸 후보 Y) 그림 파일을 지금 읽지 못했다 — 접근 거부 · 잠김 · 경로가 폴더 등 「없음」 이 아닌 읽기 실패.
-        /// 그 행 무변(그림 찍기 켬 유지) · 다음 기동에 다시(고침 1 · [3-V] P2-1 · PM 판단).
-        /// </summary>
-        PictureUnreadable,
-    }
+    // 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 고침 1 · [4] P3-3 · PM 판단] 결과 형식 두 개(YTemplateOutcome · YTemplateResult)는
+    //   인터페이스와 같은 층(`Interfaces/IFormTemplateService.cs`)으로 옮겼다 — 이름 · 값 · 설명 글자 무변.
+    //   이 파일은 `using HitPan.Application.Interfaces;` 로 같은 이름 그대로 쓴다.
+    // ⬛ 옛 줄(주석 보존 · #1):
+    //    /// <summary>Y 템플릿 만들기 결과.</summary>
+    //    public enum YTemplateOutcome
+    //    {
+    //        /// <summary>새 Y 를 만들었다.</summary>
+    //        Created,
+    //        /// <summary>같은 그림(해시) · 같은 칸 좌표의 Y 가 이미 있어 새로 만들지 않았다(재전진 멱등 · ⓘ-10 · D-12).</summary>
+    //        Reused,
+    //        /// <summary>원본 그림 경로가 비었거나 파일이 없다 — 복제 0 · 원본 print_background=0(설계 §7-3 멱등 줄 · ⓘ-6).</summary>
+    //        NoPicture,
+    //        /// <summary>원본 그림이 그 회사 그림 폴더 밖이거나 링크를 지난다 — 복제 0 · 원본 무변(결정적 실패 · CTO Q2).</summary>
+    //        OutsideTenantRoot,
+    //        /// <summary>그 회사에 그 양식이 없다(남의 회사 양식 id 포함 · ⓘ-8).</summary>
+    //        NotFound,
+    //        /// <summary>양식지가 아니거나 꺼진 양식 — 대상 아님 · 원본 무변.</summary>
+    //        NotTarget,
+    //        /// <summary>
+    //        /// 원본(또는 이어 쓸 후보 Y) 그림 파일을 지금 읽지 못했다 — 접근 거부 · 잠김 · 경로가 폴더 등 「없음」 이 아닌 읽기 실패.
+    //        /// 그 행 무변(그림 찍기 켬 유지) · 다음 기동에 다시(고침 1 · [3-V] P2-1 · PM 판단).
+    //        /// </summary>
+    //        PictureUnreadable,
+    //    }
 
     /// <summary>그림 파일 읽기 결과(고침 1) — 「없음」 은 파일 · 폴더가 진짜 없을 때만.</summary>
     private enum PictureFileState
@@ -504,8 +512,9 @@ public class FormTemplateService : IFormTemplateService
         Unreadable,
     }
 
-    /// <summary>Y 템플릿 만들기 결과 — 만든(또는 이어 쓴) Y 의 id 는 Created · Reused 일 때만.</summary>
-    public sealed record YTemplateResult(YTemplateOutcome Outcome, string? YTemplateId);
+    // ⬛ 옛 줄(주석 보존 · #1 · 고침 1 [4] P3-3 — 인터페이스 층으로 옮김):
+    //    /// <summary>Y 템플릿 만들기 결과 — 만든(또는 이어 쓴) Y 의 id 는 Created · Reused 일 때만.</summary>
+    //    public sealed record YTemplateResult(YTemplateOutcome Outcome, string? YTemplateId);
 
     /// <summary>옮기기를 지금 돌려도 되나(D-8 ⓑ).</summary>
     public enum YMigrationReadiness
@@ -527,6 +536,7 @@ public class FormTemplateService : IFormTemplateService
     /// <param name="tenantId">🔴 JWT 클레임에서 온 값만(#2).</param>
     /// <param name="templateId">원본 양식지 id — 그 회사 행이 아니면 <see cref="YTemplateOutcome.NotFound"/>.</param>
     /// <exception cref="InvalidOperationException">유일 키 충돌(1062) — 사람 말 · 행 0(CTO Q1).</exception>
+    /// <exception cref="InvalidOperationException">교착(1213) — 사람 말 · 행 0(고침 1 · §60 ⓟ4).</exception>
     public async Task<YTemplateResult> CreateYTemplateAsync(string tenantId, string templateId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenant_id required", nameof(tenantId));
@@ -538,9 +548,19 @@ public class FormTemplateService : IFormTemplateService
         var commitStarted = false;
         try
         {
+            // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P2-1 · PM 판단] 거래의 **첫 문장을 잠그는 읽기**로(옮기기 첫 문장
+            //   `LockTypeAndReadEffectiveDefaultAsync` 와 같은 꼴). 종전 첫 문장은 잠그지 않는 읽기라 반복 읽기 격리에서
+            //   읽기 시점이 **잠금 전에** 잡혔다 → 뒤의 실효 기본 · 원본 · 이어 쓸 후보 읽기가 옛 모습을 봤다
+            //   (「예」 두 건이 겹치면 뒤 건이 앞 건의 Y 를 못 봐 같은 그림 Y 2개 · 사본 2개).
+            //   이제 원본 행을 잠근 뒤(→ 그 종 행 잠금) 첫 일반 읽기가 시작된다 = 앞 건이 끝난 뒤 모습을 본다 → 겹친 「예」 2건 = Y 1개.
+            //   잠금 순서 = 「내 행 → 같은 종 행」 — 저장 문(고치기 · `ResolvePrintBackgroundToSaveOnUpdateAsync`)과 같은 순서.
+            // ⬛ 옛 줄(주석 보존 · #1):
+            //    @"SELECT form_type FROM form_templates
+            //      WHERE tenant_id = @TenantId AND template_id = @TemplateId",
             var formType = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
                 @"SELECT form_type FROM form_templates
-                  WHERE tenant_id = @TenantId AND template_id = @TemplateId",
+                  WHERE tenant_id = @TenantId AND template_id = @TemplateId
+                  FOR UPDATE",
                 new { TenantId = tenantId, TemplateId = templateId },
                 transaction: tx.DbTransaction, cancellationToken: ct));
             if (formType is null)
@@ -562,7 +582,19 @@ public class FormTemplateService : IFormTemplateService
         {
             _logger.LogWarning(ex, "[양식] Y 템플릿 만들기 거절 — 유일 키 충돌(1062) · 행 0 · tenant={Tenant} template={Template}",
                 tenantId, templateId);
-            throw new InvalidOperationException(DuplicateTemplateMessage(ex));
+            // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 ⓟ2 · PM 판단] 「예」 길에 맞는 사람 말 — 저장 문 문구 끝
+            //   「다시 저장해 주십시오」 는 이 길에서 거짓이다(그림 무변 저장엔 확인창이 다시 안 뜬다 · Q17).
+            // ⬛ 옛 줄(주석 보존 · #1): throw new InvalidOperationException(DuplicateTemplateMessage(ex));
+            throw new InvalidOperationException(DuplicateYTemplateMessage(ex));
+        }
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 ⓟ4 · PM 판단] 교착(1213)도 저장 문과 같은 꼴 — 경고 1줄 · 사람 말 · 500 0 · 행 0
+        //   (DB 가 거래를 되돌림 · 그림 사본은 아래 finally 가 지움). 컨트롤러 무변 = 400 + 문구.
+        //   첫 문장 잠금(위 P2-1)으로 잠금 순서가 저장 문과 같아졌다 — 그 종 전체를 먼저 잡는 옮기기 1회와 겹치면 날 수 있다.
+        catch (MySqlException ex) when (ex.ErrorCode == MySqlErrorCode.LockDeadlock)
+        {
+            _logger.LogWarning(ex, "[양식] Y 템플릿 만들기 거절 — 교착(1213) · 행 0 · tenant={Tenant} template={Template}",
+                tenantId, templateId);
+            throw new InvalidOperationException(YTemplateDeadlockMessage);
         }
         finally
         {
@@ -1236,6 +1268,30 @@ public class FormTemplateService : IFormTemplateService
         => ex.Message.Contains("uk_form_templates_one_default", StringComparison.Ordinal)
             ? "방금 다른 화면에서 이 종류의 기본 양식이 바뀌었습니다. 목록을 새로 고친 뒤 다시 저장해 주십시오."
             : "이 양식 종류에는 지금 양식을 더 둘 수 없습니다. 쓰지 않는 양식을 정리한 뒤 다시 저장해 주십시오.";
+
+    // ── 🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 ⓟ2 · ⓟ4 · PM 판단] 확인창 「예」 길의 사람 말(#23) ─────────
+    //   화면은 「빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다.」 뒤에 이 말을 붙인다 → 여기는 까닭과 다음 할 일만.
+    //   다음 할 일 = 그림을 다시 올려 저장(올리기는 늘 새 이름 → 「바뀐 저장」 → 확인창이 다시 뜸) — 「그림을 지금 읽지 못함」 줄과 같은 말.
+
+    /// <summary>
+    /// 그림 경로 앞뒤 공백을 자른다 — 공백만이면 null(「그림 지우기」와 같은 빈 값). 편집창 `TrimBackgroundPath` 와 같은 자름.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-5] 화면에서만 자르면 다른 호출(직접 호출 · 앞으로 생길 화면)로 공백 경로가
+    ///   다시 행에 들어가 인쇄 때 그림이 조용히 빠진다 — 값 정규화는 서버 몫. 구분자 맞추기 등 그 밖의 정규화는 하지 않는다.
+    /// </remarks>
+    private static string? TrimBackgroundPath(string? path)
+        => string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+    /// <summary>「예」 길 1213(교착) 사람 말 — 개발 용어 · 원문 0.</summary>
+    private const string YTemplateDeadlockMessage =
+        "다른 작업과 같은 순간에 겹쳤습니다. 잠시 뒤 그림을 다시 올려 저장하시면 다시 여쭙니다.";
+
+    /// <summary>「예」 길 1062 사람 말 — 저장 문(<see cref="DuplicateTemplateMessage"/>)과 같은 키 가름 · 다음 할 일만 이 길에 맞춤.</summary>
+    private static string DuplicateYTemplateMessage(MySqlException ex)
+        => ex.Message.Contains("uk_form_templates_one_default", StringComparison.Ordinal)
+            ? "방금 다른 화면에서 이 종류의 기본 양식이 바뀌었습니다. 목록을 새로 고친 뒤 그림을 다시 올려 저장하시면 다시 여쭙니다."
+            : "이 양식 종류에는 지금 양식을 더 둘 수 없습니다. 쓰지 않는 양식을 정리한 뒤 그림을 다시 올려 저장하시면 다시 여쭙니다.";
 
     /// <summary>
     /// 인쇄 매수를 정한다 (DB-90). 값이 비면 그 양식의 법정·관행 기본값을 쓴다.

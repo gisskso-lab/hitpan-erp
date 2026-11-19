@@ -403,7 +403,22 @@
                                      </text>
                                  }
                                  else if (_form.PrintBackground)
-                                 ... (아래 세 갈래와 같은 글자) *@
+                                 {
+                                     <text>빈 종이에 이 그림을 함께 인쇄합니다. 양식용지를 따로 사실 필요가 없습니다.</text>
+                                 }
+                                 else if (_form.PaperMode == "preprint")
+                                 {
+                                     <text>
+                                         양식용지에 이미 인쇄된 모양이 있으니 종이에는 찍지 않습니다.
+                                         이 그림은 아래 미리보기에서 <b>자리를 맞추는 데만</b> 쓰입니다.
+                                     </text>
+                                 }
+                                 else
+                                 {
+                                     <text>지금은 아래 미리보기에만 보이고 <b>종이에는 찍히지 않습니다.</b></text>
+                                 }
+                             </MudText>
+                           ⬛ 위 옛 줄 끝(고침 1 · [4] P3-5 · PM 판단 — 종전 「… (아래 세 갈래와 같은 글자)」 줄임을 옛 글자 그대로 되살림 · #1) *@
                         <MudText Typo="Typo.caption" Class="mud-text-secondary mt-1">
                             @if (_form.PaperMode == "preprint")
                             {
@@ -1164,6 +1179,9 @@
             }
 
             _form.BackgroundImageUrl = saved.StoredPath;
+            // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-1 · [4] P3-1] 이 창에서 「올리기」로 받은 마지막 경로 — 확인창 첫 줄이
+            //   「새로 올리셨습니다」(올림) 와 「바꾸셨습니다」(주소 칸에 손으로 적음)를 가르는 근거.
+            _bgLastUploadedPath = saved.StoredPath;
             _bgFileName = file.Name;
             // 🔴🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 종전 문구는 「올렸습니다」로 끝났다.
             //   고객은 그것을 「양식에 들어갔다」로 읽고 창을 닫았고, 전표에는 아무것도 없었다.
@@ -1507,6 +1525,8 @@
         var sentBackgroundPath = _form.BackgroundImageUrl;
         // 🔴 [W-G1-51 갈래 F-1 · 편집창 부분] 확인창 판정도 **보낸 값**으로 한다(저장 중 「양식용지로 바꾸기」를 눌러도 어긋나지 않게).
         var sentPaperMode = _form.PaperMode;
+        // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 멈춤 (다)] 「Y 좌표를 지킨 저장」인지도 보낸 순간 값으로 잡는다(좌표 JSON 을 만든 조건과 같은 판정).
+        var sentKeepsYCoords = KeepLoadedYCoords;
         try
         {
             HttpResponseMessage resp;
@@ -1536,12 +1556,23 @@
                     var savedId = await ReadSavedTemplateIdAsync(resp) ?? _form.TemplateId;
                     if (!string.IsNullOrEmpty(savedId))
                     {
-                        await AskAndCreateYTemplateAsync(savedId);
+                        // ⬛ 옛 줄(주석 보존 · #1): await AskAndCreateYTemplateAsync(savedId);
+                        // 🔴 [고침 1 · [3-V] P3-1] 첫 줄(올림 · 손으로 적음) 판정도 **보낸 값**으로 한다.
+                        await AskAndCreateYTemplateAsync(savedId, sentBackgroundPath);
                     }
                     else
                     {
                         Console.Error.WriteLine("[FormYTemplate] 저장 응답에서 양식 번호를 못 읽어 확인창을 띄우지 않았다");
                     }
+                }
+                // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 멈춤 (다) · PM 판단] 「양식 그림 포함」(빈 A4) 양식에서 그림을 바꿔 저장 —
+                //   칸 위치는 지킨다(갈래 B 동작 그대로 · 좌표 작업 잃음 0) · 안내 1줄만 더한다. 이 창엔 칸 위치 표가 없어
+                //   새 그림에 맞춰 칸을 고칠 길은 양식용지 양식(칸 맞춤 → 그림 올려 저장 → 「예」)뿐이다.
+                //   위 확인창(양식용지일 때만)과 겹치는 경우 0 — 이 갈래는 빈 A4 · 저 갈래는 양식용지.
+                if (sentKeepsYCoords && !SameBackgroundPath(sentBackgroundPath, Template?.BackgroundImageUrl))
+                {
+                    Snackbar.Add("그림만 바꾸고 칸 위치는 그대로 두었습니다. 칸 위치를 새 그림에 맞추시려면 양식용지 양식에서 칸을 맞추고 그림을 올려 저장해 주십시오.",
+                        Severity.Info);
                 }
                 MudDialog.Close(DialogResult.Ok(true));
             }
@@ -1574,6 +1605,15 @@
     // 🔴 [세금계산서] 양식지도 묻는다 — 그 Y 는 법정 작성기 예외(착수 전 질문 (나))라 그림 + 칸 값이 찍힌다.
     // 🔴 「아니오」 · 창 닫음 = 아무것도 안 만든다(고객의 명시 거절 · 저장이 이미 그림 찍기를 0 으로 내려 옮기기도 다시 안 봄).
     // 🔴 「예」 = 서버 `CreateYTemplateAsync`(옮기기와 같은 몸통). 결과 글자는 여기서 정한다(서버는 결과 이름만 · #23).
+    // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-1 · [4] P3-1 · PM 판단] 위 [언제] 의 「글자가 다를 때」 를
+    //   갈래 B 의 `SameBackgroundPath`(앞뒤 공백 자름 · 대소문자 무시)로 바꿨다 — 공백 · 대소문자만 다른 저장은 그림을 안 바꾼 저장이다
+    //   (종전엔 그림을 손대지 않은 고객에게 「새로 올리셨습니다」 라고 물었다). 같은 창의 꼬리표 · 저장 뒤 지우기와 한 기준.
+    //   🔴 서버 「그림 찍기 유지」 판정은 무변(Ordinal · CTO F-1 Ⓐ (나)) — 대소문자만 다르게 다시 적거나 옛 행 경로에 공백이 있던 저장은
+    //     서버가 그림 찍기를 0 으로 내리지만 이 창은 묻지 않는다(개발명세서 §고침 1 넘길 것).
+    //   🔴 첫 줄은 올림 · 손으로 적음을 가른다 — 이 창에서 「올리기」로 받은 마지막 경로면 「새로 올리셨습니다」, 아니면 「바꾸셨습니다」.
+
+    /// <summary>이 창에서 「양식용지 그림 올리기」로 받은 마지막 보관 경로 — 확인창 첫 줄(올림 · 손으로 적음)을 가른다.</summary>
+    private string? _bgLastUploadedPath;
 
     /// <summary>그림 경로 앞뒤 공백을 자른다 — 공백만이면 null(「그림 지우기」와 같은 빈 값).</summary>
     private static string? TrimBackgroundPath(string? path)
@@ -1583,20 +1623,32 @@
     private bool PictureNewOrChangedOnSave(string? sentPaperMode, string? sentPath)
         => string.Equals(sentPaperMode, "preprint", StringComparison.Ordinal)
         && !string.IsNullOrWhiteSpace(sentPath)
-        && !string.Equals(sentPath, Template?.BackgroundImageUrl, StringComparison.Ordinal);
+        // ⬛ 옛 줄(주석 보존 · #1): && !string.Equals(sentPath, Template?.BackgroundImageUrl, StringComparison.Ordinal);
+        && !SameBackgroundPath(sentPath, Template?.BackgroundImageUrl);
 
     /// <summary>예/아니오를 묻고 「예」면 Y 템플릿을 만든다. 🔴 무엇이 잘못돼도 저장은 이미 끝났다 — 「저장 실패」로 말하지 않는다.</summary>
-    private async Task AskAndCreateYTemplateAsync(string templateId)
+    // ⬛ 옛 줄(주석 보존 · #1): private async Task AskAndCreateYTemplateAsync(string templateId)
+    private async Task AskAndCreateYTemplateAsync(string templateId, string? sentPath)
     {
         try
         {
-            var message = "양식용지 그림을 새로 올리셨습니다.\n\n"
+            // ⬛ 옛 줄(주석 보존 · #1): var message = "양식용지 그림을 새로 올리셨습니다.\n\n"
+            // 🔴 [고침 1 · [3-V] P3-1 · [4] P3-1] 첫 줄 — 이 창에서 올린 그림이면 「새로 올리셨습니다」, 주소 칸에 적은 경로면 「바꾸셨습니다」.
+            var uploadedHere = SameBackgroundPath(sentPath, _bgLastUploadedPath);
+            var message = (uploadedHere ? "양식용지 그림을 새로 올리셨습니다.\n\n" : "양식용지 그림을 바꾸셨습니다.\n\n")
                         + "이 그림을 빈 A4 용지에 값과 함께 인쇄하는 양식을 하나 더 만들어 둘까요?\n"
                         + "지금 양식은 그대로 두며, 양식용지에는 값만 인쇄됩니다.";
             if (_form.IsDefault)
             {
                 // 🔴 Y 는 실효 기본을 이어받는다(설계 Q16 · 한 함수) — 기본 양식이 바뀌는 것을 미리 말한다.
                 message += "\n\n지금 양식이 기본 양식이라, 새로 만드는 양식이 기본 양식을 이어받습니다.";
+            }
+            // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 ⓟ1 · PM 판단] 기본으로 정한 양식이 없어 **이름순 첫째라 기본으로 쓰이는**
+            //   양식(실효 기본)도 「예」 면 새 양식이 기본을 이어받는다 — 그때도 알림 1줄. 실효 기본 = 서버 `GetDefaultAsync`(명시 기본,
+            //   없으면 이름순 첫째 · Y 만들기가 잠근 뒤 뜨는 규칙과 같음)를 그대로 묻는다. 못 물으면 알림 0(만들기 자체는 무변).
+            else if (await IsEffectiveDefaultAsync(templateId, _form.FormType))
+            {
+                message += "\n\n이 종류에 기본으로 정한 양식이 없어 지금 양식이 기본으로 쓰이고 있습니다. 새로 만드는 양식이 기본 양식을 이어받습니다.";
             }
             var yes = await Dialogs.ShowMessageBoxAsync(
                 "빈 A4 양식도 만들까요?",
@@ -1635,6 +1687,28 @@
             // 🔴 빈 catch 금지(#15) — 저장은 끝났으니 「저장 실패」가 아니라 이 한 줄.
             Console.Error.WriteLine($"[FormYTemplate] 빈 A4 양식 만들기 실패: {ex.Message}");
             Snackbar.Add("빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다.", Severity.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 그 양식이 지금 그 종류의 <b>실효 기본</b>(명시 기본, 없으면 이름순 첫째)인가 — 서버 「기본 양식」 문(`GetDefaultAsync`)에 묻는다.
+    /// 못 물으면 false(알림 1줄만 빠짐 · 만들기 무변).
+    /// </summary>
+    /// <remarks>🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 ⓟ1] 새 서버 문 0 · 새 SQL 0 — 있는 조회 문을 그대로 부른다.</remarks>
+    private async Task<bool> IsEffectiveDefaultAsync(string templateId, string? formType)
+    {
+        if (string.IsNullOrWhiteSpace(formType)) return false;
+        try
+        {
+            var resp = await Http.GetAsync($"api/settings/form-templates/default/{Uri.EscapeDataString(formType)}");
+            if (!resp.IsSuccessStatusCode) return false;   // 404 = 그 종류에 쓰는 양식 없음
+            var current = await resp.Content.ReadFromJsonAsync<SavedTemplate>();
+            return string.Equals(current?.TemplateId, templateId, StringComparison.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[FormYTemplate] 기본 양식을 묻지 못해 이어받기 알림을 뺐다: {ex.Message}");
+            return false;
         }
     }
 
