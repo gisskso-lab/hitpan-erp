@@ -451,6 +451,9 @@ public class FormTemplateService : IFormTemplateService
     // 기동마다 「적용 결과 표 없음(1146)」 경고를 한 번만 남긴다(D3 · D4 회차마다 0).
     private static int s_applyStatusTableMissingWarned;
 
+    // 고침 1([4] 참고-3) — 판 글자를 못 읽어 옮기기가 안 도는 경우 경고를 프로세스당 한 번만 남긴다(30초 회차마다 0).
+    private static int s_versionTextUnreadableWarned;
+
     /// <summary>Y 템플릿 만들기 결과.</summary>
     public enum YTemplateOutcome
     {
@@ -600,6 +603,26 @@ public class FormTemplateService : IFormTemplateService
         var confirmed = rows.Any(r =>
             string.Equals(r.Result, "success", StringComparison.Ordinal)
             && IsSameVersionAsWatchdog(r.AppliedVersion, apiVersion));
+
+        // 🔴 고침 1([4] 참고-3 · PM 판단) — 판 글자를 못 읽으면(`Version.TryParse` 실패 · 비었음) 「같은 판 아님」 으로 남아
+        //   옮기기가 조용히 영영 안 돈다 → 확정 못 함 + 못 읽은 글자가 있을 때 이름 붙은 경고 1줄(프로세스당 1번). 판정 규칙은 무변(D2).
+        if (!confirmed)
+        {
+            var apiVersionReadable = TryParseThreePart(apiVersion, out _);
+            var unreadableApplied = rows
+                .Where(r => string.Equals(r.Result, "success", StringComparison.Ordinal)
+                            && !TryParseThreePart(r.AppliedVersion, out _))
+                .Select(r => r.AppliedVersion)
+                .ToList();
+            if ((!apiVersionReadable || unreadableApplied.Count > 0)
+                && Interlocked.Exchange(ref s_versionTextUnreadableWarned, 1) == 0)
+            {
+                _logger.LogWarning(
+                    "[양식 옮기기] 판 글자를 읽지 못해 이 판의 업데이트 확정을 맞춰 보지 못했다 — 옮기기를 미룬다 · 이 판={ApiVersion} 읽지 못한 적용 기록 판={AppliedVersions}",
+                    apiVersion ?? "(없음)", string.Join(", ", unreadableApplied.Select(v => v ?? "(없음)")));
+            }
+        }
+
         return confirmed ? YMigrationReadiness.Ready : YMigrationReadiness.NotConfirmed;
     }
 
