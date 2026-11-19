@@ -4,6 +4,7 @@
 //            · PNG 만들기(결정적 · 4분면 순서) · 런 계획(plan.json 꼴 · 잡 이름 · 패치 경로) · 워크플로 ui-print 잡 지킴 글자
 //   못 덮는 것(미측정): 실제 화면 차림 · 실제 PDF 판독(그건 PrintProbe selftest T1~T6 · CI 런)
 //   쓰는 법: node print.selftest.js   — 끝 줄 「인쇄 자체시험 끝 — 통과 n · 실패 m」 · 실패 1 이상이면 끝 코드 1
+//   🔴 8차(명세서 §1-8) — T-C1a · T-C1b 는 capture.js 를 자식 프로세스로 돌린다: 나가는 연결 = 127.0.0.1 의 닫힌 포트 시도만(밖 네트워크 · 브라우저 · DB · 앱 0 · 관찰 손이 셈)
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
@@ -1403,6 +1404,355 @@ guardAsync('T-Z37 7차 C7 폭발 반경 — R-3 · R-4 실패 = 그 칸만 차�
     && judge.code === 0 && /양성 대조 통과/.test(judge.end) && rowOf(pc.basicForm.cell).cat !== C.SETUP && rowOf(pc.preprint.cell).cat !== C.SETUP && setupRows === failed.length;
   check('T-Z37 7차 C7 폭발 반경 — R-3 · R-4 실패 = 그 칸만 차림 불가 · 양성 대조 무사', ok,
     `capture 끝 코드 ${r.code} · 차림 불가 ${failed.length}(매입 반품 ${r3.length} · 거래명세서·판매 반품 ${r4.length} · 그 밖 ${wrongFail.length}) · 양성 칸 ${pcCells.map((c) => c.status).join('/')} · 판정 끝 코드 ${judge.code} · ${judge.end.slice(0, 60)} · 판정 차림 불가 ${setupRows}`);
+});
+
+// ════ 8차(11/19 · CTO 8차 판정 §4-1 Z8-1~Z8-4 · 워크플로 무변 · 명세서 §1-8) ════
+const NET8 = require('net');
+const sleep8 = (ms) => new Promise((ok) => setTimeout(ok, ms));
+/** 워크플로 「[시험] 차림 · 판독 입구」 단계의 run: 한 줄 그대로. */
+function captureCmd8() {
+  const L8 = printJob7().split('\n');
+  const i = L8.findIndex((l) => l.includes('- name: "[시험] 차림 · 판독 입구'));
+  if (i < 0) return null;
+  const r = L8.slice(i + 1, i + 6).find((l) => /^\s+run:\s+\S/.test(l));
+  return r ? r.replace(/^\s+run:\s+/, '').trim() : null;
+}
+/** 127.0.0.1 의 안 쓰는 포트 — 열었다 닫은 뒤 연결이 거절되는지 먼저 확인. */
+async function closedPort8() {
+  const srv = NET8.createServer();
+  await new Promise((ok, no) => { srv.once('error', no); srv.listen(0, '127.0.0.1', ok); });
+  const { port } = srv.address();
+  await new Promise((ok) => srv.close(ok));
+  const refused = await new Promise((ok) => {
+    const s = NET8.connect(port, '127.0.0.1');
+    s.once('connect', () => { s.destroy(); ok(false); });
+    s.once('error', (e) => ok(e.code === 'ECONNREFUSED'));
+  });
+  return { port, refused };
+}
+/** 관찰 손 — 자식 프로세스에 NODE_OPTIONS --require 로 실음 · 기록만(동작 무변): 나가는 TCP 연결 · playwright 불러오기 · 자식 프로세스. */
+function observer8() {
+  const fs0 = require('fs');
+  const net0 = require('net');
+  const Module0 = require('module');
+  const cp0 = require('child_process');
+  const put = (s) => fs0.appendFileSync(process.env.W51_TC1_REC, `${s}\n`);
+  const con = net0.Socket.prototype.connect;
+  net0.Socket.prototype.connect = function connect8(...a) {
+    const o = Array.isArray(a[0]) ? a[0][0] : a[0];
+    put(o && typeof o === 'object' ? `connect ${o.host || o.path || '?'}:${o.port || ''}` : `connect ${typeof a[1] === 'string' ? a[1] : '?'}:${o}`);
+    return con.apply(this, a);
+  };
+  const load = Module0._load;
+  Module0._load = function load8(req, ...a) {
+    if (/^(playwright|playwright-core|@playwright\/)/.test(String(req))) put(`require ${req}`);
+    return load.call(this, req, ...a);
+  };
+  for (const k of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
+    const f = cp0[k];
+    cp0[k] = function child8(...a) { put(`child ${k}`); return f.apply(this, a); };
+  }
+}
+/** capture.js 를 워크플로 명령줄 그대로 자식 프로세스로(작업 폴더 = 레포 뿌리) — 처음부터 새로 짠 최소 환경(실 비밀 · GITHUB_ENV 0) + 시험 값. */
+function runCapture8(cmd, extra) {
+  const root = fs.mkdtempSync(path.join(OS.tmpdir(), 'w51-tc1-'));
+  const out = path.join(root, 'out');
+  const rec = path.join(root, 'rec.log');
+  const obs = path.join(root, 'observer.js');
+  try {
+    fs.writeFileSync(obs, `'use strict';\n(${observer8.toString()})();\n`);
+    fs.writeFileSync(rec, '');
+    const env = {};
+    for (const k of ['PATH', 'SystemRoot', 'TEMP', 'TMP', 'TMPDIR']) if (process.env[k]) env[k] = process.env[k];
+    Object.assign(env, {
+      PRINT_OUT: out, PRINT_RUN: 'selftest', PRINT_JOB: 'tc1', PRINT_BOARD: 'main',
+      UI_LOGIN_PARENT: 'selftest-parent', UI_PW_PARENT: 'selftest-tc1-pw',
+      NODE_OPTIONS: `--require "${obs.split(path.sep).join('/')}"`, W51_TC1_REC: rec,
+    }, extra);
+    const parts = String(cmd || '').split(/\s+/).filter(Boolean);
+    const r = parts[0] === 'node' && parts.length === 2
+      ? CP.spawnSync(process.execPath, parts.slice(1), { cwd: REPO7, env, encoding: 'utf8', timeout: 90000 })
+      : { status: null, stdout: '', stderr: `명령줄 꼴 다름: ${cmd}` };
+    const at = path.join(out, 'cells.json');
+    const doc = fs.existsSync(at) ? JSON.parse(fs.readFileSync(at, 'utf8')) : null;
+    const lines = fs.readFileSync(rec, 'utf8').split('\n').filter(Boolean);
+    return { code: r.status, text: `${r.stdout || ''}${r.stderr || ''}${r.error ? r.error.message : ''}`, doc, lines };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+const TC1_B_CODE = 0; // 🔴 명세서 §1-8-0 — ⓑ 끝 코드 기대값(돌리기 전에 적은 값)
+const PRODUCT_PORTS8 = [5234, 5257, 3306];
+function tc1Facts(r, port) {
+  const cells = (r.doc && r.doc.cells) || [];
+  const connects = r.lines.filter((l) => l.startsWith('connect '));
+  return {
+    cells,
+    planned: F.plannedCells().cells.length,
+    pending: cells.filter((c) => c.status === 'pending').length,
+    noReason: cells.filter((c) => !(c.reason || (c.status === 'no-door' && c.noDoorAtMain))).length,
+    connects,
+    product: connects.filter((l) => PRODUCT_PORTS8.some((p) => l.endsWith(`:${p}`))).length,
+    other: connects.filter((l) => !l.endsWith(`127.0.0.1:${port}`)).length,
+    pw: r.lines.filter((l) => l.startsWith('require ')).length,
+    child: r.lines.filter((l) => l.startsWith('child ')).length,
+    dev: /⚫ FAIL \[장치\]/.test(r.text),
+  };
+}
+
+// T-C1a 8차 Z8-1 ⓐ — capture.js 프로세스 진입점(C1 · C6 ①) · PRINT_PATCH_FAIL=1 → 끝 코드 0 · OUT 에 cells.json · 칸 수 = 계획 · 전 칸 「패치 적용 실패」 · TCP · 브라우저 0
+guardAsync('T-C1a 8차 Z8-1 ⓐ capture.js 프로세스(워크플로 명령줄) · PRINT_PATCH_FAIL=1', async () => {
+  const cmd = captureCmd8();
+  const cp = await closedPort8(); // ⓐ 도 UI_BASE = 닫힌 포트(새는 길이 있어도 기본 주소로 안 감)
+  const r = runCapture8(cmd, { PRINT_PATCH_FAIL: '1', UI_BASE: `http://127.0.0.1:${cp.port}` });
+  const f = tc1Facts(r, cp.port);
+  const allPatch = f.cells.length > 0 && f.cells.every((c) => c.status === 'setup-fail' && c.reason === '패치 적용 실패(git apply)');
+  const ok = cmd === 'node scripts/playwright-audit/ci/print/capture.js' && r.code === 0 && r.doc !== null && f.cells.length === f.planned && allPatch && f.pending === 0
+    && f.connects.length === 0 && f.pw === 0 && f.child === 0 && !f.dev;
+  check('T-C1a 8차 Z8-1 ⓐ capture.js 프로세스(워크플로 명령줄) · PRINT_PATCH_FAIL=1', ok,
+    `명령줄 「${cmd}」 · 끝 코드 ${r.code} · OUT 의 cells.json ${r.doc !== null} · 칸 ${f.cells.length}/${f.planned} · 전 칸 패치 사유 ${allPatch} · pending ${f.pending} · TCP ${f.connects.length} · playwright ${f.pw} · 자식 ${f.child} · ⚫ ${f.dev}${r.doc === null ? ` · ${LIB.sanitize(r.text, 160)}` : ''}`);
+});
+
+// T-C1b 8차 Z8-1 ⓑ — 닫힌 포트 → 끝 코드 = TC1_B_CODE · cells.json · pending 0 · 모든 칸 사유 · ⚫ 0 · 브라우저 0 · 나가는 TCP = 닫힌 포트로만(제품 포트 · DB 0)
+guardAsync('T-C1b 8차 Z8-1 ⓑ capture.js 프로세스 · 닫힌 포트 → 차림 불가 · 브라우저 0 · 제품 포트 0', async () => {
+  const cmd = captureCmd8();
+  const cp = await closedPort8();
+  const r = runCapture8(cmd, { UI_BASE: `http://127.0.0.1:${cp.port}` });
+  const f = tc1Facts(r, cp.port);
+  const noDoor = f.cells.filter((c) => c.status === 'no-door').length;
+  const loginFail = f.cells.filter((c) => c.status === 'setup-fail' && /^기초 자료 차림 실패 — API 로그인 실패/.test(c.reason || '')).length;
+  const why1 = (f.cells.find((c) => c.status === 'setup-fail') || {}).reason || '';
+  const ok = cp.refused && !PRODUCT_PORTS8.includes(cp.port) && r.code === TC1_B_CODE && r.doc !== null && f.cells.length === f.planned && f.pending === 0 && f.noReason === 0
+    && loginFail > 0 && noDoor + loginFail === f.cells.length && !f.dev && f.connects.length >= 1 && f.other === 0 && f.product === 0 && f.pw === 0 && f.child === 0;
+  check('T-C1b 8차 Z8-1 ⓑ capture.js 프로세스 · 닫힌 포트 → 차림 불가 · 브라우저 0 · 제품 포트 0', ok,
+    `닫힘 확인 ${cp.refused} · 끝 코드 ${r.code}(기대 ${TC1_B_CODE}) · OUT 의 cells.json ${r.doc !== null} · 칸 ${f.cells.length}/${f.planned} · pending ${f.pending} · 사유 없음 ${f.noReason} · 로그인 실패 ${loginFail} + 문 없음 ${noDoor} · 사유 「${LIB.sanitize(why1, 80)}」 · ⚫ ${f.dev} · TCP ${f.connects.length}(닫힌 포트 밖 ${f.other} · 제품 포트 · DB ${f.product}) · playwright ${f.pw} · 자식 ${f.child}`);
+});
+
+// T-Z35b 8차 Z8-2 ⓐ — qtyColumn 동치: T-Z35 가 읽는 그 .razor MudTh 원문의 「수량」 5종 × (원문 · 공백 둘러쌈 · 앞에 부분 일치 미끼 머리) = 옛 규칙(정확 일치 「수량」) 위치
+//   · PurchaseReturnGrid 만 다름(옛 -1 · 새 = 「반품수량」) · 대조 변이(부분 일치 · trim 제거)는 이 시험이 가름
+guard('T-Z35b 8차 Z8-2 ⓐ qtyColumn = 옛 규칙 위치(수량 5종 × 원문 · 공백 · 미끼) · 매입 반품만 다름', () => {
+  const CAPR = require('./capture');
+  const web = path.join(REPO7, 'src', 'HitPan.Web');
+  const files = [];
+  const walk = (d) => {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) { if (e.name !== 'obj' && e.name !== 'bin') walk(path.join(d, e.name)); } else if (e.name.endsWith('.razor')) files.push(path.join(d, e.name));
+    }
+  };
+  walk(web);
+  const text = new Map(files.map((f) => [f, fs.readFileSync(f, 'utf8')]));
+  const pageOf = (route) => files.find((f) => text.get(f).includes(`@page "${route}"`));
+  const comp = (name) => files.find((f) => path.basename(f) === `${name}.razor`);
+  const rawHeads = (src) => [...src.matchAll(/<MudTh[^>]*>([^<]*)<\/MudTh>/g)].map((m) => m[1]); // 원문(자르기 0)
+  const found = new Map();
+  for (const t of F.TYPES.filter((x) => x.key !== 'sales_return')) {
+    const pg = pageOf(t.route);
+    const grids = pg ? [...new Set([...text.get(pg).matchAll(/<([A-Z]\w*Grid)\b/g)].map((m) => m[1]).filter((n) => n !== 'MudGrid'))] : [];
+    for (const g of grids) if (comp(g)) found.set(g, rawHeads(text.get(comp(g))));
+  }
+  const oldCol = (hs) => hs.findIndex((h) => h.trim() === '수량'); // ⬛ 1~6차 fillLines 옛 줄 그대로
+  const variants = (hs) => [['원문', hs], ['공백', hs.map((h) => `\n ${h}\t `)], ['미끼', [hs[0], '재고수량', ...hs.slice(1)]]];
+  const QTY5 = ['QuotationGrid', 'DeliveryGrid', 'SalesOrderGrid', 'PurchaseOrderGrid', 'PurchaseReceiptGrid'];
+  const same = (fn) => QTY5.every((g) => found.has(g) && variants(found.get(g)).every(([, v]) => oldCol(v) >= 0 && fn(v) === oldCol(v)));
+  const prOk = (fn) => found.has('PurchaseReturnGrid') && variants(found.get('PurchaseReturnGrid')).every(([, v]) => oldCol(v) === -1 && fn(v) >= 0 && String(v[fn(v)]).trim() === '반품수량');
+  const now = (hs) => CAPR.qtyColumn(hs);
+  const partial = (hs) => hs.findIndex((h) => CAPR.QTY_HEADERS.some((q) => String(h).includes(q))); // 대조 변이(원본 무변)
+  const noTrim = (hs) => hs.findIndex((h) => CAPR.QTY_HEADERS.includes(String(h))); // 대조 변이(원본 무변)
+  const pc = found.get('QuotationGrid') || [];
+  const ok = same(now) && prOk(now) && !same(partial) && !same(noTrim);
+  check('T-Z35b 8차 Z8-2 ⓐ qtyColumn = 옛 규칙 위치(수량 5종 × 원문 · 공백 · 미끼) · 매입 반품만 다름', ok,
+    `부품 ${[...found.keys()].join('+')} · 5종 × 3꼴 같음 ${same(now)} · 양성 대조 QuotationGrid 위치 새 ${now(pc)} = 옛 ${oldCol(pc)} · 매입 반품 옛 -1 · 새 반품수량 ${prOk(now)} · 대조 변이 거름(부분 일치 ${!same(partial)} · trim 제거 ${!same(noTrim)})`);
+});
+
+/** 가짜 목록 창(8차) — rows: [{ text, at(ms 뒤 나타남), head }] · st.diag = 진단에서만 쓰는 손이 불린 수 · spec.hang = 'outside' | 'rows' 면 그 읽기가 끝나지 않음. */
+function fakeList8(spec = {}) {
+  const t0 = Date.now();
+  const st = { diag: 0, shots: 0, waits: [] };
+  const rows = spec.rows || [];
+  const shown = () => rows.filter((r) => Date.now() - t0 >= (r.at || 0));
+  const hang = (k) => (spec.hang === k ? new Promise(() => {}) : null);
+  const loc = (ops) => {
+    const match = () => shown().filter((r) => !r.head && ops.every((o) => (o.hasText === undefined || r.text.includes(o.hasText)) && (o.hasNotText === undefined || !r.text.includes(o.hasNotText))));
+    return {
+      filter: (o) => loc([...ops, o]),
+      count: async () => { if (ops.length === 0) st.diag += 1; return ops.length === 0 ? shown().length : match().length; },
+      first: () => ({
+        waitFor: async ({ timeout }) => {
+          st.waits.push(timeout);
+          const end = Date.now() + timeout;
+          for (;;) {
+            if (match().length > 0) return;
+            if (Date.now() >= end) { const e = new Error(`Timeout ${timeout}ms exceeded`); e.name = 'TimeoutError'; throw e; }
+            await sleep8(20);
+          }
+        },
+      }),
+      evaluateAll: async (fn) => { st.diag += 1; return hang('rows') || fn(shown().map((r) => ({ querySelector: (s) => (s === 'th' && r.head ? {} : null), innerText: r.text }))); },
+      texts: () => match().map((r) => r.text),
+    };
+  };
+  const dlg = {
+    locator: (sel) => {
+      if (sel === 'tr') return loc([]);
+      if (sel === 'input') return { evaluateAll: async (fn) => { st.diag += 1; return fn((spec.dlgInputs || []).map((value) => ({ value }))); } };
+      return { allInnerTexts: async () => { st.diag += 1; return spec.pager || []; } };
+    },
+    innerText: async () => { st.diag += 1; return spec.dlgText || ''; },
+    screenshot: async () => { st.shots += 1; },
+  };
+  const page = {
+    evaluate: async () => { st.diag += 1; return 'UTC · 분 차 0'; },
+    locator: () => ({
+      evaluateAll: async (fn) => {
+        st.diag += 1;
+        return hang('outside') || fn([...(spec.pageInputs || []).map((value) => ({ value, closest: () => null })), ...(spec.dlgInputs || []).map((value) => ({ value, closest: () => ({}) }))]);
+      },
+    }),
+    screenshot: async () => { st.shots += 1; },
+  };
+  return { st, dlg, page };
+}
+/** ⬛ 1~6차 openFromList 옛 줄 그대로(0.8초 쉬고 한 번 셈) — 동치 비교용. */
+async function oldListRule8(dlg, pick) {
+  await sleep8(800);
+  const rows = pick(dlg.locator('tr').filter({ hasText: F.MARK.partner }));
+  if ((await rows.count()) === 0) throw new S.SetupError('표지 거래처 줄 없음');
+  return rows;
+}
+
+// T-Z36b 8차 Z8-2 ⓑ — waitListRows 성공 길: 표지 줄이 처음부터 있음 / 0.5초 뒤 나타남 × 줄 고르기 3(견적 = 양성 대조 · 거래명세서 · 판매 반품 ⓙ)
+//   → 돌려준 줄 = 옛 규칙(0.8초 쉬고 셈)과 같음 · 진단 손 부름 0 · 사진 0 · 기다림 상한 = LIST_WAIT · 처음부터 있음 = 1초 안
+guardAsync('T-Z36b 8차 Z8-2 ⓑ waitListRows 성공 길 = 옛 규칙 줄 · 진단 0 · 처음부터 있음 1초 안', async () => {
+  const CAPR = require('./capture');
+  const P0 = F.MARK.partner;
+  const rowsAt = (at) => [{ head: true, text: '일자 전표번호 업체' }, { text: `2026-11-19 D-1 ${P0} 확정`, at }, { text: `2026-11-19 D-2 ${P0} 반품`, at }, { text: '2026-11-19 D-3 다른거래처', at: 0 }];
+  const runs = [];
+  for (const at of [0, 500]) {
+    for (const [typeKey, entry] of [['estimate', 'doc'], ['delivery', 'doc'], ['delivery', 'doc-j']]) {
+      const t = F.TYPES.find((x) => x.key === typeKey);
+      const pick = CAPR.entryPick(typeKey, entry);
+      const a = fakeList8({ rows: rowsAt(at) });
+      const b = fakeList8({ rows: rowsAt(at) });
+      runs.push(Promise.all([
+        (async () => { const t1 = Date.now(); const got = await CAPR.waitListRows(a.page, a.dlg, t, pick); return { got, ms: Date.now() - t1 }; })(),
+        oldListRule8(b.dlg, pick),
+      ]).then(([n, old]) => ({
+        at, typeKey, entry, ms: n.ms, diag: a.st.diag, shots: a.st.shots, waitOk: a.st.waits.length === 1 && a.st.waits[0] === CAPR.LIST_WAIT,
+        same: n.got.texts().length > 0 && JSON.stringify(n.got.texts()) === JSON.stringify(old.texts()),
+      })));
+    }
+  }
+  const cases = await Promise.all(runs);
+  const ok = cases.length === 6 && cases.every((c) => c.same && c.diag === 0 && c.shots === 0 && c.waitOk) && cases.filter((c) => c.at === 0).every((c) => c.ms < 1000);
+  check('T-Z36b 8차 Z8-2 ⓑ waitListRows 성공 길 = 옛 규칙 줄 · 진단 0 · 처음부터 있음 1초 안', ok,
+    cases.map((c) => `${c.at}ms·${c.typeKey}/${c.entry}=${c.same ? '같음' : '다름'}·${c.ms}ms·진단 ${c.diag}`).join(' · '));
+});
+
+// T-Z36c 8차 Z8-3 — 진단 소독: 환경 비밀값(S0 가림과 같은 3꼴 = 평문 · base64 · url 조각) + 제어 글자 + 긴 글을 창 글 · 기간 입력 · 새 칸(창 밖 날짜 · 머리 줄 · 첫 3줄 · 쪽 글)에 심음
+//   → 진단 글에 3꼴 0 · 제어 글자 0 · 칸별 길이 상한(창 글 200 · 줄 80 · 날짜 · 쪽 40) · 칸마다 글이 실제로 지남(빈 통과 0)
+//   제어 글자로 쪼갠 값(빈칸 자리 = BEL) = 빈칸으로 바꾸면 비밀값이 다시 이어지는 길(7차 창 글 차례 · 7차 기간 값 제어 글자 안 거름)
+guardAsync('T-Z36c 8차 Z8-3 진단 소독 — 3꼴 비밀 0 · 제어 글자 0 · 칸별 길이 상한', async () => {
+  const CAPR = require('./capture');
+  const SEC = 'selftest-w51 진단값'; // 빈칸 든 가짜 값(자격증명 꼴 아님)
+  const NAME = `${LIB.SECRET_PREFIX}W51DIAG`;
+  const b64 = Buffer.from(SEC, 'utf8').toString('base64');
+  const url = encodeURIComponent(SEC);
+  const split = SEC.replace(' ', '\u0007');
+  const C0 = '\u0001\u001b[31m\u007f';
+  const fill = (ch, n) => ch.repeat(n);
+  const spec = {
+    rows: [
+      { head: true, text: `${b64} ${SEC}${C0}${fill('Ａ', 300)}` },
+      { text: `${SEC}${C0}${fill('Ｃ', 300)}` },
+      { text: `${url}\t${fill('Ｃ', 300)}` },
+      { text: `${split}${fill('Ｃ', 300)}` },
+    ],
+    dlgInputs: [`2026-11-01 ${SEC}${C0}${fill('Ｅ', 300)}`, `2026-11-19 ${split}${fill('Ｅ', 300)}`],
+    pageInputs: [`2026-11-19 ${split}${C0}${fill('Ｄ', 300)}`, `2026-11-18 ${SEC}${fill('Ｄ', 300)}`],
+    pager: [`1-3 ${SEC}${C0}${fill('Ｇ', 300)}`],
+    dlgText: `판매 목록 조회\n${SEC}\u0000${b64}\u0007${url}\n${split}${C0}${fill('Ｆ', 500)}`,
+  };
+  let msg = '';
+  process.env[NAME] = SEC;
+  try {
+    const w = fakeList8(spec);
+    msg = await CAPR.listDiag(w.page, w.dlg);
+  } finally {
+    delete process.env[NAME];
+  }
+  const forms = LIB.needleForms(SEC).flatMap((x) => x.strs).filter(Boolean);
+  const leaked = forms.filter((n) => msg.includes(n)).length;
+  const ctl = /[\u0000-\u001f\u007f]/.test(msg);
+  const run = (ch) => Math.max(0, ...(msg.match(new RegExp(`${ch}+`, 'g')) || []).map((s) => s.length));
+  const caps = { 'Ａ': 80, 'Ｃ': 80, 'Ｅ': 40, 'Ｄ': 40, 'Ｇ': 40, 'Ｆ': 200 };
+  const over = Object.entries(caps).filter(([ch, cap]) => run(ch) === 0 || run(ch) > cap).map(([ch, cap]) => `${ch}${run(ch)}/${cap}`);
+  const labels = ['기간 값 2026-11-01', '창 글 「', '창 밖 날짜 2026-11-19', '창 머리 줄 「', '첫 3줄 1「', '쪽 글 「'];
+  const missing = labels.filter((l) => !msg.includes(l));
+  const unread = (msg.match(/못 읽음/g) || []).length;
+  const ok = forms.length >= 3 && leaked === 0 && !ctl && over.length === 0 && missing.length === 0 && unread === 0;
+  check('T-Z36c 8차 Z8-3 진단 소독 — 3꼴 비밀 0 · 제어 글자 0 · 칸별 길이 상한', ok,
+    `꼴 ${forms.length} 중 샘 ${leaked} · 제어 글자 ${ctl} · 상한 넘음/빈 칸 [${over.join(',')}] · 빠진 칸 [${missing.join(',')}] · 못 읽음 ${unread} · 글 ${msg.length}자`);
+});
+
+/** 표지 줄 가름(명세서 §2 Z5-n · CTO §6) — waitListRows 결과 → H1~H4 · 미분류. */
+function classify8(r) {
+  if (r.rows) return 'H1';
+  const m = r.msg || '';
+  const per = /기간 값 (\d{4}-\d{2}-\d{2})[^~·]*~ (\d{4}-\d{2}-\d{2})/.exec(m);
+  const out = /창 밖 날짜 ([^·]*)/.exec(m);
+  const outs = out ? [...out[1].matchAll(/\d{4}-\d{2}-\d{2}/g)].map((x) => x[0]) : [];
+  const zero = /표지 줄 0\)/.test(m);
+  if (per && outs.length && outs.some((d) => d < per[1] || d > per[2])) return 'H2';
+  if (per && outs.length && /결과 없음 문구 참/.test(m) && zero) return 'H3';
+  const first = /첫 3줄 (1「[^」]*」(?: \d「[^」]*」)*)/.exec(m);
+  if (/결과 없음 문구 거짓/.test(m) && zero && first && !first[1].includes(F.MARK.partner)) return 'H4';
+  return '미분류';
+}
+
+// T-Z36d 8차 Z8-4 — listDiag 읽기 3칸 · 가짜 창 4꼴이 서로 다르게 가름: H1 늦게 나타남 → 줄 돌려줌 · 진단 0 / H2 창 밖 날짜 ∉ 기간 → 두 값 다 보임
+//   / H3 빈 목록 + 결과 없음 문구 → 결과 없음 참 · 표지 줄 0 / H4 줄 있음 · 표지 0 → 첫 줄 글에 다른 거래처 · 진단 ≤ 5초 · 사진 0 · 읽기가 안 끝나는 칸 = 시간 상한 「못 읽음」
+guardAsync('T-Z36d 8차 Z8-4 listDiag 읽기 3칸 · 가짜 창 H1~H4 가름 · 성공 길 진단 0 · 시간 상한', async () => {
+  const CAPR = require('./capture');
+  const P0 = F.MARK.partner;
+  const t = F.TYPES.find((x) => x.key === 'delivery');
+  const pick = CAPR.entryPick('delivery', 'doc');
+  const head = { head: true, text: '일자\t전표번호\t업체\t작성자\t상태\t금액' };
+  const period = ['2026-11-01', '2026-11-19'];
+  const none = '조회된 거래명세서가 없습니다.';
+  const H = {
+    H1: { rows: [head, { text: `2026-11-19 D-1 ${P0} 확정`, at: 500 }], dlgInputs: period, pageInputs: ['2026-11-19'] },
+    H2: { rows: [head, { text: none }], dlgInputs: period, pageInputs: ['2026-11-20'], dlgText: `판매 목록 조회\n${none}` },
+    H3: { rows: [head, { text: none }], dlgInputs: period, pageInputs: ['2026-11-19'], dlgText: `판매 목록 조회\n${none}` },
+    H4: { rows: [head, { text: '2026-11-19 D-7 다른거래처 확정' }, { text: '2026-11-18 D-6 다른거래처 확정' }], dlgInputs: period, pageInputs: ['2026-11-19'], dlgText: '판매 목록 조회\n2026-11-19 D-7 다른거래처', pager: ['1-2 / 2'] },
+  };
+  const res = {};
+  for (const [k, spec] of Object.entries(H)) {
+    const w = fakeList8(spec);
+    const t1 = Date.now();
+    try {
+      const rows = k === 'H1' ? await CAPR.waitListRows(w.page, w.dlg, t, pick) : await CAPR.waitListRows(w.page, w.dlg, t, pick, 300);
+      res[k] = { rows, ms: Date.now() - t1, st: w.st };
+    } catch (e) {
+      res[k] = { msg: String(e.message), setup: e instanceof S.SetupError, ms: Date.now() - t1, st: w.st };
+    }
+    res[k].cls = classify8(res[k]);
+  }
+  const hw = fakeList8({ ...H.H3, hang: 'outside' });
+  const th = Date.now();
+  const hangMsg = await CAPR.listDiag(hw.page, hw.dlg);
+  const hangMs = Date.now() - th;
+  const cls = ['H1', 'H2', 'H3', 'H4'].map((k) => res[k].cls);
+  const m = (k) => res[k].msg || '';
+  const ok = cls.join(',') === 'H1,H2,H3,H4' && res.H1.st.diag === 0
+    && m('H2').includes('기간 값 2026-11-01 ~ 2026-11-19') && m('H2').includes('창 밖 날짜 2026-11-20')
+    && m('H3').includes('결과 없음 문구 참') && m('H3').includes('표지 줄 0)')
+    && m('H4').includes('첫 3줄 1「2026-11-19 D-7 다른거래처 확정」') && m('H4').includes('결과 없음 문구 거짓') && m('H4').includes('쪽 글 「1-2 / 2」')
+    && ['H2', 'H3', 'H4'].every((k) => res[k].setup && res[k].ms <= 300 + 5000)
+    && Object.values(res).every((x) => x.st.shots === 0)
+    && /창 밖 날짜 못 읽음\(DiagTimeout\)/.test(hangMsg) && hangMs <= 5000 && hw.st.shots === 0;
+  check('T-Z36d 8차 Z8-4 listDiag 읽기 3칸 · 가짜 창 H1~H4 가름 · 성공 길 진단 0 · 시간 상한', ok,
+    `가름 ${cls.join('/')} · H1 진단 ${res.H1.st.diag} · 시간 ${['H2', 'H3', 'H4'].map((k) => `${k} ${res[k].ms}ms`).join(' ')} · 안 끝나는 칸 ${hangMs}ms 「${(/창 밖 날짜 [^·]*/.exec(hangMsg) || [''])[0].trim()}」 · H4 「${(/첫 3줄 [^·]*/.exec(m('H4')) || [''])[0].trim().slice(0, 60)}」`);
 });
 
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;

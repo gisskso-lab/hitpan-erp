@@ -141,21 +141,61 @@ async function makeSalesReturn(page) {
 const LIST_WAIT = 10000;
 const CTL_ALL = /[\u0000-\u001f\u007f]/g;
 async function listDiag(page, dlg) {
+  // 🔴 8차 Z8-4(CTO 8차 판정 §4-1 · §6) — 읽기 3칸 더함 · 실패 가지(waitListRows 가 표지 줄을 못 찾은 뒤)에서만 불림 · 화면 사진 0
+  //   (i) 창 밖 날짜 = 뒤 화면 새 전표의 날짜 기본값(최대 3 · 40자) (ii) 창 머리 줄 · 첫 3줄 글 따로(줄마다 80자) (iii) 결과 없음 문구 참/거짓 · 쪽 글(40자)
+  //   칸마다 take() + 시간 상한 DIAG_MS(못 읽으면 「못 읽음(이름)」 · 칸 9 × 2초 = 칸 하나에 최대 18초)
+  // 🔴 8차 Z8-3([3-V] P2-1) — 진단 글 소독 = clean(): 제어 글자 → 빈칸 **먼저** · 공백 접기 · L.sanitize(3꼴 지움 뒤 자름)
+  //   7차 창 글은 소독 **뒤에** 제어 글자를 빈칸으로 바꿔, 제어 글자로 쪼갠 비밀값(빈칸 든 값)이 소독 뒤 다시 이어졌다 · 7차 기간 값은 제어 글자를 안 걸렀다
+  const DIAG_MS = 2000;
+  const RESULT_NONE = /(조회된[^\n]{0,30}없습니다|결과가 없습니다)/; // SalesListDialog.razor:89 「조회된 거래명세서가 없습니다.」 · 그 밖 「결과가 없습니다」 꼴
+  const PAGER = '.mud-table-pagination-caption, .mud-table-page-number-information, .mud-table-pagination-information';
+  const clean = (s, cap) => L.sanitize(String(s ?? '').replace(CTL_ALL, ' ').replace(/\s+/g, ' ').trim(), cap);
   const part = [];
-  const take = async (what, fn) => {
+  // ⬛ [낡은 줄 · 7차] const take = async (what, fn) => {
+  const take = async (what, fn, ms = DIAG_MS) => {
+    let t = null;
     try {
-      part.push(`${what} ${await fn()}`);
+      // ⬛ [낡은 줄 · 7차] part.push(`${what} ${await fn()}`);
+      const cap = new Promise((_, no) => {
+        t = setTimeout(() => no(Object.assign(new Error(`${what} 시간 상한 ${ms}ms`), { name: 'DiagTimeout' })), ms);
+      });
+      part.push(`${what} ${await Promise.race([fn(), cap])}`); // race 가 늦은 거절도 받음(처리 안 된 거절 0)
     } catch (e) {
       part.push(`${what} 못 읽음(${L.errorName(e)})`); // 진단 실패도 사유 글에 남김(#15)
+    } finally {
+      clearTimeout(t);
     }
   };
   await take('줄 수', async () => `${await dlg.locator('tr').count()}(표지 줄 ${await dlg.locator('tr').filter({ hasText: F.MARK.partner }).count()})`);
   await take('기간 값', async () => {
     const v = await dlg.locator('input').evaluateAll((els) => els.map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}/.test(x)));
-    return v.length ? v.map((x) => L.sanitize(x, 40)).join(' ~ ') : '없음';
+    // ⬛ [낡은 줄 · 7차] return v.length ? v.map((x) => L.sanitize(x, 40)).join(' ~ ') : '없음';
+    return v.length ? v.map((x) => clean(x, 40)).join(' ~ ') : '없음';
   });
   await take('브라우저 시간대', async () => page.evaluate(() => `${Intl.DateTimeFormat().resolvedOptions().timeZone} · 분 차 ${-new Date().getTimezoneOffset()}`));
-  await take('창 글', async () => `「${L.sanitize(String(await dlg.innerText()).replace(/\s+/g, ' '), 200).replace(CTL_ALL, ' ')}」`);
+  // ⬛ [낡은 줄 · 7차] await take('창 글', async () => `「${L.sanitize(String(await dlg.innerText()).replace(/\s+/g, ' '), 200).replace(CTL_ALL, ' ')}」`);
+  await take('창 글', async () => `「${clean(await dlg.innerText(), 200)}」`);
+  // ── 8차 Z8-4 (i) 창 밖 날짜(뒤 화면 · `.mud-dialog` 밖 입력의 yyyy-mm-dd 꼴 값 · 최대 3)
+  await take('창 밖 날짜', async () => {
+    const v = await page.locator('input').evaluateAll((els) => els.filter((x) => !x.closest('.mud-dialog')).map((x) => x.value || '').filter((x) => /\d{4}-\d{2}-\d{2}/.test(x)).slice(0, 3));
+    return v.length ? v.map((x) => clean(x, 40)).join(' / ') : '없음';
+  });
+  // ── 8차 Z8-4 (ii) 창 머리 줄 · 첫 3줄(머리 = th 가 든 줄 · 나머지 = 몸 줄 · 빈 목록 문구 줄도 몸 줄로 셈)
+  const rowsOf = () => dlg.locator('tr').evaluateAll((els) => els.map((r) => ({ head: !!r.querySelector('th'), text: r.innerText || r.textContent || '' })));
+  await take('창 머리 줄', async () => {
+    const h = (await rowsOf()).find((r) => r.head);
+    return h ? `「${clean(h.text, 80)}」` : '없음';
+  });
+  await take('첫 3줄', async () => {
+    const b = (await rowsOf()).filter((r) => !r.head).slice(0, 3);
+    return b.length ? b.map((r, k) => `${k + 1}「${clean(r.text, 80)}」`).join(' ') : '없음';
+  });
+  // ── 8차 Z8-4 (iii) 결과 없음 문구(원문 대신 참/거짓) · 쪽 글(있으면 40자)
+  await take('결과 없음 문구', async () => (RESULT_NONE.test(String(await dlg.innerText())) ? '참' : '거짓'));
+  await take('쪽 글', async () => {
+    const p = (await dlg.locator(PAGER).allInnerTexts()).map((x) => String(x).trim()).filter(Boolean);
+    return p.length ? `「${clean(p[0], 40)}」` : '없음';
+  });
   return part.join(' · ');
 }
 async function waitListRows(page, dlg, t, pick, wait = LIST_WAIT) {
