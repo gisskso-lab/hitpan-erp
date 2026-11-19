@@ -2355,6 +2355,22 @@ guardAsync(TF2, async () => {
   check(TF2, ok, `끔 ${/글꼴 관문/.test(out.off.md) ? '줄 있음(틀림)' : '줄 없음'} · 켬 끝 코드 ${out.on.code} · 「${onLine.slice(0, 120)}」 · 통과 = 그대로 ${rOk.positive.why === r0.positive.why} · 실패 앞머리 ${String(rBad.positive.why).slice(0, 30)}`);
 });
 
+// T-FG4 11차 D7′ · D6(고침 1 §8-4 · 고침 2 §5 · §1-10-0 (8)) — 꼬리표 글자(법무 ㉣) · 결과표 머리 · ㉤ 두 칸 · 굵게 요청 → 600 파일 · R6 계획 글자
+const TFG4 = 'T-FG4 11차 D7′ 꼬리표 글자 · 결과표 머리 · ㉤ 두 칸 · 굵게 600 칸 · D6 R6 계획(run R6 · 잡 r6-main-read · qpdf false)';
+guard(TFG4, () => {
+  const base = J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [], fontGate: { ok: true, why: '글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬', pdfFonts: ['ABCDEF+PrintSubstitute-Regular'], boldWeight: 600 } });
+  const md = J.toMarkdown({ run: 'R6', job: 'r6-main-read', board: 'main' }, base, null);
+  const mdNoGate = J.toMarkdown({ run: 'R6', job: 'x', board: 'main' }, J.judgeRun({ cells: [], board: 'main', factsById: {}, positive: F.POSITIVE_CONTROL, probeSelftestOk: true, groups: [] }), null);
+  const plan = JSON.parse(fs.readFileSync(path.join(__dirname, 'plan.json'), 'utf8'));
+  const r6 = plan.runs.R6 || {};
+  const job = (r6.jobs || [])[0] || {};
+  const tagOk = J.FONT_TAG === '대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1, © NAVER Corp.)';
+  const ok = tagOk && md.includes(`- 〔${J.FONT_TAG}〕`) && mdNoGate.includes(`- 〔${J.FONT_TAG}〕`)
+    && md.includes('- 요청 이름 = Malgun Gothic · PDF 실제 글꼴 칸(사실 파일 값 그대로) = ABCDEF+PrintSubstitute-Regular') && md.includes('- 굵게 요청 → 600 파일: 굵게 파일 usWeightClass = 600')
+    && plan.run === 'R6' && r6.jobs.length === 1 && job.id === 'r6-main-read' && job.board === 'main' && job.tenant === 'A' && job.phase === 'read' && job.patch === '' && job.qpdf === false && !r6.blocked;
+  check(TFG4, ok, `꼬리표 ${tagOk ? '○' : '×'} · 머리 ${md.includes(`〔${J.FONT_TAG}〕`) ? '○' : '×'} · ㉤ ${md.includes('요청 이름 = Malgun Gothic') ? '○' : '×'} · 600 ${md.includes('usWeightClass = 600') ? '○' : '×'} · 계획 ${plan.run} · ${job.id || '잡 없음'} · qpdf ${job.qpdf}`);
+});
+
 // ⬛ [낡은 끝 줄 2 · 1~3차-b] console.log(`인쇄 자체시험 끝 — 통과 ${pass} · 실패 ${fail}`); process.exitCode = fail === 0 ? 0 : 1;
 // 🔴 4차 — 비동기 경우(가짜 fetch)를 차례로 끝낸 뒤 같은 끝 줄
 (async () => {

@@ -1,7 +1,7 @@
 {
   "schema": "print-plan/1",
   "about": "W-G1-51 인쇄 작3 갈래 Z 런 계획 — 작업지시서 §4-1 그대로 · 상한 Z 4 · 고침 6 · 런마다 run 칸만 바꿔 커밋(yml 무변) · 개발명세서 §3 ⑧ · §4",
-  "run": "Z2",
+  "run": "R6",
   "cap": { "Z": 4, "fix": 6 },
   "runs": {
     "Z1": {
@@ -34,7 +34,10 @@
     "R3": { "what": "심은 결함 묶음 S 11(⑨ⓐⓑⓒ 포함 · qpdf)", "blocked": "갈래 A~F 코드 뒤 · 예상 실패 사유 런 전 고정", "jobs": [] },
     "R4": { "what": "R1~R3 의 미측정 · 차림 불가 칸만", "blocked": "R1~R3 뒤", "jobs": [] },
     "R5": { "what": "예비", "blocked": "쓰면 PM 보고", "jobs": [] },
-    "R6": { "what": "예비", "blocked": "쓰면 PM 보고", "jobs": [] }
+    "R6": {
+      "what": "비교(main) — 대표 §51 · 글꼴 고친 장치 · 고치기 전 판 · 테넌트 A",
+      "jobs": [ { "id": "r6-main-read", "board": "main", "tenant": "A", "phase": "read", "patch": "", "qpdf": false } ]
+    }
   },
   "expectedReasons": {
     "about": "HQA ⑦ — 런 전 고정(개발명세서 §2 · 설계 :263 글자 그대로) · 나머지 심은 결함 = 미고정(패치 대상 코드 없음)",

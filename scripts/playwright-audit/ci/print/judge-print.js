@@ -352,7 +352,9 @@ function judgeCell(cell, ctx) {
  *   CI 리눅스 판에는 실물 맑은 고딕이 없어 줄바꿈 · 잘림 · 좌표가 대체 글꼴로 잡힌다 → 그 기준(fields 칸 상자 · noStdHeaderOutside 상자 밖 · style 잘림)을 쓴
  *   판정 행(빨강 · 초록 · 바뀐 모양)에 꼬리표. 판정 칸(cat)은 안 바꿈(꼬리표 = 읽는 법). 절대 좌표 판정은 이 PC(윈도우 · 실물 맑은 고딕) 몫.
  */
-const FONT_TAG = '대체 글꼴 기준';
+// ⬛ [낡은 줄 · 10차 D7] const FONT_TAG = '대체 글꼴 기준';
+// 🔴 11차 D7′(고침 1 §8-4 · 법무 ㉣ · CTO ⓖ) — 꼬리표 글자 넓힘(D7 코드 갈래 무변 · 출처 표기 = 감사 표기 범위)
+const FONT_TAG = '대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1, © NAVER Corp.)';
 const COORD_KINDS = ['fields', 'noStdHeaderOutside', 'style'];
 function fontTag(cell, r) {
   if (![CAT.RED, CAT.GREEN, CAT.CHANGED].includes(r.cat)) return r;
@@ -664,6 +666,12 @@ function toMarkdown(meta, res, nine) {
   L.push('');
   L.push(`- 판독기 양성 대조(먼저 · F4 ⑴ · HQA ②): **${res.positive.ok ? '통과' : '실패'}** — ${res.positive.why}`);
   if (res.fontGate) L.push(`- 글꼴 관문(T8 · 판정 관문): **${res.fontGate.ok ? '통과' : '실패 — 판정 0'}** — ${res.fontGate.why}${res.fontGate.boldNote ? ` · ${res.fontGate.boldNote}` : ''}`); // 🔴 11차 D2′
+  // 🔴 11차 D7′(§8-4 법무 ㉣ · ㉤ · 고침 2 §5) — 결과표 머리 꼬리표 · ㉤ 두 칸(요청 이름 · PDF 실제 글꼴 칸 그대로) · 굵게 요청 → 600 파일
+  L.push(`- 〔${FONT_TAG}〕`);
+  if (res.fontGate) {
+    L.push(`- 요청 이름 = Malgun Gothic · PDF 실제 글꼴 칸(사실 파일 값 그대로) = ${(res.fontGate.pdfFonts || []).join(', ') || '기록 없음'}`);
+    L.push(`- 굵게 요청 → 600 파일: 굵게 파일 usWeightClass = ${res.fontGate.boldWeight == null ? '기록 없음' : res.fontGate.boldWeight}(기대 600 · 700 아님)`);
+  }
   L.push('- 대표 DB 조건 재현 = 미측정(고정 줄 · 작업지시서 §4-2 HQA ④)');
   if (res.stops.length) L.push(`- 🔴 멈춤: ${res.stops.join(' / ')}`);
   L.push('');
@@ -738,6 +746,10 @@ function main(outDir) {
       probeOk: doc.probeSelftestOk === true, basicHangul: !!bf && wordsOf(bf).some((w) => /[가-힣]/.test(String(w.t))),
     });
     console.log(fontGate0.why);
+    // 🔴 11차 D7′ — ㉤ PDF 실제 글꼴 칸(전 사실 파일 · 값 그대로 · 12 까지) · 굵게 파일 굵기(사실 파일)
+    const ff = rd('font-facts.json');
+    fontGate0.pdfFonts = [...new Set(Object.values(factsById).flatMap((f) => pagesOf(f).flatMap((p) => (Array.isArray(p.fonts) ? p.fonts : []))))].slice(0, 12);
+    fontGate0.boldWeight = ff && Array.isArray(ff.files) ? (ff.files.find((x) => x && x.role === 'bold') || {}).weight : undefined;
   }
   // ⬛ [낡은 줄 · 1~10차] const res = judgeRun({ cells: doc.cells, board: doc.board, factsById, positive: doc.positive, groups: doc.groups, probeSelftestOk: doc.probeSelftestOk });
   const res = judgeRun({
