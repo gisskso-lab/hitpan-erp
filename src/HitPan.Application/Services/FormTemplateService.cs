@@ -466,6 +466,19 @@ public class FormTemplateService : IFormTemplateService
         NotFound,
         /// <summary>양식지가 아니거나 꺼진 양식 — 대상 아님 · 원본 무변.</summary>
         NotTarget,
+        /// <summary>
+        /// 원본(또는 이어 쓸 후보 Y) 그림 파일을 지금 읽지 못했다 — 접근 거부 · 잠김 · 경로가 폴더 등 「없음」 이 아닌 읽기 실패.
+        /// 그 행 무변(그림 찍기 켬 유지) · 다음 기동에 다시(고침 1 · [3-V] P2-1 · PM 판단).
+        /// </summary>
+        PictureUnreadable,
+    }
+
+    /// <summary>그림 파일 읽기 결과(고침 1) — 「없음」 은 파일 · 폴더가 진짜 없을 때만.</summary>
+    private enum PictureFileState
+    {
+        Present,
+        Missing,
+        Unreadable,
     }
 
     /// <summary>Y 템플릿 만들기 결과 — 만든(또는 이어 쓴) Y 의 id 는 Created · Reused 일 때만.</summary>
@@ -744,9 +757,24 @@ public class FormTemplateService : IFormTemplateService
 
         var wasEffectiveDefault = string.Equals(src.TemplateId, effectiveDefaultId, StringComparison.Ordinal);
 
+        // 🔴 고침 1([3-V] P2-1 · PM 판단) — 「그림 없음」 = 파일 · 폴더가 진짜 없을 때만(위 ⓘ-6 줄 그대로).
+        //   접근 거부 · 잠김 · 경로가 폴더 등 그 밖 읽기 실패 = 그 행 무변(켬 유지) · 다음 기동에 다시 · 이름 붙은 경고.
+        //   종전: 존재 확인(`File.Exists`)이 거짓이면 모두 「없음」 → 원본 켬이 한 번의 읽기 실패로 영구히 꺼졌다.
+        var srcRead = await ReadPictureHashAsync(tenantId, picture.FullPath, ct);
+        if (srcRead.State == PictureFileState.Missing)
+        {
+            await LowerSourcePrintBackgroundAsync(db, tx, tenantId, templateId, ct);
+            return new YTemplateResult(YTemplateOutcome.NoPicture, null);
+        }
+        if (srcRead.State == PictureFileState.Unreadable || srcRead.Hash is null)
+        {
+            return new YTemplateResult(YTemplateOutcome.PictureUnreadable, null);
+        }
+
         // 재전진 멱등 — 같은 회사 · 같은 종에 Y 꼴 행(빈 A4 · 그림 찍음 · 활성)이 있고
         //   그림 해시 **그리고** 칸 좌표 글자가 같으면 복제 0(ⓘ-10 · J5 ⑵ · D-12). 여백 · 워터마크는 판정에 안 쓴다(설계 §7-3).
-        var srcHash = await HashFileAsync(picture.FullPath, ct);
+        // 종전(고침 1 전): var srcHash = await HashFileAsync(picture.FullPath, ct);
+        var srcHash = srcRead.Hash;
         string? reuseId = null;
         var candidates = await db.QueryAsync<(string TemplateId, string? BackgroundImageUrl)>(new CommandDefinition(
             @"SELECT template_id AS TemplateId, background_image_url AS BackgroundImageUrl
@@ -762,7 +790,16 @@ public class FormTemplateService : IFormTemplateService
         {
             var cPic = ResolveTenantPicture(tenantId, c.BackgroundImageUrl);
             if (cPic.FullPath is null) continue;
-            var cHash = await HashFileAsync(cPic.FullPath, ct);
+            // 종전(고침 1 전): var cHash = await HashFileAsync(cPic.FullPath, ct);
+            //   고침 1 — 후보 그림이 없음 = 이 후보 건너뜀(종전과 같음) · 읽기 실패 = 이어 쓸지 못 가림 →
+            //   그 행 무변 · 다음 기동에 다시(같은 그림 Y 가 둘 생기는 길을 막음 · 파일 · DB 쓰기 전 자리).
+            var cRead = await ReadPictureHashAsync(tenantId, cPic.FullPath, ct);
+            if (cRead.State == PictureFileState.Missing) continue;
+            if (cRead.State == PictureFileState.Unreadable || cRead.Hash is null)
+            {
+                return new YTemplateResult(YTemplateOutcome.PictureUnreadable, null);
+            }
+            var cHash = cRead.Hash;
             if (CryptographicOperations.FixedTimeEquals(srcHash, cHash))
             {
                 reuseId = c.TemplateId;
@@ -873,6 +910,11 @@ public class FormTemplateService : IFormTemplateService
                 _logger.LogWarning("[양식] 원본 그림이 그 회사 그림 폴더 밖이거나 사본 자리를 못 만들어 Y 템플릿을 만들지 않았다 — 원래 양식 그대로 · tenant={Tenant} source={Source}",
                     tenantId, templateId);
                 break;
+            case YTemplateOutcome.PictureUnreadable:
+                // 고침 1([3-V] P2-1) — 이름 붙은 경고 · 행 무변 · 다음 기동에 다시.
+                _logger.LogWarning("[양식] 원본 그림을 지금 읽지 못해 이번엔 Y 템플릿을 만들지 않았다 — 원래 양식 그대로(그림 찍기 켬 유지) · 다음 기동에 다시 · tenant={Tenant} source={Source}",
+                    tenantId, templateId);
+                break;
             default:
                 _logger.LogInformation("[양식] Y 템플릿 대상 아님({Outcome}) — tenant={Tenant} source={Source}",
                     r.Outcome, tenantId, templateId);
@@ -898,6 +940,7 @@ public class FormTemplateService : IFormTemplateService
     /// 저장된 그림 경로를 그 회사 그림 폴더 안의 실제 파일로 푼다.
     /// Outside = 폴더 밖 · 링크를 지남 · 회사 값이 폴더 이름으로 못 쓰는 모양. FullPath null(Outside 아님) = 비었거나 파일 없음.
     /// </summary>
+    /// <remarks>고침 1([3-V] P2-1) — FullPath null(Outside 아님) = 저장값이 비었을 때뿐. 파일이 있는지 · 읽히는지는 <see cref="ReadPictureHashAsync"/> 가 가른다.</remarks>
     private (string? FullPath, bool Outside) ResolveTenantPicture(string tenantId, string? stored)
     {
         if (string.IsNullOrWhiteSpace(stored)) return (null, false);
@@ -915,7 +958,10 @@ public class FormTemplateService : IFormTemplateService
             var full = Path.GetFullPath(stored);
             if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return (null, true);
             if (PassesThroughLink(full)) return (null, true);
-            return File.Exists(full) ? (full, false) : (null, false);
+            // 종전(고침 1 전): return File.Exists(full) ? (full, false) : (null, false);
+            //   고침 1([3-V] P2-1) — 존재 확인은 여기서 안 한다. `File.Exists` 는 권한 거부 · 잠김 · 폴더에도 거짓이라
+            //   「없음」 과 「못 읽음」 을 못 가른다 → 읽는 자리(<see cref="ReadPictureHashAsync"/>)에서 예외 종류로 가른다.
+            return (full, false);
         }
         catch (Exception ex)
         {
@@ -980,6 +1026,32 @@ public class FormTemplateService : IFormTemplateService
     {
         await using var fs = File.OpenRead(fullPath);
         return await SHA256.HashDataAsync(fs, ct);
+    }
+
+    /// <summary>
+    /// 고침 1([3-V] P2-1 · PM 판단) — 그림을 읽어 해시를 낸다. 「없음」 = 파일(`FileNotFoundException`) ·
+    /// 폴더(`DirectoryNotFoundException`)가 진짜 없을 때만. 접근 거부 · 잠김 · 경로가 폴더 · 그 밖 입출력 실패 = 「못 읽음」.
+    /// 취소는 잡지 않는다(위로 다시 감).
+    /// </summary>
+    private async Task<(PictureFileState State, byte[]? Hash)> ReadPictureHashAsync(
+        string tenantId, string fullPath, CancellationToken ct)
+    {
+        try
+        {
+            return (PictureFileState.Present, await HashFileAsync(fullPath, ct));
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            _logger.LogWarning(ex, "[양식] 그림 파일이 없다 — 「그림 없음」 으로 본다 · tenant={Tenant}", tenantId);
+            return (PictureFileState.Missing, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex,
+                "[양식] 그림 파일을 지금 읽지 못했다(접근 거부 · 잠김 · 폴더 등) — 그 양식 그대로(그림 찍기 켬 유지) · 다음 기동에 다시 · tenant={Tenant}",
+                tenantId);
+            return (PictureFileState.Unreadable, null);
+        }
     }
 
     /// <summary>양식지(`preprint`)는 그림 찍기 0 으로 저장한다(W-G1-51 F-1 · 측정 ⓘ-11). 빈 A4 는 요청값 그대로.</summary>
