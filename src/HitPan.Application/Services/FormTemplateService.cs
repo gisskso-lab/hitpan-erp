@@ -510,6 +510,9 @@ public class FormTemplateService : IFormTemplateService
 
         var db = _unitOfWork.GetDbConnection();
         await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
+        // 고침 1([4] P2-1 · [3-V] P2-2) — 이번 거래가 만든 그림 사본. 커밋 전에 빠져나가면(되돌림 · 예외) 지운다(finally).
+        var newCopies = new List<string>();
+        var commitStarted = false;
         try
         {
             var formType = await db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
@@ -525,8 +528,10 @@ public class FormTemplateService : IFormTemplateService
             var effectiveDefaultId = await LockTypeAndReadEffectiveDefaultAsync(
                 db, tx.DbTransaction, tenantId, formType, ct);
             var result = await CreateYTemplateCoreAsync(
-                db, tx.DbTransaction, tenantId, templateId, effectiveDefaultId, ct);
+                db, tx.DbTransaction, tenantId, templateId, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
+            commitStarted = true;
             await tx.CommitAsync(ct);
+            newCopies.Clear();   // 고침 1 — 확정된 사본은 지울 대상 아님
             LogYOutcome(tenantId, templateId, result);
             return result;
         }
@@ -535,6 +540,10 @@ public class FormTemplateService : IFormTemplateService
             _logger.LogWarning(ex, "[양식] Y 템플릿 만들기 거절 — 유일 키 충돌(1062) · 행 0 · tenant={Tenant} template={Template}",
                 tenantId, templateId);
             throw new InvalidOperationException(DuplicateTemplateMessage(ex));
+        }
+        finally
+        {
+            DiscardUncommittedCopies(tenantId, newCopies, commitStarted);
         }
     }
 
@@ -618,6 +627,10 @@ public class FormTemplateService : IFormTemplateService
         foreach (var g in groups)
         {
             ct.ThrowIfCancellationRequested();
+            // 고침 1([4] P2-1 · [3-V] P2-2) — 이 (회사 · 종) 거래가 만든 그림 사본. 되돌림 · 예외 · 취소 때 지운다(finally ·
+            //   거래는 try 블록을 나갈 때 이미 되돌려짐). 커밋을 시작했으면 지우지 않는다(확정 여부를 모름 · 그림 잃는 쪽보다 남는 쪽).
+            var newCopies = new List<string>();
+            var commitStarted = false;
             try
             {
                 await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
@@ -636,10 +649,12 @@ public class FormTemplateService : IFormTemplateService
                 foreach (var id in ids)
                 {
                     var r = await CreateYTemplateCoreAsync(
-                        db, tx.DbTransaction, g.TenantId, id, effectiveDefaultId, ct);
+                        db, tx.DbTransaction, g.TenantId, id, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
                     results.Add((id, r));
                 }
+                commitStarted = true;
                 await tx.CommitAsync(ct);
+                newCopies.Clear();   // 고침 1 — 확정된 사본은 지울 대상 아님
 
                 foreach (var (id, r) in results)
                 {
@@ -657,6 +672,10 @@ public class FormTemplateService : IFormTemplateService
                 _logger.LogWarning(ex,
                     "[양식 옮기기] 이 회사 · 양식 종류는 되돌렸다 — 원래 양식 그대로 · 다음 기동에 다시 · tenant={Tenant} type={Type}",
                     g.TenantId, g.FormType);
+            }
+            finally
+            {
+                DiscardUncommittedCopies(g.TenantId, newCopies, commitStarted);
             }
         }
         return created;
@@ -726,8 +745,10 @@ public class FormTemplateService : IFormTemplateService
     /// </summary>
     private async Task<YTemplateResult> CreateYTemplateCoreAsync(
         DbConnection db, DbTransaction tx, string tenantId, string templateId,
-        string? effectiveDefaultId, CancellationToken ct)
+        string? effectiveDefaultId, List<string> newCopies, CancellationToken ct)
     {
+        // 종전(고침 1 전) 인자 끝: string? effectiveDefaultId, CancellationToken ct)
+        //   고침 1([4] P2-1 · [3-V] P2-2) — newCopies = 이번에 만든 그림 사본 경로를 여기 더한다 · 호출부가 커밋 전 이탈 때 지운다.
         var src = await db.QueryFirstOrDefaultAsync<YSourceRow>(new CommandDefinition(
             @"SELECT template_id AS TemplateId, form_type AS FormType, template_name AS TemplateName,
                      paper_mode AS PaperMode, background_image_url AS BackgroundImageUrl,
@@ -817,6 +838,7 @@ public class FormTemplateService : IFormTemplateService
                 // 사본 자리를 못 만듦(폴더 쓰기 막힘 · 링크) — 원본 무변 · 다음 기동에 다시(ⓘ-12).
                 return new YTemplateResult(YTemplateOutcome.OutsideTenantRoot, null);
             }
+            newCopies.Add(copiedPath);   // 고침 1 — 사본이 생긴 바로 뒤에 적는다(아래 DB 문이 실패해도 지울 수 있게)
             yId = Guid.NewGuid().ToString();
         }
         else
@@ -883,6 +905,35 @@ public class FormTemplateService : IFormTemplateService
         await LowerSourcePrintBackgroundAsync(db, tx, tenantId, templateId, ct);
 
         return new YTemplateResult(reuseId is null ? YTemplateOutcome.Created : YTemplateOutcome.Reused, yId);
+    }
+
+    /// <summary>
+    /// 고침 1([4] P2-1 · [3-V] P2-2) — 커밋 전에 빠져나간 거래(되돌림 · 예외 · 취소)가 만든 그림 사본만 지운다.
+    /// 커밋을 시작했는데 여기 왔으면(커밋 중 예외) DB 에 Y 가 섰는지 모르므로 지우지 않고 경고만 남긴다 — 선 Y 의 그림을 잃는 쪽보다 파일이 남는 쪽이 안전.
+    /// 지움 실패 = 경고 1줄 · 원래 예외를 가리지 않게 여기서 다 잡는다(#15).
+    /// </summary>
+    private void DiscardUncommittedCopies(string tenantId, List<string> newCopies, bool commitStarted)
+    {
+        if (newCopies.Count == 0) return;
+        if (commitStarted)
+        {
+            _logger.LogWarning(
+                "[양식] 거래 확정 도중 멈춰 Y 템플릿 그림 사본 {Count}개를 그대로 두었다 — 확정 여부를 몰라 지우지 않음 · tenant={Tenant}",
+                newCopies.Count, tenantId);
+            return;
+        }
+        foreach (var path in newCopies)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[양식] 되돌린 Y 템플릿의 그림 사본을 지우지 못했다 — 파일만 남음 · tenant={Tenant}", tenantId);
+            }
+        }
+        newCopies.Clear();
     }
 
     private static Task<int> LowerSourcePrintBackgroundAsync(
