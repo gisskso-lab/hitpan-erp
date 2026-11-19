@@ -1,0 +1,218 @@
+{
+  "stage": "M0",
+  "ok": true,
+  "mode": "armed",
+  "head": "7329cf25cde05e7d25936f35b333d563cb5dea1f",
+  "github_sha": "7329cf25cde05e7d25936f35b333d563cb5dea1f",
+  "mode_line": "armed:7b945ca0609a2d4214d626e200a5b229a23dc042:r1",
+  "run_id": "44581671955",
+  "run_attempt": "1",
+  "ref": "refs/heads/hqa/20261116-S4-gh실측-장치",
+  "fixture_tree_expected": "47a909c8e7f7d11c89f455d8ff28ca2b9e8fc8e2",
+  "base_expected": "88085da1d797b915b8e8be314517af180d0b9939",
+  "feat_expected": "16e88c01092d33eb643c6cac454703f00efa02ac",
+  "checks": [
+    {
+      "check": "head_is_event",
+      "ok": true,
+      "detail": "HEAD=7329cf25cde05e7d25936f35b333d563cb5dea1f"
+    },
+    {
+      "check": "run_attempt_one",
+      "ok": true,
+      "detail": "run_attempt=1"
+    },
+    {
+      "check": "m0_1_fixture_tree",
+      "ok": true,
+      "detail": "tree=47a909c8e7f7d11c89f455d8ff28ca2b9e8fc8e2"
+    },
+    {
+      "check": "m0_2_base_ancestor",
+      "ok": true,
+      "detail": "base=88085da1d797b915b8e8be314517af180d0b9939"
+    },
+    {
+      "check": "m0_2_parent_ancestor",
+      "ok": true,
+      "detail": "parent=b967b1b007fb519d9a91537fbef911e818e950de"
+    },
+    {
+      "check": "m0_2_root_ancestor",
+      "ok": true,
+      "detail": "parent=01161edb5618b5e34ea2c5e655dcaaf2333d3a68"
+    },
+    {
+      "check": "m0_3_diff_allowed",
+      "ok": true,
+      "detail": "changed=27"
+    },
+    {
+      "check": "m0_3b_secret_blobs",
+      "ok": true,
+      "detail": "checked=4"
+    },
+    {
+      "check": "m0_4_ls_remote_lines",
+      "ok": true,
+      "detail": "lines=3"
+    },
+    {
+      "check": "m0_4_feat_head",
+      "ok": true,
+      "detail": "feat=16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "check": "m0_4_fixture_head",
+      "ok": true,
+      "detail": "fixture=88085da1d797b915b8e8be314517af180d0b9939"
+    },
+    {
+      "check": "m0_4_main_recorded",
+      "ok": true,
+      "detail": "main=36f491358d45365ad80847732da099070cce44a0"
+    },
+    {
+      "check": "m0_5_blobs",
+      "ok": true,
+      "detail": "10 pairs"
+    },
+    {
+      "check": "mode_value",
+      "ok": true,
+      "detail": "armed:7b945ca0609a2d4214d626e200a5b229a23dc042:r1"
+    },
+    {
+      "check": "armed_one_parent",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "armed_parent_is_D",
+      "ok": true,
+      "detail": "parent=7b945ca0609a2d4214d626e200a5b229a23dc042"
+    },
+    {
+      "check": "armed_diff_only_mode",
+      "ok": true,
+      "detail": "tools/hqa-s4-measure/MODE"
+    },
+    {
+      "check": "armed_one_line",
+      "ok": true,
+      "detail": "1/1"
+    },
+    {
+      "check": "armed_prev_mode",
+      "ok": true,
+      "detail": "rehearsal"
+    },
+    {
+      "check": "<가림:1>",
+      "ok": true,
+      "detail": "absent"
+    },
+    {
+      "check": "armed_hqa_confirmed",
+      "ok": true,
+      "detail": "{\"hqa_gate\":\"confirmed\",\"problems\":[]}"
+    }
+  ],
+  "ls_remote_start": [
+    {
+      "ref": "refs/heads/feat/20261107-백오피스S4닫기",
+      "sha": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "ref": "refs/heads/hqa/20261107-S4-시험앱",
+      "sha": "88085da1d797b915b8e8be314517af180d0b9939"
+    },
+    {
+      "ref": "refs/heads/main",
+      "sha": "36f491358d45365ad80847732da099070cce44a0"
+    }
+  ],
+  "blobs": [
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusCell.razor",
+      "fixture_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/After/CsStatusMenu.cs",
+      "fixture_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusMenu.cs",
+      "src_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Vocab/CsVocab.cs",
+      "fixture_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsVocab.cs",
+      "src_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "match": true,
+      "commit": "16e88c01092d33eb643c6cac454703f00efa02ac"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/Components/A2/CsStatusCell.razor",
+      "fixture_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "match": true,
+      "commit": "2a6a0ee10fcc3c79791f49747070009b25290fec"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "2a6a0ee10fcc3c79791f49747070009b25290fec"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-<가림:2>.razor",
+      "fixture_blob": "644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138",
+      "match": true,
+      "commit": "e456e4f6a0b2dc36f14ef53f64106d455f363ecb"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "e456e4f6a0b2dc36f14ef53f64106d455f363ecb"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-<가림:3>.razor",
+      "fixture_blob": "8830faf15f302549bba16005ea688472979c60ae",
+      "src_path": "src/HitPan.Backoffice/Components/Pages/Platform/Components/CsStatusCell.razor",
+      "src_blob": "8830faf15f302549bba16005ea688472979c60ae",
+      "match": true,
+      "commit": "74a76c58f3005dcc92be0a2043918dcc483e6220"
+    },
+    {
+      "fixture_path": "tools/hqa-s4-fixture/wwwroot/css/after/backoffice-dashboard.css",
+      "fixture_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "src_path": "src/HitPan.Backoffice/wwwroot/css/backoffice-dashboard.css",
+      "src_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "match": true,
+      "commit": "74a76c58f3005dcc92be0a2043918dcc483e6220"
+    }
+  ],
+  "generated_utc": "2026-11-19T17:52:03.656Z"
+}

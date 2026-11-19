@@ -1,0 +1,57 @@
+{
+  "stage": "M3",
+  "ok": true,
+  "command": "npm ci --ignore-scripts --no-audit --no-fund",
+  "ignore_scripts": true,
+  "npm_ci_rc": 0,
+  "npm_version": "10.9.9",
+  "lockfile_version": 3,
+  "pw_version": "1.62.1",
+  "blob_match": [
+    {
+      "file": "package.json",
+      "match": true
+    },
+    {
+      "file": "package-lock.json",
+      "match": true
+    }
+  ],
+  "lock_ok": true,
+  "install_scripts_n": 1,
+  "packages": [
+    {
+      "name": "fsevents",
+      "version": null,
+      "lock_version": "2.3.2",
+      "resolved": null,
+      "installed": false,
+      "optional": true,
+      "lock_match": false,
+      "install_script": true
+    },
+    {
+      "name": "playwright",
+      "version": "1.62.1",
+      "lock_version": "1.62.1",
+      "resolved": "https://registry.npmjs.org/playwright/-/playwright-1.62.1.tgz",
+      "installed": true,
+      "optional": false,
+      "lock_match": true,
+      "install_script": false
+    },
+    {
+      "name": "playwright-core",
+      "version": "1.62.1",
+      "lock_version": "1.62.1",
+      "resolved": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.62.1.tgz",
+      "installed": true,
+      "optional": false,
+      "lock_match": true,
+      "install_script": false
+    }
+  ],
+  "lock_file": "tools/hqa-s4-measure/pw/package-lock.json (device tree)",
+  "pw_dir_exact": true,
+  "dev_ref": "GITHUB_SHA"
+}

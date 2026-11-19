@@ -1,0 +1,343 @@
+{
+  "stage": "M1",
+  "check": "src_vs_tree",
+  "ok": true,
+  "judged_by": "norm_blob = git hash-object --path (repo attributes · core.autocrlf=false)",
+  "tree_files": 41,
+  "tar_files": 41,
+  "norm_match": 41,
+  "raw_match": 41,
+  "filter_only_match": 0,
+  "tree_only": [],
+  "tar_only": [],
+  "files": [
+    {
+      "path": ".gitattributes",
+      "tree_blob": "c038ebe3454947439d00e8a71c028af4133c86dd",
+      "raw_blob": "c038ebe3454947439d00e8a71c028af4133c86dd",
+      "norm_blob": "c038ebe3454947439d00e8a71c028af4133c86dd",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/A2/CsStatusCell.razor",
+      "tree_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "raw_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "norm_blob": "49d7502d48f934bfe1d443ae347c5f2e082c82fc",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/A2/_Imports.razor",
+      "tree_blob": "1014a9b87f07abd15dbf3d19b73386e590160af8",
+      "raw_blob": "1014a9b87f07abd15dbf3d19b73386e590160af8",
+      "norm_blob": "1014a9b87f07abd15dbf3d19b73386e590160af8",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/After/CsStatusCell.razor",
+      "tree_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "raw_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "norm_blob": "9c358a00d2320e2308ff56f2cec1030a0f582261",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/After/CsStatusMenu.cs",
+      "tree_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "raw_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "norm_blob": "1aa0fc6aebc21c6c9e72a40bb4f77c18acad507a",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/After/_Imports.razor",
+      "tree_blob": "e970df8d29222e0469553a89fd120a817972ab7a",
+      "raw_blob": "e970df8d29222e0469553a89fd120a817972ab7a",
+      "norm_blob": "e970df8d29222e0469553a89fd120a817972ab7a",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/App.razor",
+      "tree_blob": "65663068cc1e63e6098b8c1f6511a128992e6e4f",
+      "raw_blob": "65663068cc1e63e6098b8c1f6511a128992e6e4f",
+      "norm_blob": "65663068cc1e63e6098b8c1f6511a128992e6e4f",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Before/CsStatusCell.razor",
+      "tree_blob": "1eef106a401e900283a4af7997f68585cdf9271d",
+      "raw_blob": "1eef106a401e900283a4af7997f68585cdf9271d",
+      "norm_blob": "1eef106a401e900283a4af7997f68585cdf9271d",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Before/_Imports.razor",
+      "tree_blob": "eda8b033b7758f60b835b742bc693188f3818ce8",
+      "raw_blob": "eda8b033b7758f60b835b742bc693188f3818ce8",
+      "norm_blob": "eda8b033b7758f60b835b742bc693188f3818ce8",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "<가림:4>.razor",
+      "tree_blob": "644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138",
+      "raw_blob": "644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138",
+      "norm_blob": "644e27ebfb594c90cf4e9b755a7b9a0d2bb9f138",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/E1T3/_Imports.razor",
+      "tree_blob": "2a28b71c67c043a9959e829bfe709148600c11eb",
+      "raw_blob": "2a28b71c67c043a9959e829bfe709148600c11eb",
+      "norm_blob": "2a28b71c67c043a9959e829bfe709148600c11eb",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Pages/FixtureData.cs",
+      "tree_blob": "d17adfbdf2fcf6620ce7c0152dbcf55f7481d7bb",
+      "raw_blob": "d17adfbdf2fcf6620ce7c0152dbcf55f7481d7bb",
+      "norm_blob": "d17adfbdf2fcf6620ce7c0152dbcf55f7481d7bb",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Pages/FixturePage.razor",
+      "tree_blob": "03ccd5974f639efe83d76c44e057fc4476f9b033",
+      "raw_blob": "03ccd5974f639efe83d76c44e057fc4476f9b033",
+      "norm_blob": "03ccd5974f639efe83d76c44e057fc4476f9b033",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Pages/FixturePageA2.razor",
+      "tree_blob": "95594cc05c97152ad39437cae46e5269cb12b378",
+      "raw_blob": "95594cc05c97152ad39437cae46e5269cb12b378",
+      "norm_blob": "95594cc05c97152ad39437cae46e5269cb12b378",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "<가림:5>.razor",
+      "tree_blob": "f53e7d9343c399f4396ea61f9935d10063f3407d",
+      "raw_blob": "f53e7d9343c399f4396ea61f9935d10063f3407d",
+      "norm_blob": "f53e7d9343c399f4396ea61f9935d10063f3407d",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "<가림:6>.razor",
+      "tree_blob": "7fe546f64ff1e7da3be9c0345f028b597a5d7174",
+      "raw_blob": "7fe546f64ff1e7da3be9c0345f028b597a5d7174",
+      "norm_blob": "7fe546f64ff1e7da3be9c0345f028b597a5d7174",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Pages/Home.razor",
+      "tree_blob": "6d6a133ae73ad0abd920752c122d048e2c3c0f43",
+      "raw_blob": "6d6a133ae73ad0abd920752c122d048e2c3c0f43",
+      "norm_blob": "6d6a133ae73ad0abd920752c122d048e2c3c0f43",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Pages/_Imports.razor",
+      "tree_blob": "22620b8700bd69ccc7c31c33814bf7075c46a1c5",
+      "raw_blob": "22620b8700bd69ccc7c31c33814bf7075c46a1c5",
+      "norm_blob": "22620b8700bd69ccc7c31c33814bf7075c46a1c5",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/Routes.razor",
+      "tree_blob": "af087d9afa0848a1d6ddee463c256103b774b7a8",
+      "raw_blob": "af087d9afa0848a1d6ddee463c256103b774b7a8",
+      "norm_blob": "af087d9afa0848a1d6ddee463c256103b774b7a8",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "<가림:7>.razor",
+      "tree_blob": "8830faf15f302549bba16005ea688472979c60ae",
+      "raw_blob": "8830faf15f302549bba16005ea688472979c60ae",
+      "norm_blob": "8830faf15f302549bba16005ea688472979c60ae",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/V2/_Imports.razor",
+      "tree_blob": "13d692fb304b7c41cc76a7024db00a56b94484f7",
+      "raw_blob": "13d692fb304b7c41cc76a7024db00a56b94484f7",
+      "norm_blob": "13d692fb304b7c41cc76a7024db00a56b94484f7",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Components/_Imports.razor",
+      "tree_blob": "3ee1ac7ae70a3c5b79b8e35aff5aa95a1d505829",
+      "raw_blob": "3ee1ac7ae70a3c5b79b8e35aff5aa95a1d505829",
+      "norm_blob": "3ee1ac7ae70a3c5b79b8e35aff5aa95a1d505829",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "HqaS4Fixture.csproj",
+      "tree_blob": "de1c0ed19a4270d034b9d39b05b9e2cc59b2ae63",
+      "raw_blob": "de1c0ed19a4270d034b9d39b05b9e2cc59b2ae63",
+      "norm_blob": "de1c0ed19a4270d034b9d39b05b9e2cc59b2ae63",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Program.cs",
+      "tree_blob": "fafeee3f39e5ab91108f86a10b4d8a6c343a6075",
+      "raw_blob": "fafeee3f39e5ab91108f86a10b4d8a6c343a6075",
+      "norm_blob": "fafeee3f39e5ab91108f86a10b4d8a6c343a6075",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Properties/launchSettings.json",
+      "tree_blob": "3c54c4e231b0078e4337488ac90cd5e44d249c71",
+      "raw_blob": "3c54c4e231b0078e4337488ac90cd5e44d249c71",
+      "norm_blob": "3c54c4e231b0078e4337488ac90cd5e44d249c71",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "README.md",
+      "tree_blob": "28eca5c3e17e6ea06efd08faf91746fa99c184fb",
+      "raw_blob": "28eca5c3e17e6ea06efd08faf91746fa99c184fb",
+      "norm_blob": "28eca5c3e17e6ea06efd08faf91746fa99c184fb",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "Vocab/CsVocab.cs",
+      "tree_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "raw_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "norm_blob": "0ec65e70ef69b451458018cbdb749a98402c0cab",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/README.md",
+      "tree_blob": "84d4566066edb59f39ea0e3d08e24d73c815eec1",
+      "raw_blob": "84d4566066edb59f39ea0e3d08e24d73c815eec1",
+      "norm_blob": "84d4566066edb59f39ea0e3d08e24d73c815eec1",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/control-test.js",
+      "tree_blob": "c8b5242cd3d14d785a71930d50cc4c22117befa5",
+      "raw_blob": "c8b5242cd3d14d785a71930d50cc4c22117befa5",
+      "norm_blob": "c8b5242cd3d14d785a71930d50cc4c22117befa5",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/flow.js",
+      "tree_blob": "284856e3236ea190753bd07eb74678f7e289a145",
+      "raw_blob": "284856e3236ea190753bd07eb74678f7e289a145",
+      "norm_blob": "284856e3236ea190753bd07eb74678f7e289a145",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/loss150.jsonl",
+      "tree_blob": "27716759deb3959e6891be908644f9e65b3a7eb0",
+      "raw_blob": "27716759deb3959e6891be908644f9e65b3a7eb0",
+      "norm_blob": "27716759deb3959e6891be908644f9e65b3a7eb0",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/loss300.jsonl",
+      "tree_blob": "c6dd71b06e877b5036abe4a668da900c4bc74f1b",
+      "raw_blob": "c6dd71b06e877b5036abe4a668da900c4bc74f1b",
+      "norm_blob": "c6dd71b06e877b5036abe4a668da900c4bc74f1b",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/proxy2-instrumented.js",
+      "tree_blob": "681469006936cae012d3588dd05b10e8117cba9a",
+      "raw_blob": "681469006936cae012d3588dd05b10e8117cba9a",
+      "norm_blob": "681469006936cae012d3588dd05b10e8117cba9a",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/result.json",
+      "tree_blob": "73acb019aa705d90cec5611194eaa6ae45ece630",
+      "raw_blob": "73acb019aa705d90cec5611194eaa6ae45ece630",
+      "norm_blob": "73acb019aa705d90cec5611194eaa6ae45ece630",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "evidence/d-s4-1/summ.js",
+      "tree_blob": "60599a12ba28b77198a67206da2040c3e8c31be0",
+      "raw_blob": "60599a12ba28b77198a67206da2040c3e8c31be0",
+      "norm_blob": "60599a12ba28b77198a67206da2040c3e8c31be0",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "proxy/delay-proxy.js",
+      "tree_blob": "e944926bf25ffa4b8b8e77d36e1eabdd7a043696",
+      "raw_blob": "e944926bf25ffa4b8b8e77d36e1eabdd7a043696",
+      "norm_blob": "e944926bf25ffa4b8b8e77d36e1eabdd7a043696",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "wwwroot/css/after/backoffice-dashboard.css",
+      "tree_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "raw_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "norm_blob": "0e922200fc29f057aff2d9b4b436c815c177bdc3",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "wwwroot/css/before/backoffice-dashboard.css",
+      "tree_blob": "3f938234e1f776d1e917cd9f286ea72823da4034",
+      "raw_blob": "3f938234e1f776d1e917cd9f286ea72823da4034",
+      "norm_blob": "3f938234e1f776d1e917cd9f286ea72823da4034",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "wwwroot/css/common/app.css",
+      "tree_blob": "73a69d6f6829d98de0cfe14f8f9179e7bc318232",
+      "raw_blob": "73a69d6f6829d98de0cfe14f8f9179e7bc318232",
+      "norm_blob": "73a69d6f6829d98de0cfe14f8f9179e7bc318232",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "wwwroot/css/common/backoffice-v2.css",
+      "tree_blob": "9b7635789c9d8a8bf8e170d98b7f8d50f434005d",
+      "raw_blob": "9b7635789c9d8a8bf8e170d98b7f8d50f434005d",
+      "norm_blob": "9b7635789c9d8a8bf8e170d98b7f8d50f434005d",
+      "norm_match": true,
+      "raw_match": true
+    },
+    {
+      "path": "wwwroot/css/common/bootstrap.min.css",
+      "tree_blob": "39934146ffdc3af1e17b83657576b2d21f3cbecd",
+      "raw_blob": "39934146ffdc3af1e17b83657576b2d21f3cbecd",
+      "norm_blob": "39934146ffdc3af1e17b83657576b2d21f3cbecd",
+      "norm_match": true,
+      "raw_match": true
+    }
+  ]
+}

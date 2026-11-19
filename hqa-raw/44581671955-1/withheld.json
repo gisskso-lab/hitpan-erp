@@ -1,0 +1,22 @@
+{
+  "note": "names and pattern kinds only - values 0",
+  "stages": {
+    "measure": [],
+    "publish": [
+      {
+        "name": "run.json",
+        "kinds": [
+          "long-token"
+        ]
+      }
+    ]
+  },
+  "files": [
+    {
+      "name": "run.json",
+      "kinds": [
+        "long-token"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,5556 @@
+{
+  "marker": "장치 판독 — 판정 아님 · 판정 = HQA",
+  "rulesVersion": "s4gh-B-r1",
+  "rulesSha256": "62e8321fb410b262903a8de8da52255105b2e843597bcfccafe7d4b507d6ec06",
+  "judgeSha256": "3aee183a08bfebcef98f5289582ae9b12b6e7132473ac0edfbadd151291f1852",
+  "devicePlan": {
+    "cells": 120,
+    "plannedSamples": 396
+  },
+  "browserCondition": {
+    "headless": true,
+    "headlessShell": false,
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "deviceScaleFactor": 1,
+    "locale": "ko-KR"
+  },
+  "delayUnit": "per-direction-ms",
+  "escWait": {
+    "ms": 700,
+    "openPollMs": 50,
+    "ref": "HQA #850 댓글 6709803008 · 열린 메뉴 관측 → 700ms 유지 → Esc",
+    "pollAfterEscMaxMs": 3000,
+    "menuZeroFailCases": [
+      "kbd-open"
+    ]
+  },
+  "round": {
+    "state": "판독 가능",
+    "reasons": [],
+    "red": false
+  },
+  "totalsMeaning": {
+    "planned": "칸 수(옛 이름) — 계획 표본 수 = totals.plannedSamples"
+  },
+  "hiddenDefectSuspect": 0,
+  "totals": {
+    "planned": 120,
+    "samples": 396,
+    "valid": 369,
+    "unplanned": 0,
+    "badLines": 0,
+    "kbdUnreachable": 130,
+    "afterUnreachExcl": 0,
+    "validMismatch": 0,
+    "maskConflictSamples": 0,
+    "orderProblems": 0,
+    "cells": 120,
+    "plannedSamples": 396,
+    "gotSamples": 396,
+    "missingSamples": 0,
+    "excluded": {
+      "afterUnreachable": 0,
+      "deviceFailure": 27,
+      "outOfPlan": 0,
+      "maskConflict": 0,
+      "maskedRead": 0
+    },
+    "withheldFiles": 0,
+    "maskedReadSamples": 0,
+    "attemptRecords": 120,
+    "attemptOutOfPlan": 0
+  },
+  "hqaPendingOpenCount": 0,
+  "hqaPendingPlaceholder": [],
+  "deviceReadingText": {
+    "device_failure": "장치 실패",
+    "keyboard_unreachable": "키보드 도달 0(측정됨)"
+  },
+  "n1Contrast": "a2",
+  "contrastScreen": {
+    "N-1": "a2",
+    "I-4/mouse-open": "before",
+    "I-4/kbd-open": "e1t3",
+    "I-8": "v2"
+  },
+  "t3ReadUnit": "item",
+  "notMeasuredOpen": [
+    {
+      "item": "WebKit/Firefox",
+      "text": "미측정"
+    }
+  ],
+  "red": true,
+  "redReasons": [
+    "정해진 표본 수 모자람 0/3: I-4|mouse-open|after|d0|1280x720",
+    "정해진 표본 수 모자람 0/3: I-4|mouse-open|after|d150|1280x720",
+    "정해진 표본 수 모자람 0/3: I-4|mouse-open|after|d300|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|row-cell|after|d0|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|row-cell|after|d150|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|row-cell|after|d300|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|below-list|after|d0|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|below-list|after|d150|1280x720",
+    "정해진 표본 수 모자람 0/3: I-7|below-list|after|d300|1280x720"
+  ],
+  "maskConflicts": [],
+  "orderProblems": [],
+  "hqaPendingOpen": [],
+  "notMeasured": [
+    {
+      "item": "I-8",
+      "name": "T3",
+      "text": "미측정 · 정의 후보 있음(11/7 작업지시서 L306 · 공백 상태 칸) · HQA 확인 대기",
+      "hqaPending": "T3",
+      "superseded": "H4 I-8 측정",
+      "_superseded_표지": "H4 §7-1 — 이 줄은 지우지 않는다(#1). superseded 표지가 있는 줄은 판독기 · 관문이 미측정으로 세지 않는다(I-8 은 plan.items 에서 잰다)."
+    },
+    {
+      "item": "WebKit/Firefox",
+      "text": "미측정"
+    }
+  ],
+  "items": {
+    "N-1": {
+      "source": "16e88c01:docs/검증/외부/20261113_4X대상재결정_S4_A프라임_3인.md §6",
+      "ruleText": "`/before` 가 300 · 500 단 어디에서도 재현 못 하면 그 항목 **대조 무효**(통과로 안 셈) · `/after` 가 한 번이라도 회로 죽음 또는 다른 줄 변화면 **🔴** · 초점이 같은 줄 상태 단추가 아니면 **🟡**(기록 · K2 입력)",
+      "expectedAfter": "회로 삶 · 목록 닫힘 · 초점 = 같은 줄 상태 단추 · 다른 줄 변화 0",
+      "expectedBefore": "회로 죽음(재연결 표시)이 1회 이상 재현",
+      "contrastScreen": "a2",
+      "contrastReadRuleRef": "rules.json readingText.N-1.contrastReadRule",
+      "deviceFail": false,
+      "failCells": [],
+      "labels": [
+        "대조 무효",
+        "🟡"
+      ],
+      "contrastReason": null,
+      "beforeRecordOnly": {
+        "text": "기록만 · 판정에 안 씀",
+        "valid": 20,
+        "circuitDead": 0,
+        "kbdUnreachable": 20,
+        "failCells": [],
+        "failTag": null
+      },
+      "reading": "대조 무효 · 🟡",
+      "counts": {
+        "beforeContrastValid": 10,
+        "beforeCircuitDead": 0,
+        "afterValid": 20,
+        "afterCircuitDead": 0,
+        "afterOtherRowsChanged": 0,
+        "afterFocusOffRowBtn": 20,
+        "afterListNotClosed": 20,
+        "afterNotOpened": 0,
+        "beforeNotOpened": 0,
+        "beforeKbdUnreachable": 0,
+        "beforeKuDead": 0,
+        "afterUnreachExcl": 0
+      },
+      "byDelay": [
+        {
+          "delay": 0,
+          "beforeValid": 0,
+          "beforeDead": 0,
+          "afterValid": 5,
+          "afterDead": 0,
+          "recordOnlyBeforeValid": 5,
+          "recordOnlyBeforeDead": 0
+        },
+        {
+          "delay": 150,
+          "beforeValid": 0,
+          "beforeDead": 0,
+          "afterValid": 5,
+          "afterDead": 0,
+          "recordOnlyBeforeValid": 5,
+          "recordOnlyBeforeDead": 0
+        },
+        {
+          "delay": 300,
+          "beforeValid": 5,
+          "beforeDead": 0,
+          "afterValid": 5,
+          "afterDead": 0,
+          "recordOnlyBeforeValid": 5,
+          "recordOnlyBeforeDead": 0
+        },
+        {
+          "delay": 500,
+          "beforeValid": 5,
+          "beforeDead": 0,
+          "afterValid": 5,
+          "afterDead": 0,
+          "recordOnlyBeforeValid": 5,
+          "recordOnlyBeforeDead": 0
+        }
+      ],
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 10,
+        "cells": 10,
+        "of": 10,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 20,
+        "of": 20,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "대조 무효",
+        "reason": "A2 화면 가 같은 조건에서 실패를 재현 못 함(정본 A L21) · 통과로 안 셈",
+        "cells": [
+          {
+            "key": "N-1|arrows|a2|d300|1280x720",
+            "valid": 5,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          },
+          {
+            "key": "N-1|arrows|a2|d500|1280x720",
+            "valid": 5,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [],
+        "exposureOnly": {
+          "flag": null,
+          "reproducedCells": [],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "N-1|arrows|before|d0|1280x720",
+        "N-1|arrows|after|d0|1280x720"
+      ]
+    },
+    "N-2": {
+      "source": "16e88c01:docs/검증/외부/20261113_4X대상재결정_S4_A프라임_3인.md §6",
+      "afterText": "**관찰 칸 — 합불 기준 아님.** 미리 적은 예상: 「첫 항목 골라짐(9.3 기본 길)」",
+      "beforeText": "기록만",
+      "ruleText": "결과는 K2 별건 입력. A′ 판정에 쓰지 않는다",
+      "expected": "첫 항목 골라짐(9.3 기본 길)",
+      "deviceFail": false,
+      "failCells": [],
+      "reading": "판독값 기록 · 판정 = HQA",
+      "pickDeltaByScreen": [
+        {
+          "screen": "before",
+          "values": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "screen": "after",
+          "values": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "judgedBy": "HQA"
+    },
+    "I-6": {
+      "source": "16e88c01:docs/검증/외부/20261107_4X대상확인_S4_3인.md §3-2",
+      "expected": [
+        "두 목록 동시 열림 0"
+      ],
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」",
+      "deviceFail": false,
+      "failCells": [],
+      "afterValid": 18,
+      "afterMismatchExpected": 5,
+      "beforeValid": 18,
+      "beforeReproduced": 0,
+      "beforeKbdUnreachable": 18,
+      "afterUnreachExcl": 0,
+      "contrast": "대조 무효",
+      "reading": "판독값 기록 · 판정 = HQA",
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 12,
+        "cells": 12,
+        "of": 12,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 18,
+        "of": 18,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "대조 무효",
+        "reason": "/before 키보드 도달 0 — 자극 실행 불가(D1 재현) · 비교 성립 안 함",
+        "cells": [
+          {
+            "key": "I-6|esc|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-6|esc|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-6|esc|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-6|enter|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-6|enter|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-6|enter|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [],
+        "exposureOnly": {
+          "flag": null,
+          "reproducedCells": [],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "beforeFailRepro": {
+        "count": 0,
+        "text": "항목 실패 재현 수(D1 재현과 다른 뜻 · 옛 contrast 「재현됨」 의 뜻)"
+      },
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-6|esc|before|d0|1280x720",
+        "I-6|esc|after|d0|1280x720",
+        "I-6|enter|before|d0|1280x720",
+        "I-6|enter|after|d0|1280x720"
+      ]
+    },
+    "I-7": {
+      "source": "16e88c01:docs/검증/외부/20261107_4X대상확인_S4_3인.md §4 C5 · §3-3",
+      "expected": [
+        "행 클릭 0",
+        "연 줄뿐 · 다른 줄 0"
+      ],
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」",
+      "deviceFail": true,
+      "failCells": [
+        "I-7|row-cell|after|d0|1280x720",
+        "I-7|row-cell|after|d150|1280x720",
+        "I-7|row-cell|after|d300|1280x720",
+        "I-7|below-list|after|d0|1280x720",
+        "I-7|below-list|after|d150|1280x720",
+        "I-7|below-list|after|d300|1280x720"
+      ],
+      "afterValid": 0,
+      "afterMismatchExpected": 0,
+      "beforeValid": 18,
+      "beforeReproduced": 9,
+      "beforeKbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "contrast": "장치 실패",
+      "reading": "장치 실패",
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 12,
+        "cells": 12,
+        "of": 12,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 0,
+        "of": 18,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "성립",
+        "reason": null,
+        "cells": [
+          {
+            "key": "I-7|row-cell|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-7|row-cell|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-7|row-cell|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-7|below-list|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          },
+          {
+            "key": "I-7|below-list|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          },
+          {
+            "key": "I-7|below-list|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [
+          "I-7|row-cell|before|d0|1280x720",
+          "I-7|row-cell|before|d150|1280x720",
+          "I-7|row-cell|before|d300|1280x720"
+        ],
+        "exposureOnly": {
+          "flag": false,
+          "reproducedCells": [
+            "I-7|row-cell|before|d0|1280x720",
+            "I-7|row-cell|before|d150|1280x720",
+            "I-7|row-cell|before|d300|1280x720"
+          ],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": true,
+        "reasons": [
+          "정해진 표본 수 모자람 0/3"
+        ],
+        "cells": [
+          "I-7|row-cell|after|d0|1280x720",
+          "I-7|row-cell|after|d150|1280x720",
+          "I-7|row-cell|after|d300|1280x720",
+          "I-7|below-list|after|d0|1280x720",
+          "I-7|below-list|after|d150|1280x720",
+          "I-7|below-list|after|d300|1280x720"
+        ]
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "contrastByCase": {
+        "row-cell": {
+          "screen": "before",
+          "rule": "경우별 대조(보탬 G-3) — 경우마다 그 경우 대조 칸만으로 판독 · 한 경우의 장치 실패가 다른 경우 대조 칸을 덮지 않음 · 항목 contrastState(옛 묶음 판독)는 그대로",
+          "state": "성립",
+          "reason": null,
+          "cells": [
+            {
+              "key": "I-7|row-cell|before|d0|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            },
+            {
+              "key": "I-7|row-cell|before|d150|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            },
+            {
+              "key": "I-7|row-cell|before|d300|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            }
+          ],
+          "exprMismatchChanged": false,
+          "exprMismatchRemoved": 0,
+          "reproducedCells": [
+            "I-7|row-cell|before|d0|1280x720",
+            "I-7|row-cell|before|d150|1280x720",
+            "I-7|row-cell|before|d300|1280x720"
+          ],
+          "exposureOnly": {
+            "flag": false,
+            "reproducedCells": [
+              "I-7|row-cell|before|d0|1280x720",
+              "I-7|row-cell|before|d150|1280x720",
+              "I-7|row-cell|before|d300|1280x720"
+            ],
+            "exposedReproCells": [],
+            "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+          }
+        },
+        "below-list": {
+          "screen": "before",
+          "rule": "경우별 대조(보탬 G-3) — 경우마다 그 경우 대조 칸만으로 판독 · 한 경우의 장치 실패가 다른 경우 대조 칸을 덮지 않음 · 항목 contrastState(옛 묶음 판독)는 그대로",
+          "state": "대조 무효",
+          "reason": "/before 가 같은 조건에서 실패를 재현 못 함(정본 A L21) · 통과로 안 셈",
+          "cells": [
+            {
+              "key": "I-7|below-list|before|d0|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 0
+            },
+            {
+              "key": "I-7|below-list|before|d150|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 0
+            },
+            {
+              "key": "I-7|below-list|before|d300|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 0
+            }
+          ],
+          "exprMismatchChanged": false,
+          "exprMismatchRemoved": 0,
+          "reproducedCells": [],
+          "exposureOnly": {
+            "flag": null,
+            "reproducedCells": [],
+            "exposedReproCells": [],
+            "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+          }
+        }
+      },
+      "beforeFailRepro": {
+        "count": 9,
+        "text": "항목 실패 재현 수(D1 재현과 다른 뜻 · 옛 contrast 「재현됨」 의 뜻)"
+      }
+    },
+    "I-1": {
+      "deviceFail": false,
+      "failCells": [],
+      "reading": "판독값 기록 · 판정 = HQA",
+      "validSamples": 18,
+      "beforeKbdUnreachable": 9,
+      "afterUnreachExcl": 0,
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 6,
+        "cells": 6,
+        "of": 6,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 9,
+        "of": 9,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "성립",
+        "reason": null,
+        "cells": [
+          {
+            "key": "I-1|tab-walk|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 3
+          },
+          {
+            "key": "I-1|tab-walk|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 3
+          },
+          {
+            "key": "I-1|tab-walk|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 3
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [
+          "I-1|tab-walk|before|d0|1280x720",
+          "I-1|tab-walk|before|d150|1280x720",
+          "I-1|tab-walk|before|d300|1280x720"
+        ],
+        "exposureOnly": {
+          "flag": false,
+          "reproducedCells": [
+            "I-1|tab-walk|before|d0|1280x720",
+            "I-1|tab-walk|before|d150|1280x720",
+            "I-1|tab-walk|before|d300|1280x720"
+          ],
+          "exposedReproCells": [
+            "I-1|tab-walk|before|d0|1280x720"
+          ],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-1|tab-walk|before|d0|1280x720",
+        "I-1|tab-walk|after|d0|1280x720"
+      ]
+    },
+    "I-2": {
+      "deviceFail": false,
+      "failCells": [],
+      "reading": "판독값 기록 · 판정 = HQA",
+      "validSamples": 72,
+      "beforeKbdUnreachable": 36,
+      "afterUnreachExcl": 0,
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 24,
+        "cells": 24,
+        "of": 24,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 36,
+        "of": 36,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "대조 기준 미정",
+        "reason": "정본에 /before 실패 꼴 인용 없음 — 대조 무효와 다른 글자 · 안건 ③ 재료",
+        "cells": [
+          {
+            "key": "I-2|enter-short|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|enter-short|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|enter-short|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-short|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-short|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-short|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|enter-long|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|enter-long|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|enter-long|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-long|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-long|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-2|space-long|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [],
+        "exposureOnly": {
+          "flag": null,
+          "reproducedCells": [],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-2|enter-short|before|d0|1280x720",
+        "I-2|enter-short|after|d0|1280x720",
+        "I-2|space-short|before|d0|1280x720",
+        "I-2|enter-long|before|d0|1280x720",
+        "I-2|space-long|before|d0|1280x720"
+      ]
+    },
+    "I-3": {
+      "deviceFail": false,
+      "failCells": [],
+      "reading": "판독값 기록 · 판정 = HQA",
+      "validSamples": 36,
+      "beforeKbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 12,
+        "cells": 12,
+        "of": 12,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 0,
+        "of": 18,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "성립",
+        "reason": null,
+        "cells": [
+          {
+            "key": "I-3|bottom-row|before|d0|1280x330",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-3|bottom-row|before|d0|1280x200",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-3|bottom-row|before|d150|1280x330",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-3|bottom-row|before|d150|1280x200",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-3|bottom-row|before|d300|1280x330",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-3|bottom-row|before|d300|1280x200",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [
+          "I-3|bottom-row|before|d0|1280x330",
+          "I-3|bottom-row|before|d0|1280x200",
+          "I-3|bottom-row|before|d150|1280x330",
+          "I-3|bottom-row|before|d150|1280x200",
+          "I-3|bottom-row|before|d300|1280x330",
+          "I-3|bottom-row|before|d300|1280x200"
+        ],
+        "exposureOnly": {
+          "flag": false,
+          "reproducedCells": [
+            "I-3|bottom-row|before|d0|1280x330",
+            "I-3|bottom-row|before|d0|1280x200",
+            "I-3|bottom-row|before|d150|1280x330",
+            "I-3|bottom-row|before|d150|1280x200",
+            "I-3|bottom-row|before|d300|1280x330",
+            "I-3|bottom-row|before|d300|1280x200"
+          ],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본"
+    },
+    "I-4": {
+      "deviceFail": true,
+      "failCells": [
+        "I-4|mouse-open|after|d0|1280x720",
+        "I-4|mouse-open|after|d150|1280x720",
+        "I-4|mouse-open|after|d300|1280x720"
+      ],
+      "reading": "장치 실패",
+      "validSamples": 36,
+      "beforeKbdUnreachable": 9,
+      "afterUnreachExcl": 0,
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 15,
+        "cells": 15,
+        "of": 15,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 9,
+        "of": 18,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "성립",
+        "reason": null,
+        "cells": [
+          {
+            "key": "I-4|mouse-open|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|mouse-open|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|mouse-open|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|kbd-open|e1t3|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          },
+          {
+            "key": "I-4|kbd-open|e1t3|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 0
+          },
+          {
+            "key": "I-4|kbd-open|e1t3|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          }
+        ],
+        "rule": "경우별 대조 — 항목 contrastState 는 모든 경우가 성립일 때만 성립(I-4 · 결-H4) · 어느 경우든 대조 칸 장치 실패면 state null(대조 불가)",
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [
+          "I-4|mouse-open|before|d0|1280x720",
+          "I-4|mouse-open|before|d150|1280x720",
+          "I-4|mouse-open|before|d300|1280x720",
+          "I-4|kbd-open|e1t3|d300|1280x720"
+        ],
+        "exposureOnly": {
+          "flag": true,
+          "reproducedCells": [
+            "I-4|mouse-open|before|d0|1280x720",
+            "I-4|mouse-open|before|d150|1280x720",
+            "I-4|mouse-open|before|d300|1280x720",
+            "I-4|kbd-open|e1t3|d300|1280x720"
+          ],
+          "exposedReproCells": [
+            "I-4|mouse-open|before|d0|1280x720",
+            "I-4|mouse-open|before|d150|1280x720",
+            "I-4|mouse-open|before|d300|1280x720",
+            "I-4|kbd-open|e1t3|d300|1280x720"
+          ],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": true,
+        "reasons": [
+          "정해진 표본 수 모자람 0/3"
+        ],
+        "cells": [
+          "I-4|mouse-open|after|d0|1280x720",
+          "I-4|mouse-open|after|d150|1280x720",
+          "I-4|mouse-open|after|d300|1280x720"
+        ]
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "contrastByCase": {
+        "mouse-open": {
+          "screen": "before",
+          "state": "성립",
+          "reason": null,
+          "cells": [
+            {
+              "key": "I-4|mouse-open|before|d0|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            },
+            {
+              "key": "I-4|mouse-open|before|d150|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            },
+            {
+              "key": "I-4|mouse-open|before|d300|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            }
+          ],
+          "exprMismatchChanged": false,
+          "exprMismatchRemoved": 0,
+          "reproducedCells": [
+            "I-4|mouse-open|before|d0|1280x720",
+            "I-4|mouse-open|before|d150|1280x720",
+            "I-4|mouse-open|before|d300|1280x720"
+          ],
+          "exposureOnly": {
+            "flag": true,
+            "reproducedCells": [
+              "I-4|mouse-open|before|d0|1280x720",
+              "I-4|mouse-open|before|d150|1280x720",
+              "I-4|mouse-open|before|d300|1280x720"
+            ],
+            "exposedReproCells": [
+              "I-4|mouse-open|before|d0|1280x720",
+              "I-4|mouse-open|before|d150|1280x720",
+              "I-4|mouse-open|before|d300|1280x720"
+            ],
+            "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+          }
+        },
+        "kbd-open": {
+          "screen": "e1t3",
+          "state": "성립",
+          "reason": null,
+          "cells": [
+            {
+              "key": "I-4|kbd-open|e1t3|d0|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 0
+            },
+            {
+              "key": "I-4|kbd-open|e1t3|d150|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 0
+            },
+            {
+              "key": "I-4|kbd-open|e1t3|d300|1280x720",
+              "valid": 3,
+              "kbdUnreachable": 0,
+              "reproduced": 3
+            }
+          ],
+          "exprMismatchChanged": false,
+          "exprMismatchRemoved": 0,
+          "reproducedCells": [
+            "I-4|kbd-open|e1t3|d300|1280x720"
+          ],
+          "exposureOnly": {
+            "flag": true,
+            "reproducedCells": [
+              "I-4|kbd-open|e1t3|d300|1280x720"
+            ],
+            "exposedReproCells": [
+              "I-4|kbd-open|e1t3|d300|1280x720"
+            ],
+            "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+          }
+        }
+      },
+      "contrastStateFix5": {
+        "state": "성립",
+        "reason": null,
+        "cells": [
+          {
+            "key": "I-4|mouse-open|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|mouse-open|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|mouse-open|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 0,
+            "reproduced": 3
+          },
+          {
+            "key": "I-4|kbd-open|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-4|kbd-open|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          },
+          {
+            "key": "I-4|kbd-open|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": 0
+          }
+        ]
+      },
+      "focusAfterClose": [
+        {
+          "case": "mouse-open",
+          "screen": "before",
+          "valid": 9,
+          "onSameRowBtn": 0,
+          "offSameRowBtn": 0,
+          "noRead": 9,
+          "exprMismatchExcluded": 0
+        },
+        {
+          "case": "mouse-open",
+          "screen": "after",
+          "valid": 0,
+          "onSameRowBtn": 0,
+          "offSameRowBtn": 0,
+          "noRead": 0,
+          "exprMismatchExcluded": 0
+        },
+        {
+          "case": "kbd-open",
+          "screen": "before",
+          "valid": 9,
+          "onSameRowBtn": 0,
+          "offSameRowBtn": 0,
+          "noRead": 9,
+          "exprMismatchExcluded": 0
+        },
+        {
+          "case": "kbd-open",
+          "screen": "after",
+          "valid": 9,
+          "onSameRowBtn": 9,
+          "offSameRowBtn": 0,
+          "noRead": 0,
+          "exprMismatchExcluded": 0
+        }
+      ],
+      "exprMismatch": {
+        "count": 0,
+        "samples": [],
+        "rows": [],
+        "notComparable": {
+          "count": 0,
+          "samples": [],
+          "rows": []
+        },
+        "classes": {
+          "total": 45,
+          "ownPath": 27,
+          "match": 18,
+          "notComparable": 0,
+          "mismatch": 0
+        },
+        "text": {
+          "keyboard": "두 식 불일치 · HQA 검토 — 키보드: 같은 줄 셈 · 실패 재현 셈 · 대조 근거에서 뺌 · 유효 표본 수 무변",
+          "mouse": "두 식 불일치 · HQA 검토 — 마우스: 초점 셈(같은 줄 셈)에서만 뺌 · 열림 재현 셈 그대로 · 유효 표본 수 무변",
+          "notComparable": "두 식 칸이 없는 표본 = 비교 불가 · 불일치와 같은 셈에서 뺌 · HQA 검토"
+        }
+      },
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-4|mouse-open|before|d0|1280x720",
+        "I-4|mouse-open|before|d150|1280x720",
+        "I-4|mouse-open|before|d300|1280x720",
+        "I-4|kbd-open|before|d0|1280x720",
+        "I-4|kbd-open|after|d0|1280x720",
+        "I-4|kbd-open|e1t3|d0|1280x720",
+        "I-4|kbd-open|e1t3|d150|1280x720",
+        "I-4|kbd-open|e1t3|d300|1280x720"
+      ]
+    },
+    "I-5": {
+      "deviceFail": false,
+      "failCells": [],
+      "reading": "판독값 기록 · 판정 = HQA",
+      "validSamples": 36,
+      "beforeKbdUnreachable": 18,
+      "afterUnreachExcl": 0,
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 12,
+        "cells": 12,
+        "of": 12,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 18,
+        "of": 18,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "대조 기준 미정",
+        "reason": "정본에 /before 실패 꼴 인용 없음 — 대조 무효와 다른 글자 · 안건 ③ 재료",
+        "cells": [
+          {
+            "key": "I-5|tab|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-5|tab|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-5|tab|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-5|shift-tab|before|d0|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-5|shift-tab|before|d150|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          },
+          {
+            "key": "I-5|shift-tab|before|d300|1280x720",
+            "valid": 3,
+            "kbdUnreachable": 3,
+            "reproduced": null
+          }
+        ],
+        "exprMismatchChanged": false,
+        "exprMismatchRemoved": 0,
+        "reproducedCells": [],
+        "exposureOnly": {
+          "flag": null,
+          "reproducedCells": [],
+          "exposedReproCells": [],
+          "text": "대조가 노출 칸만으로 섬 — 독립 대조 아님 · 판정 = HQA"
+        }
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-5|tab|before|d0|1280x720",
+        "I-5|tab|after|d0|1280x720",
+        "I-5|shift-tab|before|d0|1280x720",
+        "I-5|shift-tab|after|d0|1280x720"
+      ]
+    },
+    "I-8": {
+      "source": "16e88c01:docs/운영기록/20261107작_백오피스CS상태칸_S4덮임_키보드_고침_작업지시서.md L306(T3 글자) · 11/7 리뷰서 L151(실패 꼴)",
+      "expected": [
+        "공백 · 빈 · null 줄 모두 상태 칸이 사라지지 않음(L306 「통째로 사라짐」 의 부정) — 구조 기준: 단추 ≥ 1 · 크기 > 0 · 숨김 클래스 0 · 탭 정지 1"
+      ],
+      "contrastRule": "`/before` 가 같은 조건에서 실패를 재현 못 한 항목은 「대조 무효」",
+      "contrastScreen": "v2",
+      "t3ReadUnit": "item",
+      "t3ReadUnitText": "항목 단위(같은 항목의 공백 칸으로 대조 화면에서 재현이면 성립 · 빈 값 · null 칸은 기록만)",
+      "deviceFail": false,
+      "failCells": [],
+      "afterByKind": [
+        {
+          "kind": "blank",
+          "samples": 9,
+          "rows": 18,
+          "failShape": 0,
+          "afterShapeMismatch": 0
+        },
+        {
+          "kind": "empty",
+          "samples": 9,
+          "rows": 9,
+          "failShape": 0,
+          "afterShapeMismatch": 0
+        },
+        {
+          "kind": "null",
+          "samples": 9,
+          "rows": 9,
+          "failShape": 0,
+          "afterShapeMismatch": 0
+        }
+      ],
+      "beforeRecordOnly": {
+        "text": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+        "byKind": [
+          {
+            "kind": "blank",
+            "samples": 9,
+            "rows": 18,
+            "failShape": 18,
+            "afterShapeMismatch": 18
+          },
+          {
+            "kind": "empty",
+            "samples": 9,
+            "rows": 9,
+            "failShape": 9,
+            "afterShapeMismatch": 9
+          },
+          {
+            "kind": "null",
+            "samples": 9,
+            "rows": 9,
+            "failShape": 9,
+            "afterShapeMismatch": 9
+          }
+        ]
+      },
+      "reading": "판독값 기록 · 판정 = HQA",
+      "judgedBy": "HQA",
+      "attempted": {
+        "records": 9,
+        "cells": 9,
+        "of": 9,
+        "text": "시도 기록 줄 수(칸마다 표본보다 먼저) — 미측정 = 시도 기록 0 · 표본 0 일 때만 · 시도 있음 + 표본 0 = 장치 실패"
+      },
+      "d1Reproduced": {
+        "count": 0,
+        "of": 9,
+        "text": "/before 키보드 도달 0 표본 수 / 받은 표본 수 — 관찰 사실 · 판정 = HQA"
+      },
+      "contrastState": {
+        "state": "성립",
+        "reason": null,
+        "unit": "item",
+        "judgedKinds": [
+          "blank"
+        ],
+        "kinds": [
+          {
+            "kind": "blank",
+            "samples": 9,
+            "rows": 18,
+            "failShape": 18,
+            "afterShapeMismatch": 18,
+            "contrast": "성립",
+            "recordOnly": null
+          },
+          {
+            "kind": "empty",
+            "samples": 9,
+            "rows": 9,
+            "failShape": 0,
+            "afterShapeMismatch": 0,
+            "contrast": "대조 무효(어느 판에서도 실패 꼴 없음)",
+            "recordOnly": "기록만 · 항목 판정에 안 씀(대표 결정 ⓑ)"
+          },
+          {
+            "kind": "null",
+            "samples": 9,
+            "rows": 9,
+            "failShape": 0,
+            "afterShapeMismatch": 0,
+            "contrast": "대조 무효(어느 판에서도 실패 꼴 없음)",
+            "recordOnly": "기록만 · 항목 판정에 안 씀(대표 결정 ⓑ)"
+          }
+        ],
+        "noRowsRecordOnly": null
+      },
+      "notMeasured": {
+        "flag": false,
+        "reason": null
+      },
+      "deviceFailure": {
+        "flag": false,
+        "reasons": [],
+        "cells": []
+      },
+      "fields5": "옛 칸(contrast · reading · labels · deviceFail) 유지 — 고침5 네 칸(d1Reproduced · contrastState · notMeasured · deviceFailure)이 정본",
+      "independenceNote": "노출 칸 포함 · 독립성 제약 — 판정 = HQA",
+      "exposedCells": [
+        "I-8|blank-rows|v2|d0|1280x720",
+        "I-8|blank-rows|v2|d150|1280x720",
+        "I-8|blank-rows|v2|d300|1280x720"
+      ]
+    }
+  },
+  "cells": [
+    {
+      "key": "I-1|tab-walk|before|d0|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check R2)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-1|tab-walk|before|d150|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-1|tab-walk|before|d300|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-1|tab-walk|after|d0|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-1|tab-walk|after|d150|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-1|tab-walk|after|d300|1280x720",
+      "item": "I-1",
+      "case": "tab-walk",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-short|before|d0|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-short|before|d150|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-short|before|d300|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-short|after|d0|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-short|after|d150|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-short|after|d300|1280x720",
+      "item": "I-2",
+      "case": "enter-short",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-short|before|d0|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-short|before|d150|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-short|before|d300|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-short|after|d0|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-short|after|d150|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-short|after|d300|1280x720",
+      "item": "I-2",
+      "case": "space-short",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-long|before|d0|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-long|before|d150|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-long|before|d300|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|enter-long|after|d0|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-long|after|d150|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|enter-long|after|d300|1280x720",
+      "item": "I-2",
+      "case": "enter-long",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-long|before|d0|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-long|before|d150|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-long|before|d300|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-2|space-long|after|d0|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-long|after|d150|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-2|space-long|after|d300|1280x720",
+      "item": "I-2",
+      "case": "space-long",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d0|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d0|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d150|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d150|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d300|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|before|d300|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d0|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d0|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d150|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d150|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d300|1280x330",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 330
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-3|bottom-row|after|d300|1280x200",
+      "item": "I-3",
+      "case": "bottom-row",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 200
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|mouse-open|before|d0|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L51"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|mouse-open|before|d150|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L51"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|mouse-open|before|d300|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L51"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|mouse-open|after|d0|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-4|mouse-open|after|d150|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-4|mouse-open|after|d300|1280x720",
+      "item": "I-4",
+      "case": "mouse-open",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-4|kbd-open|before|d0|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-4|kbd-open|before|d150|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-4|kbd-open|before|d300|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-4|kbd-open|after|d0|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|kbd-open|after|d150|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|kbd-open|after|d300|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|kbd-open|e1t3|d0|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "e1t3",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/8 근본원인 §2 묶음 A(지금 판 · 8e7f3208 After · 700ms · Enter/Space 4꼴) · HQA #850 6709803008(방향당 300)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|kbd-open|e1t3|d150|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "e1t3",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/8 근본원인 §2 묶음 A(지금 판 · 8e7f3208 After · 700ms · Enter/Space 4꼴) · HQA #850 6709803008(방향당 300)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-4|kbd-open|e1t3|d300|1280x720",
+      "item": "I-4",
+      "case": "kbd-open",
+      "screen": "e1t3",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/8 근본원인 §2 묶음 A(지금 판 · 8e7f3208 After · 700ms · Enter/Space 4꼴) · HQA #850 6709803008(방향당 300)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|tab|before|d0|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|tab|before|d150|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|tab|before|d300|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|tab|after|d0|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|tab|after|d150|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|tab|after|d300|1280x720",
+      "item": "I-5",
+      "case": "tab",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|shift-tab|before|d0|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|shift-tab|before|d150|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|shift-tab|before|d300|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-5|shift-tab|after|d0|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|shift-tab|after|d150|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-5|shift-tab|after|d300|1280x720",
+      "item": "I-5",
+      "case": "shift-tab",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|esc|before|d0|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|esc|before|d150|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|esc|before|d300|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|esc|after|d0|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|esc|after|d150|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|esc|after|d300|1280x720",
+      "item": "I-6",
+      "case": "esc",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|enter|before|d0|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|enter|before|d150|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|enter|before|d300|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 3,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "I-6|enter|after|d0|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|enter|after|d150|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-6|enter|after|d300|1280x720",
+      "item": "I-6",
+      "case": "enter",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|row-cell|before|d0|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|row-cell|before|d150|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|row-cell|before|d300|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|row-cell|after|d0|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-7|row-cell|after|d150|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-7|row-cell|after|d300|1280x720",
+      "item": "I-7",
+      "case": "row-cell",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-7|below-list|before|d0|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|below-list|before|d150|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|below-list|before|d300|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-7|below-list|after|d0|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-7|below-list|after|d150|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "I-7|below-list|after|d300|1280x720",
+      "item": "I-7",
+      "case": "below-list",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 0,
+      "invalid": 3,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 3,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "장치 실패",
+      "reason": "정해진 표본 수 모자람 0/3",
+      "zeroReason": "칸 표본 0",
+      "deviceReading": "device_failure"
+    },
+    {
+      "key": "N-1|arrows|before|d0|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465 · 리허설 3 f2362cca(k_check)"
+        ]
+      },
+      "n1Role": "기록만 · 판정에 안 씀",
+      "recordOnlyRole": "기록만 · 판정에 안 씀",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-1|arrows|before|d150|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "n1Role": "기록만 · 판정에 안 씀",
+      "recordOnlyRole": "기록만 · 판정에 안 씀",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-1|arrows|before|d300|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "n1Role": "기록만 · 판정에 안 씀",
+      "recordOnlyRole": "기록만 · 판정에 안 씀",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-1|arrows|before|d500|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "before",
+      "delay": 500,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "n1Role": "기록만 · 판정에 안 씀",
+      "recordOnlyRole": "기록만 · 판정에 안 씀",
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-1|arrows|after|d0|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "리허설 2 런 43748603465"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-1|arrows|after|d150|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-1|arrows|after|d300|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-1|arrows|after|d500|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "after",
+      "delay": 500,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-1|arrows|a2|d300|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "a2",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-1|arrows|a2|d500|1280x720",
+      "item": "N-1",
+      "case": "arrows",
+      "screen": "a2",
+      "delay": 500,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-2|enter-twice|before|d0|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-2|enter-twice|before|d150|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-2|enter-twice|before|d300|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-2|enter-twice|before|d500|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "before",
+      "delay": 500,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 5,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": "keyboard_unreachable",
+      "deviceReadingText": "키보드 도달 0(측정됨) · 11/7 D1 과 같은 모양 · 판정 = HQA"
+    },
+    {
+      "key": "N-2|enter-twice|after|d0|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-2|enter-twice|after|d150|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-2|enter-twice|after|d300|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "N-2|enter-twice|after|d500|1280x720",
+      "item": "N-2",
+      "case": "enter-twice",
+      "screen": "after",
+      "delay": 500,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 5,
+      "got": 5,
+      "valid": 5,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 5,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|before|d0|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "before",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|before|d150|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "before",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|before|d300|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "before",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "recordOnlyRole": "기록만 · 판정에 안 씀(대조 화면이 before 아님)",
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|after|d0|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "after",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|after|d150|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "after",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|after|d300|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "after",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "afterUnreachable": {
+        "count": 0,
+        "samples": [],
+        "tabPath": [],
+        "reason": "/after 키보드 도달 0 — 유효에서 뺌(HQA Q3)"
+      },
+      "exclusionReview": {
+        "count": 0,
+        "ofGot": 3,
+        "sameShapeAsD1": null,
+        "reading": null
+      },
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|v2|d0|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "v2",
+      "delay": 0,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L151"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|v2|d150|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "v2",
+      "delay": 150,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L151"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    },
+    {
+      "key": "I-8|blank-rows|v2|d300|1280x720",
+      "item": "I-8",
+      "case": "blank-rows",
+      "screen": "v2",
+      "delay": 300,
+      "window": {
+        "w": 1280,
+        "h": 720
+      },
+      "planned": 3,
+      "got": 3,
+      "valid": 3,
+      "invalid": 0,
+      "attemptRecords": 1,
+      "kbdUnreachable": 0,
+      "afterUnreachExcl": 0,
+      "missing": 0,
+      "excluded": {
+        "afterUnreachable": 0,
+        "deviceFailure": 0,
+        "maskConflict": 0,
+        "maskedRead": 0
+      },
+      "exposed": {
+        "source": [
+          "11/7 리뷰서 L151"
+        ]
+      },
+      "status": "표본 있음",
+      "deviceReading": null
+    }
+  ]
+}
