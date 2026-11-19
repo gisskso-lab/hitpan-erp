@@ -88,7 +88,7 @@ Windows PowerShell 5.1 이 BOM 없는 UTF-8 한글을 CP949로 오독해 가짜 
 ### 옛 도구는 실행되지 않는다
 - `Run-CommsScenarios.ps1` · `Build-TestSlot.ps1`(이 폴더) · `tests/scenarios/Run-All-Scenarios.ps1` · `S06` · `S07` · `S10` · `S14` · `S15` · `S16` = **9파일 맨 앞(param 바로 뒤)에 무조건 거절 블록** — 안내 두 줄을 찍고 `exit 1`. 우회 스위치 없음 · 본문은 기록으로 보존.
 - 위 「자동화 · 안전망 · test 마커 파일 스펙 · 반증 테스트 · 다음 세션 순서」 절은 옛 러너 기준이다. **마커 형식도 바뀌었다**(아래).
-- (11/19 [3-V] M6) **위 9파일 밖 옛 진입점** `tests/scenarios/W1-Gate-Checklist.ps1` · `Pre-W1-Gate-Check.ps1` · `S18` · `S19` · `S20` 은 이번 거절 대상이 **아니다**(거절 블록 없음 · 별건) — 그러나 **기본 대상이 운영 도메인**이라 **쓰지 말 것**(인자 없이도 돌리지 말 것).
+- (11/19 [3-V] M6 · 같은 날 좁은 재셈 S2 정정) **위 9파일 밖 옛 진입점** `tests/scenarios/W1-Gate-Checklist.ps1` · `Pre-W1-Gate-Check.ps1` · `S18` · `S19` · `S20` 은 이번 거절 대상이 **아니다**(거절 블록 없음 · 별건) — 그러나 **다섯 다 쓰지 말 것**: `W1-Gate-Checklist` · `Pre-W1-Gate-Check` 는 **기본 대상이 운영 도메인**이다(인자 없이도 돌리지 말 것). `S18` ~ `S20` 은 기본값이 없고 받은 주소(`-HealthUrl`)를 그대로 치며, `W1-Gate-Checklist` 가 운영 도메인을 넣어 부른다.
 
 ### 새 러너 — `Run-RoutinePcScenarios.ps1`(이 폴더)
 | 쓰는 법 | 하는 일 |
