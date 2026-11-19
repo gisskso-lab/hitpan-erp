@@ -292,7 +292,7 @@ class CgWorld {
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 # (11/19 [3-V] 갈래2 V5) 경우 수 · 세부 확인 수 하한 — 경우 블록이 지워지거나 안 불리면 불일치 · 세부 확인이 줄면 종료 1
 $script:CaseMax = 40      # (11/19 [4] F8~F10) 32 → 35(C33~C35) · (11/19 [3-V] 재반증) 35 → 38(C36~C38) · (11/19 [4] 4회차 F15 · F16) 38 → 40(C39 · C40)
-$script:MinDetail = 613   # 이 커밋 기준 세부 확인 수 619 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 561(567 − 6) · 524(530 − 6) · 420 이상 — 늘리기만 한다
+$script:MinDetail = 647   # (11/19 4회차) 이 커밋 기준 세부 확인 수 653 − C29 정션 확인 6(「미측정」 일 수 있어 뺌) · 옛 613(619 − 6) · 561(567 − 6) · 524(530 − 6) · 420 이상 — 늘리기만 한다
 if (-not $ModulePath) { $ModulePath = Join-Path $PSScriptRoot 'CommsGuard.psm1' }
 if (-not $RunnerPath) { $RunnerPath = Join-Path $PSScriptRoot 'Run-RoutinePcScenarios.ps1' }
 $script:ModulePath = [System.IO.Path]::GetFullPath($ModulePath)
