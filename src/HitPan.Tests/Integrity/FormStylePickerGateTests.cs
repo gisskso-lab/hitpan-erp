@@ -266,4 +266,28 @@ public sealed class FormStylePickerGateTests
         Assert.All(keys, k => Assert.Equal(k, FormStyleChoice.Normalize(k)));
         Assert.Contains(FormStyleChoice.DefaultKey, server);
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // T5b — 항목 값 = 저장 문 허용 4값 (E⑷ 고침 1-③ · PM 판단 §78 · [4] P3-2)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// <remarks>
+    /// 🔴 서버 쪽 스타일 집합은 두 자리다 — 렌더 <c>KnownStyleKeys</c>(T5) · 저장 문 <c>AllowedStyleKeys</c>(E⑵ 고침 1 · 글자 그대로 비교).
+    ///   저장 집합만 바뀌면 고르기가 저장이 거절할 값을 내놓아 「저장」 이 막힌다 → 저장 집합도 반사로 대조한다.
+    /// </remarks>
+    [Fact(DisplayName = "T5b 🔴 고르기 항목 값 집합 = 저장 문 AllowedStyleKeys(반사) — 저장이 거절할 값을 고르기가 내놓지 않는다")]
+    public void T5b_OptionsEqualSaveAllowedStyleKeys()
+    {
+        var field = typeof(FormTemplateService).GetField("AllowedStyleKeys", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.True(field is not null, "저장 문 허용 목록(AllowedStyleKeys)을 못 찾았다 — 배선이 바뀌었다.");
+        var saveAllowed = (string[])field!.GetValue(null)!;
+
+        Assert.Equal(4, saveAllowed.Length);
+        Assert.Equal(saveAllowed.Length, saveAllowed.Distinct(StringComparer.Ordinal).Count());
+
+        var keys = FormStyleChoice.Options.Select(o => o.Key).ToHashSet(StringComparer.Ordinal);
+        Assert.True(keys.SetEquals(saveAllowed),
+            $"편집창 항목({string.Join(",", keys.OrderBy(x => x, StringComparer.Ordinal))})과 "
+            + $"저장 문 허용 목록({string.Join(",", saveAllowed.OrderBy(x => x, StringComparer.Ordinal))})이 다르다.");
+    }
 }

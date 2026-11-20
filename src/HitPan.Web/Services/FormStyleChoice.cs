@@ -36,6 +36,8 @@ public static class FormStyleChoice
     /// <summary>
     /// 고르기 항목 — (저장 값, 화면 글자). 차례 = 화면 차례.
     /// 🔴 저장 값 넷 = 서버 허용 목록(<c>KnownStyleKeys</c>)과 같은 집합 — 게이트가 반사로 대조한다.
+    /// 🔴 [E⑷ 고침 1-③] 저장 문 허용 4값(<c>FormTemplateService.AllowedStyleKeys</c>)과도 같은 집합 — 게이트 T5b 가 반사로 대조한다
+    ///   (저장이 거절할 값을 고르기가 내놓지 않는다).
     /// </summary>
     public static readonly IReadOnlyList<KeyValuePair<string, string>> Options = new[]
     {
@@ -44,6 +46,24 @@ public static class FormStyleChoice
         new KeyValuePair<string, string>("simple", "간결 — 팩스 · 잉크를 아낄 때"),
         new KeyValuePair<string, string>("large", "큰글씨 — 창고 · 현장에서 멀리서 볼 때"),
     };
+
+    /// <summary>
+    /// 🔴 큰글씨 설명 줄 밑 덧줄 한 줄 — 좁은 종이에서는 큰글씨가 기본 모양으로 찍힌다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-11-20 E⑷ 고침 1-① · PM 판단 §78 · [3-V] P2-1] 서버 인쇄는 본문 폭이 모자라면(E⑵ 고침 2 · A5 세로는 늘)
+    ///   큰글씨를 기본 모양으로 떨어뜨린다 — 고르기 칸이 그 말을 안 하면 「고른 대로 안 나온다」 가 된다.
+    /// 🔴 <b>글자만</b> — 폭 판정 · 흐리게 · 도움말 바꿈 0(대표 §76 「1안」 · E4-5 쓰지 않음). 실제 떨어짐 확인 = 장치 15차 A5 세로 칸.
+    /// 🔴 「기본」 = 기본 항목의 화면 이름 그대로(<see cref="Options"/> 첫 줄 「기본 — …」 의 이름).
+    /// </remarks>
+    public const string LargeNarrowNote = "종이 폭이 좁으면(A5 세로 등) 「기본」으로 찍힙니다.";
+
+    /// <summary>
+    /// 🔴 고르기 항목 설명 줄 밑 덧줄 — 큰글씨(<c>large</c>)만 <see cref="LargeNarrowNote"/> · 그 밖 <c>null</c>.
+    /// 편집창은 이 값을 그리기만 한다(판정 · 글자 한 자리).
+    /// </summary>
+    public static string? OptionNote(string? key) =>
+        string.Equals(key, "large", StringComparison.Ordinal) ? LargeNarrowNote : null;
 
     /// <summary>
     /// 🔴 불러온 저장 값을 고르기 항목 값으로 고른다 — 앞뒤 공백 자름 · 대소문자 무시 · 빈 값 · null · 모르는 값 = <c>basic</c>.

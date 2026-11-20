@@ -62,7 +62,16 @@
                            Disabled="@(StyleWhyNotUsed is not null)" Margin="Margin.Dense">
                     @foreach (var styleOption in FormStyleChoice.Options)
                     {
-                        <MudSelectItem T="string" Value="@styleOption.Key">@styleOption.Value</MudSelectItem>
+                        @* ⬛ [E⑷ 고침 1-①로 대체] 옛 줄: <MudSelectItem T="string" Value="@styleOption.Key">@styleOption.Value</MudSelectItem>
+                             🔴 [2026-11-20 E⑷ 고침 1-① · PM 판단 §78] 큰글씨 설명 줄 밑에 덧줄 한 줄(「종이 폭이 좁으면 … 「기본」으로 찍힙니다.」).
+                               글자만 — 폭 판정 · 흐리게 · 도움말 바꿈 0(대표 §76). 글자 · 어느 항목인지는 FormStyleChoice.OptionNote 한 자리. *@
+                        <MudSelectItem T="string" Value="@styleOption.Key">
+                            @styleOption.Value
+                            @if (FormStyleChoice.OptionNote(styleOption.Key) is { Length: > 0 } styleNote)
+                            {
+                                <MudText Typo="Typo.caption" HtmlTag="span" Class="d-block mud-text-secondary">@styleNote</MudText>
+                            }
+                        </MudSelectItem>
                     }
                 </MudSelect>
                 @if (StyleWhyNotUsed is { Length: > 0 } styleWhy)
