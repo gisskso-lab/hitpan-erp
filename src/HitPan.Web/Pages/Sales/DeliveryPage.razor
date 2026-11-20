@@ -1210,8 +1210,16 @@
             return;
         }
 
-        await DocService.DownloadPdfAsync(
-            "delivery", _draft.Id);
+        // 🔴 W-G1-51 갈래 「옛 /pdf」(대표 §76 · PM 결재 §81 ⑤) — [인쇄](Print) 와 같은 전표 인쇄 문 · 같은 종 · 같은 가지.
+        //   목록에서 연 판매반품 전표면 판매반품 종(반품 id 로 거래명세서를 찾으면 404 · #20).
+        // 종전(#1): await DocService.DownloadPdfAsync("delivery", _draft.Id);  ← 옛 렌더러(양식 · 스타일 · 워터마크 무시)
+        if (IsOpenedSalesReturnForPrint)
+        {
+            await PrintPreview.DownloadPdfAsync("sales-return", _draft.Id, "판매반품");
+            return;
+        }
+
+        await PrintPreview.DownloadPdfAsync("delivery", _draft.Id, "거래명세서");
     }
     private async Task OpenTaxInvoice()
     {

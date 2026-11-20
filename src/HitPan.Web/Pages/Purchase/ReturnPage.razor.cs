@@ -487,14 +487,17 @@ public partial class ReturnPage : ComponentBase
         // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키. ⚠️ 이 단추는 옛 /pdf 길(DocumentController
         //   LoadDocumentAsync)을 탄다 — 거기엔 아직 "sales-return" 적재가 없어 빈 문서가 나온다(설계 C8 ⑷).
         //   그 파일은 착수준비표 P-2 로 Z5 뒤다. 키만 먼저 맞춰 둔다.
+        //   🔴 2026-11-20 W-G1-51 갈래 「옛 /pdf」(대표 §76 · PM 결재 §81) 로 닫힘 — 이제 [인쇄] 와 같은 전표 인쇄 문을 탄다(빈 문서 0).
         //   고침1 — 판정은 불러온 전표의 종 · id(선택칸 아님 · P2-E1).
         if (IsLoadedSalesReturnForPrint)
         {
-            await DocService.DownloadPdfAsync(SalesReturnPrintType, _draft.Id);
+            // 종전(#1): await DocService.DownloadPdfAsync(SalesReturnPrintType, _draft.Id);
+            await PrintPreview.DownloadPdfAsync(SalesReturnPrintType, _draft.Id, "판매반품");
             return;
         }
 
-        await DocService.DownloadPdfAsync("return", _draft.Id);
+        // 종전(#1): await DocService.DownloadPdfAsync("return", _draft.Id);
+        await PrintPreview.DownloadPdfAsync("return", _draft.Id, "반품서");
     }
 
     /// <summary>진행 중 재진입 잠금 — 더블클릭으로 품목이 두 번 들어오는 것을 막는다.</summary>

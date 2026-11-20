@@ -710,7 +710,9 @@ public partial class PurchaseReceiptPage : ComponentBase
             return;
         }
 
-        await DocService.DownloadPdfAsync("purchase-receipt", _draft.Id);
+        // 🔴 W-G1-51 갈래 「옛 /pdf」(대표 §76 · PM 결재 §81) — [인쇄] 미리보기와 같은 전표 인쇄 문 · 같은 종.
+        // 종전(#1): await DocService.DownloadPdfAsync("purchase-receipt", _draft.Id);  ← 옛 렌더러(양식 · 스타일 · 워터마크 무시)
+        await PrintPreview.DownloadPdfAsync("purchase-receipt", _draft.Id, "매입명세서");
     }
 
     /// <summary>
