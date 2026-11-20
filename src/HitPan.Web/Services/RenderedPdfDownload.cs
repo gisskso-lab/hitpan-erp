@@ -25,9 +25,83 @@ public sealed class RenderedPdfDownload
 {
     private readonly HttpClient _http;
 
+    // 🔴 [고침 1 · 결재 기록 §86 P3] 두 번 누름 잠금 — 받는 중(안내 묻기 · 상자 · 그리기 · 저장)엔 다시 눌러도 요청 0.
+    //   0 = 비었음 · 1 = 받는 중. 단위 = 이 객체 하나(DocumentPrintPreview 하나 · Scoped = WASM 앱 하나).
+    private int _busy;
+
+    /// <summary>잠긴 동안 다시 누르면 띄우는 글자 — 조용히 아무 일도 안 일어나면 고객은 고장으로 읽는다.</summary>
+    private const string BusyText = "PDF 를 만드는 중입니다. 잠시만 기다려 주십시오.";
+
     public RenderedPdfDownload(HttpClient http)
     {
         _http = http;
+    }
+
+    /// <summary>
+    /// 🔴 [고침 1 · 결재 기록 §86 ①] 전표 「PDF」 단추 한 번의 흐름 ①~④ 한 자리 —
+    /// <c>DocumentPrintPreview.DownloadPdfAsync</c> 가 화면 손잡이(<paramref name="ui"/>)만 붙여 부른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 왜 여기로 옮겼나 — 화면 쪽(<c>DocumentPrintPreview</c>)은 MudBlazor · JS · 미리보기 창에 기대어 시험이 부를 수 없다.
+    ///   흐름을 Blazor 의존 0 인 이 파일에 두어 시험이 <b>실제로 불러</b> 요청 · 상자 · 저장을 센다(「취소」 뒤 받기 0 등).
+    /// 🔴 흐름 · 글자는 종전 <c>DocumentPrintPreview.DownloadPdfAsync</c> ①~④ 그대로 — 두 번 누름 잠금만 보탰다(§86 P3).
+    /// </remarks>
+    /// <param name="docType">같은 화면 [인쇄] 단추의 종과 같은 종(핵심 규칙).</param>
+    /// <param name="docId">전표 id. 🔴 비어 있으면 받지 않는다 — 그릴 것이 없다.</param>
+    /// <param name="title">[인쇄] 창 제목과 같은 이름 — 서버가 파일 이름을 안 주면 <c>{title}.pdf</c>.</param>
+    /// <param name="ui">화면 손잡이 — 상자 · 스낵바 · 파일 저장.</param>
+    public async Task DownloadPdfAsync(string docType, string? docId, string title, PdfDownloadUi ui)
+    {
+        if (string.IsNullOrWhiteSpace(docId))
+        {
+            // 🔴 ShowAsync 와 같은 글자 — 조용히 아무 일도 안 일어나면 고객은 고장으로 읽는다.
+            ui.Warn("먼저 전표를 저장하거나 목록에서 불러오십시오.");
+            return;
+        }
+
+        // 🔴 P3 두 번 누름 잠금 — 첫 누름이 끝나기 전 누름은 요청 · 상자 · 저장 0 + 안내 1줄.
+        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+        {
+            ui.Info(BusyText);
+            return;
+        }
+
+        try
+        {
+            // ② K3(빈 A4 + 그림 + 칸 0) 이면 받기 전에 알린다 — 받은 PDF 는 거래처로 갈 수 있다.
+            if (await NeedsNoticeAsync(docType, CancellationToken.None))
+            {
+                var go = await ui.ConfirmImageOnlyAsync();
+                if (!go) return;
+            }
+
+            // ③ 전표 인쇄 문 — 옵션 null = 저장된 양식 그대로.
+            var got = await FetchAsync(docType, docId!, CancellationToken.None);
+            if (!got.Ok)
+            {
+                var fallback = got.StatusCode > 0
+                    ? $"PDF 를 만들지 못했습니다. ({got.StatusCode})"
+                    : "PDF 를 만들지 못했습니다.";
+                ui.Error(got.Message ?? fallback);
+                return;
+            }
+
+            // ④ 받은 바이트를 파일로 — 화면 손잡이(기존 JS 함수 downloadFileFromBytes) · 새 JS 0.
+            try
+            {
+                await ui.SaveAsync(got.FileName ?? $"{title}.pdf", got.Bytes);
+            }
+            catch (Exception ex)
+            {
+                ui.Error("PDF 를 저장하지 못했습니다.");
+                Console.Error.WriteLine($"[DocPdf] 내려받기 실패 — type={docType}: {ex.Message}");
+            }
+        }
+        finally
+        {
+            // 🔴 취소 · 실패 · 저장 예외 뒤에도 푼다 — 잠금이 남으면 「PDF」 가 영영 안 눌린다.
+            Volatile.Write(ref _busy, 0);
+        }
     }
 
     /// <summary>
@@ -138,3 +212,25 @@ public sealed class RenderedPdfDownload
 /// <param name="Message">실패 때 서버 사람 말 — 없으면 null.</param>
 /// <param name="StatusCode">HTTP 상태 코드 — 연결 예외면 0.</param>
 public sealed record RenderedPdfResult(bool Ok, byte[] Bytes, string? FileName, string? Message, int StatusCode);
+
+/// <summary>
+/// 🔴 [고침 1 · 결재 기록 §86 ①] 「PDF 받기」 흐름이 쓰는 화면 손잡이 — 화면(<c>DocumentPrintPreview</c>)은
+/// MudBlazor 상자 · 스낵바 · JS 를 붙이고, 시험은 세는 대역을 붙인다. Blazor 의존 0.
+/// </summary>
+public sealed class PdfDownloadUi
+{
+    /// <summary>「아직 칸을 안 맞췄습니다」 상자 — 「그래도 받기」 면 참 · 「취소」 · 닫기면 거짓.</summary>
+    public required Func<Task<bool>> ConfirmImageOnlyAsync { get; init; }
+
+    /// <summary>경고 스낵바(빈 id).</summary>
+    public required Action<string> Warn { get; init; }
+
+    /// <summary>안내 스낵바(받는 중 다시 누름).</summary>
+    public required Action<string> Info { get; init; }
+
+    /// <summary>오류 스낵바(받기 · 저장 실패).</summary>
+    public required Action<string> Error { get; init; }
+
+    /// <summary>받은 바이트를 파일로 저장(이름 · 바이트).</summary>
+    public required Func<string, byte[], Task> SaveAsync { get; init; }
+}

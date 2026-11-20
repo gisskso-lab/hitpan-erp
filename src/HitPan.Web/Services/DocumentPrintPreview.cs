@@ -34,6 +34,9 @@ public sealed class DocumentPrintPreview
     // 🔴 W-G1-51 갈래 「옛 /pdf」 — 「PDF 받기」 한 자리용. 둘 다 이미 DI 등록(로그인 HttpClient · JS) · Program.cs 0줄.
     private readonly RenderedPdfDownload _pdf;
     private readonly IJSRuntime _js;
+    // 🔴 [고침 1 · 결재 기록 §86 ①] 「PDF 받기」 흐름(RenderedPdfDownload.DownloadPdfAsync)에 붙이는 화면 손잡이 —
+    //   상자 · 스낵바 · JS 글자는 종전 DownloadPdfAsync 몸통 그대로(아래 「종전(#1)」 주석과 대조).
+    private readonly PdfDownloadUi _ui;
 
     public DocumentPrintPreview(IDialogService dialog, ISnackbar snackbar, HttpClient http, IJSRuntime js)
     {
@@ -41,6 +44,19 @@ public sealed class DocumentPrintPreview
         _snackbar = snackbar;
         _pdf = new RenderedPdfDownload(http);
         _js = js;
+        _ui = new PdfDownloadUi
+        {
+            ConfirmImageOnlyAsync = async () => (await _dialog.ShowMessageBoxAsync(
+                "아직 칸을 안 맞췄습니다",
+                "이 양식으로 PDF 를 받으면 올린 양식 그림만 나오고 전표 내용은 찍히지 않습니다. 칸을 맞추려면 「양식 템플릿」 메뉴의 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다 · 관리자).",
+                yesText: "그래도 받기",
+                cancelText: "취소")) == true,
+            Warn = m => _snackbar.Add(m, Severity.Warning),
+            Info = m => _snackbar.Add(m, Severity.Info),
+            Error = m => _snackbar.Add(m, Severity.Error),
+            SaveAsync = (name, bytes) => _js.InvokeVoidAsync("downloadFileFromBytes",
+                name, "application/pdf", Convert.ToBase64String(bytes)).AsTask(),
+        };
     }
 
     /// <summary>
@@ -93,45 +109,50 @@ public sealed class DocumentPrintPreview
     /// </remarks>
     public async Task DownloadPdfAsync(string docType, string? docId, string title)
     {
-        if (string.IsNullOrWhiteSpace(docId))
-        {
-            // 🔴 ShowAsync 와 같은 글자 — 조용히 아무 일도 안 일어나면 고객은 고장으로 읽는다.
-            _snackbar.Add("먼저 전표를 저장하거나 목록에서 불러오십시오.", Severity.Warning);
-            return;
-        }
+        // 🔴 [고침 1 · 결재 기록 §86 ①] 흐름 ①~④ 는 RenderedPdfDownload.DownloadPdfAsync 한 자리로 옮겼다(시험이 실제로 부른다) ·
+        //   여기는 화면 손잡이(_ui)만 붙인다. 두 번 누름 잠금(§86 P3)도 그 자리에 있다.
+        await _pdf.DownloadPdfAsync(docType, docId, title, _ui);
 
-        // ② K3(빈 A4 + 그림 + 칸 0) 이면 받기 전에 알린다 — 받은 PDF 는 거래처로 갈 수 있다.
-        if (await _pdf.NeedsNoticeAsync(docType, CancellationToken.None))
-        {
-            var go = await _dialog.ShowMessageBoxAsync(
-                "아직 칸을 안 맞췄습니다",
-                "이 양식으로 PDF 를 받으면 올린 양식 그림만 나오고 전표 내용은 찍히지 않습니다. 칸을 맞추려면 「양식 템플릿」 메뉴의 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다 · 관리자).",
-                yesText: "그래도 받기",
-                cancelText: "취소");
-            if (go != true) return;
-        }
-
-        // ③ 전표 인쇄 문 — 옵션 null = 저장된 양식 그대로.
-        var got = await _pdf.FetchAsync(docType, docId!, CancellationToken.None);
-        if (!got.Ok)
-        {
-            var fallback = got.StatusCode > 0
-                ? $"PDF 를 만들지 못했습니다. ({got.StatusCode})"
-                : "PDF 를 만들지 못했습니다.";
-            _snackbar.Add(got.Message ?? fallback, Severity.Error);
-            return;
-        }
-
-        // ④ 받은 바이트를 파일로 — 기존 JS 함수(wwwroot/js/storage.js downloadFileFromBytes) · 새 JS 0.
-        try
-        {
-            await _js.InvokeVoidAsync("downloadFileFromBytes",
-                got.FileName ?? $"{title}.pdf", "application/pdf", Convert.ToBase64String(got.Bytes));
-        }
-        catch (Exception ex)
-        {
-            _snackbar.Add("PDF 를 저장하지 못했습니다.", Severity.Error);
-            Console.Error.WriteLine($"[DocPdf] 내려받기 실패 — type={docType}: {ex.Message}");
-        }
+        // 종전(#1 · 고침 1 로 RenderedPdfDownload.DownloadPdfAsync 로 옮김 · 글자 그대로):
+        // if (string.IsNullOrWhiteSpace(docId))
+        // {
+        //     // 🔴 ShowAsync 와 같은 글자 — 조용히 아무 일도 안 일어나면 고객은 고장으로 읽는다.
+        //     _snackbar.Add("먼저 전표를 저장하거나 목록에서 불러오십시오.", Severity.Warning);
+        //     return;
+        // }
+        //
+        // // ② K3(빈 A4 + 그림 + 칸 0) 이면 받기 전에 알린다 — 받은 PDF 는 거래처로 갈 수 있다.
+        // if (await _pdf.NeedsNoticeAsync(docType, CancellationToken.None))
+        // {
+        //     var go = await _dialog.ShowMessageBoxAsync(
+        //         "아직 칸을 안 맞췄습니다",
+        //         "이 양식으로 PDF 를 받으면 올린 양식 그림만 나오고 전표 내용은 찍히지 않습니다. 칸을 맞추려면 「양식 템플릿」 메뉴의 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다 · 관리자).",
+        //         yesText: "그래도 받기",
+        //         cancelText: "취소");
+        //     if (go != true) return;
+        // }
+        //
+        // // ③ 전표 인쇄 문 — 옵션 null = 저장된 양식 그대로.
+        // var got = await _pdf.FetchAsync(docType, docId!, CancellationToken.None);
+        // if (!got.Ok)
+        // {
+        //     var fallback = got.StatusCode > 0
+        //         ? $"PDF 를 만들지 못했습니다. ({got.StatusCode})"
+        //         : "PDF 를 만들지 못했습니다.";
+        //     _snackbar.Add(got.Message ?? fallback, Severity.Error);
+        //     return;
+        // }
+        //
+        // // ④ 받은 바이트를 파일로 — 기존 JS 함수(wwwroot/js/storage.js downloadFileFromBytes) · 새 JS 0.
+        // try
+        // {
+        //     await _js.InvokeVoidAsync("downloadFileFromBytes",
+        //         got.FileName ?? $"{title}.pdf", "application/pdf", Convert.ToBase64String(got.Bytes));
+        // }
+        // catch (Exception ex)
+        // {
+        //     _snackbar.Add("PDF 를 저장하지 못했습니다.", Severity.Error);
+        //     Console.Error.WriteLine($"[DocPdf] 내려받기 실패 — type={docType}: {ex.Message}");
+        // }
     }
 }
