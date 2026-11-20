@@ -121,8 +121,9 @@ public sealed class PdfConcurrentGenerationGateTests
         var results = await RunParallelAsync(jobs, j => j.Generate());
         sw.Stop();
 
-        var broken = Diff(results, r => baselines[r.Input.Name]);
+        var broken = Diff(results, r => new[] { baselines[r.Input.Name].Text });
         _out.WriteLine($"G2 제품 길 병렬 {ParallelCount}: 깨진 장 {broken.Count} · {sw.ElapsedMilliseconds}ms · 꼴 {inputs.Count}종 · cpu {Environment.ProcessorCount}");
+        foreach (var b in broken.Take(10)) _out.WriteLine($"G2 다른 장: {b.Desc}");
 
         // 세금계산서 측정 길(:1860 · :2079)에 실제로 닿았는지 — 제품이 남기는 로그로 센다(제품 코드 추가 0).
         foreach (var input in inputs.Where(i => i.Log is not null && i.ReachMarker is not null))
@@ -138,10 +139,32 @@ public sealed class PdfConcurrentGenerationGateTests
                 $"🔴 G2 「{input.Name}」 측정이 동시 생성 중에 실패했다: {string.Join(" | ", failedMeasure.Take(3))}");
         }
 
+        // 🔴 기준이 시계로 바뀐 경우만 가른다 — 견적 K4 예시 자료의 날짜는 `DateTime.Today`(PdfRenderService
+        //   BuildSampleSnapshot)라 병렬 도중 자정을 넘기면 뒤에 만든 장의 날짜 글자가 기준과 달라진다(A2 2회 · 00:00 실측).
+        //   병렬 뒤 순차 기준을 다시 세워, 기준이 실제로 바뀐 입력에 한해 **새 기준과 글자 하나까지 같은 장만** 깨짐에서 뺀다.
+        //   글자층이 깨진 장(\0)은 새 기준과도 다르므로 그대로 빨강이다. 기준이 안 바뀌었으면 아무것도 안 뺀다.
+        var clockShifted = 0;
+        if (broken.Count > 0)
+        {
+            var after = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var input in inputs.Where(i => broken.Any(b => ReferenceEquals(b.Result.Input, i))))
+            {
+                after[input.Name] = (await BuildBaselineAsync(input)).Text;
+            }
+
+            var before = broken.Count;
+            broken = broken.Where(b => !(after.TryGetValue(b.Result.Input.Name, out var a)
+                                         && !string.Equals(a, baselines[b.Result.Input.Name].Text, StringComparison.Ordinal)
+                                         && string.Equals(b.Text, a, StringComparison.Ordinal))).ToList();
+            clockShifted = before - broken.Count;
+            _out.WriteLine($"G2 기준 다시 세움: 시계로 바뀐 기준과 같은 장 {clockShifted} · 남은 깨진 장 {broken.Count}");
+        }
+
         Assert.True(broken.Count == 0,
             $"🔴 G2 제품 길을 {ParallelCount}개 동시에 만들었더니 순차 기준과 글자열이 다른 PDF 가 {broken.Count}장이다 — "
-          + "PDF 생성이 한 통로(PdfGenerationGate)로 줄 서지 않는다(잠금이 빠졌거나 잠금 객체가 호출마다 다름).\n  "
-          + string.Join("\n  ", broken.Take(10)));
+          + "PDF 생성이 한 통로(PdfGenerationGate)로 줄 서지 않는다(잠금이 빠졌거나 잠금 객체가 호출마다 다름)"
+          + $"(시계로 바뀐 기준과 같아 뺀 장 {clockShifted}).\n  "
+          + string.Join("\n  ", broken.Take(10).Select(b => b.Desc)));
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -158,11 +181,11 @@ public sealed class PdfConcurrentGenerationGateTests
 
         var perRound = new List<int>();
         var sw = Stopwatch.StartNew();
-        List<string> broken = new();
+        List<BrokenPdf> broken = new();
         for (var round = 0; round < ControlMaxRounds; round++)
         {
             var results = await RunParallelAsync(jobs, j => j.Generate());
-            broken = Diff(results, _ => baseline);
+            broken = Diff(results, _ => new[] { baseline.Text });
             perRound.Add(broken.Count);
             if (broken.Count > 0) break;
         }
@@ -170,7 +193,7 @@ public sealed class PdfConcurrentGenerationGateTests
 
         var after = TextOf(await input.Generate());
         _out.WriteLine($"G3 대조 병렬 {ParallelCount}: 라운드별 깨진 장 [{string.Join(", ", perRound)}] · {sw.ElapsedMilliseconds}ms · cpu {Environment.ProcessorCount} · 대조 뒤 순차 1장 = 기준 {after.Text == baseline.Text}");
-        foreach (var b in broken.Take(3)) _out.WriteLine($"G3 깨진 예: {b}");
+        foreach (var b in broken.Take(3)) _out.WriteLine($"G3 깨진 예: {b.Desc}");
 
         Assert.True(perRound.Any(n => n > 0),
             $"🔴 G3 대조 성립 안 함 — 잠금 효과 증명 불가. 잠금을 걷은 날 생성 {ParallelCount}개 동시를 {perRound.Count}라운드 돌렸는데 "
@@ -440,21 +463,28 @@ public sealed class PdfConcurrentGenerationGateTests
         return bag.OrderBy(r => r.Index).ToList();
     }
 
-    private static List<string> Diff(List<GenResult> results, Func<GenResult, Baseline> baselineOf)
+    private sealed record BrokenPdf(GenResult Result, string Desc, string? Text);
+
+    /// <summary>D3 — 글자열이 기준(<paramref name="okTexts"/>)과 하나도 안 맞는 장. 생성 예외도 깨진 장으로 센다.</summary>
+    private static List<BrokenPdf> Diff(List<GenResult> results, Func<GenResult, IReadOnlyList<string>> okTexts)
     {
-        var broken = new List<string>();
+        var broken = new List<BrokenPdf>();
         foreach (var r in results)
         {
             if (r.Error is not null)
             {
-                broken.Add($"#{r.Index} {r.Input.Name}: 생성 예외 {r.Error.GetType().Name} — {r.Error.Message}");
+                broken.Add(new BrokenPdf(r, $"#{r.Index} {r.Input.Name}: 생성 예외 {r.Error.GetType().Name} — {r.Error.Message}", null));
                 continue;
             }
 
-            var b = baselineOf(r);
+            var ok = okTexts(r);
             var t = TextOf(r.Bytes!);
-            if (string.Equals(t.Text, b.Text, StringComparison.Ordinal)) continue;
-            broken.Add($"#{r.Index} {r.Input.Name}: 쪽 {t.Pages}/{b.Pages} · 글자 {t.LetterCount}/{b.LetterCount} · \\0 글꼴 [{t.ZeroFonts}]");
+            if (ok.Any(x => string.Equals(t.Text, x, StringComparison.Ordinal))) continue;
+            var firstDiff = 0;
+            while (firstDiff < Math.Min(t.Text.Length, ok[0].Length) && t.Text[firstDiff] == ok[0][firstDiff]) firstDiff++;
+            broken.Add(new BrokenPdf(r,
+                $"#{r.Index} {r.Input.Name}: 쪽 {t.Pages} · 글자 {t.LetterCount} · 글자열 길이 {t.Text.Length}/{ok[0].Length} · 첫 다름 {firstDiff} · \\0 글꼴 [{t.ZeroFonts}]",
+                t.Text));
         }
         return broken;
     }
