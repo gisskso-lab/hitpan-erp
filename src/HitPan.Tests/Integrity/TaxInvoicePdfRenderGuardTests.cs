@@ -1000,7 +1000,7 @@ public class TaxInvoicePdfRenderGuardTests
                 page.DefaultTextStyle(t => t.FontFamily("Malgun Gothic").FontSize(9));
                 page.Content().Element(e => compose.Invoke(null, new object?[] { e, snap, coords }));
             });
-        }).GeneratePdf();
+        }).GeneratePdfOneAtATime();
 
         return string.Concat(PageTexts(bytes));
     }
