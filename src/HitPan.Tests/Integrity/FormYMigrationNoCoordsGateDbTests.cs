@@ -101,6 +101,15 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
             Password = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "",
             Database = database,
             CharacterSet = "utf8mb4",
+            // 종전(보탬 3 전): 속성은 위 6개(Server · Port · UserID · Password · Database · CharacterSet)뿐이었다.
+            // 🔴 보탬 3(PM 판단 §101) — 제품 연결(InfrastructureExtensions.cs `GuidFormat=None` 줄)과 질의 뜻을 같게 한다.
+            //   GuidFormat 이 빠지면 MySqlConnector 기본이 char(36) 칸을 Guid 로 돌려줘, string 으로 받는 제품 Dapper 읽기가
+            //   InvalidCastException(IConvertible) · Error parsing column … Guid 로 터진다(2026-08-12 양식템플릿 사고 ·
+            //   M5 1차 CI 두 런 실패 10 = 제품 동작 전에 멈춘 무효 측정). 같은 레포 DB 게이트 builder 관례와 같은 세 값.
+            //   AllowLoadLocalInfile 은 넣지 않는다 — 이 시험과 이 시험이 부르는 제품 서비스에 파일 적재가 없다.
+            GuidFormat = MySqlGuidFormat.None,
+            AllowUserVariables = true,
+            DefaultCommandTimeout = 90,
         }.ConnectionString;
     }
 
