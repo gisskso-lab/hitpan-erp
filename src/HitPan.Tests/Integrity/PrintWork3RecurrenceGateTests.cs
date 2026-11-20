@@ -461,6 +461,69 @@ public sealed class PrintWork3RecurrenceGateTests
     // §2-4 기존 게이트 (A-T11)
     // ═══════════════════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════════════════
+    // 🆕 D 마감(2026-11-20) — 기대값 문서 §2-5 Y-라 · §2-6 E2M-폭 · E2M-법정
+    //   작업지시서 docs/운영기록/20261120작_WG1-51_장치15차_D마감_작업지시서.md §8 D-1 · D-4
+    //   🔴 반사 대상(StyleKey · ResolvePrintStyle · IsBodyTooNarrowForStyle · LargeStyle)은 갈래 E⑵ 코드에만 있다 ⇒
+    //     정적 필드로 붙잡지 않는다(형 초기화 실패가 이 클래스의 다른 시험까지 깨지 않게) · 시험마다 찾고 없으면 그 시험만 빨강.
+    // ═══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "Y-라 Y 템플릿 + 전표 미리보기 옵션 그림 끔 = 기본 폼 · 그림 0 (E⑴⑶ [4] A-1 수용 · main 초록)")]
+    public async Task YRa_YTemplateOptionImageOff_BasicForm()
+    {
+        using var t = new TenantBackground();
+        var r = ReadPdf(await RenderAsync(t.Tenant, "delivery", YTemplate(t.WritePng()), 1,
+            new PrintOptionOverrides { PrintBackground = false }));
+        AssertBasicForm(r, "Y-라");
+        Assert.Equal(0, r.Images);
+    }
+
+    private static MethodInfo E2Method(string name)
+    {
+        var m = SvcType.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.True(m is not null, $"PdfRenderService.{name}(…) 가 없다 — 갈래 E⑵ 코드가 실려야 초록(첫 실행 = 합류본).");
+        return m!;
+    }
+
+    private static object E2LargeStyle()
+    {
+        var f = SvcType.GetField("LargeStyle", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.True(f is not null, "PdfRenderService.LargeStyle 이 없다 — 갈래 E⑵ 코드가 실려야 초록.");
+        return f!.GetValue(null)!;
+    }
+
+    [Fact(DisplayName = "E2M-폭 큰글씨 A4 세로 좌우 25mm = 폭 모자람 참(basic 값) · 20mm = 거짓 (제품 함수 직접 · E⑵ P3-2)")]
+    public void E2M_Width_LargeStyleFallsBackAt25mm()
+    {
+        var narrow = E2Method("IsBodyTooNarrowForStyle");
+        var large = E2LargeStyle();
+        var a4 = QuestPDF.Helpers.PageSizes.A4.Width;
+        Assert.True((bool)narrow.Invoke(null, new object[] { large, a4, 25f, 25f })!,
+            "E2M-폭: A4 세로 좌우 25mm 인데 큰글씨가 대체되지 않는다(문턱 459).");
+        Assert.False((bool)narrow.Invoke(null, new object[] { large, a4, 20f, 20f })!,
+            "E2M-폭 대조: A4 세로 좌우 20mm 인데 대체된다.");
+        Assert.Equal(459f, (float)large.GetType().GetProperty("MinBodyWidth")!.GetValue(large)!);
+    }
+
+    [Theory(DisplayName = "E2M-법정 법정 3종 documentType = 스타일 null · delivery 대조 = 큰글씨 (제품 함수 직접 · E⑵ P3-2)")]
+    [InlineData("tax_invoice", true)]
+    [InlineData("invoice_exempt", true)]
+    [InlineData("payment_receipt", true)]
+    [InlineData("delivery", false)]
+    public void E2M_Legal_StyleNullForLegalTypes(string documentType, bool expectNull)
+    {
+        var resolve = E2Method("ResolvePrintStyle");
+        var info = Info("plain", false, null);
+        var styleKey = InfoType.GetProperty("StyleKey");
+        Assert.True(styleKey is not null, "FormTemplateInfo.StyleKey 가 없다 — 갈래 E⑵ 코드가 실려야 초록.");
+        styleKey!.SetValue(info, "large");
+        var style = resolve.Invoke(null, new object?[] { info, false, documentType });
+        if (expectNull)
+            Assert.True(style is null, $"E2M-법정: {documentType} 인데 스타일이 붙었다.");
+        else
+            Assert.True(style is not null, "E2M-법정 대조: delivery 큰글씨인데 스타일이 null 이다.");
+    }
+
     [Fact(DisplayName = "A-T11 기존 인쇄 게이트(축⒧-2 · G-W5 · 축③) 시험 클래스가 그대로 있다 (main 초록)")]
     public void AT11_ExistingPrintGatesStillPresent()
     {
