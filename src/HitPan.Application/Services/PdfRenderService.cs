@@ -164,6 +164,7 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 위 두 문장(`isYTemplate` · `useCoords`)은 한 글자도 안 바꿨다 — 편집창 판정 게이트가 그 글자를 읽는다.
         //   🔴 판정은 `IsNoCoordsImageOnly` 한 자리다 — 인쇄 미리보기 창의 안내 문(`IsNoCoordsImageOnlyAsync`)도 그 함수만 부른다.
         //   🔴 위 :112 「좌표가 0개인 양식은 한 글자도 안 바뀐다」 는 K3(인쇄 문)에 한해 틀리게 됐다 — 그 줄은 이력으로 둔다(지운 것 0).
+        //   🔴 §59 고침 1(작업지시서 ②-9 · P2-1) — 고침 1 부터 위 「칸 0」 = 저장된 칸 0(FormCoordsStored.IsEmpty) · 모두 무효 칸은 K3 아님(종전 기본 배치 + 데이터).
         var noCoordsImageOnly = IsNoCoordsImageOnly(documentType, overrides, isYTemplate, template);
 
         // 🔴 로고 워터마크 (20261026작1 §C-2 · DB-148 · 사장님 오더 10/25 ④).
@@ -2967,6 +2968,7 @@ public sealed class PdfRenderService : IPdfRenderService
     ///   ① <c>paper_mode</c> = <c>"plain"</c> ② <b>저장된</b> 그림 찍기 = 켬 ③ 그림 경로 있음 ④ 그 그림이 이번 인쇄에 실제로 읽힘
     ///   — ①~④ 는 렌더의 <paramref name="isYTemplate"/> 그대로 받는다(새 판정을 따로 짓지 않음 · 어긋남 0)
     ///   ⑤ 칸 좌표 0개(<c>useCoords</c> 앞 조건과 같은 셈 — K3 = <c>isYTemplate &amp;&amp; 칸 0</c> 은 Y 좌표 경로의 정확한 여집합)
+    ///   🔴 §59 고침 1(작업지시서 ②-9 · P2-1) — 고침 1 부터 ⑤ = <b>저장된 칸 0</b>(<see cref="FormCoordsStored.IsEmpty"/>) · 모두 무효 칸은 K3 아님(종전 기본 배치 + 데이터). 위 줄 「정확한 여집합」 은 이력으로 둔다 — 무효 칸 양식은 Y 좌표 경로도 K3 도 아니다.
     ///   ⑥ 법정 서식(또는 그 후보) <see cref="LegalFormDocTypes"/>(세금계산서 · 면세계산서 · 입금표)가 아님 — PM ⑥ (나) · 법무 판정 전까지 막는 쪽
     ///   ⑦ 전표 [인쇄] 문에서 부름(<see cref="PdfPreviewOverrides.NoCoordsImageOnly"/>) · 설정 미리보기(<c>IsFormDesignPreview</c>) 아님.
     /// 🔴 <b>판정 유일 자리</b> — 렌더(<c>RenderDocumentAsync</c>)와 인쇄 미리보기 창의 안내 문(<see cref="IsNoCoordsImageOnlyAsync"/>)이
@@ -2983,6 +2985,7 @@ public sealed class PdfRenderService : IPdfRenderService
            && overrides.IsFormDesignPreview != true
            && isYTemplate
            && (template?.FieldCoords.Count ?? 0) == 0
+           && FormCoordsStored.IsEmpty(template?.FieldCoordsJson)   // §59 고침 1(②-7) — 저장된 칸 0 · 위 줄은 그대로 둠
            && !LegalFormDocTypes.Contains(documentType);
 
     /// <summary>
@@ -3939,6 +3942,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 && savedPrintBackground
                 && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
                 && bgImage is not null;
+            // §59 고침 1(②-8) — 칸 0 = 저장된 칸 0 · 판정은 ②-7(IsNoCoordsImageOnly 의 FormCoordsStored.IsEmpty 줄) 하나 · 이 문은 코드 무변.
             return IsNoCoordsImageOnly(documentType, printDoor, yTemplate, template);
         }
         catch (Exception ex)
@@ -4020,6 +4024,9 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   맞춰도 인쇄물은 코드에 고정된 위치로만 나왔다.
                 //   ⇒ 시판 양식지 칸과 안 맞아 양식용지 모드가 사실상 못 쓰는 기능이었다.
                 FieldCoords = ParseFieldCoords(dto.FieldCoordsJson),
+                // 🔴 §59 고침 1(작업지시서 ②-6) — 저장값 글자 그대로도 들고 간다. 판정 「저장된 칸 0」(FormCoordsStored.IsEmpty)이 읽는다.
+                //   DTO 와 같은 이름 · 같은 형이라 짝 대조 게이트(축⒡ 긁기)가 이 배선을 스스로 잰다.
+                FieldCoordsJson = dto.FieldCoordsJson,
             // 🔴 20261024 사장님 오더 "인쇄까지 모두 양식지 적용" · §13
             //   *"이미 업체에서 쓰는 양식지가 있을수도 있으니"* — 종전에는 이 칸을
             //   **읽어오지도 않았다**(PdfRenderService 안 BackgroundImageUrl 0건).
@@ -4108,6 +4115,12 @@ public sealed class PdfRenderService : IPdfRenderService
     private sealed class FormTemplateInfo
     {
         public string PaperMode { get; set; } = "plain";
+
+        /// <summary>
+        /// 🔴 저장된 칸 좌표 글자 그대로 (W-G1-51 §59 고침 1 · P2-1). <see cref="FieldCoords"/> 는 읽어 낸 목록이라
+        ///   모두 무효 칸이면 0개가 된다 — 「저장된 칸 0」 판정(<see cref="FormCoordsStored.IsEmpty"/>)은 이 글자를 본다.
+        /// </summary>
+        public string? FieldCoordsJson { get; set; }
         public decimal MarginTopMm { get; set; } = 20;
         public decimal MarginLeftMm { get; set; } = 20;
         public decimal MarginRightMm { get; set; } = 20;

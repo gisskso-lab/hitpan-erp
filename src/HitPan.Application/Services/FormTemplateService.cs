@@ -578,7 +578,9 @@ public class FormTemplateService : IFormTemplateService
             var effectiveDefaultId = await LockTypeAndReadEffectiveDefaultAsync(
                 db, tx.DbTransaction, tenantId, formType, ct);
             var result = await CreateYTemplateCoreAsync(
-                db, tx.DbTransaction, tenantId, templateId, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
+                db, tx.DbTransaction, tenantId, templateId, effectiveDefaultId, newCopies,
+                keepDefaultWhenNoCoords: false, ct);   // §59 고침 1(PM 결재 ②): Y 단추 길 = 종전 그대로(칸 0 이어도 기본 넘김)
+            // 종전(§59 고침 1 전): db, tx.DbTransaction, tenantId, templateId, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
             commitStarted = true;
             await tx.CommitAsync(ct);
             newCopies.Clear();   // 고침 1 — 확정된 사본은 지울 대상 아님
@@ -731,7 +733,9 @@ public class FormTemplateService : IFormTemplateService
                 foreach (var id in ids)
                 {
                     var r = await CreateYTemplateCoreAsync(
-                        db, tx.DbTransaction, g.TenantId, id, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
+                        db, tx.DbTransaction, g.TenantId, id, effectiveDefaultId, newCopies,
+                        keepDefaultWhenNoCoords: true, ct);   // §59 고침 1(PM 결재 ②): 옮기기 길만 — 저장된 칸 0 이면 기본 안 넘김
+                    // 종전(§59 고침 1 전): db, tx.DbTransaction, g.TenantId, id, effectiveDefaultId, newCopies, ct);   // 고침 1: newCopies 인자 더함
                     results.Add((id, r));
                 }
                 commitStarted = true;
@@ -827,8 +831,11 @@ public class FormTemplateService : IFormTemplateService
     /// </summary>
     private async Task<YTemplateResult> CreateYTemplateCoreAsync(
         DbConnection db, DbTransaction tx, string tenantId, string templateId,
-        string? effectiveDefaultId, List<string> newCopies, CancellationToken ct)
+        string? effectiveDefaultId, List<string> newCopies, bool keepDefaultWhenNoCoords, CancellationToken ct)
     {
+        // 종전(§59 고침 1 전) 인자 끝: string? effectiveDefaultId, List<string> newCopies, CancellationToken ct)
+        //   §59 고침 1(작업지시서 ②-1 · PM 결재 ②) — keepDefaultWhenNoCoords = 옮기기 길만 참 · Y 단추 길 거짓(종전 그대로).
+        //   참이고 원본이 「저장된 칸 0」(FormCoordsStored.IsEmpty)이면 사본을 만들되 기본을 넘기지 않는다(CTO §59 P1-1 (가)).
         // 종전(고침 1 전) 인자 끝: string? effectiveDefaultId, CancellationToken ct)
         //   고침 1([4] P2-1 · [3-V] P2-2) — newCopies = 이번에 만든 그림 사본 경로를 여기 더한다 · 호출부가 커밋 전 이탈 때 지운다.
         var src = await db.QueryFirstOrDefaultAsync<YSourceRow>(new CommandDefinition(
@@ -859,6 +866,10 @@ public class FormTemplateService : IFormTemplateService
         }
 
         var wasEffectiveDefault = string.Equals(src.TemplateId, effectiveDefaultId, StringComparison.Ordinal);
+
+        // 🔴 §59 고침 1(작업지시서 ②-2) — 기본 넘김 세 자리(⑴ 원본 내림 · ⑵ 새 사본 기본 · 재사용 길 올림)를 이 한 값으로 묶는다.
+        //   옮기기 길(keepDefaultWhenNoCoords) + 원본 저장된 칸 0 = 넘기지 않음 → 기본 = 원본 = 데이터만(대표 §10 #2).
+        var passDefault = wasEffectiveDefault && !(keepDefaultWhenNoCoords && FormCoordsStored.IsEmpty(src.FieldCoordsJson));
 
         // 🔴 고침 1([3-V] P2-1 · PM 판단) — 「그림 없음」 = 파일 · 폴더가 진짜 없을 때만(위 ⓘ-6 줄 그대로).
         //   접근 거부 · 잠김 · 경로가 폴더 등 그 밖 읽기 실패 = 그 행 무변(켬 유지) · 다음 기동에 다시 · 이름 붙은 경고.
@@ -955,7 +966,8 @@ public class FormTemplateService : IFormTemplateService
         }
 
         // ⑴ 원본이 실효 기본이었고 명시 기본이면 내림(이름순 실효 기본이면 이미 0).
-        if (wasEffectiveDefault && src.IsDefault)
+        //   §59 고침 1(②-3a) — 종전: if (wasEffectiveDefault && src.IsDefault)
+        if (passDefault && src.IsDefault)
         {
             await db.ExecuteAsync(new CommandDefinition(
                 @"UPDATE form_templates SET is_default = 0
@@ -994,18 +1006,31 @@ public class FormTemplateService : IFormTemplateService
                     NewTemplateId = yId,
                     NewTemplateName = BuildYTemplateName(src.TemplateName),
                     NewBackgroundImageUrl = copiedPath,
-                    NewIsDefault = wasEffectiveDefault ? 1 : 0,
+                    NewIsDefault = passDefault ? 1 : 0,   // §59 고침 1(②-3b) — 종전: NewIsDefault = wasEffectiveDefault ? 1 : 0,
                     TenantId = tenantId,
                     TemplateId = templateId
                 },
                 transaction: tx, cancellationToken: ct));
         }
-        else if (wasEffectiveDefault)
+        else if (passDefault)   // §59 고침 1(②-3c) — 종전: else if (wasEffectiveDefault)
         {
             await db.ExecuteAsync(new CommandDefinition(
                 @"UPDATE form_templates SET is_default = 1
                   WHERE tenant_id = @TenantId AND template_id = @TemplateId",
                 new { TenantId = tenantId, TemplateId = yId },
+                transaction: tx, cancellationToken: ct));
+        }
+
+        // 🔴 §59 고침 1(작업지시서 ②-4 · PM 결재 ③ · 불변식 I2) — 기본을 안 넘겼고 원본이 이름순 실효 기본이었으면
+        //   원본을 명시 기본으로 올린다. 사본 이름(원본 + 꼬리)은 원본이 89자를 넘으면 잘려 이름순에서 원본보다 앞설 수 있다
+        //   (BuildYTemplateName) — 안 올리면 사본이 실효 기본이 된다. 실효 기본이 이름순이었다 = 그 종에 활성 명시 기본 0
+        //   → 새 유일 키(uk_form_templates_one_default) 1062 길 0 · 같은 거래 · 인쇄 결과 무변(원본이 이미 실효 기본).
+        if (wasEffectiveDefault && !passDefault && !src.IsDefault)
+        {
+            await db.ExecuteAsync(new CommandDefinition(
+                @"UPDATE form_templates SET is_default = 1
+                  WHERE tenant_id = @TenantId AND template_id = @TemplateId",
+                new { TenantId = tenantId, TemplateId = templateId },
                 transaction: tx, cancellationToken: ct));
         }
 

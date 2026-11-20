@@ -1337,6 +1337,7 @@ jobs:
           #   🔴 DB 불필요(리플렉션만) — SKIP 이 찍히면 안 돈 것이다.
           GATES="$GATES|P0EnvCollectionGate"
           GATES="$GATES|BackofficeAnonymousEntry"
+          GATES="$GATES|FormYMigrationNoCoordsGate"
 
 
 
