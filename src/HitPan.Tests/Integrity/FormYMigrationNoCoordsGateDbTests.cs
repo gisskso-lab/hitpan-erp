@@ -29,7 +29,11 @@ namespace HitPan.Tests.Integrity;
 /// 🔴 이 파일은 제품의 새 함수(<c>FormCoordsStored</c>)를 부르지 않는다 — 고침 전 머리(<c>189ad5f6</c>) 위에 그대로 얹어
 ///   재현 런(빨강)을 낼 수 있어야 한다(작업지시서 §4 절차 1). S7 의 기대값은 시험 안의 표 글자다.
 /// 🔴 그림은 제품 그림 뿌리(<see cref="FormBackgroundPaths.TenantRoot"/>) 아래 실제 PNG — 쓰기가 막히면 「[환경]」 으로 이름 붙여 던진다.
+/// 🔴 보탬 2(PM 결재 §92 · [3-V] · [4] P2-1) — 제품 옮기기는 회사 조건 없이 DB 전체를 고른다. 그래서 옮기기 전에
+///   ⑴ 호스트 · 포트 · DB 이름을 환경변수로 명시 받았을 때만 ⑵ DB 이름 허용 목록(<c>hitpan_e2e</c>) ⑶ 시험 회사 밖 옮기기 대상 0 —
+///   하나라도 어긋나면 옮기기를 부르지 않고 「[환경]」 으로 실패한다. DB 전역에 닿으므로 병렬 끔 묶음에서 돈다([4] P3-1).
 /// </remarks>
+[Collection(BoSignupTenantKeyGateCollection.Name)]   // 보탬 2([4] P3-1) — 기존 DB 게이트 묶음 · 정의 = BoSignupTenantKeyGateTests.cs `DisableParallelization = true`
 public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
 {
     private const string Gate = "FormYMigrationNoCoordsGate";
@@ -54,14 +58,45 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
     // 자 — 연결 · 시드 · 기동 · 읽기
     // ═════════════════════════════════════════════════════════════
 
+    // 🔴 보탬 2 ⑵(PM 결재 §92) — DB 이름 허용 목록 = CI db-gate env 의 시험 DB 이름 글자 그대로
+    //   (.github/workflows/build-and-test.yml db-gate `HITPAN_TEST_DB: 'hitpan_e2e'`). 대소문자 · 공백까지 같아야 한다.
+    private static readonly string[] AllowedTestDbs = { "hitpan_e2e" };
+
+    // 🔴 보탬 2([4] P3-3) — MariaDB 의 CHECK 제약 거절 오류 번호 ER_CONSTRAINT_FAILED(MariaDB 11.4 mysqld_error.h).
+    //   MySqlConnector 의 MySqlErrorCode 에 이 번호 이름이 없어 숫자로 견준다. MySQL 8 의 3819 는 ERP(MariaDB)에 안 쓴다.
+    private const int MariaDbCheckConstraintFailed = 4025;
+
+    /// <summary>
+    /// 시험 DB 연결 글자. <c>HITPAN_TEST_DB</c> 가 비면 null(연결 0 → <see cref="DbGateEnvironment.SkipOrFail"/> · 종전 그대로).
+    /// 🔴 보탬 2 ⑴ · ⑵ — 값이 있는데 호스트 · 포트를 명시하지 않았거나 DB 이름이 허용 목록 밖이면 연결 열기 전 「[환경]」 으로 던진다.
+    /// </summary>
     private static string? ConnString()
     {
         var database = Environment.GetEnvironmentVariable("HITPAN_TEST_DB");
         if (string.IsNullOrWhiteSpace(database)) return null;
+        // 🔴 보탬 2 ⑴ — 기본값(127.0.0.1:3306)으로 떨어지지 않는다. 이 PC 의 3306 은 실물 서버다.
+        var host = Environment.GetEnvironmentVariable("HITPAN_DB_HOST");
+        var portText = Environment.GetEnvironmentVariable("HITPAN_DB_PORT");
+        if (string.IsNullOrWhiteSpace(host) || !uint.TryParse(portText, out var port))
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"[환경] HITPAN_TEST_DB='{database}' 인데 HITPAN_DB_HOST · HITPAN_DB_PORT 를 명시하지 않았다"
+                + $"(호스트 '{host}' · 포트 '{portText}') — 기본값(127.0.0.1:3306)으로 붙지 않는다. "
+                + "이 시험은 제품 옮기기를 회사 조건 없이 부르므로 시험 DB 를 세 환경변수로 명시해야 한다.");
+        }
+        // 🔴 보탬 2 ⑵ — 허용 목록 밖 DB 이름이면 연결을 열지 않는다.
+        if (!AllowedTestDbs.Contains(database, StringComparer.Ordinal))
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"[환경] HITPAN_TEST_DB='{database}' 는 허용 목록({string.Join(", ", AllowedTestDbs)}) 밖이다 — 연결을 열지 않는다. "
+                + "이 시험은 제품 옮기기를 회사 조건 없이 부른다(실물 · 공용 DB 보호).");
+        }
         return new MySqlConnectionStringBuilder
         {
-            Server = Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "127.0.0.1",
-            Port = uint.TryParse(Environment.GetEnvironmentVariable("HITPAN_DB_PORT"), out var p) ? p : 3306,
+            // 종전(보탬 2 전): Server = Environment.GetEnvironmentVariable("HITPAN_DB_HOST") ?? "127.0.0.1",
+            // 종전(보탬 2 전): Port = uint.TryParse(Environment.GetEnvironmentVariable("HITPAN_DB_PORT"), out var p) ? p : 3306,
+            Server = host,
+            Port = port,
             UserID = Environment.GetEnvironmentVariable("HITPAN_DB_USER") ?? "root",
             Password = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "",
             Database = database,
@@ -176,12 +211,38 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
     private async Task<Boot> BootAsync()
     {
         await using var db = await OpenRequiredAsync();
+        await RequireNoOutsideTargetsAsync(db);   // 🔴 보탬 2 ⑶ — 제품 준비 확인 · 옮기기 부르기 전
         var log = new ListLogger<FormTemplateService>();
         var svc = new FormTemplateService(new GateUnitOfWork(db), log);
         var ready = await svc.CheckYMigrationReadinessAsync(ApiVersion);
         var created = ready == FormTemplateService.YMigrationReadiness.Ready ? await svc.RunYMigrationOnceAsync() : 0;
         _out.WriteLine($"[gate59f1] 기동 — 준비 {ready} · 만든 수 {created} · 기록 {log.Entries.Count}");
         return new Boot(ready, created, log.Entries);
+    }
+
+    /// <summary>
+    /// 🔴 보탬 2 ⑶(PM 결재 §92 · [3-V] · [4] P2-1) — 제품 옮기기는 회사 조건 없이 DB 전체의 대상(양식지 · 찍기 1 · 활성)을 고른다.
+    /// 이 시험이 만든 회사 밖에 대상이 한 행이라도 있으면 옮기기를 부르지 않고 「[환경]」 으로 실패한다(남의 회사 행을 옮기지 않는다).
+    /// 고르기 세 조건 = <c>FormTemplateService.RunYMigrationOnceAsync</c> 의 WHERE 글자 그대로(칸 = 출하 DDL form_templates · #13).
+    /// </summary>
+    private async Task RequireNoOutsideTargetsAsync(DbConnection db)
+    {
+        var outside = _tenants.Count == 0
+            ? await db.ExecuteScalarAsync<long>(
+                @"SELECT COUNT(*) FROM form_templates
+                  WHERE paper_mode = 'preprint' AND print_background = 1 AND is_active = 1")
+            : await db.ExecuteScalarAsync<long>(
+                @"SELECT COUNT(*) FROM form_templates
+                  WHERE paper_mode = 'preprint' AND print_background = 1 AND is_active = 1
+                    AND tenant_id NOT IN @Tenants",
+                new { Tenants = _tenants });
+        if (outside != 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"[환경] 시험 회사 밖 옮기기 대상(양식지 · 찍기 1 · 활성)이 {outside}행 있다 — 제품 옮기기(회사 조건 없음)를 부르지 않는다. "
+                + "공용 시험 DB 에 다른 회사 양식지 행이 남았거나, 시험 DB 가 아닌 곳을 가리킨다.");
+        }
+        _out.WriteLine($"[gate59f1] 옮기기 전 확인 — 시험 회사 밖 대상 0 · 시험 회사 {_tenants.Count}");
     }
 
     private static void NoWarnings(Boot b)
@@ -414,7 +475,9 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
         {
             src = await InsertAsync(db, t, $"gate59f1 {label}", "preprint", true, coords, WritePng(t), isDefault: true);
         }
-        catch (MySqlException ex) when (label is "E2" or "E3" or "E10")
+        // 종전(보탬 2 전): catch (MySqlException ex) when (label is "E2" or "E3" or "E10")
+        // 🔴 보탬 2([4] P3-3) — CHECK 거절(4025)만 받는다. 연결 끊김 · 칸 이름 틀림 등 그 밖 MySql 오류는 밖으로(빨강 · 거짓 초록 0).
+        catch (MySqlException ex) when ((label is "E2" or "E3" or "E10") && ex.Number == MariaDbCheckConstraintFailed)
         {
             // U1 실측 — 출하 DDL 의 CHECK(json_valid) 가 이 값을 거절했다. E1 · E4 · E5 는 여기로 못 온다(넣어져야 함).
             _out.WriteLine($"[S7] {label} = DB 에 못 들어감 — {ex.ErrorCode} · {ex.Message}");
@@ -584,6 +647,12 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
             {
                 _out.WriteLine($"[gate59f1] U5′ 시험 행 정리 실패(시험 판정과 무관): {ex.Message}");
             }
+            catch (Exception ex)
+            {
+                // 🔴 보탬 2([3-V] P3-1) — 연결 끊긴 뒤 InvalidOperationException 등도 잡는다. finally 에서 던지면 앞의 원래 단언 실패가
+                //   사라진다 → 정리는 밖으로 안 던지고 경고 1줄만(#15).
+                _out.WriteLine($"[gate59f1] 경고 — U5′ 시험 행 정리 실패 {ex.GetType().Name}(시험 판정과 무관 · 원래 결과 유지): {ex.Message}");
+            }
         }
     }
 
@@ -686,11 +755,14 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
 
     public void Dispose()
     {
-        var cs = ConnString();
-        if (cs is not null && (_tenants.Count > 0 || _seededApplyStatus))
+        // 종전(보탬 2 전): var cs = ConnString();
+        // 종전(보탬 2 전): if (cs is not null && (_tenants.Count > 0 || _seededApplyStatus))
+        // 🔴 보탬 2 — ConnString 은 ⑴ · ⑵ 어긋남에 「[환경]」 으로 던진다 → 시험 행이 있을 때만 · try 안에서 부른다.
+        if (_tenants.Count > 0 || _seededApplyStatus)
         {
             try
             {
+                var cs = ConnString() ?? throw new InvalidOperationException("시험 행이 있는데 HITPAN_TEST_DB 가 비었다(도중에 바뀜).");
                 using var c = new MySqlConnection(cs);
                 c.Open();
                 foreach (var t in _tenants)
@@ -707,6 +779,11 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
             {
                 _out.WriteLine($"[gate59f1] 시험 행 정리 실패(시험 판정과 무관): {ex.Message}");
             }
+            catch (Exception ex)
+            {
+                // 🔴 보탬 2([3-V] P3-1) — 정리 실패가 원래 단언 실패를 덮지 않게 모든 예외를 잡고 경고 1줄(#15).
+                _out.WriteLine($"[gate59f1] 경고 — 시험 행 정리 실패 {ex.GetType().Name}(시험 판정과 무관 · 원래 결과 유지): {ex.Message}");
+            }
         }
         foreach (var t in _tenants)
         {
@@ -722,6 +799,11 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
             catch (UnauthorizedAccessException ex)
             {
                 _out.WriteLine($"[gate59f1] 시험 그림 폴더 정리 거부(시험 판정과 무관): {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                // 🔴 보탬 2([3-V] P3-1) — 그 밖 예외도 잡고 경고 1줄(#15) · 원래 결과 유지.
+                _out.WriteLine($"[gate59f1] 경고 — 시험 그림 폴더 정리 실패 {ex.GetType().Name}(시험 판정과 무관 · 원래 결과 유지): {ex.Message}");
             }
         }
     }
