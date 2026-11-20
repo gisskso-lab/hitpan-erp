@@ -2,6 +2,8 @@ using System.Data;
 using System.Data.Common;
 using Dapper;
 using HitPan.Application.DTOs.Documents;
+using HitPan.Application.DTOs.Email;
+using HitPan.Application.DTOs.Fax;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
 using HitPan.Domain.Common;
@@ -462,6 +464,181 @@ public sealed class FormYMigrationNoCoordsGateDbTests : IDisposable
         var rows = await RowsAsync(db, t);
         Assert.True(rows.Single(x => x.Id == r.YTemplateId).Def, "Y 단추 길 사본이 기본이 안 됐다 — 고침이 옮기기 길 밖으로 샜다.");
         Assert.False(rows.Single(x => x.Id == src).Def);
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // U5′ — 메일 · 팩스 보내기 동작 시험(PM 결재 고침 ⑧ · 음성 시험 = 고침 1 이 안 바꾸는 길)
+    //   실제 DB 에 설정 1행을 넣고 제품 서비스의 SendDocumentAsync 를 실제로 부른다. 렌더만 기록하는 가짜다.
+    //   🔴 메일 = SMTP 127.0.0.1 · 닫힌 포트 1 → 바깥 연결 0 · 바로 거절. 팩스 = 가짜 공급자(실제 송출 0).
+    //   🔴 시험이 넣은 행은 finally 에서 그 회사 것만 지운다. 칸 이름 = 출하 DDL hitpan_db_clean.sql CREATE TABLE(#13).
+    //   🔴 고침 1 의 새 함수를 부르지 않는다 — 189ad5f6 위에서도 빌드 · 초록(메일 · 팩스는 고침 1 이 안 바꿈).
+    // ═════════════════════════════════════════════════════════════
+
+    private const string MailDocId = "gate59f1-mail-doc";
+    private const string FaxDocId = "gate59f1-fax-doc";
+    private const string FaxProviderCode = "gate59f1";      // fax_settings.provider varchar(30)
+
+    [Fact(DisplayName = "§59 고침 1 U5′ 🔴 메일 보내기(EmailService.SendDocumentAsync 실제 호출) = 4인자 판 1회 · 인쇄 문 표지 판 0회")]
+    public async Task U5p_Mail_SendDocument_FourArgOnly()
+    {
+        await using var db = await OpenAsync();
+        if (db is null) return;
+        var t = NewTenant();
+        try
+        {
+            await db.ExecuteAsync(
+                @"INSERT INTO email_settings
+                    (tenant_id, smtp_host, smtp_port, smtp_user, smtp_password_enc, use_ssl,
+                     from_address, from_name, bcc_self, is_active)
+                  VALUES (@T, '127.0.0.1', 1, '', NULL, 0, 'gate59f1-from@example.invalid', 'gate59f1', 0, 1)",
+                new { T = t });
+
+            var pdf = new RecordingPdf();
+            var log = new ListLogger<EmailService>();
+            var svc = new EmailService(db, new Mock<IPasswordEncryptor>(MockBehavior.Strict).Object, pdf, log);
+            var resp = await svc.SendDocumentAsync(t, null, new SendDocumentEmailRequest
+            {
+                DocumentType = DocType,
+                DocumentId = MailDocId,
+                DocumentNo = "GATE59F1-M1",
+                RecipientEmail = "gate59f1-to@example.invalid",
+                Subject = "gate59f1 U5p mail",
+                Body = "gate59f1",
+                AttachPdf = true,
+            });
+            _out.WriteLine($"[gate59f1] U5′ 메일 — {pdf.Describe()} · 응답 성공 {resp.Success} · 오류 {resp.Error} · 기록 {log.Entries.Count}");
+
+            Assert.True(pdf.FourArg == 1, $"메일 보내기가 4인자 판을 {pdf.FourArg}회 불렀다(기대 1) — {pdf.Describe()}");
+            Assert.True(pdf.WithOverrides == 0,
+                $"메일 보내기가 인쇄 문 표지 판(overrides 판)을 {pdf.WithOverrides}회 불렀다(기대 0) — {pdf.Describe()}");
+            Assert.Equal((t, DocType, MailDocId), pdf.LastFourArg);
+            Assert.False(resp.Success, "[환경] 127.0.0.1:1 SMTP 연결이 성공했다 — 닫힌 포트 전제가 깨졌다(바깥 연결 0 확인 불가).");
+            var attached = await db.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM email_send_history WHERE tenant_id = @T AND has_attachment = 1", new { T = t });
+            Assert.True(attached == 1, $"메일 이력에 첨부 1 행이 {attached}행 — 4인자 판 렌더 결과가 첨부로 안 갔다.");
+        }
+        finally
+        {
+            await CleanupAsync(db, t,
+                "DELETE FROM email_attachment_history WHERE tenant_id = @T",
+                "DELETE FROM email_send_history WHERE tenant_id = @T",
+                "DELETE FROM email_settings WHERE tenant_id = @T");
+        }
+    }
+
+    [Fact(DisplayName = "§59 고침 1 U5′ 🔴 팩스 보내기(FaxService.SendDocumentAsync 실제 호출) = 4인자 판 1회 · 인쇄 문 표지 판 0회")]
+    public async Task U5p_Fax_SendDocument_FourArgOnly()
+    {
+        await using var db = await OpenAsync();
+        if (db is null) return;
+        var t = NewTenant();
+        try
+        {
+            await db.ExecuteAsync(
+                @"INSERT INTO fax_settings
+                    (tenant_id, provider, api_endpoint, api_key_enc, api_secret_enc,
+                     sender_fax_no, sender_name, is_active)
+                  VALUES (@T, @P, NULL, NULL, NULL, '0200000000', 'gate59f1', 1)",
+                new { T = t, P = FaxProviderCode });
+
+            var pdf = new RecordingPdf();
+            var provider = new RecordingFaxProvider();
+            var log = new ListLogger<FaxService>();
+            var svc = new FaxService(db, new Mock<IPasswordEncryptor>(MockBehavior.Strict).Object, pdf,
+                new IFaxProvider[] { provider }, log);
+            var resp = await svc.SendDocumentAsync(t, null, new SendFaxRequest
+            {
+                DocumentType = DocType,
+                DocumentId = FaxDocId,
+                DocumentNo = "GATE59F1-F1",
+                RecipientFaxNo = "0200000001",
+                RecipientName = "gate59f1",
+            });
+            _out.WriteLine($"[gate59f1] U5′ 팩스 — {pdf.Describe()} · 송출 {provider.Sent.Count} · 응답 성공 {resp.Success} · 오류 {resp.Error} · 기록 {log.Entries.Count}");
+
+            Assert.True(pdf.FourArg == 1, $"팩스 보내기가 4인자 판을 {pdf.FourArg}회 불렀다(기대 1) — {pdf.Describe()}");
+            Assert.True(pdf.WithOverrides == 0,
+                $"팩스 보내기가 인쇄 문 표지 판(overrides 판)을 {pdf.WithOverrides}회 불렀다(기대 0) — {pdf.Describe()}");
+            Assert.Equal((t, DocType, FaxDocId), pdf.LastFourArg);
+            Assert.True(provider.Sent.Count == 1, $"가짜 공급자 송출 {provider.Sent.Count}회(기대 1) — 설정된 공급자로 안 갔다.");
+            Assert.Equal(RecordingPdf.Bytes, provider.Sent[0].DocumentBytes);
+        }
+        finally
+        {
+            await CleanupAsync(db, t,
+                "DELETE FROM fax_send_history WHERE tenant_id = @T",
+                "DELETE FROM fax_settings WHERE tenant_id = @T");
+        }
+    }
+
+    /// <summary>U5′ 정리 — 그 회사 행만 지운다. 실패는 출력 1줄(시험 판정과 무관 · #15).</summary>
+    private async Task CleanupAsync(DbConnection db, string tenant, params string[] deletes)
+    {
+        foreach (var sql in deletes)
+        {
+            try
+            {
+                await db.ExecuteAsync(sql, new { T = tenant });
+            }
+            catch (MySqlException ex)
+            {
+                _out.WriteLine($"[gate59f1] U5′ 시험 행 정리 실패(시험 판정과 무관): {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>기록하는 가짜 렌더 — 4인자 판과 overrides 판(인쇄 문 표지 판)을 따로 센다. 렌더는 하지 않는다.</summary>
+    private sealed class RecordingPdf : IPdfRenderService
+    {
+        public static readonly byte[] Bytes = System.Text.Encoding.ASCII.GetBytes("%PDF-1.4 gate59f1 U5p");
+
+        public int FourArg { get; private set; }
+        public int WithOverrides { get; private set; }
+        public int PrintDoorFlag { get; private set; }
+        public int NoticeAsked { get; private set; }
+        public (string Tenant, string Type, string Id) LastFourArg { get; private set; }
+
+        public Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType,
+            string documentId, CancellationToken ct = default)
+        {
+            FourArg++;
+            LastFourArg = (tenantId, documentType, documentId);
+            return Task.FromResult((Bytes, "gate59f1.pdf"));
+        }
+
+        public Task<(byte[] Bytes, string FileName)> RenderDocumentAsync(string tenantId, string documentType,
+            string documentId, PdfPreviewOverrides? overrides, CancellationToken ct = default)
+        {
+            WithOverrides++;
+            if (overrides?.NoCoordsImageOnly == true) PrintDoorFlag++;
+            return Task.FromResult((Bytes, "gate59f1.pdf"));
+        }
+
+        public Task<bool> IsNoCoordsImageOnlyAsync(string tenantId, string documentType, CancellationToken ct = default)
+        {
+            NoticeAsked++;
+            return Task.FromResult(false);
+        }
+
+        public string Describe() =>
+            $"4인자 판 {FourArg} · overrides 판 {WithOverrides}(표지 {PrintDoorFlag}) · 안내 판정 {NoticeAsked}";
+    }
+
+    /// <summary>가짜 팩스 공급자 — 받은 요청만 적는다(실제 송출 0).</summary>
+    private sealed class RecordingFaxProvider : IFaxProvider
+    {
+        public List<FaxProviderRequest> Sent { get; } = new();
+        public string ProviderCode => FaxProviderCode;
+        public bool CanSendReal => true;
+
+        public Task<FaxProviderResult> SendAsync(FaxProviderRequest req, CancellationToken ct = default)
+        {
+            Sent.Add(req);
+            return Task.FromResult(new FaxProviderResult { Success = true, JobId = "gate59f1-job", PageCount = 1 });
+        }
+
+        public Task<FaxProviderResult> TestAsync(FaxProviderRequest req, CancellationToken ct = default) =>
+            throw new NotSupportedException("U5′ 는 연결 시험 길을 태우지 않는다.");
     }
 
     // ═════════════════════════════════════════════════════════════
