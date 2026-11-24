@@ -132,6 +132,11 @@ public class FormTemplateService : IFormTemplateService
     {
         // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-5 · PM 판단] 그림 경로 앞뒤 공백은 서버 저장 입구에서도 자른다.
         request.BackgroundImageUrl = TrimBackgroundPath(request.BackgroundImageUrl);
+        // 🔴 [2026-11-24 W-G1-51 P2-A · PM 결재 §112] 입력 검사 = 트랜잭션 열기 **전**(잘못된 입력 = DB 연결 · 트랜잭션 0 · 400).
+        // 2943c249 가 Core 안(트랜잭션 뒤)으로 옮긴 순서를 되돌린다. Core 안 같은 줄은 그대로 둔다(#1 · 순수 static · 두 번 불러도 같은 값).
+        ValidatePaperMode(request.PaperMode);
+        _ = ResolveStyleKeyToSave(request.StyleKey);
+        _ = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode);
         await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
         try
         {
@@ -281,6 +286,11 @@ public class FormTemplateService : IFormTemplateService
     {
         // 🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · [3-V] P3-5 · PM 판단] 만들기와 같은 자름(아래 그림 찍기 유지 판정도 자른 값을 본다).
         request.BackgroundImageUrl = TrimBackgroundPath(request.BackgroundImageUrl);
+        // 🔴 [2026-11-24 W-G1-51 P2-A · PM 결재 §112] 만들기와 같은 입구 검사 — 트랜잭션 열기 **전**(FOR UPDATE 읽기 · 기본 내림보다도 앞).
+        // Core 안 같은 줄은 그대로 둔다(#1 · 순수 static · 두 번 불러도 같은 값).
+        ValidatePaperMode(request.PaperMode);
+        _ = ResolveStyleKeyToSave(request.StyleKey);
+        _ = ResolvePrintCopyMode(request.FormType, request.PrintCopyMode);
         await using var tx = await _unitOfWork.BeginTransactionAsync(ct);
         try
         {
