@@ -107,4 +107,35 @@ public class FormTemplateServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => svc.CreateAsync("tenant-1", req));
         uow.Verify(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // 🔴 [2026-11-25 W-G1-51 P2-A 보탬 1 · PM 결재 §115] Update 짝 — FTS-05 · 06 은 Create 만 물었다.
+    [Fact(DisplayName = "FTS-07: UpdateAsync — 스타일 허용 4값 밖 저장 시 InvalidOperationException · 트랜잭션 0")]
+    public async Task Update_InvalidStyleKey_ThrowsBeforeTransaction()
+    {
+        var (svc, uow) = CreateServiceWithUow();
+        var req = new UpdateFormTemplateRequest
+        {
+            FormType = "estimate",
+            TemplateName = "T",
+            PaperMode = "plain",
+            StyleKey = "fancy"
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.UpdateAsync("tenant-1", "template-1", req));
+        uow.Verify(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "FTS-08: UpdateAsync — 인쇄 매수 3값 밖 저장 시 InvalidOperationException · 트랜잭션 0")]
+    public async Task Update_InvalidPrintCopyMode_ThrowsBeforeTransaction()
+    {
+        var (svc, uow) = CreateServiceWithUow();
+        var req = new UpdateFormTemplateRequest
+        {
+            FormType = "estimate",
+            TemplateName = "T",
+            PaperMode = "plain",
+            PrintCopyMode = "triple"
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.UpdateAsync("tenant-1", "template-1", req));
+        uow.Verify(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
 }
