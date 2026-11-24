@@ -313,6 +313,8 @@ public sealed class LegacyPdfButtonRenderRouteGateTests
         private readonly object _gate = new();
         public bool ConfirmAnswer { get; set; }
         public Exception? SaveThrows { get; set; }
+        // 🔴 [고침 2 · G2-4] 상자 예외 뒤 풀림 시험용 — 상자를 센 뒤 던진다.
+        public Exception? ConfirmThrows { get; set; }
         public int Confirms;
         public List<string> Warns { get; } = new();
         public List<string> Infos { get; } = new();
@@ -324,6 +326,7 @@ public sealed class LegacyPdfButtonRenderRouteGateTests
             ConfirmImageOnlyAsync = () =>
             {
                 Interlocked.Increment(ref Confirms);
+                if (ConfirmThrows is not null) throw ConfirmThrows;
                 return Task.FromResult(ConfirmAnswer);
             },
             Warn = m => { lock (_gate) Warns.Add(m); },
@@ -523,6 +526,78 @@ public sealed class LegacyPdfButtonRenderRouteGateTests
         ui.ConfirmAnswer = true;
         await pdf.DownloadPdfAsync("sales-return", "s-1", "판매반품", ui.Ui).WaitAsync(Wait);
 
+        Assert.Equal(1, h.Count("POST", EndsWith("/preview-pdf")));
+        Assert.Single(ui.Saves);
+        Assert.Empty(ui.Infos);
+    }
+
+    // ═══════════════ O8 — [고침 2 · G2-4] 실패 · 저장 예외 · 상자 예외 뒤에도 풀린다 ═══════════════
+
+    [Theory(DisplayName = "O8 P3 잠금 — 받기 실패(404 말 · 500 · 연결 예외) 뒤에 풀린다(다시 누르면 받음 · Info 0) (고침 2 G2-4)")]
+    [InlineData(404, "{\"message\":\"저장된 전표가 아닙니다\"}", "저장된 전표가 아닙니다")]
+    [InlineData(500, "", "PDF 를 만들지 못했습니다. (500)")]
+    [InlineData(0, "", "PDF 를 만들지 못했습니다.")]
+    public async Task O8_LockReleasedAfterFailure(int code, string body, string expected)
+    {
+        var posts = 0;
+        var h = new FlowHandler(r =>
+        {
+            if (r.Method == HttpMethod.Get) return Notice(false);
+            if (Interlocked.Increment(ref posts) > 1) return Pdf("inline");
+            if (code == 0) throw new HttpRequestException("끊김");
+            return Json((HttpStatusCode)code, body);
+        });
+        var ui = new UiLog();
+        var pdf = new RenderedPdfDownload(Client(h));
+
+        await pdf.DownloadPdfAsync("return", "r-1", "반품서", ui.Ui).WaitAsync(Wait);
+        Assert.Equal(new[] { expected }, ui.Errors);
+        Assert.Empty(ui.Saves);
+
+        await pdf.DownloadPdfAsync("return", "r-1", "반품서", ui.Ui).WaitAsync(Wait);
+
+        Assert.Equal(2, h.Count("POST", EndsWith("/preview-pdf")));
+        Assert.Single(ui.Saves);
+        Assert.Empty(ui.Infos);
+        Assert.Equal(new[] { expected }, ui.Errors);
+    }
+
+    [Fact(DisplayName = "O8 P3 잠금 — 저장 예외 뒤에 풀린다(다시 누르면 받음 · Info 0) (고침 2 G2-4)")]
+    public async Task O8_LockReleasedAfterSaveException()
+    {
+        var h = new FlowHandler(r => r.Method == HttpMethod.Get ? Notice(false) : Pdf("inline"));
+        var ui = new UiLog { SaveThrows = new InvalidOperationException("JS 실패 대역") };
+        var pdf = new RenderedPdfDownload(Client(h));
+
+        await pdf.DownloadPdfAsync("purchase-order", "p-1", "발주서", ui.Ui).WaitAsync(Wait);
+        Assert.Equal(new[] { "PDF 를 저장하지 못했습니다." }, ui.Errors);
+
+        ui.SaveThrows = null;
+        await pdf.DownloadPdfAsync("purchase-order", "p-1", "발주서", ui.Ui).WaitAsync(Wait);
+
+        Assert.Equal(2, h.Count("POST", EndsWith("/preview-pdf")));
+        Assert.Single(ui.Saves);
+        Assert.Empty(ui.Infos);
+    }
+
+    [Fact(DisplayName = "O8 P3 잠금 — 상자 예외는 밖으로 나오고(종전 동작) 그 뒤에도 풀린다(다시 누르면 상자 2 · POST 1 · 저장 1 · Info 0) (고침 2 G2-4)")]
+    public async Task O8_LockReleasedAfterConfirmException()
+    {
+        var h = new FlowHandler(r => r.Method == HttpMethod.Get ? Notice(true) : Pdf("inline"));
+        var thrown = new InvalidOperationException("상자 실패 대역");
+        var ui = new UiLog { ConfirmThrows = thrown };
+        var pdf = new RenderedPdfDownload(Client(h));
+
+        var ex = await Record.ExceptionAsync(() =>
+            pdf.DownloadPdfAsync("delivery", "d-1", "거래명세서", ui.Ui).WaitAsync(Wait));
+        Assert.Same(thrown, ex);
+        Assert.Equal(0, h.Count("POST", EndsWith("/preview-pdf")));
+
+        ui.ConfirmThrows = null;
+        ui.ConfirmAnswer = true;
+        await pdf.DownloadPdfAsync("delivery", "d-1", "거래명세서", ui.Ui).WaitAsync(Wait);
+
+        Assert.Equal(2, ui.Confirms);
         Assert.Equal(1, h.Count("POST", EndsWith("/preview-pdf")));
         Assert.Single(ui.Saves);
         Assert.Empty(ui.Infos);
@@ -812,6 +887,168 @@ public sealed class LegacyPdfButtonRenderRouteGateTests
 
         Assert.Single(Regex.Matches(body, @"\b_pdf\.DownloadPdfAsync\(\s*docType\s*,\s*docId\s*,\s*title\s*,\s*_ui\s*\)"));
         Assert.DoesNotMatch(@"FetchAsync\(|NeedsNoticeAsync\(|InvokeVoidAsync\(|ShowMessageBoxAsync\(", body);
+
+        // 🔴 [고침 2 · G2-1 · [4] P2-1 (가)] 몸통 = 정확히 위임 한 문장(앞 return · await 뺌 · 줄 지움 = 빨강) · 서명 무변 1회.
+        Assert.Equal("{ await _pdf.DownloadPdfAsync(docType, docId, title, _ui); }", Fold(body));
+        Assert.Single(Regex.Matches(Fold(code),
+            Regex.Escape("public async Task DownloadPdfAsync(string docType, string? docId, string title)")));
+    }
+
+    /// <summary>
+    /// 🔴 [고침 2] 접기 — 글자 상수 <b>밖</b> 공백 덩이를 빈칸 하나로 · <c>(</c> 뒤 · <c>)</c> 앞 빈칸은 버림 · 앞뒤 다듬음.
+    /// 글자 상수 안은 그대로(주석은 먼저 <see cref="WithoutComments"/> 로 걷은 글자를 넣는다).
+    /// </summary>
+    private static string Fold(string text)
+    {
+        var sb = new StringBuilder(text.Length);
+        var i = 0;
+        while (i < text.Length)
+        {
+            var lit = LiteralEnd(text, i);
+            if (lit > i)
+            {
+                sb.Append(text, i, lit - i);
+                i = lit;
+                continue;
+            }
+            if (char.IsWhiteSpace(text[i]))
+            {
+                var j = i;
+                while (j < text.Length && char.IsWhiteSpace(text[j])) j++;
+                var prevOpen = sb.Length > 0 && sb[^1] == '(';
+                var nextClose = j < text.Length && text[j] == ')';
+                if (sb.Length > 0 && j < text.Length && !prevOpen && !nextClose) sb.Append(' ');
+                i = j;
+                continue;
+            }
+            sb.Append(text[i]);
+            i++;
+        }
+        return sb.ToString();
+    }
+
+    // ═══════════════ O12 — [고침 2 · G2-2] 화면 손잡이 _ui 글자(보조) ═══════════════
+    // 🔴 보조 · 글자 — 동작 증거 아님 · 손잡이 동작(상자 · 스낵바 · JS 저장)은 갈래 D 실측.
+    // 기대 글자 출처 = 개발명세서 §1-8(상자 글자 · 결재 ②) · §1-9(알림 꼴) · 지시서 §3-2 ④(JS 함수 · 형) — 결재된 글자(PM 결재 §113 ②).
+
+    private const string NoticeBoxTitle = "아직 칸을 안 맞췄습니다";
+
+    private const string NoticeBoxBody =
+        "이 양식으로 PDF 를 받으면 올린 양식 그림만 나오고 전표 내용은 찍히지 않습니다. 칸을 맞추려면 「양식 템플릿」 메뉴의 양식용지 양식에서 칸을 맞추고 그림을 올려 저장한 뒤 「예」를 눌러 주십시오(양식이 하나 더 생깁니다 · 관리자).";
+
+    private const string WantConfirm =
+        "async () => (await _dialog.ShowMessageBoxAsync(\"" + NoticeBoxTitle + "\", \"" + NoticeBoxBody
+        + "\", yesText: \"그래도 받기\", cancelText: \"취소\")) == true";
+
+    private static readonly string[] UiHandleNames = { "ConfirmImageOnlyAsync", "Warn", "Info", "Error", "SaveAsync" };
+
+    /// <summary>생성자 몸통(여는 · 닫는 중괄호 포함) · 그 시작 자리 — 주석 걷은 글자에서.</summary>
+    private static (string Body, int Open, int Close) CtorBody(string code)
+    {
+        var at = code.IndexOf("public DocumentPrintPreview(", StringComparison.Ordinal);
+        Assert.True(at >= 0, "생성자 public DocumentPrintPreview( 를 못 찾음");
+        var po = code.IndexOf('(', at);
+        var pc = MatchClose(code, po);
+        Assert.True(pc > po, "생성자 괄호 짝을 못 찾음");
+        var bo = code.IndexOf('{', pc);
+        var bc = bo < 0 ? -1 : MatchClose(code, bo);
+        Assert.True(bc > bo && bo >= 0, "생성자 몸통을 못 찾음");
+        return (code.Substring(bo, bc - bo + 1), bo, bc);
+    }
+
+    /// <summary>생성자 안 <c>_ui = new PdfDownloadUi { … }</c> 덩이 → (이름, 접은 오른쪽) 짝(빈 조각 버림).</summary>
+    private static List<(string Name, string Right)> UiHandles(string ctor)
+    {
+        var m = Regex.Match(ctor, @"\b_ui\s*=\s*new\s+PdfDownloadUi\s*\{");
+        Assert.True(m.Success, "생성자에 _ui = new PdfDownloadUi { 덩이가 없다");
+        var open = m.Index + m.Length - 1;
+        var close = MatchClose(ctor, open);
+        Assert.True(close > open, "_ui 덩이 닫는 괄호를 못 찾음");
+        var list = new List<(string, string)>();
+        foreach (var part in SplitTopLevel(ctor.Substring(open + 1, close - open - 1)).Where(p => p.Length > 0))
+        {
+            var kv = Regex.Match(part, @"^(\w+)\s*=(?![=>])\s*(.*)$", RegexOptions.Singleline);
+            Assert.True(kv.Success, $"_ui 덩이에서 이름 = 오른쪽 꼴이 아닌 조각: {part}");
+            list.Add((kv.Groups[1].Value, Fold(kv.Groups[2].Value)));
+        }
+        return list;
+    }
+
+    [Theory(DisplayName = "O12 (보조 · 글자) DocumentPrintPreview 손잡이 _ui 오른쪽 = 결재 글자(명세 §1-8 · §1-9) — 상자 == true · 스낵바 Severity 짝 · JS 저장 (고침 2 G2-2)")]
+    [InlineData("ConfirmImageOnlyAsync", WantConfirm)]
+    [InlineData("Warn", "m => _snackbar.Add(m, Severity.Warning)")]
+    [InlineData("Info", "m => _snackbar.Add(m, Severity.Info)")]
+    [InlineData("Error", "m => _snackbar.Add(m, Severity.Error)")]
+    [InlineData("SaveAsync", "(name, bytes) => _js.InvokeVoidAsync(\"downloadFileFromBytes\", name, \"application/pdf\", Convert.ToBase64String(bytes)).AsTask()")]
+    public void O12_UiHandleTextMatchesApproved(string name, string expected)
+    {
+        var code = WithoutComments(ReadWeb("Services/DocumentPrintPreview.cs"));
+        var handles = UiHandles(CtorBody(code).Body);
+
+        var hit = Assert.Single(handles, h => h.Name == name);
+        Assert.Equal(expected, hit.Right);
+    }
+
+    [Fact(DisplayName = "O12 (보조 · 글자) _ui 덩이 이름 = 정확히 다섯 · 생성자 대입 넷 각 1 · _ui 대입 1(생성자 안) · 필드 1 (고침 2 G2-2)")]
+    public void O12_UiBlockAndCtorShape()
+    {
+        var code = WithoutComments(ReadWeb("Services/DocumentPrintPreview.cs"));
+        var (ctor, open, close) = CtorBody(code);
+
+        var names = UiHandles(ctor).Select(h => h.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        Assert.Equal(UiHandleNames.OrderBy(n => n, StringComparer.Ordinal).ToList(), names);
+
+        var folded = Fold(ctor);
+        foreach (var stmt in new[] { "_dialog = dialog;", "_snackbar = snackbar;", "_js = js;", "_pdf = new RenderedPdfDownload(http);" })
+        {
+            Assert.True(Regex.Matches(folded, @"(?<![\w])" + Regex.Escape(stmt)).Count == 1, $"생성자에 「{stmt}」 가 정확히 1이 아니다");
+        }
+
+        var assigns = Regex.Matches(code, @"(?<![\w])_ui\s*=(?![=>])").Cast<Match>().ToList();
+        var only = Assert.Single(assigns);
+        Assert.True(open < only.Index && only.Index < close, "_ui 대입이 생성자 밖에 있다");
+        Assert.Single(Regex.Matches(Fold(code), Regex.Escape("private readonly PdfDownloadUi _ui;")));
+    }
+
+    // ═══════════════ O13 — [고침 2 · G2-5] 미리보기 창 사본 ↔ 이 갈래 사본 ↔ 서버 경로(보조 · 글자) ═══════════════
+    // 🔴 창 = §59 갈래 파일 · 읽기만(이 갈래 0줄). 서버 ↔ 이 갈래 사본은 O11(동작) · 이 갈래 사본 ↔ 창 사본은 O13(글자).
+
+    [Fact(DisplayName = "O13 (보조 · 글자) 창 PrintNoticeSaid 공개 속성 = RenderedPdfDownload.NoticeSaid · 창 안내 경로 = 서버 틀 경로 (고침 2 G2-5)")]
+    public void O13_PreviewDialogNoticeCopyBindsServer()
+    {
+        var code = WithoutComments(ReadWeb("Components/Common/DocumentPrintPreviewDialog.razor"));
+
+        // ① 창 사본 공개 속성(형 · 이름) = 이 갈래 사본(리플렉션).
+        var cm = Regex.Match(code, @"\bclass\s+PrintNoticeSaid\b[^{]*\{");
+        Assert.True(cm.Success, "창에 class PrintNoticeSaid 가 없다");
+        var co = cm.Index + cm.Length - 1;
+        var cc = MatchClose(code, co);
+        Assert.True(cc > co, "PrintNoticeSaid 덩이 닫는 괄호를 못 찾음");
+        var keyword = new Dictionary<string, Type>(StringComparer.Ordinal) { ["bool"] = typeof(bool) };
+        var dialogProps = Regex.Matches(code.Substring(co + 1, cc - co - 1), @"\bpublic\s+(\w+)\s+(\w+)\s*\{\s*get;\s*set;\s*\}")
+            .Select(m => (Type: keyword.TryGetValue(m.Groups[1].Value, out var t) ? t.FullName : $"(모름:{m.Groups[1].Value})", Name: m.Groups[2].Value))
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToList();
+        var nested = typeof(RenderedPdfDownload).GetNestedType("NoticeSaid", BindingFlags.NonPublic);
+        Assert.NotNull(nested);
+        var ourProps = nested!.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => (Type: p.PropertyType.FullName, Name: p.Name))
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToList();
+        Assert.NotEmpty(ourProps);
+        Assert.Equal(ourProps, dialogProps);
+
+        // ② 창 안내 경로 = 서버 틀 경로.
+        var calls = Regex.Matches(code, @"GetFromJsonAsync<PrintNoticeSaid>\(").Cast<Match>().ToList();
+        var call = Assert.Single(calls);
+        var po = call.Index + call.Length - 1;
+        var pc = MatchClose(code, po);
+        Assert.True(pc > po, "GetFromJsonAsync<PrintNoticeSaid>( 괄호 짝을 못 찾음");
+        var first = SplitTopLevel(code.Substring(po + 1, pc - po - 1)).FirstOrDefault() ?? "";
+        var lit = Regex.Match(first.Trim(), @"^\$""([^""]*)""$");
+        Assert.True(lit.Success, $"창 안내 경로 첫 인자가 보간 글자 상수가 아니다: {first}");
+        var dialogRoute = "/" + lit.Groups[1].Value.Replace("{DocType}", "{type}", StringComparison.Ordinal);
+        Assert.Equal(ServerNoticeRoute(), dialogRoute);
     }
 
     // ═══════════════ O10 — ② 주석 꼴 셋 걷기 ═══════════════
