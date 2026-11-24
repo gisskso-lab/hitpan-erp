@@ -45,6 +45,12 @@ public sealed class PdfConcurrentGenerationGateCollection
 /// <see cref="PdfGenerationGate.GeneratePdfOneAtATime"/> 한 통로로(정적 <c>lock</c>).</para>
 /// <para><b>[판정 D3]</b> 순차 기준 글자열(쪽마다 PdfPig <c>Letters</c> 값 전부 · Type3 포함)과 <b>전체 일치</b>.
 /// 「Page」 유무 · 글리프 수 · Type3 뺀 <c>\0</c> 셈은 거짓 초록이라 쓰지 않는다(1V §5).</para>
+/// <para>🔴 [고침 2 · 작업지시서 §15 R3 · PM §15-PM ①] <b>판정 = D3 + 문서 지문</b>(입력마다 전 글꼴 <c>\0</c> 0 · 쪽 수 · 필수 낱말 · 금지 낱말) —
+/// 지문은 프로세스 상태와 무관해서 기준이 이미 오염돼도 잡고, 날짜 글자가 없어 자정과도 무관하다. 위 「쓰지 않는다」 는 <b>유일 판정</b> 이야기이고 지문은 D3 위에 덧붙인다.</para>
+/// <para>🔴 [고침 2 · R3 · PM §15-PM ③] <b>시험 실행 순서에 기대지 않는다</b> — xUnit 기본 순서는 이름 해시 순(소스 · 가나다 순 아님 · 실측 G3→G1→K9→G2→G4).
+/// 앞 시험이 프로세스를 오염시켜도 기준 세우는 자리의 지문이 빨강을 낸다.</para>
+/// <para>🔴 [고침 2 · R3 · PM §15-PM ②] 지문 낱말에 <b>제품 양식 글자</b>(「1 / 2 쪽」 · 「절취선」 · 「거 래 명 세 서」 · 「납품조건」 · 「[전자]」)와 쪽 수가 든다 —
+/// 인쇄 양식을 바꾸는 갈래는 이 게이트가 빨강이 되므로 지문 표(<see cref="BuildInputs"/> · <see cref="PureInput"/>)를 같은 커밋에서 같이 고친다.</para>
 /// <list type="bullet">
 /// <item>G1 순차 기준 1종 · 본문 · 굵은 · Type3(🔴) 세 글꼴 — 아니면 「입력 무효」 빨강</item>
 /// <item>G2 제품 길 섞어 60개 동시 → 깨진 장 0</item>
@@ -89,7 +95,10 @@ public sealed class PdfConcurrentGenerationGateTests
     // G1 — 순차 기준 1종 · 세 글꼴
     // ══════════════════════════════════════════════════════════════
     [Fact(DisplayName = "G1 🔴 PDF 동시 생성 게이트 — 입력마다 순차 3번이 글자열 1종이고 본문 · 굵은 · Type3(🔴) 세 글꼴이 다 든다(아니면 입력 무효)")]
-    public async Task G1_SequentialBaseline_IsOneKind_WithThreeFonts()
+    // 옛 줄(고침 2 · 상한 감쌈 전 · 작업지시서 §15 R4 · PM §15-PM ⑤): public async Task G1_SequentialBaseline_IsOneKind_WithThreeFonts()
+    public Task G1_SequentialBaseline_IsOneKind_WithThreeFonts() => WithinDeadline(G1Body, "G1");
+
+    private async Task G1Body()
     {
         var inputs = BuildInputs();
         inputs.Add(PureInput());
@@ -100,6 +109,8 @@ public sealed class PdfConcurrentGenerationGateTests
             var today = DateTime.Today;
             var baseline = await BuildBaselineAsync(input);
             _out.WriteLine($"G1 {input.Name}: 쪽 {baseline.Pages} · 글자 {baseline.LetterCount} · 글꼴 [{string.Join(", ", baseline.FontNames)}]");
+            // 🔴 [고침 2 · R2 · K2] 기준 지문은 BuildBaselineAsync 가 이미 단언했다 — 여기까지 오면 맞은 것이다.
+            _out.WriteLine($"G1 {input.Name}: 지문 맞음(쪽 {input.Fp.Pages} · 필수 [{string.Join(", ", input.Fp.Must)}] · 금지 0)");
             _out.WriteLine($"G1 {input.Name}: 기준 글자열에 오늘 날짜 {today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 듦 "
                 + baseline.Text.Contains(today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 + DateShiftNote(today));
@@ -110,7 +121,10 @@ public sealed class PdfConcurrentGenerationGateTests
     // G2 — 제품 길 섞어 60개 동시 → 깨진 장 0
     // ══════════════════════════════════════════════════════════════
     [Fact(DisplayName = "G2 🔴 PDF 동시 생성 게이트 — 제품 길(견적 · 세금계산서 작성기 2꼴 · 내보내기 3종)을 섞어 60개 동시에 만들어도 순차 기준과 글자열이 다른 장이 0이다")]
-    public async Task G2_ProductPaths_Parallel60_NoBrokenPdf()
+    // 옛 줄(고침 2 · 상한 감쌈 전 · 작업지시서 §15 R4 · PM §15-PM ⑤): public async Task G2_ProductPaths_Parallel60_NoBrokenPdf()
+    public Task G2_ProductPaths_Parallel60_NoBrokenPdf() => WithinDeadline(G2Body, "G2");
+
+    private async Task G2Body()
     {
         // 🔴 [고침 1 · R2 (다-2) · PM §14-9 ①] 판정 시작 날짜 — 끝에서 다르면 빨강 문구에 표지만 덧붙인다(빼기 · 건너뜀 0).
         var day0 = DateTime.Today;
@@ -182,12 +196,16 @@ public sealed class PdfConcurrentGenerationGateTests
     // G3 — 잠금 우회 대조 60개 동시 → 깨진 장 ≥1 (0 이면 빨강)
     // ══════════════════════════════════════════════════════════════
     [Fact(DisplayName = "G3 🔴 PDF 동시 생성 게이트 — 잠금 걷은 대조(날 생성 60개 동시)는 깨진 장이 1장 이상이다 · 3라운드 모두 0이면 「대조 성립 안 함」 빨강")]
-    public async Task G3_BypassControl_Parallel60_BreaksAtLeastOne()
+    // 옛 줄(고침 2 · 상한 감쌈 전 · 작업지시서 §15 R4 · PM §15-PM ⑤): public async Task G3_BypassControl_Parallel60_BreaksAtLeastOne()
+    public Task G3_BypassControl_Parallel60_BreaksAtLeastOne() => WithinDeadline(G3Body, "G3");
+
+    private async Task G3Body()
     {
         var input = PureInput();
         var baseline = await BuildBaselineAsync(input);
 
-        var bypass = new GenInput("순수 QuestPDF 잠금 우회(대조)", () => Task.FromResult(PureBypassingGate()), null, null);
+        // 옛 줄(고침 2 · 지문 칸 전 · 작업지시서 §15 R1): var bypass = new GenInput("순수 QuestPDF 잠금 우회(대조)", () => Task.FromResult(PureBypassingGate()), null, null);
+        var bypass = new GenInput("순수 QuestPDF 잠금 우회(대조)", () => Task.FromResult(PureBypassingGate()), null, null, input.Fp);
         var jobs = Enumerable.Range(0, ParallelCount).Select(_ => bypass).ToList();
 
         var perRound = new List<int>();
@@ -345,7 +363,9 @@ public sealed class PdfConcurrentGenerationGateTests
 
         Assert.True(ReferenceEquals(first, all),
             $"🔴 K9 격식 양식 {FormalParallelCount}개 동시 생성이 {FormalDeadline.TotalSeconds}초 안에 안 끝났다 — 글꼴 등록 · PDF 생성 잠금 교착 의심"
-          + "(등록 공장 안에서 통로 잠금을 잡지 않았나 확인).");
+          // 옛 줄(고침 2 · 뒤 시험 안내 전 · 작업지시서 §15 R5): + "(등록 공장 안에서 통로 잠금을 잡지 않았나 확인).");
+          + "(등록 공장 안에서 통로 잠금을 잡지 않았나 확인). "
+          + $"이 시험이 교착으로 빨강이면 같은 프로세스의 뒤 PDF 시험도 통로 잠금을 기다리다 상한({PdfTestDeadline.TotalSeconds}초)에 빨강이 된다 — 원인은 이 시험이다.");
         var pdfs = await all;
         var fontFail = log.Where(m => m.Contains("격식 제목 글꼴을 등록하지 못했다", StringComparison.Ordinal)).ToList();
         _out.WriteLine($"K9 격식 양식 병렬 {FormalParallelCount}: {sw.ElapsedMilliseconds}ms · 빈 PDF {pdfs.Count(p => p.Length == 0)} · 등록 실패 로그 {fontFail.Count} · cpu {Environment.ProcessorCount}");
@@ -356,7 +376,26 @@ public sealed class PdfConcurrentGenerationGateTests
     // ══════════════════════════════════════════════════════════════
     // 입력 — DB 0 · 파일 0
     // ══════════════════════════════════════════════════════════════
-    private sealed record GenInput(string Name, Func<Task<byte[]>> Generate, ConcurrentQueue<string>? Log, string? ReachMarker);
+    // 옛 줄(고침 2 · 지문 칸 전 · 작업지시서 §15 R1 · PM §15-PM ⑥): private sealed record GenInput(string Name, Func<Task<byte[]>> Generate, ConcurrentQueue<string>? Log, string? ReachMarker);
+    private sealed record GenInput(string Name, Func<Task<byte[]>> Generate, ConcurrentQueue<string>? Log, string? ReachMarker, Fingerprint Fp);
+
+    /// <summary>
+    /// 🔴 [고침 2 · 작업지시서 §15-2 · R1] 문서 지문 — 입력마다 고정 쪽 수 · 반드시 들 낱말. 프로세스 상태와 무관한 기대값이다
+    /// (기준이 이미 오염돼도 잡음 · 낱말에 날짜 0). 금지 낱말 = 다른 지문의 필수 낱말 합집합 − 자기 필수 낱말(<see cref="FingerprintProblem"/>).
+    /// 🔴 양식 글자(「1 / 2 쪽」 · 「절취선」 · 「거 래 명 세 서」 · 「납품조건」 · 「[전자]」)를 바꾸는 갈래는 이 표를 같은 커밋에서 맞춘다(PM §15-PM ②).
+    /// </summary>
+    private sealed record Fingerprint(int Pages, string[] Must);
+
+    private static readonly Fingerprint FpK4 = new(1, new[] { "예시-0000" });
+    private static readonly Fingerprint FpTaxContinue = new(2, new[] { "PDFLOCK-TI-0001", "1 / 2 쪽" });
+    private static readonly Fingerprint FpTaxOnePage = new(1, new[] { "PDFLOCK-TI-0001", "절취선" });
+    private static readonly Fingerprint FpDelivery = new(1, new[] { "거 래 명 세 서" });
+    private static readonly Fingerprint FpQuotation = new(1, new[] { "납품조건" });
+    private static readonly Fingerprint FpTaxExport = new(1, new[] { "[전자]" });
+    private static readonly Fingerprint FpPure = new(1, new[] { "비고 ABC" });
+
+    private static readonly Fingerprint[] AllFingerprints =
+        { FpK4, FpTaxContinue, FpTaxOnePage, FpDelivery, FpQuotation, FpTaxExport, FpPure };
 
     private static List<GenInput> BuildInputs()
     {
@@ -365,21 +404,28 @@ public sealed class PdfConcurrentGenerationGateTests
         var tearOnLog = new ConcurrentQueue<string>();
         return new List<GenInput>
         {
-            new("견적 K4(RenderDocumentAsync · :430)", () => RenderK4Async(k4Log), k4Log, null),
+            // 옛 줄(고침 2 · 지문 칸 전 · R1): new("견적 K4(RenderDocumentAsync · :430)", () => RenderK4Async(k4Log), k4Log, null),
+            new("견적 K4(RenderDocumentAsync · :430)", () => RenderK4Async(k4Log), k4Log, null, FpK4),
             // 한 장 모으기 끔 → 이어쓰기 쪽 재기(MeasureCopyPageFits · :2079) + 본판(:1737)
             new("세금계산서 이어쓰기(작성기 · :2079 + :1737)", () => Task.FromResult(RenderTaxInvoice(tearOffLog, showTearLine: false)),
-                tearOffLog, "세금계산서 이어쓰기 — 벌 하나를"),
+                // 옛 줄(고침 2 · 지문 칸 전 · R1): tearOffLog, "세금계산서 이어쓰기 — 벌 하나를"),
+                tearOffLog, "세금계산서 이어쓰기 — 벌 하나를", FpTaxContinue),
             // 한 장 모으기 켬 → 두 벌 한 쪽 재기(MeasureBothCopiesFitOnePage · :1860) + 본판(:1737)
             new("세금계산서 한 장 모으기(작성기 · :1860 + :1737)", () => Task.FromResult(RenderTaxInvoice(tearOnLog, showTearLine: true)),
-                tearOnLog, "(한장모으기 True)"),
-            new("거래명세서(PdfExportService · :89)", () => Task.FromResult(new PdfExportService().GenerateDeliveryPdf(ExportSample())), null, null),
-            new("견적서(PdfExportService · :183)", () => Task.FromResult(new PdfExportService().GenerateQuotationPdf(ExportSample())), null, null),
-            new("세금계산서(PdfExportService · :318)", () => Task.FromResult(new PdfExportService().GenerateTaxInvoicePdf(ExportSample())), null, null),
+                // 옛 줄(고침 2 · 지문 칸 전 · R1): tearOnLog, "(한장모으기 True)"),
+                tearOnLog, "(한장모으기 True)", FpTaxOnePage),
+            // 옛 줄(고침 2 · 지문 칸 전 · R1): new("거래명세서(PdfExportService · :89)", () => Task.FromResult(new PdfExportService().GenerateDeliveryPdf(ExportSample())), null, null),
+            new("거래명세서(PdfExportService · :89)", () => Task.FromResult(new PdfExportService().GenerateDeliveryPdf(ExportSample())), null, null, FpDelivery),
+            // 옛 줄(고침 2 · 지문 칸 전 · R1): new("견적서(PdfExportService · :183)", () => Task.FromResult(new PdfExportService().GenerateQuotationPdf(ExportSample())), null, null),
+            new("견적서(PdfExportService · :183)", () => Task.FromResult(new PdfExportService().GenerateQuotationPdf(ExportSample())), null, null, FpQuotation),
+            // 옛 줄(고침 2 · 지문 칸 전 · R1): new("세금계산서(PdfExportService · :318)", () => Task.FromResult(new PdfExportService().GenerateTaxInvoicePdf(ExportSample())), null, null),
+            new("세금계산서(PdfExportService · :318)", () => Task.FromResult(new PdfExportService().GenerateTaxInvoicePdf(ExportSample())), null, null, FpTaxExport),
         };
     }
 
     private static GenInput PureInput() =>
-        new("순수 QuestPDF(통로 · 대조 기준)", () => Task.FromResult(PureDoc().GeneratePdfOneAtATime()), null, null);
+        // 옛 줄(고침 2 · 지문 칸 전 · R1): new("순수 QuestPDF(통로 · 대조 기준)", () => Task.FromResult(PureDoc().GeneratePdfOneAtATime()), null, null);
+        new("순수 QuestPDF(통로 · 대조 기준)", () => Task.FromResult(PureDoc().GeneratePdfOneAtATime()), null, null, FpPure);
 
     /// <summary>G3 대조 — 일부러 잠금 밖에서 만든다. 이 한 줄만 G4 가 허용한다(이름표).</summary>
     private static byte[] PureBypassingGate() => PureDoc().GeneratePdf(); // G4-허용: G3 대조 우회
@@ -553,6 +599,11 @@ public sealed class PdfConcurrentGenerationGateTests
           + DateShiftNote(day0));
 
         var first = texts[0];
+        // 🔴 [고침 2 · R2 · [4] P1-A · PM §15-PM ①] 기준이 같은 프로세스의 현재 상태로 서므로, 이미 오염된 프로세스면 기준도 오염된다 —
+        //   프로세스 상태와 무관한 문서 지문으로 기준 자체를 먼저 확인한다(순서 장치 0 · §15-PM ③).
+        var fpProblem = FingerprintProblem(input, first);
+        Assert.True(fpProblem is null,
+            $"🔴 G1 입력 무효 — 「{input.Name}」 기준 지문 어긋남(이 프로세스가 이미 오염됐거나 양식 글자가 바뀜 — 양식을 바꾼 갈래면 지문 표를 같은 커밋에서 맞춤): {fpProblem}");
         var hasType3 = first.FontNames.Any(IsType3);
         var hasBold = first.FontNames.Any(IsBold);
         var hasBody = first.FontNames.Any(f => !IsType3(f) && !IsBold(f));
@@ -576,6 +627,45 @@ public sealed class PdfConcurrentGenerationGateTests
         return after == before
             ? string.Empty
             : $" 🕛 판정 중 날짜 바뀜({before.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}→{after.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}) — 예시 자료 날짜 글자 차이일 수 있으나 빨강 그대로 · 다시 돌려 확인";
+    }
+
+    /// <summary>
+    /// 🔴 [고침 2 · R2 · 작업지시서 §15-2 (가)] 문서 지문 판정 — ⓐ 전 글꼴(Type3 포함) <c>\0</c> 글자 0 ⓑ 쪽 = <see cref="Fingerprint.Pages"/>
+    /// ⓒ 필수 낱말 전부 ⓓ 금지 낱말(다른 지문의 필수 − 자기 필수) 0. 맞으면 <c>null</c>, 어긋나면 까닭 글.
+    /// D3 를 대신하지 않고 위에 덧붙인다(ⓐ 단독은 1V §5 의 거짓 초록 꼴 → 단독으로 안 씀).
+    /// </summary>
+    private static string? FingerprintProblem(GenInput input, PdfText t)
+    {
+        var fp = input.Fp;
+        var problems = new List<string>();
+        if (t.ZeroFonts.Length > 0) problems.Add($"\\0 글자 {t.ZeroFonts}");
+        if (t.Pages != fp.Pages) problems.Add($"쪽 {t.Pages}≠{fp.Pages}");
+        foreach (var must in fp.Must.Where(m => !t.Text.Contains(m, StringComparison.Ordinal)))
+            problems.Add($"필수 없음 「{must}」");
+        var forbidden = AllFingerprints.Where(f => !ReferenceEquals(f, fp))
+                                       .SelectMany(f => f.Must)
+                                       .Except(fp.Must, StringComparer.Ordinal)
+                                       .Distinct(StringComparer.Ordinal);
+        foreach (var word in forbidden.Where(w => t.Text.Contains(w, StringComparison.Ordinal)))
+            problems.Add($"금지 있음 「{word}」");
+        return problems.Count == 0 ? null : string.Join(" · ", problems);
+    }
+
+    /// <summary>🔴 [고침 2 · R4 · PM §15-PM ⑤] PDF 를 만드는 시험(G1 · G2 · G3) 하나의 상한 — 정상 G2 2.4~5.2 s 의 20배 넘는 여유.</summary>
+    private static readonly TimeSpan PdfTestDeadline = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// 🔴 [고침 2 · R4 · [4] P3-B] 시험 본문을 상한 안에서 돌린다 — 앞 시험(K9 등)이 교착으로 통로 잠금을 쥔 채 멈추면 뒤 시험이
+    /// 끝없이 기다려 CI 잡 시간 초과(30분)로만 보이던 것을, 그 시험 하나의 빨강으로 바꾼다.
+    /// 이 상한은 <b>시험 쪽</b>이다 — 제품 통로 대기 타임아웃 없음(결재 6)은 그대로다. 멈춘 본문은 스레드 풀(배경) 스레드에 남는다.
+    /// </summary>
+    private static async Task WithinDeadline(Func<Task> body, string name)
+    {
+        var run = Task.Run(body);
+        var first = await Task.WhenAny(run, Task.Delay(PdfTestDeadline));
+        Assert.True(ReferenceEquals(first, run),
+            $"🔴 {name} 이 {PdfTestDeadline.TotalSeconds}초 안에 안 끝났다 — PDF 통로 잠금이 안 풀린다. 앞 시험(K9 등)이 교착으로 빨강이면 원인은 그 시험이다.");
+        await run;
     }
 
     private sealed record GenResult(int Index, GenInput Input, byte[]? Bytes, Exception? Error);
@@ -607,6 +697,13 @@ public sealed class PdfConcurrentGenerationGateTests
 
             var ok = okTexts(r);
             var t = TextOf(r.Bytes!);
+            // 🔴 [고침 2 · R2] D3 비교 앞에 문서 지문 — 기준이 오염돼 오염된 장과 같아도 지문이 깨진 장으로 센다.
+            var fpProblem = FingerprintProblem(r.Input, t);
+            if (fpProblem is not null)
+            {
+                broken.Add(new BrokenPdf(r, $"#{r.Index} {r.Input.Name}: 지문 {fpProblem}", t.Text));
+                continue;
+            }
             if (ok.Any(x => string.Equals(t.Text, x, StringComparison.Ordinal))) continue;
             var firstDiff = 0;
             while (firstDiff < Math.Min(t.Text.Length, ok[0].Length) && t.Text[firstDiff] == ok[0][firstDiff]) firstDiff++;
