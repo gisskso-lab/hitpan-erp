@@ -39,4 +39,37 @@ public static class PdfGenerationGate
             return document.GeneratePdf();
         }
     }
+
+    /// <summary>
+    /// <paramref name="document"/> 를 그림(쪽마다 바이트)으로 만든다 — <see cref="GeneratePdfOneAtATime"/> 와 <b>같은 잠금</b>으로 혼자 돈다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [W-G1-51 갈래 PDF 잠금 고침 1 · 작업지시서 §14 R3 · PM 결재 §14-9 ②] 제품 호출 0 — 시험의 그림 대조(워터마크 · 격자 · 양식 꼴)용이다.
+    /// 그림 생성도 같은 엔진이라 날로 겹치면 같은 프로세스의 통로 PDF 글자층을 깬다([4] 탐침 4/6 회).
+    /// 앞으로 판이 지연 반복기로 바뀌어도 그림이 잠금 밖으로 새지 않게 <b>잠금 안에서 목록으로 굳힌다</b>.
+    /// </remarks>
+    public static IReadOnlyList<byte[]> GenerateImagesOneAtATime(this IDocument document, ImageGenerationSettings settings)
+    {
+        lock (OneAtATime)
+        {
+            return document.GenerateImages(settings).ToList();
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="work"/> 를 PDF 생성과 <b>같은 잠금</b> 안에서 돌린다 — 전역 글꼴 상태를 바꾸는 일(내장 글꼴 첫 등록)용.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [고침 1 · 작업지시서 §14 R6 · PM 결재 §14-9 ⑤ (가)] <c>PdfRenderService</c> 의 격식 제목 글꼴 첫 등록 자리 한 곳만 부른다.
+    /// 🔴 <b>이 안에 <c>await</c> 를 넣지 말 것.</b> 🔴 <b>등록 공장(<c>Lazy</c>) 안에서 이 잠금을 잡지 말 것</b> — 잡는 순서는 늘
+    /// 「통로 → Lazy」 한 방향이어야 한다(공장 안에서 잡으면 생성 중 제목을 그리는 쪽과 순환 교착).
+    /// 예외는 <c>lock</c> 이 풀고 부른 쪽 <c>catch</c> 가 그대로 받는다.
+    /// </remarks>
+    internal static void RunOneAtATime(Action work)
+    {
+        lock (OneAtATime)
+        {
+            work();
+        }
+    }
 }

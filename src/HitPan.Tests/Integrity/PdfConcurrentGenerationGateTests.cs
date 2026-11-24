@@ -96,8 +96,13 @@ public sealed class PdfConcurrentGenerationGateTests
 
         foreach (var input in inputs)
         {
+            // 🔴 [고침 1 · R2 · K10] 기준을 세우기 전 날짜 — 기준 글자열에 오늘 날짜가 찍히는지(자정 가설의 구조 근거) 출력한다.
+            var today = DateTime.Today;
             var baseline = await BuildBaselineAsync(input);
             _out.WriteLine($"G1 {input.Name}: 쪽 {baseline.Pages} · 글자 {baseline.LetterCount} · 글꼴 [{string.Join(", ", baseline.FontNames)}]");
+            _out.WriteLine($"G1 {input.Name}: 기준 글자열에 오늘 날짜 {today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 듦 "
+                + baseline.Text.Contains(today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                + DateShiftNote(today));
         }
     }
 
@@ -107,6 +112,8 @@ public sealed class PdfConcurrentGenerationGateTests
     [Fact(DisplayName = "G2 🔴 PDF 동시 생성 게이트 — 제품 길(견적 · 세금계산서 작성기 2꼴 · 내보내기 3종)을 섞어 60개 동시에 만들어도 순차 기준과 글자열이 다른 장이 0이다")]
     public async Task G2_ProductPaths_Parallel60_NoBrokenPdf()
     {
+        // 🔴 [고침 1 · R2 (다-2) · PM §14-9 ①] 판정 시작 날짜 — 끝에서 다르면 빨강 문구에 표지만 덧붙인다(빼기 · 건너뜀 0).
+        var day0 = DateTime.Today;
         var inputs = BuildInputs();
         var baselines = new Dictionary<string, Baseline>(StringComparer.Ordinal);
         foreach (var input in inputs)
@@ -139,31 +146,35 @@ public sealed class PdfConcurrentGenerationGateTests
                 $"🔴 G2 「{input.Name}」 측정이 동시 생성 중에 실패했다: {string.Join(" | ", failedMeasure.Take(3))}");
         }
 
-        // 🔴 기준이 시계로 바뀐 경우만 가른다 — 견적 K4 예시 자료의 날짜는 `DateTime.Today`(PdfRenderService
-        //   BuildSampleSnapshot)라 병렬 도중 자정을 넘기면 뒤에 만든 장의 날짜 글자가 기준과 달라진다(A2 2회 · 00:00 실측).
-        //   병렬 뒤 순차 기준을 다시 세워, 기준이 실제로 바뀐 입력에 한해 **새 기준과 글자 하나까지 같은 장만** 깨짐에서 뺀다.
-        //   글자층이 깨진 장(\0)은 새 기준과도 다르므로 그대로 빨강이다. 기준이 안 바뀌었으면 아무것도 안 뺀다.
-        var clockShifted = 0;
-        if (broken.Count > 0)
-        {
-            var after = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var input in inputs.Where(i => broken.Any(b => ReferenceEquals(b.Result.Input, i))))
-            {
-                after[input.Name] = (await BuildBaselineAsync(input)).Text;
-            }
-
-            var before = broken.Count;
-            broken = broken.Where(b => !(after.TryGetValue(b.Result.Input.Name, out var a)
-                                         && !string.Equals(a, baselines[b.Result.Input.Name].Text, StringComparison.Ordinal)
-                                         && string.Equals(b.Text, a, StringComparison.Ordinal))).ToList();
-            clockShifted = before - broken.Count;
-            _out.WriteLine($"G2 기준 다시 세움: 시계로 바뀐 기준과 같은 장 {clockShifted} · 남은 깨진 장 {broken.Count}");
-        }
+        // 🔴 [고침 1 · R1 · [4] P1-1 · PM §14-9 ③] 아래 D10 「기준 다시 세움」 덩이를 되돌린다 — 옛 줄 주석으로 보존.
+        //   이 완화는 시계만 골라내지 않고 「병렬 뒤에도 같은 꼴로 계속 틀리는」 지속형 깨짐까지 뺐다([4] 변이 지속형 G2 초록 2/2 · 깨진 장 59 가림).
+        //   이제 G2 = 순수 D3(순차 기준과 한 장이라도 다르면 빨강). 날짜는 위 day0 · 아래 DateShiftNote 로 표지만 붙인다.
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): // 🔴 기준이 시계로 바뀐 경우만 가른다 — 견적 K4 예시 자료의 날짜는 `DateTime.Today`(PdfRenderService
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): //   BuildSampleSnapshot)라 병렬 도중 자정을 넘기면 뒤에 만든 장의 날짜 글자가 기준과 달라진다(A2 2회 · 00:00 실측).
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): //   병렬 뒤 순차 기준을 다시 세워, 기준이 실제로 바뀐 입력에 한해 **새 기준과 글자 하나까지 같은 장만** 깨짐에서 뺀다.
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): //   글자층이 깨진 장(\0)은 새 기준과도 다르므로 그대로 빨강이다. 기준이 안 바뀌었으면 아무것도 안 뺀다.
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): var clockShifted = 0;
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): if (broken.Count > 0)
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): {
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     var after = new Dictionary<string, string>(StringComparer.Ordinal);
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     foreach (var input in inputs.Where(i => broken.Any(b => ReferenceEquals(b.Result.Input, i))))
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     {
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):         after[input.Name] = (await BuildBaselineAsync(input)).Text;
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     }
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     var before = broken.Count;
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     broken = broken.Where(b => !(after.TryGetValue(b.Result.Input.Name, out var a)
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):                                  && !string.Equals(a, baselines[b.Result.Input.Name].Text, StringComparison.Ordinal)
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):                                  && string.Equals(b.Text, a, StringComparison.Ordinal))).ToList();
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     clockShifted = before - broken.Count;
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③):     _out.WriteLine($"G2 기준 다시 세움: 시계로 바뀐 기준과 같은 장 {clockShifted} · 남은 깨진 장 {broken.Count}");
+        // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): }
 
         Assert.True(broken.Count == 0,
             $"🔴 G2 제품 길을 {ParallelCount}개 동시에 만들었더니 순차 기준과 글자열이 다른 PDF 가 {broken.Count}장이다 — "
           + "PDF 생성이 한 통로(PdfGenerationGate)로 줄 서지 않는다(잠금이 빠졌거나 잠금 객체가 호출마다 다름)"
-          + $"(시계로 바뀐 기준과 같아 뺀 장 {clockShifted}).\n  "
+          // 옛 줄(고침 1 · D10 되돌림 · PM §14-9 ③): + $"(시계로 바뀐 기준과 같아 뺀 장 {clockShifted}).\n  "
+          + DateShiftNote(day0) + ".\n  "
           + string.Join("\n  ", broken.Take(10).Select(b => b.Desc)));
     }
 
@@ -204,44 +215,142 @@ public sealed class PdfConcurrentGenerationGateTests
     // ══════════════════════════════════════════════════════════════
     // G4 — 통로 밖 날 생성 0 (제품 + 시험 · 글자 셈)
     // ══════════════════════════════════════════════════════════════
-    private static readonly Regex RawGeneratePdf = new(@"\.GeneratePdf\s*\(\s*\)", RegexOptions.CultureInvariant);
-    private static readonly Regex GateCall = new(@"\.GeneratePdfOneAtATime\s*\(\s*\)", RegexOptions.CultureInvariant);
-    private static readonly Regex OtherGenerate = new(@"\.Generate(Images|Xps|Svg)\s*\(", RegexOptions.CultureInvariant);
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): private static readonly Regex RawGeneratePdf = new(@"\.GeneratePdf\s*\(\s*\)", RegexOptions.CultureInvariant);
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): private static readonly Regex GateCall = new(@"\.GeneratePdfOneAtATime\s*\(\s*\)", RegexOptions.CultureInvariant);
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): private static readonly Regex OtherGenerate = new(@"\.Generate(Images|Xps|Svg)\s*\(", RegexOptions.CultureInvariant);
 
-    [Fact(DisplayName = "G4 🔴 PDF 동시 생성 게이트 — 통로 밖 날 생성 0: 제품 날 호출은 통로 파일 1 · 통로 호출 8 · 이미지/XPS/SVG 0 · 시험 날 호출은 G3 우회 이름표 줄만")]
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): [Fact(DisplayName = "G4 🔴 PDF 동시 생성 게이트 — 통로 밖 날 생성 0: 제품 날 호출은 통로 파일 1 · 통로 호출 8 · 이미지/XPS/SVG 0 · 시험 날 호출은 G3 우회 이름표 줄만")]
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): public void G4_NoRawGenerationOutsideGate()
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): {
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var root = FindRepoRoot();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var product = CodeLines(root, "src", "HitPan.Application").Concat(CodeLines(root, "src", "HitPan.API")).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var tests = CodeLines(root, "src", "HitPan.Tests").ToList();
+
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var productRaw = product.Where(l => RawGeneratePdf.IsMatch(l.Text)).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var productGate = product.Where(l => GateCall.IsMatch(l.Text)).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var productOther = product.Where(l => OtherGenerate.IsMatch(l.Text)).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var testRaw = tests.Where(l => RawGeneratePdf.IsMatch(l.Text)).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var testLabeled = testRaw.Where(l => l.Text.Contains(BypassLabel, StringComparison.Ordinal)
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):                                       && l.File.EndsWith(nameof(PdfConcurrentGenerationGateTests) + ".cs", StringComparison.Ordinal)).ToList();
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     var testUnlabeled = testRaw.Except(testLabeled).ToList();
+
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     _out.WriteLine($"G4 제품 날 호출 {productRaw.Count} [{string.Join(", ", productRaw.Select(l => l.Where))}]");
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     _out.WriteLine($"G4 제품 통로 호출 {productGate.Count} [{string.Join(", ", productGate.Select(l => l.Where))}]");
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     _out.WriteLine($"G4 제품 이미지/XPS/SVG {productOther.Count} · 시험 날 호출 {testRaw.Count}(이름표 {testLabeled.Count} [{string.Join(", ", testLabeled.Select(l => l.Where))}])");
+
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     Assert.True(productRaw.Count == 1 && productRaw[0].File.EndsWith(nameof(PdfGenerationGate) + ".cs", StringComparison.Ordinal),
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):         $"🔴 G4 제품 코드의 날 GeneratePdf 호출은 통로 파일({nameof(PdfGenerationGate)}.cs) 안 1개뿐이어야 한다 — 지금 {productRaw.Count}개: "
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):       + string.Join(", ", productRaw.Select(l => l.Where))
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):       + $"\n  통로 밖에서 만들면 동시 인쇄 · 메일 · 팩스 때 글자층이 깨진 PDF 가 나간다. `.{nameof(PdfGenerationGate.GeneratePdfOneAtATime)}()` 로 바꿔라.");
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     Assert.True(productGate.Count == ExpectedGateCalls,
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):         $"🔴 G4 제품 통로 호출이 {productGate.Count}개다 — {ExpectedGateCalls}개(PdfRenderService 5 · PdfExportService 3)를 기대했다: "
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):       + string.Join(", ", productGate.Select(l => l.Where)));
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     Assert.True(productOther.Count == 0,
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):         "🔴 G4 제품 코드에 이미지/XPS/SVG 생성이 생겼다 — 같은 생성 엔진이라 통로 밖이면 같은 결함 길이다: "
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):       + string.Join(", ", productOther.Select(l => l.Where)));
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     Assert.True(testUnlabeled.Count == 0,
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):         "🔴 G4 시험 코드에 통로 밖 날 GeneratePdf 호출이 있다 — 같은 시험 프로세스에서 제품 길 PDF 를 깨뜨린다(PM 결재 §13 ⑤ (가)). "
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):       + $"`.{nameof(PdfGenerationGate.GeneratePdfOneAtATime)}()` 로 바꿔라: " + string.Join(", ", testUnlabeled.Select(l => l.Where)));
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):     Assert.True(testLabeled.Count == ExpectedBypassLines,
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④):         $"🔴 G4 G3 대조 우회 이름표 줄이 {testLabeled.Count}개다 — {ExpectedBypassLines}개를 기대했다(대조가 통로로 바뀌면 G3 이 증명을 잃는다).");
+    // 옛 줄(고침 1 · G4 넓힘 전 · PM §14-9 ④): }
+
+    // 🔴 [고침 1 · R5 · [4] P2-1 · P3-4 · [3-V] P2-1 · P3-5 · PM §14-9 ④] G4 = 낱말 셈(괄호 무관) · 범위 = src 전부 − 백오피스 두 폴더.
+    //   줄마다 ① `//` 로 시작하는 줄 빼기 ② 문자열 · 문자 글과 줄 끝 `//…` 지우기 ③ 생성 API 전 꼴 낱말을 센다.
+    //   통로 낱말(GeneratePdfOneAtATime · GenerateImagesOneAtATime)은 `\b` 로 저절로 갈린다.
+    //   못 세는 꼴(기록 · 작업지시서 §14-7 W2): 문자열 안 이름 반사 호출 · 보간 구멍 안 · 다른 어셈블리로 감싼 생성.
+    private static readonly Regex RawGenerationWord = new(
+        @"\b(GeneratePdf|GeneratePdfAndShow|GenerateImages|GenerateXps|GenerateXpsAndShow|GenerateSvg|ShowInCompanion|ShowInCompanionAsync)\b",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex StringOrCharLiteral = new(
+        @"(?:\$@|@\$|@)""(?:[^""]|"""")*""|\$?""(?:[^""\\]|\\.)*""|'(?:[^'\\]|\\.)+'",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex GatePdfCall = new(@"\.GeneratePdfOneAtATime\b", RegexOptions.CultureInvariant);
+    private static readonly Regex GateImagesCall = new(@"\.GenerateImagesOneAtATime\b", RegexOptions.CultureInvariant);
+
+    /// <summary>G4 허용 ⓒ — 이름만 같은 옛 메서드 선언(QuestPDF 아님 · 부르는 줄 0). 부르는 줄이 생기면 헛빨강 → 문구로 안내.</summary>
+    private const string LegacyExportDeclaration = "public byte[] GeneratePdf(DocumentDto data, string title)";
+
+    private static readonly string[] BackofficeFolders = { "HitPan.Backoffice", "HitPan.Backoffice.API" };
+
+    [Fact(DisplayName = "G4 🔴 PDF 동시 생성 게이트 — 통로 밖 날 생성 0: src 전부(백오피스 두 폴더는 수만 출력)에서 생성 API 낱말은 통로 파일(PDF 1 · 그림 1) · G3 우회 이름표 줄 · 옛 선언 1 만 · 제품 통로 호출 8")]
     public void G4_NoRawGenerationOutsideGate()
     {
         var root = FindRepoRoot();
-        var product = CodeLines(root, "src", "HitPan.Application").Concat(CodeLines(root, "src", "HitPan.API")).ToList();
-        var tests = CodeLines(root, "src", "HitPan.Tests").ToList();
+        var all = CodeWords(root).ToList();
+        var backoffice = all.Where(l => BackofficeFolders.Contains(l.TopFolder, StringComparer.Ordinal)).ToList();
+        var erp = all.Except(backoffice).ToList();
+        var isProduct = (CodeWordLine l) => l.TopFolder is "HitPan.Application" or "HitPan.API";
 
-        var productRaw = product.Where(l => RawGeneratePdf.IsMatch(l.Text)).ToList();
-        var productGate = product.Where(l => GateCall.IsMatch(l.Text)).ToList();
-        var productOther = product.Where(l => OtherGenerate.IsMatch(l.Text)).ToList();
-        var testRaw = tests.Where(l => RawGeneratePdf.IsMatch(l.Text)).ToList();
-        var testLabeled = testRaw.Where(l => l.Text.Contains(BypassLabel, StringComparison.Ordinal)
-                                          && l.File.EndsWith(nameof(PdfConcurrentGenerationGateTests) + ".cs", StringComparison.Ordinal)).ToList();
-        var testUnlabeled = testRaw.Except(testLabeled).ToList();
+        var gateFile = "src/HitPan.Application/Services/" + nameof(PdfGenerationGate) + ".cs";
+        var gateFileHits = erp.Where(l => l.File == gateFile).SelectMany(l => l.Words.Select(w => (Line: l, Word: w))).ToList();
+        var labeled = erp.Where(l => l.Words.Count > 0
+                                     && l.Raw.Contains(BypassLabel, StringComparison.Ordinal)
+                                     && l.File.EndsWith("/" + nameof(PdfConcurrentGenerationGateTests) + ".cs", StringComparison.Ordinal)).ToList();
+        var legacyDecl = erp.Where(l => l.Words.Count > 0
+                                        && l.File == "src/HitPan.Application/Services/" + nameof(PdfExportService) + ".cs"
+                                        && l.Stripped.Contains(LegacyExportDeclaration, StringComparison.Ordinal)).ToList();
+        var outside = erp.Where(l => l.Words.Count > 0 && l.File != gateFile)
+                         .Except(labeled).Except(legacyDecl).ToList();
+        var productGate = erp.Where(l => isProduct(l)).Sum(l => GatePdfCall.Matches(l.Stripped).Count);
+        var productGateWhere = erp.Where(l => isProduct(l) && GatePdfCall.IsMatch(l.Stripped)).Select(l => l.Where).ToList();
+        var testImagesGate = erp.Where(l => !isProduct(l)).Sum(l => GateImagesCall.Matches(l.Stripped).Count);
+        var gatePdf = gateFileHits.Count(h => h.Word == "GeneratePdf");
+        var gateImages = gateFileHits.Count(h => h.Word == "GenerateImages");
+        var gateOther = gateFileHits.Count - gatePdf - gateImages;
+        var backofficeHits = backoffice.Where(l => l.Words.Count > 0).ToList();
 
-        _out.WriteLine($"G4 제품 날 호출 {productRaw.Count} [{string.Join(", ", productRaw.Select(l => l.Where))}]");
-        _out.WriteLine($"G4 제품 통로 호출 {productGate.Count} [{string.Join(", ", productGate.Select(l => l.Where))}]");
-        _out.WriteLine($"G4 제품 이미지/XPS/SVG {productOther.Count} · 시험 날 호출 {testRaw.Count}(이름표 {testLabeled.Count} [{string.Join(", ", testLabeled.Select(l => l.Where))}])");
+        _out.WriteLine($"G4 셈 줄 {all.Count} · 통로 파일 날 GeneratePdf {gatePdf} · GenerateImages {gateImages} · 그 밖 {gateOther}");
+        _out.WriteLine($"G4 허용 밖 날 생성 {outside.Count} [{string.Join(", ", outside.Select(l => $"{l.Where}({string.Join("/", l.Words)})"))}]");
+        _out.WriteLine($"G4 G3 우회 이름표 줄 {labeled.Count} [{string.Join(", ", labeled.Select(l => l.Where))}] · 옛 선언 {legacyDecl.Count} [{string.Join(", ", legacyDecl.Select(l => l.Where))}]");
+        _out.WriteLine($"G4 제품 통로 호출 {productGate} [{string.Join(", ", productGateWhere)}] · 시험 그림 통로 호출 {testImagesGate}(출력만)");
+        _out.WriteLine($"G4 백오피스(출력만 · C7 열린 건) 날 생성 {backofficeHits.Count} [{string.Join(", ", backofficeHits.Select(l => l.Where))}]");
 
-        Assert.True(productRaw.Count == 1 && productRaw[0].File.EndsWith(nameof(PdfGenerationGate) + ".cs", StringComparison.Ordinal),
-            $"🔴 G4 제품 코드의 날 GeneratePdf 호출은 통로 파일({nameof(PdfGenerationGate)}.cs) 안 1개뿐이어야 한다 — 지금 {productRaw.Count}개: "
-          + string.Join(", ", productRaw.Select(l => l.Where))
-          + $"\n  통로 밖에서 만들면 동시 인쇄 · 메일 · 팩스 때 글자층이 깨진 PDF 가 나간다. `.{nameof(PdfGenerationGate.GeneratePdfOneAtATime)}()` 로 바꿔라.");
-        Assert.True(productGate.Count == ExpectedGateCalls,
-            $"🔴 G4 제품 통로 호출이 {productGate.Count}개다 — {ExpectedGateCalls}개(PdfRenderService 5 · PdfExportService 3)를 기대했다: "
-          + string.Join(", ", productGate.Select(l => l.Where)));
-        Assert.True(productOther.Count == 0,
-            "🔴 G4 제품 코드에 이미지/XPS/SVG 생성이 생겼다 — 같은 생성 엔진이라 통로 밖이면 같은 결함 길이다: "
-          + string.Join(", ", productOther.Select(l => l.Where)));
-        Assert.True(testUnlabeled.Count == 0,
-            "🔴 G4 시험 코드에 통로 밖 날 GeneratePdf 호출이 있다 — 같은 시험 프로세스에서 제품 길 PDF 를 깨뜨린다(PM 결재 §13 ⑤ (가)). "
-          + $"`.{nameof(PdfGenerationGate.GeneratePdfOneAtATime)}()` 로 바꿔라: " + string.Join(", ", testUnlabeled.Select(l => l.Where)));
-        Assert.True(testLabeled.Count == ExpectedBypassLines,
-            $"🔴 G4 G3 대조 우회 이름표 줄이 {testLabeled.Count}개다 — {ExpectedBypassLines}개를 기대했다(대조가 통로로 바뀌면 G3 이 증명을 잃는다).");
+        Assert.True(outside.Count == 0,
+            $"🔴 G4 통로 밖 날 생성이 {outside.Count}곳이다 — 같은 프로세스에서 겹치면 글자층이 깨진 PDF 가 나간다: "
+          + string.Join(", ", outside.Select(l => $"{l.Where}({string.Join("/", l.Words)})"))
+          + $"\n  `.{nameof(PdfGenerationGate.GeneratePdfOneAtATime)}()` · `.{nameof(PdfGenerationGate.GenerateImagesOneAtATime)}(settings)` 로 바꿔라."
+          + $"\n  (옛 `{nameof(PdfExportService)}` 의 같은 이름 메서드를 부르는 줄이 생겨 걸렸다면 허용 목록은 결재 거리다 — 작업지시서 §14-7 W3.)");
+        Assert.True(gatePdf == 1 && gateImages == 1 && gateOther == 0,
+            $"🔴 G4 통로 파일의 날 생성 낱말은 GeneratePdf 1 · GenerateImages 1 이어야 한다 — 지금 {gatePdf} · {gateImages} · 그 밖 {gateOther}: "
+          + string.Join(", ", gateFileHits.Select(h => $"{h.Line.Where}({h.Word})")));
+        Assert.True(productGate == ExpectedGateCalls,
+            $"🔴 G4 제품 통로 호출이 {productGate}개다 — {ExpectedGateCalls}개(PdfRenderService 5 · PdfExportService 3)를 기대했다: "
+          + string.Join(", ", productGateWhere));
+        Assert.True(labeled.Count == ExpectedBypassLines,
+            $"🔴 G4 G3 대조 우회 이름표 줄이 {labeled.Count}개다 — {ExpectedBypassLines}개를 기대했다(대조가 통로로 바뀌면 G3 이 증명을 잃는다).");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // K9 — 격식 제목 글꼴 첫 등록(통로 잠금 안) 동시 20 → 교착 0 (보조)
+    // ══════════════════════════════════════════════════════════════
+    private const int FormalParallelCount = 20;
+    private static readonly TimeSpan FormalDeadline = TimeSpan.FromSeconds(30);
+
+    /// <remarks>
+    /// 🔴 [고침 1 · R6 · K9 · PM §14-9 ⑤ (가)] 제품 <c>RenderDocumentAsync</c> 는 격식 제목 글꼴 첫 등록을 PDF 생성과 같은 잠금 안에서 한다
+    /// (<c>PdfGenerationGate.RunOneAtATime</c>). 등록 공장(<c>Lazy</c>)은 이 잠금을 안 잡으므로 잡는 순서는 늘 「통로 → Lazy」 한 방향이다.
+    /// 첫 등록은 프로세스당 1번이라 앞 시험이 이미 등록했으면 이 시험은 「첫 등록」 을 못 탄다 — 교착 0 의 주 근거는 코드 읽기이고 이 시험은 보조다.
+    /// </remarks>
+    [Fact(DisplayName = "K9 🔴 PDF 동시 생성 게이트 — 격식 양식(제목 내장 글꼴 등록 = 통로 잠금 안) 20개를 동시에 만들어도 30초 안에 다 끝난다(교착 0 · 등록 실패 로그 0)")]
+    public async Task K9_FormalTitleFontRegistration_Parallel20_NoDeadlock()
+    {
+        var log = new ConcurrentQueue<string>();
+        var sw = Stopwatch.StartNew();
+        var all = Task.WhenAll(Enumerable.Range(0, FormalParallelCount).Select(_ => Task.Run(() => RenderK4Async(log, "formal"))));
+        var first = await Task.WhenAny(all, Task.Delay(FormalDeadline));
+        sw.Stop();
+
+        Assert.True(ReferenceEquals(first, all),
+            $"🔴 K9 격식 양식 {FormalParallelCount}개 동시 생성이 {FormalDeadline.TotalSeconds}초 안에 안 끝났다 — 글꼴 등록 · PDF 생성 잠금 교착 의심"
+          + "(등록 공장 안에서 통로 잠금을 잡지 않았나 확인).");
+        var pdfs = await all;
+        var fontFail = log.Where(m => m.Contains("격식 제목 글꼴을 등록하지 못했다", StringComparison.Ordinal)).ToList();
+        _out.WriteLine($"K9 격식 양식 병렬 {FormalParallelCount}: {sw.ElapsedMilliseconds}ms · 빈 PDF {pdfs.Count(p => p.Length == 0)} · 등록 실패 로그 {fontFail.Count} · cpu {Environment.ProcessorCount}");
+        Assert.True(pdfs.All(p => p.Length > 0), "🔴 K9 격식 양식 PDF 중 빈 것이 있다.");
+        Assert.True(fontFail.Count == 0, $"🔴 K9 격식 제목 글꼴 등록 실패 로그가 {fontFail.Count}건이다: {string.Join(" | ", fontFail.Take(3))}");
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -289,7 +398,8 @@ public sealed class PdfConcurrentGenerationGateTests
         });
     }));
 
-    private static async Task<byte[]> RenderK4Async(ConcurrentQueue<string> log)
+    // 옛 줄(고침 1 · K9 전 — 양식 스타일 인자 보탬 · 기본값 = 옛 값 "basic"): private static async Task<byte[]> RenderK4Async(ConcurrentQueue<string> log)
+    private static async Task<byte[]> RenderK4Async(ConcurrentQueue<string> log, string styleKey = "basic")
     {
         var forms = new Mock<IFormTemplateService>();
         forms.Setup(f => f.GetDefaultAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -301,7 +411,8 @@ public sealed class PdfConcurrentGenerationGateTests
                 PrintBackground = false,
                 BackgroundImageUrl = null,
                 FieldCoordsJson = "[{\"key\":\"partner_business_no\",\"x_mm\":30,\"y_mm\":40}]",
-                StyleKey = "basic",
+                // 옛 줄(고침 1 · K9 전): StyleKey = "basic",
+                StyleKey = styleKey,
                 ShowWatermark = false,
             });
         var svc = new PdfRenderService(new Mock<IDbConnection>().Object, new QueueLogger(log), forms.Object);
@@ -430,12 +541,16 @@ public sealed class PdfConcurrentGenerationGateTests
     /// <summary>G1 — 순차 3번 → 1종 · 세 글꼴. 아니면 「입력 무효」 빨강(G2 · G3 도 이 기준 위에서만 잰다).</summary>
     private static async Task<Baseline> BuildBaselineAsync(GenInput input)
     {
+        // 🔴 [고침 1 · R2 (다-2)] 순차 3번 시작 날짜 — 자정을 걸치면 빨강 문구에 표지만 붙는다(빨강 그대로).
+        var day0 = DateTime.Today;
         var texts = new List<PdfText>();
         for (var i = 0; i < SequentialRepeats; i++) texts.Add(TextOf(await input.Generate()));
 
         var kinds = texts.Select(t => t.Text).Distinct(StringComparer.Ordinal).Count();
         Assert.True(kinds == 1,
-            $"🔴 G1 입력 무효 — 「{input.Name}」 을 순차로 {SequentialRepeats}번 만들었는데 글자열이 {kinds}종이다. 기준이 하나가 아니면 D3 비교가 성립 안 한다.");
+            // 옛 줄(고침 1 · R2 전): $"🔴 G1 입력 무효 — 「{input.Name}」 을 순차로 {SequentialRepeats}번 만들었는데 글자열이 {kinds}종이다. 기준이 하나가 아니면 D3 비교가 성립 안 한다.");
+            $"🔴 G1 입력 무효 — 「{input.Name}」 을 순차로 {SequentialRepeats}번 만들었는데 글자열이 {kinds}종이다. 기준이 하나가 아니면 D3 비교가 성립 안 한다."
+          + DateShiftNote(day0));
 
         var first = texts[0];
         var hasType3 = first.FontNames.Any(IsType3);
@@ -448,6 +563,19 @@ public sealed class PdfConcurrentGenerationGateTests
             $"🔴 G1 입력 무효 — 「{input.Name}」 순차 기준에 이미 \\0 글자가 있다: {first.ZeroFonts}");
 
         return new Baseline(first.Text, first.Pages, first.LetterCount, first.FontNames);
+    }
+
+    /// <summary>
+    /// 🔴 [고침 1 · R2 (다-2) · PM §14-9 ①] 판정 중 날짜가 바뀌었으면 빨강 문구에 붙일 표지 — 안 바뀌었으면 빈 글.
+    /// 견적 K4 예시 자료 날짜는 <c>DateTime.Today</c>(제품 <c>BuildSampleSnapshot</c> · 시험에서 넣을 이음매 없음)라 자정을 걸치면
+    /// 날짜 글자가 달라질 수 있다. 이 표지는 <b>문구만</b> 바꾼다 — 빨강을 초록으로 · 건너뜀으로 바꾸는 길은 0 이다.
+    /// </summary>
+    private static string DateShiftNote(DateTime before)
+    {
+        var after = DateTime.Today;
+        return after == before
+            ? string.Empty
+            : $" 🕛 판정 중 날짜 바뀜({before.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}→{after.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}) — 예시 자료 날짜 글자 차이일 수 있으나 빨강 그대로 · 다시 돌려 확인";
     }
 
     private sealed record GenResult(int Index, GenInput Input, byte[]? Bytes, Exception? Error);
@@ -512,6 +640,28 @@ public sealed class PdfConcurrentGenerationGateTests
                 if (lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
                 yield return new CodeLine(rel, i + 1, lines[i]);
             }
+        }
+    }
+
+    /// <summary>G4 낱말 셈 한 줄 — <see cref="Raw"/> 는 원문(이름표 확인용) · <see cref="Stripped"/> 는 문자열 · 문자 글 · 줄 끝 주석을 지운 글.</summary>
+    private sealed record CodeWordLine(string File, int Line, string Raw, string Stripped, IReadOnlyList<string> Words)
+    {
+        public string Where => $"{File}:{Line}";
+
+        /// <summary><c>src/</c> 바로 아래 폴더 이름(예: <c>HitPan.Application</c>).</summary>
+        public string TopFolder => File.Split('/') is { Length: > 2 } parts ? parts[1] : string.Empty;
+    }
+
+    /// <summary>🔴 [고침 1 · R5] <c>src</c> 아래 모든 <c>.cs</c>(bin · obj 빼기 · <c>//</c> 시작 줄 빼기) — 줄마다 생성 API 낱말을 센다.</summary>
+    private static IEnumerable<CodeWordLine> CodeWords(string root)
+    {
+        foreach (var l in CodeLines(root, "src"))
+        {
+            var stripped = StringOrCharLiteral.Replace(l.Text, "\"\"");
+            var cut = stripped.IndexOf("//", StringComparison.Ordinal);
+            if (cut >= 0) stripped = stripped[..cut];
+            var words = RawGenerationWord.Matches(stripped).Select(m => m.Value).ToList();
+            yield return new CodeWordLine(l.File, l.Line, l.Text, stripped, words);
         }
     }
 

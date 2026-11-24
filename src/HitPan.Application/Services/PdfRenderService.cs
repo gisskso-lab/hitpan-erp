@@ -202,7 +202,8 @@ public sealed class PdfRenderService : IPdfRenderService
         {
             try
             {
-                EnsureEmbeddedFontsRegistered();
+                // 옛 줄(W-G1-51 PDF 잠금 고침 1 전 · 헌법 #1 · PM §14-9 ⑤ (가) — 첫 등록을 PDF 생성과 같은 잠금 안으로): EnsureEmbeddedFontsRegistered();
+                PdfGenerationGate.RunOneAtATime(EnsureEmbeddedFontsRegistered);
             }
             catch (Exception ex)
             {
