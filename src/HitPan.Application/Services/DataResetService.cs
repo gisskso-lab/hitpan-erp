@@ -152,10 +152,10 @@ public sealed class DataResetService : IDataResetService
             var gateInTx = await GetResetGateInTransactionAsync(tx, tenantId, userId, ct).ConfigureAwait(false);
             if (gateInTx != DataResetGate.Allowed)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 var txCode = DataResetGateCodes.ToCode(gateInTx);
                 await _audit.LogAsync("data_reset_denied", "system", null, reason: InTxDenyReasonPrefix + txCode, ct: ct)
                     .ConfigureAwait(false);
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 return new DataResetResponse
                 {
                     Success = false,
