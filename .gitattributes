@@ -10,3 +10,8 @@ src/HitPan.Web/wwwroot/appsettings.Development.json linguist-generated
 # NCP(리눅스)에서 실행되는 bash — CRLF 로 커밋되면 '\r' 때문에 실행 실패한다.
 # publish-update.sh / sign-manifest.sh 등 배포 스크립트 보호.
 *.sh text eol=lf
+
+# 격식 글꼴 고지(OFL) 파일은 반드시 LF (2026-11-25 · W-G1-51 갈래 F-2 · 결재 §133 ②)
+# 원본 그대로(5,682 B · LF)가 법무 조건이다 — CRLF 로 풀리면 바이트가 바뀌어 「수정본」 이 된다.
+# 이 한 파일만 문다(*.txt 전체 금지) · 시험 FormalTitleFontEmbedGateTests G1 이 길이 · SHA 로 잰다.
+src/HitPan.Application/Resources/Fonts/NotoSerifKR-OFL.txt text eol=lf

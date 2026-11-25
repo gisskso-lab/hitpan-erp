@@ -271,6 +271,74 @@ jobs:
           }
           Write-Host "[MigSmoke] 마이그 SQL $($out.Count)개 집합 동일 + 전부 비어있지 않음. OK."
 
+      # 🔴 W-G1-51 갈래 F-2 (2026-11-25 · 결재 §133 ④ · 작업지시서 고침 1 §15 · 결재 §142 ㉠′) — 출시 꼴 실림 검사용 publish.
+      #   꼴 = deploy-update.yml 단계 「Publish ERP API (single-file)」(ded7ce34 기준 :195~202) 글자 그대로.
+      #   HitPanVersion 주입만 뺐다(판 번호 주입이라 실림과 무관). 이 단계는 배포 길이 아니다 — 배포 워크플로를 고치지 말 것.
+      #   dotnet --version 을 먼저 찍는다 — 러너 SDK 에서 `--self-contained false` 가 실제 어느 꼴로 나오는지 이 런이 잰다
+      #   (개발 PC SDK 10.0.204 에선 자기 포함으로 나왔다 · 개발명세서 §6). 자기 포함이면 다음 단계 G3 가 빨강 — 느슨하게 고치지 말 것(K10).
+      - name: Publish ERP API (출시 꼴 · 실림 검사용 · 배포 아님)
+        shell: pwsh
+        run: |
+          dotnet --version
+          dotnet publish src/HitPan.API/HitPan.API.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -o publish-shipform --nologo
+
+      # 🔴 W-G1-51 갈래 F-2 — 글꼴(번들 안 dll 리소스) · 고지(licenses) · QuestPDF 네이티브 6 실림 게이트(G-F2-G1 ~ G4 · 전용 단계).
+      #   선례 = 「HITPAN_REQUIRE_ISCC」 단계(ded7ce34 기준 :157~199) 꼴. REQUIRE=1 이라 폴더가 없거나 비면 스킵이 아니라 빨강.
+      #   판정(고침 1 §15-2 ③ · 결재 §141 N-1 · N-5): 결과 폴더 매번 새로 · trx 정확히 1 · ResultSummary = Completed ·
+      #   Counters total = passed(Failed · Error · Timeout · NotExecuted 전부 빨강) · G1 ~ G4 각 Passed ≥1 · optout 표식 생기면 빨강(N-2).
+      #   증거는 이름 · 길이 · SHA-256 만 찍는다 — 전체 경로 · 환경값 전체 출력 금지(S-6).
+      - name: Gate — 글꼴 · 고지 · 네이티브 6 실림 (출시 꼴 · F-2)
+        env:
+          HITPAN_REQUIRE_SHIPFORM: "1"
+          HITPAN_SHIPFORM_DIR: ${{ github.workspace }}/publish-shipform
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 앞선 전체 시험이 남긴 표식을 먼저 지운다 — 이 단계가 자기 실행만 보도록.
+          find . -name 'shipform-optout.log' -delete
+          RES="$RUNNER_TEMP/shipform-gate-results"
+          rm -rf "$RES"
+          mkdir -p "$RES"
+          dotnet test src/HitPan.Tests/HitPan.Tests.csproj \
+            --configuration Release --no-build --nologo --verbosity normal \
+            --filter "FullyQualifiedName~FormalTitleFontEmbedGateTests" \
+            --results-directory "$RES" \
+            --logger "trx;LogFileName=shipform-gate-results.trx" 2>&1 | tee "$RUNNER_TEMP/shipform-gate.log"
+          mapfile -t TRXS < <(find "$RES" -name '*.trx' -type f)
+          if [ "${#TRXS[@]}" -ne 1 ]; then
+            echo "::error::trx 가 ${#TRXS[@]} 개다(정확히 1 이어야 함) — 게이트가 안 돌았거나 옛 결과가 섞였다"; exit 1
+          fi
+          TRX="${TRXS[0]}"
+          if ! grep -q '<ResultSummary outcome="Completed"' "$TRX"; then
+            echo "::error::trx ResultSummary outcome ≠ Completed"; grep -o '<ResultSummary [^>]*' "$TRX" || true; exit 1
+          fi
+          COUNTERS=$(grep -o '<Counters [^>]*' "$TRX")
+          TOTAL=$(echo "$COUNTERS" | sed -E 's/.* total="([0-9]+)".*/\1/')
+          PASSED=$(echo "$COUNTERS" | sed -E 's/.* passed="([0-9]+)".*/\1/')
+          echo "  $COUNTERS"
+          if ! [[ "$TOTAL" =~ ^[0-9]+$ && "$PASSED" =~ ^[0-9]+$ ]] || [ "$TOTAL" -eq 0 ] || [ "$TOTAL" -ne "$PASSED" ]; then
+            echo "::error::Counters total=$TOTAL passed=$PASSED — 전부 통과가 아니다(Failed · Error · Timeout · NotExecuted 포함 빨강)"; exit 1
+          fi
+          for G in G1 G2 G3 G4; do
+            N=$(grep -o '<UnitTestResult [^>]*' "$TRX" | grep -F "(G-F2-$G)" | grep -c 'outcome="Passed"' || true)
+            echo "  G-F2-$G Passed : $N 건 (결과 레코드)"
+            if [ "$N" -lt 1 ]; then echo "::error::G-F2-$G 통과 레코드가 없다"; exit 1; fi
+          done
+          if grep -q -e 'outcome="Failed"' -e 'outcome="NotExecuted"' "$TRX"; then
+            echo "::error::trx 에 Failed · NotExecuted 레코드가 있다"; exit 1
+          fi
+          # REQUIRE 가 시험에 안 닿았으면(env 이름 오타 · 누락) G2 ~ G4 가 표식만 남기고 통과한다 = 조용한 초록 ⇒ 빨강.
+          if find . -name 'shipform-optout.log' -print -quit | grep -q .; then
+            echo "::error::전용 단계인데 shipform-optout.log 가 생겼다 — HITPAN_REQUIRE_SHIPFORM 이 시험에 안 닿았다"; exit 1
+          fi
+          echo "F-2 실림 게이트 G1 ~ G4 통과."
+          # 증거(판정 무관) — 이름 · 길이 · SHA-256 · 러너 core.autocrlf 값만.
+          echo "core.autocrlf=$(git config --get core.autocrlf || echo '(없음)')"
+          pwsh -NoProfile -Command '$d = $env:HITPAN_SHIPFORM_DIR; @("licenses/NotoSerifKR-OFL.txt","qpdf.dll","zlib1.dll","QuestPdfSkia.dll","libgcc_s_seh-1.dll","libstdc++-6.dll","libwinpthread-1.dll","HitPan.API.exe") | ForEach-Object { $f = Get-Item -LiteralPath (Join-Path $d $_); "{0} | {1} B | {2}" -f $_, $f.Length, (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }'
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v5
