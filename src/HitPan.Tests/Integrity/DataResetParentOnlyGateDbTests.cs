@@ -578,6 +578,56 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
         Assert.True(ownerAffected == 1, $"🔴 A 롤백 뒤에도 대표 행 UPDATE 영향 = {ownerAffected}(1행이어야 한다).");
     }
 
+    // ══ T2b — 안 판정이 진행 중이던 변경을 기다렸다가 최신 커밋으로 판정(결재 §189 · [3-V] S-9) ══
+
+    [Fact(DisplayName = "T2b 🔴 연결 B 트랜잭션이 대표 행 is_active=0 미커밋인 동안 연결 A 트랜잭션 안 판정 = 기다림 → B 커밋 → A = no_parent(잠금 줄이 집계보다 먼저 · 옛 스냅숏 Allowed 금지)")]
+    public async Task T2b_안판정_진행중변경_기다려_최신판정()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(T2b_안판정_진행중변경_기다려_최신판정)); return; }
+        SetUpFreshInstall();
+        string owner;
+        await using (var seed = await OpenAsync())
+        {
+            owner = await InsertUserAsync(seed, TenantId, "owner", parent: true, admin: true, OwnerPw);
+        }
+
+        // B — 대표 행 비활성 UPDATE(미커밋) = 대표 행 레코드 잠금을 쥔다.
+        await using var b = await OpenAsync();
+        await using var txB = await b.BeginTransactionAsync();
+        var pending = await b.ExecuteAsync(
+            "UPDATE users SET is_active = 0 WHERE user_id = @U AND tenant_id = @T", new { U = owner, T = TenantId }, txB);
+        Assert.True(pending == 1, $"🔴 B 의 대표 행 UPDATE 영향 = {pending}(1행이어야 한다 · 준비 실패).");
+
+        // A — 서로 다른 연결(헌법 #16 · 같은 연결 동시 실행 0). 잠금 대기 10초 · 시험 상한 20초.
+        await using var a = await OpenAsync();
+        await a.ExecuteAsync("SET SESSION innodb_lock_wait_timeout = 10");
+        await using var txA = await a.BeginTransactionAsync();
+        var gateTask = NewService(a, new CountingBackup()).GetResetGateInTransactionAsync(txA, TenantId, owner);
+
+        // 짧게 기다린 뒤 A 가 아직 안 끝났어야 한다 — 첫 문장(본인 행 잠금 읽기)이 B 의 잠금에서 기다린다.
+        var finishedEarly = await Task.WhenAny(gateTask, Task.Delay(TimeSpan.FromSeconds(1))) == gateTask;
+        if (finishedEarly)
+        {
+            var early = gateTask.IsFaulted ? gateTask.Exception!.GetBaseException() : null;
+            var got = early is not null ? early.GetType().Name + ": " + early.Message : (await gateTask).ToString();
+            Assert.Fail($"🔴 B 가 대표 행을 쥔 동안 A 의 안 판정이 기다리지 않고 끝났다({got}) — 첫 문장이 잠금 읽기가 아니다.");
+        }
+
+        await txB.CommitAsync();
+
+        var finished = await Task.WhenAny(gateTask, Task.Delay(TimeSpan.FromSeconds(20))) == gateTask;
+        Assert.True(finished, "🔴 B 커밋 뒤 20초가 지나도 A 의 안 판정이 안 끝났다.");
+        var gate = await gateTask;
+        Assert.True(gate == DataResetGate.NoParent,
+            $"🔴 B 커밋 뒤 A 의 안 판정 = {gate}(NoParent 여야 한다) — 집계가 잠금 앞 옛 스냅숏(대표 활성)으로 읽었다.");
+
+        await txA.RollbackAsync();
+        await using var check = await OpenAsync();
+        var active = await check.ExecuteScalarAsync<long>(
+            "SELECT CAST(is_active AS SIGNED) FROM users WHERE user_id = @U AND tenant_id = @T", new { U = owner, T = TenantId });
+        Assert.True(active == 0, $"🔴 B 커밋 뒤 대표 행 is_active = {active}(0 이어야 한다 · 준비 확인).");
+    }
+
     // ══ 대역 ══
 
     /// <summary>강제 백업이 몇 번 불렸는지 센다 — 판정이 백업 앞인지 재는 자리.</summary>
