@@ -22,7 +22,10 @@ public sealed class DataResetParentOnlyGateTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            // ⬛ 고침 1 이전(CodeQL 「Path.Combine 앞 인자가 조용히 버려질 수 있음」):
+            //   if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            // Path.Join 은 뒤 조각이 절대 경로여도 앞을 버리지 않는다 — 상대 조각 하나라 결과는 같다.
+            if (File.Exists(Path.Join(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
             dir = dir.Parent;
         }
         throw new Xunit.Sdk.XunitException("HitPan.sln 을 못 찾았다 — 시험이 Sidebar.razor 를 읽을 수 없다.");
@@ -66,7 +69,8 @@ public sealed class DataResetParentOnlyGateTests
     [Fact(DisplayName = "N2 🔴 Sidebar — /data/reset 줄만 ShowResetLink 블록 안 · 백업 · 자료이관 · 로그 3줄은 밖(범위 「초기화만」) · 관리자 블록에서 my-level 부름")]
     public void N2_사이드바_감쌈()
     {
-        var path = Path.Combine(RepoRoot(), "src", "HitPan.Web", "Layout", "Sidebar.razor");
+        // ⬛ 고침 1 이전(CodeQL): var path = Path.Combine(RepoRoot(), "src", "HitPan.Web", "Layout", "Sidebar.razor");
+        var path = Path.Join(RepoRoot(), "src", "HitPan.Web", "Layout", "Sidebar.razor");
         Assert.True(File.Exists(path), $"Sidebar.razor 가 없다: {path}");
         var lines = File.ReadAllLines(path);
 
@@ -193,6 +197,45 @@ public sealed class DataResetParentOnlyGateTests
         Assert.Equal(3, Prop("level"));
         Assert.Equal(true, Prop("isAdmin"));
         Assert.Equal(DataResetMenuRule.NotParent, Prop("dataResetGate"));
+    }
+
+    // ══ N6 — (고침 1 · [4] L6) my-level 은 관리자에게 대표 판정을 실제로 부르고 그 글자를 돌려준다 · 관리자 아니면 안 부른다 ══
+
+    [Theory(DisplayName = "N6 🔴 my-level — 관리자면 대표 판정을 1번 불러 그 글자(allowed 등)를 돌려줌 · 관리자 아니면 판정 0번 · not_parent (판정을 안 부르고 늘 not_parent 면 대표에게 메뉴가 사라진다)")]
+    [InlineData("tenant_admin", HitPan.Application.DTOs.DataReset.DataResetGate.Allowed, 1, "allowed")]
+    [InlineData("tenant_admin", HitPan.Application.DTOs.DataReset.DataResetGate.MultipleParents, 1, "multiple_parents")]
+    [InlineData("tenant_user", HitPan.Application.DTOs.DataReset.DataResetGate.Allowed, 0, "not_parent")]
+    public async Task N6_my_level_판정_부름(string accountType, HitPan.Application.DTOs.DataReset.DataResetGate fakeGate,
+        int expectedCalls, string expectedCode)
+    {
+        var c = new UserController(userService: null!);
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Items["TenantId"] = "n6-tenant";
+        http.Items["UserId"] = "n6-user";
+        http.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim("account_type", accountType) }, "n6"));
+        c.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = http };
+
+        var permission = FakeProxy<HitPan.Application.Interfaces.IPermissionService>.Create(
+            m => m.Name == "GetUsersLevelAsync" ? Task.FromResult(3) : throw new NotSupportedException(m.Name));
+        var calls = 0;
+        var countingGate = FakeProxy<HitPan.Application.Interfaces.IDataResetService>.Create(m =>
+        {
+            if (m.Name != "GetResetGateAsync") throw new NotSupportedException(m.Name);
+            calls++;
+            return Task.FromResult(fakeGate);
+        });
+
+        var result = await c.GetMyLevel(permission, countingGate,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<UserController>.Instance, default);
+
+        var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+        object? Prop(string name) => ok.Value?.GetType().GetProperty(name)?.GetValue(ok.Value);
+        Assert.True(calls == expectedCalls,
+            $"🔴 account_type={accountType} → 대표 판정을 {expectedCalls}번 불러야 하는데 {calls}번 불렀다. "
+          + "관리자에게 판정을 안 부르면 대표에게도 메뉴가 사라지고, 관리자 아닌데 부르면 쓸데없이 DB 를 읽는다.");
+        Assert.Equal(expectedCode, Prop("dataResetGate"));
+        Assert.Equal(3, Prop("level"));
     }
 
     /// <summary>
