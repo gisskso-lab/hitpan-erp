@@ -342,7 +342,11 @@
         </MudNavLink>
         <MudNavLink Href="/data/logs" Icon="@Icons.Material.Filled.ManageSearch">ERP 로그 기록</MudNavLink>
         @* 모든데이터 초기화 (사장님 결재 2026-06-23) — 부모계정·회사정보·로그 제외 전체 포맷 *@
+        @* 20261125작 — 대표 결재 §146 「초기화만」: 이 한 줄만 대표 계정(is_parent=1)에게 보인다. 막는 것은 서버 대표 판정이다(메뉴 감춤 ≠ 차단). *@
+        @if (DataResetMenuRule.ShowResetLink(_dataResetGate))
+        {
         <MudNavLink Href="/data/reset" Icon="@Icons.Material.Filled.DeleteForever">모든데이터 초기화</MudNavLink>
+        }
         @* 🔴 20261014작1 T-3 — 수동 업데이트·수동 되돌리기 **2줄은 「고객지원센터」로 옮겼다**(사장님 오더 10/14 ③).
              옛 자리는 20260930작1 갈래 F 였다(사장님 9/30 「자료관리에 이전버전으로 회귀하는 메뉴하고,
              최신버젼 업데이트 메뉴 신설」). 자리만 바뀌고 **경로·낱말·메인PC 판정은 한 글자도 안 바뀐다.**
@@ -520,6 +524,9 @@
     //     ③서버(요청 자체를 거부). 셋 중 하나라도 빠지면 막았다고 말할 수 없다.
     private bool _isTenantAdmin;
 
+    /// <summary>20261125작 — 「모든데이터 초기화」 대표 판정 글자(my-level dataResetGate). null 이면 그 한 줄 안 보임.</summary>
+    private string? _dataResetGate;
+
     /// <summary>20261005작5 — 「직원 계정 관리」 단계(대표·관리자 아닌 직원만 읽는다). 1 이상이면 설정관리에 그 한 줄.</summary>
     private int _usersLevel;
 
@@ -543,6 +550,13 @@
         {
             var me = await new AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
             _usersLevel = me?.Level ?? 0;
+        }
+
+        // 20261125작 K4 (가) — 관리자면 my-level 을 한 번 읽어 「모든데이터 초기화」 한 줄을 가른다(대표만 · 못 읽으면 안 보임).
+        if (_isTenantAdmin)
+        {
+            var me = await new AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
+            _dataResetGate = me?.DataResetGate;
         }
 
         // 🔴 20260929작3 절F5 — 게이트가 다시 물어 온 상태(M-22 R-1 경주 뒤)를 따라간다(추가 호출 0).

@@ -74,12 +74,31 @@ public sealed class DataResetService : IDataResetService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
-        // ── 1) 부모계정 패스워드 재검증 (본인 확인) ──
+        // ── 0) 대표 계정 판정 (20261125작 · 대표 결재 §146 「초기화만」 · 「막고 안내」) ──
+        // 지금까지는 account_type = 'tenant_admin' 만 봐서, 관리자 역할 자식 계정도 자기 비번으로 회사 장부 전체를 지울 수 있었다(1V §0).
+        // 대표 = users.is_parent = 1 인 살아 있는 로컬 행(헌법 #38 · #40). 비번 대조 · 강제 백업 · 삭제보다 **앞**에서 막는다.
+        // 자료이관 덮어쓰기(MigrationController.PrepareOverwriteAsync)도 이 메서드를 부르므로 함께 닫힌다.
+        var gate = await GetResetGateAsync(tenantId, userId, ct).ConfigureAwait(false);
+        if (gate != DataResetGate.Allowed)
+        {
+            var code = DataResetGateCodes.ToCode(gate);
+            await _audit.LogAsync("data_reset_denied", "system", null, reason: $"대표 판정 거절: {code}", ct: ct)
+                .ConfigureAwait(false);
+            return new DataResetResponse { Success = false, DenyCode = code, Error = GateMessage(gate) };
+        }
+
+        // ⬛ 20261125작 이전 주석: // ── 1) 부모계정 패스워드 재검증 (본인 확인) ──
+        // ── 1) 대표 판정을 통과한 본인의 비밀번호 확인 (20261125작 K7 — 대표 판정은 0) 에서 끝남) ──
+        // ⬛ 20261125작 이전 WHERE(#1 보존):
+        //   WHERE user_id = @UserId AND tenant_id = @TenantId
+        //     AND account_type = 'tenant_admin' AND is_active = 1
+        // 20261125작: AND is_parent = 1 AND is_deleted = 0 더함 — 두 번째 겹. 누가 0) 의 순서를 바꿔도 자식 계정 비번으로는 통과 못 한다.
         var hash = await _db.ExecuteScalarAsync<string?>(new CommandDefinition(
             """
             SELECT password_hash FROM users
             WHERE user_id = @UserId AND tenant_id = @TenantId
               AND account_type = 'tenant_admin' AND is_active = 1
+              AND is_parent = 1 AND is_deleted = 0
             LIMIT 1
             """,
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
@@ -87,9 +106,11 @@ public sealed class DataResetService : IDataResetService
         if (string.IsNullOrEmpty(hash) || !BCrypt.Net.BCrypt.Verify(request.Password, hash))
         {
             // 실패도 로그에 남긴다 (시도 추적).
-            await _audit.LogAsync("data_reset_denied", "system", null, reason: "패스워드 불일치 또는 부모계정 아님", ct: ct)
+            // ⬛ 20261125작 이전 reason: "패스워드 불일치 또는 부모계정 아님"
+            await _audit.LogAsync("data_reset_denied", "system", null, reason: "대표 계정 비밀번호 불일치", ct: ct)
                 .ConfigureAwait(false);
-            return new DataResetResponse { Success = false, Error = "비밀번호가 일치하지 않거나 부모계정이 아닙니다." };
+            // ⬛ 20261125작 이전 문구: "비밀번호가 일치하지 않거나 부모계정이 아닙니다." — 이제 이 줄에는 대표 본인만 닿는다(K7).
+            return new DataResetResponse { Success = false, Error = "비밀번호가 일치하지 않습니다." };
         }
 
         // ── 2) 강제 백업 (초기화 직전 — 되돌릴 안전망) ──
@@ -183,6 +204,58 @@ public sealed class DataResetService : IDataResetService
             BackupId = backup.BackupId,
             ClearedTableCount = cleared
         };
+    }
+
+    /// <summary>20261125작 — 대표 아닌 관리자가 초기화를 부를 때의 안내(시험이 이 상수로 대조).</summary>
+    public const string NotParentMessage =
+        "모든데이터 초기화는 대표 계정만 할 수 있습니다. 대표 계정으로 다시 로그인해 주세요.";
+
+    /// <summary>20261125작 — 회사에 살아 있는 대표 계정이 없을 때의 안내.</summary>
+    public const string NoParentMessage =
+        "이 회사의 대표 계정을 찾지 못해 초기화를 막았습니다. 고객지원센터에 '대표 계정 확인'을 요청해 주세요.";
+
+    /// <summary>20261125작 — 회사에 대표 계정이 둘 이상일 때의 안내.</summary>
+    public const string MultipleParentsMessage =
+        "이 회사에 대표 계정이 둘 이상으로 되어 있어 초기화를 막았습니다. 고객지원센터에 '대표 계정 확인'을 요청해 주세요.";
+
+    private static string GateMessage(DataResetGate gate) => gate switch
+    {
+        DataResetGate.NoParent => NoParentMessage,
+        DataResetGate.MultipleParents => MultipleParentsMessage,
+        _ => NotParentMessage,
+    };
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 20261125작 — 쿼리 1번(#16) · tenant 범위(#2). 칸은 출하 DDL <c>installer/hitpan_db_clean.sql</c> users 정의로 확인(#13 ·
+    /// is_parent · is_deleted · is_active · account_type · tenant_id · user_id).
+    /// 판정 순서: 대표 0 → NoParent · 본인 아님 → NotParent · 대표 2+ → MultipleParents · 그 밖 → Allowed.
+    /// </remarks>
+    public async Task<DataResetGate> GetResetGateAsync(string tenantId, string userId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var row = await _db.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
+            """
+            SELECT
+              CAST(COALESCE(SUM(is_parent = 1 AND is_deleted = 0 AND is_active = 1), 0) AS SIGNED) AS ParentCount,
+              CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1 AND is_deleted = 0 AND is_active = 1
+                                AND account_type = 'tenant_admin'), 0) AS SIGNED) AS SelfCount
+            FROM users
+            WHERE tenant_id = @TenantId
+            """,
+            new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        if (row.ParentCount == 0) return DataResetGate.NoParent;
+        if (row.SelfCount == 0) return DataResetGate.NotParent;
+        if (row.ParentCount >= 2) return DataResetGate.MultipleParents;
+        return DataResetGate.Allowed;
+    }
+
+    private sealed class ResetGateRow
+    {
+        public long ParentCount { get; set; }
+        public long SelfCount { get; set; }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)
