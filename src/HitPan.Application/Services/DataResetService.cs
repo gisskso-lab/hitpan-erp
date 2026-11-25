@@ -242,13 +242,12 @@ public sealed class DataResetService : IDataResetService
               CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1 AND is_deleted = 0 AND is_active = 1
                                 AND account_type = 'tenant_admin'), 0) AS SIGNED) AS SelfCount
             FROM users
-            WHERE tenant_id = @TenantId
             """,
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
         if (row.ParentCount == 0) return DataResetGate.NoParent;
-        if (row.SelfCount == 0) return DataResetGate.NotParent;
         if (row.ParentCount >= 2) return DataResetGate.MultipleParents;
+        if (row.SelfCount == 0) return DataResetGate.NotParent;
         return DataResetGate.Allowed;
     }
 
