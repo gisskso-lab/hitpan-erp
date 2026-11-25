@@ -287,7 +287,7 @@ public sealed class DataResetService : IDataResetService
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         var row = await conn.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
-            ResetGateSql,
+            ResetGateSql + "\nFOR UPDATE",
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         return Decide(row);
