@@ -149,21 +149,6 @@ public sealed class DataResetService : IDataResetService
             // 0) 판정 뒤 · 강제 백업 도중에 대표가 멈춤 · 지움 · 해제되거나 대표가 하나 더 생기면 0) 의 답은 낡는다.
             // 트랜잭션 첫 문장 = 본인 행 잠금 + 같은 판정 SQL(ResetGateSql) — FK 끄기보다 앞(뒤면 거절 반환 뒤 연결이 FK 꺼진 채 남음).
             // 거절은 예외로 던지지 않는다(아래 catch 가 data_reset_failed 로 잘못 센다) — 롤백 먼저 → 감사(트랜잭션 밖) → 같은 DenyCode.
-            var gateInTx = await GetResetGateInTransactionAsync(tx, tenantId, userId, ct).ConfigureAwait(false);
-            if (gateInTx != DataResetGate.Allowed)
-            {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
-                var txCode = DataResetGateCodes.ToCode(gateInTx);
-                await _audit.LogAsync("data_reset_denied", "system", null, reason: InTxDenyReasonPrefix + txCode, ct: ct)
-                    .ConfigureAwait(false);
-                return new DataResetResponse
-                {
-                    Success = false,
-                    DenyCode = txCode,
-                    Error = GateMessage(gateInTx),
-                    BackupId = backup.BackupId
-                };
-            }
 
             // FK 순환·자식→부모 순서 의존 회피: 트랜잭션 내에서만 FK 체크 해제.
             await conn.ExecuteAsync(new CommandDefinition("SET FOREIGN_KEY_CHECKS = 0", transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
