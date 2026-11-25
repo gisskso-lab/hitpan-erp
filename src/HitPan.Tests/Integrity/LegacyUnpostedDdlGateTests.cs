@@ -408,10 +408,10 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
                 """
                 INSERT INTO users
                   (user_id, tenant_id, email, password_hash, user_name, role,
-                   account_type, is_active, created_at, updated_at, is_parent)
+                   account_type, is_active, created_at, updated_at)
                 VALUES
                   (@Uid, @Tid, 'legacy-ddl-gate@hitpan.kr', @Hash, '게이트시험자', 'tenant_admin',
-                   'tenant_admin', 1, NOW(6), NOW(6), 1)
+                   'tenant_admin', 1, NOW(6), NOW(6))
                 """,
                 new { Uid = UserId, Tid = TenantId, Hash = BCrypt.Net.BCrypt.HashPassword(AdminPassword) });
 

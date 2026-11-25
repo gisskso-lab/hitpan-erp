@@ -78,14 +78,6 @@ public sealed class DataResetService : IDataResetService
         // 지금까지는 account_type = 'tenant_admin' 만 봐서, 관리자 역할 자식 계정도 자기 비번으로 회사 장부 전체를 지울 수 있었다(1V §0).
         // 대표 = users.is_parent = 1 인 살아 있는 로컬 행(헌법 #38 · #40). 비번 대조 · 강제 백업 · 삭제보다 **앞**에서 막는다.
         // 자료이관 덮어쓰기(MigrationController.PrepareOverwriteAsync)도 이 메서드를 부르므로 함께 닫힌다.
-        var gate = await GetResetGateAsync(tenantId, userId, ct).ConfigureAwait(false);
-        if (gate != DataResetGate.Allowed)
-        {
-            var code = DataResetGateCodes.ToCode(gate);
-            await _audit.LogAsync("data_reset_denied", "system", null, reason: $"대표 판정 거절: {code}", ct: ct)
-                .ConfigureAwait(false);
-            return new DataResetResponse { Success = false, DenyCode = code, Error = GateMessage(gate) };
-        }
 
         // ⬛ 20261125작 이전 주석: // ── 1) 부모계정 패스워드 재검증 (본인 확인) ──
         // ── 1) 대표 판정을 통과한 본인의 비밀번호 확인 (20261125작 K7 — 대표 판정은 0) 에서 끝남) ──
@@ -125,6 +117,14 @@ public sealed class DataResetService : IDataResetService
                 BackupId = backup.BackupId,
                 Error = "초기화 전 강제 백업에 실패하여 작업을 중단했습니다. 백업 설정을 확인해주세요."
             };
+        }
+        var gate = await GetResetGateAsync(tenantId, userId, ct).ConfigureAwait(false);
+        if (gate != DataResetGate.Allowed)
+        {
+            var code = DataResetGateCodes.ToCode(gate);
+            await _audit.LogAsync("data_reset_denied", "system", null, reason: $"대표 판정 거절: {code}", ct: ct)
+                .ConfigureAwait(false);
+            return new DataResetResponse { Success = false, DenyCode = code, Error = GateMessage(gate) };
         }
 
         // ── 3) 보존 화이트리스트 외 테이블을 tenant_id 범위로 삭제 ──
