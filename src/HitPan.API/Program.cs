@@ -499,6 +499,10 @@ var app = builder.Build();
 //   나머지 업무는 계속 돌아간다 — 전면 중단보다 피해가 작다.
 //   ⚠️ 단, 이 판단은 '부분 실패' 전제다. 마이그가 데이터를 변형하는 종류로 넓어지면
 //     그때는 기동 차단이 맞을 수 있다. 그 시점에 재결재를 받는다.
+//   🔴 [2026-11-19 W-G1-51 갈래 F-1] 그 재결재가 났다 — 자료를 바꾸는 첫 시작 단계(켠 양식지 → Y 템플릿 옮기기):
+//     CTO 판정 docs/검증/외부/20261118_WG1-51_H1_CTO판정.md §0 ② Q18 = (가) **기동 계속** ·
+//     ③ D-8 = ⓑ **업데이트 확정 뒤 배경 단계** (조건 D0~D7 · 설계 docs/설계/erp/20261118_WG1-51_인쇄작3_반려봉합_설계.md §7-4).
+//     ⇒ 옮기기는 이 블록 안이 아니라 바로 아래 「Y 템플릿 옮기기」 블록(기동 뒤 배경)에서 돈다 · 실패해도 기동 계속.
 //
 // 헌법: #9 DB 는 미리 다 / #13 조회 전 존재 보장 / #15 빈 catch 금지 /
 //       #26 마이그 목표(10분)-Timeout(24h) 분리 / #30 본사 의존 0 / #39 사람 손 ALTER 대체
@@ -550,6 +554,83 @@ var app = builder.Build();
             "[Startup/Migration] 🛑 DB 스키마 갱신 중 예기치 못한 오류 — 기동은 계속합니다. " +
             "새 컬럼을 쓰는 화면에서 오류가 날 수 있습니다.");
     }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// 🔴 [2026-11-19 W-G1-51 갈래 F-1] 「종이에도 함께 인쇄」 켠 양식지 → Y 템플릿 옮기기 — **기동 뒤 배경 단계**
+//   근거: CTO 판정 §0 ② Q18 (가) 기동 계속 · ③ D-8 ⓑ 업데이트 확정 뒤 · 설계 §7-3 · §7-4 D-7 · D-8 ⓑ 조건 D0~D7
+//   · P-3 정적 확인(마이그 적용기 게이트는 C# 시작 단계를 세지도 막지도 않는다 · PM 확인 11/19).
+//   🔴 왜 마이그(.sql)가 아닌가 — 그림 파일 복사가 필요하고 적용기는 DB-*.sql 만 돌린다(설계 §7-3 시점).
+//   🔴 왜 배경인가(D-8 ⓑ) — 워치독 생존 확인에 떨어져 옛 판으로 되돌아가는 창 안에서는 옮긴 자료 0 이어야 한다.
+//     ⇒ 「이 판의 업데이트 성공 기록(local_update_apply_status · success)」 이 생긴 뒤에만 돈다.
+//   🔴 흐름(D4 · PM 재결재 7차 🟢 30초 · 10분 · 코드 상수 · #21 설정 파일 0):
+//     대상 0(새 설치 포함) → 기다림 0 · 끝 / 새 키 없음 · 옛 키 공존 → 경고 1줄 · 이번 기동 끝(다음 기동에 다시)
+//     / 성공 기록 없음 → 30초마다 다시 봄 · 기동 뒤 10분 넘으면 다음 기동까지 쉼 · 대기 로그 기동당 1줄
+//     / 돌려도 됨 → 옮기기 **기동당 최대 1회**(실행 뒤 남은 대상 때문에 다시 열지 않음 · Q2 · D4).
+//   🔴 판 값 = VersionInfo.Current — 워치독이 대조한 `/health` checks.version 과 같은 출처(D2 · HealthController).
+//   🔴 테넌트는 DB 행에서 순회한다(#2 — 새 API 인자 0) · 워치독 · 업데이트 코드 무접촉 · 읽기만(#43).
+//   🔴 실패해도 기동은 계속(D-7 (가) · 위 마이그 블록 · 아래 작5 P-6 과 같은 원칙 · #15 로그 남김).
+// ────────────────────────────────────────────────────────────────────────
+{
+    var yLogger = app.Services.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("HitPan.Startup.FormYTemplateMigration");
+    var yApiVersion = HitPan.API.VersionInfo.Current;
+    var yStopping = app.Lifetime.ApplicationStopping;
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var deadline = DateTime.UtcNow + FormTemplateService.YMigrationDeadline;
+            var waitLogged = false;
+            while (true)
+            {
+                FormTemplateService.YMigrationReadiness readiness;
+                using (var yScope = app.Services.CreateScope())
+                {
+                    var ySvc = ActivatorUtilities.CreateInstance<FormTemplateService>(yScope.ServiceProvider);
+                    readiness = await ySvc.CheckYMigrationReadinessAsync(yApiVersion, yStopping).ConfigureAwait(false);
+                    if (readiness == FormTemplateService.YMigrationReadiness.Ready)
+                    {
+                        var made = await ySvc.RunYMigrationOnceAsync(yStopping).ConfigureAwait(false);
+                        yLogger.LogInformation(
+                            "[Startup/FormYTemplate] 켠 양식지 옮기기 끝 — 새 Y 템플릿 {Made}개 (판 {Version}).",
+                            made, yApiVersion);
+                        return;
+                    }
+                }
+
+                if (readiness == FormTemplateService.YMigrationReadiness.NoTargets) return;
+                if (readiness == FormTemplateService.YMigrationReadiness.KeysNotReady)
+                {
+                    yLogger.LogWarning(
+                        "[Startup/FormYTemplate] 양식 규칙(DB-150)이 아직 서지 않아 옮기기를 하지 않았습니다 — " +
+                        "원래 양식은 데이터만 인쇄됩니다 · 다음 기동에 다시 봅니다.");
+                    return;
+                }
+
+                // NotConfirmed — 이 판의 업데이트 성공 기록을 기다린다.
+                if (!waitLogged)
+                {
+                    yLogger.LogWarning(
+                        "[Startup/FormYTemplate] 이 판({Version})의 업데이트 확정 기록이 아직 없어 옮기기를 기다립니다 — " +
+                        "30초마다 다시 보고 기동 뒤 10분이 지나면 다음 기동까지 쉽니다. 그동안 원래 양식은 데이터만 인쇄됩니다.",
+                        yApiVersion);
+                    waitLogged = true;
+                }
+                if (DateTime.UtcNow + FormTemplateService.YMigrationInterval > deadline) return;
+                await Task.Delay(FormTemplateService.YMigrationInterval, yStopping).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (yStopping.IsCancellationRequested)
+        {
+            yLogger.LogInformation("[Startup/FormYTemplate] 앱 종료 중이라 옮기기 확인을 멈췄습니다 — 다음 기동에 다시 봅니다.");
+        }
+        catch (Exception ex)
+        {
+            yLogger.LogWarning(ex,
+                "[Startup/FormYTemplate] 켠 양식지 옮기기 실패 — 기동은 계속합니다 · 원래 양식은 데이터만 인쇄됩니다 · 다음 기동에 다시 봅니다.");
+        }
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

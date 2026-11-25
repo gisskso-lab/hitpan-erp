@@ -535,7 +535,10 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         Assert.Equal(a4.Height, got.Height, 1);
     }
 
-    [Theory(DisplayName = "축⒠ 🔴 스타일은 아직 **무엇이 와도 basic** (4종 디자인 미확정 · 배선만)")]
+    // ⬛ 종전 표시 이름(갈래 E⑵ 고침 1 전 · 4종 시안 승인 전): "축⒠ 🔴 스타일은 아직 **무엇이 와도 basic** (4종 디자인 미확정 · 배선만)"
+    //   🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 1 · PM 판단 §72 E-4 · [3-V] P2-1 · [4] F8] 이름만 지금 동작으로 고쳤다 —
+    //     넣는 값 4개 · 단언(`"basic"`) · 메서드 이름은 그대로. 허용 4값(formal · simple · large)을 그리는 시험은 `FormStyleRenderGateTests`.
+    [Theory(DisplayName = "축⒠ 🔴 허용 4값 밖 · 빈 값 스타일은 **basic** 으로 떨어진다 (basic 은 basic · 모르는 값은 경고 뒤 basic)")]
     [InlineData("basic")]
     [InlineData("modern")]
     [InlineData("")]
@@ -1586,20 +1589,60 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         //   ② plain   + 켬  = 빈 종이에 함께 인쇄한다
         //   ③ preprint + 끔 = 자리 맞추는 데만 쓴다
         //   ④ plain   + 끔 = 미리보기에만 보인다
-        Assert.Contains("양식용지에는 양식이 이미 인쇄되어 있습니다", razor, StringComparison.Ordinal);
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 F-1 · 편집창 부분 · 대표 11/18 08시②] 「종이에도 함께 인쇄」 **선택칸을 없앴다** —
+        //   그림까지 찍는 종이는 양식지 저장 뒤 확인창 「예」의 Y 템플릿이 대신한다. 양식지는 켬 · 끔과 무관하게
+        //   데이터만 찍히므로(서버가 DB 현재값으로 정함 · 렌더 안전망) ① 갈래(두 겹 경고)는 거짓이 되어 뺐다 → **세 갈래**:
+        //   ① preprint = 자리 맞추는 데만  ② plain + 켬(불러온 값) = 빈 종이에 함께 인쇄  ③ plain + 끔 = 미리보기에만.
+        // ⬛ 옛 단언 두 줄(주석 보존 · #1) — 선택칸 · 두 겹 갈래가 살아 있을 때의 글자:
+        //   Assert.Contains("양식용지에는 양식이 이미 인쇄되어 있습니다", razor, StringComparison.Ordinal);
+        //   Assert.Matches(@"_form\.PrintBackground\s*&&\s*_form\.PaperMode == ""preprint""", razor);
+        Assert.DoesNotContain("양식용지에는 양식이 이미 인쇄되어 있습니다", razor, StringComparison.Ordinal);
+        Assert.DoesNotMatch(PrintBackgroundCheckboxPattern, razor);
         Assert.Contains("빈 종이에 이 그림을 함께 인쇄합니다", razor, StringComparison.Ordinal);
         Assert.Contains("자리를 맞추는 데만", razor, StringComparison.Ordinal);
         Assert.Contains("종이에는 찍히지 않습니다", razor, StringComparison.Ordinal);
 
-        // 🔴 네 갈래가 **정말 갈라져 있나** — `_form.PrintBackground` 와 `PaperMode` 를
-        //   둘 다 보는 조건이 있어야 한다. 한 축만 보면 네 갈래가 될 수 없다.
-        Assert.Matches(@"_form\.PrintBackground\s*&&\s*_form\.PaperMode == ""preprint""", razor);
+        // 🔴 세 갈래가 **정말 갈라져 있나** — 양식지 갈래가 먼저 · 그다음 빈 A4 를 그림 찍기 값으로 가른다.
+        Assert.Matches(@"@if \(_form\.PaperMode == ""preprint""\)\s*\{\s*<text>\s*양식용지에 이미 인쇄된 모양이 있으니", razor);
+        Assert.Matches(@"else if \(_form\.PrintBackground\)\s*\{\s*<text>빈 종이에 이 그림을 함께 인쇄합니다", razor);
 
         // 🔴 화면이 가르는 법정 조건과 **서버가 실제로 가르는 조건**이 같은지 본다.
         Assert.Matches(@"IsLegalOnlyComposer\s*=>\s*_form\.PaperMode != ""preprint""\s*&&\s*string\.Equals\(_form\.FormType, ""tax_invoice""", razor);
+        // 🔴 [W-G1-51 F-1 · 착수 전 질문 세금계산서 Y (나)] 서버가 Y 템플릿을 법정 분기 **앞에서** 가르므로 화면도 같은 예외 1개.
+        Assert.Matches(LegalOnlyYExceptionPattern, razor);
 
         var server = ReadCode("src", "HitPan.Application", "Services", "PdfRenderService.cs");
         Assert.Matches(@"documentType, TaxInvoiceDocType, StringComparison\.Ordinal\)\s*&&\s*!isPreprint", server);
+        Assert.Matches(@"&&\s*!isPreprint\s*&&\s*!\(isYTemplate && useCoords\)", server);
+    }
+
+    /// <summary>「종이에도 함께 인쇄」 선택칸(그림 찍기 값을 화면이 바꾸는 칸) — 주석 걷은 화면에 없어야 한다(W-G1-51 F-1).</summary>
+    private const string PrintBackgroundCheckboxPattern = @"@bind-Value=""_form\.PrintBackground""";
+
+    /// <summary>편집창 법정 판정의 Y 예외 — 「지금 Y 인가」(KeepLoadedYCoords)면 법정 서식 경고를 띄우지 않는다(W-G1-51 F-1 (나)).</summary>
+    private const string LegalOnlyYExceptionPattern =
+        @"IsLegalOnlyComposer\s*=>\s*_form\.PaperMode != ""preprint""\s*&&\s*string\.Equals\(_form\.FormType, ""tax_invoice"", StringComparison\.Ordinal\)\s*&&\s*!KeepLoadedYCoords;";
+
+    [Fact(DisplayName = "축⒥-5 음성대조군 ② 🔴 선택칸이 돌아오거나 Y 예외가 빠지면 빨개진다 (W-G1-51 F-1 · 편집창 부분)")]
+    public void AxisJ5_NegativeControl_CheckboxBackOrNoYExceptionFails()
+    {
+        const string withCheckbox =
+            "<MudCheckBox T=\"bool\" @bind-Value=\"_form.PrintBackground\" Class=\"mt-1\"\n"
+            + "             Label=\"이 그림을 종이에도 함께 인쇄하기\" Dense=\"true\" />";
+        Assert.Matches(PrintBackgroundCheckboxPattern, withCheckbox);
+
+        const string noYException =
+            "private bool IsLegalOnlyComposer\n"
+            + "    => _form.PaperMode != \"preprint\"\n"
+            + "    && string.Equals(_form.FormType, \"tax_invoice\", StringComparison.Ordinal);";
+        Assert.DoesNotMatch(LegalOnlyYExceptionPattern, noYException);
+
+        const string withYException =
+            "private bool IsLegalOnlyComposer\n"
+            + "    => _form.PaperMode != \"preprint\"\n"
+            + "    && string.Equals(_form.FormType, \"tax_invoice\", StringComparison.Ordinal)\n"
+            + "    && !KeepLoadedYCoords;";
+        Assert.Matches(LegalOnlyYExceptionPattern, withYException);
     }
 
     [Fact(DisplayName = "축⒥-5 음성대조군 🔴 한 벌 문구만 있으면 빨개진다")]

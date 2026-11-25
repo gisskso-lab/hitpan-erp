@@ -89,12 +89,39 @@ public sealed class PdfRenderService : IPdfRenderService
         //   저장된 양식을 **그대로 쓰고** 그 위에 **이번 한 번만** 바꿀 값을 얹는다.
         //   🔴 저장하지 않는다 — 고객이 미리보기에서 만진 값이 양식으로 굳으면 안 된다.
         //   🔴 옵션이 null 이면 아무것도 안 바뀐다 ⇒ **지금 인쇄와 같은 종이**(#1).
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 대표 §49 · 구별 기준 §1-3 C 「저장값 조건」]
+        //   Y 템플릿 판정(아래 `isYTemplate`)은 **저장된** `print_background` 로 본다 — 바로 아래
+        //   `ApplyPrintOptions` 는 전표 미리보기 옵션으로 이번 한 번 `PrintBackground` 를 **같은 객체에
+        //   덮어쓸** 수 있다. 덮은 값으로 보면 옛 좌표가 남은 빈 A4(K4 · 저장값 0)가 그 한 번만
+        //   칸 모양이 된다 ⇒ 덮기 전에 값(bool)을 떠 둔다.
+        //   🔴 그림 깔기 판정(`ResolveFormBackground`)은 종전대로 덮은 값을 쓴다 — 이 줄은 그 판정을 안 바꾼다.
+        //   🔴 양식정보설정 미리보기(`overrides.Template`)에서는 편집 중 값이 이 자리에 온다 — 편집창이
+        //     빈 A4 좌표를 null 로 보내므로(좌표 0) 그 미리보기의 종이는 이 값과 상관없이 종전과 같다.
+        var savedPrintBackground = template?.PrintBackground == true;
         template = ApplyPrintOptions(template, overrides?.Options);
         var isPreprint = template?.PaperMode == "preprint";
         // 🔴 봉합 2026-08-12 (사장님 지시 "양식정보 설정의 양식용지만 해")
         //   고객이 맞춘 좌표가 있으면 그대로 찍는다. 종전에는 이 값을 읽지도 않아
         //   코드 고정 위치로만 나갔고, 시판 양식지 칸과 안 맞았다.
-        var useCoords = isPreprint && (template?.FieldCoords.Count ?? 0) > 0;
+        //
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1 · 대표 11/18 Q12] **`isPreprint &&` 제약을 뺐다.**
+        //   종전 식 = `isPreprint && (template?.FieldCoords.Count ?? 0) > 0`
+        //   [그대로 두면 무슨 일이 나나] 빈 A4(`plain`) 양식에 칸 좌표가 있어도 이 한 줄이
+        //     좌표를 통째로 버렸다 ⇒ 값은 늘 히트판 표준 표(`ComposeBody`)로 갔다(설계 §2 C1 · C2).
+        //     대표 11/18 08시② 의 Y 템플릿(흰 종이 + 양식 그림 + 칸 값)은 좌표를 타야 서는 모양이다.
+        //   🔴 **좌표가 0개인 양식은 한 글자도 안 바뀐다** — 그때 이 값은 여전히 `false` 이고
+        //     그 종이는 종전과 똑같다(#1). 바뀌는 것은 **좌표가 남은 빈 A4 양식**(Y 템플릿 · K4)뿐이고,
+        //     K4 가 기본 폼 → 좌표 모양으로 바뀌는 것은 대표 11/18 Q12 「받아들임」 이다.
+        //   🔴 양식지(`preprint`)는 종전에도 좌표를 탔다 — 그 종이는 안 바뀐다.
+        //   🔴 세금계산서는 이 변화가 **안 닿는다** — `plain` 세금계산서는 아래 전용 작성기
+        //     분기(`&& !isPreprint`)에서 이 값을 쓰기 전에 먼저 빠진다(법정 서식).
+        //   🔴 좌표가 있으면 용지 · 방향이 A4 세로로 묶인다(`ResolvePageSize` 의 좌표 울타리) —
+        //     좌표는 어느 종이에 대고 쟀는지가 전제이기 때문이다. 이제 `plain` 좌표 양식도 그 안이다.
+        //   🔴 칸 맞춤 화면은 양식지 전용 그대로다(설계 §3 P2 안 가져옴 · 편집창 무변).
+        // 🔴🔴 [2026-11-19 고침1 · 대표 §49] **위 「K4 가 기본 폼 → 좌표 모양으로 바뀌는 것은 Q12 받아들임」 은
+        //   좁혀졌다** — 대표 §49 「옛 좌표가 남은 빈 A4 = 기본 폼 유지」. 칸 모양은 양식지와 Y 템플릿에만이다.
+        //   위 주석은 이력으로 남긴다(지운 것 0). 판정 줄(`useCoords`)은 아래 그림 읽기(`bgImage`) **뒤로**
+        //   내렸다 — Y 템플릿 판정에 「그 그림이 실제로 읽혔나」 가 들어가기 때문이다(구별 기준 §3).
         // 🔴 양식지 그림 (§13). 읽기만 한다 — 보관소·업로드 통로는 만들지 않는다(범위 밖).
         // 🔴🔴 [2026-10-24 반려 R-1 봉합] 양식지 그림은 **미리보기에만** 깐다.
         //   [내가 뭘 틀렸나] 결재된 §13-8 은 「종이에는 **안 찍히고**(이미 인쇄돼 있다)
@@ -113,6 +140,32 @@ public sealed class PdfRenderService : IPdfRenderService
         //   🔴 「등재만 · 이번에 안 한다」였던 §13-10 이 **사장님 오더로 열렸다** —
         //     내가 임의로 넓힌 것이 아니다. 근거는 20261026작1 작업지시서 §C-3.
         var bgImage = ResolveFormBackground(overrides, template);
+
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 대표 §49 「옛 좌표가 남은 빈 A4 = 기본 폼 유지」 · 구별 기준 §1-3 C · PM 결재 11/19]
+        //   종전 식(갈래 A 첫 판) = `(template?.FieldCoords.Count ?? 0) > 0`  (main = `isPreprint && …`)
+        //   [그대로 두면 무슨 일이 나나] 옛 좌표만 남은 빈 A4(K4)도 칸 모양으로 나가 자사 이름 · 제목 ·
+        //     머리글이 빠지고, 한 쪽을 넘친 품목이 잘리고, 계산서 · 영수증도 같았다([3-V] P2-1 · P2-2 · [4] #1 · #2 · #5).
+        //   [이제] 칸 모양 = 양식지(종전대로) **또는** Y 템플릿. Y 템플릿 = 아래 다섯 조건이 **모두** 참:
+        //     ① `paper_mode` = "plain"(글자 그대로 · 모르는 값은 Y 아님) ② **저장된** `print_background` = 켬(위에서 떠 둔 값)
+        //     ③ 그림 경로가 비지 않음 ④ 칸 좌표 1개 이상(`useCoords` 의 앞 조건) ⑤ 그 그림이 실제로 읽힘(`bgImage` != null)
+        //   🔴 나머지 빈 A4(K4 · 좌표 0 · 그림을 못 읽은 Y)는 **main 과 같은 기본 폼**이다(#1 · 머리글 · 쪽번호 · 용지 · 여백 모두).
+        //   🔴 ⑤ 는 이번 인쇄에 실제로 깔리는 그림이다 — 파일이 없어졌거나 못 읽으면, 또는 전표 미리보기 옵션으로
+        //     그림을 끈 한 번은 기본 폼으로 나간다. 값만 흩어진 흰 종이보다 머리글 · 자사 이름 · 표가 있는 종이가 낫다(#20 · #25).
+        //   🔴 한계(PM 결재 기록): 저장 문을 직접 불러 네 칸을 Y 와 똑같이 채운 행은 자료가 Y 와 글자까지 같아 못 가른다 → Y 로 본다.
+        //   🔴 세금계산서 `plain` 은 아래 법정 작성기 분기(`&& !isPreprint`)에서 이 값을 쓰기 전에 먼저 빠진다 — 무변.
+        var isYTemplate = string.Equals(template?.PaperMode, "plain", StringComparison.Ordinal)
+            && savedPrintBackground
+            && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
+            && bgImage is not null;
+        var useCoords = (template?.FieldCoords.Count ?? 0) > 0 && (isPreprint || isYTemplate);
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ① (가) · ⑥ (나)]
+        //   K3 = Y 판정 다섯 칸 중 ①②③⑤ 참(`isYTemplate`) **그리고** 칸 0 **그리고** 전표 [인쇄] 문 · 설정 미리보기 아님 · 법정 3종 아님.
+        //   참이면 아래 머리글 · 본문 · 쪽번호를 건너뛰고 그림 겹(배경)만 남긴다 — 종이에 올린 양식 그림만 · 데이터 없음.
+        //   🔴 위 두 문장(`isYTemplate` · `useCoords`)은 한 글자도 안 바꿨다 — 편집창 판정 게이트가 그 글자를 읽는다.
+        //   🔴 판정은 `IsNoCoordsImageOnly` 한 자리다 — 인쇄 미리보기 창의 안내 문(`IsNoCoordsImageOnlyAsync`)도 그 함수만 부른다.
+        //   🔴 위 :112 「좌표가 0개인 양식은 한 글자도 안 바뀐다」 는 K3(인쇄 문)에 한해 틀리게 됐다 — 그 줄은 이력으로 둔다(지운 것 0).
+        //   🔴 §59 고침 1(작업지시서 ②-9 · P2-1) — 고침 1 부터 위 「칸 0」 = 저장된 칸 0(FormCoordsStored.IsEmpty) · 모두 무효 칸은 K3 아님(종전 기본 배치 + 데이터).
+        var noCoordsImageOnly = IsNoCoordsImageOnly(documentType, overrides, isYTemplate, template);
 
         // 🔴 로고 워터마크 (20261026작1 §C-2 · DB-148 · 사장님 오더 10/25 ④).
         //   사장님: *"모든 양식지에 고객사 로고 워터마크 넣기 옵션 추가. 위치 = 정중앙 크게.
@@ -134,10 +187,47 @@ public sealed class PdfRenderService : IPdfRenderService
         var marginRight = (float)(template?.MarginRightMm ?? 20);
         var marginBottom = (float)(template?.MarginBottomMm ?? 20);
 
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵ · 시안 §3-1 · 대표 §9 #1 「스타일 4종 = 순백지 양식에만」 · §11 #1 · 시안 PM Q-C]
+        //   스타일(formal · simple · large)이 먹는 양식이면 그 값 묶음 · 아니면 null.
+        //   🔴 null = basic = 옛 `ComposeHeader` · `ComposeBody` · 쪽번호 줄을 **그대로** 탄다(한 글자도 안 바뀜 · #1).
+        //   🔴 양식지 · 좌표 경로(Y 템플릿 포함) · 그림 있는 양식(§59 K3 포함) · 모르는 키 = null(조건은 `ResolvePrintStyle`).
+        //   🔴 세금계산서는 바로 아래 법정 작성기 분기에서 먼저 빠진다 — 이 값을 안 읽는다. 급여명세서는 다른 함수다.
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1 · [3-V] P1-1] 문서 종류를 같이 넘긴다 —
+        //   법정 서식(또는 그 후보) `LegalFormDocTypes`(세금계산서 · 면세계산서 · 입금표)는 스타일을 안 먹는다(조건 ⑥).
+        // ⬛ 종전: var printStyle = ResolvePrintStyle(template, useCoords);
+        var printStyle = ResolvePrintStyle(template, useCoords, documentType);
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 3] 격식 제목 글꼴(내장)을 그리기 전에 등록한다 —
+        //   실패(리소스 없음 · 읽기 오류)면 경고 1줄 + 이 전표는 제목을 기본 글꼴로 그린다(#20 · 전표는 나간다).
+        if (printStyle?.TitleFontFamily is not null)
+        {
+            try
+            {
+                EnsureEmbeddedFontsRegistered();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PDF] 격식 제목 글꼴을 등록하지 못했다 — 제목을 기본 글꼴로 그린다.");
+                printStyle = printStyle with { TitleFontFamily = null };
+            }
+        }
+
         // 🔴 20261021작 절 B-3 — 세금계산서 전용(법정) 작성기.
         //   양식용지(preprint)·좌표 경로는 **종전 그대로** 간다(아래 공용 흐름).
         //   나머지 9종도 아래 공용 흐름 그대로 — 이 분기 안에서만 갈라진다(#1).
-        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint)
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 F-1 · 착수 전 질문 (나) · PM 결재 11/19 20:3x · 착수준비표 P-8]
+        //   종전 식 = `string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint`
+        //   [그대로 두면 무슨 일이 나나] 「종이에도 함께 인쇄」 를 켠 세금계산서 양식지를 옮겨 만든 Y 템플릿
+        //     (빈 A4 · 그림 찍음 · 칸 좌표)이 이 분기로 빠져 **히트판 법정 표준 서식**(그림 0 · 좌표 0)으로 나갔다 —
+        //     대표 Q14 「그림까지 인쇄하던 모양 유지」 와 어긋난다(이름은 「(양식 그림 포함)」 인데 그림이 없음).
+        //   [이제] Y 템플릿(위 `isYTemplate` 다섯 조건 = `isYTemplate && useCoords`)은 이 분기 **앞에서** 갈라
+        //     아래 공용 흐름(그림 + 칸 값 · 한 쪽 · 넘치면 종이 알림 한 줄 = main 의 양식지+켬 세금계산서와 같은 종이)으로 간다.
+        //   🔴 Y 아닌 `plain` 세금계산서는 한 글자도 안 바뀐다(#1) — 그림을 못 읽은 Y(⑤ 거짓)도 종전대로 법정 작성기.
+        //   🔴 정정 줄: 위 :116 「세금계산서는 이 변화가 안 닿는다」 · :155 「세금계산서 `plain` … 무변」 ·
+        //     아래 :219 「세금계산서 `plain` 은 위에서 이미 빠졌다」 는 **Y 세금계산서에 한해 틀리게 됐다** — 그 줄들은 이력으로 둔다(지운 것 0).
+        //   🔴 법정성 판정 = 법무팀장 1줄(F-1 머지 전 · 착수 전 질문 §3 (나) 질문 글자) — 「안 됨」 이면 (다)로 대표께.
+        //   🔴 워터마크는 계속 0 — 종 판정(결-K)이라 Y 세금계산서도 막힌다.
+        if (string.Equals(documentType, TaxInvoiceDocType, StringComparison.Ordinal) && !isPreprint
+            && !(isYTemplate && useCoords))
         {
             // 양식 행이 없으면 법정 2매가 기본이다(FormTemplateService 의 TwoCopyFormTypes).
             var copyMode = template?.PrintCopyMode ?? "both";
@@ -165,6 +255,41 @@ public sealed class PdfRenderService : IPdfRenderService
             return (taxBytes, $"{KoLabel(documentType)}_{data.DocNo}.pdf");
         }
 
+        // 🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · 구별 기준 §2 안 (가) · PM 결재 11/19] Y 템플릿 품목 넘침 = **서버 경고 로그 1줄**.
+        //   칸 모양은 한 쪽(297mm)에 고정이고 `max_rows` 를 넘친 품목은 잘린다(`ComposeBodyCoords` · 원래 양식지 main 과 같은 모양).
+        //   🔴 **종이는 안 바꾼다** — 자르기 · 자리 · 종이 위 알림 모두 그대로(옛 결재 Q-4 「나머지 9종 종이 무변화」 · R-2 반려 이력).
+        //     고객 알림(종이 · 화면)은 대표 재질문 거리라 이 차수 0 — 원격 진단 길만 둔다.
+        //   🔴 `ComposeBodyCoords` 서명은 그대로다(시험이 반사로 부른다) — 줄 수 셈은 여기서 같은 규칙으로 한 번 더 한다.
+        //   🔴 품목 이름 · 금액 등 **값은 적지 않는다** — 줄 수 · 테넌트 · 종 · 전표 id 만.
+        //   🔴 양식지(`preprint`)는 이 줄을 안 탄다 — 양식지 로그도 main 과 같다. 세금계산서 `plain` 은 위에서 이미 빠졌다.
+        //   🔴 「종이 안」 줄 수는 어림이다 — 가장 아래 품목 칸의 첫 줄 자리에서 줄 간격으로 297mm 앞까지 센다(글자 높이 안 셈).
+        if (useCoords && isYTemplate && data.Lines.Count > 0)
+        {
+            var yCoords = template!.FieldCoords;
+            var yLineCoords = yCoords
+                .Where(fc => fc.Key.StartsWith("line.", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (yLineCoords.Count > 0)
+            {
+                var yMaxRows = yCoords.FirstOrDefault(fc =>
+                    fc.Key.Equals("max_rows", StringComparison.OrdinalIgnoreCase))?.XMm ?? 0f;
+                var yRowLimit = yMaxRows > 0 ? (int)yMaxRows : data.Lines.Count;
+                var yPitch = yCoords.FirstOrDefault(fc =>
+                    fc.Key.Equals("row_pitch", StringComparison.OrdinalIgnoreCase))?.YMm ?? 0f;
+                if (yPitch <= 0f) yPitch = 6f;
+                var yLowest = yLineCoords.Max(fc => fc.YMm);
+                var yOnPaper = yLowest >= 297f ? 0 : (int)MathF.Ceiling((297f - yLowest) / yPitch);
+                var yShown = Math.Min(Math.Min(data.Lines.Count, yRowLimit), yOnPaper);
+                if (data.Lines.Count > yShown)
+                {
+                    _logger.LogWarning(
+                        "[PDF] 좌표 양식(빈 A4 + 양식 그림)의 품목이 한 쪽에 다 안 들어간다 — 품목 {Total}줄 중 {Shown}줄만 종이에 나간다"
+                        + "(줄 수 설정 {RowLimit} · 종이 안 어림 {OnPaper}). 종이는 그대로 그린다. tenant={Tenant} type={Type} id={Id}",
+                        data.Lines.Count, yShown, yRowLimit, yOnPaper, tenantId, documentType, documentId);
+                }
+            }
+        }
+
         var bytes = Document.Create(c =>
         {
             c.Page(page =>
@@ -178,9 +303,29 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   다음 사람이 「두 번 그렸나」로 읽는다. 한 번만 부른다.
                 var pageSize = ResolvePageSize(template, documentType, useCoords);
                 page.Size(pageSize);
+                // 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §4 R-4 · R-5 · PM 결재 §74] 폭 모자람 대체.
+                //   큰글씨는 고정 칸 합 427pt + 품명 최소 32pt = 본문 폭 459pt 가 있어야 그린다.
+                //   [그대로 두면 무슨 일이 나나] 고정 칸 합이 본문 폭을 넘으면 품명(상대 칸) 폭이 0 아래로 간다 —
+                //     배치 엔진 동작 미측정 · 예외면 전표가 안 나간다(#20). 그래서 모자라면 큰글씨 대신 basic(옛 작성기 ·
+                //     머리 · 본문 · 쪽번호 모두)으로 그리고 경고 1줄을 남긴다(A5 세로 = 늘 · A4 세로는 좌우 여백 24mm 언저리부터).
+                //   🔴 W = 바로 위 `pageSize`(용지 · 방향 결과 · `ResolvePageSize` 1번 부름 그대로) 폭 − 좌우 여백(빈 칸 = 20mm) — 미리보기와 종이가 같은 셈(R-5).
+                //   🔴 좌표 경로는 `printStyle` 이 이미 null(조건 ③)이라 여기 안 걸린다. 격식 · 간결은 문턱 0 = 검사 0.
+                //   🔴 아래 머리 · 본문 · 쪽번호 줄이 이 값을 읽는다 — 이 칸 뒤에서 다시 바꾸지 않는다.
+                if (printStyle is not null
+                    && IsBodyTooNarrowForStyle(printStyle, pageSize.Width, marginLeft, marginRight))
+                {
+                    _logger.LogWarning(
+                        "[PDF] 양식 스타일 {Style} 은 본문 폭 {Need}pt 이상에서만 그린다 — 이 용지 · 여백의 본문 폭은 {Width}pt 라 기본 모양으로 그린다. "
+                        + "좌우 여백을 줄이거나 방향을 가로로 바꾸면 그 모양으로 나온다.",
+                        printStyle.Key, printStyle.MinBodyWidth,
+                        MathF.Round(BodyWidthPt(pageSize.Width, marginLeft, marginRight), 1));
+                    printStyle = null;
+                }
                 // 🔴 스타일 칸을 **읽는다** — 지금은 늘 basic 이다(배선만 · 4종 디자인 미확정).
                 //   종전에는 저장·조회만 되고 작성기가 이 칸을 아예 몰랐다. 모르는 값이 오면
                 //   ResolveStyleKey 가 적어 둔다 — 조용히 넘어가지 않는다.
+                // 🔴 [2026-11-20 갈래 E⑵] 위 「지금은 늘 basic」 은 **낡았다**(이력으로 둔다) — 4종 시안 승인(대표 §11 #1).
+                //   이 줄은 그대로 모르는 값 경고만 맡는다. 그리는 값 묶음은 위 `printStyle`(순백지에만)이다.
                 _ = ResolveStyleKey(template);
                 // 좌표 인쇄는 원점이 **종이 왼쪽 위 모서리**다(고객이 자를 대는 기준).
                 //   여백을 주면 좌표가 그만큼 통째로 밀린다 ⇒ 이 경로만 여백 0.
@@ -228,20 +373,57 @@ public sealed class PdfRenderService : IPdfRenderService
                 }
 
                 // preprint(양식용지): 헤더·테두리 미렌더, 필드값만 저장
-                if (!isPreprint && showHeader)
+                // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1] **좌표 경로는 머리글을 안 그린다.**
+                //   종전 식 = `!isPreprint && showHeader`
+                //   [그대로 두면 무슨 일이 나나] 좌표 경로는 여백이 **0** 이다(위 `useCoords` 분기).
+                //     그 종이에 표준 머리글을 또 그리면 Y 템플릿 양식 그림의 맨 윗칸 위에
+                //     「견적서 / 문서번호 / 회사이름」 이 **겹쳐 찍힌다** ⇒ 「기본 폼이 나온다」 의 재발.
+                //   🔴 `preprint` 는 종전에도 안 그렸다 — 그 종이는 안 바뀐다(#1).
+                //   🔴 좌표가 0개인 `plain` 양식도 안 바뀐다 — `useCoords` 가 `false` 다(#1).
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3(인쇄 문 · 빈 A4 + 그림 + 칸 0)는 머리글을 안 그린다 — 그림만.
+                //   위 「좌표가 0개인 `plain` 양식도 안 바뀐다」 는 K3 에 한해 틀리게 됐다(이력으로 둔다).
+                //   ⬛ 종전 식: if (!isPreprint && !useCoords && showHeader)
+                if (!isPreprint && !useCoords && showHeader && !noCoordsImageOnly)
                 {
-                    page.Header().Element(e => ComposeHeader(e, data, company));
+                    // 🔴 [2026-11-20 갈래 E⑵] 스타일 양식일 때만 새 머리를 더했다 — basic 은 아래 옛 줄 그대로(#1).
+                    if (printStyle is not null)
+                        page.Header().Element(e => ComposeHeaderStyled(e, data, company, printStyle));
+                    else
+                        page.Header().Element(e => ComposeHeader(e, data, company));
                 }
-                if (useCoords)
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3 = **빈 본문**(표 · 품목 · 합계 0) — 갈래 하나를 맨 앞에 더했다.
+                //   본문을 안 채운 쪽은 그림 겹(위 배경)만 남는다. 나머지 세 갈래는 그대로다(#1).
+                //   🔴 안내 글자를 종이에 찍지 않는다(장치 §4 금지 · PM 결재 ③) — 안내는 인쇄 미리보기 창에만.
+                if (noCoordsImageOnly)
+                {
+                    /* 빈 본문 */
+                }
+                // ⬛ 종전 줄: if (useCoords)
+                else if (useCoords)
                     page.Content().Element(e => ComposeBodyCoords(e, data, template!.FieldCoords));
+                // 🔴 [2026-11-20 갈래 E⑵] 스타일 양식(순백지 · 좌표 경로 아님)일 때만 새 본문 — 칸 하나 더함 · 옛 두 갈래 무변.
+                //   `printStyle` 은 `preprint` 에서 늘 null 이다(`ResolvePrintStyle` ②) ⇒ 양식지는 아래 옛 줄로 간다.
+                else if (printStyle is not null)
+                    page.Content().Element(e => ComposeBodyStyled(e, data, showBorder, printStyle));
                 else
                     page.Content().Element(e => ComposeBody(e, data, isPreprint, showBorder));
-                if (!isPreprint)
+                // 🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §3 P1] 쪽번호도 좌표 경로에서는 안 찍는다 —
+                //   종전 식 = `!isPreprint` · 여백 0 이라 양식 그림의 맨 아랫칸을 덮는다(머리글과 같은 까닭).
+                //   좌표 0개 양식 · `preprint` 는 종전과 같다(#1).
+                // 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59] K3 는 쪽번호도 안 찍는다(「Page 1 / 1」 0) — 그림만.
+                //   위 「좌표 0개 양식 … 종전과 같다」 는 K3 에 한해 틀리게 됐다(이력으로 둔다).
+                //   ⬛ 종전 식: if (!isPreprint && !useCoords)
+                if (!isPreprint && !useCoords && !noCoordsImageOnly)
                 {
+                    // 🔴 [2026-11-20 갈래 E⑵ · 시안 §2-2 쪽 번호 8 · 8 · 8 · 9] 글자 크기만 값으로 받는다.
+                    //   ⬛ 종전: t.Span("Page ").FontSize(8); t.CurrentPageNumber().FontSize(8);
+                    //   ⬛ 종전: t.Span(" / ").FontSize(8); t.TotalPages().FontSize(8);
+                    //   🔴 basic(`printStyle` null) = 8 그대로 — 종이 무변(#1).
+                    var pageNoSize = printStyle?.PageNumberSize ?? 8f;
                     page.Footer().AlignCenter().Text(t =>
                     {
-                        t.Span("Page ").FontSize(8); t.CurrentPageNumber().FontSize(8);
-                        t.Span(" / ").FontSize(8); t.TotalPages().FontSize(8);
+                        t.Span("Page ").FontSize(pageNoSize); t.CurrentPageNumber().FontSize(pageNoSize);
+                        t.Span(" / ").FontSize(pageNoSize); t.TotalPages().FontSize(pageNoSize);
                     });
                 }
             });
@@ -404,6 +586,475 @@ public sealed class PdfRenderService : IPdfRenderService
             return box.Border(borderWidth).BorderColor(Colors.Grey.Lighten1).Padding(cellPad);
         }
         IContainer CellBody(IContainer x) => x.Border(borderWidth).BorderColor(Colors.Grey.Lighten2).Padding(cellPad);
+    }
+
+    // ─── 양식 스타일 4종 (2026-11-20 W-G1-51 갈래 E⑵) ─────────────────────
+    //   근거: 시안 `docs/설계/erp/20261118_WG1-51_양식스타일4종_시안.md` §2-1 · §2-2 · §3-1 · 대표 §11 #1(시안 승인)
+    //   · §9 #1(순백지에만) · 시안 PM Q-C(양식지 · 좌표 양식엔 무시) · 개발명세서 `20261120작_WG1-51_갈래E2_스타일_개발명세서.md`.
+    //   🔴 basic 은 이 아래를 **안 탄다** — 옛 `ComposeHeader` · `ComposeBody` 그대로(#1 · 한 글자도 안 바뀜).
+    //   🔴 `ComposeBody` 서명을 안 건드린 까닭: 시험(`GridBorderRenderGateTests`)이 반사로 **4인자** 부른다 —
+    //     인자를 더하면(선택 인자라도) 깨지고, 같은 이름으로 겹쳐 지으면 `GetMethod` 가 모호해진다.
+
+    private const string StyleInk = "#000000";
+
+    // ─── 격식 제목 글꼴 (2026-11-20 W-G1-51 갈래 E⑵ 고침 3) ─────────────────────
+    //   근거: 대표 §11 #2(Noto Serif KR 내장 승인) · 착수준비표 P-5(어셈블리 내장 리소스) · 법무 1줄 ①~⑥ + 해석 덧붙임 · PM §74.
+    //   🔴 원본 1개 손질 0 — notofonts/noto-cjk 태그 Serif2.003 · 커밋 9b0f1436e455d902de067a2501422e5dc71ad16b ·
+    //     Serif/SubsetOTF/KR/NotoSerifKR-Bold.otf · SHA-256 = 개발명세서 §고침 3 · 시험 `FormalTitleFontEmbedGateTests` 가 저장소 · 내장 둘 다 대조.
+    //   🔴 고지 = 저장소 글꼴 옆 `NotoSerifKR-OFL.txt` → api 출력 · 게시 `licenses\`(HitPan.API.csproj · 설치 · 업데이트 스크립트 0줄).
+    //   🔴 이름을 바꿔 등록하지 않는다(`RegisterFontWithCustomName` 안 씀) — 파일의 가족 이름(이름 기록 ID 1)으로 등록된다.
+
+    /// <summary>내장 리소스 이름 — <c>HitPan.Application.csproj</c> 의 <c>EmbeddedResource LogicalName</c> 과 같은 글자.</summary>
+    private const string FormalTitleFontResourceName = "HitPan.Application.Resources.Fonts.NotoSerifKR-Bold.otf";
+
+    /// <summary>글꼴 파일 이름 기록 ID 1(가족 이름) 글자 그대로 — 격식 제목에만 쓴다.</summary>
+    private const string FormalTitleFontFamily = "Noto Serif KR";
+
+    /// <summary>
+    /// 🔴 내장 글꼴 등록 — 처음 쓸 때 <b>1번</b>(스레드 안전). 실패(리소스 없음 · 읽기 오류)는 값에 담겨 부를 때마다 다시 던진다.
+    /// </summary>
+    private static readonly Lazy<bool> EmbeddedFontRegistration =
+        new(RegisterEmbeddedFonts, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>내장 글꼴이 등록돼 있게 한다 — 실패면 예외(제품 길은 <c>RenderDocumentAsync</c> 가 경고 1줄 + 기본 글꼴로 내림).</summary>
+    private static void EnsureEmbeddedFontsRegistered() => _ = EmbeddedFontRegistration.Value;
+
+    private static bool RegisterEmbeddedFonts()
+    {
+        using var stream = typeof(PdfRenderService).Assembly.GetManifestResourceStream(FormalTitleFontResourceName)
+            ?? throw new InvalidOperationException(
+                $"격식 제목 글꼴 내장 리소스({FormalTitleFontResourceName})가 없다 — 빌드 산출물을 확인해 주십시오.");
+        QuestPDF.Drawing.FontManager.RegisterFont(stream);
+        return true;
+    }
+
+    /// <summary>
+    /// 🔴 양식 디자인 스타일 값 묶음 — 시안 §2-2 표를 <b>그대로</b> 옮겼다(formal · simple · large).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 basic 인스턴스는 없다 — basic 은 옛 작성기를 그대로 탄다(위 주석).
+    /// 🔴 시안 표에 없는 값(간격 · 비고 안쪽 6 · 비고 표제 반굵게 · 열 너비)은 basic 값 그대로다.
+    /// 🔴 ⬛ 정정(2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 · PM 결재 §74): 열 너비 · 숫자 칸 안쪽은 <b>큰글씨만</b> 따로다 — 격식 · 간결은 basic 값 그대로.
+    /// 🔴 글자는 모두 검정 · 강조색 0(시안 §0 「색」 · §2 「글자는 모두 #000」).
+    /// </remarks>
+    private sealed record PrintStyle
+    {
+        public required string Key { get; init; }
+
+        // 머리(시안 §2-1 · §2-2)
+        public bool TitleCentered { get; init; }
+        public float TitleSize { get; init; }
+        /// <summary>QuestPDF 자간은 글자 크기 <b>비례</b> 값이다 — 시안 「+6pt」 = 6 / 제목 크기.</summary>
+        public float TitleLetterSpacing { get; init; }
+        /// <summary>
+        /// 🔴 비움 = 본문 글꼴(맑은 고딕). 격식 = Noto Serif KR 은 <b>글꼴 파일 들이기 뒤</b>
+        /// (착수준비표 P-5 「법무팀장 1줄 = 들이기 전」 · 개발명세서 §2 멈춤) — 그때 이 값 + 등록 줄만 더한다.
+        /// ⬛ 정정(2026-11-20 고침 3): 들임 끝 — 격식 = <c>Noto Serif KR</c>(내장 · 처음 쓸 때 등록). 간결 · 큰글씨 = 비움 그대로.
+        /// </summary>
+        public string? TitleFontFamily { get; init; }
+        public float DocMetaSize { get; init; }
+        public float CompanyNameSize { get; init; }
+        /// <summary>사업자 · 대표 줄.</summary>
+        public float CompanyIdSize { get; init; }
+        /// <summary>주소 · TEL 줄.</summary>
+        public float CompanyContactSize { get; init; }
+        public float RuleWidth { get; init; }
+        public string RuleColor { get; init; } = StyleInk;
+        /// <summary>0 = 한 줄. 격식 = 굵은 선 아래 띄고 가는 선 하나 더(이중선).</summary>
+        public float RuleSecondGap { get; init; }
+        public float RuleSecondWidth { get; init; }
+
+        // 거래처
+        public bool PartnerBoxed { get; init; }
+        /// <summary>박스면 박스 선 · 박스 없음(간결)이면 표제 밑줄.</summary>
+        public float PartnerLine { get; init; }
+        public string PartnerLineColor { get; init; } = StyleInk;
+        /// <summary>박스면 사방 안쪽 · 박스 없음(간결)이면 위아래만.</summary>
+        public float PartnerPad { get; init; }
+        public float PartnerLabelSize { get; init; }
+        public float PartnerNameSize { get; init; }
+        public float PartnerOtherSize { get; init; }
+
+        // 품목표
+        public float TableOuterLine { get; init; }
+        public string TableOuterColor { get; init; } = StyleInk;
+        /// <summary>간결 = 위 · 아래만(좌우 0).</summary>
+        public bool TableOuterTopBottomOnly { get; init; }
+        public string? HeadBackground { get; init; }
+        public float HeadLine { get; init; }
+        public string HeadLineColor { get; init; } = StyleInk;
+        public bool HeadLineBottomOnly { get; init; }
+        public float HeadTextSize { get; init; }
+        public float BodyLine { get; init; }
+        public string BodyLineColor { get; init; } = StyleInk;
+        /// <summary>간결 = 가로선만 · 세로 0.</summary>
+        public bool BodyLineHorizontalOnly { get; init; }
+        public float BodyTextSize { get; init; }
+        /// <summary>큰글씨 = 짝수 줄 면.</summary>
+        public string? ZebraEvenBackground { get; init; }
+        public float CellPadVertical { get; init; }
+        public float CellPadHorizontal { get; init; }
+        /// <summary>
+        /// 🔴 품명 : 규격 비율 — 지금 4종 모두 basic 과 같은 3 : 2.
+        /// 큰글씨 품명 칸 넓힘 폭은 <b>문서에 수치가 없어</b> 짐작하지 않았다(개발명세서 §3 멈춤 · 대표 §11 #3 「둘 다 허용」).
+        /// ⬛ 정정(고침 2 · 큰글씨 시안 정정 §2-1): 큰글씨는 규격이 고정 칸(<c>SpecColumnWidth</c> 51)이라 품명이 남는 폭을 다 받는다(비율 1).
+        /// </summary>
+        public float ItemNameRelative { get; init; } = 3;
+        public float SpecRelative { get; init; } = 2;
+        // 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 · §4 R-4 · PM 결재 §74] 열 너비 · 숫자 칸 안쪽 · 폭 문턱.
+        //   🔴 기본값 = basic 열 너비(30 · 3:2 · 60 · 80 · 90 · 70 · 90) · 지금 안쪽 그대로 ⇒ 값을 안 적는 격식 · 간결 종이는 안 바뀐다(#1).
+        /// <summary>순 칸 폭(pt).</summary>
+        public float SeqColumnWidth { get; init; } = 30;
+        /// <summary>비움 = 규격도 상대 칸(<c>SpecRelative</c>). 값 = 고정 칸 폭(pt) — 큰글씨 51(한글 4자 · 정정 §2-2).</summary>
+        public float? SpecColumnWidth { get; init; }
+        public float QtyColumnWidth { get; init; } = 60;
+        public float UnitPriceColumnWidth { get; init; } = 80;
+        public float SupplyColumnWidth { get; init; } = 90;
+        public float VatColumnWidth { get; init; } = 70;
+        public float TotalColumnWidth { get; init; } = 90;
+        /// <summary>
+        /// 숫자 칸(수량 · 단가 · 공급가액 · 부가세 · 합계 · 머리 포함) 좌우 안쪽. 비움 = 글자 칸과 같은 <c>CellPadHorizontal</c>.
+        /// </summary>
+        public float? NumberCellPadHorizontal { get; init; }
+        /// <summary>
+        /// 이 스타일을 그릴 수 있는 가장 좁은 본문 폭(pt). 0 = 검사 없음.
+        /// 큰글씨 = 459(고정 칸 27 + 51 + 61 + 72 × 4 = 427 + 품명 최소 32 · 정정 §4 R-4) — 모자라면 basic 으로 그린다(<c>IsBodyTooNarrowForStyle</c>).
+        /// </summary>
+        public float MinBodyWidth { get; init; }
+        // 🔴 큰글씨 품명 줄바꿈(잘림 0 · 대표 §11 #3) = QuestPDF 배치 엔진 기본 동작이다 — 긴 낱말도 칸 안에서 접는다.
+        //   `WrapAnywhere()` 는 2024.3 판부터 쓰지 않는 칸(CS0618 「layout engine 이 알아서 다룬다」 · 이 저장소 2026.2.4)이라 안 쓴다.
+        //   🔴 그래서 품명 칸에 줄 수 제한(`ClampLines`) · 높이 고정을 **걸지 않는 것**이 잘림 0 의 조건이다.
+
+        // 합계 · 비고 · 쪽
+        public float SumSize { get; init; }
+        public float TotalSize { get; init; }
+        /// <summary>총 합계 위 선(0 = 없음).</summary>
+        public float TotalRule { get; init; }
+        public float RemarkLine { get; init; }
+        public string RemarkLineColor { get; init; } = StyleInk;
+        /// <summary>간결 = 위 선만.</summary>
+        public bool RemarkTopOnly { get; init; }
+        public float RemarkSize { get; init; }
+        public float PageNumberSize { get; init; }
+    }
+
+    /// <summary>격식 <c>formal</c> — 처음 거래 · 관공서 · 큰 거래처 제출(시안 §0).</summary>
+    private static readonly PrintStyle FormalStyle = new()
+    {
+        Key = "formal",
+        TitleCentered = true, TitleSize = 22, TitleLetterSpacing = 6f / 22f,
+        // 🔴 [2026-11-20 갈래 E⑵ 고침 3 · 대표 §11 #2 · 시안 §3-2] 격식 제목 글꼴 — 제목 한 줄에만(본문 · 거래처 · 합계 = 맑은 고딕 그대로).
+        TitleFontFamily = FormalTitleFontFamily,
+        DocMetaSize = 9, CompanyNameSize = 12, CompanyIdSize = 9, CompanyContactSize = 8,
+        RuleWidth = 1.5f, RuleSecondGap = 1.5f, RuleSecondWidth = 0.5f,
+        PartnerBoxed = true, PartnerLine = 0.75f, PartnerPad = 8,
+        PartnerLabelSize = 9, PartnerNameSize = 10, PartnerOtherSize = 9,
+        TableOuterLine = 1.2f,
+        HeadBackground = "#E6E6E6", HeadLine = 0.5f, HeadTextSize = 10,
+        BodyLine = 0.5f, BodyLineColor = "#424242", BodyTextSize = 10,
+        CellPadVertical = 4, CellPadHorizontal = 4,
+        SumSize = 10, TotalSize = 14, TotalRule = 0.75f,
+        RemarkLine = 0.75f, RemarkSize = 9,
+        PageNumberSize = 8,
+    };
+
+    /// <summary>간결 <c>simple</c> — 팩스 · 잉크 절약(시안 §0).</summary>
+    private static readonly PrintStyle SimpleStyle = new()
+    {
+        Key = "simple",
+        TitleSize = 18,
+        DocMetaSize = 9, CompanyNameSize = 11, CompanyIdSize = 8.5f, CompanyContactSize = 8,
+        RuleWidth = 0.75f,
+        PartnerBoxed = false, PartnerLine = 0.5f, PartnerPad = 4,
+        PartnerLabelSize = 9, PartnerNameSize = 10, PartnerOtherSize = 9,
+        TableOuterLine = 1, TableOuterTopBottomOnly = true,
+        HeadBackground = null, HeadLine = 0.75f, HeadLineBottomOnly = true, HeadTextSize = 9.5f,
+        BodyLine = 0.4f, BodyLineColor = "#9E9E9E", BodyLineHorizontalOnly = true, BodyTextSize = 9.5f,
+        CellPadVertical = 4, CellPadHorizontal = 5,
+        SumSize = 9.5f, TotalSize = 12, TotalRule = 1,
+        RemarkLine = 0.5f, RemarkLineColor = "#9E9E9E", RemarkTopOnly = true, RemarkSize = 9,
+        PageNumberSize = 8,
+    };
+
+    /// <summary>큰글씨 <c>large</c> — 창고 · 현장 · 멀리서 읽기(시안 §0).</summary>
+    private static readonly PrintStyle LargeStyle = new()
+    {
+        Key = "large",
+        TitleSize = 24,
+        DocMetaSize = 11, CompanyNameSize = 14, CompanyIdSize = 10.5f, CompanyContactSize = 10,
+        RuleWidth = 1.5f,
+        PartnerBoxed = true, PartnerLine = 0.75f, PartnerLineColor = "#757575", PartnerPad = 10,
+        PartnerLabelSize = 11, PartnerNameSize = 12, PartnerOtherSize = 11,
+        TableOuterLine = 0.75f, TableOuterColor = "#757575",
+        HeadBackground = "#E0E0E0", HeadLine = 0.75f, HeadLineColor = "#757575", HeadTextSize = 11,
+        // 🔴🔴 [2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §2-1 1안 · PM 결재 §74] 표 본문 11 → 10.5 · 안쪽 6 → 글자 칸 3 · 숫자 칸 2 · 위아래 5 ·
+        //   큰글씨 전용 열 너비 · 폭 문턱 459. 까닭 = 시안 값(11 · 안쪽 6)으로는 부가세 9자리 · 수량 큰 수가 칸을 넘어 줄이 바뀌고
+        //   품명 2자/줄 · 규격 1자/줄([4] F1 · F3) — 1안 = 10자리 금액 · 수량 1,000,000.0 · 규격 한글 4자 줄바꿈 0 · 품명 4자/줄(정적 셈 · 정정 §2-2).
+        //   ⬛ 종전: BodyLine = 0.5f, BodyLineColor = "#9E9E9E", BodyTextSize = 11,
+        BodyLine = 0.5f, BodyLineColor = "#9E9E9E", BodyTextSize = 10.5f,
+        ZebraEvenBackground = "#F2F2F2",
+        //   ⬛ 종전: CellPadVertical = 6, CellPadHorizontal = 6,
+        CellPadVertical = 5, CellPadHorizontal = 3, NumberCellPadHorizontal = 2,
+        SeqColumnWidth = 27, ItemNameRelative = 1, SpecColumnWidth = 51,
+        QtyColumnWidth = 61, UnitPriceColumnWidth = 72, SupplyColumnWidth = 72, VatColumnWidth = 72, TotalColumnWidth = 72,
+        MinBodyWidth = 459,
+        SumSize = 12, TotalSize = 16, TotalRule = 1.5f,
+        RemarkLine = 0.75f, RemarkLineColor = "#757575", RemarkSize = 11,
+        PageNumberSize = 9,
+    };
+
+    /// <summary>
+    /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · 큰글씨 시안 정정 §4 R-5] 본문 폭(pt) = 종이 폭 − 좌우 여백(mm · 1mm = 72/25.4pt).
+    /// </summary>
+    private static float BodyWidthPt(float pageWidthPt, float marginLeftMm, float marginRightMm) =>
+        pageWidthPt - (marginLeftMm + marginRightMm) * 72f / 25.4f;
+
+    /// <summary>
+    /// 🔴 [고침 2 · 정정 §4 R-4] 이 스타일의 고정 칸이 본문 폭에 다 안 드나 — 참이면 그 스타일 대신 basic 으로 그린다.
+    /// </summary>
+    /// <remarks>문턱 0(격식 · 간결) = 늘 거짓. 큰글씨 = 459pt.</remarks>
+    private static bool IsBodyTooNarrowForStyle(PrintStyle style, float pageWidthPt, float marginLeftMm, float marginRightMm) =>
+        style.MinBodyWidth > 0 && BodyWidthPt(pageWidthPt, marginLeftMm, marginRightMm) < style.MinBodyWidth;
+
+    /// <summary>
+    /// 🔴 스타일 양식의 머리(매 쪽 반복). basic 은 옛 <see cref="ComposeHeader"/> 를 탄다.
+    /// </summary>
+    /// <remarks>
+    /// 격식 = 맨 위 가운데 제목 → 이중선 → 한 줄에 왼쪽 문서번호 · 일자 / 오른쪽 공급자.
+    /// 간결 · 큰글씨 = basic 과 같은 배치 · 크기와 선만 다르다(시안 §2-1).
+    /// 🔴 새 간격 1곳: 격식 이중선 아래 머리 줄 위 8pt(basic 머리 선 위 간격과 같은 값 · 시안에 값 없음).
+    /// </remarks>
+    private static void ComposeHeaderStyled(IContainer e, DocumentSnapshot d, CompanyInfo c, PrintStyle s)
+    {
+        e.Column(col =>
+        {
+            if (s.TitleCentered)
+            {
+                StyledTitle(col.Item().AlignCenter(), d, s);
+                col.Item().PaddingTop(8).LineHorizontal(s.RuleWidth).LineColor(s.RuleColor);
+                if (s.RuleSecondWidth > 0)
+                    col.Item().PaddingTop(s.RuleSecondGap).LineHorizontal(s.RuleSecondWidth).LineColor(s.RuleColor);
+                col.Item().PaddingTop(8).Row(r =>
+                {
+                    r.RelativeItem().Column(left => StyledDocMeta(left, d, s, withTitle: false));
+                    r.RelativeItem().AlignRight().Column(right => StyledSupplier(right, c, s));
+                });
+            }
+            else
+            {
+                col.Item().Row(r =>
+                {
+                    r.RelativeItem().Column(left => StyledDocMeta(left, d, s, withTitle: true));
+                    r.RelativeItem().AlignRight().Column(right => StyledSupplier(right, c, s));
+                });
+                col.Item().PaddingTop(8).LineHorizontal(s.RuleWidth).LineColor(s.RuleColor);
+            }
+        });
+    }
+
+    private static void StyledTitle(IContainer x, DocumentSnapshot d, PrintStyle s)
+    {
+        var title = x.Text(KoLabel(d.DocType));
+        title.FontSize(s.TitleSize).Bold();
+        if (s.TitleLetterSpacing > 0) title.LetterSpacing(s.TitleLetterSpacing);
+        // ⬛ 종전: if (s.TitleFontFamily is not null) title.FontFamily(s.TitleFontFamily);
+        // 🔴 [고침 3] 글꼴을 쓰기 전에 내장 글꼴 등록을 확인한다(처음 1번) — 시험의 반사 길도 실제 글꼴로 그린다.
+        //   제품 길은 `RenderDocumentAsync` 가 먼저 확인해 실패면 이 칸을 비워 보낸다 ⇒ 여기서 던질 일 0.
+        if (s.TitleFontFamily is not null)
+        {
+            EnsureEmbeddedFontsRegistered();
+            title.FontFamily(s.TitleFontFamily);
+        }
+    }
+
+    private static void StyledDocMeta(ColumnDescriptor left, DocumentSnapshot d, PrintStyle s, bool withTitle)
+    {
+        if (withTitle)
+        {
+            StyledTitle(left.Item(), d, s);
+            left.Item().PaddingTop(2).Text($"문서번호: {d.DocNo}").FontSize(s.DocMetaSize);
+        }
+        else
+        {
+            left.Item().Text($"문서번호: {d.DocNo}").FontSize(s.DocMetaSize);
+        }
+        left.Item().Text($"일자: {d.DocDate:yyyy-MM-dd}").FontSize(s.DocMetaSize);
+    }
+
+    private static void StyledSupplier(ColumnDescriptor right, CompanyInfo c, PrintStyle s)
+    {
+        right.Item().Text(c.CompanyName).FontSize(s.CompanyNameSize).Bold();
+        if (!string.IsNullOrWhiteSpace(c.BusinessNo))
+            right.Item().Text($"사업자: {c.BusinessNo}").FontSize(s.CompanyIdSize);
+        if (!string.IsNullOrWhiteSpace(c.RepresentativeName))
+            right.Item().Text($"대표: {c.RepresentativeName}").FontSize(s.CompanyIdSize);
+        if (!string.IsNullOrWhiteSpace(c.Address))
+            right.Item().Text(c.Address).FontSize(s.CompanyContactSize);
+        if (!string.IsNullOrWhiteSpace(c.Phone))
+            right.Item().Text($"TEL: {c.Phone}").FontSize(s.CompanyContactSize);
+    }
+
+    /// <summary>
+    /// 🔴 스타일 양식의 본문(거래처 · 품목표 · 합계 · 비고). basic 은 옛 <see cref="ComposeBody"/> 를 탄다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 칸 순서 · 항목 · 열 너비(고정 칸) · 숫자 서식(`N1` · `N0`)은 basic 과 같다 — 바뀌는 것은 글자 크기 · 선 · 면 · 안쪽뿐(시안 §0).
+    /// 🔴 ⬛ 정정(고침 2 · 큰글씨 시안 정정 §2 · §5): <b>큰글씨만</b> 열 너비 · 숫자 칸 안쪽이 따로다(묶음 값) — 칸 순서 · 항목 · 숫자 서식은 4종 공통.
+    /// 🔴 <c>show_border=0</c>(시안 :109 「4종 모두 지금 규칙 그대로」) = basic 이 끄는 자리와 같은 자리만 끈다 —
+    ///   거래처 선(간결 = 표제 밑줄) · 표 선(바깥 · 머리 · 본문) 0 · 면(머리 · 줄무늬) 끔 · 칸 안쪽 +1.
+    ///   머리 아래 선 · 총 합계 위 선 · 비고 선은 basic 처럼 그대로 둔다.
+    /// 🔴 새 간격 2곳(시안에 값 없음): 총 합계 위 선 아래 2pt · 간결 거래처 표제 밑줄 위 2pt — 글자와 선이 붙지 않게.
+    /// </remarks>
+    private static void ComposeBodyStyled(IContainer e, DocumentSnapshot d, bool showBorder, PrintStyle s)
+    {
+        var plus = showBorder ? 0f : 1f;
+        var padV = s.CellPadVertical + plus;
+        var padH = s.CellPadHorizontal + plus;
+        // 🔴 [고침 2] 숫자 칸(오른쪽 맞춤 5칸 · 머리 포함) 좌우 안쪽 — 묶음이 비우면 글자 칸과 같다(격식 · 간결 무변).
+        var padHNum = (s.NumberCellPadHorizontal ?? s.CellPadHorizontal) + plus;
+
+        e.PaddingTop(10).Column(col =>
+        {
+            // 거래처
+            var partner = col.Item().PaddingBottom(8);
+            partner = s.PartnerBoxed
+                ? partner.Border(showBorder ? s.PartnerLine : 0f).BorderColor(s.PartnerLineColor).Padding(s.PartnerPad)
+                : partner.PaddingVertical(s.PartnerPad);
+            partner.Column(p =>
+            {
+                var label = p.Item();
+                if (!s.PartnerBoxed && showBorder)
+                    label = label.BorderBottom(s.PartnerLine).BorderColor(s.PartnerLineColor).PaddingBottom(2);
+                label.Text("[ 거래처 정보 ]").FontSize(s.PartnerLabelSize).Bold();
+                p.Item().PaddingTop(4).Row(r =>
+                {
+                    r.RelativeItem().Text($"상호: {d.PartnerName}").FontSize(s.PartnerNameSize);
+                    if (!string.IsNullOrWhiteSpace(d.PartnerBusinessNo))
+                        r.RelativeItem().AlignRight().Text($"사업자: {d.PartnerBusinessNo}").FontSize(s.PartnerOtherSize);
+                });
+                if (!string.IsNullOrWhiteSpace(d.PartnerAddress))
+                    p.Item().Text($"주소: {d.PartnerAddress}").FontSize(s.PartnerOtherSize);
+                if (!string.IsNullOrWhiteSpace(d.PartnerContact))
+                    p.Item().Text($"담당: {d.PartnerContact}").FontSize(s.PartnerOtherSize);
+            });
+
+            // 품목표
+            var tableBox = col.Item();
+            if (showBorder && s.TableOuterLine > 0)
+            {
+                tableBox = s.TableOuterTopBottomOnly
+                    ? tableBox.BorderHorizontal(s.TableOuterLine).BorderColor(s.TableOuterColor)
+                    : tableBox.Border(s.TableOuterLine).BorderColor(s.TableOuterColor);
+            }
+            tableBox.Table(tbl =>
+            {
+                tbl.ColumnsDefinition(cd =>
+                {
+                    // 🔴 [고침 2 · 정정 §2-1] 열 너비 = 묶음 값(기본값 = 아래 옛 숫자 그대로 · 큰글씨만 따로).
+                    // ⬛ 종전: cd.ConstantColumn(30);                    // 순번
+                    cd.ConstantColumn(s.SeqColumnWidth);      // 순번
+                    cd.RelativeColumn(s.ItemNameRelative);    // 품명
+                    // ⬛ 종전: cd.RelativeColumn(s.SpecRelative);        // 규격
+                    if (s.SpecColumnWidth is float specWidth)
+                        cd.ConstantColumn(specWidth);         // 규격(큰글씨 = 고정 51)
+                    else
+                        cd.RelativeColumn(s.SpecRelative);    // 규격
+                    // ⬛ 종전: cd.ConstantColumn(60);                    // 수량
+                    // ⬛ 종전: cd.ConstantColumn(80);                    // 단가
+                    // ⬛ 종전: cd.ConstantColumn(90);                    // 공급가
+                    // ⬛ 종전: cd.ConstantColumn(70);                    // 부가세
+                    // ⬛ 종전: cd.ConstantColumn(90);                    // 합계
+                    cd.ConstantColumn(s.QtyColumnWidth);      // 수량
+                    cd.ConstantColumn(s.UnitPriceColumnWidth); // 단가
+                    cd.ConstantColumn(s.SupplyColumnWidth);   // 공급가
+                    cd.ConstantColumn(s.VatColumnWidth);      // 부가세
+                    cd.ConstantColumn(s.TotalColumnWidth);    // 합계
+                });
+                tbl.Header(h =>
+                {
+                    Head(h.Cell(), "순", false);
+                    Head(h.Cell(), "품명", false);
+                    Head(h.Cell(), "규격", false);
+                    Head(h.Cell(), "수량", true);
+                    Head(h.Cell(), "단가", true);
+                    Head(h.Cell(), "공급가액", true);
+                    Head(h.Cell(), "부가세", true);
+                    Head(h.Cell(), "합계", true);
+                });
+                var seq = 0;
+                foreach (var line in d.Lines)
+                {
+                    seq++;
+                    var even = seq % 2 == 0;
+                    Body(tbl.Cell(), even).AlignCenter().Text($"{seq}").FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even).Text(line.ItemName).FontSize(s.BodyTextSize);   // 줄 수 제한 0 = 잘림 0
+                    Body(tbl.Cell(), even).Text(line.Spec ?? "").FontSize(s.BodyTextSize);
+                    // 🔴 [고침 2] 숫자 5칸 = 숫자 칸 안쪽(`number: true`) · 글자 · 서식 · 맞춤 무변.
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Qty.ToString("N1")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Supply.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Vat.ToString("N0")).FontSize(s.BodyTextSize);
+                    // ⬛ 종전: Body(tbl.Cell(), even).AlignRight().Text(line.Total.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Qty.ToString("N1")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.UnitPrice.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Supply.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Vat.ToString("N0")).FontSize(s.BodyTextSize);
+                    Body(tbl.Cell(), even, number: true).AlignRight().Text(line.Total.ToString("N0")).FontSize(s.BodyTextSize);
+                }
+                if (d.Lines.Count == 0)
+                {
+                    Body(tbl.Cell().ColumnSpan(8), false).AlignCenter().Text("(품목 정보 없음)").FontSize(s.BodyTextSize);
+                }
+            });
+
+            // 합계
+            col.Item().PaddingTop(8).AlignRight().Column(p =>
+            {
+                p.Item().Text($"공급가액 합계: {d.TotalSupply:N0}").FontSize(s.SumSize);
+                p.Item().Text($"부가세 합계  : {d.TotalVat:N0}").FontSize(s.SumSize);
+                var total = p.Item().PaddingTop(4);
+                if (s.TotalRule > 0)
+                    total = total.BorderTop(s.TotalRule).BorderColor(StyleInk).PaddingTop(2);
+                total.Text($"총 합계: {d.TotalAmount:N0} 원").FontSize(s.TotalSize).Bold();
+            });
+
+            // 비고
+            if (!string.IsNullOrWhiteSpace(d.Remark))
+            {
+                var remark = col.Item().PaddingTop(10);
+                remark = s.RemarkTopOnly ? remark.BorderTop(s.RemarkLine) : remark.Border(s.RemarkLine);
+                remark.BorderColor(s.RemarkLineColor).Padding(6).Column(p =>
+                {
+                    p.Item().Text("비고").FontSize(s.RemarkSize).SemiBold();
+                    p.Item().Text(d.Remark).FontSize(s.RemarkSize);
+                });
+            }
+        });
+
+        void Head(IContainer cell, string text, bool alignRight)
+        {
+            var x = cell;
+            if (showBorder && s.HeadBackground is not null) x = x.Background(s.HeadBackground);
+            var w = showBorder ? s.HeadLine : 0f;
+            x = s.HeadLineBottomOnly ? x.BorderBottom(w) : x.Border(w);
+            // ⬛ 종전: x = x.BorderColor(s.HeadLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            // 🔴 [고침 2] 오른쪽 맞춤 머리 = 숫자 칸 → 숫자 칸 안쪽.
+            x = x.BorderColor(s.HeadLineColor).PaddingVertical(padV).PaddingHorizontal(alignRight ? padHNum : padH);
+            if (alignRight) x = x.AlignRight();
+            x.Text(text).FontSize(s.HeadTextSize).Bold();
+        }
+
+        // ⬛ 종전: IContainer Body(IContainer cell, bool even)
+        // 🔴 [고침 2] `number` = 숫자 칸(숫자 칸 안쪽) · 기본 거짓 = 글자 칸(순 · 품명 · 규격 · 「품목 정보 없음」).
+        IContainer Body(IContainer cell, bool even, bool number = false)
+        {
+            var x = cell;
+            if (showBorder && even && s.ZebraEvenBackground is not null) x = x.Background(s.ZebraEvenBackground);
+            var w = showBorder ? s.BodyLine : 0f;
+            x = s.BodyLineHorizontalOnly ? x.BorderBottom(w) : x.Border(w);
+            // ⬛ 종전: return x.BorderColor(s.BodyLineColor).PaddingVertical(padV).PaddingHorizontal(padH);
+            return x.BorderColor(s.BodyLineColor).PaddingVertical(padV).PaddingHorizontal(number ? padHNum : padH);
+        }
     }
 
     // ─── DB lookup ─────────────────────────────────────
@@ -1926,6 +2577,22 @@ public sealed class PdfRenderService : IPdfRenderService
         //     그 판정은 화면이 먼저 말려 주고(갈래 D), 여기서는 고객이 고른 대로 그린다.
         //     「우리가 몰래 끈다」는 길은 안 만든다(반자동 원칙 · 고객이 정한다).
         if (overrides?.IsFormDesignPreview != true && template?.PrintBackground != true) return null;
+        // 🔴🔴 [2026-11-19 W-G1-51 갈래 A · 설계 §5 A 줄 · 대표 11/18 Q11 · Q14 · 08시②] **양식지 안전망 — 한 줄 더했다.**
+        //   위 줄은 그대로 두고(#1 · 지운 것 0) 이 줄을 **더해** 판정을 좁혔다. 두 줄을 합친 판정:
+        //     깐다 ⇔ 설계 미리보기 **또는** (`print_background`=1 **그리고** 양식지 아님)
+        //   [그대로 두면 무슨 일이 나나] 대표 결정 「양식지 = 늘 데이터만」(08시②) 인데
+        //     `print_background`=1 로 남은 양식지 행은 전표 인쇄에 그림이 또 찍힌다(이중 인쇄).
+        //     그 행은 업데이트 때 Y 템플릿으로 복제되고(대표 Q14 · 갈래 F) 원래 양식지는
+        //     데이터만으로 남아야 한다 — **옮기기가 실패한 행도** 여기서 이중 인쇄 0 이 된다.
+        //   🔴 칸 좌표 유무와 **상관없이** 본다 — 양식지는 칸이 있든 없든 데이터만이다.
+        //   🔴 양식정보설정 미리보기(`IsFormDesignPreview`)는 종전대로 깐다 — 겹침 미리보기는
+        //     그 화면에만 있다(대표 Q11 ⑴). 전표 [인쇄] 미리보기 창 = 데이터만 = 인쇄 바이트.
+        //   🔴 빈 A4(`plain`) + 켬(Y 템플릿)은 종전대로 깐다 — 미리보기 바이트 = 인쇄 바이트.
+        //   🔴 바뀌는 행 = 양식지 + `print_background`=1 행의 **전표 쪽** 종이뿐이다(기본값 0 행 무변).
+        //   🔴 위 주석의 「preprint 가 켜면 고객이 고른 대로 그린다 · 몰래 끄는 길은 안 만든다」(작1 결-D)는
+        //     대표 11/18 08시② 「종이에도 함께 인쇄」 선택 없앰 · Y 템플릿으로 대신 으로 바뀌었다 —
+        //     옛 주석은 이력으로 남기고(지운 것 0) 판정은 이 줄이 정한다.
+        if (overrides?.IsFormDesignPreview != true && template?.PaperMode == "preprint") return null;
         return TryLoadFormBackground(template?.BackgroundImageUrl);
     }
 
@@ -2132,10 +2799,12 @@ public sealed class PdfRenderService : IPdfRenderService
         //     이번 차수에서 가장 위험한 자리였다(고객은 전표가 안 나간 줄도 모른다).
         //   🔴 좌표는 **어느 종이에 대고 쟀는지**가 전제다. 그 전제를 코드가 혼자 바꾸지 않는다.
         //     용지를 바꾸려면 고객이 좌표를 다시 맞춰야 하고, 그건 화면이 안내할 일이다(등재).
+        //   🔴 [2026-11-19 W-G1-51 갈래 A 고침1 · [4] #6] 로그 문구만 「양식용지 좌표」 → 「좌표 양식」 —
+        //     이제 빈 A4 Y 템플릿(그림 있는 빈 A4)도 이 길을 탄다. 판정 · 반환 값 무변 · 고객 노출 0.
         if (useCoords && !IsA4Portrait(template))
         {
             _logger.LogWarning(
-                "[PDF] 양식용지 좌표가 맞춰져 있어 용지·방향을 바꾸지 않는다 — A4 세로로 그린다. "
+                "[PDF] 좌표 양식(양식지 · 빈 A4 + 양식 그림)은 칸 좌표가 맞춰져 있어 용지·방향을 바꾸지 않는다 — A4 세로로 그린다. "
                 + "용지를 바꾸려면 좌표를 다시 맞춰 주십시오.");
             return PageSizes.A4;
         }
@@ -2206,21 +2875,118 @@ public sealed class PdfRenderService : IPdfRenderService
     ///   그 그림을 여기서 발명하면 결재 없이 디자인을 정하는 것이 된다.
     /// 🔴 그래서 이 함수가 하는 일은 하나다 — <b>종전에는 아무도 안 읽던 칸을 읽고,
     ///   모르는 값이면 적어 둔다.</b> 4종이 확정되는 날 이 자리가 갈림길이 된다.
+    /// 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑵] <b>위 「지금은 무엇이 와도 basic」 은 낡았다</b>(이력으로 둔다) —
+    ///   4종 시안 승인(대표 §11 #1). 이제 허용 4개(<c>basic</c> · <c>formal</c> · <c>simple</c> · <c>large</c> · 대소문자 무시)는
+    ///   소문자 키로 돌려준다. 모르는 값 · 빈 값은 <b>지금 그대로</b>(모르는 값 = 경고 한 줄 + basic · 빈 값 = basic).
+    ///   🔴 이 함수는 경고만 맡는다 — 그리는 값 묶음은 <see cref="ResolvePrintStyle"/>(순백지에만)이 정한다.
+    /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · E⑷ 작업지시서 E4-6 · §7] 위에 옮겨 적은 출하 DDL 주석 <i>"4종 확정 전까지 basic 단일"</i> 도 낡았다(이력으로 둔다) —
+    ///   그 주석 새 글자 = <i>"디자인 스타일 (DB-90). basic·formal·simple·large — 빈 A4 순백지이고 양식 그림이 없는 양식에만 쓰임(그 밖은 basic 모양)"</i>
+    ///   (E⑷ §7 · DDL 주석만 · 마이그 0 · DDL 손질은 E⑷ 몫).
     /// </remarks>
     private string ResolveStyleKey(FormTemplateInfo? template)
     {
-        var key = (template?.StyleKey ?? "basic").Trim();
-        if (key.Length == 0) return "basic";
-
-        if (!string.Equals(key, "basic", StringComparison.OrdinalIgnoreCase))
+        // ⬛ 종전 몸통(2026-11-20 갈래 E⑵ 전) — basic 외 값은 모두 경고 뒤 basic:
+        // ⬛ var key = (template?.StyleKey ?? "basic").Trim();
+        // ⬛ if (key.Length == 0) return "basic";
+        // ⬛ if (!string.Equals(key, "basic", StringComparison.OrdinalIgnoreCase))
+        // ⬛ {
+        // ⬛     _logger.LogWarning(
+        // ⬛         "[PDF] 아직 준비되지 않은 양식 스타일({Key}) — 기본 모양으로 그린다.", key);
+        // ⬛     return "basic";
+        // ⬛ }
+        // ⬛ return "basic";
+        var known = NormalizeStyleKey(template?.StyleKey);
+        if (known is null)
         {
             _logger.LogWarning(
-                "[PDF] 아직 준비되지 않은 양식 스타일({Key}) — 기본 모양으로 그린다.", key);
+                "[PDF] 아직 준비되지 않은 양식 스타일({Key}) — 기본 모양으로 그린다.",
+                (template?.StyleKey ?? "").Trim());
             return "basic";
         }
 
-        return "basic";
+        return known;
     }
+
+    /// <summary>스타일 키 허용 목록(시안 §3-1 · 소문자).</summary>
+    private static readonly string[] KnownStyleKeys = { "basic", "formal", "simple", "large" };
+
+    /// <summary>
+    /// 🔴 스타일 키를 허용 목록 소문자로 고른다 — 빈 값 = <c>basic</c> · 모르는 값 = <c>null</c>. <b>로그 0</b>
+    /// (경고는 <see cref="ResolveStyleKey"/> 한 자리에서만 — 두 번 부르면 경고가 두 줄 찍힌다).
+    /// </summary>
+    private static string? NormalizeStyleKey(string? raw)
+    {
+        var key = (raw ?? "basic").Trim();
+        if (key.Length == 0) return "basic";
+        foreach (var k in KnownStyleKeys)
+        {
+            if (string.Equals(key, k, StringComparison.OrdinalIgnoreCase)) return k;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 🔴 이 인쇄에 스타일 값 묶음을 쓰나 — 쓰면 그 묶음 · 아니면 <c>null</c>(= basic = 옛 작성기 그대로).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 E⑵] 다섯 조건이 <b>모두</b> 참일 때만 묶음을 준다:
+    ///   ① 양식 행 있음 ② <c>paper_mode</c> = <c>"plain"</c>(순백지 · 글자 그대로 · 대표 §9 #1 · 출하 DDL 「plain=A4 순백지」)
+    ///   ③ 이번 인쇄가 좌표 경로가 아님(<paramref name="useCoords"/> 거짓 — 양식지 · Y 템플릿 = 무시 · 시안 PM Q-C)
+    ///   ④ 양식 그림 경로가 빈 칸(설계 「빈 A4 · 그림 0 · 좌표 0」 · 대표 §59 K3 「그림 + 칸 0」 과 겹침 0)
+    ///   ⑤ 스타일 키 = <c>formal</c> · <c>simple</c> · <c>large</c>.
+    /// 🔴 ③ 을 저장된 칸 수가 아니라 <paramref name="useCoords"/> 로 보는 까닭: 설정 미리보기에서 편집창이
+    ///   빈 A4 좌표를 null 로 보낸다 — 저장 칸 수로 가르면 옛 좌표만 남은 빈 A4(K4)의 미리보기 ≠ 종이가 된다.
+    /// 🔴 <b>로그 0</b> — 모르는 키 경고는 <see cref="ResolveStyleKey"/> 가 이미 적는다.
+    /// 🔴🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1 · [3-V] P1-1] 조건 ⑥ 을 더했다 —
+    ///   ⑥ 문서 종류가 <see cref="LegalFormDocTypes"/>(세금계산서 · 면세계산서 · 입금표)가 <b>아님</b>.
+    ///   위 「다섯 조건」 은 이제 여섯이다(이력으로 둔다). 용지 판정(<see cref="ResolvePageSize"/>)과 <b>같은 목록</b>을 그대로 쓴다
+    ///   — 새 목록 0. 법정성 판정은 법무팀장 몫이고 그 전까지는 <b>막는 쪽</b>(2026-10-25 재검증 S-3 과 같은 까닭).
+    ///   법무 판정이 나오면 이 한 줄로 다시 연다.
+    /// </remarks>
+    // ⬛ 종전 서명(갈래 E⑵ 고침 1 전): private static PrintStyle? ResolvePrintStyle(FormTemplateInfo? template, bool useCoords)
+    private static PrintStyle? ResolvePrintStyle(FormTemplateInfo? template, bool useCoords, string? documentType)
+    {
+        if (template is null || useCoords) return null;
+        if (LegalFormDocTypes.Contains(documentType ?? string.Empty)) return null;
+        if (!string.Equals(template.PaperMode, "plain", StringComparison.Ordinal)) return null;
+        if (!string.IsNullOrWhiteSpace(template.BackgroundImageUrl)) return null;
+        return NormalizeStyleKey(template.StyleKey) switch
+        {
+            "formal" => FormalStyle,
+            "simple" => SimpleStyle,
+            "large" => LargeStyle,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// 🔴🔴 이 인쇄가 대표 §59 K3 라 <b>그림만</b> 찍나 — 참이면 머리글 · 본문 · 쪽번호를 건너뛴다(그림 겹은 그대로).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · 작업지시서 §1 · PM 결재 ① (가) · ⑥ (나) · ⑦]
+    ///   K3 = 아래가 <b>모두</b> 참:
+    ///   ① <c>paper_mode</c> = <c>"plain"</c> ② <b>저장된</b> 그림 찍기 = 켬 ③ 그림 경로 있음 ④ 그 그림이 이번 인쇄에 실제로 읽힘
+    ///   — ①~④ 는 렌더의 <paramref name="isYTemplate"/> 그대로 받는다(새 판정을 따로 짓지 않음 · 어긋남 0)
+    ///   ⑤ 칸 좌표 0개(<c>useCoords</c> 앞 조건과 같은 셈 — K3 = <c>isYTemplate &amp;&amp; 칸 0</c> 은 Y 좌표 경로의 정확한 여집합)
+    ///   🔴 §59 고침 1(작업지시서 ②-9 · P2-1) — 고침 1 부터 ⑤ = <b>저장된 칸 0</b>(<see cref="FormCoordsStored.IsEmpty"/>) · 모두 무효 칸은 K3 아님(종전 기본 배치 + 데이터). 위 줄 「정확한 여집합」 은 이력으로 둔다 — 무효 칸 양식은 Y 좌표 경로도 K3 도 아니다.
+    ///   ⑥ 법정 서식(또는 그 후보) <see cref="LegalFormDocTypes"/>(세금계산서 · 면세계산서 · 입금표)가 아님 — PM ⑥ (나) · 법무 판정 전까지 막는 쪽
+    ///   ⑦ 전표 [인쇄] 문에서 부름(<see cref="PdfPreviewOverrides.NoCoordsImageOnly"/>) · 설정 미리보기(<c>IsFormDesignPreview</c>) 아님.
+    /// 🔴 <b>판정 유일 자리</b> — 렌더(<c>RenderDocumentAsync</c>)와 인쇄 미리보기 창의 안내 문(<see cref="IsNoCoordsImageOnlyAsync"/>)이
+    ///   이 함수만 부른다. 화면이 양식 행을 읽어 스스로 셈하는 두 번째 판정은 없다(PM 결재 ②).
+    /// 🔴 메일 · 팩스 · 설정 미리보기 · 4인자 호출은 ⑦ 이 거짓 ⇒ 지금 그대로(#1).
+    /// 🔴 스타일(<see cref="ResolvePrintStyle"/>)과 겹침 0 — K3 는 ③ 참이라 스타일이 이미 null 이다. 스타일 키는 이 판정에 없다.
+    /// 🔴 <b>로그 0</b>.
+    /// 🔴 작업지시서 §3-1 글자는 <c>internal static</c> 이다 — <see cref="FormTemplateInfo"/> 가 <c>private</c> 중첩형이라
+    ///   <c>internal</c> 메서드 인자로 쓰면 빌드가 안 된다(CS0051) ⇒ <c>private static</c>(시험은 반사로 부른다 · 개발명세서 §2-4 다-1).
+    /// </remarks>
+    private static bool IsNoCoordsImageOnly(string documentType, PdfPreviewOverrides? overrides, bool isYTemplate,
+        FormTemplateInfo? template)
+        => overrides?.NoCoordsImageOnly == true
+           && overrides.IsFormDesignPreview != true
+           && isYTemplate
+           && (template?.FieldCoords.Count ?? 0) == 0
+           && FormCoordsStored.IsEmpty(template?.FieldCoordsJson)   // §59 고침 1(②-7) — 저장된 칸 0 · 위 줄은 그대로 둠
+           && !LegalFormDocTypes.Contains(documentType);
 
     /// <summary>
     /// 🔴 양식지 그림을 읽어 올 수 있는 <b>유일한 폴더</b> (R-4 경로 가둠).
@@ -3087,9 +3853,11 @@ public sealed class PdfRenderService : IPdfRenderService
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
+            // 🔴 [2026-11-19 갈래 A 고침1 · [4] #6] 이 함수의 로그 세 줄 문구만 「양식용지 좌표」 → 「좌표 양식의 칸 좌표」 —
+            //   빈 A4 Y 템플릿도 좌표를 탄다. 판정 · 건너뛰기 · 경계값(`x > 420 || y > 594`) 무변 · 고객 노출 0.
             if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
             {
-                _logger.LogWarning("양식용지 좌표가 목록 형태가 아니다 — 기본 배치로 인쇄한다.");
+                _logger.LogWarning("좌표 양식의 칸 좌표가 목록 형태가 아니다 — 기본 배치로 인쇄한다.");
                 return list;
             }
 
@@ -3107,7 +3875,7 @@ public sealed class PdfRenderService : IPdfRenderService
                 // 종이 밖 좌표는 조용히 사라진다 — 고객이 왜 안 나오는지 모르므로 남긴다.
                 if (x < 0 || y < 0 || x > 420 || y > 594)
                 {
-                    _logger.LogWarning("양식용지 좌표가 종이 밖이다 — key={Key} x={X}mm y={Y}mm, 이 칸은 건너뛴다.", key, x, y);
+                    _logger.LogWarning("좌표 양식의 칸 좌표가 종이 밖이다 — key={Key} x={X}mm y={Y}mm, 이 칸은 건너뛴다.", key, x, y);
                     continue;
                 }
 
@@ -3124,7 +3892,7 @@ public sealed class PdfRenderService : IPdfRenderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "양식용지 좌표를 읽지 못했다 — 기본 배치로 인쇄한다.");
+            _logger.LogWarning(ex, "좌표 양식의 칸 좌표를 읽지 못했다 — 기본 배치로 인쇄한다.");
             return new List<FieldCoord>();
         }
         return list;
@@ -3145,6 +3913,43 @@ public sealed class PdfRenderService : IPdfRenderService
                                        System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
             }
             return null;
+        }
+    }
+
+    /// <summary>
+    /// 🔴 [2026-11-20 W-G1-51 갈래 §59 · 대표 §59 「그림만 + 안내」 · PM 결재 ②] 이 종류의 저장된 양식으로 전표 [인쇄] 를 하면
+    /// <b>그림만</b> 나오나 — 전표 인쇄 미리보기 창이 「아직 칸을 안 맞췄습니다」 안내를 띄울지 묻는 문(<c>GET …/print-notice</c>)이 부른다.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 렌더(<c>RenderDocumentAsync</c>)와 <b>같은 차례 · 같은 함수</b>로 센다:
+    ///   양식 읽기(<see cref="TryLoadTemplateAsync"/> 그대로) → 저장된 그림 찍기 → 그림 읽기(<see cref="ResolveFormBackground"/> · 인쇄 문 꼴)
+    ///   → Y 네 칸(렌더 <c>isYTemplate</c> 과 같은 셈) → <see cref="IsNoCoordsImageOnly"/>(판정 유일 자리).
+    /// 🔴 Y 네 칸 변수 이름을 <c>yTemplate</c> 로 둔다 — <c>var isYTemplate =</c> 로 시작하는 줄을 새로 만들면
+    ///   편집창 판정 게이트(<c>FormYTemplateCoordsKeepGateTests</c>)가 첫 줄을 읽는 자리가 흐려진다.
+    /// 🔴 실패하면 경고 1줄 + 거짓(#15) — 안내가 안 뜰 뿐 미리보기 · 인쇄는 그대로다(#20).
+    /// 🔴 전표 미리보기 옵션(<c>Options</c>)은 안 받는다 — 창은 그림 찍기 옵션을 보내지 않는다(작업지시서 §3-2 · 개발명세서 §9 3).
+    /// </remarks>
+    public async Task<bool> IsNoCoordsImageOnlyAsync(string tenantId, string documentType, CancellationToken ct = default)
+    {
+        try
+        {
+            var template = await TryLoadTemplateAsync(tenantId, documentType, ct).ConfigureAwait(false);
+            // 인쇄 문(`DocumentController.PreviewPdf`)이 세우는 꼴 그대로 — 설정 미리보기 아님 · 인쇄 문 참.
+            var printDoor = new PdfPreviewOverrides { NoCoordsImageOnly = true };
+            var savedPrintBackground = template?.PrintBackground == true;
+            var bgImage = ResolveFormBackground(printDoor, template);
+            var yTemplate = string.Equals(template?.PaperMode, "plain", StringComparison.Ordinal)
+                && savedPrintBackground
+                && !string.IsNullOrWhiteSpace(template?.BackgroundImageUrl)
+                && bgImage is not null;
+            // §59 고침 1(②-8) — 칸 0 = 저장된 칸 0 · 판정은 ②-7(IsNoCoordsImageOnly 의 FormCoordsStored.IsEmpty 줄) 하나 · 이 문은 코드 무변.
+            return IsNoCoordsImageOnly(documentType, printDoor, yTemplate, template);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PDF] 인쇄 전 안내(그림만) 판정을 못 했다 — 안내 없이 둔다. tenant={Tenant} type={Type}",
+                tenantId, documentType);
+            return false;
         }
     }
 
@@ -3219,6 +4024,9 @@ public sealed class PdfRenderService : IPdfRenderService
                 //   맞춰도 인쇄물은 코드에 고정된 위치로만 나왔다.
                 //   ⇒ 시판 양식지 칸과 안 맞아 양식용지 모드가 사실상 못 쓰는 기능이었다.
                 FieldCoords = ParseFieldCoords(dto.FieldCoordsJson),
+                // 🔴 §59 고침 1(작업지시서 ②-6) — 저장값 글자 그대로도 들고 간다. 판정 「저장된 칸 0」(FormCoordsStored.IsEmpty)이 읽는다.
+                //   DTO 와 같은 이름 · 같은 형이라 짝 대조 게이트(축⒡ 긁기)가 이 배선을 스스로 잰다.
+                FieldCoordsJson = dto.FieldCoordsJson,
             // 🔴 20261024 사장님 오더 "인쇄까지 모두 양식지 적용" · §13
             //   *"이미 업체에서 쓰는 양식지가 있을수도 있으니"* — 종전에는 이 칸을
             //   **읽어오지도 않았다**(PdfRenderService 안 BackgroundImageUrl 0건).
@@ -3307,6 +4115,12 @@ public sealed class PdfRenderService : IPdfRenderService
     private sealed class FormTemplateInfo
     {
         public string PaperMode { get; set; } = "plain";
+
+        /// <summary>
+        /// 🔴 저장된 칸 좌표 글자 그대로 (W-G1-51 §59 고침 1 · P2-1). <see cref="FieldCoords"/> 는 읽어 낸 목록이라
+        ///   모두 무효 칸이면 0개가 된다 — 「저장된 칸 0」 판정(<see cref="FormCoordsStored.IsEmpty"/>)은 이 글자를 본다.
+        /// </summary>
+        public string? FieldCoordsJson { get; set; }
         public decimal MarginTopMm { get; set; } = 20;
         public decimal MarginLeftMm { get; set; } = 20;
         public decimal MarginRightMm { get; set; } = 20;
@@ -3395,6 +4209,11 @@ public sealed class PdfRenderService : IPdfRenderService
         /// 🔴 디자인 스타일 (DB-90 · <b>배선만</b>). 출하 DDL 주석에 적힌 그대로
         /// <i>"4종 확정 전까지 basic 단일"</i> ⇒ 🔴 <b>지금은 무엇이 와도 basic 으로 그린다.</b>
         /// 종전에는 저장·조회만 되고 <b>작성기가 읽지 않았다</b>.
+        /// 🔴 [2026-11-20 W-G1-51 갈래 E⑵] 위 「지금은 무엇이 와도 basic」 은 낡았다(이력으로 둔다) —
+        /// 순백지 양식에 한해 <c>formal</c> · <c>simple</c> · <c>large</c> 를 그린다(<c>ResolvePrintStyle</c>).
+        /// 🔴 [2026-11-20 갈래 E⑵ 고침 1 · PM 판단 §72 E-1] 법정 서식(또는 그 후보) 3종(세금계산서 · 면세계산서 · 입금표)은 빼고.
+        /// 🔴 [2026-11-20 갈래 E⑵ 고침 2 · E⑷ E4-6 · §7] 위에 옮겨 적은 DDL 주석 <i>"4종 확정 전까지 basic 단일"</i> 도 낡았다(이력으로 둔다) —
+        /// 새 글자 = <i>"디자인 스타일 (DB-90). basic·formal·simple·large — 빈 A4 순백지이고 양식 그림이 없는 양식에만 쓰임(그 밖은 basic 모양)"</i>.
         /// </summary>
         public string StyleKey { get; set; } = "basic";
 

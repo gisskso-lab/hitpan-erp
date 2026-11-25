@@ -1408,6 +1408,10 @@ CREATE TABLE `force_edit_logs` (
 
 --
 -- Table structure for table `form_templates`
+--   🔴 DB-150 (W-G1-51 갈래 F-1 · 2026-11-19) — 유일 키 교체. 옛 줄(지우지 않고 여기 남김):
+--     UNIQUE KEY `uk_form_templates_default` (`tenant_id`,`form_type`,`is_default`,`is_active`),
+--   새 규칙 = 계산 칸 `default_key`(맨 끝 · VIRTUAL) + UNIQUE `uk_form_templates_one_default` — 활성 기본만 (회사 · 종)마다 하나.
+--   비기본 · 끈 행은 몇 개든 된다(UNIQUE 는 NULL 을 겹침으로 안 본다). 근거 = 설계 20261118_WG1-51 §7-4 · DB-150 머리 주석.
 --
 
 DROP TABLE IF EXISTS `form_templates`;
@@ -1442,9 +1446,12 @@ CREATE TABLE `form_templates` (
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  `default_key` tinyint(4) GENERATED ALWAYS AS (if(`is_default` = 1 and `is_active` = 1,1,NULL)) VIRTUAL COMMENT '활성 기본 하나 보장용 (DB-150). 활성 기본일 때만 1, 아니면 NULL — 값을 직접 쓰지 않는다',
   PRIMARY KEY (`template_id`),
-  UNIQUE KEY `uk_form_templates_default` (`tenant_id`,`form_type`,`is_default`,`is_active`),
-  KEY `idx_form_templates_type` (`tenant_id`,`form_type`,`is_active`,`is_default`)
+  -- 고침 1([3-V] P3-2): 새 유일 키 줄을 DB-150 이 키를 더하는 순서(기존 idx_form_templates_type 뒤)로 옮김 · 옛 자리 글자:
+  --   UNIQUE KEY `uk_form_templates_one_default` (`tenant_id`,`form_type`,`default_key`),
+  KEY `idx_form_templates_type` (`tenant_id`,`form_type`,`is_active`,`is_default`),
+  UNIQUE KEY `uk_form_templates_one_default` (`tenant_id`,`form_type`,`default_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='양식정보설정 — paper_mode 분기 박제 (사장님 헌법 2026-05-31)';
 
 --
@@ -3666,7 +3673,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1),('DB-150','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
