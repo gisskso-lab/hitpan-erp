@@ -145,6 +145,26 @@ public sealed class DataResetService : IDataResetService
         using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
+            // ── 2-1) 트랜잭션 안 대표 판정 다시 (20261125작 지시서 §17 · 12d-2 · 외부 판정 ⑧ · CTO C7 · C8) ──
+            // 0) 판정 뒤 · 강제 백업 도중에 대표가 멈춤 · 지움 · 해제되거나 대표가 하나 더 생기면 0) 의 답은 낡는다.
+            // 트랜잭션 첫 문장 = 본인 행 잠금 + 같은 판정 SQL(ResetGateSql) — FK 끄기보다 앞(뒤면 거절 반환 뒤 연결이 FK 꺼진 채 남음).
+            // 거절은 예외로 던지지 않는다(아래 catch 가 data_reset_failed 로 잘못 센다) — 롤백 먼저 → 감사(트랜잭션 밖) → 같은 DenyCode.
+            var gateInTx = await GetResetGateInTransactionAsync(tx, tenantId, userId, ct).ConfigureAwait(false);
+            if (gateInTx != DataResetGate.Allowed)
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                var txCode = DataResetGateCodes.ToCode(gateInTx);
+                await _audit.LogAsync("data_reset_denied", "system", null, reason: InTxDenyReasonPrefix + txCode, ct: ct)
+                    .ConfigureAwait(false);
+                return new DataResetResponse
+                {
+                    Success = false,
+                    DenyCode = txCode,
+                    Error = GateMessage(gateInTx),
+                    BackupId = backup.BackupId
+                };
+            }
+
             // FK 순환·자식→부모 순서 의존 회피: 트랜잭션 내에서만 FK 체크 해제.
             await conn.ExecuteAsync(new CommandDefinition("SET FOREIGN_KEY_CHECKS = 0", transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -236,16 +256,63 @@ public sealed class DataResetService : IDataResetService
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var row = await _db.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
-            """
-            SELECT
-              CAST(COALESCE(SUM(is_parent = 1 AND is_deleted = 0 AND is_active = 1), 0) AS SIGNED) AS ParentCount,
-              CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1 AND is_deleted = 0 AND is_active = 1
-                                AND account_type = 'tenant_admin'), 0) AS SIGNED) AS SelfCount
-            FROM users
-            WHERE tenant_id = @TenantId
-            """,
+            // → ResetGateSql(두 판정이 같은 글자 · 12d)
+            ResetGateSql,
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
+        // ⬛ 지시서 §17 이전: 판정 순서 4줄(0 → NoParent · 본인 0 → NotParent · 2+ → MultipleParents · 그 밖 Allowed)이 여기 있었다 → Decide(글자 그대로 옮김)
+        return Decide(row);
+    }
+
+    /// <summary>
+    /// 20261125작 지시서 §17(12d-2 · CTO C7) — 삭제 트랜잭션 <b>안</b>에서 대표 판정을 다시 한다.
+    /// <see cref="GetResetGateAsync"/> 서명은 그대로 두고(my-level · 반사 경로) 클래스에만 더한 메서드(인터페이스 손 0 · #12).
+    /// </summary>
+    /// <remarks>
+    /// ① 본인 행 한 줄 잠금(PK <c>user_id</c> 동등 FOR UPDATE = 그 행 레코드 잠금 · 틈 잠금 없음) — 초기화 커밋 · 롤백까지
+    /// 다른 요청이 본인을 멈춤 · 지움 · 대표 해제하지 못한다. 집계 SQL 에는 FOR UPDATE 를 붙이지 않는다(그 회사 users 전 행 + 틈이 잠겨
+    /// 삭제 내내 다른 직원 로그인 · 계정 변경이 멈춤 · C7).
+    /// ② 대표 수 셈 = <see cref="GetResetGateAsync"/> 와 같은 <c>ResetGateSql</c> · 같은 트랜잭션 연결.
+    /// ③ 판정 순서 = <c>Decide</c> 하나(두 판정 갈라짐 금지).
+    /// public 인 이유 = DB 시험 T2 가 직접 부른다(Application 에 InternalsVisibleTo 없음 · C9).
+    /// </remarks>
+    public async Task<DataResetGate> GetResetGateInTransactionAsync(
+        DbTransaction tx, string tenantId, string userId, CancellationToken ct = default)
+    {
+        var conn = tx.Connection
+            ?? throw new InvalidOperationException("트랜잭션에 연결이 없다 — 초기화 안 판정을 할 수 없다.");
+
+        await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+            "SELECT user_id FROM users WHERE user_id = @UserId AND tenant_id = @TenantId FOR UPDATE",
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        var row = await conn.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
+            ResetGateSql,
+            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        return Decide(row);
+    }
+
+    /// <summary>
+    /// 20261125작 지시서 §17 — 대표 판정 SQL 한 상수(<see cref="GetResetGateAsync"/> · <see cref="GetResetGateInTransactionAsync"/> 공용 · C7).
+    /// 글자는 <c>e2e76008</c> 의 GetResetGateAsync 안 글자 그대로.
+    /// </summary>
+    private const string ResetGateSql =
+        """
+        SELECT
+          CAST(COALESCE(SUM(is_parent = 1 AND is_deleted = 0 AND is_active = 1), 0) AS SIGNED) AS ParentCount,
+          CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1 AND is_deleted = 0 AND is_active = 1
+                            AND account_type = 'tenant_admin'), 0) AS SIGNED) AS SelfCount
+        FROM users
+        WHERE tenant_id = @TenantId
+        """;
+
+    /// <summary>20261125작 지시서 §17 — 트랜잭션 안 판정 거절의 감사 reason 접두(뒤에 DenyCode · 시험이 이 상수로 대조).</summary>
+    public const string InTxDenyReasonPrefix = "트랜잭션 안 판정 거절: ";
+
+    /// <summary>판정 순서: 대표 0 → NoParent · 본인 아님 → NotParent · 대표 2+ → MultipleParents · 그 밖 → Allowed(두 판정 공용).</summary>
+    private static DataResetGate Decide(ResetGateRow row)
+    {
         if (row.ParentCount == 0) return DataResetGate.NoParent;
         if (row.SelfCount == 0) return DataResetGate.NotParent;
         if (row.ParentCount >= 2) return DataResetGate.MultipleParents;

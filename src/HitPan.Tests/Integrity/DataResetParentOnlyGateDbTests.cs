@@ -442,6 +442,142 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
         Assert.Equal(1L, await BusinessRowsAsync(db, TenantId));
     }
 
+    // ══ 지시서 §17(외부 판정 ⑧ · CTO C7 ~ C9) — 삭제 트랜잭션 안 재판정 ══
+
+    /// <summary>진짜 AuditService(같은 연결 · 고정 회사 문맥)로 만든 서비스 — 「롤백 → 감사」 순서를 감사 행으로 잰다(12d-3).</summary>
+    private static DataResetService NewServiceWithRealAudit(MySqlConnection db, CountingBackup backup, string userId) =>
+        new(db, backup,
+            new AuditService(db, new FixedTenant(TenantId, userId), NullLogger<AuditService>.Instance),
+            NullLogger<DataResetService>.Instance);
+
+    /// <summary>audit_trail 의 회사 · action_type 행 reason 목록(행 수 = 목록 길이).</summary>
+    private static async Task<List<string?>> AuditReasonsAsync(MySqlConnection db, string tenantId, string actionType) =>
+        (await db.QueryAsync<string?>(
+            "SELECT reason FROM audit_trail WHERE tenant_id = @T AND action_type = @A",
+            new { T = tenantId, A = actionType })).ToList();
+
+    private static Task SetActiveAsync(MySqlConnection db, string tenantId, string userId, bool active) =>
+        db.ExecuteAsync("UPDATE users SET is_active = @Act WHERE user_id = @U AND tenant_id = @T",
+            new { Act = active ? 1 : 0, U = userId, T = tenantId });
+
+    /// <summary>T1 · T1b 공통 단언 — 「삭제 0」 만 보는 가짜 초록 금지(C9): DenyCode 정확 · 안내 · 백업 1회 · 줄 그대로 · 감사 거절 1 · 실패 0 · 성공 0.</summary>
+    private async Task AssertDeniedInTxAsync(MySqlConnection db, DataResetResponse res, CountingBackup backup,
+        string code, string message, string what)
+    {
+        Assert.False(res.Success, $"🔴 {what} — 백업 도중 판정이 바뀌었는데 초기화가 끝까지 갔다(트랜잭션 안 재판정 없음).");
+        Assert.Equal(code, res.DenyCode);
+        Assert.Equal(message, res.Error);
+        Assert.Equal("reset-gate-backup", res.BackupId);
+        Assert.True(backup.Count == 1, $"🔴 {what} — 강제 백업이 {backup.Count}번 돌았다(앞 판정 통과 뒤 1번이어야 한다).");
+        Assert.Equal(1L, await BusinessRowsAsync(db, TenantId));
+
+        var denied = await AuditReasonsAsync(db, TenantId, "data_reset_denied");
+        Assert.True(denied.Count == 1,
+            $"🔴 {what} — 거절 감사가 {denied.Count}행이다(1행이어야 한다 · 롤백 앞 감사는 조용히 사라진다 · C8).");
+        Assert.Contains("트랜잭션 안 판정", denied[0] ?? string.Empty);
+        Assert.Contains(code, denied[0] ?? string.Empty);
+        Assert.Equal(DataResetService.InTxDenyReasonPrefix + code, denied[0]);
+
+        var failed = await AuditReasonsAsync(db, TenantId, "data_reset_failed");
+        Assert.True(failed.Count == 0,
+            $"🔴 {what} — data_reset_failed 가 {failed.Count}행이다(거절이 예외 → catch 길로 갔다 · C8): {string.Join(" | ", failed)}");
+        Assert.Empty(await AuditReasonsAsync(db, TenantId, "data_reset"));
+    }
+
+    // ══ T1 — 백업 도중 대표가 멈춤 = no_parent ══
+
+    [Fact(DisplayName = "T1 🔴 대표 1 · 백업 도중 별도 연결로 대표 is_active=0 커밋 → no_parent · 안내 · 백업 1회 · 업무 줄 그대로 · 거절 감사 1 · 실패 감사 0 · 세션 FK 검사 1")]
+    public async Task T1_백업도중_대표멈춤_no_parent()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(T1_백업도중_대표멈춤_no_parent)); return; }
+        SetUpFreshInstall();
+        await using var db = await OpenAsync();
+        var owner = await InsertUserAsync(db, TenantId, "owner", parent: true, admin: true, OwnerPw);
+        await InsertBusinessRowAsync(db, TenantId, "t1");
+
+        var backup = new CountingBackup
+        {
+            OnRun = async () =>
+            {
+                await using var other = await OpenAsync();
+                await SetActiveAsync(other, TenantId, owner, active: false);
+            }
+        };
+        var res = await NewServiceWithRealAudit(db, backup, owner).ResetAllAsync(
+            new DataResetRequest { Password = OwnerPw, ConfirmText = "초기화" }, TenantId, owner);
+
+        await AssertDeniedInTxAsync(db, res, backup, "no_parent", DataResetService.NoParentMessage, "T1 백업 도중 대표 멈춤");
+
+        // (덧 · K10) 안 판정이 FK 끄기보다 앞 — 거절 반환 뒤 같은 연결 세션의 FK 검사가 켜져 있어야 한다(C7).
+        var fk = await db.ExecuteScalarAsync<long>("SELECT @@SESSION.foreign_key_checks");
+        Assert.True(fk == 1, $"🔴 거절 반환 뒤 이 연결의 foreign_key_checks = {fk} — 안 판정이 FK 끄기 뒤에 있다(C7).");
+    }
+
+    // ══ T1b — 백업 도중 대표가 하나 더 = multiple_parents ══
+
+    [Fact(DisplayName = "T1b 🔴 대표 1 · 백업 도중 별도 연결로 활성 대표 1행 더함 → multiple_parents · 안내 · 백업 1회 · 업무 줄 그대로 · 거절 감사 1 · 실패 감사 0")]
+    public async Task T1b_백업도중_대표추가_multiple_parents()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(T1b_백업도중_대표추가_multiple_parents)); return; }
+        SetUpFreshInstall();
+        await using var db = await OpenAsync();
+        var owner = await InsertUserAsync(db, TenantId, "owner", parent: true, admin: true, OwnerPw);
+        await InsertBusinessRowAsync(db, TenantId, "t1b");
+
+        var backup = new CountingBackup
+        {
+            OnRun = async () =>
+            {
+                await using var other = await OpenAsync();
+                await InsertUserAsync(other, TenantId, "owner-late", parent: true, admin: true, OwnerPw);
+            }
+        };
+        var res = await NewServiceWithRealAudit(db, backup, owner).ResetAllAsync(
+            new DataResetRequest { Password = OwnerPw, ConfirmText = "초기화" }, TenantId, owner);
+
+        await AssertDeniedInTxAsync(db, res, backup, "multiple_parents", DataResetService.MultipleParentsMessage, "T1b 백업 도중 대표 추가");
+    }
+
+    // ══ T2 — 안 판정이 잡은 본인 행 잠금 ══
+
+    [Fact(DisplayName = "T2 🔴 연결 A 트랜잭션 안 판정 = Allowed 동안 연결 B(잠금 대기 1초)의 대표 행 비활성 UPDATE = 1205 · A 롤백 뒤 같은 UPDATE = 1행 · 대조: 같은 회사 다른 사용자 행 UPDATE = 성공")]
+    public async Task T2_안판정_본인행_잠금()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(T2_안판정_본인행_잠금)); return; }
+        SetUpFreshInstall();
+        string owner, staff;
+        await using (var seed = await OpenAsync())
+        {
+            owner = await InsertUserAsync(seed, TenantId, "owner", parent: true, admin: true, OwnerPw);
+            staff = await InsertUserAsync(seed, TenantId, "staff", parent: false, admin: false, ChildPw);
+        }
+
+        await using var a = await OpenAsync();
+        await using var txA = await a.BeginTransactionAsync();
+        var gate = await NewService(a, new CountingBackup()).GetResetGateInTransactionAsync(txA, TenantId, owner);
+        Assert.Equal(DataResetGate.Allowed, gate);
+
+        await using var b = await OpenAsync();
+        await b.ExecuteAsync("SET SESSION innodb_lock_wait_timeout = 1");
+
+        // (덧 · K10) 대조 — 본인 행만 잠근다: 같은 회사 다른 사용자 행은 기다리지 않는다(막히면 1초 뒤 1205 로 빨강 · C7 「집계에 FOR UPDATE 금지」).
+        var staffAffected = await b.ExecuteAsync(
+            "UPDATE users SET is_active = 0 WHERE user_id = @U AND tenant_id = @T", new { U = staff, T = TenantId });
+        Assert.True(staffAffected == 1,
+            $"🔴 A 가 판정을 잡은 동안 같은 회사 다른 사용자 행 UPDATE 영향 = {staffAffected} — 본인 행만 잠가야 한다.");
+
+        // 본인(대표) 행 — A 가 커밋 · 롤백할 때까지 기다리다 1초 뒤 1205(조용한 실패 아님).
+        var ex = await Assert.ThrowsAsync<MySqlException>(() =>
+            b.ExecuteAsync("UPDATE users SET is_active = 0 WHERE user_id = @U AND tenant_id = @T", new { U = owner, T = TenantId }));
+        Assert.True(ex.ErrorCode == MySqlErrorCode.LockWaitTimeout,
+            $"🔴 대표 행 UPDATE 가 잠금 대기 초과(1205)가 아니다: {ex.ErrorCode} · {ex.Message}");
+
+        await txA.RollbackAsync();
+        var ownerAffected = await b.ExecuteAsync(
+            "UPDATE users SET is_active = 0 WHERE user_id = @U AND tenant_id = @T", new { U = owner, T = TenantId });
+        Assert.True(ownerAffected == 1, $"🔴 A 롤백 뒤에도 대표 행 UPDATE 영향 = {ownerAffected}(1행이어야 한다).");
+    }
+
     // ══ 대역 ══
 
     /// <summary>강제 백업이 몇 번 불렸는지 센다 — 판정이 백업 앞인지 재는 자리.</summary>
@@ -449,10 +585,15 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
     {
         public int Count { get; private set; }
 
-        public Task<RunBackupResponse> RunBackupAsync(string tenantId, string triggeredBy = "manual", CancellationToken ct = default)
+        /// <summary>지시서 §17 12d-3 — 백업 도중에 일어날 일(별도 연결 커밋). 기본 null = P1 ~ P10 동작 그대로.</summary>
+        public Func<Task>? OnRun { get; init; }
+
+        // ⬛ 지시서 §17 이전 몸통: { Count++; return Task.FromResult(new RunBackupResponse { Success = true, BackupId = "reset-gate-backup" }); }
+        public async Task<RunBackupResponse> RunBackupAsync(string tenantId, string triggeredBy = "manual", CancellationToken ct = default)
         {
             Count++;
-            return Task.FromResult(new RunBackupResponse { Success = true, BackupId = "reset-gate-backup" });
+            if (OnRun is not null) await OnRun();
+            return new RunBackupResponse { Success = true, BackupId = "reset-gate-backup" };
         }
 
         public Task<BackupSettingsDto> GetSettingsAsync(string tenantId, CancellationToken ct = default) =>
@@ -473,6 +614,14 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
             string? beforeJson = null, string? afterJson = null, string? reason = null,
             System.Data.IDbTransaction? tx = null,
             CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    /// <summary>지시서 §17 12d-3 — 진짜 AuditService 가 쓰는 회사 문맥(TenantId 가 빈칸이면 감사가 건너뛰므로 채운다).</summary>
+    private sealed class FixedTenant(string tenantId, string userId) : ICurrentTenant
+    {
+        public string TenantId { get; } = tenantId;
+        public string UserId { get; } = userId;
+        public string AccountType { get; } = "tenant_admin";
     }
 
     public void Dispose()
