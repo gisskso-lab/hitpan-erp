@@ -125,7 +125,6 @@
          · 설치 = .iss api 폴더 재귀 복사 · 업데이트 판 = api 폴더 통째 — 설치 · 업데이트 스크립트 · 워크플로 0줄(#43).
          · 원본은 저장소 글꼴 옆 한 벌(Link) — 두 벌로 두지 않는다. 선례 = 위 local-swap.ps1 줄(CopyToPublishDirectory).
          · 이 줄이 빠진 판이 한 번이라도 나가면 그 PC 의 글꼴은 고지 없는 사본이 된다(법무 ㉱) — 지우지 마라. -->
-    <None Include="..\HitPan.Application\Resources\Fonts\NotoSerifKR-OFL.txt" Link="licenses\NotoSerifKR-OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
