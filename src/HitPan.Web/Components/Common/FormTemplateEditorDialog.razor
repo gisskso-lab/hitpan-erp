@@ -49,6 +49,36 @@
                     <MudSelectItem Value="@("preprint")">미리 인쇄된 양식용지 (내용만 채워 인쇄)</MudSelectItem>
                 </MudSelect>
             </MudItem>
+            @* 🔴🔴 [2026-11-20 W-G1-51 갈래 E⑷ 「스타일 고르기」 · 작업지시서 §2 · §3 · §6 · PM 결재 E4-1~E4-3]
+                 대표 §11 #1 「스타일 4종 결재승인」 — 그런데 종전에는 고객이 4종을 **고를 길이 없었다**(불러온 값을 그대로 보낼 뿐).
+                 🔴 자리 = 종이 고르기 바로 뒤 — 흐리게 되는 까닭이 종이 고르기에 달려 있어 눈이 같은 줄에서 원인을 본다.
+                 🔴 안 쓰이는 양식(법정 서식 · 양식용지 · 양식 그림)에서는 **숨기지 않고 흐리게** + 칸 바로 밑 까닭 한 줄
+                   (말풍선 · 마우스 올림에 숨기지 않는다). 판정 · 글자는 순수 C# 한 자리(Services/FormStyleChoice.cs).
+                 🔴 `@bind-Value` 가 아니다 — 고르면 미리보기를 다시 그려야 해서 처리기로 받는다. *@
+            <MudItem xs="12" md="6">
+                <MudSelect T="string" Value="@_form.StyleKey" ValueChanged="OnStyleChangedAsync"
+                           Label="@FormStyleChoice.Label"
+                           HelperText="@(StyleWhyNotUsed is null ? FormStyleChoice.HelperText : null)"
+                           Disabled="@(StyleWhyNotUsed is not null)" Margin="Margin.Dense">
+                    @foreach (var styleOption in FormStyleChoice.Options)
+                    {
+                        @* ⬛ [E⑷ 고침 1-①로 대체] 옛 줄: <MudSelectItem T="string" Value="@styleOption.Key">@styleOption.Value</MudSelectItem>
+                             🔴 [2026-11-20 E⑷ 고침 1-① · PM 판단 §78] 큰글씨 설명 줄 밑에 덧줄 한 줄(「종이 폭이 좁으면 … 「기본」으로 찍힙니다.」).
+                               글자만 — 폭 판정 · 흐리게 · 도움말 바꿈 0(대표 §76). 글자 · 어느 항목인지는 FormStyleChoice.OptionNote 한 자리. *@
+                        <MudSelectItem T="string" Value="@styleOption.Key">
+                            @styleOption.Value
+                            @if (FormStyleChoice.OptionNote(styleOption.Key) is { Length: > 0 } styleNote)
+                            {
+                                <MudText Typo="Typo.caption" HtmlTag="span" Class="d-block mud-text-secondary">@styleNote</MudText>
+                            }
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+                @if (StyleWhyNotUsed is { Length: > 0 } styleWhy)
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@styleWhy</MudText>
+                }
+            </MudItem>
 
             @* 🔴 인쇄 매수 (사장님 지시 2026-08-11):
                  *"공급받는자만 (혹은 공급자만) / 공급받는자 / 공급자 인쇄"*
@@ -738,7 +768,11 @@
                 //   ⇒ 이 줄이 없으면 아래 ShowTearLine 도 영영 안 먹는다(both 일 때만 쓰이므로).
                 //   드롭다운 자체는 한 글자도 안 고쳤다(#1 · 20261021작 §5 무접촉).
                 PrintCopyMode = Template.PrintCopyMode,
-                StyleKey = Template.StyleKey,
+                // ⬛ 옛 줄(주석 보존 · #1): StyleKey = Template.StyleKey,
+                // 🔴 [2026-11-20 W-G1-51 갈래 E⑷ · 작업지시서 §5 · PM 결재 E4-4] 불러온 값을 고르기 항목 값으로 고른다
+                //   (앞뒤 공백 · 대소문자 무시 · 빈 값 · 모르는 값 = 기본). 모르는 값은 지금도 종이에 기본으로 나가므로 화면 「기본」 이 사실과 같고,
+                //   그대로 보내면 저장 문 허용 4값(E⑵ 고침 1 · 글자 그대로)에 걸려 **아무것도 안 바꾼 저장까지 막힌다**(결재 기록 §75 ②).
+                StyleKey = FormStyleChoice.Normalize(Template.StyleKey),
                 ShowTearLine = Template.ShowTearLine,
                 // 🔴 [20261026작1 §D-1] 이 다섯 줄이 빠지면 10/21 S-2 와 **똑같은 사고**가 난다 —
                 //   고객이 양식을 열어 아무것도 안 바꾸고 저장만 해도 워터마크 설정이
@@ -1041,6 +1075,60 @@
     /// </summary>
     private static readonly string[] LegalFormTypes =
         { "tax_invoice", "invoice_exempt", "payment_receipt" };
+
+    // ── 인쇄 모양 (W-G1-51 갈래 E⑷ 「스타일 고르기」 · 작업지시서 §3 · §6) ─────────────────
+    /// <summary>
+    /// 🔴 지금 화면 값으로 인쇄 모양이 <b>안 쓰이면</b> 그 까닭 한 줄 · 쓰이면 <c>null</c>(고르기 칸 흐리게 + 칸 밑 한 줄).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 법정 목록은 바로 위 <c>LegalFormTypes</c> 를 <b>그대로 넘긴다</b> — 새로 적지 않는다(두 벌 금지 · 작업지시서 §10).
+    /// 🔴 조건은 서버 스타일 판정과 같다 — 게이트(FormStylePickerGateTests)가 서버 판정을 반사로 불러 40경우를 대조한다.
+    /// 🔴 흐린 동안에도 저장 값은 그대로다 — 순백지로 되돌리면 고른 모양이 살아난다(작업지시서 §3 끝).
+    /// </remarks>
+    private string? StyleWhyNotUsed =>
+        FormStyleChoice.WhyNotUsed(_form.FormType, _form.PaperMode, _form.BackgroundImageUrl, LegalFormTypes);
+
+    /// <summary>그리는 중에 또 골랐다 — 지금 그림이 끝나면 마지막 고른 값으로 1번 더 그린다.</summary>
+    private bool _stylePreviewAgain;
+
+    /// <summary>고르기로 시작한 다시 그리기 고리가 도는 중인가(고리는 하나만 돈다).</summary>
+    private bool _stylePreviewLoop;
+
+    /// <summary>
+    /// 🔴 「인쇄 모양」 을 고르면 값을 담고 <b>미리보기를 다시 그린다</b> — 닫혀 있어도 연다(고른 모양이 바로 보인다 · PM ⑨ (가)).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 [작업지시서 §6 · PM 결재 E4-3] 그리는 중에 또 고르면 「다시 그릴 거리」로 적어 두고, 지금 그림이 끝나면
+    ///   <b>마지막 고른 값으로 1번만</b> 더 그린다 — 늦게 끝난 옛 그림이 새 고름을 덮는 일 0.
+    /// 🔴 지금 그림이 다른 길(미리보기 단추 · 그림 올리기)에서 시작된 것이어도 끝나길 기다린 뒤 그린다 —
+    ///   <c>_previewBusy</c> 는 <c>PreviewAsync</c> 의 <c>finally</c> 에서 늘 풀린다(끝없는 기다림 0). <c>PreviewAsync</c> 본문은 0줄.
+    /// 🔴 서버 새 길 0 — 미리보기 본문이 이미 <c>_form</c> 의 <c>StyleKey</c> 를 실어 보낸다.
+    /// </remarks>
+    private async Task OnStyleChangedAsync(string v)
+    {
+        _form.StyleKey = v;
+        if (string.IsNullOrWhiteSpace(_form.FormType)) return;
+        if (StyleWhyNotUsed is not null) return;   // 흐린 칸 — 다시 그림 0(칸이 막혀 있어 원래 안 온다)
+
+        _stylePreviewAgain = true;
+        if (_stylePreviewLoop) return;   // 도는 고리가 마지막 값으로 1번 더 그린다
+
+        _stylePreviewLoop = true;
+        try
+        {
+            while (_stylePreviewAgain)
+            {
+                while (_previewBusy) await Task.Delay(100);
+                _stylePreviewAgain = false;
+                await PreviewAsync();
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _stylePreviewLoop = false;
+        }
+    }
 
     /// <summary>
     /// 🔴 [2026-10-25 [4] 반려 R-1 봉합] 「빈 A4」인데 <b>법정 전용 작성기</b>로 가는 경우 —

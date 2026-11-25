@@ -117,6 +117,8 @@
     <!-- 🔴 20261120 W-G1-51 갈래 「옛 /pdf」 — 「PDF」 단추가 부르는 전표 인쇄 문 클라이언트(Blazor 비의존)를 **실제로 불러** 요청을 센다(O1~O4). -->
     <Compile Include="..\HitPan.Web\Services\RenderedPdfDownload.cs"
              Link="Linked\RenderedPdfDownload.cs" />
+    <!-- 🔴 20261120 W-G1-51 갈래 E⑷ — 양식 편집창 「인쇄 모양」 판정(순수 C#)을 **실제로 불러** 서버 스타일 판정과 대조한다(RollbackWatch 와 같은 방식 · CS0436 위험 0). -->
+    <Compile Include="..\HitPan.Web\Services\FormStyleChoice.cs" Link="Linked\FormStyleChoice.cs" />
 
     <!-- 🔴 20261013작1 갈래③ (G-W7-6) — 「히트판공지 전송」 화면이 읽는 **그 형**을 게이트가 본다.
          베낀 모양으로 재면 화면이 바뀌어도 게이트는 초록이다(2026-10-12 사고: 게이트는 사전으로 읽어

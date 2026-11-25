@@ -1435,7 +1435,7 @@ CREATE TABLE `form_templates` (
   `show_company_seal` tinyint(1) NOT NULL DEFAULT 1,
   `show_border` tinyint(1) NOT NULL DEFAULT 1 COMMENT '순백지 = 1, 양식용지 = 0',
   `print_copy_mode` varchar(10) NOT NULL DEFAULT 'recipient' COMMENT 'both=공급자+공급받는자 2장 / recipient=공급받는자만 / supplier=공급자만 (DB-90)',
-  `style_key` varchar(20) NOT NULL DEFAULT 'basic' COMMENT '디자인 스타일 (DB-90). 4종 확정 전까지 basic 단일',
+  `style_key` varchar(20) NOT NULL DEFAULT 'basic' COMMENT '디자인 스타일 (DB-90). basic·formal·simple·large — 빈 A4 순백지이고 양식 그림이 없는 양식에만 쓰임(그 밖은 basic 모양)',
   `show_tear_line` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=한 장에 두 벌+가운데 자르는 선 / 0=벌마다 한 쪽씩 (DB-147). print_copy_mode=both 일 때만 쓰인다',
   `print_background` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=양식지 그림을 실제 종이에도 찍는다 / 0=안 찍는다(기본, DB-148). paper_mode 와 다른 축 — 곱해진다',
   `show_watermark` tinyint(1) DEFAULT NULL COMMENT '1=이 양식만 켠다 / 0=이 양식만 끈다 / NULL=공통(print_common_settings)을 따른다(기본, DB-148). 재료는 local_company.logo_url',
