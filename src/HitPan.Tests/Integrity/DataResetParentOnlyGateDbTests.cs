@@ -47,7 +47,10 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            // ⬛ 고침 1 이전(CodeQL 「Path.Combine 앞 인자가 조용히 버려질 수 있음」):
+            //   if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            // Path.Join 은 뒤 조각이 절대 경로여도 앞을 버리지 않는다 — 상대 조각 하나라 결과는 같다.
+            if (File.Exists(Path.Join(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
             dir = dir.Parent;
         }
         throw new Xunit.Sdk.XunitException("HitPan.sln 을 못 찾았다 — 시험이 출하 DDL 을 읽을 수 없다.");
@@ -88,7 +91,8 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
 
     private void SetUpFreshInstall()
     {
-        var ddlPath = Path.Combine(RepoRoot(), "installer", "hitpan_db_clean.sql");
+        // ⬛ 고침 1 이전(CodeQL): var ddlPath = Path.Combine(RepoRoot(), "installer", "hitpan_db_clean.sql");
+        var ddlPath = Path.Join(RepoRoot(), "installer", "hitpan_db_clean.sql");
         Assert.True(File.Exists(ddlPath), $"출하 DDL 이 없다: {ddlPath}");
 
         using (var admin = new MySqlConnection(ServerConnString()))
@@ -389,6 +393,53 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
         Assert.Equal(DataResetGate.NoParent, await svc.GetResetGateAsync(T("5"), m5));
         // 다른 회사의 대표 아이디를 이 회사 이름으로 물어도 통과하지 않는다(tenant 범위 · #2).
         Assert.Equal(DataResetGate.NoParent, await svc.GetResetGateAsync(T("5"), o1));
+    }
+
+    // ══ P9 — (고침 1 · [4] C-2 ⓐ) 대표 2명 회사의 대표 아닌 관리자 = not_parent — 판정 순서 「0 → 본인 → 2+」(지시서 §4-2 · K2)를 묶는다 ══
+
+    [Fact(DisplayName = "P9 🔴 대표 2명 + 관리자 역할 자식(맞는 비번) → not_parent(본인 판정이 2+ 판정보다 먼저) · NotParent 안내 · 백업 0 · 업무 줄 그대로")]
+    public async Task P9_대표2명_회사_관리자_자식은_not_parent()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(P9_대표2명_회사_관리자_자식은_not_parent)); return; }
+        SetUpFreshInstall();
+        string child;
+        await using (var db = await OpenAsync())
+        {
+            await InsertUserAsync(db, TenantId, "owner-a", parent: true, admin: true, OwnerPw);
+            await InsertUserAsync(db, TenantId, "owner-b", parent: true, admin: true, OwnerPw);
+            child = await InsertUserAsync(db, TenantId, "mgr", parent: false, admin: true, ChildPw);
+            await InsertBusinessRowAsync(db, TenantId, "p9");
+
+            // 판정 직접 — 순서가 「2+ → 본인」 으로 뒤집히면 여기서 MultipleParents 가 나와 빨강.
+            Assert.True(await NewService(db, new CountingBackup()).GetResetGateAsync(TenantId, child) == DataResetGate.NotParent,
+                "🔴 대표 2명 회사의 대표 아닌 관리자가 not_parent 가 아니다 — 판정 순서(0 → 본인 → 2+)가 바뀌었다(지시서 §4-2 · K2).");
+        }
+
+        await AssertDeniedAsync(TenantId, child, ChildPw, DataResetGateCodes.NotParent, DataResetService.NotParentMessage, "대표 2명 회사의 관리자 역할 자식");
+    }
+
+    // ══ P10 — (고침 1 · [4] C-2 ⓑ) 대표 본인 · 비번 틀림 = 판정 통과 → 기존 비번 틀림 응답 · 백업 0 · 초기화 0 ══
+
+    [Fact(DisplayName = "P10 🔴 대표 1명 · 대표 본인 · 틀린 비번 → 판정은 통과(DenyCode 없음) · 「비밀번호가 일치하지 않습니다.」 · 백업 0 · 업무 줄 그대로")]
+    public async Task P10_대표_비번_틀림()
+    {
+        if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail(nameof(P10_대표_비번_틀림)); return; }
+        SetUpFreshInstall();
+        await using var db = await OpenAsync();
+        var owner = await InsertUserAsync(db, TenantId, "owner", parent: true, admin: true, OwnerPw);
+        await InsertBusinessRowAsync(db, TenantId, "p10");
+
+        Assert.Equal(DataResetGate.Allowed, await NewService(db, new CountingBackup()).GetResetGateAsync(TenantId, owner));
+
+        var backup = new CountingBackup();
+        var res = await NewService(db, backup).ResetAllAsync(
+            new DataResetRequest { Password = OwnerPw + "-wrong", ConfirmText = "초기화" }, TenantId, owner);
+
+        Assert.False(res.Success, "🔴 대표 본인이 틀린 비번으로 초기화를 했다 — 장부 전체가 지워진다.");
+        Assert.Null(res.DenyCode);
+        Assert.Equal("비밀번호가 일치하지 않습니다.", res.Error);
+        Assert.True(backup.Count == 0, $"🔴 비번이 틀렸는데 강제 백업이 {backup.Count}번 돌았다(비번 확인은 백업 앞이어야 한다).");
+        Assert.Equal(1L, await BusinessRowsAsync(db, TenantId));
     }
 
     // ══ 대역 ══
