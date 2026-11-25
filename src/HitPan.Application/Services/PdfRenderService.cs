@@ -443,6 +443,11 @@ public sealed class PdfRenderService : IPdfRenderService
         "tax_invoice" => "세금계산서",
         "purchase_order" => "발주서",
         "purchase_receipt" => "매입명세서",
+        // 🔴 [2026-11-26 W-G1-51 R1 회송 갈래 R-D · 대표 결재 §221 #5] 반품 2종 제목 — 종전엔 이 표에 없어 「문서」 로 찍혔다.
+        //   머리(basic · 스타일) · 파일 이름이 모두 이 표를 탄다. 판매 반품 입구 셋(반품 화면 · 거래명세서 화면 · 판매반품 화면)은
+        //   모두 "sales-return" → DocumentController.PrintTypeToDocumentType → "sales_return" 한 길.
+        "purchase_return" => "매입반품",
+        "sales_return" => "판매반품",
         _ => "문서"
     };
 
