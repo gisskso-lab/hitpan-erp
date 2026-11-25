@@ -10,6 +10,35 @@ public sealed class DataResetRequest
     public string ConfirmText { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// 20261125작 — 모든데이터 초기화를 부를 수 있는지 판정한 결과(대표 계정 = users.is_parent = 1 · 대표 결재 §146 「초기화만」 · 「막고 안내」).
+/// 판정 순서: 대표 0명 → NoParent · 요청자 본인이 대표 아님 → NotParent · 대표 2명 이상 → MultipleParents · 그 밖 → Allowed.
+/// </summary>
+public enum DataResetGate
+{
+    Allowed,
+    NotParent,
+    NoParent,
+    MultipleParents,
+}
+
+/// <summary>20261125작 — <see cref="DataResetGate"/> 를 화면 · 시험이 함께 쓰는 글자로 바꾼다(화면 ↔ 서버 계약 · 화면 쪽 짝 = HitPan.Web DataResetMenuRule).</summary>
+public static class DataResetGateCodes
+{
+    public const string Allowed = "allowed";
+    public const string NotParent = "not_parent";
+    public const string NoParent = "no_parent";
+    public const string MultipleParents = "multiple_parents";
+
+    public static string ToCode(DataResetGate gate) => gate switch
+    {
+        DataResetGate.Allowed => Allowed,
+        DataResetGate.NoParent => NoParent,
+        DataResetGate.MultipleParents => MultipleParents,
+        _ => NotParent,
+    };
+}
+
 /// <summary>모든데이터 초기화 결과.</summary>
 public sealed class DataResetResponse
 {
@@ -23,4 +52,7 @@ public sealed class DataResetResponse
 
     /// <summary>실패 시 사유.</summary>
     public string? Error { get; set; }
+
+    /// <summary>20261125작 — 대표 판정에서 막혔을 때의 까닭 글자(<see cref="DataResetGateCodes"/>). 막히지 않았으면 null.</summary>
+    public string? DenyCode { get; set; }
 }

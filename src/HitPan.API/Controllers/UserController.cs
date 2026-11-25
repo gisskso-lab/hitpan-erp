@@ -356,14 +356,39 @@ public sealed class UserController : ControllerBase
     /// <summary>내 「직원 계정 관리」 단계(0~3). 화면이 버튼·사이드바 한 줄을 가른다(§5-4).</summary>
     [HttpGet("my-level")]
     [Authorize(Policy = "TenantOnly")]
-    public async Task<IActionResult> GetMyLevel([FromServices] IPermissionService permission, CancellationToken ct)
+    // ⬛ 20261125작 이전 서명: GetMyLevel([FromServices] IPermissionService permission, CancellationToken ct)
+    // ⬛ 20261125작 이전 응답: return Ok(new { level, isAdmin = IsTenantAdminCaller() });
+    // 20261125작 K4 (가) — 사이드바 「모든데이터 초기화」 한 줄 감춤 재료로 dataResetGate 칸 1개를 더한다(기존 level · isAdmin 손 0).
+    //   관리자면 초기화 서비스의 대표 판정(GetResetGateAsync) 글자 · 관리자 아니면 DB 를 읽지 않고 "not_parent".
+    public async Task<IActionResult> GetMyLevel(
+        [FromServices] IPermissionService permission,
+        [FromServices] IDataResetService dataReset,
+        [FromServices] Microsoft.Extensions.Logging.ILogger<UserController> logger,
+        CancellationToken ct)
     {
         var tenantId = HttpContext.Items["TenantId"]?.ToString();
         var userId = CallerUserId();
         if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(userId)) return Forbid();
 
         var level = await permission.GetUsersLevelAsync(userId, tenantId, ct).ConfigureAwait(false);
-        return Ok(new { level, isAdmin = IsTenantAdminCaller() });
+        var isAdmin = IsTenantAdminCaller();
+        var dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.NotParent;
+        if (isAdmin)
+        {
+            // [3-V] S-1 (PM 결재 §150): 판정이 실패해도 my-level 전체가 500 이 되면 안 된다 — 계정 연결 버튼(level · isAdmin)까지 사라진다.
+            //   판정 칸만 메뉴 감춤 쪽(not_parent)으로 두고 남긴다(#15). 서버 초기화는 ResetAllAsync 가 따로 판정하므로 여기서 열어 줄 일은 없다.
+            try
+            {
+                dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.ToCode(
+                    await dataReset.GetResetGateAsync(tenantId, userId, ct).ConfigureAwait(false));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "[my-level] 초기화 대표 판정 실패 — 메뉴 감춤으로 둔다");
+                dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.NotParent;
+            }
+        }
+        return Ok(new { level, isAdmin, dataResetGate });
     }
 
     /// <summary>계정을 만들 수 있는 사원(재직 · 계정 없음 · 2단계 직원이면 일반 직무만). 「기존 사원 고르기」(§4).</summary>

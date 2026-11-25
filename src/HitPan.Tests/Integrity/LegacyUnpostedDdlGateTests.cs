@@ -403,14 +403,15 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
         await using (var seed = new MySqlConnection(DbConnString()))
         {
             await seed.OpenAsync();
+            // 20261125작 — 초기화는 대표(is_parent=1)만. 없으면 판정에서 막혀 이 시험이 재려는 0행을 못 잼(칸 is_parent · 값 1 더함 · #1).
             await seed.ExecuteAsync(
                 """
                 INSERT INTO users
                   (user_id, tenant_id, email, password_hash, user_name, role,
-                   account_type, is_active, created_at, updated_at)
+                   account_type, is_active, created_at, updated_at, is_parent)
                 VALUES
                   (@Uid, @Tid, 'legacy-ddl-gate@hitpan.kr', @Hash, '게이트시험자', 'tenant_admin',
-                   'tenant_admin', 1, NOW(6), NOW(6))
+                   'tenant_admin', 1, NOW(6), NOW(6), 1)
                 """,
                 new { Uid = UserId, Tid = TenantId, Hash = BCrypt.Net.BCrypt.HashPassword(AdminPassword) });
 

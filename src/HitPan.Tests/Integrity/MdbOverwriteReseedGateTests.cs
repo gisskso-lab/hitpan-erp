@@ -426,6 +426,10 @@ public sealed class MdbOverwriteReseedGateTests
             Called = true;
             return Task.FromResult(new DataResetResponse { Success = false, Error = "게이트용 가짜" });
         }
+
+        // 20261125작 #12 — 인터페이스에 대표 판정이 더해져 가짜에도 더함(기존 몸통 손 0).
+        public Task<DataResetGate> GetResetGateAsync(string tenantId, string userId, CancellationToken ct = default)
+            => Task.FromResult(DataResetGate.Allowed);
     }
 
     /// <summary>
@@ -437,6 +441,10 @@ public sealed class MdbOverwriteReseedGateTests
         public Task<DataResetResponse> ResetAllAsync(
             DataResetRequest request, string tenantId, string userId, CancellationToken ct = default)
             => Task.FromResult(new DataResetResponse { Success = true, BackupId = "gate", ClearedTableCount = 0 });
+
+        // 20261125작 #12 — 인터페이스에 대표 판정이 더해져 가짜에도 더함(기존 몸통 손 0).
+        public Task<DataResetGate> GetResetGateAsync(string tenantId, string userId, CancellationToken ct = default)
+            => Task.FromResult(DataResetGate.Allowed);
     }
 
     /// <summary>모드 검사·확인 검사만 타는 자리라 나머지 의존은 넣지 않는다 — 만지면 그 자리에서 터진다(그게 증명이다).</summary>
