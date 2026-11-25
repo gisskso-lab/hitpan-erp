@@ -284,11 +284,11 @@ public sealed class DataResetService : IDataResetService
 
         await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
             "SELECT user_id FROM users WHERE user_id = @UserId AND tenant_id = @TenantId FOR UPDATE",
-            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
         var row = await conn.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
             ResetGateSql,
-            new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+            new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
         return Decide(row);
     }
