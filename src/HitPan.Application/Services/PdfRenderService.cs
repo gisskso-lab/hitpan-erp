@@ -202,7 +202,8 @@ public sealed class PdfRenderService : IPdfRenderService
         {
             try
             {
-                EnsureEmbeddedFontsRegistered();
+                // 옛 줄(W-G1-51 PDF 잠금 고침 1 전 · 헌법 #1 · PM §14-9 ⑤ (가) — 첫 등록을 PDF 생성과 같은 잠금 안으로): EnsureEmbeddedFontsRegistered();
+                PdfGenerationGate.RunOneAtATime(EnsureEmbeddedFontsRegistered);
             }
             catch (Exception ex)
             {
@@ -427,7 +428,8 @@ public sealed class PdfRenderService : IPdfRenderService
                     });
                 }
             });
-        }).GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): }).GeneratePdf();
+        }).GeneratePdfOneAtATime();
 
         var fileName = $"{KoLabel(documentType)}_{data.DocNo}.pdf";
         return (bytes, fileName);
@@ -1734,7 +1736,8 @@ public sealed class PdfRenderService : IPdfRenderService
                     t.Span(" 쪽").FontSize(8);
                 });
             });
-        }).GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): }).GeneratePdf();
+        }).GeneratePdfOneAtATime();
     }
 
     /// <summary>취소된 계산서 안내문 — 고객이 읽는 말로만 적는다.</summary>
@@ -1857,7 +1860,8 @@ public sealed class PdfRenderService : IPdfRenderService
                         t.Span(" 쪽").FontSize(8);
                     });
                 });
-            }).GeneratePdf();
+            // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): }).GeneratePdf();
+            }).GeneratePdfOneAtATime();
         }
         catch (Exception ex)
         {
@@ -2076,7 +2080,8 @@ public sealed class PdfRenderService : IPdfRenderService
                         t.Span(" 쪽").FontSize(8);
                     });
                 });
-            }).GeneratePdf();
+            // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): }).GeneratePdf();
+            }).GeneratePdfOneAtATime();
         }
         catch (Exception ex)
         {
@@ -3519,7 +3524,8 @@ public sealed class PdfRenderService : IPdfRenderService
                 }
                 page.Content().Element(e => ComposePayslipBody(e, data, showBorder));
             });
-        }).GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): }).GeneratePdf();
+        }).GeneratePdfOneAtATime();
 
         var fileName = $"급여명세서_{data.EmpName}_{data.PayYear}-{data.PayMonth:00}.pdf";
         return (bytes, fileName);

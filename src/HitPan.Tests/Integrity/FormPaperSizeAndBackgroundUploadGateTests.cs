@@ -975,7 +975,7 @@ public class FormPaperSizeAndBackgroundUploadGateTests
                 page.Size(pageSize);
                 page.Content().Text("게이트");
             });
-        }).GeneratePdf();
+        }).GeneratePdfOneAtATime();
 
         var (w, h) = ReadFirstMediaBox(bytes);
 
@@ -993,13 +993,13 @@ public class FormPaperSizeAndBackgroundUploadGateTests
         {
             p.Size(QuestPDF.Helpers.PageSizes.A4);
             p.Content().Text("x");
-        })).GeneratePdf();
+        })).GeneratePdfOneAtATime();
 
         var a5 = QuestPDF.Fluent.Document.Create(d => d.Page(p =>
         {
             p.Size(QuestPDF.Helpers.PageSizes.A5);
             p.Content().Text("x");
-        })).GeneratePdf();
+        })).GeneratePdfOneAtATime();
 
         // 🔴 이 둘이 같게 읽히면 읽기 함수가 고장난 것이고, 위 축⒣ 전부가 거짓 통과다.
         Assert.NotEqual(ReadFirstMediaBox(a4), ReadFirstMediaBox(a5));

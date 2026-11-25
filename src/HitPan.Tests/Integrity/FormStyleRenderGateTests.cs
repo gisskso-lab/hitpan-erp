@@ -164,7 +164,7 @@ public sealed class FormStyleRenderGateTests
                     t.Span(" / ").FontSize(pageNoSize); t.TotalPages().FontSize(pageNoSize);
                 });
             });
-        }).GenerateImages(new ImageGenerationSettings
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings
         {
             ImageFormat = ImageFormat.Png,
             RasterDpi = 72
