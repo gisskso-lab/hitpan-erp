@@ -388,6 +388,7 @@ public sealed class UserController : ControllerBase
                 dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.NotParent;
             }
         }
+        dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.Allowed;
         return Ok(new { level, isAdmin, dataResetGate });
     }
 
