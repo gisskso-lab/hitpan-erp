@@ -145,6 +145,9 @@ public sealed class DataResetService : IDataResetService
         using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
+
+            // FK 순환·자식→부모 순서 의존 회피: 트랜잭션 내에서만 FK 체크 해제.
+            await conn.ExecuteAsync(new CommandDefinition("SET FOREIGN_KEY_CHECKS = 0", transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
             // ── 2-1) 트랜잭션 안 대표 판정 다시 (20261125작 지시서 §17 · 12d-2 · 외부 판정 ⑧ · CTO C7 · C8) ──
             // 0) 판정 뒤 · 강제 백업 도중에 대표가 멈춤 · 지움 · 해제되거나 대표가 하나 더 생기면 0) 의 답은 낡는다.
             // 트랜잭션 첫 문장 = 본인 행 잠금 + 같은 판정 SQL(ResetGateSql) — FK 끄기보다 앞(뒤면 거절 반환 뒤 연결이 FK 꺼진 채 남음).
@@ -164,9 +167,6 @@ public sealed class DataResetService : IDataResetService
                     BackupId = backup.BackupId
                 };
             }
-
-            // FK 순환·자식→부모 순서 의존 회피: 트랜잭션 내에서만 FK 체크 해제.
-            await conn.ExecuteAsync(new CommandDefinition("SET FOREIGN_KEY_CHECKS = 0", transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
             foreach (var table in targets)
             {
