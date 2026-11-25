@@ -283,7 +283,7 @@ public sealed class DataResetService : IDataResetService
             ?? throw new InvalidOperationException("트랜잭션에 연결이 없다 — 초기화 안 판정을 할 수 없다.");
 
         await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
-            "SELECT user_id FROM users WHERE user_id = @UserId AND tenant_id = @TenantId FOR UPDATE",
+            "SELECT user_id FROM users WHERE user_id = @UserId AND tenant_id = @TenantId",
             new { UserId = userId, TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         var row = await conn.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
