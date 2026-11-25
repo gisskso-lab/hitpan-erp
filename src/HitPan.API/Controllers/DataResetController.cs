@@ -48,6 +48,14 @@ public sealed class DataResetController : HitPanControllerBase
         if (EnsureTenant() is { } err) return err;
         if (string.IsNullOrEmpty(UserId)) return Forbid();
 
+        // 20261125작 K3 안 1 — 확인 문구 「초기화」 를 서버에서도 본다(화면만 보던 자리 · 1V §4 덧).
+        //   화면 모델이 읽는 모양(DataResetResponse) 그대로 돌려준다. 서비스는 문구를 모른다
+        //   (자료이관 덮어쓰기는 MigrationController 가 「덮어쓰기」 로 이미 본다).
+        if ((request.ConfirmText ?? string.Empty).Trim() != "초기화")
+        {
+            return BadRequest(new DataResetResponse { Success = false, Error = "확인을 위해 '초기화' 라고 입력해 주세요." });
+        }
+
         var result = await _service.ResetAllAsync(request, TenantId!, UserId!, ct).ConfigureAwait(false);
         if (!result.Success)
         {

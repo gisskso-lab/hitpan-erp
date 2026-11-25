@@ -126,6 +126,45 @@ public sealed class DataResetParentOnlyGateTests
         Assert.NotNull(t.GetCustomAttribute<HitPan.API.Security.MainPcOnlyAttribute>(inherit: true));
     }
 
+    // ══ N4 — (K3 안 1) 확인 문구 「초기화」 서버 대조 ══
+
+    [Theory(DisplayName = "N4 🔴 초기화 API — 확인 문구가 「초기화」(앞뒤 빈칸 허용)가 아니면 서비스를 부르지도 않고 400 · Success=false")]
+    [InlineData("", false)]
+    [InlineData("덮어쓰기", false)]
+    [InlineData("초기 화", false)]
+    [InlineData("초기화 ", true)]
+    [InlineData(" 초기화", true)]
+    [InlineData("초기화", true)]
+    public async Task N4_확인문구_서버대조(string confirmText, bool serviceCalled)
+    {
+        var called = false;
+        var spy = FakeProxy<HitPan.Application.Interfaces.IDataResetService>.Create(m =>
+        {
+            if (m.Name != "ResetAllAsync") throw new NotSupportedException(m.Name);
+            called = true;
+            return Task.FromResult(new HitPan.Application.DTOs.DataReset.DataResetResponse { Success = false, Error = "n4 가짜" });
+        });
+        var c = new DataResetController(spy, provisioner: null!,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataResetController>.Instance);
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Items["TenantId"] = "n4-tenant";
+        http.Items["UserId"] = "n4-user";
+        c.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = http };
+
+        var result = await c.ResetAll(new HitPan.Application.DTOs.DataReset.DataResetRequest
+        {
+            Password = "n4-pw",
+            ConfirmText = confirmText,
+        }, default);
+
+        Assert.True(called == serviceCalled,
+            $"🔴 확인 문구 「{confirmText}」 → 서비스 {(serviceCalled ? "불려야" : "안 불려야")} 하는데 {(called ? "불렸다" : "안 불렸다")}.");
+        var bad = Assert.IsType<Microsoft.AspNetCore.Mvc.BadRequestObjectResult>(result);
+        var body = Assert.IsType<HitPan.Application.DTOs.DataReset.DataResetResponse>(bad.Value);
+        Assert.False(body.Success);
+        if (!serviceCalled) Assert.Equal("확인을 위해 '초기화' 라고 입력해 주세요.", body.Error);
+    }
+
     // ══ N5 — [3-V] S-1 (PM 결재 §150): 판정이 던져도 my-level 은 200 · 기존 칸 그대로 · 판정 칸 not_parent ══
 
     [Fact(DisplayName = "N5 🔴 my-level — 대표 판정이 예외를 던져도 200 · level · isAdmin 그대로 · dataResetGate = not_parent(메뉴 감춤)")]
