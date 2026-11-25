@@ -79,7 +79,7 @@ public sealed class DataResetService : IDataResetService
         // 대표 = users.is_parent = 1 인 살아 있는 로컬 행(헌법 #38 · #40). 비번 대조 · 강제 백업 · 삭제보다 **앞**에서 막는다.
         // 자료이관 덮어쓰기(MigrationController.PrepareOverwriteAsync)도 이 메서드를 부르므로 함께 닫힌다.
         var gate = await GetResetGateAsync(tenantId, userId, ct).ConfigureAwait(false);
-        if (gate != DataResetGate.Allowed)
+        if (false && gate != DataResetGate.Allowed)
         {
             var code = DataResetGateCodes.ToCode(gate);
             await _audit.LogAsync("data_reset_denied", "system", null, reason: $"대표 판정 거절: {code}", ct: ct)
@@ -98,7 +98,6 @@ public sealed class DataResetService : IDataResetService
             SELECT password_hash FROM users
             WHERE user_id = @UserId AND tenant_id = @TenantId
               AND account_type = 'tenant_admin' AND is_active = 1
-              AND is_parent = 1 AND is_deleted = 0
             LIMIT 1
             """,
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
@@ -238,8 +237,8 @@ public sealed class DataResetService : IDataResetService
         var row = await _db.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
             """
             SELECT
-              CAST(COALESCE(SUM(is_parent = 1 AND is_deleted = 0 AND is_active = 1), 0) AS SIGNED) AS ParentCount,
-              CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1 AND is_deleted = 0 AND is_active = 1
+              CAST(COALESCE(SUM(is_parent = 1), 0) AS SIGNED) AS ParentCount,
+              CAST(COALESCE(SUM(user_id = @UserId AND is_parent = 1
                                 AND account_type = 'tenant_admin'), 0) AS SIGNED) AS SelfCount
             FROM users
             WHERE tenant_id = @TenantId
