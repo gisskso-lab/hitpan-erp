@@ -23,6 +23,9 @@ public sealed class UsersLevelModel
 {
     public int Level { get; set; }
     public bool IsAdmin { get; set; }
+
+    /// <summary>20261125작 K4 (가) — 「모든데이터 초기화」 대표 판정 글자(<see cref="DataResetMenuRule"/> 상수). 못 읽으면 null → 메뉴 안 보임.</summary>
+    public string? DataResetGate { get; set; }
 }
 
 /// <summary>[구독계정추가] 창이 읽는 숫자(GET api/users/seat-subscription · 3단계 전용).</summary>

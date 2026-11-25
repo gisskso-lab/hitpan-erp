@@ -9,7 +9,8 @@ namespace HitPan.API.Controllers;
 /// 모든데이터 초기화(히트판 자료 포맷) API (사장님 결재 2026-06-23).
 /// 부모계정·회사정보·로그 제외 모든 업무 데이터(원장·장부 포함)를 비운다.
 /// 실행 전 부모계정 패스워드 재입력 + 강제 백업을 강제하며, 초기화 동작도 audit 로그에 남긴다.
-/// 권한: TenantAdminOnly — 부모계정 전용. §#22 본사 미수신(로컬 처리).
+/// ⬛ 20261125작 이전: 권한: TenantAdminOnly — 부모계정 전용. §#22 본사 미수신(로컬 처리).
+/// 권한: 문 = TenantAdminOnly · 대표 판정 = 서비스(<c>DataResetService.GetResetGateAsync</c> · users.is_parent = 1 · 20261125작 K7). §#22 본사 미수신(로컬 처리).
 /// </summary>
 [ApiController]
 [Route("api/data-reset")]
@@ -46,6 +47,14 @@ public sealed class DataResetController : HitPanControllerBase
     {
         if (EnsureTenant() is { } err) return err;
         if (string.IsNullOrEmpty(UserId)) return Forbid();
+
+        // 20261125작 K3 안 1 — 확인 문구 「초기화」 를 서버에서도 본다(화면만 보던 자리 · 1V §4 덧).
+        //   화면 모델이 읽는 모양(DataResetResponse) 그대로 돌려준다. 서비스는 문구를 모른다
+        //   (자료이관 덮어쓰기는 MigrationController 가 「덮어쓰기」 로 이미 본다).
+        if ((request.ConfirmText ?? string.Empty).Trim() != "초기화")
+        {
+            return BadRequest(new DataResetResponse { Success = false, Error = "확인을 위해 '초기화' 라고 입력해 주세요." });
+        }
 
         var result = await _service.ResetAllAsync(request, TenantId!, UserId!, ct).ConfigureAwait(false);
         if (!result.Success)

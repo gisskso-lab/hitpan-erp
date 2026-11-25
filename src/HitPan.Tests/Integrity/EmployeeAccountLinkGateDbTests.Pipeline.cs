@@ -109,6 +109,9 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IEmployeeService, EmployeeService>();
         services.AddSingleton<ITenantDeviceService>(sp => new TenantDeviceService(db, new NoOpAudit(), config, NullLogger<TenantDeviceService>.Instance));
+        // 20261125작 — my-level 이 초기화 대표 판정(GetResetGateAsync)을 부르게 되어 Program.cs:143 과 같은 서비스를 넣는다.
+        //   이 시험은 판정만 탄다 — 백업 서비스는 넣지 않는다(초기화를 부르면 그 자리에서 터진다 = 이 길로 지우지 않았다는 증명).
+        services.AddScoped<IDataResetService>(_ => new DataResetService(db, null!, new NoOpAudit(), NullLogger<DataResetService>.Instance));
 
         await using var sp = services.BuildServiceProvider();
         var app = new ApplicationBuilder(sp);
@@ -319,6 +322,12 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         var mgrLevel = await PipeAsync(db, "GET", "/api/users/my-level", manager);
         Assert.Equal(3, MyLevel(mgrLevel));
         Assert.Contains("\"isAdmin\":true", mgrLevel.Body);
+        // 20261125작 — 「모든데이터 초기화」 메뉴 재료(dataResetGate). 관리자(대표 아님) = not_parent · 대표 = allowed.
+        //   기대 글자는 화면이 쓰는 DataResetMenuRule 상수로 만든다(화면 ↔ 서버 계약 — 한쪽 글자만 바뀌면 여기서 빨강).
+        Assert.Contains($"\"dataResetGate\":\"{HitPan.Web.Services.DataResetMenuRule.NotParent}\"", mgrLevel.Body);
+        var ownerLevel = await PipeAsync(db, "GET", "/api/users/my-level", owner);
+        Assert.True(ownerLevel.Status == 200, $"대표 my-level → {ownerLevel.Status} · {ownerLevel.Body}");
+        Assert.Contains($"\"dataResetGate\":\"{HitPan.Web.Services.DataResetMenuRule.Allowed}\"", ownerLevel.Body);
         var ownerPerm = await PipeAsync(db, "POST", "/api/permissions", owner,
             $"{{\"userId\":\"{target}\",\"permissions\":[{{\"menuCode\":\"USERS\",\"canView\":true}}]}}");
         Assert.True(Ok2xx(ownerPerm), $"대표 POST permissions → {ownerPerm.Status}");
