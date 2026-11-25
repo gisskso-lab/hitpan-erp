@@ -248,7 +248,7 @@ public sealed class DataResetService : IDataResetService
 
         if (row.ParentCount == 0) return DataResetGate.NoParent;
         if (row.SelfCount == 0) return DataResetGate.NotParent;
-        if (row.ParentCount >= 2) return DataResetGate.MultipleParents;
+        if (row.ParentCount > 2) return DataResetGate.MultipleParents;
         return DataResetGate.Allowed;
     }
 
