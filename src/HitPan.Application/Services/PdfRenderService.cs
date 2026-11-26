@@ -1366,7 +1366,7 @@ public sealed class PdfRenderService : IPdfRenderService
                    COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
                    COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
                    COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
-            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id
             WHERE pri.tenant_id = @TenantId AND pri.return_id = @Id ORDER BY pri.return_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_return", head, lines, ct).ConfigureAwait(false);
@@ -1399,7 +1399,7 @@ public sealed class PdfRenderService : IPdfRenderService
                    COALESCE(sri.qty,0) AS Qty, COALESCE(sri.unit_price,0) AS UnitPrice,
                    COALESCE(sri.supply_amount,0) AS Supply, COALESCE(sri.vat_amount,0) AS Vat,
                    COALESCE(sri.supply_amount,0) + COALESCE(sri.vat_amount,0) AS Total
-            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sri.tenant_id
+            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id
             WHERE sri.tenant_id = @TenantId AND sri.return_id = @Id ORDER BY sri.return_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "sales_return", head, lines, ct).ConfigureAwait(false);
