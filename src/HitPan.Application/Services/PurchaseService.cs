@@ -32,6 +32,10 @@ public class PurchaseService : IPurchaseService
 
     public async Task<string> CreateOrderAsync(CreatePurchaseOrderRequest request, CancellationToken ct = default)
     {
+        // 🔴 W-G1-51 후1 E8 — 번호 따기 · 첫 쓰기 전에 품목이 이 회사 것인지 본다(회사 값 = JWT).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
+
         var poRepo = _unitOfWork.Repository<PurchaseOrder>();
         var poItemRepo = _unitOfWork.Repository<PurchaseOrderItem>();
 
@@ -96,6 +100,10 @@ public class PurchaseService : IPurchaseService
 
     public async Task<string> CreateReceiptAsync(CreateReceiptRequest request, CancellationToken ct = default)
     {
+        // 🔴 W-G1-51 후1 E9 — 번호 따기 · 첫 쓰기 전에 본다(회사 값 = JWT). 발주 → 매입 전환도 이 입구를 지난다.
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
+
         var receiptRepo = _unitOfWork.Repository<PurchaseReceipt>();
         var receiptItemRepo = _unitOfWork.Repository<PurchaseReceiptItem>();
 
@@ -976,6 +984,11 @@ public class PurchaseService : IPurchaseService
             "SELECT item_id, qty, unit_price, supply_amount, vat_amount, warehouse_id FROM purchase_receipt_items WHERE receipt_id=@Id AND tenant_id=@Tid",
             new { Id = receiptId, Tid = tenantId }, transaction: dbTx, cancellationToken: ct))).ToList();
 
+        // 🔴 W-G1-51 후1 K3 (가) — 매입명세서 → 반품 전환(W3). 고치기 전 들어간 원본 매입 줄이 남아 있을 수 있어
+        //   원본 줄 id 로 한 번 본다. 같은 연결 · 같은 tx · 번호 따기 · 반품 머리 INSERT 전(거절되면 아래 catch 가 롤백).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            conn, tenantId, items.Select(x => (string?)x.item_id), dbTx, ct);
+
         // 반품 문서번호 채번 — WO-11 한글 prefix
         var today = BusinessDate.Today;   // 20260825작18 W4 — 반품일자·채번 prefix 가 하루 어긋나던 자리
         // 🔴 20260827작9 W2 — COUNT+1 → MAX+1(DocumentNumberHelper).
@@ -1062,6 +1075,10 @@ public class PurchaseService : IPurchaseService
             else
                 _db.Open();
         }
+
+        // 🔴 W-G1-51 후1 E10 — 원 매입 조회 · 트랜잭션 · 첫 쓰기 전에 본다(회사 값 = JWT 에서 온 인자).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         // 🔴🔴 20260827작7 W2-1 (사장님 지시 "당장 봉합") — **중복 발행 차단 + 상태 가드.**
         //
@@ -1207,6 +1224,11 @@ public class PurchaseService : IPurchaseService
         var status = (string)current.status;
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
+
+        // 🔴 W-G1-51 후1 E11 — 이 길은 트랜잭션 없이 머리 UPDATE → 줄 DELETE → INSERT 라
+        //   반드시 머리 UPDATE 앞에서 본다(거절되면 머리 · 기존 줄 그대로).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         decimal totalAmount = 0, totalVat = 0;
