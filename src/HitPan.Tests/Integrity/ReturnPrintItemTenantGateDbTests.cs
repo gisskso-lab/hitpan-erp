@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using HitPan.Application.DTOs.Settings;
@@ -30,6 +29,12 @@ namespace HitPan.Tests.Integrity;
 /// 🔴 변이(K4): 로더 조인의 회사 조각을 빼면 G-2a · G-2b 빨강 · G-1 · G-0 은 초록 그대로.
 /// 🔴 표 칸 = 출하 DDL <c>installer/hitpan_db_clean.sql</c> 대조(#13 · #36) · 로더가 읽는 칸만 둔 부분 집합.
 /// 🔴 이 PC 개발 DB(3306)는 실물이다 — 로컬에서는 이 게이트를 돌리지 않는다(CI 업무 로직 게이트 잡이 문다).
+/// 🔴 <b>2026-11-26 회송 고침 — 잴 글자는 ASCII</b>: 첫 CI 런(DB 게이트 잡 = 리눅스 러너)에서 6건이 모두 빨강이었다.
+///   PDF 글자를 보니 문서번호 · 날짜 · 금액(ASCII)은 읽혔고 한글은 전부 <c>\0</c> 였다 — 제품 기본 글꼴(맑은 고딕)이
+///   그 러너에 없어 한글 글리프가 빈 글리프로 그려지고 PdfPig 가 글자를 되찾지 못한 것(시험 장치 결함 · 제품 조건과 무관).
+///   그래서 품명 · 규격 · 거래처 이름처럼 <b>있다 / 없다를 재는 글자</b>는 글꼴과 상관없는 ASCII 토큰으로 둔다.
+///   한글 안내문 0 검사는 남기되(윈도 러너에서는 뜻이 있다), 리눅스에서도 뜻이 있는 「찾음」 증거를 ASCII 로 함께 단다
+///   (<see cref="AssertFound"/> — 못 찾으면 문서번호 칸이 반품 번호가 아니라 전표 id 로 그려진다).
 /// </remarks>
 public sealed class ReturnPrintItemTenantGateDbTests
 {
@@ -41,11 +46,18 @@ public sealed class ReturnPrintItemTenantGateDbTests
     private const string PartnerA = "GATE-RPIT-PARTNER-A";
     private const string PartnerB = "GATE-RPIT-PARTNER-B";
     private const string ItemA1 = "GATE-RPIT-ITEM-A1";
+    private const string ItemA2 = "GATE-RPIT-ITEM-A2";
     private const string ItemB1 = "GATE-RPIT-ITEM-B1";
-    private const string NameA1 = "가회사부품";
-    private const string SpecA1 = "A-규격77";
-    private const string NameB1 = "나회사비밀품";
-    private const string SpecB1 = "B-규격99";
+    // 종전(회송 고침 전 · 한글 = 리눅스 러너에서 \0 로 읽혀 6건 모두 빈 측정): NameA1 = "가회사부품" · SpecA1 = "A-규격77" · NameB1 = "나회사비밀품" · SpecB1 = "B-규격99"
+    // 🔴 토큰끼리 서로의 부분 글자가 아니다(포함 판정이 섞이지 않게) · 공백 · 하이픈 0(칸 안 줄바꿈으로 토큰이 쪼개지지 않게).
+    private const string NameA1 = "RPITNAMEAONE";
+    private const string SpecA1 = "RPITSPECA77";
+    private const string NameA2 = "RPITNAMEATWO";
+    private const string SpecA2 = "RPITSPECA88";
+    private const string NameB1 = "RPITSECRETB";
+    private const string SpecB1 = "RPITSPECB99";
+    private const string PartnerNameA = "RPITPARTNERA";
+    private const string PartnerNameB = "RPITPARTNERB";
     private const string Missing = "원본 문서를 찾을 수 없습니다";
 
     private const string PurchaseKey = "purchase_return";
@@ -101,18 +113,24 @@ public sealed class ReturnPrintItemTenantGateDbTests
         if (!ServerAvailable()) { DbGateEnvironment.SkipOrFail($"ReturnPrintItemTenantGate G-1 ({key})"); return; }
         using var db = FreshDb();
         SeedMasters(db);
+        // 종전(회송 고침 전 · [4] F-4 「품명 정확히 2번」 꼴 취약): 두 줄 모두 ItemA1 · Assert.Equal(2, Regex.Matches(text, Regex.Escape(NameA1)).Count)
+        //   → 줄마다 같은 회사의 <b>다른</b> 품목을 둬 「줄 1 = A1 품명 · 규격」 · 「줄 2 = A2 품명 · 규격」 을 각각 포함으로 잰다
+        //     (글자 뽑기의 줄바꿈 · 낱말 끊기 · 다른 칸 우연 등장에 횟수가 흔들리지 않는다 · 뜻 = 같은 회사 품목 그대로).
         var lines = new[]
         {
             new Line("L1", ItemA1, 2m, 15850m),
-            new Line("L2", ItemA1, 3m, 16300m),
+            new Line("L2", ItemA2, 3m, 16300m),
         };
         var headTotal = SeedReturn(db, key, TenantA, PartnerA, "RPIT-G1", "RPIT-G1-NO", lines);
 
         var text = await RenderText(db, TenantA, key, "RPIT-G1");
 
+        AssertFound(text, "RPIT-G1-NO", PartnerNameA);
         Assert.DoesNotContain(Missing, text, StringComparison.Ordinal);
-        Assert.Equal(2, Regex.Matches(text, Regex.Escape(NameA1)).Count);
+        Assert.Contains(NameA1, text, StringComparison.Ordinal);
         Assert.Contains(SpecA1, text, StringComparison.Ordinal);
+        Assert.Contains(NameA2, text, StringComparison.Ordinal);
+        Assert.Contains(SpecA2, text, StringComparison.Ordinal);
         foreach (var l in lines)
             Assert.Contains(l.Total.ToString("N0"), text, StringComparison.Ordinal);
         Assert.Contains(headTotal.ToString("N0"), text, StringComparison.Ordinal);
@@ -130,6 +148,7 @@ public sealed class ReturnPrintItemTenantGateDbTests
         // 예외가 나면 이 줄에서 빨강(Q1 — NULL 품명 렌더) — 잡지 않는다.
         var text = await RenderText(db, TenantA, key, "RPIT-G2");
 
+        AssertFound(text, "RPIT-G2-NO", PartnerNameA);
         Assert.DoesNotContain(NameB1, text, StringComparison.Ordinal);
         Assert.DoesNotContain(SpecB1, text, StringComparison.Ordinal);
         Assert.Contains(foreign.Total.ToString("N0"), text, StringComparison.Ordinal);   // 줄은 남음(LEFT JOIN 유지)
@@ -148,6 +167,7 @@ public sealed class ReturnPrintItemTenantGateDbTests
 
         var text = await RenderText(db, TenantB, key, "RPIT-G0");
 
+        AssertFound(text, "RPIT-G0-NO", PartnerNameB);
         Assert.DoesNotContain(Missing, text, StringComparison.Ordinal);
         Assert.Contains(NameB1, text, StringComparison.Ordinal);
         Assert.Contains(SpecB1, text, StringComparison.Ordinal);
@@ -157,6 +177,16 @@ public sealed class ReturnPrintItemTenantGateDbTests
     // ────────────────────────────────────────────────────────────────────────
     //  헬퍼
     // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 로더가 반품을 <b>찾았다</b>는 글꼴 무관 증거 — 찾으면 문서번호 칸 = 반품 번호(<c>…-NO</c>) · 거래처 칸 = 거래처 이름,
+    /// 못 찾으면 문서번호 칸 = 전표 id · 거래처 칸 = 한글 안내문(리눅스 러너에서는 \0 로 읽혀 <see cref="Missing"/> 검사만으로는 못 가른다).
+    /// </summary>
+    private static void AssertFound(string text, string returnNo, string partnerName)
+    {
+        Assert.Contains(returnNo, text, StringComparison.Ordinal);
+        Assert.Contains(partnerName, text, StringComparison.Ordinal);
+    }
 
     /// <summary>메일 길과 같은 호출 꼴(4인자 · overrides 없음) — 양식은 빈 값(Moq) · PDF 글자를 돌려준다.</summary>
     private static async Task<string> RenderText(MySqlConnection db, string tenant, string key, string id)
@@ -172,18 +202,20 @@ public sealed class ReturnPrintItemTenantGateDbTests
         return string.Join("\n", read.GetPages().Select(p => p.Text));
     }
 
-    /// <summary>두 회사 · 거래처 · 품목 A1(회사 A) · B1(회사 B) · 회사 정보.</summary>
+    /// <summary>두 회사 · 거래처 · 품목 A1 · A2(회사 A) · B1(회사 B) · 회사 정보.</summary>
     private static void SeedMasters(MySqlConnection db)
     {
         Exec(db, $"""
             INSERT INTO items (item_id, tenant_id, item_code, item_name, spec) VALUES
               ('{ItemA1}', '{TenantA}', 'RPIT-A1', '{NameA1}', '{SpecA1}'),
+              ('{ItemA2}', '{TenantA}', 'RPIT-A2', '{NameA2}', '{SpecA2}'),
               ('{ItemB1}', '{TenantB}', 'RPIT-B1', '{NameB1}', '{SpecB1}');
             """);
+        // 종전(회송 고침 전): 거래처 이름 '가거래처' · '나거래처'(한글 — 리눅스 러너에서 못 읽어 「찾음」 증거로 못 쓴다)
         Exec(db, $"""
             INSERT INTO partners (partner_id, tenant_id, partner_name) VALUES
-              ('{PartnerA}', '{TenantA}', '가거래처'),
-              ('{PartnerB}', '{TenantB}', '나거래처');
+              ('{PartnerA}', '{TenantA}', '{PartnerNameA}'),
+              ('{PartnerB}', '{TenantB}', '{PartnerNameB}');
             """);
         Exec(db, $"""
             INSERT INTO local_company (tenant_id, tenant_code, company_name) VALUES
