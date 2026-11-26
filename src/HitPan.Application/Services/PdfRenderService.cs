@@ -1123,15 +1123,12 @@ public sealed class PdfRenderService : IPdfRenderService
             FROM quotations q LEFT JOIN partners p ON p.partner_id = q.partner_id AND p.tenant_id = q.tenant_id
             WHERE q.tenant_id = @TenantId AND q.quote_id = @Id
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P1) — 품목 조인에 회사 조건 한 조각 더함(LEFT JOIN 유지 · 다른 회사 품목 줄은 행 · 금액 남고 품명 · 규격만 빈 칸).
-        //   견적 상세표(quotation_items)엔 tenant_id 칸이 없다(출하 DDL) ⇒ 머리 SQL 과 같은 @TenantId(JWT 값 · 새 매개변수 0)를 직접 쓴다 — 상세 칸 꼴 금지.
-        // 종전: FROM quotation_items qi LEFT JOIN items i ON i.item_id = qi.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(qi.qty,0) AS Qty, COALESCE(qi.unit_price,0) AS UnitPrice,
                    COALESCE(qi.amount,0) AS Supply, COALESCE(qi.vat_amount,0) AS Vat,
                    COALESCE(qi.amount,0) + COALESCE(qi.vat_amount,0) AS Total
-            FROM quotation_items qi LEFT JOIN items i ON i.item_id = qi.item_id AND i.tenant_id = @TenantId
+            FROM quotation_items qi LEFT JOIN items i ON i.item_id = qi.item_id
             WHERE qi.quote_id = @Id ORDER BY qi.sort_order
             """;
         return await LoadByQueriesAsync(tenantId, id, "quotation", head, lines, ct).ConfigureAwait(false);
@@ -1152,14 +1149,12 @@ public sealed class PdfRenderService : IPdfRenderService
             FROM sales_orders s LEFT JOIN partners p ON p.partner_id = s.partner_id AND p.tenant_id = s.tenant_id
             WHERE s.tenant_id = @TenantId AND s.order_id = @Id
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P2) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지).
-        // 종전: FROM sales_order_items soi LEFT JOIN items i ON i.item_id = soi.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(soi.ordered_qty,0) AS Qty, COALESCE(soi.unit_price,0) AS UnitPrice,
                    COALESCE(soi.supply_amount,0) AS Supply, COALESCE(soi.vat_amount,0) AS Vat,
                    COALESCE(soi.supply_amount,0) + COALESCE(soi.vat_amount,0) AS Total
-            FROM sales_order_items soi LEFT JOIN items i ON i.item_id = soi.item_id AND i.tenant_id = soi.tenant_id
+            FROM sales_order_items soi LEFT JOIN items i ON i.item_id = soi.item_id
             WHERE soi.tenant_id = @TenantId AND soi.order_id = @Id ORDER BY soi.order_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "sales_order", head, lines, ct).ConfigureAwait(false);
@@ -1179,14 +1174,12 @@ public sealed class PdfRenderService : IPdfRenderService
             FROM sales_deliveries d LEFT JOIN partners p ON p.partner_id = d.partner_id AND p.tenant_id = d.tenant_id
             WHERE d.tenant_id = @TenantId AND d.delivery_id = @Id
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P3) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지).
-        // 종전: FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(di.qty,0) AS Qty, COALESCE(di.unit_price,0) AS UnitPrice,
                    COALESCE(di.supply_amount,0) AS Supply, COALESCE(di.vat_amount,0) AS Vat,
                    COALESCE(di.supply_amount,0) + COALESCE(di.vat_amount,0) AS Total
-            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
+            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
             WHERE di.tenant_id = @TenantId AND di.delivery_id = @Id ORDER BY di.delivery_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "delivery", head, lines, ct).ConfigureAwait(false);
@@ -1217,14 +1210,12 @@ public sealed class PdfRenderService : IPdfRenderService
             LEFT JOIN partners p ON p.partner_id = d.partner_id AND p.tenant_id = d.tenant_id
             WHERE d.tenant_id = @TenantId AND d.delivery_id = @Id AND d.is_deleted = 0
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P4) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지).
-        // 종전: FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(di.qty,0) AS Qty, COALESCE(di.unit_price,0) AS UnitPrice,
                    COALESCE(di.supply_amount,0) AS Supply, COALESCE(di.vat_amount,0) AS Vat,
                    COALESCE(di.supply_amount,0) + COALESCE(di.vat_amount,0) AS Total
-            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id AND i.tenant_id = di.tenant_id
+            FROM sales_delivery_items di LEFT JOIN items i ON i.item_id = di.item_id
             WHERE di.tenant_id = @TenantId AND di.delivery_id = @Id ORDER BY di.delivery_item_id
             """;
 
@@ -1310,14 +1301,12 @@ public sealed class PdfRenderService : IPdfRenderService
             FROM purchase_orders po LEFT JOIN partners p ON p.partner_id = po.partner_id AND p.tenant_id = po.tenant_id
             WHERE po.tenant_id = @TenantId AND po.po_id = @Id
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P5) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지).
-        // 종전: FROM purchase_order_items poi LEFT JOIN items i ON i.item_id = poi.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(poi.ordered_qty,0) AS Qty, COALESCE(poi.unit_price,0) AS UnitPrice,
                    COALESCE(poi.supply_amount,0) AS Supply, COALESCE(poi.vat_amount,0) AS Vat,
                    COALESCE(poi.supply_amount,0) + COALESCE(poi.vat_amount,0) AS Total
-            FROM purchase_order_items poi LEFT JOIN items i ON i.item_id = poi.item_id AND i.tenant_id = poi.tenant_id
+            FROM purchase_order_items poi LEFT JOIN items i ON i.item_id = poi.item_id
             WHERE poi.tenant_id = @TenantId AND poi.po_id = @Id ORDER BY poi.po_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_order", head, lines, ct).ConfigureAwait(false);
@@ -1337,14 +1326,12 @@ public sealed class PdfRenderService : IPdfRenderService
             FROM purchase_receipts pr LEFT JOIN partners p ON p.partner_id = pr.partner_id AND p.tenant_id = pr.tenant_id
             WHERE pr.tenant_id = @TenantId AND pr.receipt_id = @Id
             """;
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 P6) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지).
-        // 종전: FROM purchase_receipt_items pri LEFT JOIN items i ON i.item_id = pri.item_id
         const string lines = """
             SELECT i.item_name AS ItemName, i.spec AS Spec,
                    COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
                    COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
                    COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
-            FROM purchase_receipt_items pri LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
+            FROM purchase_receipt_items pri LEFT JOIN items i ON i.item_id = pri.item_id
             WHERE pri.tenant_id = @TenantId AND pri.receipt_id = @Id ORDER BY pri.receipt_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_receipt", head, lines, ct).ConfigureAwait(false);

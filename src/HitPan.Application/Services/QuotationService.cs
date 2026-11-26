@@ -151,10 +151,6 @@ public class QuotationService : IQuotationService
     {
         ValidateRequest(request.Items);
 
-        // 🔴 W-G1-51 후1 E1 — 첫 쓰기 전에 품목이 이 회사 것인지 본다(회사 값 = JWT 에서 온 인자).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
-
         var quoteDate = request.QuoteDate == default ? DateTime.UtcNow.Date : request.QuoteDate.Date;
         var quoteId = Guid.NewGuid().ToString();
         var quoteNo = await GenerateQuoteNoAsync(tenantId, quoteDate, ct);
@@ -207,10 +203,6 @@ public class QuotationService : IQuotationService
     {
         ValidateRequest(request.Items);
         await EnsureExistsAsync(tenantId, quoteId, ct);
-
-        // 🔴 W-G1-51 후1 E2 — 머리 UPDATE · 줄 DELETE 전에 본다(거절되면 기존 견적 그대로).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         var quoteDate = request.QuoteDate == default ? DateTime.UtcNow.Date : request.QuoteDate.Date;
         var totalAmount = request.Items.Sum(x => x.Amount);
@@ -318,11 +310,6 @@ public class QuotationService : IQuotationService
             throw new InvalidOperationException(
                 $"이미 수주로 전환된 견적서입니다. (전환번호: {convertedNo ?? quote.ConvertedOrderId})");
         }
-
-        // 🔴 W-G1-51 후1 K3 (가) — 견적 → 수주 전환. 고치기 전 들어간 원본 견적 줄이 남아 있을 수 있어
-        //   원본 줄 id 로 한 번 본다. 번호 따기 · 수주 머리 INSERT 전(거절되면 수주 0 · 견적 상태 그대로).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, quote.Items.Select(x => x.ItemId), null, ct);
 
         // 수주 문서번호 채번 — WO-11 한글 prefix
         // 🔴 20260827작9 W2 — COUNT+1 → MAX+1 (위 GenerateQuoteNoAsync 와 같은 이유).

@@ -2,7 +2,6 @@ using System.Data;
 using Dapper;
 using HitPan.Application.DTOs.Sales;
 using HitPan.Application.Interfaces;
-using HitPan.Application.Services;
 
 namespace HitPan.API.Services;
 
@@ -35,13 +34,6 @@ public sealed class DeliveryBatchService : IDeliveryBatchService
         try
         {
             var tenantId = _currentTenant.TenantId;
-
-            // 🔴 W-G1-51 후1 E7 — 묶음의 모든 요청 품목 id 를 한 번에 본다(첫 쓰기 전 · 같은 tx).
-            //   거절되면 아래 catch 가 종전대로 롤백하고 건별 실패 문구로 돌려준다.
-            //   id 가 빈 줄(이름으로 찾기 · 이미 이 회사 안에서만 찾음)은 함수가 뺀다.
-            await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-                _db, tenantId, requests.SelectMany(r => r.Items).Select(x => x.ItemId?.Trim()), tx, ct);
-
             var now = DateTime.Now;
             var dateToken = now.ToString("yyyyMMdd");
             var deliveryDate = now.Date;

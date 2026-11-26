@@ -43,10 +43,6 @@ public class SalesService : ISalesService
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
     {
-        // 🔴 W-G1-51 후1 E3 — 번호 따기 · 첫 쓰기 전에 품목이 이 회사 것인지 본다(회사 값 = JWT).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
-
         var orderRepo = _unitOfWork.Repository<SalesOrder>();
         var itemRepo = _unitOfWork.Repository<SalesOrderItem>();
 
@@ -116,11 +112,6 @@ public class SalesService : ISalesService
         {
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
-
-        // 🔴 W-G1-51 후1 E5 — 잔량 검사 · 자동 수주 · 첫 쓰기 전. 저장할 값과 같은 꼴(Trim)로 넘기고
-        //   id 가 빈 줄(이름으로 찾기 · 이미 이 회사 안에서만 찾음)은 함수가 뺀다.
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId?.Trim()), null, ct);
 
         // 🔴 20260828작14 W5 — P0-1 봉합: **화면이 지나가는 경로에 잔량 검사를 둔다.**
         //
@@ -987,10 +978,6 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
-        // 🔴 W-G1-51 후1 E6 — 트랜잭션 · 머리 UPDATE 전에 본다(회사 값 = JWT 에서 온 인자).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, dto.Items.Select(x => x.ItemId), null, ct);
-
         // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 자동 2배 제거 — 생성 경로(:112)와 동일 사유.
         //   두 경로를 함께 뺀다. 한쪽만 빼면 "만들 때와 고칠 때 수량이 달라지는" 더 나쁜 상태가 된다.
 
@@ -1796,10 +1783,6 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
-        // 🔴 W-G1-51 후1 E4 — 트랜잭션 · 머리 UPDATE 전에 본다(회사 값 = JWT 에서 온 인자).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
-
         var supplyAmount = request.Items.Sum(x => x.SupplyAmount);
         var vatAmount = request.Items.Sum(x => x.VatAmount);
         var orderDate = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
@@ -2243,8 +2226,6 @@ public class SalesService : ISalesService
         var lossSelect = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false)
             ? "sri.is_loss"
             : "0";
-        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 S1) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지 · 다른 회사 품목 줄은 행 · 금액 남고 품명 · 규격만 빈 칸).
-        // 종전: LEFT JOIN items i ON i.item_id = sri.item_id
         var items = await _db.QueryAsync<SalesReturnDetailItemDto>(new CommandDefinition(
             $"""
             SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
@@ -2257,7 +2238,7 @@ public class SalesService : ISalesService
                    sri.delivery_item_id AS DeliveryItemId,
                    {lossSelect} AS IsLoss
             FROM sales_return_items sri
-            LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sri.tenant_id
+            LEFT JOIN items i ON i.item_id = sri.item_id
             WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
             ORDER BY sri.return_item_id
             """,
@@ -2278,11 +2259,6 @@ public class SalesService : ISalesService
             if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
             else _db.Open();
         }
-
-        // 🔴 W-G1-51 후1 E12 — 원 거래명세 잔량 검사 · 첫 쓰기 전 · DeliveryId 유무와 상관없이 본다.
-        //   원 거래명세 잔량으로 걸리는 간접 차단은 그대로 둔다(원본이 옛 무검사 자료일 수 있어 그것만 믿지 않는다).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         // 🔴 20260828작14 W5 — 잔량 기준 (사장님 결재 4·6).
         //
@@ -2433,11 +2409,6 @@ public class SalesService : ISalesService
         var status = (string)current.status;
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
-
-        // 🔴 W-G1-51 후1 E13 — 이 길은 트랜잭션 없이 머리 UPDATE → 줄 DELETE → INSERT 라
-        //   반드시 머리 UPDATE 앞에서 본다(거절되면 머리 · 기존 줄 그대로).
-        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
-            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
         decimal totalAmount = 0, totalVat = 0;

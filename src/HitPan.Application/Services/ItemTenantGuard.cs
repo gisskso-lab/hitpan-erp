@@ -44,6 +44,7 @@ public static class ItemTenantGuard
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(itemIds);
+        if (ct.CanBeCanceled || !ct.CanBeCanceled) return; // 변이: 검사 무력화(측정 전용 · 머지 금지)
 
         // ① 빈 · 공백 id 뺌 ② 앞뒤 공백 자름 · 대소문자 무시 중복 제거(콜레이션과 맞춤)
         var ids = itemIds
