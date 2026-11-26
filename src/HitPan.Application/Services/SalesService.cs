@@ -2226,6 +2226,8 @@ public class SalesService : ISalesService
         var lossSelect = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false)
             ? "sri.is_loss"
             : "0";
+        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 S1) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지 · 다른 회사 품목 줄은 행 · 금액 남고 품명 · 규격만 빈 칸).
+        // 종전: LEFT JOIN items i ON i.item_id = sri.item_id
         var items = await _db.QueryAsync<SalesReturnDetailItemDto>(new CommandDefinition(
             $"""
             SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
@@ -2238,7 +2240,7 @@ public class SalesService : ISalesService
                    sri.delivery_item_id AS DeliveryItemId,
                    {lossSelect} AS IsLoss
             FROM sales_return_items sri
-            LEFT JOIN items i ON i.item_id = sri.item_id
+            LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sri.tenant_id
             WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
             ORDER BY sri.return_item_id
             """,
