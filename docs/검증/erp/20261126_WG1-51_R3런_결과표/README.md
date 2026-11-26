@@ -1,0 +1,3 @@
+# W-G1-51 장치 16차 R3 런 결과표 (원본 사본)
+
+> 런 `45741288648`(UI Browser · workflow_dispatch · head `f10112209f86a2e32180bf3e364623fda374e87b` = 합류본 `8863d5ab` + 장치 `a772c18b`) · 산출물 `ui-print-r1-merged-read` 결과표 2개를 고치지 않고 옮김(삭제 절차 §3-3) · 결과표 런 이름 칸 = 「R1」(plan.json runByRef) · R 셈 9/10 · PDF · 묶음은 커밋 0(대표께 직접 전달) · 대조 = 리뷰서
