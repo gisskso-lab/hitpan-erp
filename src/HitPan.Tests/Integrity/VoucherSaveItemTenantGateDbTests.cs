@@ -854,7 +854,11 @@ public sealed class VoucherSaveItemTenantGateDbTests
         var pass = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "";
         // ⚠️ GuidFormat=None 필수 — 빠지면 char(36) 이 Guid 로 와서 string DTO 매핑이 터진다.
         // ⚠️ Pooling=false — 임시 표가 풀에 남은 연결로 새어 다른 게이트에 보이지 않게 한다.
-        return $"Server={host};Port={port};Database={TestDb};User={user};Password={pass};"
-             + "AllowUserVariables=true;GuidFormat=None;Pooling=false;Connection Timeout=5;";
+        // 연결 문자열 글자 대신 빌더(비밀 탐지 · 인계44 §6) — 값 · 옵션은 그대로.
+        return new MySqlConnectionStringBuilder
+        {
+            Server = host, Port = uint.Parse(port), Database = TestDb, UserID = user, Password = pass,
+            AllowUserVariables = true, GuidFormat = MySqlGuidFormat.None, Pooling = false, ConnectionTimeout = 5,
+        }.ConnectionString;
     }
 }

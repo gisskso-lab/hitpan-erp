@@ -325,8 +325,12 @@ public sealed class VoucherPrintItemTenantGateDbTests
         var user = Environment.GetEnvironmentVariable("HITPAN_DB_USER") ?? "hitpan";
         // 🔴 비밀번호를 코드에 적지 않는다 (기존 게이트 관례).
         var pass = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "";
-        return $"Server={host};Port={port};Database={TestDb};User={user};Password={pass};"
-             + "DefaultCommandTimeout=90;GuidFormat=None;AllowUserVariables=true;";
+        // 연결 문자열 글자 대신 빌더(비밀 탐지 · 인계44 §6) — 값 · 옵션은 그대로.
+        return new MySqlConnectionStringBuilder
+        {
+            Server = host, Port = uint.Parse(port), Database = TestDb, UserID = user, Password = pass,
+            DefaultCommandTimeout = 90, GuidFormat = MySqlGuidFormat.None, AllowUserVariables = true,
+        }.ConnectionString;
     }
 
     private static bool ServerAvailable()

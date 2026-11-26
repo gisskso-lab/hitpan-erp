@@ -170,8 +170,12 @@ public sealed class ItemTenantGuardGateDbTests
         // 🔴 비밀번호를 코드에 적지 않는다 (기존 게이트 관례).
         var pass = Environment.GetEnvironmentVariable("HITPAN_DB_PASS") ?? "";
         // ⚠️ Pooling=false — 임시 표가 풀에 남은 연결로 새어 다른 게이트에 보이지 않게 한다.
-        return $"Server={host};Port={port};Database={TestDb};User={user};Password={pass};"
-             + "AllowUserVariables=true;GuidFormat=None;Pooling=false;Connection Timeout=5;";
+        // 연결 문자열 글자 대신 빌더(비밀 탐지 · 인계44 §6) — 값 · 옵션은 그대로.
+        return new MySqlConnectionStringBuilder
+        {
+            Server = host, Port = uint.Parse(port), Database = TestDb, UserID = user, Password = pass,
+            AllowUserVariables = true, GuidFormat = MySqlGuidFormat.None, Pooling = false, ConnectionTimeout = 5,
+        }.ConnectionString;
     }
 
     /// <summary>열리지 않는 연결 — 함수가 DB 로 가면 연결 예외가 나 「DB 안 감」 이 거짓임이 드러난다.</summary>
