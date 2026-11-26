@@ -102,6 +102,21 @@ public sealed class ReturnTitleKoLabelGateTests
         }
     }
 
+    /// <summary>
+    /// 🔴 2026-11-26 P3-①(CTO §226-2 · PM §227) — T-D1 에 격식(formal) 스타일이 빠져 있었다. 격식 제목은 내장 글꼴(Noto Serif KR) ·
+    /// 자간(제목 크기 비례)으로 그려 PdfPig 가 글자 사이를 낱말로 끊을 수 있다 ⇒ 낱말 「문서」 0 은 T-D1 과 같게 보고,
+    /// 제목 글자는 낱말을 이어 붙인 글에서 찾는다(머리에 「문서」 가 낱말로 없음 + 이은 글에 결재 글자).
+    /// </summary>
+    [Theory(DisplayName = "R-D T-D1 격식 🔴 반품 2종 격식(formal) 머리 제목 = 대표 결재 글자 · 낱말 「문서」 0")]
+    [InlineData("purchase_return", "매입반품")]
+    [InlineData("sales_return", "판매반품")]
+    public void T_D1_ReturnTitles_Formal(string docType, string expected)
+    {
+        var words = HeaderWords(docType, "formal");
+        Assert.Contains(expected, string.Concat(words), StringComparison.Ordinal);
+        Assert.DoesNotContain("문서", words);
+    }
+
     [Theory(DisplayName = "R-D T-D2 회귀 — 옛 6종 제목 그대로")]
     [InlineData("quotation", "견적서")]
     [InlineData("sales_order", "수주서")]

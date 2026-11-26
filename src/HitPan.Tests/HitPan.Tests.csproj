@@ -52,6 +52,8 @@
             글자검사만으로는 또 놓친다 — **불러서 결과를 본다.** -->
     <Compile Include="..\HitPan.Web\Services\ApiErrorText.cs" Link="Linked\ApiErrorText.cs" />
     <Compile Include="..\HitPan.Web\Services\DataResetMenuRule.cs" Link="Linked\DataResetMenuRule.cs" />
+    <!-- 🔴 2026-11-26 W-G1-51 R1 회송 F-2 — 반품 [이메일] 키 고르기를 불러 그 키로 서버 렌더까지 잰다(ReturnEmailKeyGateTests). -->
+    <Compile Include="..\HitPan.Web\Services\ReturnEmailKeyRule.cs" Link="Linked\ReturnEmailKeyRule.cs" />
     <Compile Include="..\..\tools\SqlStringGate\*.cs" Exclude="..\..\tools\SqlStringGate\Program.cs"
              Link="Linked\SqlStringGate\%(Filename)%(Extension)" />
 

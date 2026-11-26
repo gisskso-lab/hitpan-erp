@@ -468,7 +468,11 @@ public partial class ReturnPage : ComponentBase
             ["DocumentType"] = "반품처리서",
             // 🔴 W-G1-51 갈래 E⑴ — 판매반품만 판매반품 키 · 매입반품은 종전 "purchase_receipt" 그대로(#1).
             //   고침1 — 판정은 불러온 전표의 종 · id(선택칸 아님 · P2-E1).
-            ["DocumentTypeKey"] = IsLoadedSalesReturnForPrint ? SalesReturnEmailTypeKey : "purchase_receipt",
+            // 🔴 2026-11-26 R1 회송 F-2(CTO §226 · PM §227) — 불러온 매입반품은 "purchase_return"(매입반품 로더 · 제목 「매입반품」).
+            //   종전엔 매입명세서 로더가 반품 id 를 못 찾아 「매입명세서」 안내문 종이가 거래처로 나갔다. 판매반품 · 안 불러옴은 종전 값 그대로.
+            //   키 고르기는 시험이 부르는 작은 함수(ReturnEmailKeyRule)로 뗐다.
+            // 옛 줄(#1): ["DocumentTypeKey"] = IsLoadedSalesReturnForPrint ? SalesReturnEmailTypeKey : "purchase_receipt",
+            ["DocumentTypeKey"] = ReturnEmailKeyRule.Pick(IsLoadedReturnOnScreen, _loadedReturnIsSales),
             ["DocumentNo"] = _draft?.DocumentNumber ?? "신규",
             ["DocumentId"] = _draft?.Id ?? "",
             ["PartnerId"] = _draft?.PartnerId ?? ""
