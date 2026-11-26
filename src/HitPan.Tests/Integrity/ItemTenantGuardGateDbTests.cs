@@ -175,8 +175,18 @@ public sealed class ItemTenantGuardGateDbTests
     }
 
     /// <summary>열리지 않는 연결 — 함수가 DB 로 가면 연결 예외가 나 「DB 안 감」 이 거짓임이 드러난다.</summary>
+    /// 🔴 20261127 PM 고침 — 종전엔 연결 문자열 글자를 그대로 적어 비밀 탐지(TruffleHog SQLServer)에 걸렸다(자격증명 모양 금지).
+    ///   빌더로 만들고 비번 칸은 아예 두지 않는다 — 1번 포트라 어차피 열리지 않는다.
     private static string UnreachableConnString() =>
-        "Server=127.0.0.1;Port=1;Database=none;User=none;Password=none;Pooling=false;Connection Timeout=1;";
+        new MySqlConnectionStringBuilder
+        {
+            Server = "127.0.0.1",
+            Port = 1,
+            Database = "none",
+            UserID = "none",
+            Pooling = false,
+            ConnectionTimeout = 1,
+        }.ConnectionString;
 
     private static bool ServerAvailable()
     {
