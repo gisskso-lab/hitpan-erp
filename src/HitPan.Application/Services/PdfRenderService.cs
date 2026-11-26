@@ -1347,6 +1347,7 @@ public sealed class PdfRenderService : IPdfRenderService
     /// 🔴 칸 이름은 출하 DDL <c>installer/hitpan_db_clean.sql</c> 을 보고 썼다(#13·#36).
     ///   <c>purchase_returns.total_amount</c> 는 <b>공급가</b>다 — 다른 5종과 같은 규약.
     ///   품목 이름 칸이 없어 <c>items</c> 를 JOIN 한다(나머지 로더와 동일).
+    /// 🔴 2026-11-26 HQA ⑥ — 품목 조인에 상세행 회사 조건 더함 · 옛 글자 = <c>... LEFT JOIN items i ON i.item_id = pri.item_id</c>
     /// </remarks>
     private async Task<DocumentSnapshot> LoadPurchaseReturnAsync(string tenantId, string id, CancellationToken ct)
     {
@@ -1365,7 +1366,7 @@ public sealed class PdfRenderService : IPdfRenderService
                    COALESCE(pri.qty,0) AS Qty, COALESCE(pri.unit_price,0) AS UnitPrice,
                    COALESCE(pri.supply_amount,0) AS Supply, COALESCE(pri.vat_amount,0) AS Vat,
                    COALESCE(pri.supply_amount,0) + COALESCE(pri.vat_amount,0) AS Total
-            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id
+            FROM purchase_return_items pri LEFT JOIN items i ON i.item_id = pri.item_id AND i.tenant_id = pri.tenant_id
             WHERE pri.tenant_id = @TenantId AND pri.return_id = @Id ORDER BY pri.return_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "purchase_return", head, lines, ct).ConfigureAwait(false);
@@ -1379,6 +1380,7 @@ public sealed class PdfRenderService : IPdfRenderService
     ///   <c>original_unit_price</c> 는 원거래 단가 복사본이다(DDL 주석). 종이에는
     ///   <b>환불 단가</b>를 찍는다 — 고객에게 돌려주는 돈이 그것이다.
     /// 🔴 <c>is_loss</c>(파손 로스)는 재고 반영 축이라 종이에 안 찍는다. 등재만.
+    /// 🔴 2026-11-26 HQA ⑥ — 품목 조인에 상세행 회사 조건 더함 · 옛 글자 = <c>... LEFT JOIN items i ON i.item_id = sri.item_id</c>
     /// </remarks>
     private async Task<DocumentSnapshot> LoadSalesReturnAsync(string tenantId, string id, CancellationToken ct)
     {
@@ -1397,7 +1399,7 @@ public sealed class PdfRenderService : IPdfRenderService
                    COALESCE(sri.qty,0) AS Qty, COALESCE(sri.unit_price,0) AS UnitPrice,
                    COALESCE(sri.supply_amount,0) AS Supply, COALESCE(sri.vat_amount,0) AS Vat,
                    COALESCE(sri.supply_amount,0) + COALESCE(sri.vat_amount,0) AS Total
-            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id
+            FROM sales_return_items sri LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sri.tenant_id
             WHERE sri.tenant_id = @TenantId AND sri.return_id = @Id ORDER BY sri.return_item_id
             """;
         return await LoadByQueriesAsync(tenantId, id, "sales_return", head, lines, ct).ConfigureAwait(false);
