@@ -95,7 +95,7 @@ public sealed class GridBorderRenderGateTests
                 p.DefaultTextStyle(t => t.FontSize(10));
                 p.Content().Element(e => compose.Invoke(null, new object?[] { e, snap, false, showBorder }));
             });
-        }).GenerateImages(new ImageGenerationSettings
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings
         {
             ImageFormat = ImageFormat.Png,
             RasterDpi = 72

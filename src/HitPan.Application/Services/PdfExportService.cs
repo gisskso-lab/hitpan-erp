@@ -86,7 +86,8 @@ public class PdfExportService
             });
         });
 
-        return document.GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): return document.GeneratePdf();
+        return document.GeneratePdfOneAtATime();
     }
 
     /// <summary>
@@ -180,7 +181,8 @@ public class PdfExportService
             });
         });
 
-        return document.GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): return document.GeneratePdf();
+        return document.GeneratePdfOneAtATime();
     }
 
     /// <summary>
@@ -315,7 +317,8 @@ public class PdfExportService
             });
         });
 
-        return document.GeneratePdf();
+        // 옛 줄(W-G1-51 PDF 잠금 전 · 헌법 #1): return document.GeneratePdf();
+        return document.GeneratePdfOneAtATime();
     }
 
     /// <summary>

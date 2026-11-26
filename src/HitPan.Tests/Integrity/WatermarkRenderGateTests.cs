@@ -60,7 +60,7 @@ public sealed class WatermarkRenderGateTests
                 p.PageColor(Color.FromHex(hex));
                 p.Content().Text(string.Empty);
             });
-        }).GenerateImages(new ImageGenerationSettings
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings
         {
             ImageFormat = QuestPDF.Infrastructure.ImageFormat.Png,
             RasterDpi = 72
@@ -127,7 +127,7 @@ public sealed class WatermarkRenderGateTests
                 p.PageColor(Colors.White);
                 body(p);
             });
-        }).GenerateImages(new ImageGenerationSettings
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings
         {
             ImageFormat = QuestPDF.Infrastructure.ImageFormat.Png,
             RasterDpi = 72
@@ -680,7 +680,7 @@ public sealed class WatermarkRenderGateTests
                 p.PageColor(Color.FromHex(hex));
                 p.Content().Text(string.Empty);
             });
-        }).GenerateImages(new ImageGenerationSettings { ImageFormat = fmt, RasterDpi = 72 }).First();
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings { ImageFormat = fmt, RasterDpi = 72 }).First();
     }
 
     /// <summary>
@@ -763,7 +763,7 @@ public sealed class WatermarkRenderGateTests
                 p.PageColor(Colors.White);
                 body(p);
             });
-        }).GenerateImages(new ImageGenerationSettings
+        }).GenerateImagesOneAtATime(new ImageGenerationSettings
         {
             ImageFormat = QuestPDF.Infrastructure.ImageFormat.Png,
             RasterDpi = 72
