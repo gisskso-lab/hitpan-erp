@@ -13,6 +13,10 @@ namespace HitPan.Application.Services;
 
 public class SalesService : ISalesService
 {
+    // W-G1-51 후1 §15-9 (K13) — 거래명세서 수정 저장 때 머리 UPDATE 가 1행이 아니면(이미 확정 · 다른 곳에서 바뀜) 저장하지 않는다.
+    public const string DeliveryChangedElsewhereMessage =
+        "이미 확정되었거나 다른 곳에서 바뀐 거래명세서라 저장하지 않았습니다. 화면을 새로 열어 확인해 주세요.";
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _db;
@@ -1040,7 +1044,8 @@ public class SalesService : ISalesService
         using var tx = _db.BeginTransaction();
         try
         {
-            await _db.ExecuteAsync(new CommandDefinition(updateSql,
+            // 종전: 머리 UPDATE 결과 행 수를 버려, 검사 뒤 다른 곳에서 확정되면 0행인데도 줄을 지우고 다시 넣었다 (W-G1-51 후1 §15-9 · K13).
+            var headerUpdated = await _db.ExecuteAsync(new CommandDefinition(updateSql,
                 new
                 {
                     DeliveryId = deliveryId,
@@ -1053,6 +1058,8 @@ public class SalesService : ISalesService
                     UserId = string.IsNullOrEmpty(userId) ? null : userId
                 },
                 transaction: tx, cancellationToken: ct));
+            if (headerUpdated != 1)
+                throw new InvalidOperationException(DeliveryChangedElsewhereMessage);
 
             // 🔴 20260827작10 W1 — 지우기 전에 수주라인 링크를 읽어둔다.
             //   종전엔 라인을 전량 DELETE 하고 order_item_id 에 NULL 을 하드코딩해 다시 넣었다.
