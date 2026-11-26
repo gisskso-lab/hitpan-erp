@@ -1,0 +1,2849 @@
+{
+  "meta": {
+    "run": "R5",
+    "job": "r5-main-pair",
+    "board": "main"
+  },
+  "positive": {
+    "ok": true,
+    "why": "기본 폼 글자 · 좌표 · 양식지 그림 해시 · 칸 값 있음 · 판독기 자체시험 통과"
+  },
+  "rows": [
+    {
+      "id": "K1.estimate.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · doc_date · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:partner_name,doc_date,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.estimate.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.estimate.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.estimate.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.estimate.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.estimate.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.estimate.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.estimate.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.estimate.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.estimate.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.estimate.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.estimate.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~19.9mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.estimate.doc · ST-simple.estimate.doc · ST-large.estimate.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.estimate.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.estimate.doc · ST-formal.estimate.doc · ST-large.estimate.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.estimate.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.estimate.doc · ST-formal.estimate.doc · ST-simple.estimate.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.estimate.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.estimate.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.delivery.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.delivery.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.delivery.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.delivery.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "code": "칸밖:line.item_name,line.qty",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.delivery.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.delivery.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.delivery.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.delivery.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.delivery.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.delivery.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.delivery.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.delivery.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~33.2mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.delivery.doc · ST-simple.delivery.doc · ST-large.delivery.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.delivery.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.delivery.doc · ST-formal.delivery.doc · ST-large.delivery.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.delivery.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.delivery.doc · ST-formal.delivery.doc · ST-simple.delivery.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.delivery.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.delivery.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.sales_order.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.sales_order.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.sales_order.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.sales_order.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "code": "칸밖:line.item_name,line.qty",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.sales_order.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.sales_order.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.sales_order.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.sales_order.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.sales_order.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.sales_order.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.sales_order.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.sales_order.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~19.9mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.sales_order.doc · ST-simple.sales_order.doc · ST-large.sales_order.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.sales_order.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.sales_order.doc · ST-formal.sales_order.doc · ST-large.sales_order.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.sales_order.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.sales_order.doc · ST-formal.sales_order.doc · ST-simple.sales_order.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.sales_order.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.sales_order.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.purchase_order.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.purchase_order.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.purchase_order.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.purchase_order.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "code": "칸밖:line.item_name,line.qty",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.purchase_order.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.purchase_order.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.purchase_order.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.purchase_order.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.purchase_order.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.purchase_order.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.purchase_order.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.purchase_order.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~19.9mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_order.doc · ST-simple.purchase_order.doc · ST-large.purchase_order.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.purchase_order.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_order.doc · ST-formal.purchase_order.doc · ST-large.purchase_order.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.purchase_order.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~19.9mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_order.doc · ST-formal.purchase_order.doc · ST-simple.purchase_order.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.purchase_order.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.purchase_order.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.receipt.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.receipt.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · doc_date · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,doc_date,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.receipt.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.receipt.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "code": "칸밖:line.item_name,line.qty",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.receipt.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.receipt.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.receipt.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.receipt.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.receipt.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.receipt.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.receipt.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.receipt.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~33.2mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.receipt.doc · ST-simple.receipt.doc · ST-large.receipt.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.receipt.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.receipt.doc · ST-formal.receipt.doc · ST-large.receipt.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.receipt.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~33.2mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.receipt.doc · ST-formal.receipt.doc · ST-simple.receipt.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.receipt.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.receipt.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.purchase_return.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.purchase_return.doc",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: partner_name · doc_date · line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비) · ○ 미리보기 창 경고 0",
+      "code": "칸밖:partner_name,doc_date,line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.purchase_return.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.purchase_return.doc",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.purchase_return.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.purchase_return.doc",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "○ 양식 그림 있음(4분면 순서 · 종횡비) · × 그림만 아님(§59) — 낱말 55 · 선 51",
+      "code": "K3:글자 · K3:선",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.purchase_return.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.purchase_return.doc",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 10/10 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 그 그림 0 · ○ 미리보기 창 경고 0",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.purchase_return.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.purchase_return.doc",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.purchase_return.doc",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 칸 1/1 상자 안 · ○ 제목 크기 20pt(기준 20) · 명조 글꼴 false · 제목 자리 0.0~13.3mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.purchase_return.doc",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 0.0~13.3mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_return.doc · ST-simple.purchase_return.doc · ST-large.purchase_return.doc",
+      "code": "스타일:크기,격식글꼴,배치,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.purchase_return.doc",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 18) · 명조 글꼴 false · 제목 자리 0.0~13.3mm(기준 왼쪽) · 머리 아래 선 1pt(기준 0.75) · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_return.doc · ST-formal.purchase_return.doc · ST-large.purchase_return.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.purchase_return.doc",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 24) · 명조 글꼴 false · 제목 자리 0.0~13.3mm(기준 왼쪽) · 머리 아래 선 1pt(기준 1.5) · 품명 잘림 0 · × 같은 PDF(글자 · 자리 · 크기 · 선): ST-basic.purchase_return.doc · ST-formal.purchase_return.doc · ST-simple.purchase_return.doc",
+      "code": "스타일:크기,선 · 스타일:같은PDF",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.purchase_return.doc",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ K2.purchase_return.doc 와 글자 · 자리 같음"
+    },
+    {
+      "id": "K1.sales_return.settings",
+      "group": "②",
+      "k": "K1",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "빨강",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "× 칸 값 없음 또는 상자 밖: line.item_name · line.qty · total_amount · ○ 자리표 0 · × 표준 표 머리 칸 밖 품명 · 수량 · 공급가액 · 공급가액 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "code": "칸밖:line.item_name,line.qty,total_amount · 표준머리",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.sales_return.doc-i",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K1.sales_return.doc-j",
+      "group": "③(가)",
+      "k": "K1",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.sales_return.settings",
+      "group": "②",
+      "k": "K2",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록일 수 있음",
+      "repCodes": [],
+      "cat": "초록",
+      "why": "○ 칸 5/5 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.sales_return.doc-i",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K2.sales_return.doc-j",
+      "group": "③(가)",
+      "k": "K2",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K3.sales_return.settings",
+      "group": "②",
+      "k": "K3",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "측정 공백(③(나) 그림 있음 · 초록 = 증거 아님)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "초록",
+      "why": "○ 자리표 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)"
+    },
+    {
+      "id": "K3.sales_return.doc-i",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K3.sales_return.doc-j",
+      "group": "③(가)",
+      "k": "K3",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "K3:글자",
+        "K3:선"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "k3Note": "K3 안내 없음"
+    },
+    {
+      "id": "K4.sales_return.settings",
+      "group": "②",
+      "k": "K4",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "초록",
+      "why": "○ 칸 8/8 상자 안 · ○ 자리표 0 · ○ 표준 표 머리 칸 밖 0 · ○ 양식 그림 있음(4분면 순서 · 종횡비)",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.sales_return.doc-i",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K4.sales_return.doc-j",
+      "group": "③(가)",
+      "k": "K4",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "repCodes": [
+        "칸밖",
+        "표준머리"
+      ],
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "K5.sales_return.settings",
+      "group": "②",
+      "k": "K5",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.sales_return.doc-i",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "K5.sales_return.doc-j",
+      "group": "③(가)",
+      "k": "K5",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9 · 갈래 F 뒤)"
+    },
+    {
+      "id": "ST-basic.sales_return.doc-i",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-basic.sales_return.doc-j",
+      "group": "③(나)",
+      "k": "ST-basic",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.sales_return.doc-i",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-formal.sales_return.doc-j",
+      "group": "③(나)",
+      "k": "ST-formal",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.sales_return.doc-i",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-simple.sales_return.doc-j",
+      "group": "③(나)",
+      "k": "ST-simple",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.sales_return.doc-i",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-large.sales_return.doc-j",
+      "group": "③(나)",
+      "k": "ST-large",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "ST-ignore.sales_return.doc-i",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "ST-ignore.sales_return.doc-j",
+      "group": "③(나) 회귀",
+      "k": "ST-ignore",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-가-on.estimate.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.estimate.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.estimate.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.estimate.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.estimate.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.estimate.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.estimate.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "estimate",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.estimate.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「견적서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.delivery.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.delivery.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.delivery.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.delivery.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.delivery.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.delivery.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.delivery.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "delivery",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.delivery.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "delivery",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「거래명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.sales_order.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.sales_order.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.sales_order.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.sales_order.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.sales_order.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.sales_order.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.sales_order.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "sales_order",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.sales_order.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "sales_order",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「수주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.purchase_order.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.purchase_order.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.purchase_order.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.purchase_order.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.purchase_order.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.purchase_order.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.purchase_order.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "purchase_order",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.purchase_order.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "purchase_order",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「발주서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.receipt.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.receipt.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.receipt.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.receipt.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.receipt.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.receipt.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.receipt.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "receipt",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.receipt.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "receipt",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「매입명세서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.purchase_return.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.purchase_return.doc",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-off.purchase_return.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.purchase_return.doc",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-나-on.purchase_return.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.purchase_return.doc",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.purchase_return.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "purchase_return",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.purchase_return.doc",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "purchase_return",
+      "path": "doc",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · 표지 「인쇄표지상사」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-가-on.sales_return.settings",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 로고 그림 1(4분면 순서 · 알파 영역 종횡비 · 눈에 보이는 비 1.3333) · 실효 불투명도 0.120(알파 영역 안 평균) · 기준 0.12±0.02",
+      "drawFacts": [
+        {
+          "alpha": 0.12,
+          "imgSMask": true,
+          "smaskMean": 0.5194,
+          "smaskMeanIn": 1,
+          "aboxRatio": 1.3333,
+          "marginMaskMax": 0,
+          "ws": 1716,
+          "hs": 1716,
+          "pw": 151.3417,
+          "ph": 151.3417,
+          "smaskW": 1716,
+          "smaskH": 1716
+        }
+      ]
+    },
+    {
+      "id": "WM-가-on.sales_return.doc-i",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-가-on.sales_return.doc-j",
+      "group": "①(가)",
+      "k": "WM-가-on",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-가-off.sales_return.settings",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록(회귀)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0"
+    },
+    {
+      "id": "WM-가-off.sales_return.doc-i",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-가-off.sales_return.doc-j",
+      "group": "①(가)",
+      "k": "WM-가-off",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-나-on.sales_return.settings",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-on.sales_return.doc-i",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-나-on.sales_return.doc-j",
+      "group": "①(나)",
+      "k": "WM-나-on",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-나-off.sales_return.settings",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "sales_return",
+      "path": "settings",
+      "mainExpect": "초록(정답)",
+      "cat": "초록",
+      "why": "○ 문서 확인 — 쪽 1 · 제목 「문서」 · ○ 그 그림 0 · ○ 안내 · 경고 글자 0"
+    },
+    {
+      "id": "WM-나-off.sales_return.doc-i",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "sales_return",
+      "path": "doc-i",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "WM-나-off.sales_return.doc-j",
+      "group": "①(나)",
+      "k": "WM-나-off",
+      "type": "sales_return",
+      "path": "doc-j",
+      "mainExpect": "빨강(C8)",
+      "cat": "빨강",
+      "why": "응답 404 · {\"message\":\"저장된 전표가 아닙니다. 먼저 저장하시거나 목록에서 전표를 불러와 주십시오.\"}",
+      "code": "응답:404"
+    },
+    {
+      "id": "OP.estimate.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "estimate",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "응답 500 · 단추 누름 뒤 PDF 0(내려받기 · PDF 응답 없음 · 오류 응답 500)",
+      "code": "응답:500"
+    },
+    {
+      "id": "OP.estimate.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "estimate",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "응답 500 · 단추 누름 뒤 PDF 0(내려받기 · PDF 응답 없음 · 오류 응답 500)",
+      "code": "응답:500",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.estimate.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "estimate",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "OP.delivery.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "delivery",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 그림 객체 0(빈 투명 묶음 꼴 포함)",
+      "code": "워터마크:그림0",
+      "drawFacts": []
+    },
+    {
+      "id": "OP.delivery.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "delivery",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 84.4~125.5mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5)",
+      "code": "스타일:크기,격식글꼴,선",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.delivery.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "delivery",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "OP.purchase_order.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "purchase_order",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 그림 객체 0(빈 투명 묶음 꼴 포함)",
+      "code": "워터마크:그림0",
+      "drawFacts": []
+    },
+    {
+      "id": "OP.purchase_order.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "purchase_order",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 93.0~116.9mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5)",
+      "code": "스타일:크기,격식글꼴,선",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.purchase_order.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "purchase_order",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "OP.receipt.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "receipt",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 그림 객체 0(빈 투명 묶음 꼴 포함)",
+      "code": "워터마크:그림0",
+      "drawFacts": []
+    },
+    {
+      "id": "OP.receipt.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "receipt",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "○ 칸 1/1 상자 안 · × 제목 크기 20pt(기준 22) · 명조 글꼴 false(필요) · 격식 글꼴 이름 없음(기준 NotoSerifKR-Bold · 종류 기록 없음) · 제목 자리 84.4~125.5mm(기준 가운데) · 머리 아래 선 1pt(기준 1.5 + 0.5)",
+      "code": "스타일:크기,격식글꼴,선",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.receipt.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "receipt",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "OP.purchase_return.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "purchase_return",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 문서 확인 — 엉뚱한 종 제목 「반품처리서」 — 입구 결함",
+      "code": "문서:엉뚱한종",
+      "drawFacts": []
+    },
+    {
+      "id": "OP.purchase_return.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "purchase_return",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 문서 확인 — 엉뚱한 종 제목 「반품처리서」 — 입구 결함",
+      "code": "문서:엉뚱한종",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.purchase_return.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "purchase_return",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "OP.sales_return.doc-wm",
+      "group": "OP",
+      "k": "OP-WM",
+      "type": "sales_return",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 문서 확인 — 엉뚱한 종 제목 「반품처리서」 — 입구 결함",
+      "code": "문서:엉뚱한종",
+      "drawFacts": []
+    },
+    {
+      "id": "OP.sales_return.doc-formal",
+      "group": "OP",
+      "k": "OP-formal",
+      "type": "sales_return",
+      "path": "op",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "× 문서 확인 — 엉뚱한 종 제목 「반품처리서」 — 입구 결함",
+      "code": "문서:엉뚱한종",
+      "tag": "대체 글꼴 기준 측정 · 맑은 고딕(Microsoft) 아님 · 글리프 = 나눔고딕(SIL OFL 1.1) · 글꼴 파일 저작권 기록 원문: Copyright © 2011 NHN Corporation"
+    },
+    {
+      "id": "OP.sales_return.route",
+      "group": "OP 경로",
+      "k": "OP-route",
+      "type": "sales_return",
+      "path": "op-route",
+      "mainExpect": "기록(main 꼴 = GET …/pdf 1 · POST …/preview-pdf 0)",
+      "cat": "해당 없음",
+      "why": "기록: 경로 GET …/pdf 1 · POST …/preview-pdf 0 — main 꼴"
+    },
+    {
+      "id": "A5-basic.estimate.doc",
+      "group": "측정 A5",
+      "k": "A5-basic",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "측정 칸",
+      "cat": "측정 칸",
+      "why": "측정: ① 응답 500({\"error\":\"\\uC11C\\uBC84 \\uC624\\uB958\\uAC00 \\uBC1C\\uC0DD\\uD588\\uC2B5\\uB2C8\\uB2E4. ) · ② · ③ 못 잼",
+      "measured": {
+        "resp": "응답 500",
+        "outRight": null,
+        "bodyPt": null
+      }
+    },
+    {
+      "id": "A5-formal.estimate.doc",
+      "group": "측정 A5",
+      "k": "A5-formal",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "측정 칸",
+      "cat": "측정 칸",
+      "why": "측정: ① 응답 500({\"error\":\"\\uC11C\\uBC84 \\uC624\\uB958\\uAC00 \\uBC1C\\uC0DD\\uD588\\uC2B5\\uB2C8\\uB2E4. ) · ② · ③ 못 잼",
+      "measured": {
+        "resp": "응답 500",
+        "outRight": null,
+        "bodyPt": null
+      }
+    },
+    {
+      "id": "A5-simple.estimate.doc",
+      "group": "측정 A5",
+      "k": "A5-simple",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "측정 칸",
+      "cat": "측정 칸",
+      "why": "측정: ① 응답 500({\"error\":\"\\uC11C\\uBC84 \\uC624\\uB958\\uAC00 \\uBC1C\\uC0DD\\uD588\\uC2B5\\uB2C8\\uB2E4. ) · ② · ③ 못 잼",
+      "measured": {
+        "resp": "응답 500",
+        "outRight": null,
+        "bodyPt": null
+      }
+    },
+    {
+      "id": "A5-large.estimate.doc",
+      "group": "측정 A5",
+      "k": "A5-large",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "측정 칸",
+      "cat": "측정 칸",
+      "why": "측정: ① 응답 500({\"error\":\"\\uC11C\\uBC84 \\uC624\\uB958\\uAC00 \\uBC1C\\uC0DD\\uD588\\uC2B5\\uB2C8\\uB2E4. ) · ② · ③ 못 잼",
+      "measured": {
+        "resp": "응답 500",
+        "outRight": null,
+        "bodyPt": null
+      }
+    },
+    {
+      "id": "M8-A5.estimate.doc",
+      "group": "M8 큰글씨",
+      "k": "M8-A5",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "미측정",
+      "why": "응답 500"
+    },
+    {
+      "id": "M8-A4LR25.estimate.doc",
+      "group": "M8 큰글씨",
+      "k": "M8-A4LR25",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "미측정",
+      "why": "응답 500"
+    },
+    {
+      "id": "M4-B1.estimate.doc",
+      "group": "M4 큰글씨",
+      "k": "M4-B1",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "빨강",
+      "why": "× 숫자 줄바꿈(한 줄 깨짐) — 닻 「1,000,000.0」 = 「1,000,000.」 + 아래 줄 「0」",
+      "code": "큰글씨:접힘"
+    },
+    {
+      "id": "M7-basic-B1.estimate.doc",
+      "group": "M7 품명",
+      "k": "M7-basic-B1",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "초록",
+      "why": "○ 품명 100자 전부 · 쪽 1"
+    },
+    {
+      "id": "M7-large-B1.estimate.doc",
+      "group": "M7 품명",
+      "k": "M7-large-B1",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "초록",
+      "why": "○ 품명 100자 전부 · 쪽 1"
+    },
+    {
+      "id": "M4-B0.estimate.doc",
+      "group": "M4 큰글씨",
+      "k": "M4-B0",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "빨강",
+      "why": "× 숫자 줄바꿈(한 줄 깨짐) — 닻 「1,000,000.0」 = 「1,000,000」 + 아래 줄 「.0」",
+      "code": "큰글씨:접힘"
+    },
+    {
+      "id": "M7-basic-B0.estimate.doc",
+      "group": "M7 품명",
+      "k": "M7-basic-B0",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "빨강",
+      "why": "× 품명 잘림 — 앞 96/100자만",
+      "code": "큰글씨:품명"
+    },
+    {
+      "id": "M7-large-B0.estimate.doc",
+      "group": "M7 품명",
+      "k": "M7-large-B0",
+      "type": "estimate",
+      "path": "doc",
+      "mainExpect": "기록",
+      "cat": "빨강",
+      "why": "× 품명 잘림 — 앞 96/100자만",
+      "code": "큰글씨:품명"
+    },
+    {
+      "id": "Z8c.estimate.concurrent",
+      "group": "동시 2건",
+      "k": "Z8c",
+      "type": "estimate",
+      "path": "concurrent",
+      "mainExpect": "기록(동시 2건 ≠ 경합 없음 증명)",
+      "cat": "해당 없음",
+      "why": "기록: 동시 2건 격식 200 PDF · 거래명세서 200 PDF → 이어서 격식 200 PDF · 거래명세서 200 PDF · 동시 2건 ≠ 경합 없음 증명"
+    },
+    {
+      "id": "D1.estimate.api",
+      "group": "D 재발 방지",
+      "k": "D1",
+      "type": "estimate",
+      "path": "api",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "비기본 둘째 저장 POST 500",
+      "code": "D1:응답500"
+    },
+    {
+      "id": "D2.estimate.api",
+      "group": "D 재발 방지",
+      "k": "D2",
+      "type": "estimate",
+      "path": "api",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "첫 지우기 DELETE 204 · 비기본 새로 저장 POST 201 → 두 번째 지우기 DELETE 500",
+      "code": "D2:응답500"
+    },
+    {
+      "id": "D3.estimate.api",
+      "group": "D 재발 방지",
+      "k": "D3",
+      "type": "estimate",
+      "path": "api",
+      "mainExpect": "빨강",
+      "cat": "빨강",
+      "why": "목록 GET 200 → 다른 양식 기본 지정 POST 500",
+      "code": "D3:응답500"
+    },
+    {
+      "id": "S.estimate.editor",
+      "group": "S",
+      "k": "S",
+      "type": "estimate",
+      "path": "editor",
+      "mainExpect": "안 보임(기록)",
+      "cat": "해당 없음",
+      "why": "기록: {\"coordTableVisible\":false,\"pdfAccept\":false}"
+    },
+    {
+      "id": "YN1.estimate.editor",
+      "group": "Y/N",
+      "k": "YN1",
+      "type": "estimate",
+      "path": "editor",
+      "mainExpect": "문 없음",
+      "cat": "문 없음 · 판정 제외",
+      "why": "PDF 양식 올리기 문 없음(C9)"
+    }
+  ],
+  "composite": [
+    {
+      "id": "①(가) 견적서 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 견적서 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 거래명세서 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 거래명세서 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 수주서 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 수주서 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 발주서 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 발주서 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 매입처리 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 매입처리 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 매입 반품 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(나) 매입 반품 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "초록",
+      "cells": 4
+    },
+    {
+      "id": "①(가) 판매 반품 객체 확인 — 켬 A 모든 길 있음 · 끔 B 모든 길 없음",
+      "cat": "빨강",
+      "cells": 6
+    },
+    {
+      "id": "①(나) 판매 반품 로고 없음 + 켬 — 아무것도 안 보임(회귀 기준)",
+      "cat": "빨강",
+      "cells": 6
+    }
+  ],
+  "counts": {
+    "초록": 95,
+    "빨강": 86,
+    "미측정": 2,
+    "차림 불가": 0,
+    "문 없음 · 판정 제외": 16,
+    "판정 제외": 0,
+    "해당 없음": 8,
+    "바뀐 모양": 0,
+    "측정 칸": 4
+  },
+  "stops": [],
+  "denomOut": 28,
+  "pass": false,
+  "pendingLeft": 0,
+  "fontGate": {
+    "ok": true,
+    "cell": "⑷ 글꼴 섬",
+    "why": "글꼴 관문 통과 — 2×2 ⑷ 글꼴 섬",
+    "t8Why": "",
+    "step": [],
+    "boldNote": "굵게 견본 없음 — T8 굵게 대조 미측정(사슬 그리기에 굵게 0)",
+    "pdfFonts": [
+      "AAAAAA+PrintSubstitute-Bold",
+      "BAAAAA+PrintSubstitute-Regular",
+      "AAAAAA+PrintSubstitute-Regular"
+    ],
+    "boldWeight": 600,
+    "runFonts": {
+      "names": [
+        "PrintSubstitute-Bold",
+        "PrintSubstitute-Regular"
+      ],
+      "bold": true
+    }
+  },
+  "notes": [
+    "K2.delivery.doc main 빨강(초록일 수 있음) — 기록",
+    "K2.sales_order.doc main 빨강(초록일 수 있음) — 기록",
+    "K2.purchase_order.doc main 빨강(초록일 수 있음) — 기록",
+    "K2.receipt.doc main 빨강(초록일 수 있음) — 기록"
+  ],
+  "detections": [],
+  "pdfDrop": {
+    "removed": 152,
+    "failed": [],
+    "kept": 0
+  },
+  "nine": null
+}
