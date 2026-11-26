@@ -1088,8 +1088,9 @@ public class SalesService : ISalesService
             // 🔴 20260903작19 W4 — 사장님 오더: 매출도 상품등록 시 지정한 창고에서 뺀다.
             //   이 경로(수정 저장)는 신규 저장보다 더 나빴다 — 라인 창고를 **보지도 않고**
             //   무조건 테넌트 기본창고를 박았다. 화면에서 창고를 골라도 수정 한 번에 날아갔다.
+            // 종전: 트랜잭션 없이 조회 → 수정 저장이 MySqlConnector 예외로 롤백(#372 · 대표 §252) — 20261127 후1 §15 로 tx 를 넘김
             var itemDefaultWarehouses = await LoadItemDefaultWarehousesAsync(
-                tenantId, dto.Items.Select(x => x.ItemId ?? string.Empty), ct);
+                tenantId, dto.Items.Select(x => x.ItemId ?? string.Empty), ct, tx);
 
             foreach (var item in dto.Items)
             {
@@ -2987,8 +2988,9 @@ public class SalesService : ISalesService
     ///    item_stock·stock_ledger 가 유령 창고에 쌓인다(10차 P0-4 가 막았던 사고).
     ///    유효하지 않으면 이 사전에서 빠지고 테넌트 폴백이 받는다.
     /// </summary>
+    // 종전: (tenantId, itemIds, ct) 세 인자 · 트랜잭션 없이 조회 → 수정 저장이 MySqlConnector 예외로 롤백(#372 · 대표 §252) — 20261127 후1 §15 로 선택 인자 tx 를 끝에 더함
     private async Task<Dictionary<string, string>> LoadItemDefaultWarehousesAsync(
-        string tenantId, IEnumerable<string> itemIds, CancellationToken ct)
+        string tenantId, IEnumerable<string> itemIds, CancellationToken ct, IDbTransaction? tx = null)
     {
         var ids = itemIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
         if (ids.Count == 0) return new Dictionary<string, string>();
@@ -3008,6 +3010,8 @@ public class SalesService : ISalesService
                    AND i.default_warehouse_id <> ''
                 """,
                 new { TenantId = tenantId, Ids = ids },
+                // 종전: transaction 인자 없음 — 20261127 후1 §15 로 tx 를 넘김(공용 WarehouseLookup 꼴)
+                transaction: tx,
                 cancellationToken: ct)).ConfigureAwait(false);
 
         return rows.ToDictionary(r => r.ItemId, r => r.WarehouseId);
