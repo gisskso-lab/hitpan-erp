@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 쿨타임 게이트 음성 대조군 — 변이 런 (설계 docs/설계/erp/쿨타임_자동로그아웃_설계_20260928.md §7 · §D · §E)
+#
+#   제품 문장 하나를 빼거나 되돌린 뒤(변이) 해당 게이트가 **FAIL 하는지** 본다. FAIL 이면 그 게이트가
+#   그 문장을 실제로 재고 있다는 증거다. 변이마다 끝나면 git 으로 원복한다(작업 나무만 · 커밋 0).
+#
+#   🔴 DB 게이트 변이는 시험 DB 가 있어야 한다 — CI db-gate 잡과 같은 환경 변수
+#      (HITPAN_REQUIRE_DB · HITPAN_MYSQL · HITPAN_DB_HOST/PORT/USER/PASS)를 준 곳에서만 돌린다.
+#      개발 PC(3306 = 실물 DB)에서 돌리지 않는다. HITPAN_REQUIRE_DB 가 없으면 DB 변이는 건너뛴다.
+#
+#   쓰는 법:  bash scripts/gates/cooltime-mutation-run.sh            # 전부
+#             bash scripts/gates/cooltime-mutation-run.sh a c        # 고른 것만(ⓐ ⓒ)
+#   근거·표: docs/개발/erp/20261127_쿨타임1b_갈래3_게이트_개발명세서.md §3
+# =============================================================================
+set -u
+cd "$(git rev-parse --show-toplevel)"
+
+ENGINE=src/HitPan.API/Services/Cooltime/CooltimeEngine.cs
+HR=src/HitPan.Application/Services/HrService.cs
+SETTINGS=src/HitPan.Application/Services/SettingsService.cs
+SESSION_MW=src/HitPan.API/Middleware/SessionValidityMiddleware.cs
+NOTIFY=src/HitPan.Web/Services/NotificationClient.cs
+DB="CooltimeDbGateTests"
+RULE="CooltimeRuleGateTests"
+
+# 이름 | 파일 | 바꿀 글자(그대로) | 바꿀 값 | 시험(FullyQualifiedName~) | DB 필요(1/0)
+MUTATIONS=(
+  "a|$ENGINE|AND tenant_id = @TenantId AND device_kind = 'pc'\" + guard|AND tenant_id = @TenantId\" + guard|$DB.G_C7_|1"
+  "b|$ENGINE|await WriteCooltimeCheckOutAsync(tenantId, row.UserId, anchorLocal, tx, ct).ConfigureAwait(false);|(CooltimeAttendanceOutcome.NotAttempted, null, null, null);|$DB.G_C8_|1"
+  "c|$ENGINE|                 AND cooltime_asked_at > UTC_TIMESTAMP(6) - INTERVAL 65 SECOND\",|                 \",|$DB.G_C6_|1"
+  "d|$HR|check_out_source = CASE WHEN check_out_source = 'cooltime_blank' THEN NULL ELSE check_out_source END|check_out_source = check_out_source|$DB.G_C16_|1"
+  "e|$NOTIFY|options.AccessTokenProvider = GetHubTokenAsync;|options.AccessTokenProvider = () => Task.FromResult<string?>(token);|$RULE.G_C18a_배선|0"
+  "f|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;|if (IsBeforeSettingChange(cUtc, null)) continue;|$DB.G_C19_|1"
+  "g|$SETTINGS|if (wasEnabled != cooltime.Enabled)|if (!wasEnabled && cooltime.Enabled)|$DB.G_C20_|1"
+  "h|$SETTINGS|if (wasEnabled != cooltime.Enabled)|if (wasEnabled && !cooltime.Enabled)|$DB.G_C20_|1"
+  "i|$ENGINE|? UtcToServerLocal(missedCUtc)|? nowLocal|$DB.G_C21_|1"
+  "k|$SESSION_MW|if (context.User?.Identity?.IsAuthenticated != true) { await _next(context); return; }|if (context.User?.Identity?.IsAuthenticated != true) { await _next(context); return; } if (context.Request.Path.StartsWithSegments(\"/api/auth/cooltime\")) { await _next(context); return; }|$DB.G_C14_|1"
+)
+
+want=" $* "
+fails=0
+for m in "${MUTATIONS[@]}"; do
+  IFS='|' read -r name file from to test needdb <<< "$m"
+  if [ "$#" -gt 0 ] && [[ "$want" != *" $name "* ]]; then continue; fi
+  if [ "$needdb" = "1" ] && [ -z "${HITPAN_REQUIRE_DB:-}" ]; then
+    echo "▶ [변이 $name] 건너뜀 — 시험 DB 없음(HITPAN_REQUIRE_DB). 이 변이는 확인 안 됐다."
+    continue
+  fi
+  count=$(FROM="$from" perl -0ne 'my $n = () = /\Q$ENV{FROM}\E/g; print $n' "$file")
+  if [ "$count" != "1" ]; then
+    echo "::error::[변이 $name] 바꿀 글자가 $file 에 ${count}번 — 정확히 1번이어야 한다(제품이 바뀌었으면 이 표를 같이 고쳐라)"
+    fails=$((fails + 1)); continue
+  fi
+  FROM="$from" TO="$to" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/' "$file"
+  echo "▶ [변이 $name] $file 변이 → 시험 $test (기대 = FAIL)"
+  if ! dotnet build src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --nologo -v q > "/tmp/ctm_mut_$name.build.log" 2>&1; then
+    echo "::error::[변이 $name] 변이 빌드 실패 — 대조군이 아니라 컴파일 오류다"; tail -20 "/tmp/ctm_mut_$name.build.log"
+    fails=$((fails + 1))
+  elif dotnet test src/HitPan.Tests/HitPan.Tests.csproj --configuration Release --no-build --nologo \
+         --filter "FullyQualifiedName~HitPan.Tests.Integrity.$test" > "/tmp/ctm_mut_$name.test.log" 2>&1; then
+    echo "::error::[변이 $name] $test 가 변이 뒤에도 통과했다 — 이 게이트는 그 문장을 재지 못한다"
+    grep -E "Passed|Failed|Total" "/tmp/ctm_mut_$name.test.log" | tail -3
+    fails=$((fails + 1))
+  elif grep -q "\[SKIP\]" "/tmp/ctm_mut_$name.test.log"; then
+    echo "::error::[변이 $name] SKIP — 안 돈 것을 FAIL 로 셀 수 없다"; fails=$((fails + 1))
+  else
+    echo "✅ [변이 $name] $test FAIL 확인(기대대로)"
+    grep -E "^\s+Failed |Assert|기대|대조군" "/tmp/ctm_mut_$name.test.log" | head -3
+  fi
+  git checkout -- "$file"
+done
+
+# 원복 확인 — 변이가 남아 있으면 안 된다
+if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY"; then
+  echo "::error::변이 원복 실패 — 제품 파일에 변경이 남았다"; git diff --stat; exit 2
+fi
+if [ "$fails" -gt 0 ]; then echo "::error::변이 런 실패 $fails 건"; exit 1; fi
+echo "변이 런 끝 — 실패 0"
