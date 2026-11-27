@@ -63,6 +63,8 @@ MUTATIONS=(
   # ── 🆕 11/28 [3-V] S-3 · [4] P3 — 규칙 ④ 폭 경계 정확값(G-C22 「경계 login = C 정확」 · 「경계 login = C + 4h 정확」) · a~z 다 써서 두 글자 ──
   "aa|$ENGINE|login_at >= @CUtc|login_at > @CUtc|$DB.G_C22_|1"
   "ab|$ENGINE|login_at < @CUtc + INTERVAL @W HOUR|login_at <= @CUtc + INTERVAL @W HOUR|$DB.G_C22_|1"
+  # ── 🆕 11/28 PM §290 S-4 — ④ 로그인도 E-2(저장 직후 C 건너뜀)를 따르는지: ⓕ 와 같은 바늘 · 대상 = G-C22 「④+저장 C 뒤」 줄 ──
+  "ac|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;|if (IsBeforeSettingChange(cUtc, null)) continue;|$DB.G_C22_|1"
 )
 
 want=" $* "
