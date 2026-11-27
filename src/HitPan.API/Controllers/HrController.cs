@@ -94,6 +94,42 @@ public class HrController : ControllerBase
         return Ok(new { message = "퇴근 처리했습니다." });
     }
 
+    // ── 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 고치기 · 고치기 이력 (추가 · #1) ──────────
+    //
+    // 사장님 Q1 「수정 여지」 — 자동 로그아웃이 정시 퇴근으로 적은 기록을 사람이 고친다(반자동 · 제안값→수정→확정).
+    // 🔴 권한 = 대리 근태와 같은 HR_PROXY update(C-5 ㉮) — 남의 근태를 건드리는 축이다. 새 권한 0(#11).
+    // 🔴 회사 = JWT(Items["TenantId"]) · 고친 사람 = JWT(Items["UserId"]). 주소의 attendanceId 는 서비스가
+    //    WHERE tenant_id 로 가둔다 — 다른 회사 행 = 404 · 행 변경 0(#2 · G-C12).
+
+    [HttpPut("attendance/{attendanceId}/check-out")]
+    [RequirePermission("HR_PROXY", "update")]
+    public async Task<IActionResult> EditCheckOut(string attendanceId, [FromBody] EditCheckOutRequest req, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        var uid = HttpContext.Items["UserId"]?.ToString();
+        if (string.IsNullOrEmpty(tid) || string.IsNullOrEmpty(uid)) return Forbid();
+
+        var result = await _svc.EditCheckOutAsync(tid, attendanceId, uid, req ?? new EditCheckOutRequest(), ct);
+        return result.Outcome switch
+        {
+            EditCheckOutOutcome.Saved => Ok(new { message = result.Message }),
+            EditCheckOutOutcome.NotFound => NotFound(new { message = result.Message }),
+            EditCheckOutOutcome.NotEditable => Conflict(new { message = result.Message }),
+            _ => BadRequest(new { message = result.Message })
+        };
+    }
+
+    [HttpGet("attendance/{attendanceId}/history")]
+    [RequirePermission("HR", "view")]
+    public async Task<IActionResult> GetCheckOutHistory(string attendanceId, CancellationToken ct)
+    {
+        var tid = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tid)) return Forbid();
+
+        var list = await _svc.GetCheckOutHistoryAsync(tid, attendanceId, ct);
+        return list is null ? NotFound(new { message = "근태 기록을 찾을 수 없습니다." }) : Ok(list);
+    }
+
     // ── 초과근무 ──
 
     [HttpGet("overtime")]
