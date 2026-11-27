@@ -53,6 +53,9 @@ public sealed class CooltimeController : ControllerBase
     /// <summary>
     /// [아니요 — 지금 로그아웃] 또는 카운트다운 0 — 끝내기 함수 하나(설계 §4)를 부른다.
     /// 이미 끝났어도 200(<c>ended=false</c>) — 화면은 어느 쪽이든 저장소를 비우고 로그인 화면으로 간다.
+    /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 위 줄의 화면 동작은 바뀌었다: <c>ended=false</c> 면 화면이 저장소를 비우지 않고
+    /// <c>GET state</c> 로 다시 확인한다(다른 탭이 [계속] 했거나 · 팝업 중 끔 = 팝업만 닫음). 물음이 65초를 넘긴 뒤의 요청도
+    /// <c>ended=false</c>(끝내기 = 서버 작업 ① 몫 · 설계 §E).
     /// </summary>
     [HttpPost("logout")]
     public async Task<IActionResult> Logout(

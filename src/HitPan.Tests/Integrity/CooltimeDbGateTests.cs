@@ -197,6 +197,15 @@ public sealed partial class CooltimeDbGateTests : IDisposable
             lock (_gate) Ended.Add((tenantId, sessionId, cause));
             return Task.CompletedTask;
         }
+
+        /// <summary>🆕 11/27 고침 차례(§273 V1) — 「계속됨」 송신을 센다(G-C14 ①).</summary>
+        public List<(string Tenant, string Sid)> Continued { get; } = new();
+
+        public Task ContinuedAsync(string tenantId, string sessionId, CancellationToken ct = default)
+        {
+            lock (_gate) Continued.Add((tenantId, sessionId));
+            return Task.CompletedTask;
+        }
     }
 
     private static CooltimeEngine Engine(MySqlConnection db, CountingPusher pusher) =>
@@ -759,6 +768,39 @@ public sealed partial class CooltimeDbGateTests : IDisposable
             new EditCheckOutRequest { CheckOut = d.AddDays(-1).AddHours(19), Reason = "사람 기록" });
         Assert.Equal(EditCheckOutOutcome.NotEditable, notEditable.Outcome);
         Assert.Equal(d.AddDays(-1).AddHours(18), (await AttAsync(db, human)).CheckOut);
+
+        // 🆕 11/27 고침 차례(§273 V3) — 「고침」 행을 다시 고친다 ⇒ Saved · 값 바뀜 · 이력 2줄(두 번째 전 = edited/18:40)
+        //   ⚠️ UPDATE WHERE 의 'edited' 를 빼면 여기서 NotEditable 로 FAIL(대조군 ⓝ).
+        var again = await hr.EditCheckOutAsync(_tenantA, attA, editor,
+            new EditCheckOutRequest { CheckOut = d.AddHours(18).AddMinutes(20), Reason = "40분이 아니라 20분" });
+        Assert.Equal(EditCheckOutOutcome.Saved, again.Outcome);
+        var a2 = await AttAsync(db, attA);
+        Assert.Equal(d.AddHours(18).AddMinutes(20), a2.CheckOut);
+        Assert.Equal("edited", a2.Source);
+        Assert.Equal(9.3m, a2.WorkHours);
+        var trail2 = (await db.QueryAsync<(string Reason, string Before, string After)>(
+            @"SELECT reason, before_value, after_value FROM audit_trail
+               WHERE tenant_id = @T AND entity_type = 'attendance' AND action_type = 'update' AND entity_id = @Id",
+            new { T = _tenantA, Id = attA })).ToList();
+        Assert.Equal(2, trail2.Count);
+        var second = trail2.Single(t => t.Reason == "40분이 아니라 20분");
+        Assert.Contains("edited", second.Before);
+        Assert.Contains("18:40", second.Before);
+        Assert.Contains("18:20", second.After);
+
+        // 🆕 11/27 고침 차례(§273 ② · V8) — 아직 오지 않은 시각은 막는다(출근 1시간 전 · 24시간 안이지만 미래) ⇒ Invalid · 변경 0 · 이력 0
+        //   짝: 같은 행에 지금보다 10분 앞 시각 = Saved(막는 것이 미래 조건뿐임을 보인다). ⚠️ 미래 줄을 빼면 FAIL(대조군 ⓞ).
+        var nowLocal = DateTime.Now;
+        var fresh = await InsertAttendanceAsync(db, _tenantA, empA, nowLocal.AddHours(-1), null, null, "cooltime_blank");
+        var future = await hr.EditCheckOutAsync(_tenantA, fresh, editor,
+            new EditCheckOutRequest { CheckOut = nowLocal.AddHours(2), Reason = "미래 시각" });
+        Assert.Equal(EditCheckOutOutcome.Invalid, future.Outcome);
+        Assert.Null((await AttAsync(db, fresh)).CheckOut);
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM audit_trail WHERE entity_type = 'attendance' AND entity_id = @Id", new { Id = fresh }));
+        var past = await hr.EditCheckOutAsync(_tenantA, fresh, editor,
+            new EditCheckOutRequest { CheckOut = nowLocal.AddMinutes(-10), Reason = "지금 직전 퇴근" });
+        Assert.Equal(EditCheckOutOutcome.Saved, past.Outcome);
     }
 
     // ══════════════════════════════════════════════════════════════

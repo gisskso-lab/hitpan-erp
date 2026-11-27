@@ -379,8 +379,13 @@ public class HrService : IHrService
     // #13 — DB 접속 금지 PC 라 출하 DDL 인용으로 갈음: attendance :301-317(check_out_source :313) · audit_trail :353-368 · users :4386-.
     //       [4] 가 CI db-gate 에서 DESCRIBE 대조.
 
-    /// <summary>퇴근 고치기 대상 출처 — 자동 로그아웃이 적은 것만.</summary>
-    public static readonly string[] EditableCheckOutSources = ["cooltime", "cooltime_blank"];
+    /// <summary>퇴근 고치기 대상 출처 — 자동 로그아웃이 적은 것 + 그것을 고친 것(<c>edited</c>).</summary>
+    /// <remarks>
+    /// 🆕 11/27 고침 차례(PM §272 ① · §273 V3) — 「고침」 행도 다시 고칠 수 있다(잘못 고치면 되돌릴 길이 0 이던 것 · 9/28 C-5 「고칠 수 있다」 취지).
+    /// 고칠 때마다 audit_trail 에 한 줄씩 쌓인다(이력 = 고친 횟수만큼). 사람이 적은 퇴근(NULL)은 여전히 대상 아님.
+    /// ⬛ [낡은 줄 · 11/27 고침 차례 이전] public static readonly string[] EditableCheckOutSources = ["cooltime", "cooltime_blank"];
+    /// </remarks>
+    public static readonly string[] EditableCheckOutSources = ["cooltime", "cooltime_blank", "edited"];
 
     /// <summary>고친 퇴근이 출근 뒤 이 시간 안이어야 한다(야간 근무 포함 · 엉뚱한 날짜 입력 막기).</summary>
     public const int EditCheckOutMaxHoursAfterCheckIn = 24;
@@ -430,6 +435,9 @@ public class HrService : IHrService
             return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각은 출근 시각보다 뒤여야 합니다.");
         if (newOut > row.CheckIn.Value.AddHours(EditCheckOutMaxHoursAfterCheckIn))
             return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각은 출근한 때부터 24시간 안으로 정해 주세요.");
+        // 🆕 11/27 고침 차례(§273 ② · 리뷰서 V8) — 아직 오지 않은 시각은 퇴근으로 적지 않는다(근태 시계 = 서버 PC 로컬 · 손 퇴근과 같은 시계).
+        if (newOut > DateTime.Now)
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각은 지금보다 뒤로 정할 수 없습니다.");
 
         // 기존 식과 같다(`CheckOutAsync` — 소수 1자리). 금액이 아니지만 칸이 decimal(4,1) 이라 decimal 로 넘긴다.
         var hours = (decimal)Math.Round((newOut - row.CheckIn.Value).TotalHours, 1);
@@ -438,7 +446,7 @@ public class HrService : IHrService
             @"UPDATE attendance
                  SET check_out = @CheckOut, work_hours = @Hours, check_out_source = 'edited'
                WHERE tenant_id = @TenantId AND attendance_id = @Id
-                 AND check_out_source IN ('cooltime', 'cooltime_blank')",
+                 AND check_out_source IN ('cooltime', 'cooltime_blank', 'edited')",
             new { CheckOut = newOut, Hours = hours, TenantId = tenantId, Id = attendanceId }, tx, cancellationToken: ct));
         if (changed != 1)
             return new EditCheckOutResult(EditCheckOutOutcome.NotEditable, "자동 로그아웃으로 적힌 퇴근만 고칠 수 있습니다.");

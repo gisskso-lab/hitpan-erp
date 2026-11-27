@@ -18,6 +18,12 @@ public interface ICooltimePusher
 
     /// <summary><c>CooltimeEnded { cause }</c> 를 그 로그인에 보낸다.</summary>
     Task EndedAsync(string tenantId, string sessionId, CooltimeEndCause cause, CancellationToken ct = default);
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1) — <c>CooltimeContinued</c>(본문 없음)를 그 로그인에 보낸다. 같은 출입증을 쓰는 다른 탭이 팝업을 닫는다.
+    /// #12 구현체 grep(11/27): <see cref="SignalRCooltimePusher"/> · 시험 <c>CooltimeDbGateTests.CountingPusher</c> — 둘 다 같이 고침.
+    /// </summary>
+    Task ContinuedAsync(string tenantId, string sessionId, CancellationToken ct = default);
 }
 
 /// <summary><see cref="ICooltimePusher"/> 의 SignalR 구현 — 기존 <c>NotificationHub</c> 연결 하나를 재사용한다.</summary>
@@ -63,6 +69,23 @@ public sealed class SignalRCooltimePusher : ICooltimePusher
         {
             // #15 — 못 받은 화면은 SessionValidityMiddleware 401 → 갱신 → refresh 폐기 401 → 로그인 화면(설계 §4).
             _logger.LogWarning(ex, "[쿨타임] 끝남 푸시 실패 — tenant={TenantId} sid={Sid}", tenantId, sessionId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ContinuedAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _hub.Clients
+                .Group(NotificationHub.SessionGroupFor(tenantId, sessionId))
+                .SendAsync(CooltimeWire.ContinuedEvent, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // #15 — 못 받은 탭은 0초에 서버가 「안 끝냄」 이라 답하면 상태를 다시 물어 팝업만 닫는다(§273 V1 뒷받침).
+            _logger.LogWarning(ex, "[쿨타임] 계속됨 푸시 실패 — tenant={TenantId} sid={Sid}", tenantId, sessionId);
         }
     }
 }

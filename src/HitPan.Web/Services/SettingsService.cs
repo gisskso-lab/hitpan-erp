@@ -51,6 +51,34 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
     }
 
     /// <summary>
+    /// 🆕 11/27 쿨타임 고침 차례(§273 V4) — 저장하되 자동 로그아웃 세 칸은 <c>null</c>(= 서버 「그대로 둠」)로 보낸다(추가 · #1).
+    /// </summary>
+    /// <remarks>
+    /// 자동 로그아웃을 고치지 않는 화면(내 정보 등)이 쓴다. 웹 모델의 켬/끔 칸은 null 못 되는 bool 이라 GET 없이 만든 모델을
+    /// <see cref="SaveAsync"/> 로 보내면 「끔」 이 실려 자동 로그아웃이 조용히 꺼진다(리뷰서 V4). 규칙 = <see cref="CooltimeScreenRules.KeepCooltimeAsIs"/>.
+    /// </remarks>
+    public async Task<bool> SaveKeepCooltimeAsync(TenantSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = JsonSerializer.SerializeToNode(model, new JsonSerializerOptions(JsonSerializerDefaults.Web)) as System.Text.Json.Nodes.JsonObject;
+            if (body is null)
+            {
+                logger.LogWarning("사용환경 설정 저장 본문을 만들지 못했다");
+                return false;
+            }
+            CooltimeScreenRules.KeepCooltimeAsIs(body);
+            using var res = await http.PutAsJsonAsync("api/settings", body, ct).ConfigureAwait(false);
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "사용환경 설정 저장 실패");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 🆕 20260928작4 쿨타임 §5-1 — 저장하고, 거절(400)이면 <b>서버가 준 문구</b>를 함께 돌려준다(추가 · #1).
     /// </summary>
     /// <remarks>

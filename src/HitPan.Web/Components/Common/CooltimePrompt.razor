@@ -5,6 +5,8 @@
       서버가 끝낸다. 그래서 이 팝업은 「묻고 · 답을 보내고 · 끝났으면 로그인 화면으로」 만 한다.
    🔴 바깥을 눌러도 · Esc 를 눌러도 닫히지 않는다(답을 해야 닫힌다).
    🔴 §E-5 — 팝업 중 받은 401 · 409 · ended:false 는 「끝남」 과 같게 처리한다(로그인 화면 · 서버 문구는 안 보여 줌).
+   🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 윗줄을 바꿨다: 401 만 끝남. 409 · ended:false 는 출입증을 지우지 않고
+      GET state 로 다시 묻는다(행 없음 · 물음 만료 = 끝남 / 안 물음 = 팝업만 닫음). 다른 탭의 [계속] 은 서버 「계속됨」 푸시로 받는다.
    🔴 끝낼 때 손 로그아웃(`AuthService.LogoutAsync` → api/auth/logout)을 부르지 않는다 — 그 길은 「그 순간 = 퇴근」 을
       적는다. 퇴근은 서버의 자동 로그아웃이 정시 퇴근으로 이미 적었다(설계 §6). 여기서는 이 PC 의 저장소만 비운다. *@
 @using Microsoft.JSInterop
@@ -58,6 +60,7 @@
     {
         Notify.OnCooltimePrompt += OnPrompt;
         Notify.OnCooltimeEnded += OnEnded;
+        Notify.OnCooltimeContinued += OnContinued;   // 🆕 11/27 고침 차례(§273 V1)
 
         // 팝업이 붙기 전에 이미 온 것(종이 먼저 연결해 상태를 물었을 때 등)을 놓치지 않는다.
         if (Notify.PendingCooltimeEnded is not null)
@@ -84,6 +87,64 @@
     private void OnPrompt(int secondsLeft) => _ = InvokeAsync(() => Show(secondsLeft));
 
     private void OnEnded(string cause) => _ = InvokeAsync(EndLocallyAsync);
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1) — 같은 출입증의 다른 탭이 [계속] 했다(서버 「계속됨」 푸시). 이 탭의 팝업도 닫는다.
+    /// [계속] 을 누른 그 탭은 이미 닫혀 있어 아무 일도 안 한다.
+    /// </summary>
+    private void OnContinued() => _ = InvokeAsync(() =>
+    {
+        if (!_open || _ending) return;
+        ClosePopup(CooltimeScreenRules.RecheckClosedNotice);
+    });
+
+    /// <summary>🆕 11/27 — 팝업만 닫고 그대로 일한다(출입증은 건드리지 않는다).</summary>
+    private void ClosePopup(string notice)
+    {
+        StopCountdown();
+        _open = false;
+        _message = null;
+        Notify.ClearPendingCooltimePrompt();
+        Snackbar.Add(notice, Severity.Success);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 서버가 「안 끝냈다」(<c>ended:false</c> · [계속] 409)고 답했을 때
+    /// 출입증을 지우지 않고 <c>GET state</c> 로 다시 묻는다. 끝남이면 로그인 화면 · 아니면 팝업만 닫는다(또는 다시 센다).
+    /// </summary>
+    private async Task RecheckAsync()
+    {
+        if (_ending) return;
+        StopCountdown();   // 0초에서 멈춘 카운트다운을 치운다(다시 셀 때 새로 시작하게)
+
+        int? status = null;
+        string? body = null;
+        try
+        {
+            using var r = await Http.GetAsync(CooltimeScreenRules.StatePath);
+            status = (int)r.StatusCode;
+            body = await r.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "자동 로그아웃 — 상태 다시 확인이 서버에 닿지 못했다(팝업만 닫고 서버 판정에 맡긴다)");
+        }
+
+        var s = CooltimeScreenRules.ParseState(body);
+        switch (CooltimeScreenRules.AfterRecheck(status, s.Active, s.Asked, s.SecondsLeft))
+        {
+            case CooltimeScreenRules.RecheckDecision.EndLocally:
+                await EndLocallyAsync();
+                break;
+            case CooltimeScreenRules.RecheckDecision.ShowAgain:
+                Show(s.SecondsLeft ?? 0);
+                break;
+            default:
+                ClosePopup(CooltimeScreenRules.RecheckClosedNotice);
+                break;
+        }
+    }
 
     private void Show(int secondsLeft)
     {
@@ -166,7 +227,12 @@
                     break;
                 case CooltimeScreenRules.CallOutcome.Ended:
                     // §E-5 — 401 · 409 = 서버가 이미 끝냈다.
+                    // 🆕 11/27 고침 차례 — 이제 여기 오는 것은 401 뿐(409 는 아래 다시 확인).
                     await EndLocallyAsync();
+                    break;
+                case CooltimeScreenRules.CallOutcome.Recheck:
+                    // 🆕 11/27 고침 차례(§273 V1) — 409 = 물음 칸이 비었다(다른 탭이 먼저 [계속] · 팝업 중 끔 · 만료) → 출입증을 지우지 않고 다시 묻는다.
+                    await RecheckAsync();
                     break;
                 default:
                     _message = CooltimeScreenRules.ContinueFailedNotice;
@@ -191,31 +257,60 @@
     private async Task FinishWithLogoutAsync(string trigger)
     {
         if (_ending) return;
-        var status = await PostLogoutAsync(trigger);
-        if (CooltimeScreenRules.ShouldRetryLogout(status))
+        try
         {
-            await Task.Delay(1000);
-            status = await PostLogoutAsync(trigger);
+            var (status, ended) = await PostLogoutAsync(trigger);
+            if (CooltimeScreenRules.ShouldRetryLogout(status))
+            {
+                await Task.Delay(1000);
+                (status, ended) = await PostLogoutAsync(trigger);
+            }
+            var outcome = CooltimeScreenRules.LogoutOutcome(status, ended);
+            if (outcome == CooltimeScreenRules.CallOutcome.Recheck)
+            {
+                // 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — ended:false = 서버가 이 로그인을 안 끝냈다
+                //   (다른 탭이 [계속] · 팝업 중 끔 · 물음 만료 = 서버 작업 몫). 출입증을 지우지 않고 다시 묻는다.
+                //   ⬛ [낡은 동작 · 11/27 이전] 2xx 면 ended 와 무관하게 아래 EndLocallyAsync 로 갔다(공유 저장소 출입증 삭제 → 두 탭 다 로그인 화면).
+                await RecheckAsync();
+                return;
+            }
+            if (outcome == CooltimeScreenRules.CallOutcome.Failed)
+            {
+                // 서버가 못 끝냈어도 화면은 끝낸다 — 서버 시각 작업이 응답 없음(①)으로 끝내고 퇴근도 그때 적는다.
+                Logger.LogWarning("자동 로그아웃 요청이 끝나지 않았다({Status}) — 이 PC 는 로그아웃하고 서버 작업에 맡긴다", status);
+            }
+            await EndLocallyAsync();
         }
-        if (CooltimeScreenRules.LogoutOutcome(status) == CooltimeScreenRules.CallOutcome.Failed)
+        finally
         {
-            // 서버가 못 끝냈어도 화면은 끝낸다 — 서버 시각 작업이 응답 없음(①)으로 끝내고 퇴근도 그때 적는다.
-            Logger.LogWarning("자동 로그아웃 요청이 끝나지 않았다({Status}) — 이 PC 는 로그아웃하고 서버 작업에 맡긴다", status);
+            // 🆕 11/27 — 다시 확인 뒤 팝업만 닫힌 경우 버튼을 다시 살린다(끝남이면 화면을 떠나므로 상관없음).
+            _busy = false;
         }
-        await EndLocallyAsync();
     }
 
-    private async Task<int?> PostLogoutAsync(string trigger)
+    // ⬛ [낡은 머리 · 11/27 고침 차례 이전] private async Task<int?> PostLogoutAsync(string trigger) — 응답 코드만 돌려줬다.
+    // 🆕 11/27 고침 차례(§273 V1) — 본문의 ended 도 읽는다(2xx 라도 ended:false 면 끝난 게 아니다).
+    private async Task<(int? Status, bool? Ended)> PostLogoutAsync(string trigger)
     {
         try
         {
             using var r = await Http.PostAsJsonAsync(CooltimeScreenRules.LogoutPath, new { trigger });
-            return (int)r.StatusCode;
+            var status = (int)r.StatusCode;
+            string? body = null;
+            try
+            {
+                body = await r.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "자동 로그아웃 응답 본문을 읽지 못했다(다시 확인으로 넘긴다)");
+            }
+            return (status, CooltimeScreenRules.ParseEnded(body));
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "자동 로그아웃 요청이 서버에 닿지 못했다");
-            return null;
+            return (null, null);
         }
     }
 
@@ -260,6 +355,7 @@
     {
         Notify.OnCooltimePrompt -= OnPrompt;
         Notify.OnCooltimeEnded -= OnEnded;
+        Notify.OnCooltimeContinued -= OnContinued;
         _tick?.Cancel();
         _tick?.Dispose();
         _tick = null;

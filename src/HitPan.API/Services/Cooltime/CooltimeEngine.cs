@@ -237,6 +237,10 @@ public sealed class CooltimeEngine
         //   ① 무응답: [계속] 문장과 정반대 경계(asked_at <= 지금-65초) ⇒ 둘 중 하나만 1행.
         //   ② 놓침  : 묻기(③)와 겹치지 않는 조건 그대로.
         //   API     : 물음을 받은 로그인만(asked_at IS NOT NULL) + JWT 사용자(남의 행 차단 · 작2 절K 와 같은 모양).
+        //   🆕 11/27 고침 차례(§275 · 설계 §E 「물음 만료 → logout ended:false」) — API 는 물음이 살아 있는 65초 안에서만 끝낸다
+        //     ([계속] 과 같은 창 · ① 무응답과 정반대 경계 ⇒ API 와 서버 작업 ① 이 같은 행을 두고 겹치지 않는다).
+        //     만료 뒤 끝내기 = 서버 작업 ① 몫(15초 안). ⚠️ 이 조건을 빼면 G-C14 ②(만료 뒤 logout = ended:false)가 FAIL 한다(대조군 ⓛ).
+        //   ⬛ [낡은 줄 · 11/27 고침 차례 이전] _ => " AND cooltime_asked_at IS NOT NULL AND user_id = @JwtUserId"
         var guard = cause switch
         {
             CooltimeEndCause.NoAnswer =>
@@ -244,7 +248,7 @@ public sealed class CooltimeEngine
             CooltimeEndCause.Missed =>
                 " AND cooltime_asked_at IS NULL AND cooltime_snooze_until IS NULL AND login_at < @CUtc" +
                 " AND UTC_TIMESTAMP(6) >= @CUtc + INTERVAL 5 MINUTE",
-            _ => " AND cooltime_asked_at IS NOT NULL AND user_id = @JwtUserId"
+            _ => " AND cooltime_asked_at IS NOT NULL AND cooltime_asked_at > UTC_TIMESTAMP(6) - INTERVAL 65 SECOND AND user_id = @JwtUserId"
         };
 
         await EnsureOpenAsync(ct).ConfigureAwait(false);
@@ -410,6 +414,10 @@ public sealed class CooltimeEngine
                  AND cooltime_asked_at IS NOT NULL
                  AND cooltime_asked_at > UTC_TIMESTAMP(6) - INTERVAL 65 SECOND",
             new { Sid = sessionId, TenantId = tenantId, UserId = userId }, cancellationToken: ct)).ConfigureAwait(false);
+        // 🆕 11/27 고침 차례(§273 V1) — 이긴 [계속] 만 「계속됨」 을 그 로그인 그룹에 알린다(같은 출입증을 쓰는 다른 탭이 팝업을 닫는다).
+        //   푸시 실패는 예외로 오르지 않는다(구현체가 경고 1줄) — [계속] 결과를 되돌리지 않는다.
+        //   ⚠️ 이 줄을 빼면 G-C14 ①(계속됨 푸시 1회)이 FAIL 한다(대조군 ⓜ).
+        if (n == 1) await _pusher.ContinuedAsync(tenantId, sessionId, ct).ConfigureAwait(false);
         return n == 1;
     }
 
@@ -424,7 +432,9 @@ public sealed class CooltimeEngine
                 FROM user_sessions
                WHERE session_id = @Sid AND tenant_id = @TenantId AND user_id = @UserId",
             new { Sid = sessionId, TenantId = tenantId, UserId = userId }, cancellationToken: ct)).ConfigureAwait(false);
-        if (s is null) return new CooltimeStateResponse(false, 0, null);
+        // ⬛ [낡은 줄 · 11/27 고침 차례 이전] if (s is null) return new CooltimeStateResponse(false, 0, null);
+        // 🆕 11/27 고침 차례(§275 E-5) — 행 없음 = active:false(지운 직후 캐시 10초 틈에서 「살아 있음」 으로 잘못 읽지 않게).
+        if (s is null) return new CooltimeStateResponse(false, 0, null, Active: false);
         return new CooltimeStateResponse(s.Asked != 0, (int)Math.Clamp(s.SecondsLeft, 0, CooltimeWire.PromptSeconds), s.SnoozeUntilUtc);
     }
 

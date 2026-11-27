@@ -70,6 +70,12 @@ public sealed class NotificationClient : IAsyncDisposable
     public event Action<string>? OnCooltimeEnded;
 
     /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1) — 같은 출입증을 쓰는 다른 탭(또는 이 탭)이 [계속] 했다. 떠 있는 팝업을 닫는다.
+    /// 고른 길 = 서버 「계속됨」 푸시(저장소 이벤트 아님) — 까닭은 갈래 ② 명세서 §8.
+    /// </summary>
+    public event Action? OnCooltimeContinued;
+
+    /// <summary>
     /// 아직 팝업이 받기 전에 온 물음(받은 때 · 남은 초). 팝업이 늦게 붙어도 이것을 보고 띄운다.
     /// 팝업이 처리하면 <see cref="ClearPendingCooltimePrompt"/> 로 지운다.
     /// </summary>
@@ -229,6 +235,13 @@ public sealed class NotificationClient : IAsyncDisposable
             var cause = m?.Cause ?? string.Empty;
             PendingCooltimeEnded = cause;
             OnCooltimeEnded?.Invoke(cause);
+        });
+
+        // 🆕 11/27 고침 차례(§273 V1) — 「계속됨」: 아직 팝업이 못 받은 물음도 지운다(늦게 붙은 팝업이 옛 물음을 띄우지 않게).
+        hub.On(CooltimeScreenRules.ContinuedEvent, () =>
+        {
+            PendingCooltimePrompt = null;
+            OnCooltimeContinued?.Invoke();
         });
 
         // ④ 자동 재연결 성공 — 끊긴 사이 온 물음을 메운다.

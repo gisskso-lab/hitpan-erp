@@ -21,6 +21,7 @@ HR=src/HitPan.Application/Services/HrService.cs
 SETTINGS=src/HitPan.Application/Services/SettingsService.cs
 SESSION_MW=src/HitPan.API/Middleware/SessionValidityMiddleware.cs
 NOTIFY=src/HitPan.Web/Services/NotificationClient.cs
+SCREEN=src/HitPan.Web/Services/CooltimeScreenRules.cs   # 🆕 11/27 고침 차례
 DB="CooltimeDbGateTests"
 RULE="CooltimeRuleGateTests"
 
@@ -36,6 +37,16 @@ MUTATIONS=(
   "h|$SETTINGS|if (wasEnabled != cooltime.Enabled)|if (wasEnabled && !cooltime.Enabled)|$DB.G_C20_|1"
   "i|$ENGINE|? UtcToServerLocal(missedCUtc)|? nowLocal|$DB.G_C21_|1"
   "k|$SESSION_MW|if (context.User?.Identity?.IsAuthenticated != true) { await _next(context); return; }|if (context.User?.Identity?.IsAuthenticated != true) { await _next(context); return; } if (context.Request.Path.StartsWithSegments(\"/api/auth/cooltime\")) { await _next(context); return; }|$DB.G_C14_|1"
+  # ── 🆕 11/27 고침 차례(§273 · §275) — 갈래 ② 명세서 §8 ──
+  "l|$ENGINE| AND cooltime_asked_at > UTC_TIMESTAMP(6) - INTERVAL 65 SECOND AND user_id = @JwtUserId\"| AND user_id = @JwtUserId\"|$DB.G_C14_|1"
+  "m|$ENGINE|if (n == 1) await _pusher.ContinuedAsync(tenantId, sessionId, ct).ConfigureAwait(false);|if (n == 1) await Task.CompletedTask;|$DB.G_C14_|1"
+  "n|$HR|AND check_out_source IN ('cooltime', 'cooltime_blank', 'edited')|AND check_out_source IN ('cooltime', 'cooltime_blank')|$DB.G_C12_|1"
+  "o|$HR|if (newOut > DateTime.Now)|if (newOut > DateTime.MaxValue)|$DB.G_C12_|1"
+  "p|$SCREEN|409 => CallOutcome.Recheck,   // [계속]|409 => CallOutcome.Ended,   // [계속]|$RULE.G_C14_화면_계속_응답|0"
+  "q|$SCREEN|>= 200 and < 300 => ended == true ? CallOutcome.Ended : CallOutcome.Recheck,|>= 200 and < 300 => CallOutcome.Ended,|$RULE.V1_|0"
+  "r|$SCREEN|foreach (var k in hit) body[k] = null;|foreach (var k in hit) { }|$RULE.V4_|0"
+  "s|$SCREEN|or SourceCooltimeBlank or SourceEdited;|or SourceCooltimeBlank;|$RULE.C5_|0"
+  "t|$SCREEN|if (active == false) return RecheckDecision.EndLocally;|if (active == false) { }|$RULE.V1_|0"
 )
 
 want=" $* "
@@ -72,7 +83,7 @@ for m in "${MUTATIONS[@]}"; do
 done
 
 # 원복 확인 — 변이가 남아 있으면 안 된다
-if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY"; then
+if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN"; then
   echo "::error::변이 원복 실패 — 제품 파일에 변경이 남았다"; git diff --stat; exit 2
 fi
 if [ "$fails" -gt 0 ]; then echo "::error::변이 런 실패 $fails 건"; exit 1; fi

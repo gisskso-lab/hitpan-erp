@@ -71,7 +71,13 @@ public sealed record CooltimeEndResult(
 public sealed record CooltimeTickResult(int EnabledTenants, int Asked, int EndedNoAnswer, int EndedMissed, int Deadlocks);
 
 /// <summary><c>GET /api/auth/cooltime/state</c> 응답 본문.</summary>
-public sealed record CooltimeStateResponse(bool Asked, int SecondsLeft, DateTime? SnoozeUntilUtc);
+/// <remarks>
+/// 🆕 11/27 고침 차례(§275 E-5 · 설계 §E-5 (나) 「state 에 칸을 더해야 함」) — <c>Active</c> = 그 로그인의 세션 행이 아직 있나.
+/// 서버가 행을 지운 직후(세션 확인 캐시 10초 안)에는 <c>asked:false</c> 200 이 나와 「살아 있음」 으로 잘못 읽힌다 ⇒
+/// 화면이 다시 확인할 때 <c>active:false</c> 면 끝남으로 본다. 행이 있거나 세션 번호 없는 옛 토큰이면 <c>true</c>.
+/// ⬛ [낡은 줄 · 11/27 고침 차례 이전] public sealed record CooltimeStateResponse(bool Asked, int SecondsLeft, DateTime? SnoozeUntilUtc);
+/// </remarks>
+public sealed record CooltimeStateResponse(bool Asked, int SecondsLeft, DateTime? SnoozeUntilUtc, bool Active = true);
 
 /// <summary><c>POST /api/auth/cooltime/logout</c> 요청 본문(선택). 테넌트·세션 번호는 받지 않는다(#2 · JWT 에서만).</summary>
 public sealed class CooltimeLogoutRequest
@@ -88,6 +94,12 @@ public static class CooltimeWire
 
     /// <summary>그룹 <c>s:{tenant}:{sid}</c> 로 보내는 끝남. 본문 <c>{ "cause": "no_answer" | "missed" | "user_choice" | "countdown" }</c>.</summary>
     public const string EndedEvent = "CooltimeEnded";
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1) — [계속] 이 이긴 순간 그룹 <c>s:{tenant}:{sid}</c> 로 보내는 「계속됨」. 본문 없음.
+    /// 같은 PC 같은 브라우저의 탭들은 출입증(=sid)을 함께 쓴다 ⇒ 한 탭의 [계속] 을 다른 탭이 알고 팝업을 닫는다.
+    /// </summary>
+    public const string ContinuedEvent = "CooltimeContinued";
 
     /// <summary>팝업 카운트다운 초(오더 「= 60초」).</summary>
     public const int PromptSeconds = 60;

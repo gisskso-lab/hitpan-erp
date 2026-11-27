@@ -13,6 +13,8 @@ public static class CooltimeScreenRules
     // ── 서버 약속(갈래 ① 명세서 §1) — 글자까지 같아야 한다 ──────────────────────────
     public const string PromptEvent = "CooltimePrompt";
     public const string EndedEvent = "CooltimeEnded";
+    /// <summary>🆕 11/27 고침 차례(§273 V1) — 같은 출입증의 다른 탭이 [계속] 했다(서버 푸시 · 본문 없음).</summary>
+    public const string ContinuedEvent = "CooltimeContinued";
     public const string ContinuePath = "api/auth/cooltime/continue";
     public const string LogoutPath = "api/auth/cooltime/logout";
     public const string StatePath = "api/auth/cooltime/state";
@@ -92,8 +94,10 @@ public static class CooltimeScreenRules
     };
 
     /// <summary>고칠 수 있는 출처인가(C-5 (가) · 서버 <c>HrService.EditableCheckOutSources</c> 와 같다).</summary>
+    // ⬛ [낡은 줄 · 11/27 고침 차례 이전] => source is SourceCooltime or SourceCooltimeBlank;
+    // 🆕 11/27 고침 차례(§272 ① · §273 V3) — 「고침」 행도 다시 고칠 수 있다(매번 이력 · 서버와 같은 셋).
     public static bool IsEditableSource(string? source)
-        => source is SourceCooltime or SourceCooltimeBlank;
+        => source is SourceCooltime or SourceCooltimeBlank or SourceEdited;
 
     // ── 팝업 응답 판정(설계 §E-5) ─────────────────────────────────────────────────
 
@@ -105,30 +109,151 @@ public static class CooltimeScreenRules
         /// <summary>끝남 — 저장소 비우고 로그인 화면.</summary>
         Ended,
         /// <summary>서버에 못 닿았거나 서버 오류 — [계속]이면 팝업을 그대로 두고 한 번 더 누르게 한다.</summary>
-        Failed
+        Failed,
+        /// <summary>
+        /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 서버가 「이 로그인은 안 끝냈다」(<c>ended:false</c> · [계속] 409)고 답했다.
+        /// 다른 탭이 [계속] 했거나 · 팝업 중 관리자가 껐거나 · 물음이 이미 만료됐거나 · 행이 막 지워졌다 — 이 넷을 가르려고
+        /// <b>저장소를 비우지 않고</b> <c>GET state</c> 로 다시 묻는다(<see cref="AfterRecheck"/>).
+        /// </summary>
+        Recheck
     }
 
     /// <summary>
-    /// [계속] 응답. 200 = 계속 · <b>401 · 409 = 끝남</b>(서버가 이미 세션을 지웠다 · §E-5) · 그 밖(5xx · 연결 실패 <c>null</c>) = 실패.
+    /// [계속] 응답. 200 = 계속 · <b>401 = 끝남</b>(서버가 이미 세션을 지웠다 · §E-5) · 🆕 11/27 <b>409 = 다시 확인</b> · 그 밖(5xx · 연결 실패 <c>null</c>) = 실패.
     /// </summary>
+    /// <remarks>
+    /// 🆕 11/27 고침 차례(§273 V1) — 409 는 「물음 칸이 비었다」 일 뿐 세션이 끝났다는 뜻이 아니다(다른 탭이 먼저 [계속] · 팝업 중 끔).
+    /// 끝남으로 보면 공유 저장소의 출입증을 지워 두 탭이 다 로그인 화면으로 간다(병렬이슈 P1) ⇒ <see cref="CallOutcome.Recheck"/>.
+    /// ⬛ [낡은 줄 · 11/27 고침 차례 이전] 401 or 409 => CallOutcome.Ended,
+    /// </remarks>
     public static CallOutcome ContinueOutcome(int? status) => status switch
     {
         >= 200 and < 300 => CallOutcome.Continued,
-        401 or 409 => CallOutcome.Ended,
+        401 => CallOutcome.Ended,
+        409 => CallOutcome.Recheck,   // [계속] 409 = 물음 칸 빔(다른 탭 계속 · 끔 · 만료)
         _ => CallOutcome.Failed
     };
 
     /// <summary>
-    /// [로그아웃] 응답. 2xx(<c>ended</c> 가 true 든 false 든) · 401 · 409 = 끝남 · 그 밖 = 실패.
+    /// [로그아웃] 응답(본문을 못 읽은 경우) — <see cref="LogoutOutcome(int?, bool?)"/> 에 <c>ended = null</c> 로 넘긴다.
+    /// </summary>
+    /// <remarks>
+    /// ⬛ [낡은 문장 · 11/27 고침 차례 이전] 2xx(<c>ended</c> 가 true 든 false 든) · 401 · 409 = 끝남 · 그 밖 = 실패.
     /// ⚠️ 실패여도 화면은 끝남으로 간다(설계 §5-2 「실패해도 저장소 비우고 로그인 화면 — 서버가 ①로 끝낸다」).
     /// 실패는 「한 번 더 불러 볼까」(503 교착) 판단에만 쓴다.
+    /// </remarks>
+    public static CallOutcome LogoutOutcome(int? status) => LogoutOutcome(status, null);
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — [로그아웃] 응답. 2xx + <c>ended:true</c> · 401 = 끝남 ·
+    /// 2xx + <c>ended:false</c>(또는 본문 못 읽음) · 409 = <b>다시 확인</b>(저장소를 비우지 않는다) · 그 밖 = 실패.
     /// </summary>
-    public static CallOutcome LogoutOutcome(int? status) => status switch
+    /// <remarks>
+    /// 실패(5xx · 연결 실패)는 그대로 「화면은 끝남으로 간다」(설계 §5-2 · 서버 작업 ① 이 끝낸다). 503 은 한 번 더 부른다.
+    /// </remarks>
+    public static CallOutcome LogoutOutcome(int? status, bool? ended) => status switch
     {
-        >= 200 and < 300 => CallOutcome.Ended,
-        401 or 409 => CallOutcome.Ended,
+        >= 200 and < 300 => ended == true ? CallOutcome.Ended : CallOutcome.Recheck,
+        401 => CallOutcome.Ended,
+        409 => CallOutcome.Recheck,
         _ => CallOutcome.Failed
     };
+
+    /// <summary>🆕 11/27 — 다시 확인한 뒤 화면이 할 일.</summary>
+    public enum RecheckDecision
+    {
+        /// <summary>끝남 — 저장소 비우고 로그인 화면(행 없음 · 출입증 거절 · 물음 만료 = 서버 작업 ① 이 15초 안에 끝낸다).</summary>
+        EndLocally,
+        /// <summary>팝업만 닫고 그대로 일한다(다른 탭이 [계속] · 팝업 중 끔 · 확인 실패 = 판정은 서버가 한다).</summary>
+        ClosePopup,
+        /// <summary>서버가 아직 묻는 중 — 남은 초로 팝업을 다시 센다.</summary>
+        ShowAgain
+    }
+
+    /// <summary>
+    /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — <c>GET state</c> 다시 확인 결과 → 할 일.
+    /// </summary>
+    /// <param name="status">응답 코드(연결 실패 = <c>null</c>).</param>
+    /// <param name="active">세션 행이 있나(서버 <c>active</c> · 옛 서버 = <c>null</c>).</param>
+    /// <param name="asked">서버가 묻는 중인가.</param>
+    /// <param name="secondsLeft">남은 초.</param>
+    /// <remarks>
+    /// 🔴 확인 실패(연결 실패 · 5xx)는 <see cref="RecheckDecision.ClosePopup"/> — 서버가 이미 「안 끝냈다」 고 답한 뒤라
+    /// 출입증을 지우지 않는다. 정말 무응답이면 서버 작업 ① 이 끝내고 <c>CooltimeEnded</c> 푸시 또는 다음 요청 401 로 로그인 화면이 된다.
+    /// </remarks>
+    public static RecheckDecision AfterRecheck(int? status, bool? active, bool? asked, int? secondsLeft)
+    {
+        if (status == 401) return RecheckDecision.EndLocally;
+        if (status is not (>= 200 and < 300)) return RecheckDecision.ClosePopup;
+        if (active == false) return RecheckDecision.EndLocally;
+        if (asked == true) return (secondsLeft ?? 0) > 0 ? RecheckDecision.ShowAgain : RecheckDecision.EndLocally;
+        return RecheckDecision.ClosePopup;
+    }
+
+    /// <summary>🆕 11/27 — 다시 확인 뒤 팝업만 닫을 때 한 줄(다른 탭에서 [계속] 했거나 관리자가 껐을 때 — 「1시간 뒤」 는 말하지 않는다).</summary>
+    public const string RecheckClosedNotice = "계속 작업할 수 있습니다.";
+
+    /// <summary>🆕 11/27 — [로그아웃] 응답 본문의 <c>ended</c>. 못 읽으면 <c>null</c>.</summary>
+    public static bool? ParseEnded(string? json)
+    {
+        var root = TryParseObject(json);
+        if (root is null) return null;
+        var node = FindKey(root, "ended");
+        return node is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
+    }
+
+    /// <summary>🆕 11/27 — <c>GET state</c> 응답 본문의 <c>active</c> · <c>asked</c> · <c>secondsLeft</c>. 못 읽은 칸은 <c>null</c>.</summary>
+    public static (bool? Active, bool? Asked, int? SecondsLeft) ParseState(string? json)
+    {
+        var root = TryParseObject(json);
+        if (root is null) return (null, null, null);
+        bool? ReadBool(string key) => FindKey(root, key) is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
+        int? ReadInt(string key) => FindKey(root, key) is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
+        return (ReadBool("active"), ReadBool("asked"), ReadInt("secondsLeft"));
+    }
+
+    // ── 🆕 11/27 고침 차례(§273 V4) — 다른 화면의 설정 저장은 자동 로그아웃 칸을 건드리지 않는다 ─────────────
+
+    /// <summary>자동 로그아웃 세 칸의 저장 본문 이름(서버 <c>UpdateTenantSettingsDto</c> · 대소문자 무시).</summary>
+    public static readonly string[] CooltimeSaveKeys = ["cooltimeEnabled", "cooltimeAt", "regularLeaveTime"];
+
+    /// <summary>
+    /// 저장 본문에서 자동 로그아웃 세 칸을 <c>null</c>(= 서버 「그대로 둠」)로 바꾼다.
+    /// 웹 모델의 <c>CooltimeEnabled</c> 는 null 못 되는 bool 이라, GET 없이 만든 모델(또는 GET 실패 뒤 새 모델)을 그대로 보내면
+    /// <c>false</c> = 「끔」 이 실려 자동 로그아웃이 조용히 꺼진다(리뷰서 V4). 쿨타임을 고치지 않는 화면(내 정보)이 쓴다.
+    /// </summary>
+    public static void KeepCooltimeAsIs(System.Text.Json.Nodes.JsonObject body)
+    {
+        foreach (var key in CooltimeSaveKeys)
+        {
+            var hit = new List<string>();
+            foreach (var p in body)
+                if (string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)) hit.Add(p.Key);
+            foreach (var k in hit) body[k] = null;
+        }
+    }
+
+    private static System.Text.Json.Nodes.JsonObject? TryParseObject(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(json) as System.Text.Json.Nodes.JsonObject;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            // #15 — 본문을 못 읽음 = 「모름」(null). 부르는 쪽이 null 을 「다시 확인」 쪽으로 다룬다(끊김 쪽으로 기울지 않음).
+            System.Diagnostics.Trace.TraceWarning("자동 로그아웃 응답 본문을 읽지 못했다: " + ex.Message);
+            return null;
+        }
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? FindKey(System.Text.Json.Nodes.JsonObject root, string key)
+    {
+        foreach (var p in root)
+            if (string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)) return p.Value;
+        return null;
+    }
 
     /// <summary>503(서버가 「다시 해 주세요」) 이면 한 번만 더 부른다.</summary>
     public static bool ShouldRetryLogout(int? status) => status == 503;

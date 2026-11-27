@@ -68,6 +68,9 @@ public sealed partial class CooltimeDbGateTests
         Assert.True(cont.Status == 200, $"continue → {cont.Status} · {cont.Body}");
         Assert.Contains("\"snoozeMinutes\":60", cont.Body);
         Assert.Null(await AskedAtAsync(db, sid));
+        // 🆕 11/27 고침 차례(§273 V1) — 이긴 [계속] 은 그 로그인 그룹에 「계속됨」 1회(같은 출입증의 다른 탭이 팝업을 닫는다).
+        //   ⚠️ 엔진의 푸시 줄을 빼면 여기서 FAIL(대조군 ⓜ).
+        Assert.Equal(1, pusher.Continued.Count(c => c == (_tenantA, sid)));
 
         // ② 행 있음 · 물음 만료(70초 전) → [계속] 409
         await db.ExecuteAsync("UPDATE user_sessions SET cooltime_asked_at = UTC_TIMESTAMP(6) - INTERVAL 70 SECOND, cooltime_snooze_until = NULL WHERE session_id = @S", new { S = sid });
@@ -77,6 +80,15 @@ public sealed partial class CooltimeDbGateTests
         var stLate = await PipeAsync(db, pusher, "GET", "/api/auth/cooltime/state", u, sid, null, true);
         Assert.Equal(200, stLate.Status);
         Assert.Contains("\"secondsLeft\":0", stLate.Body);
+        Assert.Contains("\"active\":true", stLate.Body);   // 🆕 11/27 — 행 있음
+        // 🆕 11/27 고침 차례(§275 · 설계 §E 「물음 만료 → logout ended:false」) — 만료 뒤 API 끝내기 = 안 끝냄 · 행 남음(서버 작업 ① 몫)
+        //   ⚠️ API 끝내기의 65초 조건을 빼면 ended:true · 행 없음으로 FAIL(대조군 ⓛ).
+        var lateBye = await PipeAsync(db, pusher, "POST", "/api/auth/cooltime/logout", u, sid, "{\"trigger\":\"countdown\"}", true);
+        Assert.True(lateBye.Status == 200, $"물음 만료 logout → {lateBye.Status} · {lateBye.Body}");
+        Assert.Contains("\"ended\":false", lateBye.Body);
+        Assert.Equal(1, await SessionExistsAsync(db, sid));
+        Assert.DoesNotContain(pusher.Ended, e => e.Sid == sid);
+        Assert.Equal(1, pusher.Continued.Count(c => c == (_tenantA, sid)));   // 진 [계속](409)은 「계속됨」 을 보내지 않는다(① 의 1회 그대로)
 
         // ③ 행 있음 · 안 물음(예: 팝업 중 관리자가 끔 · E-3) → logout 200 ended:false · 행 남음
         await db.ExecuteAsync("UPDATE user_sessions SET cooltime_asked_at = NULL WHERE session_id = @S", new { S = sid });
@@ -109,6 +121,9 @@ public sealed partial class CooltimeDbGateTests
             var ctl = await PipeAsync(db, pusher, method, path, u, sid, body, withSessionValidity: false);
             Assert.True(ctl.Status != 401, $"대조군 무효 — 세션 확인을 뺐는데 {method} {path} 가 401");
             Assert.True(ctl.Status is 200 or 409, $"대조군 {method} {path} → {ctl.Status} · {ctl.Body}");
+            // 🆕 11/27 고침 차례(§275 E-5 (나)) — 캐시 틈에서 컨트롤러까지 간 state 는 active:false(화면이 「살아 있음」 으로 잘못 읽지 않게)
+            if (path.EndsWith("/state", StringComparison.Ordinal))
+                Assert.Contains("\"active\":false", ctl.Body);
         }
 
         // ⑥ 출입증 없음 → 권한 단계의 JwtBearer Challenge 401(WWW-Authenticate: Bearer) — [Authorize] 가 실제로 걸려 있다

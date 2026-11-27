@@ -83,20 +83,22 @@ public sealed class CooltimeRuleGateTests
     // G-C14 화면 짝 (설계 §E E-5) — 401 · 409 · ended:false = 끝남
     // ══════════════════════════════════════════════════════════════
 
-    [Theory(DisplayName = "G-C14 화면 짝 — [계속] 응답: 200 계속 · 401/409 끝남 · 5xx/연결실패 실패")]
+    // 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 409 · ended:false = 「다시 확인」(Recheck). 이전 기대값(409·2xx = 끝남)은 아래 ⬛ 줄.
+    //   ⬛ [낡은 기대 · 11/27 이전] [InlineData(409, CooltimeScreenRules.CallOutcome.Ended)] (계속) · [InlineData(200|409, …Ended, false)] (로그아웃)
+    [Theory(DisplayName = "G-C14 화면 짝 — [계속] 응답: 200 계속 · 401 끝남 · 409 다시 확인 · 5xx/연결실패 실패")]
     [InlineData(200, CooltimeScreenRules.CallOutcome.Continued)]
     [InlineData(401, CooltimeScreenRules.CallOutcome.Ended)]
-    [InlineData(409, CooltimeScreenRules.CallOutcome.Ended)]
+    [InlineData(409, CooltimeScreenRules.CallOutcome.Recheck)]
     [InlineData(500, CooltimeScreenRules.CallOutcome.Failed)]
     [InlineData(503, CooltimeScreenRules.CallOutcome.Failed)]
     [InlineData(null, CooltimeScreenRules.CallOutcome.Failed)]
     public void G_C14_화면_계속_응답(int? status, CooltimeScreenRules.CallOutcome expected)
         => Assert.Equal(expected, CooltimeScreenRules.ContinueOutcome(status));
 
-    [Theory(DisplayName = "G-C14 화면 짝 — [로그아웃] 응답: 2xx(ended true/false)·401·409 끝남 · 503 만 한 번 더")]
-    [InlineData(200, CooltimeScreenRules.CallOutcome.Ended, false)]
+    [Theory(DisplayName = "G-C14 화면 짝 — [로그아웃] 응답(본문 못 읽음): 2xx·409 다시 확인 · 401 끝남 · 503 만 한 번 더")]
+    [InlineData(200, CooltimeScreenRules.CallOutcome.Recheck, false)]
     [InlineData(401, CooltimeScreenRules.CallOutcome.Ended, false)]
-    [InlineData(409, CooltimeScreenRules.CallOutcome.Ended, false)]
+    [InlineData(409, CooltimeScreenRules.CallOutcome.Recheck, false)]
     [InlineData(503, CooltimeScreenRules.CallOutcome.Failed, true)]
     [InlineData(500, CooltimeScreenRules.CallOutcome.Failed, false)]
     [InlineData(null, CooltimeScreenRules.CallOutcome.Failed, false)]
@@ -104,6 +106,112 @@ public sealed class CooltimeRuleGateTests
     {
         Assert.Equal(expected, CooltimeScreenRules.LogoutOutcome(status));
         Assert.Equal(retry, CooltimeScreenRules.ShouldRetryLogout(status));
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 🆕 11/27 고침 차례 — V1 여러 탭 · E-5 끔 · V4 설정 저장 (리뷰서 20261127_쿨타임1b_갈래2_3V4)
+    // ══════════════════════════════════════════════════════════════
+
+    [Theory(DisplayName = "V1·E-5 [로그아웃] 응답 본문: 2xx+ended:true 끝남 · 2xx+ended:false/모름 다시 확인(출입증 그대로) · 401 끝남")]
+    [InlineData(200, true, CooltimeScreenRules.CallOutcome.Ended)]
+    [InlineData(200, false, CooltimeScreenRules.CallOutcome.Recheck)]
+    [InlineData(200, null, CooltimeScreenRules.CallOutcome.Recheck)]
+    [InlineData(401, null, CooltimeScreenRules.CallOutcome.Ended)]
+    [InlineData(409, null, CooltimeScreenRules.CallOutcome.Recheck)]
+    [InlineData(500, null, CooltimeScreenRules.CallOutcome.Failed)]
+    [InlineData(null, null, CooltimeScreenRules.CallOutcome.Failed)]
+    public void V1_로그아웃_본문_판정(int? status, bool? ended, CooltimeScreenRules.CallOutcome expected)
+        => Assert.Equal(expected, CooltimeScreenRules.LogoutOutcome(status, ended));
+
+    [Theory(DisplayName = "V1·E-5 다시 확인 → 할 일: 401·행 없음·물음 만료 = 끝남 · 안 물음(다른 탭 계속 · 끔)·확인 실패 = 팝업만 닫음 · 묻는 중 = 다시 셈")]
+    [InlineData(401, null, null, null, CooltimeScreenRules.RecheckDecision.EndLocally)]
+    [InlineData(200, false, false, 0, CooltimeScreenRules.RecheckDecision.EndLocally)]   // 서버가 막 지움(세션 확인 캐시 틈)
+    [InlineData(200, true, true, 0, CooltimeScreenRules.RecheckDecision.EndLocally)]     // 물음 만료 — 서버 작업 ① 이 끝낸다
+    [InlineData(200, true, false, 0, CooltimeScreenRules.RecheckDecision.ClosePopup)]    // 다른 탭이 [계속] · 팝업 중 끔
+    [InlineData(200, null, false, 0, CooltimeScreenRules.RecheckDecision.ClosePopup)]    // 옛 서버(active 칸 없음)
+    [InlineData(200, true, true, 30, CooltimeScreenRules.RecheckDecision.ShowAgain)]
+    [InlineData(null, null, null, null, CooltimeScreenRules.RecheckDecision.ClosePopup)] // 연결 실패 — 출입증을 지우지 않는다
+    [InlineData(500, null, null, null, CooltimeScreenRules.RecheckDecision.ClosePopup)]
+    public void V1_다시확인_판정(int? status, bool? active, bool? asked, int? secondsLeft, CooltimeScreenRules.RecheckDecision expected)
+        => Assert.Equal(expected, CooltimeScreenRules.AfterRecheck(status, active, asked, secondsLeft));
+
+    [Fact(DisplayName = "V1 음성 대조 「탭 2개 · 한 탭 계속 → 다른 탭 0초」 — 서버가 실제로 내는 본문(ended:false · state active:true asked:false)으로 흘리면 로그인 유지 · 옛 판정(2xx = 끝남)이면 로그아웃")]
+    public void V1_탭2개_한탭계속_다른탭_0초()
+    {
+        var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        // 서버 본문 — 컨트롤러 Logout 의 Ok(new { ended = … }) · State 의 Ok(CooltimeStateResponse) 와 같은 직렬화(ASP.NET 기본 = Web)
+        var logoutBody = System.Text.Json.JsonSerializer.Serialize(new { ended = false }, web);
+        var stateBody = System.Text.Json.JsonSerializer.Serialize(new CooltimeStateResponse(false, 0, DateTime.UtcNow.AddHours(1)), web);
+
+        // 탭 B 0초: logout 200 ended:false → 다시 확인 → state 200 active:true asked:false → 팝업만 닫음
+        var outcome = CooltimeScreenRules.LogoutOutcome(200, CooltimeScreenRules.ParseEnded(logoutBody));
+        Assert.Equal(CooltimeScreenRules.CallOutcome.Recheck, outcome);
+        var s = CooltimeScreenRules.ParseState(stateBody);
+        Assert.Equal(true, s.Active);
+        Assert.Equal(false, s.Asked);
+        Assert.Equal(CooltimeScreenRules.RecheckDecision.ClosePopup, CooltimeScreenRules.AfterRecheck(200, s.Active, s.Asked, s.SecondsLeft));
+
+        // 행 지운 직후(서버 엔진 = active:false) → 끝남
+        var goneBody = System.Text.Json.JsonSerializer.Serialize(new CooltimeStateResponse(false, 0, null, Active: false), web);
+        var g = CooltimeScreenRules.ParseState(goneBody);
+        Assert.Equal(CooltimeScreenRules.RecheckDecision.EndLocally, CooltimeScreenRules.AfterRecheck(200, g.Active, g.Asked, g.SecondsLeft));
+
+        // 대조 — 옛 판정(2xx 면 ended 무관 끝남)이었다면 탭 B 가 공유 출입증을 지운다
+        static CooltimeScreenRules.CallOutcome OldLogoutOutcome(int? st) => st is >= 200 and < 300 or 401 or 409
+            ? CooltimeScreenRules.CallOutcome.Ended : CooltimeScreenRules.CallOutcome.Failed;
+        Assert.Equal(CooltimeScreenRules.CallOutcome.Ended, OldLogoutOutcome(200));
+        Assert.NotEqual(OldLogoutOutcome(200), outcome);
+    }
+
+    [Fact(DisplayName = "V1 배선 — 서버 「계속됨」 이벤트 이름 화면 = 서버 · 알림 연결이 받고 팝업이 구독 · 팝업이 본문 ended 로 판정(살아 있는 줄 기준)")]
+    public void V1_계속됨_배선()
+    {
+        Assert.Equal(CooltimeWire.ContinuedEvent, CooltimeScreenRules.ContinuedEvent);
+        static string Live(string path) => string.Join('\n', File.ReadAllText(path).Split('\n')
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        var notify = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Services", "NotificationClient.cs"));
+        Assert.Contains("hub.On(CooltimeScreenRules.ContinuedEvent,", notify);
+        Assert.Contains("OnCooltimeContinued?.Invoke();", notify);
+        var prompt = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Components", "Common", "CooltimePrompt.razor"));
+        Assert.Contains("Notify.OnCooltimeContinued += OnContinued;", prompt);
+        Assert.Contains("CooltimeScreenRules.LogoutOutcome(status, ended)", prompt);
+        Assert.Contains("await RecheckAsync();", prompt);
+        var engine = Live(Path.Combine(RepoRoot(), "src", "HitPan.API", "Services", "Cooltime", "CooltimeEngine.cs"));
+        Assert.Contains("if (n == 1) await _pusher.ContinuedAsync(tenantId, sessionId, ct)", engine);
+    }
+
+    [Fact(DisplayName = "V4 내 정보 저장 — 자동 로그아웃 세 칸을 null(= 그대로)로 보낸다 · 서버 DTO 가 null 로 받는다 · 대조(안 지움) = false(끔) 가 실린다 · 배선")]
+    public void V4_내정보_저장은_자동로그아웃을_그대로_둔다()
+    {
+        var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        // 웹 모델(새로 만든 것)의 모양 — 켬/끔 = null 못 되는 bool 의 기본값 false · 시각 두 칸 null
+        System.Text.Json.Nodes.JsonObject Body() => new()
+        {
+            ["industryType"] = "manufacturing",
+            ["cooltimeEnabled"] = false,
+            ["cooltimeAt"] = null,
+            ["regularLeaveTime"] = null
+        };
+
+        var kept = Body();
+        CooltimeScreenRules.KeepCooltimeAsIs(kept);
+        var dto = System.Text.Json.JsonSerializer.Deserialize<HitPan.Application.DTOs.Settings.UpdateTenantSettingsDto>(kept.ToJsonString(), web)!;
+        Assert.Null(dto.CooltimeEnabled);
+        Assert.Null(dto.CooltimeAt);
+        Assert.Null(dto.RegularLeaveTime);
+        Assert.Equal("manufacturing", dto.IndustryType);   // 다른 칸은 그대로 간다
+
+        // 대조 — 지우지 않으면 서버는 false = 「끔」 으로 받는다(리뷰서 V4 의 조용히 꺼짐)
+        var raw = System.Text.Json.JsonSerializer.Deserialize<HitPan.Application.DTOs.Settings.UpdateTenantSettingsDto>(Body().ToJsonString(), web)!;
+        Assert.Equal(false, raw.CooltimeEnabled);
+
+        static string Live(string path) => string.Join('\n', File.ReadAllText(path).Split('\n')
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        var page = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Pages", "Settings", "UserInfoPage.razor.cs"));
+        Assert.Contains("SettingsSvc.SaveKeepCooltimeAsync(current)", page);
+        Assert.DoesNotContain("SettingsSvc.SaveAsync(current)", page);
+        var svc = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Services", "SettingsService.cs"));
+        Assert.Contains("CooltimeScreenRules.KeepCooltimeAsIs(body);", svc);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -119,11 +227,14 @@ public sealed class CooltimeRuleGateTests
         Assert.Null(CooltimeScreenRules.SourceLabel(null));
     }
 
-    [Fact(DisplayName = "C-5 고치기 대상 — 화면(IsEditableSource) = 서버(HrService.EditableCheckOutSources) = 엔진 값(CooltimeWire)")]
+    // 🆕 11/27 고침 차례(§272 ① · §273 V3) — 대상에 「고침」(edited) 이 들어간다(다시 고치기 허용 · 매번 이력).
+    //   ⬛ [낡은 기대 · 11/27 이전] new[] { CooltimeWire.SourceCooltime, CooltimeWire.SourceCooltimeBlank }
+    [Fact(DisplayName = "C-5 고치기 대상 — 화면(IsEditableSource) = 서버(HrService.EditableCheckOutSources) = 엔진 값(CooltimeWire) + 고침(edited)")]
     public void C5_고치기_대상_화면_서버_같다()
     {
-        Assert.Equal(new[] { CooltimeWire.SourceCooltime, CooltimeWire.SourceCooltimeBlank }.OrderBy(x => x),
+        Assert.Equal(new[] { CooltimeWire.SourceCooltime, CooltimeWire.SourceCooltimeBlank, CooltimeScreenRules.SourceEdited }.OrderBy(x => x),
                      HrService.EditableCheckOutSources.OrderBy(x => x));
+        Assert.True(CooltimeScreenRules.IsEditableSource("edited"));
         foreach (var s in new[] { "cooltime", "cooltime_blank", "edited", null, "" })
             Assert.Equal(s is not null && HrService.EditableCheckOutSources.Contains(s), CooltimeScreenRules.IsEditableSource(s));
     }
