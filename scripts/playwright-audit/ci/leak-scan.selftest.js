@@ -110,8 +110,11 @@ const work = process.argv[2];
 if (!work) { console.log('사용: node leak-scan.selftest.js <빈 작업 폴더>'); process.exit(2); }
 const SCAN = path.join(__dirname, 'leak-scan.js');
 
+// 🆕 11/28 쿨타임 몸 전용 자식 다 — S0 여덟째 이름. 가짜 값도 실행 때 만든다(파일에 고정 값 글자 0).
+const FAKE_PW_DA = `SELFTEST_PWDA_${crypto.randomBytes(4).toString('hex')}`;
 function fakeEnv() {
   return {
+    UI_PW_DA: FAKE_PW_DA,
     UI_DB_PASSWORD: 'SELFTEST_DBPW_7f3a9c2e',
     UI_JWT_SECRET: 'SELFTEST_JWT_1b8d4e6f',
     UI_ENC_KEY: 'SELFTEST_ENC_9e2c7a1d',

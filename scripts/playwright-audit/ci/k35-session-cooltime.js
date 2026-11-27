@@ -19,7 +19,8 @@ const J = require('./judge');
 const env = process.env;
 const ID = { na: env.UI_LOGIN_NA || 'ci-na', ga: env.UI_LOGIN_GA || 'ci-ga', parent: env.UI_LOGIN_PARENT || 'ci-parent' };
 const PW = { na: env.UI_PW_NA || '', ga: env.UI_PW_GA || '', parent: env.UI_PW_PARENT || '' };
-const GA_NAME = '시험 가'; // 시드② 표시 이름(seed-children.js)
+// ⬛ [낡은 줄 · (가) 이전] const GA_NAME = '시험 가'; — CT3 재료가 다로 옮겨 안 쓰임
+const DA_NAME = '시험 다'; // 🆕 (가) 시드② 쿨타임 몸 전용 자식 다(seed-children.js · 다른 몸은 안 씀)
 const BROWSER = 'chromium';
 const PROMPT_SEL = 'div[role="dialog"][aria-label="로그아웃 설정시간입니다."]'; // CooltimeScreenRules.PromptTitle
 const BTN_CONTINUE = '예 — 계속 작업'; // CooltimeScreenRules.ContinueButton
@@ -217,58 +218,37 @@ function dev(st, name, step, e) {
   }
 }
 
-// ── 바퀴 A: CT1(탭 2 · [계속]) + CT3 재료(가 무응답 → 자동 퇴근) ──
-// 🆕 첫 CI 런 고침(런 46064948848 · CT1 「가 출근 status=400」) — 가(물음 무응답 대상) 준비를 CT1 판정 밖으로 뺐다.
-//   [원인 · 코드] 로그인 그 자체가 출근이다: AuthController 로그인 → `_hrService.CheckInAsync(... "자동출근")`(실패는 삼킴).
-//     HrService.CheckInAsync 는 같은 날 행이 있으면 InvalidOperationException 「오늘 이미 출근 처리되었습니다.」 →
-//     GlobalExceptionMiddleware 가 400 `{ error }` 로 바꾼다. ⇒ 가 API 로그인 직후 손 출근은 **늘** 400 이었다.
-//   [지금] 손 출근을 먼저 부르지 않고 오늘 근태 행(관리자 GET /api/hr/attendance)을 읽는다 — 행이 없을 때만 손 출근(거절이면 본문 안내를 남김).
-//     행이 이미 퇴근 처리돼 있으면(하루 1행 · 앞 몸의 로그아웃 자동 퇴근 `AuthController.Logout → CheckOutAsync`)
-//     쿨타임이 붙일 열린 행이 없다(CooltimeEngine 「check_out IS NULL」) ⇒ CT3 재료 없음의 **첫 원인** 으로 남기고 CT1 은 그대로 간다.
-async function prepGa(st) {
-  st.ga = await K.apiLogin('GA', ID.ga, PW.ga);
+// ── 바퀴 A: CT1(탭 2 · [계속]) + CT3 재료(🆕 (가) 다 = 시드 세션 무응답 → 자동 퇴근 · ⬛ 옛 = 가) ──
+// ⬛ [낡은 몸 · 첫 CI 런 고침 1차 bca4567f] prepGa — 가 API 로그인 + 오늘 근태 행 읽기(없으면 손 출근). 가의 오늘 행은 시드 · 앞 몸의
+//   로그아웃 자동 퇴근(AuthController.Logout → CheckOutAsync · 출처 NULL)이 이미 닫고 하루 1행이라 다시 못 연다 → CT3 재료가 설 수 없었다.
+//   출처 NULL 행은 제품이 고치기를 막는다(HrService.EditableCheckOutSources · 화면 칩 없음) → PM 결정 (가)(CTO 전결 11/28).
+// 🆕 (가) — 쿨타임 몸 전용 자식 다(seed-children.js). 시드가 다를 로그인한 채 두어(로그아웃 0) 오늘 출근 행이 열린 채 넘어온다.
+//   이 몸은 다의 비번 · 세션을 쓰지 않는다 — 시드 세션(login_at < C1)이 물음 무응답 대상이고, 관리자 API 로 행만 읽는다.
+//   [원인 기록] 로그인 그 자체가 출근(AuthController 로그인 → CheckInAsync 「자동출근」) · 같은 날 손 출근 = 400 「오늘 이미 출근 처리되었습니다.」
+//     (HrService.CheckInAsync → GlobalExceptionMiddleware) — 첫 CI 런 CT1 「가 출근 status=400」 의 원인.
+async function prepDa(st) {
   await adminCall(async (s) => {
-    const perms = await K.apiCall('GET', '/api/permissions', { sess: s });
-    if (perms.status !== 200 || !Array.isArray(perms.json)) throw new K.KitStepError(`권한 목록 status=${perms.status}`);
-    const u = perms.json.find((x) => (x.empName || x.EmpName) === GA_NAME || (x.userName || x.UserName) === GA_NAME);
-    if (!u) throw new K.KitStepError('권한 목록에 「시험 가」 없음');
-    const save = await K.apiCall('POST', '/api/permissions', {
-      sess: s,
-      body: { userId: u.userId || u.UserId, permissions: [{ menuCode: 'HR', menuName: '인사', canView: true, canCreate: true, canUpdate: false, canDelete: false, canExport: false }] },
-    });
-    if (save.status !== 200) throw new K.KitStepError(`가 근태 권한 저장 status=${save.status} · ${bodyWhy(save)}`);
     const emps = await K.apiCall('GET', '/api/chat/employees', { sess: s });
-    const e = Array.isArray(emps.json) ? emps.json.find((x) => (x.empName || x.EmpName) === GA_NAME) : null;
-    if (!e) throw new K.KitStepError(`chat/employees 에 「시험 가」 없음 status=${emps.status}`);
-    st.gaEmpId = e.employeeId || e.EmployeeId;
-
-    const day = ymd(new Date());
-    const q = `/api/hr/attendance?from=${day}&to=${day}&employeeId=${encodeURIComponent(st.gaEmpId)}`;
-    const todayRows = async () => {
-      const a = await K.apiCall('GET', q, { sess: s });
-      if (a.status !== 200 || !Array.isArray(a.json)) throw new K.KitStepError(`가 오늘 근태 읽기 status=${a.status} · ${bodyWhy(a)}`);
-      return a.json;
-    };
-    let rows = await todayRows();
-    let how = '로그인 자동 출근';
-    if (rows.length === 0) {
-      // ⬛ [낡은 줄 · 첫 CI 런] const ci = ...; if (ci.status !== 200) throw new K.KitStepError(`가 출근 status=${ci.status}`);
-      const ci = await K.apiCall('POST', '/api/hr/check-in', { sess: st.ga, body: {} });
-      if (ci.status !== 200) throw new K.KitStepError(`가 출근 status=${ci.status} · ${bodyWhy(ci)}`);
-      how = '손 출근';
-      rows = await todayRows();
-    }
-    const open = rows.find((x) => readJ(x, 'checkIn', 'CheckIn') && !readJ(x, 'checkOut', 'CheckOut'));
+    const e = Array.isArray(emps.json) ? emps.json.find((x) => (x.empName || x.EmpName) === DA_NAME) : null;
+    if (!e) throw new K.KitStepError(`chat/employees 에 「${DA_NAME}」 없음 status=${emps.status}(시드② 다 만들기 확인)`);
+    st.daEmpId = e.employeeId || e.EmployeeId;
+    const now = new Date();
+    const from = ymd(new Date(now.getTime() - 24 * 3600 * 1000)); // 자정 넘김이면 시드 출근 행이 어제 날짜
+    const q = `/api/hr/attendance?from=${from}&to=${ymd(now)}&employeeId=${encodeURIComponent(st.daEmpId)}`;
+    const a = await K.apiCall('GET', q, { sess: s });
+    if (a.status !== 200 || !Array.isArray(a.json)) throw new K.KitStepError(`다 근태 읽기 status=${a.status} · ${bodyWhy(a)}`);
+    const open = a.json.find((x) => readJ(x, 'checkIn', 'CheckIn') && !readJ(x, 'checkOut', 'CheckOut'));
     if (!open) {
-      const r0 = rows[0];
-      if (!r0) throw new K.KitStepError(`가 출근 뒤에도 오늘(${day}) 근태 행 없음`);
-      throw new K.KitStepError(`가 오늘(${day}) 근태 행이 이미 퇴근 처리됨(출근 ${hmOfText(readJ(r0, 'checkIn', 'CheckIn')) || '-'} · 퇴근 ${hmOfText(readJ(r0, 'checkOut', 'CheckOut')) || '-'} · 출처 ${L.sanitize(String(readJ(r0, 'checkOutSource', 'CheckOutSource') ?? '-'), 30)}) — 열린 출근 행 없음(하루 1행 · 앞 몸 로그아웃 자동 퇴근) → 쿨타임이 붙일 행 없음`);
+      const r0 = a.json[0];
+      if (!r0) throw new K.KitStepError(`다 근태 행 없음(시드 다 로그인 자동 출근이 안 됨 · 사원 연결 확인)`);
+      throw new K.KitStepError(`다 근태 행이 이미 퇴근 처리됨(출근 ${hmOfText(readJ(r0, 'checkIn', 'CheckIn')) || '-'} · 퇴근 ${hmOfText(readJ(r0, 'checkOut', 'CheckOut')) || '-'} · 출처 ${L.sanitize(String(readJ(r0, 'checkOutSource', 'CheckOutSource') ?? '-'), 30)}) — 다를 누가 로그아웃함(다른 몸은 다를 쓰면 안 됨)`);
     }
     const inText = readJ(open, 'checkIn', 'CheckIn');
     const inAt = new Date(String(inText)); // 시간대 표시 없는 로컬 글자 = 러너 로컬(서버와 같은 러너)
-    if (Number.isNaN(inAt.getTime())) throw new K.KitStepError(`가 출근 시각 해석 못 함(${L.sanitize(String(inText), 30)})`);
+    if (Number.isNaN(inAt.getTime())) throw new K.KitStepError(`다 출근 시각 해석 못 함(${L.sanitize(String(inText), 30)})`);
     st.checkIn = inAt;
-    console.log(`K 쿨타임 가 준비 — 열린 출근 행 ${hmOfText(inText)}(${how})`);
+    st.daAttId = readJ(open, 'attendanceId', 'AttendanceId');
+    console.log(`K 쿨타임 다 준비 — 열린 출근 행 ${hmOfText(inText)}(시드 로그인 자동 출근)`);
   });
 }
 
@@ -282,13 +262,14 @@ async function cycleA(st) {
     step.now = '나 탭 2 열기';
     const tab2 = await secondTab(na);
     // ⬛ [낡은 줄 · 첫 CI 런] step.now = '가 API 로그인 · 근태 권한 · 출근'; (가 준비 실패가 CT1 을 장치 실패로 세웠다)
-    step.now = '가 준비(API 로그인 · 근태 권한 · 열린 출근 행)';
+    // ⬛ [낡은 줄 · 1차 고침 bca4567f] step.now = '가 준비(API 로그인 · 근태 권한 · 열린 출근 행)'; await prepGa(st);
+    step.now = '다 준비(시드 세션 · 열린 출근 행 읽기)';
     try {
-      await prepGa(st);
+      await prepDa(st);
     } catch (e) {
       const w = whyOf(e);
-      console.log(`K 쿨타임 가 준비 실패(CT3 재료 · CT1 은 이어 감) — ${w}`);
-      cause(st, `가 준비 실패 — ${w}`);
+      console.log(`K 쿨타임 다 준비 실패(CT3 재료 · CT1 은 이어 감) — ${w}`);
+      cause(st, `다 준비 실패 — ${w}`);
     }
 
     step.now = '관리자 저장(켬 · C1)';
@@ -329,29 +310,33 @@ async function cycleA(st) {
     if (na) await closeKb(st, na);
   }
 
-  // 가(API · 무응답) 끝남 기다림 → 자동 퇴근 행(CT3 재료). 실패는 CT3 단언 전 실패 이유로 넘긴다.
-  // 🆕 첫 CI 런 고침 — 이미 첫 원인이 있으면 기다리지 않는다(가 세션은 바퀴 B 앞에서 놓는다).
+  // ⬛ [낡은 몸 · 1차 고침 bca4567f] 가(API · 무응답) 끝남 기다림 — 가 세션의 cooltime/state 가 401 · active:false 가 될 때까지(최대 120초).
+  // 🆕 (가) 다(시드 세션 · 무응답) 끝남 기다림 → 열린 출근 행에 자동 퇴근(출처 cooltime) = CT3 재료. 관리자 API 로 그 행만 본다(한 세션 · C1 뒤 로그인 = 물음 대상 아님).
+  //   실패는 CT3 단언 전 실패의 첫 원인으로 넘긴다. 이미 첫 원인이 있으면 기다리지 않는다.
   if (st.ct3Pre) return;
   try {
-    if (!st.ga) throw new K.KitStepError('가 세션 없음(바퀴 A 앞 단계 실패)');
+    if (!st.daEmpId || !st.daAttId) throw new K.KitStepError('다 준비 전 실패');
     if (!st.c1) throw new K.KitStepError('C1 저장 전 실패');
-    const until = Date.now() + END_CAP_MS;
-    let code = null;
-    while (Date.now() < until) {
-      const s = await K.apiCall('GET', '/api/auth/cooltime/state', { sess: st.ga });
-      code = s.status;
-      if (code === 401 || readJ(s.json, 'active', 'Active') === false) break;
-      await K.sleep(3000);
-    }
-    if (code !== 401) {
-      const s = await K.apiCall('GET', '/api/auth/cooltime/state', { sess: st.ga });
-      if (readJ(s.json, 'active', 'Active') !== false && s.status !== 401) throw new K.KitStepError(`가 무응답 끝냄이 상한 ${END_CAP_MS / 1000}초 안에 안 옴(state ${s.status})`);
-    }
-    st.gaEnded = true;
-    st.ga = null; // 서버가 끝낸 세션 — 로그아웃 부를 것 없음
+    const from = ymd(st.checkIn);
+    const q = `/api/hr/attendance?from=${from}&to=${ymd(new Date())}&employeeId=${encodeURIComponent(st.daEmpId)}`;
+    const last = await adminCall(async (s) => {
+      const until = Date.now() + END_CAP_MS;
+      let row = null;
+      while (Date.now() < until) {
+        const a = await K.apiCall('GET', q, { sess: s });
+        row = Array.isArray(a.json) ? a.json.find((x) => readJ(x, 'attendanceId', 'AttendanceId') === st.daAttId) || null : null;
+        if (row && readJ(row, 'checkOut', 'CheckOut')) break;
+        await K.sleep(5000);
+      }
+      return row;
+    });
+    const src = readJ(last, 'checkOutSource', 'CheckOutSource');
+    if (!last || !readJ(last, 'checkOut', 'CheckOut')) throw new K.KitStepError(`다 무응답 끝냄(자동 퇴근)이 상한 ${END_CAP_MS / 1000}초 안에 안 옴(출처 ${L.sanitize(String(src ?? '-'), 30)} · 시드 다 세션이 살아 있었나 확인)`);
+    if (src !== 'cooltime') throw new K.KitStepError(`다 퇴근 출처가 cooltime 아님(${L.sanitize(String(src ?? '-'), 30)})`);
+    st.daEnded = true;
+    console.log(`K 쿨타임 다 자동 퇴근 ${hmOfText(readJ(last, 'checkOut', 'CheckOut'))}(출처 cooltime · C1 ${st.c1})`);
   } catch (e) {
-    // ⬛ [낡은 줄 · 첫 CI 런] st.ct3Pre = e instanceof K.KitStepError ? L.sanitize(e.message, 200) : `예외 ${L.errorName(e)}`;
-    cause(st, `가 무응답 끝냄 — ${whyOf(e)}`);
+    cause(st, `다 무응답 끝냄 — ${whyOf(e)}`);
   }
 }
 
@@ -497,12 +482,13 @@ async function ct3(st) {
   let adm = null;
   try {
     if (st.ct3Pre) throw new K.KitStepError(`재료 없음 — ${st.ct3Pre}`);
-    if (!st.gaEmpId || !st.checkIn) throw new K.KitStepError('재료 없음 — 가 출근 전 실패');
+    // ⬛ [낡은 줄 · 1차 고침 이전] 재료 = 가(gaEmpId · GA_NAME) — (가) 로 다(daEmpId · DA_NAME)
+    if (!st.daEmpId || !st.checkIn) throw new K.KitStepError('재료 없음 — 다 준비 전 실패');
     const day = ymd(st.checkIn);
-    const q = `/api/hr/attendance?from=${day}&to=${day}&employeeId=${encodeURIComponent(st.gaEmpId)}`;
+    const q = `/api/hr/attendance?from=${day}&to=${day}&employeeId=${encodeURIComponent(st.daEmpId)}`;
     const row0 = await adminCall(async (s) => {
       const a = await K.apiCall('GET', q, { sess: s });
-      return Array.isArray(a.json) ? a.json[0] : null;
+      return Array.isArray(a.json) ? (a.json.find((x) => readJ(x, 'attendanceId', 'AttendanceId') === st.daAttId) || a.json[0] || null) : null;
     });
     const src0 = readJ(row0, 'checkOutSource', 'CheckOutSource');
     if (!row0 || src0 !== 'cooltime') throw new K.KitStepError(`자동 퇴근 행 없음(출처 ${L.sanitize(String(src0 ?? '-'), 30)})`);
@@ -524,12 +510,12 @@ async function ct3(st) {
     step.now = '근태 화면';
     if (!(await K.navigateInApp(adm.page, '/hr/attendance'))) throw new K.KitStepError('앱 안 이동 함수 없음');
     await adm.page.waitForURL((u) => u.pathname === '/hr/attendance', { timeout: 15000, waitUntil: 'commit' });
-    const rowSel = `tr:has-text("${GA_NAME}"):has(.mud-chip:has-text("자동"))`;
+    const rowSel = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("자동"))`;
     await adm.page.locator(rowSel).first().waitFor({ state: 'visible', timeout: 20000 });
     step.now = '첫 고침(값 그대로 · 까닭)';
     await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null);
     step.now = '다시 고침(둘째 값)';
-    const rowSel2 = `tr:has-text("${GA_NAME}"):has(.mud-chip:has-text("고침"))`;
+    const rowSel2 = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("고침"))`;
     await adm.page.locator(rowSel2).first().waitFor({ state: 'visible', timeout: 20000 });
     await editOnce(adm.page, rowSel2, '고침', 'CI 두 번째 고침', t2);
     step.now = '화면 · API 대조';
@@ -538,7 +524,7 @@ async function ct3(st) {
     const api = await adminCall(async (s) => {
       const a = await K.apiCall('GET', q, { sess: s });
       const h = await K.apiCall('GET', `/api/hr/attendance/${encodeURIComponent(attId)}/history`, { sess: s });
-      return { row: Array.isArray(a.json) ? a.json[0] : null, hist: Array.isArray(h.json) ? h.json.length : null, histStatus: h.status };
+      return { row: Array.isArray(a.json) ? (a.json.find((x) => readJ(x, 'attendanceId', 'AttendanceId') === attId) || null) : null, hist: Array.isArray(h.json) ? h.json.length : null, histStatus: h.status };
     });
     const apiOut = hmOfText(readJ(api.row, 'checkOut', 'CheckOut'));
     const apiSrc = readJ(api.row, 'checkOutSource', 'CheckOutSource');
@@ -602,7 +588,7 @@ async function cleanup(st) {
 }
 
 const st0 = {
-  r: null, br: null, kbs: [], ga: null, gaEmpId: null, checkIn: null, gaEnded: false, ct3Pre: null,
+  r: null, br: null, kbs: [], ga: null, daEmpId: null, daAttId: null, checkIn: null, daEnded: false, ct3Pre: null,
   c1: null, c2: null, saved: [], disabled: false, cleaned: false, sealed: false, logoutFail: 0,
   n4: { verified: 0, shots: 0, blocked: 0, removed: 0, delFail: 0, hits: 0, errs: 0, winDiff: 0, moveFail: 0, planted: false },
 };
