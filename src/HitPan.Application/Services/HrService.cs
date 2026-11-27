@@ -81,8 +81,17 @@ public class HrService : IHrService
         if (string.IsNullOrEmpty(att.Id)) throw new InvalidOperationException("출근 기록이 없거나 이미 퇴근 처리되었습니다.");
 
         var hours = Math.Round((now - att.CheckIn).TotalHours, 1);
+        // ⬛ [낡은 문장 · 20260928작4 §D-2 이전]
+        //   "UPDATE attendance SET check_out = @Now, work_hours = @Hours WHERE attendance_id = @Id"
+        // 🔴 20260928작4 쿨타임 §D-2 안 A(대표 결재 11/27) — 시각 규칙은 그대로, SET 칸 1개만 덧붙였다.
+        //   자동 로그아웃이 퇴근을 비워 둔 행(check_out_source='cooltime_blank')을 같은 날 손 퇴근이 채우면
+        //   그 순간이 사람이 만든 퇴근이다 ⇒ 「자동」 표시를 지운다(NULL). 다른 값(cooltime·edited·NULL)은 그대로.
+        //   ⚠️ 이 CASE 를 빼면 G-C16 이 FAIL 한다(음성 대조군 ⓓ).
         await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE attendance SET check_out = @Now, work_hours = @Hours WHERE attendance_id = @Id",
+            @"UPDATE attendance
+                 SET check_out = @Now, work_hours = @Hours,
+                     check_out_source = CASE WHEN check_out_source = 'cooltime_blank' THEN NULL ELSE check_out_source END
+               WHERE attendance_id = @Id",
             new { Now = now, Hours = hours, Id = att.Id }, cancellationToken: ct));
     }
 
