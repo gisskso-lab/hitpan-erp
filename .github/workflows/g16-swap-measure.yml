@@ -1,0 +1,59 @@
+# G16 교체 시간 실측 (측정 전용 · 머지 금지 가지 meas/* 의 PR 에서만 돈다)
+#
+# 근거: W-G1-52 설계 §15-9 G16 · R11 / 작업지시서 §7-3 #12 — 문턱 X 숫자는 PM 이 이 결과를 보고 정한다.
+# 이 워크플로는 재기만 한다(판정 0). 다른 워크플로 손 0.
+# 🔴 CI 런 낭비 주의: 측정은 PR 1회. 측정 파일이 바뀔 때만 돈다(경로 필터).
+name: G16 교체 시간 실측
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/measure/g16-swap-measure.sh'
+      - 'scripts/measure/g16_gen.py'
+      - '.github/workflows/g16-swap-measure.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g16-swap-measure-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: G16 교체 시간 실측 (mariadb 11.4 · 크기 표본 · R11)
+    if: startsWith(github.head_ref, 'meas/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 러너 사양 · 디스크 비우기
+        # 2GB 표본 = 라이브 + rs_new__ + undo + binlog → 수 GB. 쓰지 않는 도구를 지워 자리를 낸다.
+        run: |
+          echo "nproc=$(nproc)"; free -m | head -2; df -h / /mnt 2>/dev/null
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h / /mnt 2>/dev/null
+
+      - name: 측정
+        env:
+          G16_OUT: ${{ github.workspace }}/g16-out
+        run: bash scripts/measure/g16-swap-measure.sh
+
+      - name: 잡 요약에 결과 표
+        if: always()
+        run: |
+          if [ -f g16-out/result.md ]; then cat g16-out/result.md >> "$GITHUB_STEP_SUMMARY"; else
+            echo "결과 표 없음 — run.log 꼬리:" >> "$GITHUB_STEP_SUMMARY"; tail -40 g16-out/run.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true; fi
+
+      - name: 산출물 올리기
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: g16-swap-measure
+          path: |
+            g16-out/
+            !g16-out/seed_*.sql
+          retention-days: 30
