@@ -769,6 +769,135 @@ public sealed class LocalAuditFileTests : IDisposable
                 w.AppendAsync(new LocalAuditRecord("T1", bad, LocalAuditAction.ParentPasswordResetFailed, LocalAuditResult.Failed, "op")));
         Assert.Single(Lines(_path));
     }
+
+    // ───────────────────────── 🆕 고침 1 덧 (짧은 재확인 발견 1 · 2 · 3 — 살아남은 변이 M1 · M2 · M3 · M5 를 잡는 시험) ─────────────────────────
+
+    /// <summary>
+    /// 파일 자리에 연결을 세운다 — 먼저 파일 심볼릭 링크를 시도하고, Windows 에서 권한이 없으면(개발자 모드 · 관리자 아님)
+    /// 같은 자리에 교차점(폴더 연결 · 권한 불필요)을 세운다. 어느 쪽이든 그 자리는 재분석 지점이다. 돌려주는 값 = 어느 쪽으로 쟀는지(실패 문구에 씀).
+    /// </summary>
+    private static string MakeFileLinkOrJunction(string link, string fileTarget, string fallbackDirTarget)
+    {
+        string why;
+        try
+        {
+            File.CreateSymbolicLink(link, fileTarget);
+            return "파일 심볼릭 링크";
+        }
+        catch (Exception ex) when (OperatingSystem.IsWindows() && ex is IOException or UnauthorizedAccessException)
+        {
+            // 판정 값 — 이 PC 권한으로 파일 링크를 못 만듦 → 교차점으로 대신 잰다(빈 catch 아님)
+            why = ex.GetType().Name;
+        }
+        Directory.CreateDirectory(fallbackDirTarget);
+        MakeDirLink(link, fallbackDirTarget);
+        return "교차점(파일 링크 못 만듦: " + why + ")";
+    }
+
+    // 발견 1 · 변이 M1(Guard `EnsureExistingFileSafe` 「파일 자신이 재분석 지점이면 거절」) — 감사 파일 자리 자신이 연결이면
+    //   열기 전에 file_reparse_point 로 거절 · 연결 너머 파일에 줄 0. 판정은 internal(InternalsVisibleTo HitPan.Tests)이라 직접 부르고 기록기로도 한 번 더.
+    //   폴더 검사가 먼저 통과하도록 기록기가 만든 보호 audit 폴더 안에 연결을 세운다(폴더 까닭으로 초록 · 빨강이 섞이지 않게).
+    [Fact]
+    public async Task AF_30_M1_FileItselfReparsePoint_Refused()
+    {
+        var w = NewWriter();
+        await w.AppendAsync(Rec("op", LocalAuditAction.RestoreStarted));
+        var link = Path.Combine(Path.GetDirectoryName(_path)!, "linked-audit.log");
+        var how = MakeFileLinkOrJunction(link, _path, Path.Combine(_dir, "junction-target"));
+
+        var ex = Assert.Throws<LocalAuditWriteException>(() => LocalAuditFolderGuard.EnsureExistingFileSafe(link));
+        Assert.True(ex.Reason == "file_reparse_point", how + " → 까닭 " + ex.Reason);
+
+        var linked = new LocalAuditFileWriter(link, NullLogger<LocalAuditFileWriter>.Instance);
+        var ex2 = await Assert.ThrowsAsync<LocalAuditWriteException>(() => linked.AppendAsync(Rec("op2", LocalAuditAction.RestoreStarted)));
+        Assert.True(ex2.Reason == "file_reparse_point", how + " → 기록기 까닭 " + ex2.Reason);
+        Assert.Single(Lines(_path));
+    }
+
+    // 발견 2 · 변이 M2(Guard `CheckOwnerAndRulesWindows` 「개별 사용자 아닌 그룹 권한 줄 거절」) — 기록기가 만든 보호 폴더 · 파일에
+    //   넓은 그룹 쓰기 줄을 붙이면 거절(파일 = Users → file_acl · 폴더 = Everyone → folder_acl). 자기 소유 임시 폴더라 관리자 권한 불필요.
+    //   AF_11 은 「만든 폴더에 넓은 줄이 없다」 만 보고, 이 시험은 「넓은 줄이 있으면 문지기가 거절한다」 를 잰다. 붙이기 전 바닥 = 통과(대조).
+    [WindowsOnlyFact]
+    [SupportedOSPlatform("windows")]
+    public async Task AF_31_M2_BroadGroupWriteRule_FileAndFolder_Refused()
+    {
+        var w = NewWriter();
+        await w.AppendAsync(Rec("op", LocalAuditAction.RestoreStarted));
+        var folder = new DirectoryInfo(Path.GetDirectoryName(_path)!);
+        var file = new FileInfo(_path);
+
+        // 바닥(대조) — 기록기가 만든 그대로는 통과
+        LocalAuditFolderGuard.EnsureFolder(folder.FullName);
+        LocalAuditFolderGuard.EnsureExistingFileSafe(file.FullName);
+
+        // ① 파일에 Users 쓰기 줄
+        var fileAcl = file.GetAccessControl(AccessControlSections.Access);
+        fileAcl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+            FileSystemRights.Write, AccessControlType.Allow));
+        file.SetAccessControl(fileAcl);
+
+        var exFile = Assert.Throws<LocalAuditWriteException>(() => LocalAuditFolderGuard.EnsureExistingFileSafe(file.FullName));
+        Assert.Equal("file_acl", exFile.Reason);
+        var exWrite = await Assert.ThrowsAsync<LocalAuditWriteException>(() => w.AppendAsync(Rec("op2", LocalAuditAction.RestoreStarted)));
+        Assert.Equal("file_acl", exWrite.Reason);
+        Assert.Single(Lines(_path));
+
+        // ② 폴더에 Everyone 쓰기 줄(상속 없음 — 폴더 판정만)
+        var dirAcl = folder.GetAccessControl(AccessControlSections.Access);
+        dirAcl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.Write, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Allow));
+        folder.SetAccessControl(dirAcl);
+
+        var exDir = Assert.Throws<LocalAuditWriteException>(() => LocalAuditFolderGuard.EnsureFolder(folder.FullName));
+        Assert.Equal("folder_acl", exDir.Reason);
+    }
+
+    // 발견 3 · 변이 M5(Writer `IsTornShaped` 순번 칸) · M3(같은 함수 앞 줄 지문 칸) — 「기록기 꼴을 흉내 낸」 끝 조각:
+    //   v1 · 칸 꼴은 맞고 <b>순번만</b> 틀림 / <b>앞 줄 지문만</b> 틀림(다 적힌 칸 · 앞부분 칸 둘 다) → tail_garbage 빨강 · 다음 쓰기도 덮어 주지 않음.
+    //   대조: 같은 자리에 순번 · 지문이 맞는 앞부분을 두면 전원 끊김 흔적(초록 · TailTorn) — 빨강이 다른 칸 때문이 아님을 먼저 보인다.
+    [Theory]
+    [InlineData("seq_wrong")]
+    [InlineData("prev_wrong_full")]
+    [InlineData("prev_wrong_partial")]
+    public async Task AF_32_M3M5_TornShapedButWrongSeqOrPrev_TailGarbage(string kind)
+    {
+        var w = NewWriter();
+        await w.AppendAsync(Rec("a", LocalAuditAction.RestoreStarted));
+        var last = await w.AppendAsync(Rec("a", LocalAuditAction.SwapStarted));
+        var baseText = File.ReadAllText(_path, Encoding.UTF8);
+
+        var wrongPrev = (last.Hash[0] == '0' ? "1" : "0") + last.Hash[1..];
+        Assert.NotEqual(last.Hash, wrongPrev);
+        Assert.False(last.Hash.StartsWith(wrongPrev[..10], StringComparison.Ordinal));
+
+        // 앞 줄 지문 칸(10번째 칸)까지 다 적은 줄 앞부분 + 꼬리 — Forge 와 같은 칸 순서
+        string UpToPrev(long seq, string prev) =>
+            string.Join('\t', "v1", seq.ToString(CultureInfo.InvariantCulture), "2026-11-28T01:02:03.0000000Z",
+                "T1", "U-parent-1", nameof(LocalAuditAction.SwapCompleted), nameof(LocalAuditResult.Succeeded), "a", string.Empty, prev);
+
+        var (control, bad) = kind switch
+        {
+            "seq_wrong" => ("v1\t3\t2026-11-28T0", "v1\t9\t2026-11-28T0"),
+            "prev_wrong_full" => (UpToPrev(3, last.Hash) + "\tab", UpToPrev(3, wrongPrev) + "\tab"),
+            _ => (UpToPrev(3, last.Hash[..10]), UpToPrev(3, wrongPrev[..10])),
+        };
+
+        File.WriteAllText(_path, baseText + control, NoBom);
+        var ok = await w.VerifyChainAsync();
+        Assert.True(ok.Ok, kind + " 대조가 초록이 아님: " + ok.Reason);
+        Assert.True(ok.TailTorn, kind + " 대조가 끊김 흔적으로 안 읽힘");
+
+        File.WriteAllText(_path, baseText + bad, NoBom);
+        var rep = await w.VerifyChainAsync();
+        Assert.False(rep.Ok, kind + " 흉내 조각이 초록");
+        Assert.Equal("tail_garbage", rep.Reason);
+        Assert.False(rep.TailTorn);
+
+        await w.AppendAsync(Rec("next", LocalAuditAction.RestoreStarted));
+        var after = await w.VerifyChainAsync();
+        Assert.False(after.Ok, kind + " 다음 쓰기가 흉내 조각을 덮어 초록이 됨");
+        Assert.DoesNotContain(Lines(_path), l => l.Contains("\tTornTailNoted\t", StringComparison.Ordinal));
+    }
 }
 
 /// <summary>🆕 고침 1 — Windows 권한 모델에서만 재는 시험. 다른 OS 에서는 「건너뜀」 으로 드러난다(조용한 초록 아님).</summary>

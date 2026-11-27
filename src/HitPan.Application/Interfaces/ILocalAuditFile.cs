@@ -77,6 +77,13 @@ public interface ILocalAuditFile
     /// 깨진 조각은 「안 적힌 줄」. 파일 없음 · 빈 파일은 <see cref="LocalAuditOpenReport.FileState"/> 로 알린다.
     /// </summary>
     /// <param name="tenantId">🔴 필수 — #2 대로 서버가 확정한 회사 id. 비면 <see cref="ArgumentException"/>.</param>
+    /// <exception cref="ArgumentException">🆕 고침 1 덧(짧은 재확인) — 회사 id 가 비었거나 id 글자 규칙 밖이면(호출자 코드 잘못).</exception>
+    /// <exception cref="IOException">파일을 읽지 못함(다른 쪽이 공유 없이 오래 쥠 — 잠깐씩 기다려 다시 해도 안 됨 · 디스크 오류 ·
+    ///   있음 확인과 열기 사이에 지워짐 = <see cref="FileNotFoundException"/> 포함). <b>읽기는 <see cref="LocalAuditWriteException"/> 로 감싸지 않는다</b>(쓰기만 감쌈).</exception>
+    /// <exception cref="UnauthorizedAccessException">읽을 권한이 없음(보호 폴더 = SYSTEM · Administrators(· 폴더를 만든 실행 계정)만 — 그 밖 계정으로 돌면 여기서 걸림).</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> 가 취소됨(차례 기다리는 중 · 다시 읽기 전 대기 중).</exception>
+    /// <remarks>🆕 고침 1 덧 — 파일이 처음부터 없으면 던지지 않고 <see cref="LocalAuditOpenReport.FileState"/> 로 알린다.
+    ///   읽기는 폴더 · 파일 문지기(재분석 · 소유자 · 권한 줄 검사)를 돌리지 <b>않는다</b>(쓰기 걸음에서만 돎). 위 넷은 호출자가 삼키지 않는다.</remarks>
     Task<LocalAuditOpenReport> ReadUnfinishedSwapsAsync(string tenantId, CancellationToken ct = default);
 
     /// <summary>
@@ -91,6 +98,10 @@ public interface ILocalAuditFile
     /// 회사 열쇠 · 믿는 줄 규칙은 <see cref="ReadUnfinishedSwapsAsync"/> 와 같다.
     /// </summary>
     /// <param name="tenantId">🔴 필수 — #2 대로 서버가 확정한 회사 id.</param>
+    /// <exception cref="ArgumentException">🆕 고침 1 덧(짧은 재확인) — 회사 id 가 비었거나 id 글자 규칙 밖이면(호출자 코드 잘못).</exception>
+    /// <exception cref="IOException">파일을 읽지 못함 — <see cref="ReadUnfinishedSwapsAsync"/> 와 같음(<see cref="LocalAuditWriteException"/> 로 감싸지 않음).</exception>
+    /// <exception cref="UnauthorizedAccessException">읽을 권한이 없음 — <see cref="ReadUnfinishedSwapsAsync"/> 와 같음.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> 가 취소됨.</exception>
     Task<LocalAuditOpenReport> ReadOpenOperationsAsync(string tenantId, CancellationToken ct = default);
 
     /// <summary>
@@ -100,6 +111,10 @@ public interface ILocalAuditFile
     /// <see cref="LocalAuditFileState.Missing"/> / <see cref="LocalAuditFileState.Empty"/> · 까닭 <c>file_missing</c> / <c>file_empty</c>.
     /// (처음 설치 뒤 아직 한 줄도 안 쓴 상태와 「통째 지움」 은 파일만으로 못 가른다 → DB 보조와 맞대기 = A.)
     /// </summary>
+    /// <exception cref="IOException">🆕 고침 1 덧(짧은 재확인) — 파일을 읽지 못함 — <see cref="ReadUnfinishedSwapsAsync"/> 와 같음(<see cref="LocalAuditWriteException"/> 로 감싸지 않음).</exception>
+    /// <exception cref="UnauthorizedAccessException">읽을 권한이 없음 — <see cref="ReadUnfinishedSwapsAsync"/> 와 같음.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> 가 취소됨.</exception>
+    /// <remarks>🆕 고침 1 덧 — 사슬이 틀린 것 · 파일 없음 · 빈 파일은 예외가 아니라 <c>Ok=false</c> 보고다. 읽기는 문지기를 돌리지 않는다(쓰기 걸음에서만).</remarks>
     Task<LocalAuditChainReport> VerifyChainAsync(CancellationToken ct = default);
 }
 
