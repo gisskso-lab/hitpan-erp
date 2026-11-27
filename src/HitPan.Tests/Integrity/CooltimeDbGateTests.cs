@@ -715,6 +715,150 @@ public sealed partial class CooltimeDbGateTests : IDisposable
     }
 
     // ══════════════════════════════════════════════════════════════
+    // G-C22 — 규칙 ④(E-6 · 대표 결재 §287 (가) W = 4) · 🆕 11/28
+    //   설계 §E E-6 예시 표 앞 4줄(22:00 회사 · 09:00 · 23:30 · 00:40 · 03:00 로그인)을 「첫 물음」 시각 직전 · 직후 바퀴로 잰다.
+    //   DB 시계는 주입할 수 없다(§7 머리) ⇒ 22:00 은 「C 와 로그인 사이 간격」 으로 옮긴다:
+    //   로그인 = UTC_TIMESTAMP(6) - n 으로 심고, 설정 시각(시:분:초) = nowLocal − (n + 로그인−C 간격) 으로 놓는다.
+    //   회사(테넌트)마다 C 가 하나이므로 경우마다 회사를 따로 둔다 — 한 바퀴(RunOnceAsync 1회)가 전부를 판정한다.
+    // ══════════════════════════════════════════════════════════════
+
+    private sealed record RuleFourCase(string Name, TimeSpan LoginAgo, TimeSpan CAgo, bool ExpectAsk,
+        TimeSpan? SnoozeFromNow = null);
+
+    [Fact(DisplayName = "G-C22 규칙 ④(E-6 · W=4) — 22:00 회사 · 09:00 · 03:00 로그인 = ④ 아님(로그인+1h 물음 0 · 다음 C 에 ③) · 23:30 · 00:40 = ④(로그인+1h 직전 0 · 직후 1) · 폭 경계 3h59m/4h01m · 미룸 지남 = 물음 · 미룸 남음 = 0")]
+    public async Task G_C22_규칙4는_설정시각_뒤_W시간_안_로그인만_묻는다()
+    {
+        if (!Ready("G-C22")) return;
+        await using var db = await OpenAsync();
+        var pusher = new CountingPusher();
+        var now = await DbNowLocalAsync(db);
+
+        static TimeSpan H(double h) => TimeSpan.FromHours(h);
+        static TimeSpan M(double m) => TimeSpan.FromMinutes(m);
+        var before = M(59);   // 「첫 물음」(로그인 + 1시간) 1분 전
+        var after = M(61);    // 「첫 물음」 1분 뒤
+
+        // 이름 · 로그인이 몇 전 · C 가 몇 전 · 물음 기대 (C 전 = 로그인 전 + (로그인 − C))
+        var cases = new List<RuleFourCase>
+        {
+            // ── E-6 예시 1줄 — 22:00 회사 · 오늘 09:00 로그인 · 그때 C = 어제 22:00(+11h) · ④ 아님 ──
+            new("09:00 ④자리 직전", before, before + H(11), false),
+            new("09:00 ④자리 직후", after, after + H(11), false),             // 대조군 ⓙ(폭 조건 제거)이면 여기서 물음 → FAIL
+            //    첫 물음 = 오늘 22:00(③) — 다음 C 의 1분 전(아직 옛 C) · 15초 뒤(새 C)
+            new("09:00 ③자리 직전", H(13) - M(1), H(24) - M(1), false),       // C = 지금 + 1분 − 24h(어제의 그 시각)
+            new("09:00 ③자리 직후", H(13) + TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15), true),
+            // ── E-6 예시 2줄 — 23:30 로그인(C + 1.5h) · ④ · 첫 물음 00:30 ──
+            new("23:30 ④ 직전", before, before + H(1.5), false),
+            new("23:30 ④ 직후", after, after + H(1.5), true),
+            // ── E-6 예시 3줄 — 자정 넘어 00:40(C + 2h40m) · ④ · 첫 물음 01:40 ──
+            new("00:40 ④ 직전", before, before + H(2) + M(40), false),
+            new("00:40 ④ 직후", after, after + H(2) + M(40), true),
+            // ── E-6 예시 4줄 — 03:00(C + 5h) · ④ 아님 · 첫 물음 그날 22:00(③) ──
+            new("03:00 ④자리 직전", before, before + H(5), false),
+            new("03:00 ④자리 직후", after, after + H(5), false),             // 대조군 ⓙ 이면 여기서도 물음
+            new("03:00 ③자리 직전", H(19) - M(1), H(24) - M(1), false),
+            new("03:00 ③자리 직후", H(19) + TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15), true),
+            // ── 폭 경계 W = 4 — C + 3h59m(안) · C + 4h01m(밖) · 둘 다 로그인 + 1h 지남 ──
+            new("폭 안 3h59m", after, after + H(4) - M(1), true),
+            new("폭 밖 4h01m", after, after + H(4) + M(1), false),
+            // ── 미룸 있는 ④([계속] 뒤 1시간마다) — 로그인 = C + 1.5h · 로그인 3시간 전 ──
+            new("④ 미룸 지남", H(3), H(3) + H(1.5), true, SnoozeFromNow: -M(1)),
+            new("④ 미룸 남음", H(3), H(3) + H(1.5), false, SnoozeFromNow: M(30)),   // 로그인+1h 는 지났어도 미룸이 먼저
+        };
+
+        var sids = new Dictionary<string, string>();
+        foreach (var c in cases)
+        {
+            var tenant = Guid.NewGuid().ToString();
+            var cLocal = now - c.CAgo;
+            await SettingsAsync(db, tenant, true, new TimeSpan(cLocal.Hour, cLocal.Minute, cLocal.Second), new TimeSpan(18, 0, 0));
+            var u = await InsertUserAsync(db, tenant);
+            var sid = await InsertSessionAsync(db, tenant, u, "pc", loginAgoSec: (int)c.LoginAgo.TotalSeconds);
+            if (c.SnoozeFromNow is TimeSpan s)
+                await db.ExecuteAsync(
+                    "UPDATE user_sessions SET cooltime_snooze_until = UTC_TIMESTAMP(6) + INTERVAL @Sec SECOND WHERE session_id = @S",
+                    new { Sec = (int)s.TotalSeconds, S = sid });
+            sids[c.Name] = sid;
+
+            // 준비 확인(판정 아님) — 엔진이 이 회사에서 쓸 C 가 의도한 간격인지(초 내림 1초 이내).
+            var engineC = CooltimeEngine.MostRecentCooltimeLocal(now, new TimeSpan(cLocal.Hour, cLocal.Minute, cLocal.Second));
+            Assert.True(Math.Abs((engineC - cLocal).TotalSeconds) < 1.0, $"[{c.Name}] 준비 C 어긋남: {engineC:O} vs {cLocal:O}");
+        }
+
+        var r = await Engine(db, pusher).RunOnceAsync(now);
+
+        Assert.Equal(0, r.EndedMissed);      // ② 는 login_at < C 만 — ④ 로그인을 묻지 않고 끝내지 않는다
+        Assert.Equal(0, r.EndedNoAnswer);
+        var fails = new List<string>();
+        foreach (var c in cases)
+        {
+            var asked = await AskedAtAsync(db, sids[c.Name]) is not null;
+            var pushed = pusher.Prompts.Any(p => p.Sid == sids[c.Name]);
+            _out.WriteLine($"[G-C22] {c.Name}: 기대 {(c.ExpectAsk ? "물음" : "0")} · 실제 asked_at={(asked ? "있음" : "없음")} · 푸시={(pushed ? 1 : 0)}");
+            if (asked != c.ExpectAsk || pushed != c.ExpectAsk)
+                fails.Add($"{c.Name}: 기대 {(c.ExpectAsk ? "물음 1" : "물음 0")} · asked_at {(asked ? "있음" : "없음")} · 푸시 {(pushed ? 1 : 0)}");
+            Assert.Equal(1, await SessionExistsAsync(db, sids[c.Name]));   // 묻기만 — 끝내지 않는다
+        }
+        Assert.True(fails.Count == 0, "[G-C22] 규칙 ④ 판정 어긋남:\n  " + string.Join("\n  ", fails));
+        Assert.Equal(cases.Count(c => c.ExpectAsk), r.Asked);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // G-C23 — 사원 연결 없는 계정(대표 계정 등 · 리뷰 P3-1) · 🆕 11/28
+    //   끝내기는 그대로(세션 삭제 · refresh 폐기 · 접속기록) · 퇴근 기록만 건너뜀(NoEmployee) · 남의 근태 변경 0 · 예외 0.
+    //   짝(양성 대조) = 같은 회사의 사원 연결된 계정 → 퇴근 기록 1(정시 18:00).
+    // ══════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "G-C23 사원 연결 없는 계정 PC 끝내기 — 세션 끝남 · refresh 폐기 · 결과 NoEmployee · 근태 변경 0 · 짝(사원 있는 계정) = 퇴근 18:00 기록 1")]
+    public async Task G_C23_사원없는_계정은_끝내고_근태는_건너뛴다()
+    {
+        if (!Ready("G-C23")) return;
+        await using var db = await OpenAsync();
+        var pusher = new CountingPusher();
+        var d = await DayDAsync(db);
+        await SettingsAsync(db, _tenantA, true, new TimeSpan(22, 0, 0), new TimeSpan(18, 0, 0));
+
+        // 사원 없는 계정(employees 에 user_id 줄 0) · 사원 있는 계정(오늘 09:00 출근 · 퇴근 빈칸)
+        var noEmpUser = await InsertUserAsync(db, _tenantA);
+        var empUser = await InsertUserAsync(db, _tenantA);
+        var emp = await InsertEmployeeAsync(db, _tenantA, empUser);
+        var att = await InsertAttendanceAsync(db, _tenantA, emp, d.AddHours(9));
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM employees WHERE tenant_id = @T AND user_id = @U", new { T = _tenantA, U = noEmpUser }));   // 준비 확인
+
+        var sidNoEmp = await InsertSessionAsync(db, _tenantA, noEmpUser, "pc", loginUtc: Utc(d.AddHours(8.9)), askedUtc: Utc(d.AddHours(22)));
+        var rtNoEmp = await InsertRefreshAsync(db, noEmpUser, sidNoEmp);
+        var sidEmp = await InsertSessionAsync(db, _tenantA, empUser, "pc", loginUtc: Utc(d.AddHours(8.9)), askedUtc: Utc(d.AddHours(22)));
+        var attRowsBefore = await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM attendance WHERE tenant_id = @T", new { T = _tenantA });
+
+        // ① 사원 없는 계정 — 서버 작업 ① 무응답 끝내기(제품 공개 메서드)
+        var res = await Engine(db, pusher).CooltimeLogoutAsync(_tenantA, sidNoEmp, d.AddHours(22.1), CooltimeEndCause.NoAnswer);
+        Assert.Equal(CooltimeEndOutcome.Ended, res.Outcome);
+        Assert.Equal(CooltimeAttendanceOutcome.NoEmployee, res.Attendance);   // 대조군 ⓧ(반환 제거)이면 NoOpenRow
+        Assert.Null(res.EmployeeId);
+        Assert.Null(res.AttendanceId);
+        Assert.Equal(0, await SessionExistsAsync(db, sidNoEmp));
+        Assert.Equal(1, await RevokedAsync(db, rtNoEmp));
+        Assert.Equal(1, await LogoutTrailCountAsync(db, sidNoEmp));
+        Assert.Contains((_tenantA, sidNoEmp, CooltimeEndCause.NoAnswer), pusher.Ended);
+        // 근태 변경 0 — 같은 회사 다른 사람의 빈칸 행도 그대로 · 행 수 그대로
+        var untouched = await AttAsync(db, att);
+        Assert.Null(untouched.CheckOut);
+        Assert.Null(untouched.WorkHours);
+        Assert.Null(untouched.Source);
+        Assert.Equal(attRowsBefore, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM attendance WHERE tenant_id = @T", new { T = _tenantA }));
+
+        // ② 짝 — 사원 있는 계정은 같은 길에서 퇴근 기록 1(준비가 실제로 퇴근 기록 길을 탄다)
+        var pair = await Engine(db, pusher).CooltimeLogoutAsync(_tenantA, sidEmp, d.AddHours(22.1), CooltimeEndCause.NoAnswer);
+        Assert.Equal(CooltimeEndOutcome.Ended, pair.Outcome);
+        Assert.Equal(CooltimeAttendanceOutcome.WroteRegularLeave, pair.Attendance);
+        Assert.Equal(att, pair.AttendanceId);
+        var written = await AttAsync(db, att);
+        Assert.Equal(d.AddHours(18), written.CheckOut);
+        Assert.Equal("cooltime", written.Source);
+    }
+
+    // ══════════════════════════════════════════════════════════════
     // G-C12 — 퇴근 고치기 · 다른 회사 404
     // ══════════════════════════════════════════════════════════════
 

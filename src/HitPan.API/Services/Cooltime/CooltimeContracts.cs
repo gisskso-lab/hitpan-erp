@@ -107,6 +107,13 @@ public static class CooltimeWire
     /// <summary>서버가 끝내기까지 기다리는 초(60초 + 여유 5초 · 설계 §3 ①).</summary>
     public const int ServerGraceSeconds = 65;
 
+    /// <summary>
+    /// 🆕 11/28 규칙 ④ 폭 <c>W</c>(시간) — 설계 §E E-6 · 대표 결재 §287 <b>(가) W = 4</b>.
+    /// 설정 시각 <c>C</c> 뒤 <c>W</c> 시간 안에 로그인한 PC(<c>C ≤ login_at &lt; C + W</c>)만 「로그인 + 1시간」(미룸 있으면 그 순간)에 묻는다.
+    /// 설정 칸·화면 0 — 상수 하나. 출근 시각 칸이 없어 「밤」 과 「다음 날 낮」 을 가를 값이 이 폭뿐이다(4 = 02:00 설정에도 06시 뒤 출근에 안 걸림).
+    /// </summary>
+    public const int RuleFourWindowHours = 4;
+
     /// <summary><c>check_out_source</c> 값(DB-134).</summary>
     public const string SourceCooltime = "cooltime";
 

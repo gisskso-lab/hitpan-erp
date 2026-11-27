@@ -89,11 +89,13 @@ public sealed class CooltimeEngine
         => Math.Round((checkOut - checkIn).TotalHours, 1);
 
     // ═══════════════════════════════════════════════════════════════════
-    // 한 바퀴 — 설계 §3 규칙 ①②③ (④ 는 개발명세서 「못 한 것」 — 결재 대기)
+    // 한 바퀴 — 설계 §3 규칙 ①②③④
+    //   ⬛ [낡은 줄 · 11/28 이전] 「④ 는 개발명세서 「못 한 것」 — 결재 대기」
+    //   🆕 11/28 §287 대표 결재 E-6 (가) W = 4 → ④ 를 ③ 의 묻기 문장(askWhere)에 OR 한 갈래로 넣었다(설계 §E :297).
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// 서버 작업 한 바퀴. 켜진 회사마다 ① 무응답 끝내기 → ② 놓친 끝내기 → ③ 묻기 순서로 돈다.
+    /// 서버 작업 한 바퀴. 켜진 회사마다 ① 무응답 끝내기 → ② 놓친 끝내기 → ③④ 묻기 순서로 돈다.
     /// </summary>
     /// <param name="nowLocal">서버 PC 벽시계(운영 = <c>DateTime.Now</c>) — <c>C</c> 계산 · 퇴근 기록에만 쓴다. 시험이 주입한다.</param>
     public async Task<CooltimeTickResult> RunOnceAsync(DateTime nowLocal, CancellationToken ct = default)
@@ -132,6 +134,7 @@ public sealed class CooltimeEngine
             // 🆕 11/27 §E E-2 — 저장 뒤 첫 C 부터 적용. C 가 마지막 켬·시각 바꿈 순간 이전(같음 포함)이면
             //   이 회사는 이번 C 에서 ②③ 을 건너뛴다(① 은 위에서 이미 돌았다 — 떠 있던 물음의 무응답은 끝낸다).
             //   ⚠️ 이 건너뛰기를 빼면 G-C19 가 FAIL 한다(음성 대조군 ⓕ — 14:00 에 「13:00」 저장 → 첫 바퀴 끝냄 2).
+            //   🆕 11/28 — ④(E-6)도 아래 묻기 문장 안에 있으므로 같이 건너뛴다(설계 §3 ② 칸 「②③④ 공통」).
             if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;
 
             // ② 한 번도 안 물었는데 설정 시각 + 5분이 지났다(서버가 꺼져 있다 켜진 경우 등) — 묻지 않고 끝낸다(Q5)
@@ -151,22 +154,37 @@ public sealed class CooltimeEngine
 
             // ③ 묻는다 — 설정 시각 전 로그인 · 안 물음 · (미룸 없음이면 C+5분 전 / 미룸이 있으면 그 순간이 지남)
             //   「②가 아님」 = 미룸이 있거나, 없으면 아직 C+5분 전. 같은 조건을 UPDATE 문장 WHERE 에 다시 건다(심판).
+            // 🆕 11/28 ④ 묻는다(설계 §E E-6 · 대표 결재 §287 (가) W = 4) — 설정 시각 뒤 W 시간 안 로그인
+            //   (C ≤ login_at < C + W)만 · 묻는 때 = 로그인 + 1시간(미룸이 있으면 그 순간). ③ 과 같은 문장에 OR 한 갈래 ⇒
+            //   SELECT · UPDATE 가 같은 WHERE(심판 하나). ② 는 그대로 login_at < C — ④ 로그인을 묻지 않고 끝내지 않는다.
+            //   E-2 건너뛰기(위 continue)는 ②③④ 공통 — ④ 도 저장 뒤 첫 C 부터.
+            //   ⚠️ 「login_at < C + W」 를 빼면 G-C22 가 FAIL 한다(음성 대조군 ⓙ — 09:00 로그인에 물음).
+            //   ⬛ [낡은 문장 · 11/28 이전 ③ 만]
+            //     tenant_id = @TenantId AND device_kind = 'pc' AND expires_at > UTC_TIMESTAMP(6)
+            //     AND cooltime_asked_at IS NULL
+            //     AND login_at < @CUtc
+            //     AND ( (cooltime_snooze_until IS NULL AND UTC_TIMESTAMP(6) < @CUtc + INTERVAL 5 MINUTE)
+            //        OR (cooltime_snooze_until IS NOT NULL AND cooltime_snooze_until <= UTC_TIMESTAMP(6)) )
             const string askWhere = @"
                      tenant_id = @TenantId AND device_kind = 'pc' AND expires_at > UTC_TIMESTAMP(6)
                      AND cooltime_asked_at IS NULL
-                     AND login_at < @CUtc
-                     AND ( (cooltime_snooze_until IS NULL AND UTC_TIMESTAMP(6) < @CUtc + INTERVAL 5 MINUTE)
-                        OR (cooltime_snooze_until IS NOT NULL AND cooltime_snooze_until <= UTC_TIMESTAMP(6)) )";
+                     AND ( ( login_at < @CUtc
+                             AND ( (cooltime_snooze_until IS NULL AND UTC_TIMESTAMP(6) < @CUtc + INTERVAL 5 MINUTE)
+                                OR (cooltime_snooze_until IS NOT NULL AND cooltime_snooze_until <= UTC_TIMESTAMP(6)) ) )
+                        OR ( login_at >= @CUtc
+                             AND login_at < @CUtc + INTERVAL @W HOUR
+                             AND ( (cooltime_snooze_until IS NULL AND UTC_TIMESTAMP(6) >= login_at + INTERVAL 1 HOUR)
+                                OR (cooltime_snooze_until IS NOT NULL AND cooltime_snooze_until <= UTC_TIMESTAMP(6)) ) ) )";
             var toAsk = await _db.QueryAsync<string>(new CommandDefinition(
                 "SELECT session_id FROM user_sessions WHERE " + askWhere,
-                new { t.TenantId, CUtc = cUtc }, cancellationToken: ct)).ConfigureAwait(false);
+                new { t.TenantId, CUtc = cUtc, W = CooltimeWire.RuleFourWindowHours }, cancellationToken: ct)).ConfigureAwait(false);
             foreach (var sid in toAsk.ToList())
             {
                 try
                 {
                     var n = await _db.ExecuteAsync(new CommandDefinition(
                         "UPDATE user_sessions SET cooltime_asked_at = UTC_TIMESTAMP(6) WHERE session_id = @Sid AND " + askWhere,
-                        new { t.TenantId, CUtc = cUtc, Sid = sid }, cancellationToken: ct)).ConfigureAwait(false);
+                        new { t.TenantId, CUtc = cUtc, Sid = sid, W = CooltimeWire.RuleFourWindowHours }, cancellationToken: ct)).ConfigureAwait(false);
                     if (n == 1)
                     {
                         asked++;
@@ -339,6 +357,7 @@ public sealed class CooltimeEngine
         WriteCooltimeCheckOutAsync(string tenantId, string userId, DateTime anchorLocal, IDbTransaction tx, CancellationToken ct)
     {
         // §D-3 — 사원 찾기 한 줄(세 경로 공통 · JWT employee_id 안 씀). 0행 = 건너뜀.
+        //   🆕 11/28 리뷰 P3-1 — ⚠️ 아래 NoEmployee 반환을 빼면 G-C23 이 FAIL 한다(음성 대조군 ⓧ — 결과가 NoOpenRow 로 바뀜).
         var employeeId = await _db.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
             "SELECT employee_id FROM employees WHERE tenant_id = @TenantId AND user_id = @UserId",
             new { TenantId = tenantId, UserId = userId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
