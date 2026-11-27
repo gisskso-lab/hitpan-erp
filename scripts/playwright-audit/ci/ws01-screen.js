@@ -64,7 +64,17 @@ const CLOSED_API = [
   ['GET', '/api/reports/sales-profitability'],
 ];
 const EXTRA = []; // 이 프로세스에서 만든 · 받은 값(그림 대조에 더함 · 등록 목록은 S0 값만 읽으므로)
-const PROBE_401 = '/api/settings/company'; // 세션 놓기 뒤 같은 출입증 1회(모든 대상에서 열린 [Authorize] 길)
+// ⬛ 11/27 main 런 진단 앞: const PROBE_401 = '/api/settings/company'; // 세션 놓기 뒤 같은 출입증 1회(모든 대상에서 열린 [Authorize] 길)
+//   이 길은 부모 출입증 확인(R5 · M5a 문)에만 남김 — main 에서 TenantAdminOnly 라 일반 자식은 늘 403(UseAuthorization 이 세션 확인보다 앞).
+const PROBE_401 = '/api/settings/company';
+// 11/27 main 런 진단 D3 — 세션 놓기 확인 길 = GET api/users/my-level(main UserController · Policy TenantOnly = 부모 · 자식 모두 열림 · A · B 손 0)
+const PROBE_ALIVE = '/api/users/my-level';
+// main SessionValidityMiddleware 세션 생존 캐시 10초(SessionCacheTtl) — 로그아웃 바로 뒤 1회는 캐시 「살아 있음」 200 이 정상. 15초까지 1초마다 다시 봄.
+const RELEASE_WAIT_MS = 15000;
+// 칸 상한이 넘친 뒤 안쪽 단계가 끝나길 기다리는 상한(같은 창을 다음 칸과 겹쳐 만지지 않게 · 11/27 main 런 m1a 그림 = M2a 화면)
+const SETTLE_MS = 30000;
+const MDB_OVER = '모두 지우고 새로 가져오기';
+const WM_LABEL = '로고 워터마크 쓰기';
 
 // ── 대상 · 키 ─────────────────────────────────────────────────────
 const TGT = J.wTargetScan(__dirname);
@@ -106,15 +116,40 @@ function fillRest(r, why) {
   for (const [id] of J.EXPECT_W_TABLE) if (has(id) && !written.has(id)) recWDevice(r, id, why);
 }
 // 칸 묶음 — 상한 · 예외 = 그 묶음의 안 쓴 키를 DEVICE 거짓으로
+// ⬛ 11/27 main 런 진단 앞: try { await K.withTimeout(fn(), CELL_MS, …) } catch { recWDevice … } — 상한이 넘쳐도 안쪽 fn 은 계속 돌아
+//   다음 칸과 같은 창을 겹쳐 만졌다(main 런: 사이드바 칸이 60초에 끊긴 뒤 메뉴 펴기 · 그림이 M2ctl · M2a 동안 돎 → m1a 그림 = /settings 화면).
+//   이제 runBounded — 상한 뒤 안쪽이 끝날 때까지 SETTLE_MS 기다림 · 그래도 안 끝나면 CellOverrun 을 던져 이 창의 남은 칸을 멈춤(남은 키 = DEVICE 거짓).
+class CellOverrun extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'CellOverrun';
+  }
+}
+async function settleWithin(p, ms) {
+  let t = null;
+  const limit = new Promise((ok) => { t = setTimeout(() => ok(false), ms); });
+  const done = await Promise.race([p.then(() => true, () => true), limit]);
+  clearTimeout(t);
+  return done;
+}
+async function runBounded(fn, ms, settleMs, what) {
+  const run = Promise.resolve().then(fn);
+  try {
+    await K.withTimeout(run, ms, what);
+    return { ok: true, err: null, overrun: false };
+  } catch (e) {
+    const done = await settleWithin(run, settleMs);
+    return { ok: false, err: e, overrun: !done };
+  }
+}
 async function cell(r, ids, what, fn) {
   const mine = ids.filter(has);
   if (mine.length === 0) return;
-  try {
-    await K.withTimeout(fn(), CELL_MS, `W ${what}`);
-  } catch (e) {
-    console.log(`W ${what} 끊김 — ${L.errorName(e)}`);
-    for (const id of mine) recWDevice(r, id, `${what} 끊김`, e);
-  }
+  const x = await runBounded(fn, CELL_MS, SETTLE_MS, `W ${what}`);
+  if (x.ok) return;
+  console.log(`W ${what} 끊김 — ${L.errorName(x.err)}`);
+  for (const id of mine) recWDevice(r, id, `${what} 끊김`, x.err);
+  if (x.overrun) throw new CellOverrun(`${what} 안쪽 단계가 상한 뒤 ${SETTLE_MS / 1000}초에도 안 끝남 — 같은 창 겹침 막으려 이 창의 남은 칸 멈춤`);
 }
 
 // ── 11/27 [3-V] 고침 — 칸 판단을 순수 함수로 뺌(자체시험 W-C14 ~ W-C19 가 직접 잰다 · 「빼면 빨강」 변이 자리) ──
@@ -131,24 +166,57 @@ function apiGate(sess, pre) {
   if (!isOpenProbe(pre)) return { ok: false, why: `출입증 확인 실패 — 열린 길 응답 ${pre ? pre.status : 0} · json ${pre ? pre.json === true : false}(장치)` };
   return { ok: true, why: '' };
 }
+// 11/27 main 런 진단 D3 — 「열린 꼴」 = 컨트롤러가 답함: JSON(401 · 403 · 404 · 405 · 5xx 빼고 · 400 검증 오류는 열림)
+//   또는 2xx · 형식 없음 · 본문 0(main `Ok()` — PUT api/settings · PUT api/ai-settings/provider/openai 가 200 빈 형식).
+//   SPA 대체 html(200 text/html · 본문 있음) · 404 는 열린 꼴 아님 → 닫힌 쪽 응답이 대조를 초록으로 만들 길 0.
+function isOpenShape(x) {
+  if (!x) return false;
+  if (x.json === true) return ![401, 403, 404, 405].includes(x.status) && x.status < 500;
+  return x.status >= 200 && x.status < 300 && !x.ctype && String(x.text || '') === '';
+}
 function m5aJudge(pre, rows, post, n = CLOSED_API.length) {
   const gate = isOpenProbe(pre) && isOpenProbe(post);
   const closedN = rows.filter(isClosedShape).length;
   const js = rows.filter((x) => x.json === true).length;
+  const openN = rows.filter(isOpenShape).length;
   return {
     gate,
     why: gate ? '' : `출입증 확인 실패 — 앞 ${pre ? pre.status : 0} · 뒤 ${post ? post.status : 0}(장치)`,
     closedN,
     js,
+    openN,
     closedOk: gate && rows.length === n && closedN === n,
-    openOk: gate && rows.length === n && js === n,
+    // ⬛ 11/27 main 런 진단 앞: openOk: gate && rows.length === n && js === n — main 실물 2 경로가 200 빈 형식(Ok()) 이라 8/10 → 장치 거짓
+    openOk: gate && rows.length === n && openN === n,
   };
 }
 // F2 M6e — 역할 문 → /login → 인증됨 → / (RedirectToLogin · Login.razor forceLoad). 최종 주소 / · 사이드바 · 빈 화면 · 오류 화면 아님.
+// 11/27 main 런 진단 D3 — 오류 띠(#blazor-error-ui)는 **같은 자식이 / 를 곧장 열었을 때(baseErrUi)도 떠 있을 때만** 바탕으로 봄.
+//   main 대시보드가 일반 자식 403 을 Console.Error 로 적음(같은 런 K35 자식 콘솔 [Dashboard.LoadDashboardAsync] 403 줄) → WASM 이 띠를 띄움.
+//   기준(baseErrUi)을 못 쟀거나 거짓이면 예전 그대로 띠 = 거짓(느슨해지는 길은 「기준에서도 떴음」 하나뿐).
 function m6eJudge(v) {
-  const landed = v.up === true && v.at === '/' && v.nav > 0 && v.textLen >= 10 && v.errUi !== true && v.notFound !== true;
+  // ⬛ 앞: const landed = … && v.errUi !== true && v.notFound !== true;
+  const errOk = v.errUi !== true || v.baseErrUi === true;
+  const landed = v.up === true && v.at === '/' && v.nav > 0 && v.textLen >= 10 && errOk && v.notFound !== true;
   const ok = landed && v.pw === 0 && v.notice !== true;
   return { landed, closedOk: ok, openOk: ok };
+}
+// 11/27 main 런 진단 D3 — M6c 덮어쓰기 칸은 글로 찾음(main · B 둘 다 MudRadio 마다 감싼 상자가 따로라 「같은 부모」 고르개가 0 을 냄)
+function m6cJudge(v, closedTxt) {
+  return {
+    closedOk: v.overFound === true && v.overDis === true && closedTxt === true,
+    openOk: v.overFound === true && v.overDis === false && closedTxt !== true,
+  };
+}
+// 11/27 main 런 진단 D3 — R3 = 워터마크 켜기 칸(print-common 이 저장하는 유일한 늘 보이는 칸) 바꿈 → [워터마크 설정 저장] → 새로 읽음.
+//   읽기 전 GET print-common 응답을 받은 뒤에만 값을 봄(loaded) — 못 받으면 기본값이 우연히 맞아 초록 되는 길을 막음.
+function r3Judge(v) {
+  return v.loaded === true && v.st === 200 && typeof v.before === 'boolean' && v.want === !v.before && v.after === v.want;
+}
+// 11/27 main 런 진단 D3 — M9 세션 놓기: 놓기 전 같은 출입증이 열린 길 200(살아 있음) → 로그아웃 200 → 캐시 10초 지나 401.
+//   놓기 전 200 이 아니면 「401 이 로그아웃 때문」 을 말할 수 없음 → 거짓.
+function releaseJudge(who, pre, lo, post) {
+  return { ok: pre === 200 && !!lo && lo.ok === true && post === 401, got: `${who} 앞 ${pre} · ${lo ? lo.got : '로그아웃 없음'} → 뒤 요청 ${post}` };
 }
 // F3 M2a ~ e — 콘솔 오류 표지(글 대신 짧은 해시) · 바탕 잡음 = 같은 런의 열린 화면(로그인 · / · 대조 주소 4)에서 본 표지 → 「새로 생긴 오류 0」
 function errSig(kind, text) {
@@ -236,14 +304,37 @@ async function gotoReady(page, p, extra = null) {
 async function bodyText(page) {
   return page.evaluate(() => (document.body ? document.body.innerText : '')).catch((e) => `(글 못 읽음 ${L.errorName(e)})`);
 }
-async function navTexts(page) {
-  // 접힌 묶음을 모두 편다(최대 40번) → 메뉴 줄 글(숨은 줄 포함 textContent)
+// 11/27 main 런 진단 D3 — main 대시보드(/)는 새로 읽을 때마다 일일 브리핑 창을 띄움(Dashboard.razor 첫 그리기 · 「오늘 그만 보기」 전까지)
+//   → 덮개(.hp-brief-backdrop)가 메뉴 펴기 · 아바타 누름을 가로챔(main 런 M3a 예외 글 = 「hp-brief-backdrop … intercepts pointer events」).
+//   / 로 간 뒤엔 사람처럼 [닫기] 로 닫음(장치 내보냄 closeBriefing · 「오늘 그만 보기」 안 누름). 못 닫으면 단언 전 끊김.
+async function briefOff(b, appearMs = 3000) {
+  const ok = await DC.closeBriefing(b.page, b.br, appearMs);
+  if (!ok) throw new K.KitStepError(`브리핑 덮개 못 닫음(${b.br.lastErr || '-'})`);
+}
+async function homeReady(b) {
+  const up = await gotoReady(b.page, '/');
+  await briefOff(b);
+  return up;
+}
+// ⬛ 11/27 main 런 진단 앞: async function navTexts(page) { … click().catch(로그만) … 40번 } — 덮개에 막혀 5초 × 11번 = 칸 상한 60초 넘김
+//   이제 누름 실패 = 덮개 한 번 더 닫고 다시 1번 → 또 실패면 던짐 · 40번 뒤에도 접힌 묶음이 남으면 던짐(덜 편 목록으로 「5줄 0」 초록 되는 길 막음)
+async function navTexts(b) {
+  const page = b.page;
+  const closedSel = '.mud-nav-group button[aria-expanded="false"]';
   for (let i = 0; i < 40; i += 1) {
-    const b = page.locator('.mud-nav-group button[aria-expanded="false"]').first();
-    if ((await b.count()) === 0) break;
-    await b.click({ timeout: 5000 }).catch((e) => console.log(`W 메뉴 펴기 실패 ${L.errorName(e)}`));
+    const btn = page.locator(closedSel).first();
+    if ((await btn.count()) === 0) break;
+    try {
+      await btn.click({ timeout: 5000 });
+    } catch (e) {
+      console.log(`W 메뉴 펴기 실패 ${L.errorName(e)} — 덮개 다시 닫고 1번 더`);
+      await briefOff(b, 0);
+      await btn.click({ timeout: 5000 });
+    }
     await sleep(150);
   }
+  const left = await page.locator(closedSel).count();
+  if (left > 0) throw new K.KitStepError(`메뉴 묶음 ${left}개 못 폄`);
   return page.evaluate(() => [...document.querySelectorAll('.mud-nav-link')].map((x) => (x.textContent || '').replace(/\s+/g, ' ').trim()));
 }
 function countIn(list, names) {
@@ -299,22 +390,32 @@ async function fetchForm(method, p, sess, body) {
   return { status: res.status, ctype, json: /json/i.test(ctype), text };
 }
 // ④ 세션 놓기 — 로그아웃 200 → 같은 출입증 1회 = 401
-async function release(sess) {
-  if (!sess || !sess.token) return { ok: false, got: `${sess ? sess.who : '-'} 세션 없음` };
-  const lo = await K.apiLogout(sess);
-  let st = 0;
+// ⬛ 11/27 main 런 진단 앞: 로그아웃 → 곧바로 GET api/settings/company 1회 = 401 — main 런 부모 200(세션 생존 캐시 10초 안) · 자식 403(TenantAdminOnly)
+//   이제 ① 놓기 전 PROBE_ALIVE 200 ② 로그아웃 200 ③ PROBE_ALIVE 가 401 이 될 때까지 1초마다 · RELEASE_WAIT_MS 까지(releaseJudge).
+//   io = 자체시험이 가짜 로그아웃 · 가짜 확인을 넣는 자리(기본 = 실물).
+async function probeStatus(sess) {
   try {
-    st = (await fetchForm('GET', PROBE_401, sess)).status;
+    return (await fetchForm('GET', PROBE_ALIVE, sess)).status;
   } catch (e) {
     console.log(`W 세션 확인 요청 실패 ${L.errorName(e)}`);
+    return 0;
   }
-  return { ok: lo.ok && st === 401, got: `${lo.got} → 뒤 요청 ${st}` };
+}
+async function release(sess, io = {}) {
+  if (!sess || !sess.token) return { ok: false, got: `${sess ? sess.who : '-'} 세션 없음` };
+  const probe = io.probe || probeStatus;
+  const logout = io.logout || K.apiLogout;
+  const pre = await probe(sess);
+  const lo = await logout(sess);
+  const post = await pollUntil(() => probe(sess), (s) => s === 401, io.waitMs === undefined ? RELEASE_WAIT_MS : io.waitMs, io.step || 1000);
+  return releaseJudge(sess.who, pre, lo, post);
 }
 // ⬛ 11/27 [3-V] F5 앞: async function newBrowserSession(pwlib, st, who, loginId, pw, view) {
 //   F5 — hold.b 를 브라우저 띄우기 **전에** 채운다 → 안에서 던져도 부르는 쪽이 출입증 놓기 · 브라우저 닫기를 한다.
 //   F3 — esig = 콘솔 오류 표지(해시)만 · base · baseReady = 바탕 잡음(대조 주소 칸 끝에 채움).
 async function newBrowserSession(pwlib, st, who, loginId, pw, view, hold = {}) {
-  const b = { who, tok: { access: null, masked: 0, deviceId: null }, req: [], cerr: 0, esig: [], base: new Set(), baseReady: false, tally: { continue: 0, abort: 0 } };
+  // 11/27 main 런 진단 D3 — br = 브리핑 덮개 닫기 기록(장치 closeBriefing 꼴 · 앞엔 { lastErr: null } 를 그때그때 넘김)
+  const b = { who, tok: { access: null, masked: 0, deviceId: null }, req: [], cerr: 0, esig: [], base: new Set(), baseReady: false, tally: { continue: 0, abort: 0 }, br: { seen: 0, closed: 0, errs: 0, lastErr: null } };
   hold.b = b;
   b.browser = await pwlib.chromium.launch();
   b.context = await b.browser.newContext({ baseURL: BASE, viewport: view });
@@ -343,7 +444,8 @@ async function newBrowserSession(pwlib, st, who, loginId, pw, view, hold = {}) {
   await K.waitMasked(b.tok);
   if (b.tok.access) EXTRA.push(b.tok.access);
   try {
-    await DC.closeBriefing(b.page, { lastErr: null }, 3000);
+    // ⬛ 11/27 main 런 진단 앞: await DC.closeBriefing(b.page, { lastErr: null }, 3000);
+    await DC.closeBriefing(b.page, b.br, 3000);
   } catch (e) {
     console.log(`W 브리핑 덮개 닫기 예외 ${L.errorName(e)}`);
   }
@@ -362,8 +464,9 @@ async function closeBrowser(b) {
 async function cellsWide(r, b) {
   const page = b.page;
   await cell(r, ['WS01-M1a', 'WS01-M6b'], '사이드바', async () => {
-    await gotoReady(page, '/');
-    const list = await navTexts(page);
+    // ⬛ 11/27 main 런 진단 앞: await gotoReady(page, '/'); const list = await navTexts(page);
+    await homeReady(b);
+    const list = await navTexts(b);
     const c5 = countIn(list, SIDE_CLOSED5);
     const n4 = countIn(list, SIDE_NEAR4);
     const rs = countIn(list, [SIDE_RESET]);
@@ -445,17 +548,25 @@ async function cellsWide(r, b) {
   });
   await cell(r, ['WS01-R6', 'WS01-M6c'], '자료이관', async () => {
     await gotoReady(page, '/settings/mdb-migration', MDB_MERGE);
-    const v = await page.evaluate(([merge]) => {
-      const radios = [...document.querySelectorAll('.mud-radio')];
-      const dis = (el) => !!(el && ((el.querySelector('input') && el.querySelector('input').disabled) || el.classList.contains('mud-disabled')));
-      const m = radios.find((x) => (x.textContent || '').includes(merge));
-      const o = radios.find((x) => x !== m && x.parentElement === (m && m.parentElement));
-      return { n: radios.length, mergeFound: !!m, mergeDis: dis(m), overFound: !!o, overDis: dis(o) };
-    }, [MDB_MERGE]);
-    const t = await bodyText(page);
+    // ⬛ 11/27 main 런 진단 앞: o = radios.find((x) => x !== m && x.parentElement === m.parentElement) — main 런 「단추 2 · 덮어쓰기 칸 false」
+    //   (라디오마다 감싼 상자가 따로) → 이제 글(MDB_OVER)로 찾음 · 잠김 판단(input.disabled · mud-disabled)은 그대로.
+    //   main 은 첫 그림에서 _isMainPc 기본 거짓 = 잠김으로 그려졌다가 확인 뒤 풀림 → 「풀림 또는 닫힘 안내」 가 보일 때까지 8초 다시 봄.
+    const read = async () => {
+      const x = await page.evaluate(([merge, over, closed]) => {
+        const radios = [...document.querySelectorAll('.mud-radio')];
+        const dis = (el) => !!(el && ((el.querySelector('input') && el.querySelector('input').disabled) || el.classList.contains('mud-disabled')));
+        const m = radios.find((y) => (y.textContent || '').includes(merge));
+        const o = radios.find((y) => y !== m && (y.textContent || '').includes(over));
+        const t = document.body ? document.body.innerText : '';
+        return { n: radios.length, mergeFound: !!m, mergeDis: dis(m), overFound: !!o, overDis: dis(o), closedTxt: t.includes(closed) };
+      }, [MDB_MERGE, MDB_OVER, MDB_CLOSED]);
+      return x;
+    };
+    const v = await pollUntil(read, (x) => x.closedTxt || (x.overFound && !x.overDis), 8000);
     const sh = await shot(page, 'r6-mdb');
+    const j6c = m6cJudge(v, v.closedTxt);
     if (has('WS01-R6')) recW(r, 'WS01-R6', { what: '자료이관 「없는 것만 보태기」 고를 수 있음', got: `보태기 칸 ${v.mergeFound} · 잠김 ${v.mergeDis} · 단추 ${v.n} · ${sh.got}`, closedOk: v.mergeFound && !v.mergeDis, openOk: v.mergeFound && !v.mergeDis });
-    if (has('WS01-M6c')) recW(r, 'WS01-M6c', { what: '덮어쓰기 비활성 + 안내 글 일치 / 대조 = 활성', got: `덮어쓰기 칸 ${v.overFound} · 잠김 ${v.overDis} · 안내 ${t.includes(MDB_CLOSED)}`, closedOk: v.overFound && v.overDis && t.includes(MDB_CLOSED), openOk: v.overFound && !v.overDis });
+    if (has('WS01-M6c')) recW(r, 'WS01-M6c', { what: '덮어쓰기 비활성 + 안내 글 일치 / 대조 = 활성', got: `덮어쓰기 칸 ${v.overFound} · 잠김 ${v.overDis} · 안내 ${v.closedTxt} · 단추 ${v.n}`, closedOk: j6c.closedOk, openOk: j6c.openOk });
   });
   await cell(r, ['WS01-R1'], '매입매출장', async () => {
     const rx = /\/api\/finance\/purchase-sales-ledger/i;
@@ -476,34 +587,53 @@ async function cellsWide(r, b) {
     const ok = st === 200 && /json/i.test(ct) && errSnack === 0;
     recW(r, 'WS01-R1', { what: '매입매출장 조회 200 JSON · 오류 알림 0', got: `응답 ${st} · 형식 ${/json/i.test(ct) ? 'json' : (ct.split(';')[0] || '-')} · 오류 알림 ${errSnack}`, closedOk: ok, openOk: ok });
   });
+  // ⬛ 11/27 main 런 진단 앞: '.mud-main-content input[type="text"]…' 첫 칸 바꿈 → 첫 「저장」 단추 — main 런 「바꿀 칸 없음」
+  //   (main MainLayout 본문 = <main class="hitpan-content"> · .mud-main-content 없음). 또 첫 글 칸(양식 하단 문구)은 큰 [저장](SaveSettings) 몫이고
+  //   첫 「저장」 단추는 [워터마크 설정 저장](print-common) 이라 고르개를 고쳐도 값 유지가 잴 수 없었다.
+  //   이제 print-common 이 저장하는 늘 보이는 칸 = 「로고 워터마크 쓰기」 켜기를 뒤집음 → [워터마크 설정 저장] → PUT print-common → 새로 읽어 GET print-common 받은 뒤 값(r3Judge).
   await cell(r, ['WS01-R3'], '인쇄 설정', async () => {
     const rx = /\/api\/settings\/print-common/i;
-    await gotoReady(page, '/print-settings');
-    const f = page.locator('.mud-main-content input[type="text"]:not([readonly]):not([disabled])').first();
-    if ((await f.count()) === 0) throw new K.KitStepError('바꿀 칸 없음');
-    const before = await f.inputValue();
-    const want = `${before.slice(0, 20)}w${hex(1)}`;
-    await f.fill(want);
-    await f.press('Tab');
-    const put = page.waitForResponse((x) => rx.test(x.url()) && x.request().method() === 'PUT', { timeout: 20000 });
-    await page.getByRole('button', { name: /저장/ }).first().click({ timeout: 5000 });
-    const pr = await put;
-    await gotoReady(page, '/print-settings');
-    await sleep(1500);
-    const after = await page.locator('.mud-main-content input[type="text"]:not([readonly]):not([disabled])').first().inputValue();
-    const ok = pr.status() === 200 && after === want;
-    recW(r, 'WS01-R3', { what: '인쇄 설정 1칸 저장 → 새로 읽어도 값 유지 · print-common 200', got: `저장 응답 ${pr.status()} · 값 유지 ${after === want}`, closedOk: ok, openOk: ok });
+    const load = async () => {
+      const got = page.waitForResponse((x) => rx.test(x.url()) && x.request().method() === 'GET', { timeout: 30000 })
+        .then((x) => x.status()).catch((e) => { console.log(`W 인쇄 공통 읽기 응답 기다림 끝 ${L.errorName(e)}`); return 0; });
+      await gotoReady(page, '/print-settings', WM_LABEL);
+      const st = await got;
+      await sleep(800);
+      return st;
+    };
+    const box = () => page.getByLabel(WM_LABEL, { exact: true });
+    const l0 = await load();
+    if (l0 !== 200 || (await box().count()) !== 1) throw new K.KitStepError(`워터마크 칸 못 읽음(읽기 ${l0} · 칸 ${await box().count()})`);
+    const before = await box().isChecked();
+    const want = !before;
+    let put = null;
+    const armed = page.waitForResponse((x) => rx.test(x.url()) && x.request().method() === 'PUT', { timeout: 20000 })
+      .then((x) => { put = x; return x; }).catch((e) => { console.log(`W 인쇄 공통 저장 응답 기다림 끝 ${L.errorName(e)}`); return null; });
+    await page.getByText(WM_LABEL, { exact: true }).click({ timeout: 5000 });
+    await sleep(300);
+    if ((await box().isChecked()) !== want) throw new K.KitStepError('워터마크 칸 뒤집기 안 먹음');
+    await page.getByRole('button', { name: '워터마크 설정 저장', exact: true }).click({ timeout: 5000 });
+    await armed;
+    const st = put ? put.status() : 0;
+    const l1 = await load();
+    const after = (await box().count()) === 1 ? await box().isChecked() : null;
+    const ok = r3Judge({ loaded: l1 === 200, st, before, want, after });
+    recW(r, 'WS01-R3', { what: '인쇄 설정 1칸(워터마크 켜기) 저장 → 새로 읽어도 값 유지 · print-common 200', got: `저장 응답 ${st} · 앞 ${before} → ${want} · 새로 읽기 ${l1} · 뒤 ${after} · 값 유지 ${after === want}`, closedOk: ok, openOk: ok });
   });
   await cell(r, ['WS01-R2', 'WS01-R4', 'WS01-M3c'], '사용자정보', async () => {
     const i0 = b.req.length;
     const rx = /\/api\/settings\/company(\?|$)/i;
     await gotoReady(page, '/settings/user-info', '업태');
-    const cnt = page.getByLabel('상시근로자수');
+    // ⬛ 11/27 main 런 진단 앞: const cnt = page.getByLabel('상시근로자수'); — main 런 strict 위반 2개(「상시근로자수 기준일」 날짜 칸이 부분 일치)
+    const cnt = page.getByLabel('상시근로자수', { exact: true });
     const biz = page.getByLabel('업태', { exact: true });
     const cntWant = String(10 + crypto.randomInt(80));
-    const bizWant = `ci${hex(2)}`;
-    await cnt.fill(cntWant);
+    // ⬛ 앞: const bizWant = `ci${hex(2)}`; — 업태가 잠긴 칸(main UserInfoPage _lockBizType = 랜딩 잠금 + 값 있음)이면 R4 를 장치로 버렸다.
+    //   이제 잠겼으면 바꾸지 않고 「적용 뒤 원래 값 그대로」 를 잼(잠긴 값은 비어 있지 않음 = _lockBizType 조건) · 결과 칸에 잠김 적음.
     const bizRo = await biz.evaluate((x) => x.readOnly === true);
+    const bizBefore = await biz.inputValue();
+    const bizWant = bizRo ? bizBefore : `ci${hex(2)}`;
+    await cnt.fill(cntWant);
     if (!bizRo) await biz.fill(bizWant);
     await biz.press('Tab');
     let put = null;
@@ -521,7 +651,7 @@ async function cellsWide(r, b) {
     }
     await gotoReady(page, '/settings/user-info', '업태');
     await sleep(1500);
-    const cntAfter = await page.getByLabel('상시근로자수').inputValue();
+    const cntAfter = await page.getByLabel('상시근로자수', { exact: true }).inputValue();
     const bizAfter = await page.getByLabel('업태', { exact: true }).inputValue();
     const root = b.req.slice(i0).filter((x) => x === 'GET /api/settings' || x === 'PUT /api/settings').length;
     const putSt = put ? put.status() : 0;
@@ -531,8 +661,9 @@ async function cellsWide(r, b) {
       recW(r, 'WS01-R2', { what: '사업장 정보(상시근로자수) 저장 → 새로 읽어도 값 유지 · settings/company 200 JSON', got: `저장 응답 ${putSt} · json ${putJson} · 값 유지 ${cntAfter === cntWant}`, closedOk: ok, openOk: ok });
     }
     if (has('WS01-R4')) {
-      if (bizRo) recWDevice(r, 'WS01-R4', '업태 칸 잠김(바꿀 수 없음)');
-      else recW(r, 'WS01-R4', { what: '[적용] 「적용되었습니다」 · 업태 유지 · api/settings 루트 GET/PUT 0 / 대조 = 루트 요청 있음', got: `알림 ${snack} · 업태 유지 ${bizAfter === bizWant} · 루트 요청 ${root}`, closedOk: snack && bizAfter === bizWant && root === 0, openOk: root > 0 });
+      // ⬛ 앞: if (bizRo) recWDevice(r, 'WS01-R4', '업태 칸 잠김(바꿀 수 없음)'); else recW(…)
+      const bizOk = bizAfter === bizWant && bizWant !== '';
+      recW(r, 'WS01-R4', { what: '[적용] 「적용되었습니다」 · 업태 유지 · api/settings 루트 GET/PUT 0 / 대조 = 루트 요청 있음', got: `알림 ${snack} · 업태 ${bizRo ? '잠김(원래 값)' : '바꿈'} 유지 ${bizOk} · 루트 요청 ${root}`, closedOk: snack && bizOk && root === 0, openOk: root > 0 });
     }
     if (has('WS01-M3c')) {
       const from = pathNow(page);
@@ -563,7 +694,8 @@ async function cellsNarrow(r, b) {
       recW(r, 'WS01-M1b', { what: '더보기 닫힌 3줄 0 · 다른 항목 있음 / 대조 = 3줄 있음', got: `닫힌 3 중 ${c3} · 항목 ${items.length} · ${sh.got}`, closedOk: c3 === 0 && items.length > 0, openOk: c3 === 3 });
     });
     await cell(r, ['WS01-M3a'], '아바타(390×844)', async () => {
-      await gotoReady(page, '/');
+      // ⬛ 11/27 main 런 진단 앞: await gotoReady(page, '/'); — 브리핑 덮개가 아바타 누름을 가로챔(main 런 예외 글)
+      await homeReady(b);
       const from = pathNow(page);
       await page.locator('button.hp-mha-btn:has(.hp-mha-avatar)').first().click({ timeout: 5000 });
       const at = await urlAfter(page, from);
@@ -628,7 +760,9 @@ async function cellsApi(r, sess) {
     for (const [m, p] of CLOSED_API) {
       const x = await fetchForm(m, p, sess, m === 'GET' ? undefined : {});
       rows.push(x);
-      got.push(`${m} ${p} ${x.status} ${x.json ? 'json' : (x.ctype.split(';')[0] || '빈 형식')}`);
+      // ⬛ 11/27 main 런 진단 앞: got.push(`${m} ${p} ${x.status} ${x.json ? 'json' : (x.ctype.split(';')[0] || '빈 형식')}`); — 결과 칸 300자에 잘려 뒤 4 경로가 안 보였다
+      //   이제 CLOSED_API 순서대로 「상태 + 꼴 한 글자」(j = JSON · 빈 = 형식 없음 본문 0 · h = html · o = 그 밖)
+      got.push(`${x.status}${x.json ? 'j' : (/text\/html/i.test(x.ctype) ? 'h' : (!x.ctype && x.text === '' ? '빈' : 'o'))}`);
     }
     const post = await probeOpen(sess);
     const j = m5aJudge(pre, rows, post);
@@ -636,7 +770,7 @@ async function cellsApi(r, sess) {
       recWDevice(r, 'WS01-M5a', `${j.why} · ${got.join(' · ')}`);
       return;
     }
-    recW(r, 'WS01-M5a', { what: '닫힌 10 경로 = 404 또는 200 text/html 꼴(401 · 403 은 닫힘 아님 · 앞뒤 열린 길 200 JSON) / 대조 = 10 모두 JSON', got: `닫힘 꼴 ${j.closedN}/10 · JSON ${j.js}/10 · 열린 길 앞 ${pre.status} 뒤 ${post.status} · ${got.join(' · ')}`, closedOk: j.closedOk, openOk: j.openOk });
+    recW(r, 'WS01-M5a', { what: '닫힌 10 경로 = 404 또는 200 text/html 꼴(401 · 403 은 닫힘 아님 · 앞뒤 열린 길 200 JSON) / 대조 = 10 모두 열린 꼴(JSON · 또는 2xx 빈 형식 본문 0)', got: `닫힘 꼴 ${j.closedN}/10 · 열린 꼴 ${j.openN}/10 · JSON ${j.js}/10 · 열린 길 앞 ${pre.status} 뒤 ${post.status} · 경로 순 ${got.join(' ')}`, closedOk: j.closedOk, openOk: j.openOk });
   });
 }
 
@@ -710,11 +844,23 @@ async function main() {
     if (has('WS01-M6e') && child) {
       const hc = {};
       // ⬛ 11/27 [3-V] F2 앞: closedOk = pw === 0 && !닫힘안내 · openOk = false 고정(최종 주소 · 준비 결과 안 봄)
+      // ⬛ 11/27 main 런 진단 앞: await cell(…) 를 try 없이 — 이제 cell 이 CellOverrun 을 던질 수 있어 감쌈(던지면 남은 키 = fillRest)
+      try {
       await cell(r, ['WS01-M6e'], '일반 자식 /data/reset', async () => {
         const bc = await newBrowserSession(pwlib, st, 'W_CHILD_B', child.id, child.pw, VIEW_WIDE, hc);
+        // 11/27 main 런 진단 D3 — 기준: 같은 자식이 / 를 곧장 열었을 때 오류 띠가 뜨나(대시보드 403 → Console.Error → 띠) · 5초까지 기다려 봄
+        const baseUp = await homeReady(bc);
+        const errUiNow = () => bc.page.evaluate(() => {
+          const eu = document.getElementById('blazor-error-ui');
+          return !!eu && getComputedStyle(eu).display !== 'none';
+        });
+        const baseNav = await bc.page.locator('.mud-nav-link').count();
+        const baseErrUi = baseUp === true && baseNav > 0 ? await pollUntil(errUiNow, (x) => x === true, 5000) : false;
         const up = await gotoReady(bc.page, '/data/reset');
         const look = async () => ({ at: pathNow(bc.page), nav: await bc.page.locator('.mud-nav-link').count() });
         await pollUntil(look, (x) => x.at === '/' && x.nav > 0, 15000);
+        // 11/27 main 런 진단 D3 — 도착한 / 에도 브리핑 창이 뜸(main 런 m6e 그림) · 그림이 화면을 보이게 닫아 봄(못 닫아도 판단은 DOM 이라 기록만)
+        if (!(await DC.closeBriefing(bc.page, bc.br, 3000))) console.log(`W 자식 브리핑 덮개 못 닫음(${bc.br.lastErr || '-'})`);
         await sleep(1500);
         const v = await bc.page.evaluate(([notice]) => {
           const t = document.body ? document.body.innerText : '';
@@ -730,15 +876,19 @@ async function main() {
         v.up = up;
         v.at = pathNow(bc.page);
         v.pw = await bc.page.locator('input[type="password"]').count();
+        v.baseErrUi = baseErrUi;
         const j = m6eJudge(v);
         const sh = await shot(bc.page, 'm6e-child-reset');
         recW(r, 'WS01-M6e', {
-          what: '일반 자식 /data/reset = 역할 문에 막혀 / 로 감(사이드바 · 빈 · 오류 화면 아님) · 대표 판정 글 · 입력칸 안 나옴 / 대조(main) = 같음(눈 뜸)',
-          got: `준비 ${up} · 최종 주소 ${v.at} · 메뉴 줄 ${v.nav} · 글 길이 ${v.textLen} · 오류 띠 ${v.errUi} · 없는 쪽 ${v.notFound} · 비번 칸 ${v.pw} · 닫힘 안내 ${v.notice} · ${st.childNote} · ${sh.got}`,
+          what: '일반 자식 /data/reset = 역할 문에 막혀 / 로 감(사이드바 · 빈 · 오류 화면 아님 · 오류 띠는 / 곧장 열기 기준에도 뜰 때만 바탕) · 대표 판정 글 · 입력칸 안 나옴 / 대조(main) = 같음(눈 뜸)',
+          got: `기준 / 준비 ${baseUp} · 메뉴 줄 ${baseNav} · 오류 띠 ${baseErrUi} / 준비 ${up} · 최종 주소 ${v.at} · 메뉴 줄 ${v.nav} · 글 길이 ${v.textLen} · 오류 띠 ${v.errUi} · 없는 쪽 ${v.notFound} · 비번 칸 ${v.pw} · 닫힘 안내 ${v.notice} · ${st.childNote} · ${sh.got}`,
           closedOk: j.closedOk,
           openOk: j.openOk,
         });
       });
+      } catch (e) {
+        console.log(`W 일반 자식 창 멈춤 — ${L.errorName(e)}`);
+      }
       await holdRelease(hc, 'W_CHILD_B', st.sessC, release);
       await closeBrowser(hc.b);
     }
@@ -772,4 +922,6 @@ module.exports = {
   recW, has, CLOSED_API, CLOSED_PATHS, CONTROL_PATHS,
   // 11/27 [3-V] 고침 — 자체시험 W-C14 ~ W-C19 가 직접 잰다
   newBrowserSession, isOpenProbe, isClosedShape, apiGate, m5aJudge, m6eJudge, errSig, newErrCount, m2Judge, pollUntil, holdRelease, m9, r5Judge, PROFIT_CLOSED, PROFIT_KIND,
+  // 11/27 main 런 진단 D3 — 자체시험 W-C20 ~ W-C24 가 직접 잰다
+  isOpenShape, m6cJudge, r3Judge, releaseJudge, release, runBounded, CellOverrun,
 };
