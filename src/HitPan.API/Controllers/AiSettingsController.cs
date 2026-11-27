@@ -25,6 +25,11 @@ public sealed class AiSettingsController : ControllerBase
     // ─────────────────────────────────────────────────────────────
     // 설정 현황 조회 (키 설정 여부·last4·한도) — 평문 키 반환 없음
     // ─────────────────────────────────────────────────────────────
+    // 🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-2 · PM 결재 P3 ① · P4) — 01a-10 도우미 연동 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(부르면 404). 닫는 액션 = 이 GET · PUT apikey · PUT apikey/{providerId} ·
+    //   PUT provider/{providerId} · POST check/{providerId} 5개. **DELETE 2개(apikey · apikey/{providerId})는 남긴다** —
+    //   이미 저장된 키를 지울 길이다. 아래 속성·본문은 보존한다(#1 · 다시 열 때 = [NonAction] 한 줄 뗌 · 정식 판).
+    [NonAction]
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken ct)
     {
@@ -41,6 +46,8 @@ public sealed class AiSettingsController : ControllerBase
     // ─────────────────────────────────────────────────────────────
     // 연동 키 저장 (AES-256 암호화)
     // ─────────────────────────────────────────────────────────────
+    // W-S-01 갈래 A — 01a-10 PUT apikey 닫음(위 GET 주석과 같음 · 본문 보존 #1).
+    [NonAction]
     [HttpPut("apikey")]
     public async Task<IActionResult> SaveApiKey([FromBody] SaveApiKeyRequest req, CancellationToken ct)
     {
@@ -90,6 +97,8 @@ public sealed class AiSettingsController : ControllerBase
     // ═════════════════════════════════════════════════════════════════
 
     /// <summary>지정 공급자(anthropic/openai/google)의 연동 키 저장.</summary>
+    // W-S-01 갈래 A — 01a-10 PUT apikey/{providerId} 닫음(본문 보존 #1).
+    [NonAction]
     [HttpPut("apikey/{providerId}")]
     public async Task<IActionResult> SaveApiKeyForProvider(
         string providerId, [FromBody] SaveApiKeyRequest req, CancellationToken ct)
@@ -132,6 +141,8 @@ public sealed class AiSettingsController : ControllerBase
     }
 
     /// <summary>지금 사용할 공급자를 바꾼다(키는 건드리지 않는다).</summary>
+    // W-S-01 갈래 A — 01a-10 PUT provider/{providerId} 닫음(본문 보존 #1).
+    [NonAction]
     [HttpPut("provider/{providerId}")]
     public async Task<IActionResult> SetActiveProvider(string providerId, CancellationToken ct)
     {
@@ -157,6 +168,8 @@ public sealed class AiSettingsController : ControllerBase
     /// 🔴 지정 공급자에 <b>실제로 연결해 본다</b>. 저장 여부만 보는 것이 아니다.
     ///    실패해도 200 으로 결과(Succeeded=false)를 돌려준다 — 사유를 화면이 그대로 보여줘야 하기 때문.
     /// </summary>
+    // W-S-01 갈래 A — 01a-10 POST check/{providerId} 닫음(본문 보존 #1) · 이 액션이 CheckConnectionAsync 의 유일한 호출자였다.
+    [NonAction]
     [HttpPost("check/{providerId}")]
     public async Task<IActionResult> CheckConnection(string providerId, CancellationToken ct)
     {

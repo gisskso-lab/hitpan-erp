@@ -63,8 +63,25 @@ public sealed class SalesProfitabilityTool : IHitpanTool
         }
     });
 
+    /// <summary>
+    /// 🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-3) — 01b-06 판매수익성분석 닫힘 깃발.
+    /// </summary>
+    /// <remarks>
+    /// 참 = 닫힘 — <see cref="ExecuteAsync"/> 가 보고서 함수를 부르지 않고 기존 실패 꼴(<see cref="ToolResult.Fail"/>)로 안내 글을 돌려준다.
+    /// 도구 <b>등록은 그대로</b> 둔다(<c>ExternalAiExportGateTests</c> G8e · 등록부 정적 제거 안 함).
+    /// ⚠️ <c>const</c> 로 바꾸지 않는다 — 뒤 줄이 「도달할 수 없는 코드」(CS0162) 경고가 되어 빌드 0/0(#19)이 깨진다.
+    /// 다시 열 때(정식 판) = 이 값 한 줄을 거짓으로.
+    /// </remarks>
+    internal static readonly bool ClosedInThisEdition = true;
+
     public async Task<ToolResult> ExecuteAsync(JsonElement input, ToolContext ctx, CancellationToken ct = default)
     {
+        // W-S-01 갈래 A — 닫혀 있으면 첫 문장에서 안내만 돌려준다(보고서 호출 0 · 서명 · 생성자 그대로).
+        if (ClosedInThisEdition)
+        {
+            return ToolResult.Fail(AiEmployeeAnalysisService.SalesProfitabilityClosedNotice);
+        }
+
         var view = GetString(input, "view") ?? "partner";
         if (view != "partner" && view != "item" && view != "period")
         {

@@ -46,6 +46,22 @@ public sealed class AiEmployeeAnalysisService : IAiEmployeeAnalysisService
         _logger = logger;
     }
 
+    /// <summary>
+    /// 🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-3 · PM 결재 P2 초안) — 01b-06 판매수익성분석 닫힘 안내 글.
+    /// 대화 분석(이 클래스)과 도구(<c>SalesProfitabilityTool</c>)가 같은 글을 쓴다. 고객 노출 글 — 개발 낱말 · 「베타」 0(#23).
+    /// </summary>
+    public const string SalesProfitabilityClosedNotice =
+        "판매수익성분석은 정식 판에서 열립니다. 지금은 숫자를 보여 드리지 않습니다.";
+
+    /// <summary>
+    /// W-S-01 갈래 A — 01b-06 닫힘 깃발. 참 = 수익 분석 명령으로 판정된 뒤 보고서 함수를 부르지 않고 안내 결과를 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// null 로 돌리지 않는다 — null 이면 일반 도우미로 흘러 「자료 없음」 · 엉뚱한 답이 나온다(설계 §2-3 ③).
+    /// ⚠️ <c>const</c> 로 바꾸지 않는다(뒤 줄이 CS0162 경고 → #19). 다시 열 때(정식 판) = 이 값 한 줄을 거짓으로.
+    /// </remarks>
+    internal static readonly bool SalesProfitabilityClosed = true;
+
     public async Task<AiAnalysisResultDto?> TryAnalyzeAsync(
         string message, string tenantId,
         IReadOnlyList<ChatHistoryTurn>? history = null,
@@ -75,6 +91,21 @@ public sealed class AiEmployeeAnalysisService : IAiEmployeeAnalysisService
         if (!isProfit)
         {
             return null;
+        }
+
+        // 🔴 W-S-01 갈래 A — 수익 분석 명령으로 판정된 **뒤** 닫힘이면 보고서 함수를 부르지 않고 안내 결과를 돌려준다.
+        //   기존 Kind 그대로 · 행 0 · 제목 = 안내 글(새 꼴 0). 수익 아닌 질문은 위에서 지금처럼 null.
+        if (SalesProfitabilityClosed)
+        {
+            return new AiAnalysisResultDto
+            {
+                Kind = "sales-profitability",
+                Title = SalesProfitabilityClosedNotice,
+                Columns = new(),
+                Rows = new(),
+                Chart = new(),
+                ChartValueLabel = ""
+            };
         }
 
         // 새 지시(이번 메시지)를 우선 본다 — 재명령 시 "거래처별로"가 직전 "품목별"을 이겨야 한다.
