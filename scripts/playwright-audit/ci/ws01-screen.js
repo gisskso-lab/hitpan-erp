@@ -15,6 +15,8 @@
 //   ⑦ 11/27 [3-V] 고침(개발명세서 §5 11/27) — F1 출입증 확인 뒤에만 API 칸 · 닫힘 = 404 · 200 text/html 꼴만 / F2 M6e 최종 주소 · 빈 · 오류 화면 · main 대조 /
 //      F3 「새로 생긴 콘솔 오류 0」(바탕 잡음 = 같은 런 열린 화면 표지) / F4 안내 종이 기다림 / F5 띄우려 한 브라우저 세션은 늘 M9 한 줄 / F6 R5 대조 = 분석 결과 칸.
 //      판단은 순수 함수(m5aJudge · m6eJudge · m2Judge · pollUntil · holdRelease · r5Judge)로 빼 자체시험 W-C14 ~ W-C19 가 잰다.
+//   ⑧ 11/27 D5(PM 결정 · CTO 전결 §280 · 개발명세서 §7) — M5a 닫힘에 「405 + 빈 본문 + Allow 에 그 방법 없음」(처리기에 안 닿은 라우팅 거절)을 더함 ·
+//      닫힌 PUT 뒤 값이 안 바뀌었음을 열린 GET 으로 다시 읽어 확인(readbackJudge · 못 읽는 경로는 결과 칸에 적음). 401 · 403 · 5xx 는 그대로 닫힘 아님.
 'use strict';
 
 const fs = require('fs');
@@ -63,6 +65,12 @@ const CLOSED_API = [
   ['PUT', '/api/ai-settings/provider/openai'], ['POST', '/api/ai-settings/check/openai'],
   ['GET', '/api/reports/sales-profitability'],
 ];
+// 11/27 D5 — 닫힌 PUT 뒤 다시 읽을 열린 GET(대상 PR aaf691e7 에서 [NonAction] 아님 · ChatbotController Policy TenantOnly).
+//   GET api/chatbot/quota = local_subscription 의 ai_mode · 한도 · anthropic 키 설정 여부 · 끝 4자 → PUT api/ai-settings/apikey 몫만 읽힘.
+//   나머지 닫힌 PUT 3 은 같은 값을 읽는 열린 GET 이 없음(GET api/settings · GET api/ai-settings 도 닫힘 · quota 에 openai 키 · ai_provider 없음).
+const READBACK_GET = '/api/chatbot/quota';
+const READBACK_KEYS = ['aiMode', 'monthlyLimit', 'extraTokens', 'subscriptionTier', 'anthropicKeyConfigured', 'anthropicKeyLast4'];
+const READBACK_NONE = '열린 GET 없음 PUT 3(settings · apikey/openai · provider/openai)';
 const EXTRA = []; // 이 프로세스에서 만든 · 받은 값(그림 대조에 더함 · 등록 목록은 S0 값만 읽으므로)
 // ⬛ 11/27 main 런 진단 앞: const PROBE_401 = '/api/settings/company'; // 세션 놓기 뒤 같은 출입증 1회(모든 대상에서 열린 [Authorize] 길)
 //   이 길은 부모 출입증 확인(R5 · M5a 문)에만 남김 — main 에서 TenantAdminOnly 라 일반 자식은 늘 403(UseAuthorization 이 세션 확인보다 앞).
@@ -174,18 +182,61 @@ function isOpenShape(x) {
   if (x.json === true) return ![401, 403, 404, 405].includes(x.status) && x.status < 500;
   return x.status >= 200 && x.status < 300 && !x.ctype && String(x.text || '') === '';
 }
-function m5aJudge(pre, rows, post, n = CLOSED_API.length) {
+// 11/27 D5(PM 결정 · CTO 전결 §280) — 「405 + 빈 본문」 닫힘. 측정 런 A 45994182213 · AB 45994214577 M5a = 200h 405빈 405빈 405빈 200h 405빈 × 4 200h.
+//   까닭: 대상 PR aaf691e7 API 는 net8.0 · Program.cs MapFallbackToFile("index.html") — .NET 8 의 이 대체 길은 GET · HEAD 만 받음
+//   (이 PC 8.0.34 Microsoft.AspNetCore.StaticFiles.dll 에 HttpMethodMetadata · _supportedHttpMethods 있음 · 5.0 · 3.1 엔 없음).
+//   [NonAction] 으로 처리기가 빠진 길에 PUT · POST 가 오면 같은 길에 살아 있는 방법(대체 GET · HEAD · apikey 2 길은 DELETE 도)만 남아 라우팅이 405 + 빈 본문.
+//   동작으로 잼: 방법이 GET · HEAD 아님 · 405 · JSON 아님 · 형식 없음 · 본문 0 · Allow 머리 있음 · Allow 에 그 방법 없음(= 그 방법 처리기 없음).
+//   처리기가 스스로 405 를 내면 [ApiController] 문제 본문(JSON)이 붙음 → 닫힘 아님.
+function isClosed405(x) {
+  if (!x || x.status !== 405 || x.json === true || x.ctype || String(x.text || '') !== '') return false;
+  const m = String(x.m || '').toUpperCase();
+  if (!m || m === 'GET' || m === 'HEAD') return false;
+  const allow = String(x.allow || '').split(',').map((v) => v.trim().toUpperCase()).filter(Boolean);
+  return allow.length > 0 && !allow.includes(m);
+}
+// 11/27 D5 — 다시 읽기: 열린 GET 응답(200 JSON)에서 READBACK_KEYS 값만 골라 해시(값 자체는 찍지 않음 · 키 끝 4자 포함이라).
+function readbackPick(x) {
+  if (!x || x.status !== 200 || x.json !== true) return null;
+  let j = null;
+  try {
+    j = JSON.parse(String(x.text || ''));
+  } catch (e) {
+    console.log(`W 다시 읽기 응답 해석 실패 ${L.errorName(e)}`);
+    return null;
+  }
+  if (!j || typeof j !== 'object') return null;
+  const low = new Map(Object.keys(j).map((k) => [k.toLowerCase(), j[k]]));
+  const vals = READBACK_KEYS.map((k) => (low.has(k.toLowerCase()) ? low.get(k.toLowerCase()) : null));
+  if (vals.every((v) => v === null)) return null;
+  return crypto.createHash('sha256').update(JSON.stringify(vals)).digest('hex');
+}
+//   앞을 못 읽음 = 못 읽는 경로(참 · 결과 칸에 적음) · 앞은 읽었는데 뒤를 못 읽음 = 거짓 · 값 바뀜 = 거짓.
+function readbackJudge(before, after) {
+  const a = readbackPick(before);
+  if (a === null) return { readable: false, ok: true, note: `못 읽음(앞 응답 ${before ? before.status : 0})` };
+  const b = readbackPick(after);
+  if (b === null) return { readable: true, ok: false, note: `뒤 못 읽음(응답 ${after ? after.status : 0})` };
+  return { readable: true, ok: a === b, note: a === b ? '같음' : '바뀜' };
+}
+// ⬛ 11/27 D5 앞: function m5aJudge(pre, rows, post, n = CLOSED_API.length) { … const closedN = rows.filter(isClosedShape).length; … closedOk: gate && rows.length === n && closedN === n,
+//   이제 닫힘 = isClosedShape 또는 isClosed405 · rb(다시 읽기) — 405 닫힘이 하나라도 있으면 rb 가 있어야 하고 rb.ok 참 · rb 가 있으면 언제나 rb.ok 참.
+function m5aJudge(pre, rows, post, n = CLOSED_API.length, rb = null) {
   const gate = isOpenProbe(pre) && isOpenProbe(post);
-  const closedN = rows.filter(isClosedShape).length;
+  const n405 = rows.filter(isClosed405).length;
+  const closedN = rows.filter((x) => isClosedShape(x) || isClosed405(x)).length;
   const js = rows.filter((x) => x.json === true).length;
   const openN = rows.filter(isOpenShape).length;
+  const rbOk = rb ? rb.ok === true : n405 === 0;
   return {
     gate,
     why: gate ? '' : `출입증 확인 실패 — 앞 ${pre ? pre.status : 0} · 뒤 ${post ? post.status : 0}(장치)`,
     closedN,
+    n405,
     js,
     openN,
-    closedOk: gate && rows.length === n && closedN === n,
+    rbOk,
+    closedOk: gate && rows.length === n && closedN === n && rbOk,
     // ⬛ 11/27 main 런 진단 앞: openOk: gate && rows.length === n && js === n — main 실물 2 경로가 200 빈 형식(Ok()) 이라 8/10 → 장치 거짓
     openOk: gate && rows.length === n && openN === n,
   };
@@ -389,7 +440,16 @@ async function fetchForm(method, p, sess, body) {
   const res = await fetch(`${BASE}${p}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const ctype = res.headers.get('content-type') || '';
   const text = await res.text();
-  return { status: res.status, ctype, json: /json/i.test(ctype), text };
+  // ⬛ 11/27 D5 앞: return { status: res.status, ctype, json: /json/i.test(ctype), text }; — 이제 Allow 머리도(M5a 405 닫힘 판단 · isClosed405)
+  return { status: res.status, ctype, json: /json/i.test(ctype), text, allow: res.headers.get('allow') || '' };
+}
+async function readBack(sess) {
+  try {
+    return await fetchForm('GET', READBACK_GET, sess);
+  } catch (e) {
+    console.log(`W 다시 읽기 요청 실패 ${L.errorName(e)}`);
+    return { status: 0, ctype: '', json: false, text: '', allow: '' };
+  }
 }
 // ④ 세션 놓기 — 로그아웃 200 → 같은 출입증 1회 = 401
 // ⬛ 11/27 main 런 진단 앞: 로그아웃 → 곧바로 GET api/settings/company 1회 = 401 — main 런 부모 200(세션 생존 캐시 10초 안) · 자식 403(TenantAdminOnly)
@@ -759,20 +819,32 @@ async function cellsApi(r, sess) {
   await cell(r, ['WS01-M5a'], '닫힌 API 10', async () => {
     const got = [];
     const rows = [];
+    const rbBefore = await readBack(sess);
     for (const [m, p] of CLOSED_API) {
       const x = await fetchForm(m, p, sess, m === 'GET' ? undefined : {});
-      rows.push(x);
+      // ⬛ 11/27 D5 앞: rows.push(x); — 이제 보낸 방법을 같이 둠(isClosed405 가 「Allow 에 그 방법 없음」 을 봄)
+      rows.push({ ...x, m });
       // ⬛ 11/27 main 런 진단 앞: got.push(`${m} ${p} ${x.status} ${x.json ? 'json' : (x.ctype.split(';')[0] || '빈 형식')}`); — 결과 칸 300자에 잘려 뒤 4 경로가 안 보였다
       //   이제 CLOSED_API 순서대로 「상태 + 꼴 한 글자」(j = JSON · 빈 = 형식 없음 본문 0 · h = html · o = 그 밖)
       got.push(`${x.status}${x.json ? 'j' : (/text\/html/i.test(x.ctype) ? 'h' : (!x.ctype && x.text === '' ? '빈' : 'o'))}`);
     }
+    const rbAfter = await readBack(sess);
     const post = await probeOpen(sess);
-    const j = m5aJudge(pre, rows, post);
+    // ⬛ 11/27 D5 앞: const j = m5aJudge(pre, rows, post);
+    const rb = readbackJudge(rbBefore, rbAfter);
+    const j = m5aJudge(pre, rows, post, CLOSED_API.length, rb);
+    const allowN = new Map();
+    for (const x of rows.filter(isClosed405)) {
+      const k = String(x.allow).replace(/\s+/g, '');
+      allowN.set(k, (allowN.get(k) || 0) + 1);
+    }
+    const allowTxt = allowN.size ? [...allowN].map(([k, c]) => `${k} ${c}`).join(' · ') : '-';
     if (!j.gate) {
       recWDevice(r, 'WS01-M5a', `${j.why} · ${got.join(' · ')}`);
       return;
     }
-    recW(r, 'WS01-M5a', { what: '닫힌 10 경로 = 404 또는 200 text/html 꼴(401 · 403 은 닫힘 아님 · 앞뒤 열린 길 200 JSON) / 대조 = 10 모두 열린 꼴(JSON · 또는 2xx 빈 형식 본문 0)', got: `닫힘 꼴 ${j.closedN}/10 · 열린 꼴 ${j.openN}/10 · JSON ${j.js}/10 · 열린 길 앞 ${pre.status} 뒤 ${post.status} · 경로 순 ${got.join(' ')}`, closedOk: j.closedOk, openOk: j.openOk });
+    // ⬛ 11/27 D5 앞: recW(r, 'WS01-M5a', { what: '닫힌 10 경로 = 404 또는 200 text/html 꼴(401 · 403 은 닫힘 아님 · 앞뒤 열린 길 200 JSON) / 대조 = 10 모두 열린 꼴(JSON · 또는 2xx 빈 형식 본문 0)', got: `닫힘 꼴 ${j.closedN}/10 · 열린 꼴 ${j.openN}/10 · JSON ${j.js}/10 · 열린 길 앞 ${pre.status} 뒤 ${post.status} · 경로 순 ${got.join(' ')}`, closedOk: j.closedOk, openOk: j.openOk });
+    recW(r, 'WS01-M5a', { what: '닫힌 10 경로 = 404 · 200 text/html · 또는 PUT/POST 405 빈 본문 + Allow 에 그 방법 없음(401 · 403 · 5xx 닫힘 아님 · 앞뒤 열린 길 200 JSON · 닫힌 PUT 뒤 열린 GET 다시 읽기 같음) / 대조 = 10 모두 열린 꼴(JSON · 또는 2xx 빈 형식 본문 0)', got: `닫힘 꼴 ${j.closedN}/10(405빈 ${j.n405} · Allow ${allowTxt}) · 열린 꼴 ${j.openN}/10 · JSON ${j.js}/10 · 열린 길 앞 ${pre.status} 뒤 ${post.status} · 다시 읽기 quota(PUT apikey 몫) ${rb.note} · ${READBACK_NONE} · 경로 순 ${got.join(' ')}`, closedOk: j.closedOk, openOk: j.openOk });
   });
 }
 
@@ -926,4 +998,6 @@ module.exports = {
   newBrowserSession, isOpenProbe, isClosedShape, apiGate, m5aJudge, m6eJudge, errSig, newErrCount, m2Judge, pollUntil, holdRelease, m9, r5Judge, PROFIT_CLOSED, PROFIT_KIND,
   // 11/27 main 런 진단 D3 — 자체시험 W-C20 ~ W-C24 가 직접 잰다
   isOpenShape, m6cJudge, r3Judge, releaseJudge, release, runBounded, CellOverrun,
+  // 11/27 D5 — 자체시험 W-C25 가 직접 잰다
+  isClosed405, readbackJudge, READBACK_GET,
 };
