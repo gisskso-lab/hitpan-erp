@@ -77,6 +77,18 @@ function readJ(j, a, b) {
   if (!j || typeof j !== 'object') return undefined;
   return j[a] !== undefined ? j[a] : j[b];
 }
+// 🆕 11/28 CT3 진단 — 출입증 가운데 토막에서 클레임 하나(값은 찍지 않는다 · 주소에만 쓴다).
+function jwtClaim(token, name) {
+  try {
+    const mid = String(token || '').split('.')[1] || '';
+    const json = Buffer.from(mid.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const v = JSON.parse(json)[name];
+    return typeof v === 'string' && v ? v : null;
+  } catch (e) {
+    console.log(`K 쿨타임 출입증 클레임 읽기 실패 (${L.errorName(e)})`);
+    return null;
+  }
+}
 // 서버가 주는 로컬 시각 글자(시간대 표시 없음)를 그대로 HH:mm 로(시간대 바꿈 0)
 function hmOfText(s) {
   const m = /T?(\d{2}):(\d{2})/.exec(String(s ?? ''));
@@ -465,11 +477,28 @@ async function pickTimeInDialog(page, target) {
   const v = await input.inputValue().catch(() => '');
   if (hmOfText(v) !== hm(target)) throw new K.KitStepError(`시각 고르기 — 칸 값 ${L.sanitize(v, 20)} ≠ ${hm(target)}`);
 }
-async function editOnce(page, rowSel, chip, reason, target) {
+// 🆕 11/28 CT3 장치 고침(인계51 §3-2) — 첫 CI 런 46068258519 「첫 고침 · TimeoutError」 는 어느 기다림이 넘어졌는지 안 남았다.
+//   하위 단계를 step 에 적고, 고치기 칸 대신 「권한을 요청」 안내가 뜨면 기다림 상한을 다 쓰지 않고 그 사실을 바로 남긴다
+//   (개발명세서 「못 한 것 7 — 부모의 HR_PROXY 수정 권한 미측정」 가설을 이 런에서 잰다 · 제품 0줄).
+class EditFieldsHidden extends Error {}
+const EDIT_DENY_TEXT = '권한을 요청'; // HrAttendancePage 「고치려면 관리자에게 [근태 대리입력] 권한을 요청해 주세요.」
+// ⬛ [낡은 머리 · 11/28 CT3 장치 고침 이전] async function editOnce(page, rowSel, chip, reason, target) {
+async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) {
+  const base = step.now;
+  step.now = `${base} > 표시 누름`;
   await page.locator(rowSel).first().locator('.mud-chip', { hasText: chip }).first().click({ timeout: 15000 });
+  step.now = `${base} > 작은 창 뜸`;
   const dlg = page.locator('.mud-dialog', { hasText: '퇴근 기록' }).first();
   await dlg.waitFor({ state: 'visible', timeout: 15000 });
-  await dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  step.now = `${base} > 고치기 칸`;
+  // ⬛ [낡은 줄 · 11/28 이전] await dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  const reasonBox = dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true });
+  const deny = dlg.locator('.mud-alert', { hasText: EDIT_DENY_TEXT });
+  await reasonBox.or(deny).first().waitFor({ state: 'visible', timeout: 15000 });
+  if (await deny.isVisible().catch(() => false)) {
+    throw new EditFieldsHidden('고치기 칸 대신 「권한을 요청」 안내가 떴다(화면 권한 판정이 고치기 칸을 숨김)');
+  }
+  step.now = `${base} > 값 넣고 저장`;
   if (target) await pickTimeInDialog(page, target);
   await dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true }).fill(reason);
   await dlg.getByRole('button', { name: '저장', exact: true }).click({ timeout: 10000 });
@@ -512,12 +541,26 @@ async function ct3(st) {
     await adm.page.waitForURL((u) => u.pathname === '/hr/attendance', { timeout: 15000, waitUntil: 'commit' });
     const rowSel = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("자동"))`;
     await adm.page.locator(rowSel).first().waitFor({ state: 'visible', timeout: 20000 });
+    // 🆕 11/28 진단 — 부모 화면의 고치기 칸은 /api/permissions/{user_id} 의 HR_PROXY 「수정」 으로만 그려진다(서버는 tenant_admin 전권).
+    //   그 응답을 판정 밖 한 줄로 남긴다(사용자 키 · 토큰은 안 찍음).
+    step.now = '부모 화면 권한 읽기(진단)';
+    const permDiag = await adminCall(async (s) => {
+      const uid = jwtClaim(s.token, 'user_id');
+      if (!uid) return { status: null, hrProxyUpdate: null, note: '토큰에 user_id 없음' };
+      const a = await K.apiCall('GET', `/api/permissions/${encodeURIComponent(uid)}`, { sess: s });
+      const list = a.json && (a.json.permissions || a.json.Permissions);
+      const hp = Array.isArray(list) ? list.find((p) => readJ(p, 'menuCode', 'MenuCode') === 'HR_PROXY') : null;
+      return { status: a.status, hrProxyUpdate: hp ? readJ(hp, 'canUpdate', 'CanUpdate') === true : null, note: hp ? '' : 'HR_PROXY 줄 없음' };
+    }).catch((e) => ({ status: null, hrProxyUpdate: null, note: `읽기 실패 ${L.errorName(e)}` }));
+    console.log(`K 쿨타임 CT3 진단 — 부모 화면 권한 읽기 status=${permDiag.status} · HR_PROXY 수정=${permDiag.hrProxyUpdate} ${permDiag.note}`);
     step.now = '첫 고침(값 그대로 · 까닭)';
-    await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null);
+    // ⬛ [낡은 줄 · 11/28 이전] await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null);
+    await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null, step);
     step.now = '다시 고침(둘째 값)';
     const rowSel2 = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("고침"))`;
     await adm.page.locator(rowSel2).first().waitFor({ state: 'visible', timeout: 20000 });
-    await editOnce(adm.page, rowSel2, '고침', 'CI 두 번째 고침', t2);
+    // ⬛ [낡은 줄 · 11/28 이전] await editOnce(adm.page, rowSel2, '고침', 'CI 두 번째 고침', t2);
+    await editOnce(adm.page, rowSel2, '고침', 'CI 두 번째 고침', t2, step);
     step.now = '화면 · API 대조';
     const cell = (await adm.page.locator(rowSel2).first().innerText({ timeout: 10000 }).catch(() => '')) || '';
     const screenHas = cell.includes(hm(t2));
@@ -533,7 +576,13 @@ async function ct3(st) {
     await shot(adm, 'CT3-reedit');
   } catch (e) {
     if (adm && adm.page) await shot(adm, 'CT3-fail');
-    dev(st, 'reedit', step, e);
+    // 🆕 11/28 — 고치기 칸이 숨은 것은 장치가 아니라 시험 대상의 동작이다 → 시험 실패(TEST)로 적는다.
+    if (e instanceof EditFieldsHidden) {
+      console.log(`K 쿨타임 reedit 시험 실패 — 단계=${step.now} · ${e.message}`);
+      rec(st, 'reedit', { pass: false, got: { step: step.now, editFieldsHidden: true, why: e.message } });
+    } else {
+      dev(st, 'reedit', step, e);
+    }
   } finally {
     if (adm) await closeKb(st, adm);
   }
