@@ -12,6 +12,54 @@ public class AttendanceDto
     public decimal? WorkHours { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 🆕 20260928작4 쿨타임 §6 · DB-134 — 퇴근 기록이 어디서 왔나(추가 · #1).
+    /// <c>NULL</c> = 사람 · <c>cooltime</c> = 자동 로그아웃(정시 퇴근) · <c>cooltime_blank</c> = 자동 로그아웃 · 퇴근 빈칸 ·
+    /// <c>edited</c> = 인사담당이 고침. 화면은 이 값으로 「자동」 · 「고침」 표시를 단다.
+    /// </summary>
+    public string? CheckOutSource { get; set; }
+}
+
+// ── 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 고치기 · 고치기 이력 (추가 · #1) ──
+
+/// <summary>퇴근 고치기 요청. 대상 행은 주소(<c>{attendanceId}</c>)로 · 회사는 JWT 로만 정한다(#2).</summary>
+public class EditCheckOutRequest
+{
+    /// <summary>고칠 퇴근 시각(서버 PC 로컬 · 출근 시각과 같은 기준).</summary>
+    public DateTime? CheckOut { get; set; }
+
+    /// <summary>고친 까닭 — 필수.</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>퇴근 고치기 결과. 컨트롤러가 응답 코드로 바꾼다.</summary>
+public enum EditCheckOutOutcome
+{
+    /// <summary>고쳤다 — 행 1 · 이력 1.</summary>
+    Saved,
+    /// <summary>우리 회사에 그런 근태 행이 없다 → 404(다른 회사 행도 여기로 · 있는지조차 알리지 않는다).</summary>
+    NotFound,
+    /// <summary>자동 로그아웃으로 적힌 퇴근이 아니다(C-5 (가)) → 409.</summary>
+    NotEditable,
+    /// <summary>시각 · 사유가 틀렸다 → 400.</summary>
+    Invalid
+}
+
+/// <summary>퇴근 고치기 결과와 화면에 보여 줄 문구.</summary>
+public sealed record EditCheckOutResult(EditCheckOutOutcome Outcome, string Message);
+
+/// <summary>퇴근 고치기 이력 한 줄 — <c>audit_trail</c>(entity_type='attendance') 을 화면 말로 풀어 둔 것.</summary>
+public class AttendanceEditHistoryDto
+{
+    public DateTime ChangedAt { get; set; }
+    /// <summary>고친 사람 이름(계정 이름). 계정이 지워졌으면 빈 값.</summary>
+    public string? ChangedByName { get; set; }
+    public DateTime? BeforeCheckOut { get; set; }
+    public DateTime? AfterCheckOut { get; set; }
+    /// <summary>고치기 전 출처(<c>cooltime</c> · <c>cooltime_blank</c>).</summary>
+    public string? BeforeSource { get; set; }
+    public string? Reason { get; set; }
 }
 
 public class CheckInOutRequest

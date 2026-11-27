@@ -34,10 +34,13 @@ public class HrService : IHrService
     public async Task<List<AttendanceDto>> GetAttendanceAsync(string tenantId, DateTime? from, DateTime? to, string? employeeId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct);
+        // ⬛ [낡은 줄 · 20260928작4 쿨타임 이전] `a.work_hours AS WorkHours, a.status AS Status, a.memo AS Memo`
+        // 🆕 20260928작4 §6 — 칸 1개만 덧붙였다: `a.check_out_source AS CheckOutSource`(DB-134 · 화면 「자동」 · 「고침」 표시).
         var sql = """
             SELECT a.attendance_id AS AttendanceId, a.employee_id AS EmployeeId, e.emp_name AS EmployeeName,
                    a.work_date AS WorkDate, a.check_in AS CheckIn, a.check_out AS CheckOut,
-                   a.work_hours AS WorkHours, a.status AS Status, a.memo AS Memo
+                   a.work_hours AS WorkHours, a.status AS Status, a.memo AS Memo,
+                   a.check_out_source AS CheckOutSource
             FROM attendance a
             LEFT JOIN employees e ON e.employee_id = a.employee_id
             WHERE a.tenant_id = @TenantId
@@ -365,6 +368,185 @@ public class HrService : IHrService
             .DescribeApprovalBlockerAsync(_db, tenantId, "expense", ct);
 
         return (false, blocker ?? "결재 문서가 만들어지지 않았습니다. 설정 → 결재설정을 확인해주세요.");
+    }
+
+    // ═══ 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 고치기 · 고치기 이력 (추가 · #1) ═══
+    //
+    // 대상 = 자동 로그아웃이 적은 퇴근만(`check_out_source IN ('cooltime','cooltime_blank')` · 설계 §D-2 안 A · C-5 (가)).
+    // 권한 = 컨트롤러 `[RequirePermission("HR_PROXY","update")]`(C-5 ㉮ · 누구에게 줄지는 고객사 · #11).
+    // 🔴 경주 조건은 UPDATE 한 문장의 WHERE 에 둔다(작업지시서 §4) — 읽은 뒤 쓰는 두 문장으로 판정하지 않는다.
+    //    앞 SELECT … FOR UPDATE 는 「이력에 남길 고치기 전 값」 과 「출근 시각」 을 읽는 자리일 뿐이다.
+    // #13 — DB 접속 금지 PC 라 출하 DDL 인용으로 갈음: attendance :301-317(check_out_source :313) · audit_trail :353-368 · users :4386-.
+    //       [4] 가 CI db-gate 에서 DESCRIBE 대조.
+
+    /// <summary>퇴근 고치기 대상 출처 — 자동 로그아웃이 적은 것만.</summary>
+    public static readonly string[] EditableCheckOutSources = ["cooltime", "cooltime_blank"];
+
+    /// <summary>고친 퇴근이 출근 뒤 이 시간 안이어야 한다(야간 근무 포함 · 엉뚱한 날짜 입력 막기).</summary>
+    public const int EditCheckOutMaxHoursAfterCheckIn = 24;
+
+    /// <summary>사유 칸 길이(<c>audit_trail.reason varchar(500)</c>).</summary>
+    public const int EditCheckOutReasonMax = 500;
+
+    private const string AuditEntityAttendance = "attendance";
+
+    public async Task<EditCheckOutResult> EditCheckOutAsync(
+        string tenantId, string attendanceId, string editorUserId, EditCheckOutRequest req, CancellationToken ct = default)
+    {
+        var reason = (req.Reason ?? string.Empty).Trim();
+        if (req.CheckOut is null)
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각을 정해 주세요.");
+        if (reason.Length == 0)
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "고친 까닭을 적어 주세요.");
+        if (reason.Length > EditCheckOutReasonMax) reason = reason[..EditCheckOutReasonMax];
+        if (string.IsNullOrWhiteSpace(attendanceId))
+            return new EditCheckOutResult(EditCheckOutOutcome.NotFound, "근태 기록을 찾을 수 없습니다.");
+
+        await EnsureOpenAsync(ct);
+        using var tx = _db is DbConnection dbc
+            ? await dbc.BeginTransactionAsync(ct)
+            : _db.BeginTransaction();
+
+        var row = await _db.QueryFirstOrDefaultAsync<(string Id, DateTime? CheckIn, DateTime? CheckOut, string? Source)>(
+            new CommandDefinition(
+                @"SELECT attendance_id AS Id, check_in AS CheckIn, check_out AS CheckOut, check_out_source AS Source
+                    FROM attendance
+                   WHERE tenant_id = @TenantId AND attendance_id = @Id
+                   FOR UPDATE",
+                new { TenantId = tenantId, Id = attendanceId }, tx, cancellationToken: ct));
+
+        // 다른 회사 행 = 없는 행과 같다(있는지조차 알리지 않는다 · G-C12 → 404).
+        if (string.IsNullOrEmpty(row.Id))
+            return new EditCheckOutResult(EditCheckOutOutcome.NotFound, "근태 기록을 찾을 수 없습니다.");
+
+        if (row.Source is null || !EditableCheckOutSources.Contains(row.Source, StringComparer.Ordinal))
+            return new EditCheckOutResult(EditCheckOutOutcome.NotEditable, "자동 로그아웃으로 적힌 퇴근만 고칠 수 있습니다.");
+
+        if (row.CheckIn is null)
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "출근 시각이 없는 기록이라 퇴근을 고칠 수 없습니다.");
+
+        var newOut = req.CheckOut.Value;
+        if (newOut <= row.CheckIn.Value)
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각은 출근 시각보다 뒤여야 합니다.");
+        if (newOut > row.CheckIn.Value.AddHours(EditCheckOutMaxHoursAfterCheckIn))
+            return new EditCheckOutResult(EditCheckOutOutcome.Invalid, "퇴근 시각은 출근한 때부터 24시간 안으로 정해 주세요.");
+
+        // 기존 식과 같다(`CheckOutAsync` — 소수 1자리). 금액이 아니지만 칸이 decimal(4,1) 이라 decimal 로 넘긴다.
+        var hours = (decimal)Math.Round((newOut - row.CheckIn.Value).TotalHours, 1);
+
+        var changed = await _db.ExecuteAsync(new CommandDefinition(
+            @"UPDATE attendance
+                 SET check_out = @CheckOut, work_hours = @Hours, check_out_source = 'edited'
+               WHERE tenant_id = @TenantId AND attendance_id = @Id
+                 AND check_out_source IN ('cooltime', 'cooltime_blank')",
+            new { CheckOut = newOut, Hours = hours, TenantId = tenantId, Id = attendanceId }, tx, cancellationToken: ct));
+        if (changed != 1)
+            return new EditCheckOutResult(EditCheckOutOutcome.NotEditable, "자동 로그아웃으로 적힌 퇴근만 고칠 수 있습니다.");
+
+        // 🔴 JSON 키 고정 — 이력 조회(`GetCheckOutHistoryAsync`)가 같은 키로 읽는다. 설계 §6: {"check_out","source"}.
+        var beforeValue = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string?>
+        {
+            ["check_out"] = row.CheckOut?.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
+            ["source"] = row.Source
+        });
+        var afterValue = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string?>
+        {
+            ["check_out"] = newOut.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
+            ["source"] = "edited"
+        });
+
+        await _db.ExecuteAsync(new CommandDefinition(
+            @"INSERT INTO audit_trail
+                  (log_id, tenant_id, user_id, action_type, entity_type, entity_id, before_value, after_value, reason)
+              VALUES (@LogId, @TenantId, @UserId, 'update', @EntityType, @EntityId, @Before, @After, @Reason)",
+            new
+            {
+                LogId = Guid.NewGuid().ToString(),
+                TenantId = tenantId,
+                UserId = editorUserId,
+                EntityType = AuditEntityAttendance,
+                EntityId = attendanceId,
+                Before = beforeValue,
+                After = afterValue,
+                Reason = reason
+            }, tx, cancellationToken: ct));
+
+        tx.Commit();
+        return new EditCheckOutResult(EditCheckOutOutcome.Saved, "퇴근 시각을 고쳤습니다.");
+    }
+
+    public async Task<List<AttendanceEditHistoryDto>?> GetCheckOutHistoryAsync(
+        string tenantId, string attendanceId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(attendanceId)) return null;
+        await EnsureOpenAsync(ct);
+
+        // 우리 회사 행인지 먼저 — 다른 회사 행이면 404(이력 0 과 가른다).
+        var exists = await _db.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT COUNT(*) FROM attendance WHERE tenant_id = @TenantId AND attendance_id = @Id",
+            new { TenantId = tenantId, Id = attendanceId }, cancellationToken: ct));
+        if (exists == 0) return null;
+
+        // 기존 색인 (tenant_id, entity_type, entity_id) 그대로(설계 §6).
+        var rows = await _db.QueryAsync<(DateTime ChangedAt, string? ChangedByName, string? BeforeValue, string? AfterValue, string? Reason)>(
+            new CommandDefinition(
+                @"SELECT t.created_at AS ChangedAt, u.user_name AS ChangedByName,
+                         t.before_value AS BeforeValue, t.after_value AS AfterValue, t.reason AS Reason
+                    FROM audit_trail t
+                    LEFT JOIN users u ON u.user_id = t.user_id AND u.tenant_id = t.tenant_id
+                   WHERE t.tenant_id = @TenantId AND t.entity_type = @EntityType AND t.entity_id = @Id
+                     AND t.action_type = 'update'
+                   ORDER BY t.created_at DESC
+                   LIMIT 50",
+                new { TenantId = tenantId, EntityType = AuditEntityAttendance, Id = attendanceId }, cancellationToken: ct));
+
+        var list = new List<AttendanceEditHistoryDto>();
+        foreach (var r in rows)
+        {
+            var before = ReadCheckOutJson(r.BeforeValue);
+            var after = ReadCheckOutJson(r.AfterValue);
+            list.Add(new AttendanceEditHistoryDto
+            {
+                ChangedAt = r.ChangedAt,
+                ChangedByName = r.ChangedByName,
+                BeforeCheckOut = before.CheckOut,
+                AfterCheckOut = after.CheckOut,
+                BeforeSource = before.Source,
+                Reason = r.Reason
+            });
+        }
+        return list;
+    }
+
+    /// <summary>이력 JSON <c>{"check_out","source"}</c> 을 읽는다. 모양이 다르면 빈 값(화면은 「-」).</summary>
+    public static (DateTime? CheckOut, string? Source) ReadCheckOutJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return (null, null);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return (null, null);
+            DateTime? at = null;
+            string? source = null;
+            if (doc.RootElement.TryGetProperty("check_out", out var c)
+                && c.ValueKind == System.Text.Json.JsonValueKind.String
+                && DateTime.TryParse(c.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                at = parsed;
+            }
+            if (doc.RootElement.TryGetProperty("source", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                source = s.GetString();
+            }
+            return (at, source);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            // #15 — 정적 함수라 주입 로거가 없어 Trace 로 남긴다. 모양이 틀린 줄은 화면에 「-」 로 보이고 조회는 계속된다.
+            System.Diagnostics.Trace.TraceWarning("근태 고치기 이력 JSON 모양이 다릅니다: {0}", ex.Message);
+            return (null, null);
+        }
     }
 
     private async Task EnsureOpenAsync(CancellationToken ct)

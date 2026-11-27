@@ -98,7 +98,23 @@
             <MudTd>@context.WorkDate.ToString("yyyy-MM-dd")</MudTd>
             <MudTd>@context.EmployeeName</MudTd>
             <MudTd>@(context.CheckIn?.ToString("HH:mm") ?? "-")</MudTd>
-            <MudTd>@(context.CheckOut?.ToString("HH:mm") ?? "-")</MudTd>
+            @* ⬛ [낡은 칸 · 20260928작4 쿨타임 이전] <MudTd>@(context.CheckOut?.ToString("HH:mm") ?? "-")</MudTd>
+               🆕 §6 — 시각 옆에 작은 표시(「자동」 · 「자동 로그아웃 · 퇴근 빈칸」 · 「고침」). 누르면 같은 화면 작은 창. *@
+            <MudTd>
+                @(context.CheckOut?.ToString("HH:mm") ?? "-")
+                @{ var sourceLabel = CooltimeScreenRules.SourceLabel(context.CheckOutSource); }
+                @if (sourceLabel is not null)
+                {
+                    var row = context;
+                    <span @onmouseenter="@(() => PreloadHistoryAsync(row))">
+                        <MudTooltip Text="@SourceTooltip(row)">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@(row.CheckOutSource == CooltimeScreenRules.SourceEdited ? Color.Info : Color.Warning)"
+                                     OnClick="@(() => OpenCheckOutDialogAsync(row))">@sourceLabel</MudChip>
+                        </MudTooltip>
+                    </span>
+                }
+            </MudTd>
             <MudTd Style="text-align:right">@(context.WorkHours?.ToString("N1") ?? "-")h</MudTd>
             <MudTd>
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
@@ -111,6 +127,78 @@
         <NoRecordsContent><MudText Class="pa-4" Style="color:var(--hitpan-text-faint)">근태 기록이 없습니다.</MudText></NoRecordsContent>
     </MudTable>
 </MudPaper>
+
+@* 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 기록 작은 창(고치기 · 고친 기록). 다른 화면으로 안 넘어간다.
+   🔴 고치기 칸은 「자동 로그아웃이 적은 퇴근」 + [근태 대리입력] 고치기 권한이 있을 때만 그린다(눌러도 안 되는 칸 0).
+      진짜 문지기는 서버 [RequirePermission("HR_PROXY","update")] · 대상 판정도 서버 WHERE 다. *@
+<MudDialog @bind-Visible="_editOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">퇴근 기록</MudText></TitleContent>
+    <DialogContent>
+        @if (_editTarget is not null)
+        {
+            <MudText>
+                @_editTarget.EmployeeName · @_editTarget.WorkDate.ToString("yyyy-MM-dd") · 출근 @(_editTarget.CheckIn?.ToString("HH:mm") ?? "-")
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mt-1" Style="color:var(--hitpan-text-faint)">
+                지금 퇴근: @(_editTarget.CheckOut?.ToString("M/d HH:mm") ?? "비어 있음")
+                @(CooltimeScreenRules.SourceLabel(_editTarget.CheckOutSource) is { } lbl ? $" ({lbl})" : "")
+            </MudText>
+
+            @if (CanEditTarget)
+            {
+                <MudGrid Spacing="2" Class="mt-2">
+                    <MudItem xs="6">
+                        <MudDatePicker Label="퇴근 날짜" @bind-Date="_editDate" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTimePicker Label="퇴근 시각" @bind-Time="_editTime" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_editReason" Label="고친 까닭 (꼭 적어 주세요)" Variant="Variant.Outlined"
+                                      Margin="Margin.Dense" MaxLength="500" Placeholder="예: 18시 40분까지 일하고 나감" />
+                    </MudItem>
+                </MudGrid>
+                <MudText Typo="Typo.caption" Style="color:var(--hitpan-text-faint)">
+                    야간 근무라 다음 날 퇴근했으면 날짜도 바꿔 주세요. 고친 사람 · 시각 · 까닭이 함께 남습니다.
+                </MudText>
+            }
+            else if (CooltimeScreenRules.IsEditableSource(_editTarget.CheckOutSource))
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                    고치려면 관리자에게 [근태 대리입력] 권한을 요청해 주세요.
+                </MudAlert>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mt-4">고친 기록</MudText>
+            @if (_historyLoading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-1" />
+            }
+            else if (_historyFailed)
+            {
+                <MudText Typo="Typo.body2" Style="color:var(--mud-palette-error)">고친 기록을 불러오지 못했습니다.</MudText>
+            }
+            else if (_history.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Style="color:var(--hitpan-text-faint)">아직 고친 기록이 없습니다.</MudText>
+            }
+            else
+            {
+                @foreach (var h in _history)
+                {
+                    <MudText Typo="Typo.body2">@FormatHistoryLine(h)</MudText>
+                }
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseCheckOutDialog">닫기</MudButton>
+        @if (CanEditTarget)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@_editBusy" OnClick="SaveCheckOutAsync">저장</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
 
 @code {
     private List<AttendanceModel> _items = new();
@@ -180,12 +268,16 @@
             _canProxy = perm?.Permissions?.Any(p =>
                 string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal)
                 && (p.CanCreate || p.CanUpdate)) == true;
+            // 🆕 20260928작4 쿨타임 C-5 ㉮ — 퇴근 고치기 = HR_PROXY 「수정」 만(서버 [RequirePermission("HR_PROXY","update")] 와 같다).
+            _canEditCheckOut = perm?.Permissions?.Any(p =>
+                string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal) && p.CanUpdate) == true;
 
             if (_canProxy) _employees = await EmpSvc.GetListAsync();
         }
         catch (Exception ex)
         {
             _canProxy = false;
+            _canEditCheckOut = false;
             Console.Error.WriteLine($"[HrAttendancePage] 대리입력 권한 확인 실패: {ex.Message}");
         }
     }
@@ -217,6 +309,126 @@
     }
 
 
+
+    // ── 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 「자동」 표시 · 고치기 · 고친 기록 (추가 · #1) ────────
+    //
+    // ⚠️ 화면 판정(_canEditCheckOut · IsEditableSource)은 ★표시용★ — 서버가 권한과 대상(WHERE)을 다시 본다.
+    private bool _canEditCheckOut;
+    private bool _editOpen;
+    private bool _editBusy;
+    private bool _historyLoading;
+    private bool _historyFailed;
+    private AttendanceModel? _editTarget;
+    private DateTime? _editDate;
+    private TimeSpan? _editTime;
+    private string? _editReason;
+    private List<AttendanceEditHistoryModel> _history = new();
+    // 「고침」 표시에 마우스를 올렸을 때 보여 줄 마지막 고친 줄(행마다 한 번만 부른다).
+    private readonly Dictionary<string, string> _historyTip = new();
+
+    private bool CanEditTarget =>
+        _editTarget is not null && _canEditCheckOut && CooltimeScreenRules.IsEditableSource(_editTarget.CheckOutSource);
+
+    /// <summary>「김인사 · 9/29 10:12 · 18:00 → 18:40 · 사유」(설계 §6).</summary>
+    private static string FormatHistoryLine(AttendanceEditHistoryModel h)
+    {
+        var who = string.IsNullOrWhiteSpace(h.ChangedByName) ? "-" : h.ChangedByName;
+        var before = h.BeforeCheckOut?.ToString("HH:mm") ?? "빈칸";
+        var after = h.AfterCheckOut?.ToString("HH:mm") ?? "-";
+        var reason = string.IsNullOrWhiteSpace(h.Reason) ? "" : $" · {h.Reason}";
+        return $"{who} · {h.ChangedAt:M/d HH:mm} · {before} → {after}{reason}";
+    }
+
+    private string SourceTooltip(AttendanceModel a) => a.CheckOutSource switch
+    {
+        CooltimeScreenRules.SourceEdited => _historyTip.TryGetValue(a.AttendanceId, out var tip)
+            ? tip
+            : "인사담당이 고친 퇴근입니다. 누르면 고친 기록을 볼 수 있습니다.",
+        CooltimeScreenRules.SourceCooltime => "자동 로그아웃되어 정시 퇴근 시각으로 적혔습니다."
+            + (_canEditCheckOut ? " 누르면 고칠 수 있습니다." : ""),
+        CooltimeScreenRules.SourceCooltimeBlank => "자동 로그아웃되었지만 정시 퇴근 시각이 아직 오지 않아 퇴근을 비워 두었습니다."
+            + (_canEditCheckOut ? " 누르면 채울 수 있습니다." : ""),
+        _ => string.Empty
+    };
+
+    private async Task OpenCheckOutDialogAsync(AttendanceModel a)
+    {
+        _editTarget = a;
+        _editReason = null;
+        _editDate = (a.CheckOut ?? a.CheckIn ?? a.WorkDate).Date;
+        _editTime = a.CheckOut is { } co ? new TimeSpan(co.Hour, co.Minute, 0) : null;
+        _history = new();
+        _editOpen = true;
+        await LoadHistoryAsync(a);
+    }
+
+    private void CloseCheckOutDialog() => _editOpen = false;
+
+    private async Task LoadHistoryAsync(AttendanceModel a)
+    {
+        _historyLoading = true;
+        _historyFailed = false;
+        StateHasChanged();
+        var (ok, items) = await HrSvc.GetCheckOutHistoryAsync(a.AttendanceId);
+        _history = items;
+        _historyFailed = !ok;
+        _historyLoading = false;
+        if (ok && items.Count > 0) _historyTip[a.AttendanceId] = FormatHistoryLine(items[0]);
+    }
+
+    private async Task PreloadHistoryAsync(AttendanceModel a)
+    {
+        if (a.CheckOutSource != CooltimeScreenRules.SourceEdited || _historyTip.ContainsKey(a.AttendanceId)) return;
+        var (ok, items) = await HrSvc.GetCheckOutHistoryAsync(a.AttendanceId);
+        if (ok && items.Count > 0)
+        {
+            _historyTip[a.AttendanceId] = FormatHistoryLine(items[0]);
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveCheckOutAsync()
+    {
+        if (_editTarget is null) return;
+        if (_editDate is null || _editTime is null)
+        {
+            Snackbar.Add("퇴근 날짜와 시각을 정해 주세요.", Severity.Warning);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_editReason))
+        {
+            Snackbar.Add("고친 까닭을 적어 주세요.", Severity.Warning);
+            return;
+        }
+
+        // 출근 시각과 같은 기준(서버 PC 시각)으로 보낸다 — 시간대 표시를 붙이지 않는다.
+        var at = DateTime.SpecifyKind(
+            _editDate.Value.Date + new TimeSpan(_editTime.Value.Hours, _editTime.Value.Minutes, 0),
+            DateTimeKind.Unspecified);
+
+        _editBusy = true;
+        try
+        {
+            var id = _editTarget.AttendanceId;
+            var (ok, msg) = await HrSvc.EditCheckOutAsync(id, at, _editReason.Trim());
+            if (ok)
+            {
+                Snackbar.Add("퇴근 시각을 고쳤습니다.", Severity.Success);
+                _historyTip.Remove(id);
+                _editOpen = false;
+                await LoadAsync();
+            }
+            else
+            {
+                // 서버가 준 까닭 그대로(출근보다 앞 · 24시간 밖 · 자동 기록 아님 · 권한 없음).
+                Snackbar.Add(msg, Severity.Error);
+            }
+        }
+        finally
+        {
+            _editBusy = false;
+        }
+    }
 
     private async Task ApplyPeriodAsync(Period p)
     {

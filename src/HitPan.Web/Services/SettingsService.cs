@@ -51,6 +51,47 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
     }
 
     /// <summary>
+    /// 🆕 20260928작4 쿨타임 §5-1 — 저장하고, 거절(400)이면 <b>서버가 준 문구</b>를 함께 돌려준다(추가 · #1).
+    /// </summary>
+    /// <remarks>
+    /// 위 <see cref="SaveAsync"/> 는 성공/실패만 돌려줘 「자동 로그아웃을 켜려면 … 정해 주세요」 같은 까닭이 사라진다.
+    /// 무엇을 고쳐야 하는지 알려 줘야 처음 보는 사람도 혼자 고친다. 기존 함수는 그대로 둔다([초기화]가 쓴다).
+    /// </remarks>
+    public async Task<(bool Ok, string? Message)> SaveWithMessageAsync(TenantSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync("api/settings", model, ct).ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            string? message = null;
+            if (res.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                try
+                {
+                    var body = await res.Content.ReadFromJsonAsync<SettingsErrorBody>(JsonOptions, ct).ConfigureAwait(false);
+                    message = body?.Message;
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    logger.LogWarning(ex, "사용환경 설정 저장 거절 문구를 읽지 못했다");
+                }
+            }
+            return (false, message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "사용환경 설정 저장 실패");
+            return (false, null);
+        }
+    }
+
+    private sealed class SettingsErrorBody
+    {
+        public string? Message { get; set; }
+    }
+
+    /// <summary>
     /// 사업장 기본정보를 tenants 테이블에 반영한다.
     /// </summary>
     public async Task<bool> SaveCompanyAsync(TenantCompanyModel model, CancellationToken ct = default)

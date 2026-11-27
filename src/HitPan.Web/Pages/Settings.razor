@@ -345,6 +345,57 @@ else
   </MudPaper>
   </MudItem>
 
+  @* 🆕 20260928작4 쿨타임 §5-1 — 6번째 묶음 「퇴근 · 자동 로그아웃」(추가 · #1).
+     같은 MudPaper 모양 · 같은 [저장] 버튼 · 화면 권한 그대로(:4). 개발 낱말 0. *@
+  <MudItem xs="12" md="6">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-purple)"></div>
+      <MudText Typo="Typo.subtitle2">
+        퇴근 · 자동 로그아웃</MudText>
+    </div>
+
+    <MudTimePicker Label="정시 퇴근 시각"
+      @bind-Time="_regularLeave"
+      Clearable="true"
+      Variant="Variant.Outlined"
+      Margin="Margin.Dense"
+      HelperText="비워 둘 수 있습니다. 자동 로그아웃을 켜려면 꼭 정해 주세요." />
+
+    <SettingToggleRow
+      Label="자동 로그아웃"
+      Sub="정한 시각에 PC로 접속해 있는 직원에게 계속 일할지 묻습니다"
+      @bind-Value="_s.CooltimeEnabled" />
+
+    <MudTimePicker Label="자동 로그아웃 시각"
+      Class="mt-3"
+      @bind-Time="_cooltimeAt"
+      Clearable="true"
+      Variant="Variant.Outlined"
+      Margin="Margin.Dense"
+      HelperText="@(CooltimeScreenRules.DescribeAskTime(_cooltimeAt) ?? "자동 로그아웃을 켜려면 꼭 정해 주세요.")" />
+
+    @if (_s.CooltimeEnabled && (_regularLeave is null || _cooltimeAt is null))
+    {
+      <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+        @CooltimeScreenRules.SettingsNeedTimes
+      </MudAlert>
+    }
+
+    <MudText Style="font-size:12px;
+      color:var(--mud-palette-text-secondary);
+      margin-top:12px">@CooltimeScreenRules.SettingsGuide</MudText>
+
+  </MudPaper>
+  </MudItem>
+
 </MudGrid>
 
 @* 저장 버튼 *@
@@ -372,6 +423,19 @@ else
     private bool _vatRound = true;
 
     private List<PriceGradeModel> _priceGrades = new();
+
+    // 🆕 20260928작4 쿨타임 §5-1 — 시각 두 칸(시각 선택은 TimeSpan? · 저장 때 "HH:mm" / "" 로 바꾼다).
+    private TimeSpan? _regularLeave;
+    private TimeSpan? _cooltimeAt;
+
+    /// <summary>
+    /// 이 화면은 시각 두 칸을 늘 채워 보낸다 — 비웠으면 ""(서버 약속: 빈 문자열 = 비움 · null = 그대로).
+    /// </summary>
+    private void ApplyCooltimeToModel()
+    {
+        _s.RegularLeaveTime = CooltimeScreenRules.ToSaveText(_regularLeave);
+        _s.CooltimeAt = CooltimeScreenRules.ToSaveText(_cooltimeAt);
+    }
 
     // 🔴 설정을 못 불러왔는지 여부 (병렬이슈 08 · 사장님 결재 작4 ③번).
     //   이 값이 true 면 화면을 그리지 않는다 — 저장 경로 자체를 막기 위해서다.
@@ -402,6 +466,9 @@ else
             }
 
             _s = result;
+            // 🆕 20260928작4 쿨타임 §5-1 — 서버 "HH:mm" → 시각 선택 칸.
+            _regularLeave = CooltimeScreenRules.ParseHhmm(_s.RegularLeaveTime);
+            _cooltimeAt = CooltimeScreenRules.ParseHhmm(_s.CooltimeAt);
             _originalStockMethod = _s.StockEvalMethod;
             _autoVatOff = !_s.AutoVatAdjust;
             _vatRound = _s.VatRoundType == "round";
@@ -463,8 +530,18 @@ else
         _s.PriceDRate = _priceGrades[3].Rate;
         _s.PriceERate = _priceGrades[4].Rate;
 
+        // 🆕 20260928작4 쿨타임 §5-1 — 켰는데 시각이 비었으면 보내기 전에 알려 준다(서버도 같은 문구로 400).
+        if (_s.CooltimeEnabled && (_regularLeave is null || _cooltimeAt is null))
+        {
+            Snackbar.Add(CooltimeScreenRules.SettingsNeedTimes, Severity.Warning);
+            return;
+        }
+        ApplyCooltimeToModel();
+
         _saving = true;
-        var ok = await SettingsSvc.SaveAsync(_s).ConfigureAwait(false);
+        // ⬛ [낡은 줄 · 20260928작4 이전] var ok = await SettingsSvc.SaveAsync(_s).ConfigureAwait(false);
+        //   — 거절 까닭이 사라졌다. 🆕 서버가 준 문구까지 받는다(SaveWithMessageAsync · 추가).
+        var (ok, rejectMessage) = await SettingsSvc.SaveWithMessageAsync(_s).ConfigureAwait(false);
         _saving = false;
 
         if (ok)
@@ -474,6 +551,11 @@ else
             Snackbar.Add(
                 "설정이 저장됐습니다.",
                 Severity.Success);
+        }
+        else if (!string.IsNullOrWhiteSpace(rejectMessage))
+        {
+            // 🆕 서버가 까닭을 알려 준 거절(아무것도 저장 안 됨) — 화면 값을 그대로 두고 고칠 곳을 알려 준다.
+            Snackbar.Add(rejectMessage, Severity.Warning);
         }
         else
         {
