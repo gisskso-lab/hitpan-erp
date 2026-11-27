@@ -4233,6 +4233,7 @@ CREATE TABLE `tenant_settings` (
   `cooltime_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '설정 시각 자동 로그아웃(PC 만). 0=끔(기본) · 1=켬. 행 없음도 끔 (DB-132)',
   `cooltime_at` time DEFAULT NULL COMMENT '자동 로그아웃 시각(서버 PC 로컬 시각 · 00:00~23:59). NULL=미설정 — 켜려면 필수 (DB-132)',
   `regular_leave_time` time DEFAULT NULL COMMENT '정시 퇴근 시각(로컬). 자동 로그아웃으로 끝난 사람의 퇴근을 이 시각으로 적는다. NULL=미설정 (DB-132)',
+  `cooltime_changed_at` datetime(6) DEFAULT NULL COMMENT '자동 로그아웃을 켜거나 시각을 바꾼 저장 순간(UTC). 이 순간 이전의 설정 시각에서는 묻지도 끝내지도 않는다(저장 뒤 첫 설정 시각부터). NULL=기록 없음 (DB-132)',
   PRIMARY KEY (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;

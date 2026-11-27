@@ -76,6 +76,14 @@ public sealed class CooltimeEngine
     public static DateTime UtcToServerLocal(DateTime utc)
         => DateTime.SpecifyKind(DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime(), DateTimeKind.Unspecified);
 
+    /// <summary>
+    /// 🆕 11/27 설계 §E E-2 — 설정 시각 순간 <c>C</c>(UTC)가 마지막 켬·시각 바꿈 순간(<c>cooltime_changed_at</c> · UTC)
+    /// 이전(같음 포함)이면 <c>true</c> = 그 <c>C</c> 에서는 ②③ 을 건너뛴다(저장 뒤 첫 <c>C</c> 부터 적용).
+    /// 기록 없음(<c>null</c> · 옛 설정)은 건너뛰지 않는다.
+    /// </summary>
+    public static bool IsBeforeSettingChange(DateTime cooltimeUtc, DateTime? changedAtUtc)
+        => changedAtUtc is DateTime changed && cooltimeUtc <= changed;
+
     /// <summary>근무시간 — 기존 손 퇴근과 같은 식(<c>HrService.CheckOutAsync</c> · 소수 1자리).</summary>
     public static double WorkHours(DateTime checkIn, DateTime checkOut)
         => Math.Round((checkOut - checkIn).TotalHours, 1);
@@ -94,7 +102,8 @@ public sealed class CooltimeEngine
 
         // 켜진 회사가 없으면 한 바퀴 = 이 가벼운 조회 1회(설계 §2). 행 없는 회사 = 꺼짐.
         var tenants = (await _db.QueryAsync<TenantCooltimeRow>(new CommandDefinition(
-            @"SELECT tenant_id AS TenantId, cooltime_at AS CooltimeAt
+            // 🆕 11/27 §E E-2 — 마지막 켬·시각 바꿈 순간(cooltime_changed_at · UTC)을 같이 읽는다(②③ 건너뛰기 판정).
+            @"SELECT tenant_id AS TenantId, cooltime_at AS CooltimeAt, cooltime_changed_at AS ChangedAtUtc
                 FROM tenant_settings
                WHERE cooltime_enabled = 1 AND cooltime_at IS NOT NULL",
             cancellationToken: ct)).ConfigureAwait(false)).ToList();
@@ -119,6 +128,11 @@ public sealed class CooltimeEngine
                 if (r == CooltimeEndOutcome.Ended) endedNoAnswer++;
                 else if (r == CooltimeEndOutcome.Deadlock) deadlocks++;
             }
+
+            // 🆕 11/27 §E E-2 — 저장 뒤 첫 C 부터 적용. C 가 마지막 켬·시각 바꿈 순간 이전(같음 포함)이면
+            //   이 회사는 이번 C 에서 ②③ 을 건너뛴다(① 은 위에서 이미 돌았다 — 떠 있던 물음의 무응답은 끝낸다).
+            //   ⚠️ 이 건너뛰기를 빼면 G-C19 가 FAIL 한다(음성 대조군 ⓕ — 14:00 에 「13:00」 저장 → 첫 바퀴 끝냄 2).
+            if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;
 
             // ② 한 번도 안 물었는데 설정 시각 + 5분이 지났다(서버가 꺼져 있다 켜진 경우 등) — 묻지 않고 끝낸다(Q5)
             var missed = await _db.QueryAsync<string>(new CommandDefinition(
@@ -200,7 +214,7 @@ public sealed class CooltimeEngine
     /// <param name="nowLocal">서버 PC 벽시계 — 물은 순간이 없을 때 퇴근 기준 순간 <c>A</c>(설계 §6 · §D-5).</param>
     /// <param name="cause">누가 불렀나 — 삭제 문장에 덧붙는 조건이 갈린다.</param>
     /// <param name="jwtUserId">API 경로(<see cref="CooltimeEndCause.UserChoice"/>·<see cref="CooltimeEndCause.Countdown"/>)만 — JWT 사용자. 남의 행을 지울 길을 조건으로도 닫는다.</param>
-    /// <param name="cooltimeUtc"><see cref="CooltimeEndCause.Missed"/> 만 — 그 회사의 설정 시각 순간 <c>C</c>(UTC).</param>
+    /// <param name="cooltimeUtc"><see cref="CooltimeEndCause.Missed"/> 만 — 그 회사의 설정 시각 순간 <c>C</c>(UTC). 🆕 11/27 §E E-4: 놓침의 퇴근 기준 순간 <c>A</c> 로도 쓴다.</param>
     /// <param name="ct">취소.</param>
     public async Task<CooltimeEndResult> CooltimeLogoutAsync(
         string tenantId,
@@ -277,7 +291,14 @@ public sealed class CooltimeEngine
 
                 // 3 — 퇴근 기록(§6). 물은 순간(없으면 끝낸 순간)이 기준 A.
                 //   ⚠️ 이 호출을 빼면 G-C8 이 FAIL 한다(음성 대조군 ⓑ).
-                var anchorLocal = row.AskedAtUtc is DateTime askedUtc ? UtcToServerLocal(askedUtc) : nowLocal;
+                //   ⬛ [낡은 문장 · 11/27 §E E-4 이전] var anchorLocal = row.AskedAtUtc is DateTime askedUtc ? UtcToServerLocal(askedUtc) : nowLocal;
+                //   🆕 11/27 §E E-4 — 놓침(②)의 A = 그 회사 설정 시각 순간 C(로컬). ② 의 전제가 「C 순간에 로그인이 살아 있었다」.
+                //   무응답(①)·API = 물은 순간 그대로. ⚠️ 놓침 A 를 nowLocal 로 되돌리면 G-C21 이 FAIL 한다(음성 대조군 ⓘ).
+                var anchorLocal = row.AskedAtUtc is DateTime askedUtc
+                    ? UtcToServerLocal(askedUtc)
+                    : cause == CooltimeEndCause.Missed && cooltimeUtc is DateTime missedCUtc
+                        ? UtcToServerLocal(missedCUtc)
+                        : nowLocal;
                 (attOutcome, employeeId, attendanceId, written) =
                     await WriteCooltimeCheckOutAsync(tenantId, row.UserId, anchorLocal, tx, ct).ConfigureAwait(false);
 
@@ -430,6 +451,7 @@ public sealed class CooltimeEngine
     {
         public string TenantId { get; set; } = string.Empty;
         public TimeSpan CooltimeAt { get; set; }
+        public DateTime? ChangedAtUtc { get; set; }   // 🆕 11/27 §E E-2
     }
 
     private sealed class SessionRow

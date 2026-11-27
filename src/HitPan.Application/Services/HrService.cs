@@ -87,12 +87,16 @@ public class HrService : IHrService
         //   자동 로그아웃이 퇴근을 비워 둔 행(check_out_source='cooltime_blank')을 같은 날 손 퇴근이 채우면
         //   그 순간이 사람이 만든 퇴근이다 ⇒ 「자동」 표시를 지운다(NULL). 다른 값(cooltime·edited·NULL)은 그대로.
         //   ⚠️ 이 CASE 를 빼면 G-C16 이 FAIL 한다(음성 대조군 ⓓ).
-        await _db.ExecuteAsync(new CommandDefinition(
+        // 🆕 11/27 설계 §E P3 F6(PM 결재 §271) — 같은 문장 WHERE 에 `AND check_out IS NULL` 1조건 덧.
+        //   위 SELECT 와 이 UPDATE 사이에 자동 로그아웃이 같은 행에 정시 퇴근·'cooltime' 을 쓰고 커밋하면
+        //   종전 문장은 시각만 「지금」 으로 덮고 표시는 'cooltime' 으로 남겼다(값 ≠ 표시). 0행 = 기존 「이미 퇴근」 안내 길.
+        var updated = await _db.ExecuteAsync(new CommandDefinition(
             @"UPDATE attendance
                  SET check_out = @Now, work_hours = @Hours,
                      check_out_source = CASE WHEN check_out_source = 'cooltime_blank' THEN NULL ELSE check_out_source END
-               WHERE attendance_id = @Id",
+               WHERE attendance_id = @Id AND check_out IS NULL",
             new { Now = now, Hours = hours, Id = att.Id }, cancellationToken: ct));
+        if (updated == 0) throw new InvalidOperationException("출근 기록이 없거나 이미 퇴근 처리되었습니다.");
     }
 
     /// <summary>

@@ -301,18 +301,75 @@ public sealed class SettingsService : ISettingsService
         // 🆕 20260928작4 쿨타임 §5-1 — 세 칸은 따로 한 문장(기존 UPSERT 무접촉 · #1). 바뀐 칸이 없으면 안 쓴다.
         if (cooltime is not null)
         {
+            await SaveCooltimeAsync(tenantId, cooltime, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 쿨타임 세 칸 저장 — 🆕 11/27 설계 §E E-2 · E-3(PM 결재 §271) 로 한 트랜잭션이 되었다.
+    /// <list type="number">
+    /// <item>그 회사 설정 행을 잠그고(<c>FOR UPDATE</c>) 저장 전 켬/끔을 읽는다.</item>
+    /// <item>세 칸 UPSERT + <c>cooltime_changed_at</c> — 켬(0→1) 또는 <c>cooltime_at</c> 이 바뀐 저장일 때만 <c>UTC_TIMESTAMP(6)</c>(E-2 · 저장 뒤 첫 C 부터 적용).</item>
+    /// <item>켬/끔이 바뀌었으면(0→1 · 1→0) 그 회사 PC 세션의 물음·미룸 칸을 비운다(E-3 (다)).</item>
+    /// </list>
+    /// 잠금 순서 = <c>tenant_settings</c> → <c>user_sessions</c>. 끝내기 함수는 <c>user_sessions</c> 를 잠근 뒤
+    /// <c>tenant_settings</c> 를 잠그지 않고(일반 SELECT) 읽기만 하므로 순환이 없다.
+    /// </summary>
+    private async Task SaveCooltimeAsync(string tenantId, CooltimeSave cooltime, CancellationToken ct)
+    {
+        using var tx = _db.BeginTransaction();
+
+        // 저장 전 켬/끔 — 행 없음 = 끔. tinyint(1) 은 연결 설정에 따라 bool 로 오므로 정수로 바꿔 읽는다.
+        var before = await _db.QueryFirstOrDefaultAsync<long?>(new CommandDefinition(
+            """
+            SELECT CAST(cooltime_enabled AS SIGNED)
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            FOR UPDATE
+            """,
+            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var wasEnabled = before is long b && b != 0;
+
+        // ⬛ [낡은 문장 · 11/27 §E 이전 — 이 가지에서 처음 쓴 문장]
+        //   INSERT INTO tenant_settings (tenant_id, cooltime_enabled, cooltime_at, regular_leave_time)
+        //   VALUES (@TenantId, @Enabled, @At, @Leave)
+        //   ON DUPLICATE KEY UPDATE cooltime_enabled = @Enabled, cooltime_at = @At, regular_leave_time = @Leave
+        // 🆕 E-2 — cooltime_changed_at 을 **맨 앞**에 둔다: UPDATE 절은 왼쪽부터 차례로 값을 바꾸므로
+        //   cooltime_enabled · cooltime_at 을 바꾸기 전의 값과 비교해야 한다. 같은 판정을 한 문장 안에서 한다.
+        //   ⚠️ 이 칸 기록을 빼면 G-C19 가 FAIL 한다(14:00 에 「13:00」 으로 켬 → 첫 바퀴에 끝냄).
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO tenant_settings (tenant_id, cooltime_enabled, cooltime_at, regular_leave_time, cooltime_changed_at)
+            VALUES (@TenantId, @Enabled, @At, @Leave,
+                    CASE WHEN @Enabled = 1 OR @At IS NOT NULL THEN UTC_TIMESTAMP(6) ELSE NULL END)
+            ON DUPLICATE KEY UPDATE
+              cooltime_changed_at = CASE
+                  WHEN (cooltime_enabled = 0 AND @Enabled = 1) OR NOT (cooltime_at <=> @At) THEN UTC_TIMESTAMP(6)
+                  ELSE cooltime_changed_at END,
+              cooltime_enabled = @Enabled,
+              cooltime_at = @At,
+              regular_leave_time = @Leave
+            """,
+            new { TenantId = tenantId, Enabled = cooltime.Enabled ? 1 : 0, At = cooltime.At, Leave = cooltime.Leave },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🆕 E-3 (다) — 켤 때·끌 때 같은 문장. 휴대폰 세션 무접촉(device_kind='pc').
+        //   켤 때도 비우는 이유: 비상 끔(UPDATE tenant_settings 직접 · DB-132 머리)은 이 함수를 안 지나므로
+        //   남은 물음 칸이 「다시 켜는 순간 묻지 않고 끝내기」(규칙 ①) 가 되지 않게 한 번 더 비운다.
+        //   ⚠️ 끌 때 비우기를 빼면 G-C20 ⓐ · 켤 때 비우기를 빼면 G-C20 ⓑ 가 FAIL 한다(음성 대조군 ⓖ · ⓗ).
+        if (wasEnabled != cooltime.Enabled)
+        {
             await _db.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO tenant_settings (tenant_id, cooltime_enabled, cooltime_at, regular_leave_time)
-                VALUES (@TenantId, @Enabled, @At, @Leave)
-                ON DUPLICATE KEY UPDATE
-                  cooltime_enabled = @Enabled,
-                  cooltime_at = @At,
-                  regular_leave_time = @Leave
+                UPDATE user_sessions
+                   SET cooltime_asked_at = NULL,
+                       cooltime_snooze_until = NULL
+                 WHERE tenant_id = @TenantId AND device_kind = 'pc'
                 """,
-                new { TenantId = tenantId, Enabled = cooltime.Enabled ? 1 : 0, At = cooltime.At, Leave = cooltime.Leave },
-                cancellationToken: ct)).ConfigureAwait(false);
+                new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
         }
+
+        tx.Commit();
     }
 
     /// <summary>쿨타임 설정 저장 거절 문구 — 고객이 그대로 본다(#25 · 개발용어 금지).</summary>
