@@ -26,7 +26,7 @@ public sealed class AiSettingsController : ControllerBase
     // 설정 현황 조회 (키 설정 여부·last4·한도) — 평문 키 반환 없음
     // ─────────────────────────────────────────────────────────────
     // 🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-2 · PM 결재 P3 ① · P4) — 01a-10 도우미 연동 서버 닫음.
-    //   [NonAction] — 서버 라우트에 등록하지 않는다(부르면 404). 닫는 액션 = 이 GET · PUT apikey · PUT apikey/{providerId} ·
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(부르면 404 가 아니다 — 실측(M-5a): GET 은 화면 첫 장 200 HTML · 그 밖 방법은 405 빈 본문 · 처리기에 닿지 않음). 닫는 액션 = 이 GET · PUT apikey · PUT apikey/{providerId} ·
     //   PUT provider/{providerId} · POST check/{providerId} 5개. **DELETE 2개(apikey · apikey/{providerId})는 남긴다** —
     //   이미 저장된 키를 지울 길이다. 아래 속성·본문은 보존한다(#1 · 다시 열 때 = [NonAction] 한 줄 뗌 · 정식 판).
     [NonAction]
