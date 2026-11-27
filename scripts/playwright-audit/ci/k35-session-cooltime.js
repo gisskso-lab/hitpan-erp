@@ -586,11 +586,16 @@ async function ct3(st) {
     step.now = '화면 · API 대조';
     const cell = (await adm.page.locator(rowSel2).first().innerText({ timeout: 10000 }).catch(() => '')) || '';
     const screenHas = cell.includes(hm(t2));
-    const api = await adminCall(async (s) => {
+    // ⬛ [낡은 줄 · 11/28 이전] const api = await adminCall(async (s) => {
+    // 🆕 11/28 런 46078641222 「화면 · API 대조 · PARENT 로그인 status=409」 — 부모가 브라우저로 로그인해 있는 동안 API 로 한 번 더
+    //   로그인하면 같은 계정 · 다른 기기라 409(Login 「다른 PC에서 사용 중」). → 이 대조는 **브라우저의 부모 세션 그대로**(같은 사람 · 같은 출입증) 읽는다.
+    const readApi = async (s) => {
       const a = await K.apiCall('GET', q, { sess: s });
       const h = await K.apiCall('GET', `/api/hr/attendance/${encodeURIComponent(attId)}/history`, { sess: s });
       return { row: Array.isArray(a.json) ? (a.json.find((x) => readJ(x, 'attendanceId', 'AttendanceId') === attId) || null) : null, hist: Array.isArray(h.json) ? h.json.length : null, histStatus: h.status };
-    });
+    };
+    if (!adm.tok.access) throw new K.KitStepError('부모 브라우저 세션 출입증 없음(대조 못 함)');
+    const api = await readApi(sessOf(adm));
     const apiOut = hmOfText(readJ(api.row, 'checkOut', 'CheckOut'));
     const apiSrc = readJ(api.row, 'checkOutSource', 'CheckOutSource');
     const pass = screenHas && apiOut === hm(t2) && apiSrc === 'edited' && api.hist === 2;
