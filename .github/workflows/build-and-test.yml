@@ -358,7 +358,8 @@ jobs:
   db-gate:
     name: DB 게이트 (Integrity — 실제 DB 실행)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 측정 전용(머지 금지 · §285) — 쿨타임 변이 런 20건(a~u · j 보류) × 재빌드 때문에 늘림
+    timeout-minutes: 150
     services:
       mariadb:
         image: mariadb:11.4
@@ -1447,6 +1448,22 @@ jobs:
             exit 1
           fi
           echo "SKIP 없음 — 게이트가 실제로 돌았다."
+
+      - name: 측정 전용 — 쿨타임 변이 런 (머지 금지 · §285)
+        # 갈래 ③ 명세서 §3-2 — 변이마다 해당 게이트가 FAIL 이어야 통과 · 끝나면 git 원복 확인
+        if: always()
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'dbgate_ci'
+          HITPAN_TEST_DB: 'hitpan_e2e'
+        run: |
+          set -o pipefail
+          bash scripts/gates/cooltime-mutation-run.sh 2>&1 | tee "$RUNNER_TEMP/cooltime-mut.log"
 
       - name: Upload gate results
         if: always()
