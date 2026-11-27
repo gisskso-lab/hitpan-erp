@@ -44,7 +44,19 @@ public sealed class SettingsController : ControllerBase
             return Forbid();
         }
 
-        await _settingsService.SaveAsync(dto, tenantId, ct).ConfigureAwait(false);
+        // ⬛ [낡은 줄 · 20260928작4 이전] `await _settingsService.SaveAsync(dto, tenantId, ct)` 를 감싸지 않았다.
+        // 🆕 20260928작4 쿨타임 §5-1 — 켜짐인데 시각이 비거나 시각 모양이 틀리면 서비스가 아무것도 저장하지 않고
+        //   ArgumentException 을 던진다 ⇒ 400 + 고객 언어 문구(서비스 상수 그대로).
+        try
+        {
+            await _settingsService.SaveAsync(dto, tenantId, ct).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex) when (
+            ex.Message == HitPan.Application.Services.SettingsService.CooltimeNeedsTimesMessage
+            || ex.Message == HitPan.Application.Services.SettingsService.CooltimeBadTimeMessage)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         return Ok();
     }
 
