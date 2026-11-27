@@ -180,6 +180,56 @@ public sealed class CooltimeRuleGateTests
         Assert.Contains("if (n == 1) await _pusher.ContinuedAsync(tenantId, sessionId, ct)", engine);
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 🆕 11/28 고침 1(§277 P3 (b) · §285) — [아니요 — 지금 로그아웃] 을 눌렀는데 서버가 안 끝냄 → 보통 손 로그아웃
+    // ══════════════════════════════════════════════════════════════
+
+    [Theory(DisplayName = "고침1 버튼 + 서버 안 끝냄(ended:false · 409) = 손 로그아웃 · 0초 + 안 끝냄 = 다시 확인 · 끝남 · 실패 = 손 로그아웃 아님")]
+    [InlineData(CooltimeScreenRules.TriggerButton, 200, false, true)]      // 팝업 중 관리자가 끔 → 누른 뜻대로 로그아웃
+    [InlineData(CooltimeScreenRules.TriggerButton, 200, null, true)]       // 본문 못 읽음(= 다시 확인 몫) → 버튼이면 로그아웃
+    [InlineData(CooltimeScreenRules.TriggerButton, 409, null, true)]
+    [InlineData(CooltimeScreenRules.TriggerButton, 200, true, false)]      // 서버가 끝냄 → 지금대로 EndLocally
+    [InlineData(CooltimeScreenRules.TriggerButton, 401, null, false)]
+    [InlineData(CooltimeScreenRules.TriggerButton, 500, null, false)]      // 실패 → 지금대로(화면은 끝남 · 서버 작업 ①)
+    [InlineData(CooltimeScreenRules.TriggerCountdown, 200, false, false)]  // 0초 = 사람이 고른 것 아님 → 다시 확인(§273 V1 탭 2개)
+    [InlineData(CooltimeScreenRules.TriggerCountdown, 409, null, false)]
+    public void 고침1_버튼_서버안끝냄_손로그아웃(string trigger, int? status, bool? ended, bool expected)
+        => Assert.Equal(expected, CooltimeScreenRules.UseManualLogout(trigger, CooltimeScreenRules.LogoutOutcome(status, ended)));
+
+    [Fact(DisplayName = "고침1 음성 대조 「팝업 중 끔 → [지금 로그아웃]」 — 서버 실제 본문(ended:false · state asked:false)으로 흘리면 손 로그아웃 · 옛 흐름(다시 확인)이면 팝업만 닫고 「계속 작업할 수 있습니다」")]
+    public void 고침1_팝업중끔_지금로그아웃_대조()
+    {
+        var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var logoutBody = System.Text.Json.JsonSerializer.Serialize(new { ended = false }, web);
+        var stateBody = System.Text.Json.JsonSerializer.Serialize(new CooltimeStateResponse(false, 0, null), web);
+
+        var outcome = CooltimeScreenRules.LogoutOutcome(200, CooltimeScreenRules.ParseEnded(logoutBody));
+        Assert.True(CooltimeScreenRules.UseManualLogout(CooltimeScreenRules.TriggerButton, outcome));
+
+        // 대조 — 옛 흐름: 다시 확인 → 팝업만 닫음 → 누른 뜻과 반대 문구
+        var s = CooltimeScreenRules.ParseState(stateBody);
+        var old = CooltimeScreenRules.AfterRecheck(200, s.Active, s.Asked, s.SecondsLeft);
+        Assert.Equal(CooltimeScreenRules.RecheckDecision.ClosePopup, old);
+        Assert.StartsWith("계속 작업할 수 있습니다", CooltimeScreenRules.RecheckClosedNotice);
+    }
+
+    [Fact(DisplayName = "고침1 배선 — 팝업이 계기 상수로 부르고 · 다시 확인보다 먼저 손 로그아웃 판정 · 손 로그아웃 = IAuthService.LogoutAsync(살아 있는 줄 기준)")]
+    public void 고침1_배선()
+    {
+        static string Live(string path) => string.Join('\n', File.ReadAllText(path).Split('\n')
+            .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        var prompt = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Components", "Common", "CooltimePrompt.razor"));
+        Assert.Contains("FinishWithLogoutAsync(CooltimeScreenRules.TriggerButton)", prompt);
+        Assert.Contains("FinishWithLogoutAsync(CooltimeScreenRules.TriggerCountdown)", prompt);
+        Assert.DoesNotContain("FinishWithLogoutAsync(\"button\")", prompt);
+        Assert.DoesNotContain("FinishWithLogoutAsync(\"countdown\")", prompt);
+        var manual = prompt.IndexOf("CooltimeScreenRules.UseManualLogout(trigger, outcome)", StringComparison.Ordinal);
+        var recheck = prompt.IndexOf("if (outcome == CooltimeScreenRules.CallOutcome.Recheck)", StringComparison.Ordinal);
+        Assert.True(manual > 0 && recheck > manual, "손 로그아웃 판정이 다시 확인보다 먼저 와야 한다");
+        Assert.Contains("@inject IAuthService AuthService", prompt);
+        Assert.Contains("await AuthService.LogoutAsync();", prompt);
+    }
+
     [Fact(DisplayName = "V4 내 정보 저장 — 자동 로그아웃 세 칸을 null(= 그대로)로 보낸다 · 서버 DTO 가 null 로 받는다 · 대조(안 지움) = false(끔) 가 실린다 · 배선")]
     public void V4_내정보_저장은_자동로그아웃을_그대로_둔다()
     {

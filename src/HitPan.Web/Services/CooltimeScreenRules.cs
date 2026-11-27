@@ -159,6 +159,25 @@ public static class CooltimeScreenRules
         _ => CallOutcome.Failed
     };
 
+    /// <summary>🆕 11/28 고침 1(§277 P3 (b) · §285) — [로그아웃] 요청 계기: 팝업 버튼.</summary>
+    public const string TriggerButton = "button";
+
+    /// <summary>🆕 11/28 고침 1 — [로그아웃] 요청 계기: 카운트다운 0초.</summary>
+    public const string TriggerCountdown = "countdown";
+
+    /// <summary>
+    /// 🆕 11/28 고침 1(§277 P3 (b) · §285) — 서버가 「안 끝냈다」(<see cref="CallOutcome.Recheck"/>)고 답했을 때
+    /// <b>보통 손 로그아웃</b>(로그아웃 API · 접속 끝 · 퇴근 기록 → 로그인 화면)으로 갈지.
+    /// </summary>
+    /// <remarks>
+    /// 사람이 [아니요 — 지금 로그아웃] 을 눌렀으면 뜻은 「로그아웃」 이다. 팝업 중 관리자가 껐거나 다른 탭이 [계속] 해서
+    /// 서버가 안 끝냈어도, 「계속 작업할 수 있습니다」(누른 뜻과 반대)를 띄우지 않고 로그아웃한다(쉬움 기준).
+    /// 카운트다운 0초는 사람이 고른 것이 아니므로 지금대로 다시 확인한다(다른 탭 [계속] 을 지키는 §273 V1).
+    /// ⬛ [낡은 동작 · 11/27 고침 차례] 버튼 · 0초 모두 다시 확인 → 팝업만 닫고 「계속 작업할 수 있습니다」.
+    /// </remarks>
+    public static bool UseManualLogout(string trigger, CallOutcome outcome)
+        => outcome == CallOutcome.Recheck && string.Equals(trigger, TriggerButton, StringComparison.Ordinal);
+
     /// <summary>🆕 11/27 — 다시 확인한 뒤 화면이 할 일.</summary>
     public enum RecheckDecision
     {
