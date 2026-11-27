@@ -457,7 +457,10 @@ async function cycleB(st) {
 }
 
 // ── CT3: 근태 화면에서 자동 퇴근 고침 → 다시 고침 ──
-async function pickTimeInDialog(page, target) {
+// ⬛ [낡은 머리 · 11/28 이전] async function pickTimeInDialog(page, target) {
+async function pickTimeInDialog(page, target, step = { now: '' }) {
+  const base = step.now;
+  step.now = `${base} > 시각 칸 열기`;
   const input = page.getByLabel('퇴근 시각', { exact: true });
   await input.click({ timeout: 10000 });
   const nums = page.locator('.mud-popover-open .mud-clock-number');
@@ -468,16 +471,23 @@ async function pickTimeInDialog(page, target) {
       const el = nums.nth(i);
       const t = (await el.textContent().catch(() => '')) || '';
       if (/^\s*\d{1,2}\s*$/.test(t) && parseInt(t, 10) === v && (await el.isVisible().catch(() => false))) {
-        await el.click({ timeout: 5000 });
+        // ⬛ [낡은 줄 · 11/28 이전] await el.click({ timeout: 5000 });
+        // 🆕 11/28 런 46076686554 「다시 고침 > 값 넣고 저장 · TimeoutError」 — MudBlazor 9.3 시계는 숫자 위에 바늘 누름 자리
+        //   (`.mud-picker-stick*` :after 48px 원)가 덮여 있어 Playwright 의 「가려짐」 검사가 5초를 다 씀(가설 · 같은 런에서 하위 단계로 잼).
+        //   사람 손과 같게 숫자 한가운데를 누른다(force = 가려짐 검사만 건너뜀 · 맨 위 바늘 자리가 받음 = 실제 사용자와 같은 길).
+        await el.click({ timeout: 5000, force: true });
         return true;
       }
     }
     return false;
   };
+  step.now = `${base} > 시 숫자`;
   if (!(await clickNum(target.getHours()))) throw new K.KitStepError(`시각 고르기 — 시 숫자 ${target.getHours()} 못 찾음`);
   await K.sleep(600);
+  step.now = `${base} > 분 숫자`;
   if (!(await clickNum(target.getMinutes()))) throw new K.KitStepError(`시각 고르기 — 분 숫자 ${target.getMinutes()} 못 찾음`);
   await K.sleep(600);
+  step.now = `${base} > 시각 확정`;
   if (await page.locator('.mud-popover-open .mud-clock-number').first().isVisible().catch(() => false)) {
     await page.mouse.click(4, 4); // 고르기 창 바깥(덮개) 한 번 — 값 확정 · 닫힘
     await K.sleep(600);
@@ -507,9 +517,13 @@ async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) 
     throw new EditFieldsHidden('고치기 칸 대신 「권한을 요청」 안내가 떴다(화면 권한 판정이 고치기 칸을 숨김)');
   }
   step.now = `${base} > 값 넣고 저장`;
-  if (target) await pickTimeInDialog(page, target);
+  // ⬛ [낡은 줄 · 11/28 이전] if (target) await pickTimeInDialog(page, target);
+  if (target) { step.now = `${base} > 시각 고르기`; await pickTimeInDialog(page, target, step); }
+  step.now = `${base} > 까닭 넣기`;
   await dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true }).fill(reason);
+  step.now = `${base} > 저장 누름`;
   await dlg.getByRole('button', { name: '저장', exact: true }).click({ timeout: 10000 });
+  step.now = `${base} > 저장 안내`;
   await page.locator('.mud-snackbar', { hasText: EDIT_OK }).first().waitFor({ state: 'visible', timeout: 20000 });
   await dlg.waitFor({ state: 'hidden', timeout: 15000 }).catch((e) => console.log(`K 쿨타임 고침 창 닫힘 기다림 끝 (${L.errorName(e)})`));
   await K.sleep(1500);
