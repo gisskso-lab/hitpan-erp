@@ -957,7 +957,7 @@ public sealed class AutoOrderItemTenantGuardOrderGateTests
     [Fact(DisplayName = "후1 §16 자동발주 본문 · 품목 회사 검사가 첫 번호 따기 · 첫 발주 머리 INSERT 보다 앞")]
     public void AutoOrder_Guard_Before_FirstNumber_And_FirstInsert()
     {
-        var src = System.IO.File.ReadAllText(System.IO.Path.Combine(RepoRoot(),
+        var src = System.IO.File.ReadAllText(System.IO.Path.Join(RepoRoot(),
             "src", "HitPan.Application", "Services", "SalesService.cs"));
 
         var start = src.IndexOf(MethodStart, StringComparison.Ordinal);
@@ -989,7 +989,7 @@ public sealed class AutoOrderItemTenantGuardOrderGateTests
     private static string RepoRoot()
     {
         var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !System.IO.Directory.Exists(System.IO.Path.Combine(dir.FullName, "src", "HitPan.Application")))
+        while (dir is not null && !System.IO.Directory.Exists(System.IO.Path.Join(dir.FullName, "src", "HitPan.Application")))
             dir = dir.Parent;
         Assert.True(dir is not null, "레포 루트를 찾아야 한다");
         return dir!.FullName;
