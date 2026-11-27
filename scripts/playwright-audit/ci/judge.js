@@ -126,9 +126,22 @@ const EXPECT_G_ROWS = [
   ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
   ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
 ];
-const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④ · 개발명세서 docs/개발/erp/20261128_쿨타임1b_화면실측3_개발명세서.md)
+//   K 본문 k35-session-cooltime.js 의 기대 키 5 = 시험 4(CT1 · CT2 둘 · CT3) + 쿨타임 N4 1(DEVICE). 선택 키 0 — 빠지면 누락 빨강.
+//   🔴 EXPECT_G_ROWS(앞 몸 · kit35.expectKeys 가 읽는 목록)와 **따로** 둔다 — 앞 몸이 브라우저 끝에 남은 키를 DEVICE 로 채울 때
+//   쿨타임 키를 건드리지 않게. 판정(필수 · 중복 · 모르는 · 통과 꼴 · N4 끝 줄)은 둘을 합친 EXPECT_G 로 같은 규칙.
+const EXPECT_CT_ROWS = [
+  ['K35-CT1', 'CT1', 'tab2-continue', 'chromium'],
+  ['K35-CT2', 'CT2', 'off-logout', 'chromium'],
+  ['K35-CT2', 'CT2', 'off-continue', 'chromium'],
+  ['K35-CT3', 'CT3', 'reedit', 'chromium'],
+  ['K35-CT-N4', 'N4', null, 'chromium'],
+];
+// ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 // N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
-const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
+const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].filter(([, g]) => g === 'N4')
   .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
 // 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
 //   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
@@ -353,5 +366,6 @@ module.exports = {
   K_BODY_STRICT, classifyKNames, kBodyScan, // F-PR ⑧
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
+  EXPECT_CT_ROWS, // 쿨타임 화면 실측 3(11/28)
   N4_WHY, n4Why, // K 연결 3차 ⑭
 };

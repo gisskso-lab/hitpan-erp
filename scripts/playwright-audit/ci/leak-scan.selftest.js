@@ -1370,6 +1370,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'),
       fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
       fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
+      // 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — 개발명세서 표에서 따로 적는다(판정기 EXPECT_CT_ROWS 를 읽지 않음)
+      fG('K35-CT1', 'CT1', 'tab2-continue', 'chromium'),
+      fG('K35-CT2', 'CT2', 'off-logout', 'chromium'), fG('K35-CT2', 'CT2', 'off-continue', 'chromium'),
+      fG('K35-CT3', 'CT3', 'reedit', 'chromium'),
+      fG('K35-CT-N4', 'N4', null, 'chromium', 'DEVICE'),
     ];
     const F_G_N = fGRows().length;
     // 🔴 K 연결 1차 — 판정기를 부르는 칸은 사본 폴더(K 본문 꼴 1개 기본)에서 돈다 · 실물 폴더의 K 본문 수에 묶이지 않게(§5-1).
@@ -1874,8 +1879,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 1차] const ok = theirs.length === 16 && mine.length === 16 && new Set(theirs).size === 16 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 1차] check('K-C22k G 기대 키 수 16 고정(G 14 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 2차(A7) — G4 토스트 길 2 추가로 18(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 2차] const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 2차] check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 쿨타임 화면 실측 3(11/28) — 쿨타임 키 5(시험 4 · N4 1) 추가로 23(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
@@ -2196,7 +2204,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     { // K-C25c 판정기 끝 줄 둘 — 대조 못 함만 → 장치 이유 끝 줄 / 섞이면 누출 신호 먼저 / 다른 [장치] 와 섞여도 재실행 1회 아님
       const DEV = 'N4 이유=대조 못 함(장치)'; // 판정기 상수와 따로 적는다(글자 잠금)
       const LEAK = 'N4 이유=누출 신호';
-      const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // ⬛ [낡은 줄 · 3차] const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // 🔴 쿨타임 화면 실측 3(11/28) — chromium N4 키가 둘(앞 몸 K35-N4 · 쿨타임 K35-CT-N4)이 되어 앞 몸 N4 만 고른다(칸 뜻 · 기대 수 그대로)
+      const n4 = (b, got) => (w) => (w.g === 'N4' && w.id === 'K35-N4' && w.browser === b ? { ...w, pass: false, got } : w);
       const devOff = (w) => (w.id === 'K35-G1' && w.path === 'bell' && w.browser === 'webkit' ? { ...w, kind: 'DEVICE', pass: false } : w);
       const a = kJ('k25c-1', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · 가린 K 토큰 0`))]);
       const b = kJ('k25c-2', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · x`)).map(n4('chromium', `${LEAK} · 걸림 1`))]);
