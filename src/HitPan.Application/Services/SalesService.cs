@@ -2018,6 +2018,10 @@ public class SalesService : ISalesService
         var results = new List<AutoOrderResultDto>();
         if (candidates.Count == 0) return results;
 
+        // 🔴 W-G1-51 후1 §16(외부 판정 P1) — 후보는 요청 본문 값이라 번호 따기 · 첫 쓰기 전에 저장될 줄(공급처 있는 줄)의 품목이 이 회사 것인지 본다(회사 값 = JWT · 하나라도 밖이면 전체 거절).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, candidates.Where(c => !string.IsNullOrWhiteSpace(c.PartnerId)).Select(c => c.ItemId), null, ct);
+
         // 공급처별 그룹핑. 미지정 품목은 별도 실패 결과.
         var noPartner = candidates.Where(c => string.IsNullOrWhiteSpace(c.PartnerId)).ToList();
         if (noPartner.Count > 0)

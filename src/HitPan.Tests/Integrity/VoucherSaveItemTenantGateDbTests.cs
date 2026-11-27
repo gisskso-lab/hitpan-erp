@@ -532,6 +532,84 @@ public sealed class VoucherSaveItemTenantGateDbTests
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  §16 자동발주 저장 (Dapper · 공급처별 tx — 후보 = 요청 본문 값)
+    // ════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "후1 §16 자동발주 A 같은 회사 후보 2줄(같은 공급처) = 발주 머리 1 · 상세 2 · 값 그대로")]
+    public async Task AutoOrder_A_SameTenant_Saved()
+    {
+        if (Skip("§16 자동발주 A")) return;
+        using var db = FreshDb();
+        AssertAutoOrderTablesMasked(db);
+
+        var results = await Sales(db).CreateAutoOrdersAsync(AutoCandidates(SameTenantLines, PartnerA), TenantA);
+
+        var ok = Assert.Single(results);
+        Assert.True(ok.Success, ok.Reason);
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_orders WHERE po_id='{ok.PoId}' AND tenant_id='{TenantA}' AND partner_id='{PartnerA}' AND total_amount=5950"));
+        Assert.Equal(2, Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE po_id='{ok.PoId}' AND tenant_id='{TenantA}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE po_id='{ok.PoId}' AND item_id='{ItemA1}' AND supply_amount=2200"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE po_id='{ok.PoId}' AND item_id='{ItemA2}' AND supply_amount=3750"));
+    }
+
+    [Fact(DisplayName = "후1 §16 자동발주 R 🔴 다른 회사 품목 1줄 섞임 = 전체 거절 · 문구 · 발주 머리 · 상세 전후 0행")]
+    public async Task AutoOrder_R_MixedTenant_Rejected()
+    {
+        if (Skip("§16 자동발주 R")) return;
+        using var db = FreshDb();
+        AssertAutoOrderTablesMasked(db);
+        var headBefore = Count(db, $"SELECT COUNT(*) FROM purchase_orders WHERE tenant_id='{TenantA}'");
+        var lineBefore = Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE tenant_id='{TenantA}'");
+        Assert.Equal(0, headBefore);
+        Assert.Equal(0, lineBefore);
+
+        await AssertGuardRejects(() => Sales(db).CreateAutoOrdersAsync(AutoCandidates(MixedLines, PartnerA), TenantA));
+
+        Assert.Equal(headBefore, Count(db, $"SELECT COUNT(*) FROM purchase_orders WHERE tenant_id='{TenantA}'"));
+        Assert.Equal(lineBefore, Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE tenant_id='{TenantA}'"));
+        Assert.Equal(0, Count(db, $"SELECT COUNT(*) FROM purchase_order_items WHERE item_id='{ItemB1}'"));
+    }
+
+    [Fact(DisplayName = "후1 §16 자동발주 공급처 없는 줄 · 다른 회사 품목 = 거절 안 됨(저장 안 하는 줄) · 실패 사유 · 발주 0행")]
+    public async Task AutoOrder_NoPartnerLine_NotGuarded()
+    {
+        if (Skip("§16 자동발주 공급처 없음")) return;
+        using var db = FreshDb();
+        AssertAutoOrderTablesMasked(db);
+
+        var results = await Sales(db).CreateAutoOrdersAsync(AutoCandidates(new[] { (ItemB1, 1m, 1370m) }, null), TenantA);
+
+        var fail = Assert.Single(results);
+        Assert.False(fail.Success);
+        Assert.False(string.IsNullOrWhiteSpace(fail.Reason));
+        Assert.NotEqual(Msg, fail.Reason);
+        Assert.Equal(new[] { ItemB1 }, fail.ItemIds);
+        Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM purchase_orders"));
+        Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM purchase_order_items"));
+    }
+
+    /// <summary>
+    /// <c>purchase_order_items</c> 는 <see cref="FreshDb"/> 의 기대 표 목록에 없다 — 같은 기준(기본 표 · FULLTEXT 색인 0)으로
+    /// 임시 표로 가려졌는지 먼저 확인한다(실표 접촉 0 · 헌법 #39).
+    /// </summary>
+    private static void AssertAutoOrderTablesMasked(MySqlConnection db)
+    {
+        foreach (var t in new[] { "purchase_orders", "purchase_order_items" })
+        {
+            Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='{TestDb}' AND TABLE_NAME='{t}' AND TABLE_TYPE='BASE TABLE'"));
+            Assert.Equal(0, Count(db, $"SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='{TestDb}' AND TABLE_NAME='{t}' AND INDEX_TYPE='FULLTEXT'"));
+        }
+    }
+
+    /// <summary>자동발주 후보 꼴 — 제안 수량 = 줄 수량 · 단가 그대로 · 공급처 하나(없으면 null).</summary>
+    private static List<AutoOrderCandidateDto> AutoCandidates((string Id, decimal Qty, decimal Price)[] lines, string? partnerId) =>
+        lines.Select(l => new AutoOrderCandidateDto
+        {
+            ItemId = l.Id, ItemCode = l.Id, ItemName = l.Id, CurrentQty = 0m, SafetyQty = l.Qty, SuggestedOrderQty = l.Qty,
+            PartnerId = partnerId, PartnerName = partnerId, UnitPrice = l.Price, Reason = "below_safety", ItemType = "goods"
+        }).ToList();
+
+    // ════════════════════════════════════════════════════════════════════════
     //  판정 도우미
     // ════════════════════════════════════════════════════════════════════════
 
@@ -860,5 +938,60 @@ public sealed class VoucherSaveItemTenantGateDbTests
             Server = host, Port = uint.Parse(port), Database = TestDb, UserID = user, Password = pass,
             AllowUserVariables = true, GuidFormat = MySqlGuidFormat.None, Pooling = false, ConnectionTimeout = 5,
         }.ConnectionString;
+    }
+}
+
+/// <summary>
+/// 🔴 W-G1-51 후1 §16-3 본문 순서 게이트 — <c>CreateAutoOrdersAsync</c> 의 품목 회사 검사가
+/// 첫 번호 따기(<c>DocumentNumberHelper.NextNumberAsync</c>) · 첫 <c>INSERT INTO purchase_orders</c> 보다 <b>앞</b>에 있다.
+/// </summary>
+/// <remarks>
+/// 소스 본문의 순서만 본다(선례 <c>DeliveryUpdateRowCountGateTests</c> 의 Slice 꼴). 메서드 끝 표식을 못 찾으면 실패한다
+/// (파일 끝까지 잘라 다른 메서드의 호출로 통과하는 빈 측정 방지). DB 를 쓰지 않는 시험이라 build 잡에서 돈다.
+/// </remarks>
+public sealed class AutoOrderItemTenantGuardOrderGateTests
+{
+    private const string MethodStart = "public async Task<List<AutoOrderResultDto>> CreateAutoOrdersAsync(";
+    private const string MethodEnd = "public async Task<List<string>> GetSalesReturnReasonsAsync(";
+
+    [Fact(DisplayName = "후1 §16 자동발주 본문 · 품목 회사 검사가 첫 번호 따기 · 첫 발주 머리 INSERT 보다 앞")]
+    public void AutoOrder_Guard_Before_FirstNumber_And_FirstInsert()
+    {
+        var src = System.IO.File.ReadAllText(System.IO.Path.Combine(RepoRoot(),
+            "src", "HitPan.Application", "Services", "SalesService.cs"));
+
+        var start = src.IndexOf(MethodStart, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"메서드 시작 표식을 찾지 못했다: {MethodStart}");
+        var end = src.IndexOf(MethodEnd, start + MethodStart.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"메서드 끝 표식을 찾지 못했다: {MethodEnd}");
+        var body = src[start..end];
+
+        var guard = body.IndexOf("await ItemTenantGuard.EnsureItemsBelongToTenantAsync(", StringComparison.Ordinal);
+        Assert.True(guard >= 0, "CreateAutoOrdersAsync 안에 품목 회사 검사(await ItemTenantGuard.EnsureItemsBelongToTenantAsync) 가 있어야 한다");
+
+        var number = body.IndexOf("DocumentNumberHelper.NextNumberAsync(", StringComparison.Ordinal);
+        Assert.True(number >= 0, "번호 따기 표식(DocumentNumberHelper.NextNumberAsync)을 찾지 못했다");
+        var insert = body.IndexOf("INSERT INTO purchase_orders", StringComparison.Ordinal);
+        Assert.True(insert >= 0, "첫 쓰기 표식(INSERT INTO purchase_orders)을 찾지 못했다");
+
+        Assert.True(guard < number, "품목 회사 검사가 첫 번호 따기보다 앞이어야 한다");
+        Assert.True(guard < insert, "품목 회사 검사가 첫 INSERT INTO purchase_orders 보다 앞이어야 한다");
+
+        // 검사 인자 — 회사 값 = 메서드 인자 tenantId · 저장될 줄(공급처 있는 줄)만 · 트랜잭션 없음(첫 쓰기 전)
+        var close = body.IndexOf(");", guard, StringComparison.Ordinal);
+        Assert.True(close > guard, "검사 호출의 끝을 찾지 못했다");
+        var call = body[guard..close];
+        Assert.Contains("_db, tenantId,", call, StringComparison.Ordinal);
+        Assert.Contains("candidates.Where(c => !string.IsNullOrWhiteSpace(c.PartnerId)).Select(c => c.ItemId)", call, StringComparison.Ordinal);
+        Assert.Contains("null, ct", call, StringComparison.Ordinal);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !System.IO.Directory.Exists(System.IO.Path.Combine(dir.FullName, "src", "HitPan.Application")))
+            dir = dir.Parent;
+        Assert.True(dir is not null, "레포 루트를 찾아야 한다");
+        return dir!.FullName;
     }
 }
