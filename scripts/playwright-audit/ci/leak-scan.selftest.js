@@ -2856,7 +2856,12 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
           WS.r3Judge({ loaded: true, st: 200, before: true, want: true, after: true }),
           WS.r3Judge({ loaded: true, st: 200, before: null, want: true, after: true }),
         ];
-        const ok = c6ok && r3[0] === true && r3.slice(1).every((x) => x === false);
+        // 11/27 main 런 45990910010 — 저장 응답 204 도 참(main 실물) · 302 는 거짓
+        const r3b = [
+          WS.r3Judge({ loaded: true, st: 204, before: false, want: true, after: true }),
+          WS.r3Judge({ loaded: true, st: 302, before: false, want: true, after: true }),
+        ];
+        const ok = c6ok && r3[0] === true && r3.slice(1).every((x) => x === false) && r3b[0] === true && r3b[1] === false;
         check('W-C24 M6c 칸 풀림 → 대조 참 · 잠김 + 안내 → 닫힘 참 · 칸 없음 · 잠김만 · 풀림 + 안내 → 둘 다 거짓 / R3 읽기 받음 · 200 · 뒤집힌 값 유지 → 참 · 읽기 못 받음 · 저장 500 · 값 안 유지 · 안 뒤집음 · 앞 값 없음 → 거짓 5/5', ok, `M6c ${c6ok} · R3 참 ${r3[0]} · 거짓 ${r3.slice(1).filter((x) => x === false).length}/5`);
       }
     }
