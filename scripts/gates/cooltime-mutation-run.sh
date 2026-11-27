@@ -23,8 +23,11 @@ SESSION_MW=src/HitPan.API/Middleware/SessionValidityMiddleware.cs
 NOTIFY=src/HitPan.Web/Services/NotificationClient.cs
 SCREEN=src/HitPan.Web/Services/CooltimeScreenRules.cs   # 🆕 11/27 고침 차례
 PROMPT=src/HitPan.Web/Components/Common/CooltimePrompt.razor   # 🆕 11/28 고침 1
+API_PROGRAM=src/HitPan.API/Program.cs                                           # 🆕 11/28 다음 묶음(§288) ⓨ
+MIG132=src/HitPan.API/Migrations/SQL/DB-132_tenant_settings_cooltime.sql        # 🆕 11/28 다음 묶음(§288) ⓩ
 DB="CooltimeDbGateTests"
 RULE="CooltimeRuleGateTests"
+MIG="ErpMigrationApplyGateTests"                                                # 🆕 11/28 ⓩ
 
 # 이름 | 파일 | 바꿀 글자(그대로) | 바꿀 값 | 시험(FullyQualifiedName~) | DB 필요(1/0)
 MUTATIONS=(
@@ -52,6 +55,11 @@ MUTATIONS=(
   "u|$SCREEN|=> string.Equals(trigger, TriggerButton, StringComparison.Ordinal) && decision != RecheckDecision.EndLocally;|=> false;|$RULE.고침1_|0"
   "v|$PROMPT|await RecheckAsync(trigger);|await RecheckAsync();|$RULE.고침1_배선|0"
   "w|$PROMPT|await FinishWithLogoutAsync(CooltimeScreenRules.TriggerButton);|await FinishWithLogoutAsync(CooltimeScreenRules.TriggerCountdown);|$RULE.고침1_배선|0"
+  # ── 🆕 11/28 다음 묶음(§288 · 대표 결재 §287 E-6 W=4) — docs/개발/erp/20261128_쿨타임1b_다음묶음_규칙4_마이그게이트_개발명세서.md §3 ──
+  "j|$ENGINE|AND login_at < @CUtc + INTERVAL @W HOUR||$DB.G_C22_|1"
+  "x|$ENGINE|return (CooltimeAttendanceOutcome.NoEmployee, null, null, null);|{ }|$DB.G_C23_|1"
+  "y|$API_PROGRAM|builder.Services.AddHostedService<HitPan.API.Services.Cooltime.CooltimeService>();|// (변이 y) 쿨타임 서버 작업 배선 뺌|$RULE.G_C24_|0"
+  "z|$MIG132|cooltime_changed_at DATETIME(6) NULL|cooltime_changed_at DATETIME NULL|$MIG.G_W13_7_|1"
 )
 
 want=" $* "
@@ -88,7 +96,7 @@ for m in "${MUTATIONS[@]}"; do
 done
 
 # 원복 확인 — 변이가 남아 있으면 안 된다
-if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT"; then
+if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT" "$API_PROGRAM" "$MIG132"; then
   echo "::error::변이 원복 실패 — 제품 파일에 변경이 남았다"; git diff --stat; exit 2
 fi
 if [ "$fails" -gt 0 ]; then echo "::error::변이 런 실패 $fails 건"; exit 1; fi

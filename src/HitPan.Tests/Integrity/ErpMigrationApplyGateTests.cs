@@ -454,6 +454,122 @@ public sealed class ErpMigrationApplyGateTests : IDisposable
             "🔴 Collection 정의에 DisableParallelization 가 꺼져 있다 — 이름만 같고 병렬은 그대로다.");
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // G-W13-7 — 🔴 **쿨타임 마이그 DB-132 ~ 134 가 「옛 모양 DB」 에 실물 적용기로 앉는다** · 🆕 11/28
+    //
+    //   근거: 쿨타임 1-b 합류 PR #1011 [4] 리뷰 P2-1 · PM 결정 §288 「머지 전에 넣음 — G-W13-1 틀」.
+    //   G-W13-1·2·4 는 **번호 최대 한 건**만 본다(그 구조는 그대로 둔다). DB-132 ~ 134 는 그 과녁 밖이고,
+    //   쿨타임 DB 게이트는 출하 DDL(칸이 이미 있는 모양) 위에서만 돈다 ⇒ `ADD COLUMN IF NOT EXISTS` 가
+    //   **실제로 칸을 만드는지**를 잰 줄이 0 이었다. 마이그가 안 앉으면 새 기능만이 아니라 **기존** 회사 설정 조회 ·
+    //   근태 목록 · 손 퇴근이 1054 로 함께 죽는다(리뷰 R6).
+    //
+    //   옛 모양 = origin/main 모양: 출하 DDL 에서 세 마이그가 더한 칸 7개 DROP + 시드 3줄 DELETE.
+    //   ⓐ 실물 적용기 → 적용 목록 == {DB-132, DB-133, DB-134} ⓑ 모양(표·칸 형·NULL·인덱스 전체 + 7칸 DEFAULT) == 출하 DDL
+    //   ⓒ 두 번째 실행 = 적용 0건 · 모양 그대로.
+    //   음성 대조 ⓩ = DB-132 의 cooltime_changed_at 형을 DATETIME(6) → DATETIME 으로 바꿈 → ⓑ FAIL(변이 런).
+    //   🔴 이 세 이름을 적는 이유: G-W13-1 은 「다음 차수가 고치지 않아도 되게」 이름을 안 적지만, 이 게이트의
+    //      과녁은 「쿨타임 칸이 옛 DB 에 앉는가」 하나라 이름이 곧 과녁이다(마이그 파일이 지워지면 여기서 빨강).
+    // ══════════════════════════════════════════════════════════════
+    private static readonly string[] CooltimeMigrations = { "DB-132", "DB-133", "DB-134" };
+
+    private static readonly (string Table, string Column)[] CooltimeColumns =
+    {
+        ("tenant_settings", "cooltime_enabled"),     // DB-132
+        ("tenant_settings", "cooltime_at"),          // DB-132
+        ("tenant_settings", "regular_leave_time"),   // DB-132
+        ("tenant_settings", "cooltime_changed_at"),  // DB-132 (4번째 문장 · 11/27 E-2)
+        ("user_sessions", "cooltime_asked_at"),      // DB-133
+        ("user_sessions", "cooltime_snooze_until"),  // DB-133
+        ("attendance", "check_out_source"),          // DB-134
+    };
+
+    /// <summary>7칸의 형 · NULL · DEFAULT(ShapeAsync 는 DEFAULT 를 안 본다 — 리뷰 §2-3 ⓑ 가 DEFAULT 까지 요구).</summary>
+    private static async Task<List<string>> CooltimeColumnDetailsAsync(MySqlConnection db)
+    {
+        var rows = new List<string>();
+        foreach (var (table, column) in CooltimeColumns)
+        {
+            var line = await db.ExecuteScalarAsync<string?>(@"
+                SELECT CONCAT(TABLE_NAME, '.', COLUMN_NAME, ' : ', COLUMN_TYPE, ' : ', IS_NULLABLE, ' : ', COALESCE(COLUMN_DEFAULT, '(없음)'))
+                  FROM INFORMATION_SCHEMA.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @T AND COLUMN_NAME = @C",
+                new { T = table, C = column });
+            rows.Add(line ?? $"{table}.{column} : (칸 없음)");
+        }
+        return rows;
+    }
+
+    [Fact(DisplayName = "G-W13-7 🔴 쿨타임 마이그 DB-132~134 — 옛 모양 DB(칸 7 DROP · 시드 3 DELETE)에 실물 적용기 → 적용 3건 · 모양 = 출하 DDL(형·NULL·DEFAULT) · 두 번째 실행 0건 (리뷰 P2-1)")]
+    public async Task G_W13_7_쿨타임_마이그가_옛모양_DB에_앉는다()
+    {
+        const string gate = "G-W13-7 쿨타임 마이그 옛 DB 적용";
+        if (!await _db.ReadyAsync(gate)) return;
+
+        await using var db = await _db.OpenAsync();
+
+        // ① 출하 DDL 모양(#36 단일 진실원) — 양성 대조: 무엇을 세는지 먼저 단언한다.
+        var shipShape = await MigrationGateDb.ShapeAsync(db);
+        Assert.True(shipShape.Count >= 2000, $"[{gate}] 신규설치본에서 센 것이 {shipShape.Count}줄뿐 — 출하 DDL 적재 실패");
+        var shipCols = await CooltimeColumnDetailsAsync(db);
+        Assert.True(shipCols.All(c => !c.EndsWith("(칸 없음)", StringComparison.Ordinal)),
+            $"[{gate}] 출하 DDL 에 쿨타임 칸이 없다(#36):\n  " + string.Join("\n  ", shipCols));
+        foreach (var id in CooltimeMigrations)
+            Assert.True(Directory.GetFiles(MigrationGateDb.RepoSqlDir(), id + "_*.sql").Length == 1,
+                $"[{gate}] 마이그 파일 {id}_*.sql 이 레포에 정확히 1개가 아니다");
+
+        // ② 옛 모양으로 되돌린다 — 칸 7 DROP + 시드 3 DELETE(G-W13-1 틀 · 판정 변수를 세 마이그로 묶는다)
+        await db.ExecuteAsync(@"
+            ALTER TABLE tenant_settings DROP COLUMN cooltime_enabled, DROP COLUMN cooltime_at,
+                                        DROP COLUMN regular_leave_time, DROP COLUMN cooltime_changed_at;
+            ALTER TABLE user_sessions DROP COLUMN cooltime_asked_at, DROP COLUMN cooltime_snooze_until;
+            ALTER TABLE attendance DROP COLUMN check_out_source;");
+        var deleted = await db.ExecuteAsync(
+            "DELETE FROM schema_migrations WHERE migration_id IN @Ids;", new { Ids = CooltimeMigrations });
+        Assert.True(deleted == 3,
+            $"[{gate}] 출하 DDL 시드에서 지운 쿨타임 행이 {deleted}건 — 3건이어야 한다(시드 줄부터 고쳐라 · MigrationLocationGuardTests)");
+        var oldCols = await CooltimeColumnDetailsAsync(db);
+        Assert.True(oldCols.All(c => c.EndsWith("(칸 없음)", StringComparison.Ordinal)),
+            $"[{gate}] 옛 모양 준비 실패 — 남은 칸:\n  " + string.Join("\n  ", oldCols));
+
+        MigrationGateDb.MaterializeRepoSql();
+        try
+        {
+            // ⓐ 실물 적용기 — 판정용 복제 SQL 0건
+            var r = await _db.RunRealRunnerAsync();
+            Assert.True(r.Success,
+                $"[{gate}] 🔴 쿨타임 마이그가 옛 모양 DB 에서 **죽었다** — 실패 {r.FailedMigrationId}: {r.FailureMessage}\n"
+              + "  고객 PC 업데이트가 마이그 단계에서 멈추고, 기존 설정 · 근태 화면까지 1054 로 죽는다(리뷰 R6).");
+            Assert.Equal(CooltimeMigrations, r.AppliedMigrationIds.ToArray());
+            var ok = await db.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM schema_migrations WHERE migration_id IN @Ids AND success = 1;", new { Ids = CooltimeMigrations });
+            Assert.True(ok == 3, $"[{gate}] success=1 로 앉은 쿨타임 행이 {ok}건 — 다음 업데이트가 같은 자리를 또 돈다");
+
+            // ⓑ 모양 == 출하 DDL — 전체(표·칸 형·NULL·인덱스) + 7칸 DEFAULT
+            var after = await MigrationGateDb.ShapeAsync(db);
+            var onlyMig = after.Except(shipShape, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var onlyShip = shipShape.Except(after, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            Assert.True(onlyMig.Count == 0 && onlyShip.Count == 0,
+                $"[{gate}] 🔴 옛 DB 에 마이그를 돌린 모양 ≠ 출하 DDL(#36) — 기존 고객과 신규 고객의 표가 다르다.\n"
+              + "  마이그만 만든 것:\n    " + string.Join("\n    ", onlyMig)
+              + "\n  출하 DDL 에만 있는 것:\n    " + string.Join("\n    ", onlyShip));
+            var migCols = await CooltimeColumnDetailsAsync(db);
+            Assert.True(shipCols.SequenceEqual(migCols, StringComparer.Ordinal),
+                $"[{gate}] 🔴 쿨타임 칸 형·NULL·DEFAULT 가 출하 DDL 과 다르다:\n  출하: "
+              + string.Join("\n        ", shipCols) + "\n  마이그: " + string.Join("\n          ", migCols));
+
+            // ⓒ 두 번째 실행 = 적용 0건 · 모양 그대로(업데이트 재시도 경로)
+            var second = await _db.RunRealRunnerAsync();
+            Assert.True(second.Success, $"[{gate}] 2회차가 실패했다: {second.FailureMessage}");
+            Assert.Empty(second.AppliedMigrationIds);
+            var afterSecond = await MigrationGateDb.ShapeAsync(db);
+            Assert.True(after.SetEquals(afterSecond), $"[{gate}] 2회차 뒤 모양이 바뀌었다");
+        }
+        finally
+        {
+            MigrationGateDb.CleanRunnerSqlDir();
+        }
+    }
+
     private static string FirstLine(string? s) =>
         string.IsNullOrWhiteSpace(s) ? "(사유 없음)" : s.Split('\n')[0].Trim();
 

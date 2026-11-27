@@ -15,7 +15,7 @@ namespace HitPan.Tests.Integrity;
 /// <para>🔴 화면 쪽 규칙은 <c>HitPan.Web/Services/CooltimeScreenRules.cs</c> 를 <b>소스 링크</b>해 부른다(시험 프로젝트 Compile Include ·
 /// ApiErrorText 와 같은 방식). 글자를 세지 않고 함수에 값을 넣어 받은 값을 본다.</para>
 /// </remarks>
-public sealed class CooltimeRuleGateTests
+public sealed partial class CooltimeRuleGateTests
 {
     // ══════════════════════════════════════════════════════════════
     // G-C18 ⓐ (설계 §E E-1) — 푸시 연결 토큰은 부를 때마다 지금 것
