@@ -38,6 +38,7 @@ public sealed class DataResetParentOnlyGateTests
     [InlineData("no_parent", true)]
     [InlineData("multiple_parents", true)]
     [InlineData("not_parent", false)]
+    [InlineData("closed", false)]   // 20261127작 W-S-01 갈래 B — 이 판에서 닫힘 = 메뉴 안 보임
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("   ", false)]
@@ -60,7 +61,10 @@ public sealed class DataResetParentOnlyGateTests
         foreach (HitPan.Application.DTOs.DataReset.DataResetGate g in Enum.GetValues(typeof(HitPan.Application.DTOs.DataReset.DataResetGate)))
         {
             var code = HitPan.Application.DTOs.DataReset.DataResetGateCodes.ToCode(g);
-            Assert.Equal(g != HitPan.Application.DTOs.DataReset.DataResetGate.NotParent, DataResetMenuRule.ShowResetLink(code));
+            // ⬛ 20261127작 W-S-01 갈래 B 이전: Assert.Equal(g != HitPan.Application.DTOs.DataReset.DataResetGate.NotParent, DataResetMenuRule.ShowResetLink(code));
+            // 다섯째 값 Closed(이 판에서 닫힘)도 메뉴 안 보임 — 안 보이는 값 = NotParent · Closed 둘.
+            Assert.Equal(g != HitPan.Application.DTOs.DataReset.DataResetGate.NotParent
+                      && g != HitPan.Application.DTOs.DataReset.DataResetGate.Closed, DataResetMenuRule.ShowResetLink(code));
         }
     }
 

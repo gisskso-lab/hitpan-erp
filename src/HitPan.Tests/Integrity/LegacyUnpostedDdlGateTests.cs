@@ -423,7 +423,10 @@ public sealed class LegacyUnpostedDdlGateTests : IDisposable
         }
 
         await using var db = new MySqlConnection(DbConnString());
-        var svc = new DataResetService(db, new OkBackup(), new NoOpAudit(), NullLogger<DataResetService>.Instance);
+        // ⬛ 20261127작 W-S-01 갈래 B 이전: var svc = new DataResetService(db, new OkBackup(), new NoOpAudit(), NullLogger<DataResetService>.Instance);
+        // 이 시험은 「초기화가 새 표를 비우나」 를 잰다 — 열린 가짜(OpenForTest)를 넘긴다(D-B3).
+        var svc = new DataResetService(db, new OkBackup(), new NoOpAudit(), NullLogger<DataResetService>.Instance,
+            DataResetAvailabilityForTest.OpenForTest);
         var res = await svc.ResetAllAsync(new DataResetRequest { Password = AdminPassword }, TenantId, UserId);
         Assert.True(res.Success, $"준비 실패 — 초기화 자체가 실패했다: {res.Error}");
 

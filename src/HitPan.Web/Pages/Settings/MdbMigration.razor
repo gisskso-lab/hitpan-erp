@@ -9,6 +9,8 @@
 @inject IDialogService DialogService
 @inject HitPanProtectedLocalStorage Storage
 @inject HitPan.Web.Services.IAuthService Auth
+@* 20261127작 W-S-01 갈래 B — my-level 의 dataResetGate 를 읽어 「closed」 면 「모두 지우고 새로 가져오기」 를 고를 수 없게 한다(설계 §3-4 · DI 등록 없이) *@
+@inject ILogger<HitPan.Web.Services.AccountLinkApi> LinkLog
 @implements IAsyncDisposable
 
 <PageTitle>데이터 이관</PageTitle>
@@ -94,10 +96,17 @@
                 히트판에 이미 있는 자료는 그대로 두고, 예전 히트판에만 있는 자료를 채웁니다. 여러 번 해도 안전합니다.
             </MudText>
         </MudRadio>
-        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true" Disabled="@(!_isMainPc)">
+        @* ⬛ 20261127작 W-S-01 갈래 B 이전: <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true" Disabled="@(!_isMainPc)"> *@
+        <MudRadio T="string" Value="@("overwrite")" Color="Color.Error" Dense="true" Disabled="@(!_isMainPc || _resetClosed)">
             기존 자료를 <b>모두 지우고 새로 가져오기</b>
             <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
-                @if (_isMainPc)
+                @* 20261127작 W-S-01 갈래 B — 이 판에서 지우는 기능이 닫혀 있으면 안내를 먼저 보인다(서버도 같은 자리에서 막는다 · ResetAllAsync 첫 문장).
+                   ⬛ 이전: @if (_isMainPc) *@
+                @if (_resetClosed)
+                {
+                    <text>지금 쓰시는 히트판에서는 고를 수 없습니다. 예전 히트판 자료는 위의 「없는 것만 보태기」로 가져오시면 됩니다.</text>
+                }
+                else if (_isMainPc)
                 {
                     <text>히트판의 업무 자료를 모두 지운 뒤 예전 히트판을 처음부터 다시 읽습니다. 지우기 전에 자동으로 백업합니다.</text>
                 }
@@ -544,6 +553,9 @@
     /// 지우는 방식은 자료가 들어 있는 컴퓨터에서만 고를 수 있다(2026-08-11 사장님 지시 · 초기화·백업 화면과 같은 규칙).
     /// 못 물어봤으면 <b>잠근 채로 둔다</b> — 확인이 안 된 상태에서 열어주면 막은 적이 없는 것과 같다.
     private bool _isMainPc;
+
+    /// 20261127작 W-S-01 갈래 B — 서버가 「closed」 를 주면 지우는 방식을 잠근다. 못 읽으면(null) 지금 규칙 그대로 두고 서버가 막는다(새 규칙 0 · #33).
+    private bool _resetClosed;
     private bool _loading;
     private string _statusMessage = "";
     private Dictionary<string, int>? _previewResult;
@@ -658,6 +670,12 @@
             Console.Error.WriteLine($"[MdbMigration] 자료보관 컴퓨터 여부 확인 실패: {ex.GetType().Name}: {ex.Message}");
             _isMainPc = false;
         }
+
+        // 20261127작 W-S-01 갈래 B — 지우는 방식이 이 판에서 닫혀 있는지(my-level dataResetGate == "closed").
+        //   자료보관 컴퓨터가 아니어도 묻는다 — 어디서 열든 같은 안내가 보여야 한다. my-level 은 모든 로그인 사용자에게 열린 문이다.
+        //   AccountLinkApi.GetMyLevelAsync 는 실패하면 경고를 남기고 null(#15) → 잠그지 않고 지금 규칙 그대로(서버가 막는다).
+        var me = await new HitPan.Web.Services.AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
+        _resetClosed = me?.DataResetGate == HitPan.Web.Services.DataResetMenuRule.Closed;
 
         // 🔴 20260924작1 절D — **통과한 뒤에만 부른다.**
         //   아래 조회는 자료보관 컴퓨터에서만 열리는 문(api/migration/*)이다. 클라이언트 PC 에서
