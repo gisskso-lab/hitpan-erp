@@ -412,6 +412,14 @@ async function cycleB(st) {
       }
       const main = K.pathOf(ga.page.url());
       rec(st, 'offOut', { pass: toLogin && (code === 401 || active === false), got: { prompt: seenGa, waitedSec: waited, toLogin, main, oldTokenState: code, oldTokenActive: active } });
+      // 🆕 11/28 CT2 그림 장치 고침 — 런 46068258519 · 46074001780 둘 다 「그림 안 찍음 CT2-off-logout · 예외 1(Error) · 프레임 0」
+      //   → 쿨타임 N4 「대조 못 함」. 지금 로그아웃 = NavigateTo("/login", forceLoad: true)(CooltimePrompt.razor) = 전체 다시 읽기라
+      //   주소가 /login 으로 바뀐(commit) 직후엔 문서가 아직 뜨는 중 → 화면 글자 대조(evaluate)가 넘어짐. 문서가 다 뜨고
+      //   로그인 칸이 보인 뒤에 찍는다(판정 · 대조 규칙 그대로 · 기다림만 더함).
+      await ga.page.waitForLoadState('load', { timeout: 20000 }).catch((e) => console.log(`K 쿨타임 CT2 로그인 화면 문서 기다림 끝 (${L.errorName(e)})`));
+      await ga.page.locator('input[type="password"]').first().waitFor({ state: 'visible', timeout: 20000 })
+        .catch((e) => console.log(`K 쿨타임 CT2 로그인 칸 기다림 끝 (${L.errorName(e)})`));
+      await K.sleep(SETTLE_MS);
       await shot(ga, 'CT2-off-logout');
       ga.tok.access = null; // 손 로그아웃으로 이미 끝남 — 다시 부르지 않는다
     } catch (e) {
@@ -533,14 +541,6 @@ async function ct3(st) {
     }
     if (!t2) throw new K.KitStepError(`둘째 값 눈금 없음(출근 ${hm(st.checkIn)} · 자정 넘김이면 미측정)`);
 
-    step.now = '관리자 화면 로그인';
-    adm = await openCtx(st, '부모');
-    await login(adm, ID.parent, PW.parent);
-    step.now = '근태 화면';
-    if (!(await K.navigateInApp(adm.page, '/hr/attendance'))) throw new K.KitStepError('앱 안 이동 함수 없음');
-    await adm.page.waitForURL((u) => u.pathname === '/hr/attendance', { timeout: 15000, waitUntil: 'commit' });
-    const rowSel = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("자동"))`;
-    await adm.page.locator(rowSel).first().waitFor({ state: 'visible', timeout: 20000 });
     // 🆕 11/28 진단 — 부모 화면의 고치기 칸은 /api/permissions/{user_id} 의 HR_PROXY 「수정」 으로만 그려진다(서버는 tenant_admin 전권).
     //   그 응답을 판정 밖 한 줄로 남긴다(사용자 키 · 토큰은 안 찍음).
     step.now = '부모 화면 권한 읽기(진단)';
@@ -553,6 +553,14 @@ async function ct3(st) {
       return { status: a.status, hrProxyUpdate: hp ? readJ(hp, 'canUpdate', 'CanUpdate') === true : null, note: hp ? '' : 'HR_PROXY 줄 없음' };
     }).catch((e) => ({ status: null, hrProxyUpdate: null, note: `읽기 실패 ${L.errorName(e)}` }));
     console.log(`K 쿨타임 CT3 진단 — 부모 화면 권한 읽기 status=${permDiag.status} · HR_PROXY 수정=${permDiag.hrProxyUpdate} ${permDiag.note}`);
+    step.now = '관리자 화면 로그인';
+    adm = await openCtx(st, '부모');
+    await login(adm, ID.parent, PW.parent);
+    step.now = '근태 화면';
+    if (!(await K.navigateInApp(adm.page, '/hr/attendance'))) throw new K.KitStepError('앱 안 이동 함수 없음');
+    await adm.page.waitForURL((u) => u.pathname === '/hr/attendance', { timeout: 15000, waitUntil: 'commit' });
+    const rowSel = `tr:has-text("${DA_NAME}"):has(.mud-chip:has-text("자동"))`;
+    await adm.page.locator(rowSel).first().waitFor({ state: 'visible', timeout: 20000 });
     step.now = '첫 고침(값 그대로 · 까닭)';
     // ⬛ [낡은 줄 · 11/28 이전] await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null);
     await editOnce(adm.page, rowSel, '자동', 'CI 첫 고침', null, step);
