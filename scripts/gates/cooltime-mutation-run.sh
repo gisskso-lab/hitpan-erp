@@ -47,6 +47,8 @@ MUTATIONS=(
   "r|$SCREEN|foreach (var k in hit) body[k] = null;|foreach (var k in hit) { }|$RULE.V4_|0"
   "s|$SCREEN|or SourceCooltimeBlank or SourceEdited;|or SourceCooltimeBlank;|$RULE.C5_|0"
   "t|$SCREEN|if (active == false) return RecheckDecision.EndLocally;|if (active == false) { }|$RULE.V1_|0"
+  # ── 🆕 11/28 고침 1(§277 P3 (b) · §285) — [지금 로그아웃] + 서버 안 끝냄 = 손 로그아웃 ──
+  "u|$SCREEN|=> outcome == CallOutcome.Recheck && string.Equals(trigger, TriggerButton, StringComparison.Ordinal);|=> false;|$RULE.고침1_|0"
 )
 
 want=" $* "
