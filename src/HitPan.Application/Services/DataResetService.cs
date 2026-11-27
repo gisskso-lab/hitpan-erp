@@ -265,7 +265,7 @@ public sealed class DataResetService : IDataResetService
         "기존 자료를 모두 지우는 기능은 지금 쓰시는 히트판에서 잠시 닫아 두었습니다. 회사 자료는 그대로 있습니다.";
 
     /// <summary>20261127작 W-S-01 갈래 B — 닫힘 거절의 감사 reason 접두(뒤에 DenyCode 「closed」 · 설계 §3-2 의 3 · 시험이 이 상수로 대조).</summary>
-    public const string ClosedDenyReasonPrefix = "베타 판 닫힘: ";
+    public const string ClosedDenyReasonPrefix = "초기화 닫힘: "; // 종전 「베타 판 닫힘: 」 — 로그 화면(/data/logs 메모 칸)에 보이므로 「베타」 낱말 뺌(#23 · [3-V]·[4] F1 · PM 결정 11/27) · 뒤 코드 꼴은 기존 「대표 판정 거절: {code}」 와 같음
 
     private static string GateMessage(DataResetGate gate) => gate switch
     {
