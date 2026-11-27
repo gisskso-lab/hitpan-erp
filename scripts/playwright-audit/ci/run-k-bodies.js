@@ -5,12 +5,16 @@
 //   ② 이상한 이름이 하나라도 있으면 **아무것도 돌리지 않고** 실패(종료 코드 1) · 이름은 찍지 않고 수만 찍는다.
 //   ③ 정상 이름은 하나씩 돌린다 · 하나라도 실패면 끝까지 돈 뒤 실패. 표준출력은 그대로 흘린다(tee 0 · 업로드 폴더에 쓰기 0).
 //   ④ 인자 `--dir <폴더>` 는 자체시험용(기본 = 이 폴더). 판정기에는 폴더 인자를 주지 않는다(판정 입력면 늘리지 않음).
+// 🔴 W-S-01 CI 화면 측정(11/27 · 작업지시서 20261127작 W-S-01 CI화면측정장치 §2 · PM 결재 §269 · 측정 커밋 안에만 · 머지 0)
+//   ⑤ K 목록 다음에 W 목록(판정기 classifyWNames · 머리 `ws01-`)을 돈다. 이상한 이름이 K · W 어느 쪽에 하나라도 있으면
+//      아무것도 안 돌리고 실패(② 를 넓힘). W 본문이 0 이면 출력 글자 · 동작 = 옛 실행기 그대로(W 줄을 찍지 않음).
 'use strict';
 
 const path = require('path');
 const { spawnSync } = require('child_process');
 const L = require('./lib');
-const { kBodyScan } = require('./judge');
+// ⬛ [낡은 줄 · F-PR] const { kBodyScan } = require('./judge');
+const { kBodyScan, wBodyScan } = require('./judge'); // W-S-01 ⑤
 
 function targetDir(argv) {
   const i = argv.indexOf('--dir');
@@ -26,6 +30,11 @@ function targetDir(argv) {
 function main() {
   const dir = targetDir(process.argv.slice(2));
   const { run, odd } = kBodyScan(dir);
+  const wb = wBodyScan(dir); // W-S-01 ⑤ — 무엇이든 돌리기 전에 두 목록 모두 이름부터 본다
+  if (wb.odd.length > 0) {
+    console.log(`⚫ FAIL [장치] W 본문 이름 꼴 이상 ${wb.odd.length}개 — 아무것도 안 돌린다(이름은 판정기 줄에서 소독 뒤)`);
+    process.exit(1);
+  }
   if (odd.length > 0) {
     console.log(`⚫ FAIL [장치] K 본문 이름 꼴 이상 ${odd.length}개 — 아무것도 안 돌린다(이름은 판정기 줄에서 소독 뒤)`);
     process.exit(1);
@@ -33,6 +42,17 @@ function main() {
   console.log(`K 본문 실행기: 실행 ${run.length}개 · 이상 0`);
   let failed = 0;
   for (const f of run) {
+    console.log(`── ${f}`);
+    const x = spawnSync(process.execPath, [path.join(dir, f)], { stdio: 'inherit' });
+    if (x.status !== 0) {
+      failed += 1;
+      const how = x.status === null ? `신호 ${x.signal || '-'}` : `종료 코드 ${x.status}`;
+      console.log(`⚫ ${f} ${how}${x.error ? ` · 실행 오류 ${L.errorName(x.error)}` : ''}`);
+    }
+  }
+  // W-S-01 ⑤ — K 다음 W(같은 규칙 · 하나라도 실패면 끝까지 돈 뒤 실패)
+  if (wb.run.length > 0) console.log(`W 본문 실행기: 실행 ${wb.run.length}개 · 이상 0`);
+  for (const f of wb.run) {
     console.log(`── ${f}`);
     const x = spawnSync(process.execPath, [path.join(dir, f)], { stdio: 'inherit' });
     if (x.status !== 0) {
