@@ -166,17 +166,21 @@ public static class CooltimeScreenRules
     public const string TriggerCountdown = "countdown";
 
     /// <summary>
-    /// 🆕 11/28 고침 1(§277 P3 (b) · §285) — 서버가 「안 끝냈다」(<see cref="CallOutcome.Recheck"/>)고 답했을 때
+    /// 🆕 11/28 고침 1(§277 P3 (b) · §285 · §286) — [로그아웃] 에 서버가 「안 끝냈다」 고 답해 <c>GET state</c> 로 다시 물은 뒤,
     /// <b>보통 손 로그아웃</b>(로그아웃 API · 접속 끝 · 퇴근 기록 → 로그인 화면)으로 갈지.
     /// </summary>
     /// <remarks>
-    /// 사람이 [아니요 — 지금 로그아웃] 을 눌렀으면 뜻은 「로그아웃」 이다. 팝업 중 관리자가 껐거나 다른 탭이 [계속] 해서
-    /// 서버가 안 끝냈어도, 「계속 작업할 수 있습니다」(누른 뜻과 반대)를 띄우지 않고 로그아웃한다(쉬움 기준).
-    /// 카운트다운 0초는 사람이 고른 것이 아니므로 지금대로 다시 확인한다(다른 탭 [계속] 을 지키는 §273 V1).
+    /// 사람이 [아니요 — 지금 로그아웃] 을 눌렀으면 뜻은 「로그아웃」 이다. 다시 물은 결과가 「팝업만 닫음」(관리자가 끔 ·
+    /// 다른 탭 [계속] · 확인 실패) 또는 「다시 셈」 이면 「계속 작업할 수 있습니다」(누른 뜻과 반대) 대신 손 로그아웃한다.
+    /// 「끝남」(물음 만료 · 행 없음 · 401)은 손 로그아웃하지 않는다 — 서버 작업이 설정 시각 퇴근으로 적는다(설계 §6 ·
+    /// §272 놓친 사람 = 설정 시각). 손 로그아웃은 「누른 순간 = 퇴근」 을 적으므로 이 길에서는 쓰지 않는다(§286 · 리뷰 P3-1).
+    /// 카운트다운 0초는 사람이 고른 것이 아니므로 지금대로 다시 확인만 한다(다른 탭 [계속] 을 지키는 §273 V1).
     /// ⬛ [낡은 동작 · 11/27 고침 차례] 버튼 · 0초 모두 다시 확인 → 팝업만 닫고 「계속 작업할 수 있습니다」.
+    /// ⬛ [낡은 머리 · 11/28 고침 1 첫 판 eea1242c · push 전] <c>UseManualLogout(string trigger, CallOutcome outcome)</c>
+    ///    — 다시 묻기 전에 Recheck 전부를 손 로그아웃으로 보냈다(물음 만료도 「누른 순간 퇴근」 이 됨 · 리뷰 P3-1).
     /// </remarks>
-    public static bool UseManualLogout(string trigger, CallOutcome outcome)
-        => outcome == CallOutcome.Recheck && string.Equals(trigger, TriggerButton, StringComparison.Ordinal);
+    public static bool UseManualLogout(string trigger, RecheckDecision decision)
+        => string.Equals(trigger, TriggerButton, StringComparison.Ordinal) && decision != RecheckDecision.EndLocally;
 
     /// <summary>🆕 11/27 — 다시 확인한 뒤 화면이 할 일.</summary>
     public enum RecheckDecision

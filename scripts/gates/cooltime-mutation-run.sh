@@ -22,6 +22,7 @@ SETTINGS=src/HitPan.Application/Services/SettingsService.cs
 SESSION_MW=src/HitPan.API/Middleware/SessionValidityMiddleware.cs
 NOTIFY=src/HitPan.Web/Services/NotificationClient.cs
 SCREEN=src/HitPan.Web/Services/CooltimeScreenRules.cs   # 🆕 11/27 고침 차례
+PROMPT=src/HitPan.Web/Components/Common/CooltimePrompt.razor   # 🆕 11/28 고침 1
 DB="CooltimeDbGateTests"
 RULE="CooltimeRuleGateTests"
 
@@ -48,7 +49,9 @@ MUTATIONS=(
   "s|$SCREEN|or SourceCooltimeBlank or SourceEdited;|or SourceCooltimeBlank;|$RULE.C5_|0"
   "t|$SCREEN|if (active == false) return RecheckDecision.EndLocally;|if (active == false) { }|$RULE.V1_|0"
   # ── 🆕 11/28 고침 1(§277 P3 (b) · §285) — [지금 로그아웃] + 서버 안 끝냄 = 손 로그아웃 ──
-  "u|$SCREEN|=> outcome == CallOutcome.Recheck && string.Equals(trigger, TriggerButton, StringComparison.Ordinal);|=> false;|$RULE.고침1_|0"
+  "u|$SCREEN|=> string.Equals(trigger, TriggerButton, StringComparison.Ordinal) && decision != RecheckDecision.EndLocally;|=> false;|$RULE.고침1_|0"
+  "v|$PROMPT|await RecheckAsync(trigger);|await RecheckAsync();|$RULE.고침1_배선|0"
+  "w|$PROMPT|await FinishWithLogoutAsync(CooltimeScreenRules.TriggerButton);|await FinishWithLogoutAsync(CooltimeScreenRules.TriggerCountdown);|$RULE.고침1_배선|0"
 )
 
 want=" $* "
@@ -85,7 +88,7 @@ for m in "${MUTATIONS[@]}"; do
 done
 
 # 원복 확인 — 변이가 남아 있으면 안 된다
-if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN"; then
+if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT"; then
   echo "::error::변이 원복 실패 — 제품 파일에 변경이 남았다"; git diff --stat; exit 2
 fi
 if [ "$fails" -gt 0 ]; then echo "::error::변이 런 실패 $fails 건"; exit 1; fi

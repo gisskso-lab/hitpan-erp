@@ -8,7 +8,11 @@
    🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 윗줄을 바꿨다: 401 만 끝남. 409 · ended:false 는 출입증을 지우지 않고
       GET state 로 다시 묻는다(행 없음 · 물음 만료 = 끝남 / 안 물음 = 팝업만 닫음). 다른 탭의 [계속] 은 서버 「계속됨」 푸시로 받는다.
    🔴 끝낼 때 손 로그아웃(`AuthService.LogoutAsync` → api/auth/logout)을 부르지 않는다 — 그 길은 「그 순간 = 퇴근」 을
-      적는다. 퇴근은 서버의 자동 로그아웃이 정시 퇴근으로 이미 적었다(설계 §6). 여기서는 이 PC 의 저장소만 비운다. *@
+      적는다. 퇴근은 서버의 자동 로그아웃이 정시 퇴근으로 이미 적었다(설계 §6). 여기서는 이 PC 의 저장소만 비운다.
+   🆕 11/28 고침 1(§277 P3 (b) · §285 · §286) — 윗줄의 예외 하나: [아니요 — 지금 로그아웃] 을 눌렀는데 서버가 안 끝냈고
+      다시 물어도 「끝남」 이 아니면(팝업 중 관리자가 끔 · 다른 탭 [계속] · 확인 실패) 서버가 퇴근을 적지 않았으므로
+      손 로그아웃(`AuthService.LogoutAsync`)으로 간다 — 누른 뜻(로그아웃)과 퇴근 기록이 맞는다. 「끝남」(물음 만료 · 행 없음)
+      은 지금대로 저장소만 비운다(서버가 설정 시각 퇴근을 적는다). *@
 @using Microsoft.JSInterop
 @using Microsoft.Extensions.Logging
 @using MudBlazor
@@ -114,7 +118,9 @@
     /// 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — 서버가 「안 끝냈다」(<c>ended:false</c> · [계속] 409)고 답했을 때
     /// 출입증을 지우지 않고 <c>GET state</c> 로 다시 묻는다. 끝남이면 로그인 화면 · 아니면 팝업만 닫는다(또는 다시 센다).
     /// </summary>
-    private async Task RecheckAsync()
+    // ⬛ [낡은 머리 · 11/27] private async Task RecheckAsync()
+    // 🆕 11/28 고침 1(§286) — trigger = [로그아웃] 계기(버튼 · 0초) · [계속] 409 에서 부를 땐 null.
+    private async Task RecheckAsync(string? trigger = null)
     {
         if (_ending) return;
         StopCountdown();   // 0초에서 멈춘 카운트다운을 치운다(다시 셀 때 새로 시작하게)
@@ -133,7 +139,17 @@
         }
 
         var s = CooltimeScreenRules.ParseState(body);
-        switch (CooltimeScreenRules.AfterRecheck(status, s.Active, s.Asked, s.SecondsLeft))
+        // ⬛ [낡은 줄 · 11/27] switch (CooltimeScreenRules.AfterRecheck(status, s.Active, s.Asked, s.SecondsLeft))
+        var decision = CooltimeScreenRules.AfterRecheck(status, s.Active, s.Asked, s.SecondsLeft);
+        if (trigger is not null && CooltimeScreenRules.UseManualLogout(trigger, decision))
+        {
+            // 🆕 11/28 고침 1(§277 P3 (b) · §285 · §286) — [아니요 — 지금 로그아웃] 을 눌렀는데 서버가 안 끝냈고
+            //   다시 물어도 「끝남」 이 아니다(팝업 중 관리자가 끔 · 다른 탭 [계속] · 확인 실패). 누른 뜻대로 손 로그아웃.
+            //   ⬛ [낡은 동작 · 11/27] 아래 ClosePopup → 「계속 작업할 수 있습니다」(누른 뜻과 반대).
+            await ManualLogoutAsync();
+            return;
+        }
+        switch (decision)
         {
             case CooltimeScreenRules.RecheckDecision.EndLocally:
                 await EndLocallyAsync();
@@ -269,20 +285,14 @@
                 (status, ended) = await PostLogoutAsync(trigger);
             }
             var outcome = CooltimeScreenRules.LogoutOutcome(status, ended);
-            if (CooltimeScreenRules.UseManualLogout(trigger, outcome))
-            {
-                // 🆕 11/28 고침 1(§277 P3 (b) · §285) — [아니요 — 지금 로그아웃] 을 눌렀는데 서버가 안 끝냈다
-                //   (팝업 중 관리자가 끔 · 다른 탭이 [계속]). 누른 뜻대로 보통 손 로그아웃으로 간다.
-                //   ⬛ [낡은 동작 · 11/27] 아래 다시 확인으로 가서 「계속 작업할 수 있습니다」 를 띄웠다(누른 뜻과 반대).
-                await ManualLogoutAsync();
-                return;
-            }
             if (outcome == CooltimeScreenRules.CallOutcome.Recheck)
             {
                 // 🆕 11/27 고침 차례(§273 V1 · §275 E-5) — ended:false = 서버가 이 로그인을 안 끝냈다
                 //   (다른 탭이 [계속] · 팝업 중 끔 · 물음 만료 = 서버 작업 몫). 출입증을 지우지 않고 다시 묻는다.
                 //   ⬛ [낡은 동작 · 11/27 이전] 2xx 면 ended 와 무관하게 아래 EndLocallyAsync 로 갔다(공유 저장소 출입증 삭제 → 두 탭 다 로그인 화면).
-                await RecheckAsync();
+                // 🆕 11/28 고침 1(§285 · §286) — 계기를 넘긴다: 버튼이면 다시 물은 뒤 「끝남」 이 아닐 때 손 로그아웃(RecheckAsync 안).
+                //   ⬛ [낡은 줄 · 11/27] await RecheckAsync();
+                await RecheckAsync(trigger);
                 return;
             }
             if (outcome == CooltimeScreenRules.CallOutcome.Failed)
