@@ -269,8 +269,15 @@
                 string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal)
                 && (p.CanCreate || p.CanUpdate)) == true;
             // 🆕 20260928작4 쿨타임 C-5 ㉮ — 퇴근 고치기 = HR_PROXY 「수정」 만(서버 [RequirePermission("HR_PROXY","update")] 와 같다).
-            _canEditCheckOut = perm?.Permissions?.Any(p =>
-                string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal) && p.CanUpdate) == true;
+            // ⬛ [낡은 줄 · 11/28 CT3 이전] _canEditCheckOut = perm?.Permissions?.Any(p =>
+            //     string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal) && p.CanUpdate) == true;
+            // 🆕 11/28 쿨타임 CT3(결재 기록 §294) — 서버 문지기는 부모계정(대표)을 늘 전권으로 지나게 한다
+            //   (PermissionService Layer 0 · 락아웃 방지). 그런데 위 권한 읽기(/api/permissions/{user_id})에는 그 우회가 없어
+            //   대표 화면엔 고치기 칸 대신 「관리자에게 권한을 요청해 주세요」 가 떴다(CI 런 46074001780 CT3 실측).
+            //   대표 = 서버와 같게 고칠 수 있음. 자식 계정은 그대로 HR_PROXY 「수정」 만. 진짜 문지기는 여전히 서버다.
+            _canEditCheckOut = HitPan.Web.Helpers.AccountTypeHelper.IsTenantAdmin(auth.User)
+                || perm?.Permissions?.Any(p =>
+                    string.Equals(p.MenuCode, "HR_PROXY", StringComparison.Ordinal) && p.CanUpdate) == true;
 
             if (_canProxy) _employees = await EmpSvc.GetListAsync();
         }
