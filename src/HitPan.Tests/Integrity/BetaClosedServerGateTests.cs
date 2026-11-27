@@ -148,6 +148,53 @@ public sealed class BetaClosedServerGateTests
             $"G-A2 보고서 함수를 {report.Invocations.Count} 번 불렀다 — 닫힘 깃발 뒤에서 숫자가 나간다.");
     }
 
+    [Fact(DisplayName = "G-A2-4 대화 답: 닫힘 안내 결과 → 안내 글만(「자료가 없습니다 · 다시 말씀해 주세요」 0)")]
+    public async Task G_A2_4_닫힘_답은_안내_글만()
+    {
+        var report = ThrowingReport();
+        var svc = new AiEmployeeAnalysisService(report.Object, NullLogger<AiEmployeeAnalysisService>.Instance);
+        var result = await svc.TryAnalyzeAsync("이번 달 수익 분석해줘", "t-gate");
+
+        var answer = ChatbotService.ClosedAnalysisAnswer(result!);
+
+        Assert.Equal(AiEmployeeAnalysisService.SalesProfitabilityClosedNotice, answer);
+        Assert.DoesNotContain("자료가 없습니다", answer);
+        Assert.DoesNotContain("다시 말씀해 주세요", answer);
+    }
+
+    [Fact(DisplayName = "G-A2-5 대화 답 대조군: 다른 제목의 빈 결과 · 행 있는 결과 → null(기존 요약 그대로)")]
+    public void G_A2_5_닫힘_아닌_결과는_null()
+    {
+        var empty = new HitPan.Application.DTOs.Chatbot.AiAnalysisResultDto { Kind = "sales-profitability", Title = "이번 달 판매 수익성", Rows = new() };
+        Assert.Null(ChatbotService.ClosedAnalysisAnswer(empty));
+
+        var withRows = new HitPan.Application.DTOs.Chatbot.AiAnalysisResultDto
+        {
+            Kind = "sales-profitability",
+            Title = AiEmployeeAnalysisService.SalesProfitabilityClosedNotice,
+            Rows = new() { new() { "A", "1" } }
+        };
+        Assert.Null(ChatbotService.ClosedAnalysisAnswer(withRows));
+    }
+
+    [Fact(DisplayName = "G-A2-6 대화 답 결선: BuildAnalysisAnswerAsync 가 닫힘 갈래를 「행 0」 안내보다 먼저 본다(소스 순서)")]
+    public void G_A2_6_닫힘_갈래가_행0_안내보다_앞()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Join(dir.FullName, "src", "HitPan.Infrastructure")))
+            dir = dir.Parent;
+        Assert.True(dir is not null, "레포 뿌리를 찾지 못했다");
+        var src = File.ReadAllText(Path.Join(dir!.FullName, "src", "HitPan.Infrastructure", "Services", "ChatbotService.cs"));
+
+        var start = src.IndexOf("private async Task<ChatAnswerDto> BuildAnalysisAnswerAsync(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "BuildAnalysisAnswerAsync 시작을 찾지 못했다");
+        var call = src.IndexOf("ClosedAnalysisAnswer(analysis)", start, StringComparison.Ordinal);
+        var empty = src.IndexOf("else if (analysis.Rows.Count == 0)", start, StringComparison.Ordinal);
+        var noData = src.IndexOf("해당 조건에 맞는 거래 자료가 없습니다", start, StringComparison.Ordinal);
+        Assert.True(call > start, "BuildAnalysisAnswerAsync 안에서 ClosedAnalysisAnswer 를 부르지 않는다");
+        Assert.True(empty > call && noData > empty, "닫힘 갈래가 「행 0」 안내 갈래보다 앞이어야 한다");
+    }
+
     [Fact(DisplayName = "G-A2-2 대화 분석 대조군: 「안녕하세요」 → null · 보고서 호출 0")]
     public async Task G_A2_2_수익_아닌_질문은_null()
     {
