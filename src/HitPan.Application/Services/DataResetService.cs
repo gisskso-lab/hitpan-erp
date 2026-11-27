@@ -27,16 +27,23 @@ public sealed class DataResetService : IDataResetService
     private readonly IAuditService _audit;
     private readonly ILogger<DataResetService> _logger;
 
+    /// <summary>20261127작 W-S-01 갈래 B — 이 판에서 초기화가 열려 있나(운영 = <see cref="DataResetBetaAvailability"/> · 닫힘).</summary>
+    private readonly IDataResetAvailability _availability;
+
+    // ⬛ 20261127작 W-S-01 갈래 B 이전 서명: DataResetService(IDbConnection db, IBackupService backupService, IAuditService audit, ILogger<DataResetService> logger)
+    // 생성자 1개 유지 · 선택 인자 금지(설계 §3-2 의 2) — 직접 만드는 곳 4곳(시험)은 열림/닫힘을 드러내 고른다.
     public DataResetService(
         IDbConnection db,
         IBackupService backupService,
         IAuditService audit,
-        ILogger<DataResetService> logger)
+        ILogger<DataResetService> logger,
+        IDataResetAvailability availability)
     {
         _db = db;
         _backupService = backupService;
         _audit = audit;
         _logger = logger;
+        _availability = availability;
     }
 
     /// <summary>
@@ -72,6 +79,18 @@ public sealed class DataResetService : IDataResetService
     public async Task<DataResetResponse> ResetAllAsync(
         DataResetRequest request, string tenantId, string userId, CancellationToken ct = default)
     {
+        // ── 00) 20261127작 W-S-01 갈래 B — 이 판에서 닫힘이면 **맨 첫 문장**에서 거절(K25 · §256 · §258 · 설계 §3-2 의 3) ──
+        // 연결 열기 · 대표 판정 · 비번 대조 · 강제 백업 · 삭제보다 앞 — DB 를 읽지 않고 백업도 돌리지 않는다.
+        // 자료이관 덮어쓰기(MigrationController.PrepareOverwriteAsync :705)도 이 메서드를 부르므로 함께 닫힌다.
+        // 아래 0) ~ 4)(#978 대표 판정 · 비번 · 백업 · 보존 표)는 지우지 않는다(#1) — 다시 열면(DataResetBetaAvailability.IsOpen) 그대로 돈다.
+        if (!_availability.IsOpen)
+        {
+            var closedCode = DataResetGateCodes.ToCode(DataResetGate.Closed);
+            await _audit.LogAsync("data_reset_denied", "system", null, reason: ClosedDenyReasonPrefix + closedCode, ct: ct)
+                .ConfigureAwait(false);
+            return new DataResetResponse { Success = false, DenyCode = closedCode, Error = GateMessage(DataResetGate.Closed) };
+        }
+
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // ── 0) 대표 계정 판정 (20261125작 · 대표 결재 §146 「초기화만」 · 「막고 안내」) ──
@@ -238,10 +257,22 @@ public sealed class DataResetService : IDataResetService
     public const string MultipleParentsMessage =
         "이 회사에 대표 계정이 둘 이상으로 되어 있어 초기화를 막았습니다. 고객지원센터에 '대표 계정 확인'을 요청해 주세요.";
 
+    /// <summary>
+    /// 20261127작 W-S-01 갈래 B — 이 판에서 초기화가 닫혀 있을 때의 안내(설계 §3-4 · 시험이 이 상수로 대조).
+    /// 개발 낱말 · 내부 정보 0(#23 · 「처음 보는 사람」 기준).
+    /// </summary>
+    public const string ClosedMessage =
+        "기존 자료를 모두 지우는 기능은 지금 쓰시는 히트판에서 잠시 닫아 두었습니다. 회사 자료는 그대로 있습니다.";
+
+    /// <summary>20261127작 W-S-01 갈래 B — 닫힘 거절의 감사 reason 접두(뒤에 DenyCode 「closed」 · 설계 §3-2 의 3 · 시험이 이 상수로 대조).</summary>
+    public const string ClosedDenyReasonPrefix = "베타 판 닫힘: ";
+
     private static string GateMessage(DataResetGate gate) => gate switch
     {
         DataResetGate.NoParent => NoParentMessage,
         DataResetGate.MultipleParents => MultipleParentsMessage,
+        // 20261127작 W-S-01 갈래 B [반증 S-2] — 드러내 적는다. 빠뜨리면 아래 기본 칸으로 떨어져 대표에게 「대표 계정이 아닙니다」 가 뜬다(시험 G-B3 ⓑ).
+        DataResetGate.Closed => ClosedMessage,
         _ => NotParentMessage,
     };
 
@@ -253,6 +284,10 @@ public sealed class DataResetService : IDataResetService
     /// </remarks>
     public async Task<DataResetGate> GetResetGateAsync(string tenantId, string userId, CancellationToken ct = default)
     {
+        // 20261127작 W-S-01 갈래 B 둘째 겹(설계 §3-2 의 4) — 닫힘이면 DB 질의 전에 Closed.
+        //   누가 ResetAllAsync 첫 문장(00)의 순서를 바꿔도 막힘 · my-level 이 「closed」 를 받아 사이드바 메뉴가 저절로 사라진다.
+        if (!_availability.IsOpen) return DataResetGate.Closed;
+
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         var row = await _db.QuerySingleAsync<ResetGateRow>(new CommandDefinition(
@@ -279,6 +314,9 @@ public sealed class DataResetService : IDataResetService
     public async Task<DataResetGate> GetResetGateInTransactionAsync(
         DbTransaction tx, string tenantId, string userId, CancellationToken ct = default)
     {
+        // 20261127작 W-S-01 갈래 B 셋째 겹(설계 §3-2 의 4) — 닫힘이면 잠금 · 집계 질의 전에 Closed(부른 쪽이 롤백 → 같은 DenyCode).
+        if (!_availability.IsOpen) return DataResetGate.Closed;
+
         var conn = tx.Connection
             ?? throw new InvalidOperationException("트랜잭션에 연결이 없다 — 초기화 안 판정을 할 수 없다.");
 

@@ -111,7 +111,10 @@ public sealed partial class EmployeeAccountLinkGateDbTests
         services.AddSingleton<ITenantDeviceService>(sp => new TenantDeviceService(db, new NoOpAudit(), config, NullLogger<TenantDeviceService>.Instance));
         // 20261125작 — my-level 이 초기화 대표 판정(GetResetGateAsync)을 부르게 되어 Program.cs:143 과 같은 서비스를 넣는다.
         //   이 시험은 판정만 탄다 — 백업 서비스는 넣지 않는다(초기화를 부르면 그 자리에서 터진다 = 이 길로 지우지 않았다는 증명).
-        services.AddScoped<IDataResetService>(_ => new DataResetService(db, null!, new NoOpAudit(), NullLogger<DataResetService>.Instance));
+        // ⬛ 20261127작 W-S-01 갈래 B 이전: services.AddScoped<IDataResetService>(_ => new DataResetService(db, null!, new NoOpAudit(), NullLogger<DataResetService>.Instance));
+        //   열림 여부는 _resetAvailability(기본 = 열린 가짜 · G-E9 「대표 = allowed」 그대로 · D-B2 만 운영 구현으로 바꿈 → .ResetClosed.cs).
+        services.AddScoped<IDataResetService>(_ => new DataResetService(db, null!, new NoOpAudit(), NullLogger<DataResetService>.Instance,
+            _resetAvailability));
 
         await using var sp = services.BuildServiceProvider();
         var app = new ApplicationBuilder(sp);

@@ -141,6 +141,7 @@ builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<IDataResetService, DataResetService>();
+builder.Services.AddSingleton<IDataResetAvailability, DataResetBetaAvailability>();  // 20261127작 W-S-01 갈래 B — 이 판에서 초기화 닫힘(다시 여는 길 = DataResetBetaAvailability.IsOpen 한 줄 · 대표 확인 뒤에만)
 builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
 builder.Services.AddScoped<ITermsConsentService, TermsConsentService>();  // 헌법 #24 약관 4건 강제 동의
 builder.Services.AddScoped<IItemSpecService, ItemSpecService>();  // 작지① 상품 규격 1:N 콤보박스 (사장님 작업지시 2026-05-31)

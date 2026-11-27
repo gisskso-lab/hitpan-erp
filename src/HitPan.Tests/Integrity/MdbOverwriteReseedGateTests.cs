@@ -323,6 +323,40 @@ public sealed class MdbOverwriteReseedGateTests
     }
 
     /// <summary>
+    /// 🔴 G-OW11 (20261127작 W-S-01 갈래 B · 설계 §4 G-B5) — <b>닫힌 판</b>에서는 덮어쓰기가 메인PC · 확인 문구 · 비번을 다 통과해도
+    /// 지우기 서비스가 거절하고 → 400 · 닫힘 안내 · <b>잡 생성 0 · 뼈대 재시드 0</b>.
+    /// <para>
+    /// 가짜가 아니라 운영 구현(<c>DataResetBetaAvailability</c>)을 넣은 진짜 <c>DataResetService</c> 를 넣는다 — DB · 백업은 null(만지면 그 자리에서 터짐).
+    /// 잡 저장소 · 재시드도 null 이라, 거기까지 갔다면 400 이 아니라 NullReference(잡) 또는 500(재시드 catch)이 나온다 = 그게 증명이다.
+    /// </para>
+    /// <para>무력화: <c>ResetAllAsync</c> 첫 문장(닫힘)을 빼면 DB(null)를 만져 예외 → 빨간불.</para>
+    /// </summary>
+    [Fact]
+    public async Task G_OW11_닫힌판이면_덮어쓰기는_지우기도_재시드도_잡도_안_만든다()
+    {
+        var audits = 0;
+        var audit = DataResetParentOnlyGateTests.FakeProxy<IAuditService>.Create(_ => { audits++; return Task.CompletedTask; });
+        var closed = new HitPan.Application.Services.DataResetService(
+            db: null!, backupService: null!, audit: audit,
+            logger: NullLogger<HitPan.Application.Services.DataResetService>.Instance,
+            availability: new HitPan.Application.Services.DataResetBetaAvailability());
+        var controller = NewController(closed);
+
+        var result = await controller.StartMigrationJob(new MdbMigrationRequest
+        {
+            FolderPath = @"C:\HITWIN",
+            Mode = "overwrite",
+            ConfirmText = "덮어쓰기",
+            Password = "비밀번호있음",
+        }, default);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        var message = bad.Value?.GetType().GetProperty("message")?.GetValue(bad.Value) as string;
+        Assert.Equal(HitPan.Application.Services.DataResetService.ClosedMessage, message);
+        Assert.Equal(1, audits);
+    }
+
+    /// <summary>
     /// 🔴 G-OW7 — 초기화 화면과 덮어쓰기가 <b>같은 재시드</b>를 탄다.
     /// <para>
     /// 두 컨트롤러가 모두 <see cref="CompanyBootstrapProvisioner"/> 를 받아야 하고,
