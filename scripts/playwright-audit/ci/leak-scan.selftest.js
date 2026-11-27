@@ -2784,6 +2784,81 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const ok = mg.openOk === true && mk.openOk === false && ca.closedOk === true && ca.openOk === false && typeof sm.device === 'string';
         check('W-C19 (F6) R5 대조 = 분석 칸 있음 → 참 · 답만 다름 → 거짓 · 닫힘 글 → 닫힘 참 · 두 답 같음 → 장치', ok, `분석 칸 ${mg.openOk} · 답만 다름 ${mk.openOk} · 닫힘 ${ca.closedOk} · 같음 ${!!sm.device}`);
       }
+      // ── 11/27 main 대조 런 45986643982 진단 · D3 고침(개발명세서 §6 11/27) — 브라우저 · 네트워크 0 ──
+      { // W-C20 M6e 오류 띠 — / 곧장 열기 기준에도 떴을 때만 바탕 · 기준 없음 · 기준 안 뜸 = 예전 그대로 거짓
+        const good = { up: true, at: '/', nav: 30, textLen: 500, errUi: false, notFound: false, pw: 0, notice: false };
+        const both = WS.m6eJudge({ ...good, errUi: true, baseErrUi: true });
+        const onlyNow = WS.m6eJudge({ ...good, errUi: true, baseErrUi: false });
+        const noBase = WS.m6eJudge({ ...good, errUi: true });
+        const baseButBad = [{ ...good, errUi: true, baseErrUi: true, at: '/data/reset' }, { ...good, errUi: true, baseErrUi: true, nav: 0 }, { ...good, errUi: true, baseErrUi: true, pw: 1 }, { ...good, errUi: true, baseErrUi: true, notice: true }].map((v) => WS.m6eJudge(v));
+        const ok = both.closedOk === true && both.openOk === true && onlyNow.closedOk === false && noBase.closedOk === false && noBase.openOk === false
+          && baseButBad.every((x) => x.closedOk === false && x.openOk === false);
+        check('W-C20 M6e 띠가 기준(/ 곧장)에도 뜸 → 참 · 지금만 뜸 · 기준 없음 → 거짓 · 기준 떠도 머무름 · 메뉴 0 · 비번 칸 · 닫힘 안내 → 거짓 4/4', ok, `둘 다 ${both.closedOk} · 지금만 ${onlyNow.closedOk} · 기준 없음 ${noBase.closedOk} · 나머지 거짓 ${baseButBad.filter((x) => !x.closedOk).length}/4`);
+      }
+      { // W-C21 M5a main 대조 = 열린 꼴(JSON · 2xx 빈 형식 본문 0) — main 런 실물 꼴(8 JSON + 200 빈 2) 참 · 닫힌 꼴 · 401 · 403 · 405 · 5xx · html · 형식 없는 본문 있음 = 거짓
+        const o200 = { status: 200, json: true, ctype: 'application/json', text: '{}' };
+        const j400 = { status: 400, json: true, ctype: 'application/problem+json', text: '{}' };
+        const e200 = { status: 200, json: false, ctype: '', text: '' };
+        const mainRows = [o200, e200, o200, o200, o200, j400, o200, e200, o200, o200];
+        const m = WS.m5aJudge(o200, mainRows, o200);
+        const notOpen = [
+          { status: 200, json: false, ctype: 'text/html; charset=utf-8', text: '<html>' }, { status: 404, json: false, ctype: '', text: '' },
+          { status: 401, json: true, ctype: 'application/json', text: '{}' }, { status: 403, json: true, ctype: 'application/json', text: '{}' },
+          { status: 405, json: true, ctype: 'application/json', text: '{}' }, { status: 500, json: true, ctype: 'application/json', text: '{}' },
+          { status: 200, json: false, ctype: '', text: 'x' }, { status: 200, json: false, ctype: 'text/plain', text: '' }, { status: 302, json: false, ctype: '', text: '' },
+        ];
+        const oneBad = notOpen.map((x) => WS.m5aJudge(o200, [...mainRows.slice(0, 9), x], o200).openOk);
+        const closedAll = WS.m5aJudge(o200, Array.from({ length: 10 }, () => ({ status: 404, json: false, ctype: '', text: '' })), o200);
+        const noGate = WS.m5aJudge({ status: 401, json: true }, mainRows, o200);
+        const ok = m.openOk === true && m.closedOk === false && m.openN === 10 && oneBad.every((x) => x === false) && closedAll.openOk === false && closedAll.closedOk === true && noGate.openOk === false;
+        check('W-C21 M5a main 실물 꼴(JSON 8 + 200 빈 형식 2) → 대조 참 · 한 경로가 html · 404 · 401 · 403 · 405 · 500 · 형식 없는 본문 · text/plain · 302 빈 → 대조 거짓 9/9 · 10 닫힘 → 대조 거짓 · 출입증 없음 → 거짓', ok, `main ${m.openOk}(${m.openN}) · 하나 나쁨 거짓 ${oneBad.filter((x) => x === false).length}/9 · 닫힘 ${closedAll.openOk}/${closedAll.closedOk} · 문 ${noGate.openOk}`);
+      }
+      { // W-C22 칸 상한 — 상한 뒤 안쪽이 끝날 때까지 기다림(겹침 0) · 끝내 안 끝나면 overrun · 보통 예외는 바로
+        const sleepT = (ms) => new Promise((ok) => setTimeout(ok, ms));
+        let doneA = false;
+        const a = await WS.runBounded(async () => { await sleepT(250); doneA = true; }, 50, 2000, 't');
+        const afterA = doneA;
+        const b = await WS.runBounded(async () => { await sleepT(600); }, 30, 60, 't');
+        const t0 = Date.now();
+        const c = await WS.runBounded(async () => { throw new Error('바로'); }, 5000, 5000, 't');
+        const dc = Date.now() - t0;
+        const d = await WS.runBounded(async () => 1, 1000, 1000, 't');
+        const ok = a.ok === false && a.overrun === false && afterA === true && b.ok === false && b.overrun === true
+          && c.ok === false && c.overrun === false && dc < 1000 && d.ok === true && typeof WS.CellOverrun === 'function';
+        check('W-C22 칸 상한 넘침 → 안쪽 끝날 때까지 기다린 뒤 돌아옴(겹침 0) · 기다림 상한도 넘침 → overrun · 보통 예외 → 바로 · 정상 → ok', ok, `기다림 ${afterA}/${a.overrun} · 넘침 ${b.overrun} · 예외 ${c.overrun}(${dc}ms) · 정상 ${d.ok}`);
+      }
+      { // W-C23 M9 세션 놓기 — 놓기 전 200 · 로그아웃 200 · 캐시(가짜 3번 200) 지나 401 → 참 · 끝내 200 · 놓기 전 403 · 로그아웃 실패 → 거짓
+        const fake = (seq) => { let i = 0; return async () => { const v = seq[Math.min(i, seq.length - 1)]; i += 1; return v; }; };
+        const lo = async (s) => ({ ok: true, got: `${s.who} status=200` });
+        const loBad = async (s) => ({ ok: false, got: `${s.who} status=500` });
+        const s = { who: 'W_T', token: 'v' };
+        const io = (probe, logout = lo) => ({ probe, logout, waitMs: 300, step: 10 });
+        const a = await WS.release(s, io(fake([200, 200, 200, 200, 401])));
+        const b = await WS.release(s, io(fake([200, 200])));
+        const c = await WS.release(s, io(fake([403, 401])));
+        const d = await WS.release(s, io(fake([200, 401]), loBad));
+        const e = await WS.release({ who: 'W_T', token: null }, io(fake([200, 401])));
+        const ok = a.ok === true && b.ok === false && c.ok === false && d.ok === false && e.ok === false && /앞 200/.test(a.got) && /뒤 요청 401/.test(a.got);
+        check('W-C23 M9 놓기 전 200 → 로그아웃 → 캐시 200 3번 뒤 401 → 참 · 끝내 200 → 거짓 · 놓기 전 403 → 거짓 · 로그아웃 실패 → 거짓 · 출입증 없음 → 거짓', ok, `캐시 뒤 401 ${a.ok} · 끝내 200 ${b.ok} · 앞 403 ${c.ok} · 로그아웃 실패 ${d.ok} · 없음 ${e.ok}`);
+      }
+      { // W-C24 M6c(글로 찾은 덮어쓰기 칸) · R3(읽기 응답 받은 뒤 값)
+        const c6 = [
+          WS.m6cJudge({ overFound: true, overDis: false }, false), WS.m6cJudge({ overFound: true, overDis: true }, true),
+          WS.m6cJudge({ overFound: false, overDis: false }, false), WS.m6cJudge({ overFound: true, overDis: true }, false),
+          WS.m6cJudge({ overFound: true, overDis: false }, true),
+        ];
+        const c6ok = c6[0].openOk && !c6[0].closedOk && c6[1].closedOk && !c6[1].openOk && !c6[2].openOk && !c6[2].closedOk && !c6[3].openOk && !c6[3].closedOk && !c6[4].openOk && !c6[4].closedOk;
+        const r3 = [
+          WS.r3Judge({ loaded: true, st: 200, before: false, want: true, after: true }),
+          WS.r3Judge({ loaded: false, st: 200, before: false, want: true, after: true }),
+          WS.r3Judge({ loaded: true, st: 500, before: false, want: true, after: true }),
+          WS.r3Judge({ loaded: true, st: 200, before: false, want: true, after: false }),
+          WS.r3Judge({ loaded: true, st: 200, before: true, want: true, after: true }),
+          WS.r3Judge({ loaded: true, st: 200, before: null, want: true, after: true }),
+        ];
+        const ok = c6ok && r3[0] === true && r3.slice(1).every((x) => x === false);
+        check('W-C24 M6c 칸 풀림 → 대조 참 · 잠김 + 안내 → 닫힘 참 · 칸 없음 · 잠김만 · 풀림 + 안내 → 둘 다 거짓 / R3 읽기 받음 · 200 · 뒤집힌 값 유지 → 참 · 읽기 못 받음 · 저장 500 · 값 안 유지 · 안 뒤집음 · 앞 값 없음 → 거짓 5/5', ok, `M6c ${c6ok} · R3 참 ${r3[0]} · 거짓 ${r3.slice(1).filter((x) => x === false).length}/5`);
+      }
     }
   }
   const bad = results.filter((x) => !x.ok).length;
