@@ -24,12 +24,30 @@ namespace HitPan.Tests.Integrity;
 /// <para>안전장치: 진입점을 부르기 전에 같은 가로채기를 빈 <see cref="HostApplicationBuilder"/> 로 먼저 시험한다(가로채기가 안 먹는
 /// 런타임이면 진입점을 부르지 않고 FAIL). 그래도 <c>HostBuilding</c> 을 못 잡으면 <c>HostBuilt</c> 에서 다시 멈춘다(<c>Build()</c> 안 ·
 /// 마이그 적용보다 앞).</para>
+/// <para>🆕 11/28 [3-V] S-1 · S-2 · [4] P2-1 고침 — ① 진입점 첫 줄 <c>LoadDotEnv()</c> 는 실행 폴더의 조상 <c>.env</c> 를 읽어
+/// 환경 변수를 실값으로 덮는다 ⇒ 조상(실행 폴더 · 작업 폴더)에 <c>.env</c> 가 있으면 진입점을 <b>부르지 않는다</b>
+/// (CI db-gate = <c>HITPAN_REQUIRE_DB</c> 면 장치 오염 FAIL · 개발 PC 는 이유를 찍고 건너뜀 — 이 게이트는 CI 에서만 잰다).
+/// ② 환경 변수는 <b>전체</b>를 떠 두고 끝에 <b>전체</b>를 되돌린다(진입점이 더한 키는 지우고 바꾼 값은 원래대로).
+/// ③ 전역 Serilog 로거는 원래 것으로 되돌린다. ④ 같은 DB_* 키를 만지는 <c>BackupCredentialGate</c> 의 병렬 끔 Collection 에 든다
+/// (병렬 끔 Collection 은 다른 어떤 Collection 과도 동시에 돌지 않는다 ⇒ <c>WebhookAccountVocabGate</c> · 암호 키 시험과도 겹침 0).</para>
 /// </remarks>
+[Collection(BackupCredentialGateCollection.Name)]
 public sealed partial class CooltimeRuleGateTests
 {
     [Fact(DisplayName = "G-C24 서버 작업 배선(리뷰 P3-2) — ERP API 진입점을 실제로 돌려 Build 직전 서비스 목록: IHostedService = CooltimeService 1개 · CooltimeEngine Scoped · ICooltimePusher = SignalRCooltimePusher · 대조(다른 서버 작업도 보임)")]
     public void G_C24_진입점_서비스목록에_쿨타임_서버작업이_있다()
     {
+        // 🆕 11/28 S-1 — 진입점 실행 중 실제 DB 연결 0: Build 앞엔 연결을 여는 코드가 없고(등록만) · HostBuilding 에서 멈추며 · DB_HOST = `.invalid`(조상 .env 없을 때만 진입점을 부름).
+        var dotEnv = ErpApiHostCapture.FindAncestorDotEnv();
+        if (dotEnv is not null)
+        {
+            Assert.False(DbGateEnvironment.IsCi,
+                $"[G-C24] 장치 오염 — CI(HITPAN_REQUIRE_DB)인데 조상 폴더에 .env 가 있다: {dotEnv} · 진입점 LoadDotEnv() 가 이 값으로 환경 변수를 덮으므로 진입점을 부르지 않았다");
+            Console.Error.WriteLine(
+                $"[SKIP] G-C24 — 조상 폴더에 .env 가 있다({dotEnv}). 진입점 LoadDotEnv() 가 실값(DB_* · JWT_SECRET · ERP_ENCRYPTION_KEY)으로 덮으므로 진입점을 부르지 않았다. 이 게이트는 CI(.env 없음)에서만 잰다 — 초록불을 검증으로 읽지 마라.");
+            return;
+        }
+
         var services = ErpApiHostCapture.CaptureServices();
 
         // 양성 대조 — 「무엇을 세고 있는지」 먼저: 진짜 Program.cs 목록이면 수백 줄 · 다른 서버 작업도 보인다.
@@ -73,9 +91,68 @@ internal static class ErpApiHostCapture
         public StopBeforeProvider(string where) : base("[G-C24] 서비스 공급자 만들기 전에 멈춤 — " + where) { }
     }
 
+    /// <summary>
+    /// 🆕 11/28 S-1 — 진입점 <c>LoadDotEnv()</c>(Program.cs:884 · <see cref="AppContext.BaseDirectory"/> 에서 조상으로)가 읽을 <c>.env</c>,
+    /// 그리고 작업 폴더의 조상 <c>.env</c> 를 찾는다. 처음 만난 경로 · 없으면 null.
+    /// </summary>
+    public static string? FindAncestorDotEnv()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            for (var cur = new DirectoryInfo(start); cur is not null; cur = cur.Parent)
+            {
+                var path = Path.Combine(cur.FullName, ".env");
+                if (File.Exists(path)) return path;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>🆕 11/28 S-1 — 프로세스 환경 변수 전체 사본.</summary>
+    private static Dictionary<string, string?> SnapshotEnvironment()
+    {
+        var snap = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
+            snap[(string)e.Key] = e.Value as string;
+        return snap;
+    }
+
+    /// <summary>🆕 11/28 S-1 — 사본대로 되돌린다: 그 뒤 더해진 키는 지우고 · 바뀌거나 지워진 키는 원래 값으로.</summary>
+    private static void RestoreEnvironment(Dictionary<string, string?> snap)
+    {
+        foreach (var (key, _) in SnapshotEnvironment())
+            if (!snap.ContainsKey(key)) Environment.SetEnvironmentVariable(key, null);
+        foreach (var (key, value) in snap)
+            if (!string.Equals(Environment.GetEnvironmentVariable(key), value, StringComparison.Ordinal))
+                Environment.SetEnvironmentVariable(key, value);
+    }
+
     public static IReadOnlyList<ServiceDescriptor> CaptureServices()
     {
         lock (OneAtATime)
+        {
+            // 🆕 11/28 S-1 · S-2 — 환경 변수 전체 · 전역 Serilog 로거를 떠 둔다(끝에 전부 되돌림 · 아래 바깥 finally).
+            var envBefore = SnapshotEnvironment();
+            var loggerBefore = Serilog.Log.Logger;
+            try
+            {
+                return CaptureServicesCore();
+            }
+            finally
+            {
+                // 진입점이 전역 로거를 바꿨으면 그 로거를 닫고(파일 손잡이) 원래 로거로 되돌린다.
+                if (!ReferenceEquals(Serilog.Log.Logger, loggerBefore))
+                {
+                    Serilog.Log.CloseAndFlush();
+                    Serilog.Log.Logger = loggerBefore;
+                }
+                RestoreEnvironment(envBefore);
+            }
+        }
+    }
+
+    private static IReadOnlyList<ServiceDescriptor> CaptureServicesCore()
+    {
         {
             // 진입점 등록 코드가 요구하는 값(AuthExtensions — JWT_SECRET 없으면 예외). 레포에 값을 남기지 않는다(매 실행 무작위 · CooltimeDbGateTests 와 같은 이유).
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("JWT_SECRET")))
@@ -113,8 +190,8 @@ internal static class ErpApiHostCapture
             finally
             {
                 foreach (var key in filled) Environment.SetEnvironmentVariable(key, null);
-                // 진입점이 바꾼 전역 로거(Serilog)를 닫는다 — 파일 손잡이를 남기지 않는다.
-                Serilog.Log.CloseAndFlush();
+                // 진입점이 바꾼 전역 로거(Serilog) 닫기 · 되돌리기 = 🆕 11/28 S-2 — CaptureServices 바깥 finally 로 옮김
+                //   (여기서 무조건 닫으면 진입점이 로거를 안 바꾼 경우 원래 로거를 닫는다). 환경 변수 전체 되돌림도 그쪽.
             }
         }
     }

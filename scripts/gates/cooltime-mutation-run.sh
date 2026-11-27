@@ -60,6 +60,9 @@ MUTATIONS=(
   "x|$ENGINE|return (CooltimeAttendanceOutcome.NoEmployee, null, null, null);|{ }|$DB.G_C23_|1"
   "y|$API_PROGRAM|builder.Services.AddHostedService<HitPan.API.Services.Cooltime.CooltimeService>();|// (변이 y) 쿨타임 서버 작업 배선 뺌|$RULE.G_C24_|0"
   "z|$MIG132|cooltime_changed_at DATETIME(6) NULL|cooltime_changed_at DATETIME NULL|$MIG.G_W13_7_|1"
+  # ── 🆕 11/28 [3-V] S-3 · [4] P3 — 규칙 ④ 폭 경계 정확값(G-C22 「경계 login = C 정확」 · 「경계 login = C + 4h 정확」) · a~z 다 써서 두 글자 ──
+  "aa|$ENGINE|login_at >= @CUtc|login_at > @CUtc|$DB.G_C22_|1"
+  "ab|$ENGINE|login_at < @CUtc + INTERVAL @W HOUR|login_at <= @CUtc + INTERVAL @W HOUR|$DB.G_C22_|1"
 )
 
 want=" $* "

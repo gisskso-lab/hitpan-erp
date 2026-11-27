@@ -722,10 +722,12 @@ public sealed partial class CooltimeDbGateTests : IDisposable
     //   회사(테넌트)마다 C 가 하나이므로 경우마다 회사를 따로 둔다 — 한 바퀴(RunOnceAsync 1회)가 전부를 판정한다.
     // ══════════════════════════════════════════════════════════════
 
+    // 🆕 11/28 [3-V] S-3 · S-4 · [4] P3 고침 — LoginFromC: 로그인을 「엔진이 쓸 CUtc + 이 값」 그대로 심는다(경계 정확값 · 초 내림 어긋남 0).
+    //   ChangedFromC: 그 회사 cooltime_changed_at = CUtc + 이 값(E-2 — 0 이상이면 이번 C 건너뜀).
     private sealed record RuleFourCase(string Name, TimeSpan LoginAgo, TimeSpan CAgo, bool ExpectAsk,
-        TimeSpan? SnoozeFromNow = null);
+        TimeSpan? SnoozeFromNow = null, TimeSpan? LoginFromC = null, TimeSpan? ChangedFromC = null);
 
-    [Fact(DisplayName = "G-C22 규칙 ④(E-6 · W=4) — 22:00 회사 · 09:00 · 03:00 로그인 = ④ 아님(로그인+1h 물음 0 · 다음 C 에 ③) · 23:30 · 00:40 = ④(로그인+1h 직전 0 · 직후 1) · 폭 경계 3h59m/4h01m · 미룸 지남 = 물음 · 미룸 남음 = 0")]
+    [Fact(DisplayName = "G-C22 규칙 ④(E-6 · W=4) — 22:00 회사 · 09:00 · 03:00 로그인 = ④ 아님(로그인+1h 물음 0 · 다음 C 에 ③) · 23:30 · 00:40 = ④(로그인+1h 직전 0 · 직후 1) · 폭 경계 3h59m/4h01m · 미룸 지남 = 물음 · 미룸 남음 = 0 · 02:00 회사 01:30 · 07:30 = ④ 아님(③) · 경계 정확값 login=C(물음) · C+4h(0) · ④ 도 E-2 건너뜀")]
     public async Task G_C22_규칙4는_설정시각_뒤_W시간_안_로그인만_묻는다()
     {
         if (!Ready("G-C22")) return;
@@ -764,6 +766,20 @@ public sealed partial class CooltimeDbGateTests : IDisposable
             // ── 미룸 있는 ④([계속] 뒤 1시간마다) — 로그인 = C + 1.5h · 로그인 3시간 전 ──
             new("④ 미룸 지남", H(3), H(3) + H(1.5), true, SnoozeFromNow: -M(1)),
             new("④ 미룸 남음", H(3), H(3) + H(1.5), false, SnoozeFromNow: M(30)),   // 로그인+1h 는 지났어도 미룸이 먼저
+            // ── 🆕 11/28 [4] P3 — E-6 예시 5줄 — 02:00 회사 · 01:30 로그인 · 그때 C = 어제 02:00(+23.5h) · ④ 아님 · 첫 물음 02:00(③ · 로그인 30분 뒤) ──
+            new("01:30 ③자리 직전", M(29), H(24) - M(1), false),                // C = 지금 + 1분 − 24h(어제 02:00) · 폭 밖 · ③ 창 닫힘
+            new("01:30 ③자리 직후", M(30) + TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15), true),
+            // ── 🆕 11/28 [4] P3 — E-6 예시 6줄 — 02:00 회사 · 07:30 로그인(C + 5.5h) · ④ 아님 · 첫 물음 다음 날 02:00(③) ──
+            new("07:30 ④자리 직전", before, before + H(5.5), false),
+            new("07:30 ④자리 직후", after, after + H(5.5), false),             // 대조군 ⓙ 이면 여기서도 물음
+            new("07:30 ③자리 직전", H(18.5) - M(1), H(24) - M(1), false),
+            new("07:30 ③자리 직후", H(18.5) + TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15), true),
+            // ── 🆕 11/28 [3-V] S-3 — 폭 경계 정확값(로그인 = CUtc 그대로 심음 · 둘 다 로그인 + 1h 지남) ──
+            new("경계 login = C 정확", after, after, true, LoginFromC: TimeSpan.Zero),          // 변이 aa(>= → >)이면 ③·④ 둘 다 빠져 물음 0 → FAIL
+            new("경계 login = C + 4h 정확", after, after + H(4), false, LoginFromC: H(4)),      // 변이 ab(< → <=)이면 물음 → FAIL
+            // ── 🆕 11/28 [3-V] S-4 — ④ 도 E-2(저장 뒤 첫 C 부터)를 따른다 · 로그인 = C + 1.5h ──
+            new("④ + 저장이 C 뒤(E-2 건너뜀)", after, after + H(1.5), false, ChangedFromC: M(30)),   // 변이 ⓕ(건너뛰기 빼기)이면 물음 → FAIL
+            new("④ + 저장이 C 앞(E-2 짝)", after, after + H(1.5), true, ChangedFromC: -H(1)),
         };
 
         var sids = new Dictionary<string, string>();
@@ -771,9 +787,14 @@ public sealed partial class CooltimeDbGateTests : IDisposable
         {
             var tenant = Guid.NewGuid().ToString();
             var cLocal = now - c.CAgo;
-            await SettingsAsync(db, tenant, true, new TimeSpan(cLocal.Hour, cLocal.Minute, cLocal.Second), new TimeSpan(18, 0, 0));
+            // 🆕 11/28 S-3 · S-4 — 엔진이 이 회사에서 쓸 CUtc 를 C# 에서 엔진 함수 그대로 계산(같은 now · 같은 초 내림 시각).
+            var cTod = new TimeSpan(cLocal.Hour, cLocal.Minute, cLocal.Second);
+            var cUtcExact = CooltimeEngine.ServerLocalToUtc(CooltimeEngine.MostRecentCooltimeLocal(now, cTod));
+            await SettingsAsync(db, tenant, true, cTod, new TimeSpan(18, 0, 0),
+                changedAtUtc: c.ChangedFromC is TimeSpan ch ? cUtcExact + ch : null);
             var u = await InsertUserAsync(db, tenant);
-            var sid = await InsertSessionAsync(db, tenant, u, "pc", loginAgoSec: (int)c.LoginAgo.TotalSeconds);
+            var sid = await InsertSessionAsync(db, tenant, u, "pc", loginAgoSec: (int)c.LoginAgo.TotalSeconds,
+                loginUtc: c.LoginFromC is TimeSpan lf ? cUtcExact + lf : null);
             if (c.SnoozeFromNow is TimeSpan s)
                 await db.ExecuteAsync(
                     "UPDATE user_sessions SET cooltime_snooze_until = UTC_TIMESTAMP(6) + INTERVAL @Sec SECOND WHERE session_id = @S",
