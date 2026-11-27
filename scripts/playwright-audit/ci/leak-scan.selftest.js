@@ -2576,6 +2576,215 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       }
       check('K-C26b 종 길 사유 소독(등록값 가림 · 대조 = 등록 전엔 보임) · 항목 클릭 실패 뒤 다시 안 누름 · 팝업 기다림은 항목 클릭 바로 전', ok, why);
     }
+    // ── 🔴 W-S-01 CI 화면 측정(11/27 · 작업지시서 20261127작 W-S-01 CI화면측정장치 §5 · 측정 커밋 안에만 · 머지 0) — W-C1 ~ W-C13 ──
+    //   판정기는 사본 폴더(K 본문 꼴 1 기본 + W 본문 · 표지는 칸마다)에서 돈다 · 실물 폴더의 W 본문에 묶이지 않게.
+    //   W 칸 표는 판정기 상수를 읽지 않고 작업지시서 §4 에서 여기 따로 적는다(자기 증명 0 · K-C22k 꼴). 대상 순서 main · A · B · AB.
+    {
+      const wN = (mid) => ['ws01', '-', mid, '.js'].join('');
+      const W_OK_BODY = "process.stdout.write('W-RAN-OK\\n');\n";
+      const W_TGTS = ['main', 'A', 'B', 'AB'];
+      const W_MY = [
+        ['WS01-M1a', 'M1', 'DTDT'], ['WS01-M1b', 'M1', 'DTDT'],
+        ['WS01-M2a', 'M2', 'DTDT'], ['WS01-M2b', 'M2', 'DTDT'], ['WS01-M2c', 'M2', 'DTDT'], ['WS01-M2d', 'M2', 'DTDT'], ['WS01-M2e', 'M2', 'DTDT'],
+        ['WS01-M2ctl', 'M2', 'DDDD'], ['WS01-M2f', 'M2', 'DDTT'],
+        ['WS01-M3a', 'M3', 'DTDT'], ['WS01-M3b', 'M3', 'DTDT'], ['WS01-M3c', 'M3', 'DTDT'],
+        ['WS01-R1', 'M4', 'DTTT'], ['WS01-R2', 'M4', 'DTTT'], ['WS01-R3', 'M4', 'DTTT'], ['WS01-R4', 'M4', 'DTDT'], ['WS01-R5', 'M4', 'DTDT'], ['WS01-R6', 'M4', 'DTTT'],
+        ['WS01-M5a', 'M5', 'DTDT'],
+        // ⬛ 11/27 [3-V] F2 앞: ['WS01-M6e', 'M6', '--TT'] — main 대조 자리 D 더함(개발명세서 §5 11/27 [3-V] 고침)
+        ['WS01-M6b', 'M6', 'DDTT'], ['WS01-M6c', 'M6', 'DDTT'], ['WS01-M6d', 'M6', '--DD'], ['WS01-M6e', 'M6', 'D-TT'],
+        ['WS01-M9p', 'M9', 'DDDD'], ['WS01-M9c', 'M9', 'DDDD'],
+      ];
+      // ⬛ 11/27 [3-V] F2 앞: { main: 23, A: 23, B: 25, AB: 25 }
+      const W_COUNT = { main: 24, A: 23, B: 25, AB: 25 }; // 위 표에서 손으로 센 수(M1c · M1d · M1e 뺀 뒤 · 개발명세서 §3 · M6e main D 더함 = §5 11/27)
+      const fWRow = (id, g, t, kind, pass = true) => ({ id, g, path: t, browser: 'chromium', what: 'w', got: 'w', pass, kind, scope: 'W' });
+      const fWRows = (t) => {
+        const i = W_TGTS.indexOf(t);
+        return W_MY.filter(([, , s]) => s[i] !== '-').map(([id, g, s]) => fWRow(id, g, t, s[i] === 'T' ? 'TEST' : 'DEVICE'));
+      };
+      const base = () => [...fHRows(), ...fGRows()];
+      const wJudge = (name, rows, files) => {
+        const d = fCopy(`${name}-ci`, files);
+        return fNode([path.join(d, 'judge.js')], { UI_OUT: fTable(`${name}-out`, rows) });
+      };
+      const kOnly = () => ({ [fK('ok')]: K_OK_BODY });
+      const wFiles = (target, body = wN('screen')) => {
+        const o = { ...kOnly() };
+        if (body) o[body] = W_OK_BODY;
+        if (target !== null) o['ws01.target'] = target;
+        return o;
+      };
+      { // W-C1 W 본문 0 · 표지 0 · H + G 전 키 → rc 0 · W 줄 0 · 옛 출력 꼴(키 틀 줄 글자 그대로)
+        const x = wJudge('wc1', base(), kOnly());
+        const noW = !/W-S-01|W 본문|ws01/.test(x.out);
+        const keyLine = /키 틀: 누락 0 · 중복 0 · 모르는 0 · 갈래 0 · G 자리 18 · G 통과 꼴 0\n/.test(x.out);
+        check('W-C1 W 본문 0 · 표지 0 · H+G 전 키 → rc 0 · W 줄 0 · 키 틀 줄 옛 글자 그대로(옛 판정기 표준출력 대조 = 개발명세서 로컬 기록)', x.code === 0 && noW && keyLine && /PASS 전부/.test(x.out), `rc=${x.code} · W 줄 없음 ${noW} · 키 틀 줄 ${keyLine}`);
+      }
+      { // W-C2 W 본문 0 · 표지 0 · W 줄 1 → 모르는 키
+        const x = wJudge('wc2', [...base(), fWRow('WS01-M1a', 'M1', 'A', 'TEST')], kOnly());
+        check('W-C2 W 꺼짐 + W 줄 1 → rc 1 · 모르는 키(옛 동작)', x.code === 1 && /모르는 \[W\|WS01-M1a/.test(x.out), `rc=${x.code}`);
+      }
+      { // W-C3 · W-C4 짝 안 맞음
+        const a = wJudge('wc3', base(), wFiles(null));
+        const b = wJudge('wc4', base(), wFiles('A\n', null));
+        const ok = a.code === 1 && /짝 안 맞음/.test(a.out) && b.code === 1 && /짝 안 맞음/.test(b.out);
+        check('W-C3 · W-C4 W 본문 1 · 표지 0 / 표지 1 · 본문 0 → 둘 다 rc 1 · 「짝 안 맞음」', ok, `본문만 rc=${a.code} · 표지만 rc=${b.code}`);
+      }
+      { // W-C5 표지 꼴 밖 4 · 대조 = 받는 꼴 4(순수 함수)
+        const J = require(F_JUDGE);
+        const bad4 = ['', 'a\n', 'A\nB\n', 'ab\n'].map((t, i) => wJudge(`wc5-${i}`, base(), wFiles(t)));
+        const allRed = bad4.every((x) => x.code === 1 && /표지 꼴 밖/.test(x.out));
+        const good4 = typeof J.parseWTarget === 'function' && ['main', ' A \n', 'AB\r\n', 'B\n'].every((t) => J.parseWTarget(t) !== null)
+          && ['A\n\n', 'A B', 'MAIN', 'A;B'].every((t) => J.parseWTarget(t) === null);
+        check('W-C5 표지 = 빈 파일 · a · 두 줄 · 소문자 ab → 넷 다 rc 1 · 「표지 꼴 밖」 · 대조 = 받는 꼴 4 참 · 다른 꼴 4 거짓', allRed && good4, `빨강 ${bad4.filter((x) => x.code === 1).length}/4 · 순수 함수 대조 ${good4}`);
+      }
+      { // W-C6 대상 4 각각 전 키 → rc 0 · 표지 줄
+        const r6 = W_TGTS.map((t) => [t, wJudge(`wc6-${t}`, [...base(), ...fWRows(t)], wFiles(`${t}\n`))]);
+        const ok = r6.every(([t, x]) => x.code === 0 && x.out.includes(`측정 커밋 · 머지 금지(W-S-01 대상=${t})`) && /PASS 전부/.test(x.out));
+        check('W-C6 대상 4 각각 전 키 → rc 0 · 「측정 커밋 · 머지 금지(W-S-01 대상=…)」 줄', ok, r6.map(([t, x]) => `${t} rc=${x.code}`).join(' · '));
+      }
+      { // W-C7 · W-C8 누락 / 다른 대상 키
+        const ab = fWRows('AB');
+        const a = wJudge('wc7', [...base(), ...ab.slice(1)], wFiles('AB\n'));
+        const b = wJudge('wc8', [...base(), ...fWRows('A'), fWRow('WS01-M1a', 'M1', 'B', 'DEVICE')], wFiles('A\n'));
+        const ok = a.code === 1 && /누락 \[[^\]]*W\|WS01-M1a\|M1\|AB/.test(a.out) && b.code === 1 && /모르는 \[[^\]]*W\|WS01-M1a\|M1\|B\|/.test(b.out);
+        check('W-C7 · W-C8 한 키 빠짐 → 누락 빨강 / 다른 대상 키 1 섞임 → 모르는 키 빨강', ok, `누락 rc=${a.code} · 섞임 rc=${b.code}`);
+      }
+      { // W-C9 꼴 — T 자리에 DEVICE 통과 줄 / D 자리에 TEST 줄
+        const rowsT = fWRows('A').map((w) => (w.id === 'WS01-M1a' ? { ...w, kind: 'DEVICE' } : w));
+        const rowsD = fWRows('A').map((w) => (w.id === 'WS01-M2ctl' ? { ...w, kind: 'TEST' } : w));
+        const a = wJudge('wc9t', [...base(), ...rowsT], wFiles('A\n'));
+        const b = wJudge('wc9d', [...base(), ...rowsD], wFiles('A\n'));
+        const ok = a.code === 1 && /W 꼴 이상[^\n]*WS01-M1a/.test(a.out) && b.code === 1 && /W 꼴 이상[^\n]*WS01-M2ctl/.test(b.out);
+        check('W-C9 T 자리 DEVICE 통과 줄 · D 자리 TEST 줄 → 둘 다 rc 1 · 「W 꼴 이상」', ok, `T 자리 rc=${a.code} · D 자리 rc=${b.code}`);
+      }
+      { // W-C10 D 줄 거짓 → [장치] · T 줄 거짓 → [시험]
+        const rowsD = fWRows('A').map((w) => (w.id === 'WS01-M2ctl' ? { ...w, pass: false } : w));
+        const rowsT = fWRows('A').map((w) => (w.id === 'WS01-M1a' ? { ...w, pass: false } : w));
+        const a = wJudge('wc10d', [...base(), ...rowsD], wFiles('A\n'));
+        const b = wJudge('wc10t', [...base(), ...rowsT], wFiles('A\n'));
+        const ok = a.code === 1 && /⚫ FAIL \[장치\] — 같은 커밋 재실행/.test(a.out) && !/FAIL \[시험\] —/.test(a.out)
+          && b.code === 1 && /🔴 FAIL \[시험\] — 재실행 금지/.test(b.out);
+        check('W-C10 D 줄 거짓 → ⚫ [장치] 끝 줄 · T 줄 거짓 → 🔴 [시험] 끝 줄', ok, `D 거짓 rc=${a.code} · T 거짓 rc=${b.code}`);
+      }
+      { // W-C11 이름 꼴 — 실행기 0 실행 · 판정기 이름 꼴 빨강 · 공용 함수 단독
+        const J = require(F_JUDGE);
+        const d = fCopy('wc11-run', { [fK('ok')]: K_OK_BODY, [wN('A')]: W_OK_BODY, [wN('ok')]: W_OK_BODY });
+        fs.copyFileSync(F_RUNNER, path.join(d, 'run-k-bodies.js'));
+        const x = fNode([path.join(d, 'run-k-bodies.js'), '--dir', d]);
+        const runOk = x.code === 1 && !/F18-RAN-OK|W-RAN-OK/.test(x.out) && /W 본문 이름 꼴 이상 1개/.test(x.out);
+        const y = wJudge('wc11-judge', [...base(), ...fWRows('A')], { ...wFiles('A\n'), [wN('A')]: W_OK_BODY });
+        const judgeOk = y.code === 1 && /W 본문 이름 꼴 이상 1개/.test(y.out);
+        let fnOk = false;
+        if (typeof J.classifyWNames === 'function') {
+          const c = J.classifyWNames([wN('A'), wN('a\nb'), wN(''), wN('ok'), fK('ok'), 'ws01.target']);
+          const k = J.classifyKNames([wN('ok'), wN('A')]);
+          fnOk = c.odd.length === 3 && c.run.length === 1 && c.run[0] === wN('ok') && k.run.length === 0 && k.odd.length === 0;
+        }
+        // 대조 — 정상 이름만이면 K 다음 W 가 돈다
+        const d2 = fCopy('wc11-ok', { [fK('ok')]: K_OK_BODY, [wN('ok')]: W_OK_BODY });
+        fs.copyFileSync(F_RUNNER, path.join(d2, 'run-k-bodies.js'));
+        const z = fNode([path.join(d2, 'run-k-bodies.js'), '--dir', d2]);
+        const ctl = z.code === 0 && z.out.indexOf('F18-RAN-OK') >= 0 && z.out.indexOf('F18-RAN-OK') < z.out.indexOf('W-RAN-OK');
+        check('W-C11 ws01-A.js · 줄바꿈 든 이름 → 실행기 0 실행 · rc 1 / 판정기 「W 본문 이름 꼴 이상」 / 공용 함수 이상 3 · K 함수에 안 섞임 · 대조 = 정상 이름이면 K 다음 W', runOk && judgeOk && fnOk && ctl, `실행기 ${runOk} · 판정기 ${judgeOk} · 함수 ${fnOk} · 대조 ${ctl}`);
+      }
+      { // W-C12 대상별 W 키 수 · 키 글자 = 따로 적은 표 · G 키 18
+        const J = require(F_JUDGE);
+        const per = W_TGTS.map((t) => {
+          const mine = fWRows(t).map((w) => [w.scope, w.id, w.g, w.path, w.browser].join('|')).sort();
+          const theirs = J.EXPECT_W && Array.isArray(J.EXPECT_W[t]) ? [...J.EXPECT_W[t]].sort() : [];
+          return { t, ok: mine.length === W_COUNT[t] && theirs.length === W_COUNT[t] && mine.every((k, i) => k === theirs[i]), n: theirs.length };
+        });
+        const g18 = Array.isArray(J.EXPECT_G) && J.EXPECT_G.length === 18;
+        check('W-C12 대상별 W 키 수(main 24 · A 23 · B 25 · AB 25) · 키 글자 = 따로 적은 표 · G 키 18 그대로', per.every((x) => x.ok) && g18, `${per.map((x) => `${x.t} ${x.n}`).join(' · ')} · G ${J.EXPECT_G ? J.EXPECT_G.length : '-'}`);
+      }
+      { // W-C13 (변이 ⓒ 잠금) W 본문이 K 셈에 안 섞임 — K 본문 0 · W 본문 · 표지 · 전 키 → K35 ⑬ 「K 본문 0 · G 기대」 빨강 그대로
+        const files = { [wN('screen')]: W_OK_BODY, 'ws01.target': 'A\n' };
+        const x = wJudge('wc13', [...base(), ...fWRows('A')], files);
+        check('W-C13 K 본문 0 + W 본문 · 표지 · 전 키 → rc 1 · 「K 본문 0 · G 기대 18」(W 가 K35 ⑬ 을 가리지 않음)', x.code === 1 && /K 본문 0 · G 기대 18/.test(x.out), `rc=${x.code}`);
+      }
+      // ── 11/27 [3-V] 고침(보안상무 반증 F1 ~ F6 · 개발명세서 §5 11/27) — 본문 판단 순수 함수를 직접 잰다 · 브라우저 · 네트워크 0 ──
+      const WS = require(path.join(F_CI, 'ws01-screen.js'));
+      { // W-C14 (F1) M5a — 출입증 못 받음 = 장치 · 401 은 닫힘 아님 · 닫힘 = 404 · 200 text/html 꼴만
+        const o200 = { status: 200, json: true, ctype: 'application/json' };
+        const r401 = { status: 401, json: false, ctype: '' };
+        const html = { status: 200, json: false, ctype: 'text/html; charset=utf-8' };
+        const n404 = { status: 404, json: false, ctype: '' };
+        const ten = (x) => Array.from({ length: 10 }, () => x);
+        const a = WS.m5aJudge(r401, ten(r401), r401);
+        const b = WS.m5aJudge(o200, ten(r401), o200);
+        const c = WS.m5aJudge(o200, [...ten(n404).slice(0, 5), ...ten(html).slice(0, 5)], o200);
+        const d = WS.m5aJudge(o200, ten(o200), o200);
+        const e = WS.m5aJudge(o200, ten(n404), r401);
+        const g = WS.apiGate({ token: null }, null).ok === false && WS.apiGate({ token: 'x' }, r401).ok === false && WS.apiGate({ token: 'x' }, o200).ok === true;
+        const ok = a.gate === false && a.closedOk === false && b.gate === true && b.closedOk === false && c.closedOk === true && c.openOk === false
+          && d.openOk === true && d.closedOk === false && e.gate === false && e.closedOk === false && g;
+        check('W-C14 (F1) M5a 출입증 못 받음(열린 길 401) → 장치 · 10 경로 401 → 닫힘 아님 · 404/200 html → 닫힘 · 대조 10 JSON → 열림 · 뒤 출입증 죽음 → 장치', ok, `못 받음 ${a.gate}/${a.closedOk} · 401 닫힘 ${b.closedOk} · 꼴 닫힘 ${c.closedOk} · 대조 ${d.openOk} · 뒤 죽음 ${e.gate} · 문 ${g}`);
+      }
+      { // W-C15 (F2) M6e — 최종 주소 / · 사이드바 · 빈 화면 · 오류 화면 · 머무름 · 없는 쪽 = 거짓 · 대조(main) = 같음
+        const good = { up: true, at: '/', nav: 30, textLen: 500, errUi: false, notFound: false, pw: 0, notice: false };
+        const bad = [
+          { up: false, at: '/data/reset', nav: 0, textLen: 0, errUi: false, notFound: false, pw: 0, notice: false },
+          { ...good, errUi: true }, { ...good, at: '/data/reset' }, { ...good, at: '/login', nav: 0 },
+          { ...good, notFound: true }, { ...good, pw: 1 }, { ...good, notice: true }, { ...good, textLen: 3 },
+        ].map((v) => WS.m6eJudge(v));
+        const gj = WS.m6eJudge(good);
+        const ok = gj.closedOk === true && gj.openOk === true && bad.every((x) => x.closedOk === false && x.openOk === false);
+        check('W-C15 (F2) M6e 빈 화면 · 오류 띠 · /data/reset 머무름 · /login · 없는 쪽 · 비번 칸 · 닫힘 안내 · 글 거의 없음 → 거짓 8/8 · 대조 = / 사이드바 → 참(main D 같음)', ok, `좋음 ${gj.closedOk}/${gj.openOk} · 거짓 ${bad.filter((x) => !x.closedOk && !x.openOk).length}/8`);
+      }
+      { // W-C16 (F3) M2a ~ e — 바탕 잡음은 빼고 「새로 생긴 오류 0」 · main 대조도 새 오류 0 · 기준 못 잼 = 장치
+        const sN = WS.errSig('c', 'hub reconnect 3 failed');
+        const sX = WS.errSig('p', 'TypeError boom');
+        const base = new Set([sN]);
+        const same = WS.errSig('c', 'hub reconnect 41 failed') === sN && WS.errSig('p', 'hub reconnect 3 failed') !== sN && /^[0-9a-f]{12}$/.test(sN);
+        const c0 = { up: true, okText: true, devWord: false, home: '/', pn: 1, at: '/settings', p: '/settings', baseReady: true, base };
+        const noise = WS.m2Judge({ ...c0, sigs: [sN, sN] });
+        const fresh = WS.m2Judge({ ...c0, sigs: [sN, sX] });
+        const mOpen = WS.m2Judge({ ...c0, pn: 0, sigs: [sN] });
+        const mNew = WS.m2Judge({ ...c0, pn: 0, sigs: [sX] });
+        const nb = WS.m2Judge({ ...c0, baseReady: false, sigs: [] });
+        const ok = same && noise.closedOk === true && noise.newErr === 0 && fresh.closedOk === false && fresh.newErr === 1
+          && mOpen.openOk === true && mNew.openOk === false && typeof nb.device === 'string' && nb.closedOk === false;
+        check('W-C16 (F3) M2 바탕 잡음 2줄만 → 닫힘 참 · 새 표지 1 → 거짓 · main 대조 바탕만 → 참 · 새 표지 → 거짓 · 기준 못 잼 → 장치 · 표지 = 숫자 무시 12자', ok, `표지 ${same} · 잡음 ${noise.closedOk} · 새 ${fresh.closedOk} · 대조 ${mOpen.openOk}/${mNew.openOk} · 기준 ${!!nb.device}`);
+      }
+      { // W-C17 (F4) 늦게 그려지는 안내 종이 — 다시 봄 · 상한 지킴
+        let k1 = 0;
+        const v1 = await WS.pollUntil(async () => { k1 += 1; return k1 >= 3 ? 1 : 0; }, (n) => n > 0, 3000, 10);
+        let k2 = 0;
+        const t0 = Date.now();
+        const v2 = await WS.pollUntil(async () => { k2 += 1; return 0; }, (n) => n > 0, 200, 20);
+        const dt = Date.now() - t0;
+        check('W-C17 (F4) 세 번째에 뜨는 안내 → 1 받음 · 끝내 안 뜨면 상한(0.2초) 안에 0', v1 === 1 && k1 === 3 && v2 === 0 && k2 >= 2 && dt < 2000, `늦게 뜸 ${v1}(${k1}번) · 안 뜸 ${v2}(${k2}번 · ${dt}ms)`);
+      }
+      { // W-C18 (F5) M9 — 띄우려 한 브라우저 세션은 늘 한 줄(출입증 없음 = 거짓) · hold 는 띄우기 전에 채움
+        const rel = async (s) => ({ ok: true, got: `${s.who} 놓음` });
+        const l1 = [{ ok: true, got: 'api' }];
+        await WS.holdRelease({ b: { tok: { access: null } } }, 'W_CHILD_B', l1, rel);
+        const l2 = [{ ok: true, got: 'api' }];
+        await WS.holdRelease({}, 'W_CHILD_B', l2, rel);
+        const l3 = [{ ok: true, got: 'api' }];
+        await WS.holdRelease({ b: { tok: { access: 'v', deviceId: 'd' } } }, 'W_CHILD_B', l3, rel);
+        const hold = {};
+        let threw = false;
+        try {
+          await WS.newBrowserSession({ chromium: { launch: async () => { throw new Error('launch'); } } }, { r: null }, 'W_CHILD_B', 'id', 'pw', null, hold);
+        } catch (e) {
+          threw = e && e.message === 'launch';
+        }
+        const ok = l1.length === 2 && WS.m9(l1).ok === false && l2.length === 2 && WS.m9(l2).ok === false && l3.length === 2 && WS.m9(l3).ok === true
+          && WS.m9([]).ok === false && threw && !!hold.b && hold.b.tok && hold.b.tok.access === null;
+        check('W-C18 (F5) 자식 브라우저 출입증 없음 · 못 띄움 → M9 거짓 줄 · 대조 = 출입증 있으면 놓기 참 · 띄우다 던져도 hold 채워짐', ok, `없음 ${l1.length}/${WS.m9(l1).ok} · 못 띄움 ${l2.length}/${WS.m9(l2).ok} · 대조 ${WS.m9(l3).ok} · hold ${!!hold.b}`);
+      }
+      { // W-C19 (F6) R5 — main 대조 = 수익 질문 응답에 분석 결과 칸 · 답만 다르면 대조 거짓
+        const PC = WS.PROFIT_CLOSED;
+        const PK = WS.PROFIT_KIND;
+        const mg = WS.r5Judge({ st: 200, a: '인사 답', kind: '' }, { st: 200, a: '수익성 분석 답', kind: PK });
+        const mk = WS.r5Judge({ st: 200, a: '인사 답', kind: '' }, { st: 200, a: '다른 답', kind: '' });
+        const ca = WS.r5Judge({ st: 200, a: '인사 답', kind: '' }, { st: 200, a: `앞 ${PC}`, kind: '' });
+        const sm = WS.r5Judge({ st: 200, a: '같음', kind: '' }, { st: 200, a: '같음', kind: '' });
+        const ok = mg.openOk === true && mk.openOk === false && ca.closedOk === true && ca.openOk === false && typeof sm.device === 'string';
+        check('W-C19 (F6) R5 대조 = 분석 칸 있음 → 참 · 답만 다름 → 거짓 · 닫힘 글 → 닫힘 참 · 두 답 같음 → 장치', ok, `분석 칸 ${mg.openOk} · 답만 다름 ${mk.openOk} · 닫힘 ${ca.closedOk} · 같음 ${!!sm.device}`);
+      }
+    }
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);

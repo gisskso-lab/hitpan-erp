@@ -38,9 +38,20 @@
 //   중복(상한 1) · 목록 밖 비H 키(모르는 키) · G 빈 자리 검사는 그대로. 빨강 순서 그대로(G 줄은 키 틀 안).
 //   (⑪ ⑫ ⑬ = 작업지시서 §4-2 ① ② ⑤ · 아래 줄 주석의 「K 연결 ①②⑤」 와 같은 것)
 //   되돌릴 때: K 본문만 지우면 ⑬ 때문에 대상 PR 이 전부 빨강 — G 기대 키도 같이 비운다(작업지시서 §11).
+//
+// 🔴 W-S-01 CI 화면 측정(11/27 · 작업지시서 20261127작 W-S-01 CI화면측정장치 §2 · PM 결재 §269 D1 · D2) — 측정 커밋 안에서만 쓴다(머지 0)
+//   ⑮ W 본문 이름 = 새 순수 함수 classifyWNames(머리 `ws01-` · 엄격 꼴) — classifyKNames · kFiles 셈은 손 0(K35 ⑥ ⑬ 이 W 에 가려지지 않게).
+//      W 머리를 달았는데 엄격 꼴 밖 = 「W 본문 이름 꼴 이상」 ⚫ [장치] 빨강(K 이름 꼴 이상과 같은 층 · 실행기도 아무것도 안 돌림).
+//   ⑯ 대상 표지 `ws01.target`(이 폴더 · 보통 파일 · 64바이트 이하) — 한 줄 정확히 main · A · B · AB(앞뒤 공백 · 끝 줄바꿈 1개만 허용).
+//   ⑰ W 본문 0 · 표지 0 · W 이상 이름 0 → 옛 동작과 글자 같음(W 줄 = 모르는 키) / 본문 · 표지 중 하나만 → 키 틀 빨강 「W 본문 · 대상 짝 안 맞음」 /
+//      표지 꼴 밖 → 키 틀 빨강 / 둘 다 맞음 → 필수 ∪= EXPECT_W[대상] · 그 대상 키만 받음(다른 대상 키 = 모르는 키).
+//   ⑱ W 키 꼴 — T 자리 통과는 TEST 줄로만(실패 DEVICE 줄 = 단언 전 끊김 · 허용 · K35 ⑫ 꼴) · D 자리는 DEVICE 줄로만. 어긋나면 키 틀 빨강.
+//   ⑲ 표지가 있으면 판정표 머리에 「측정 커밋 · 머지 금지(W-S-01 대상=…)」 를 찍는다(④ plant 표지와 같은 뜻).
+//   빨강 순서 그대로 — W 이유는 「이름 꼴 이상 · 키 틀」 안. isGTest 는 W 줄을 세지 않는다(돈 시험 · G 시험 수는 K35 몫 그대로).
 'use strict';
 
 const fs = require('fs');
+const path = require('path'); // W-S-01 ⑯ 표지 파일 자리
 const L = require('./lib');
 
 const KINDS = new Set(['TEST', 'DEVICE']);
@@ -138,12 +149,105 @@ function n4Why(row) {
   const got = row && typeof row.got === 'string' ? row.got : '';
   return got.startsWith(N4_WHY.device) ? 'device' : 'leak';
 }
+// ── 🔴 W-S-01 ⑮ ~ ⑱ (작업지시서 20261127작 W-S-01 CI화면측정장치 §2 · §4) ─────────────────────────
+const W_BODY_HEAD = 'ws01-';
+const W_BODY_STRICT = /^ws01-[a-z0-9][a-z0-9-]*\.js$/;
+// 순수 함수(파일 시스템 0) — classifyKNames 와 같은 꼴 · 다른 머리. 실행기 · 판정기 · 자체시험이 같은 함수를 부른다.
+function classifyWNames(names) {
+  const run = [];
+  const odd = [];
+  for (const n of names) {
+    const s = String(n);
+    if (!s.startsWith(W_BODY_HEAD)) continue;
+    if (W_BODY_STRICT.test(s)) run.push(s);
+    else odd.push(s);
+  }
+  return { run: run.sort(), odd: odd.sort() };
+}
+function wBodyScan(dir = __dirname) {
+  return classifyWNames(fs.readdirSync(dir));
+}
+const W_TARGET_FILE = 'ws01.target';
+const W_TARGETS = Object.freeze(['main', 'A', 'B', 'AB']);
+const W_TARGET_LINE = /^[ \t]*(main|A|B|AB)[ \t]*(\r?\n)?$/; // JS 의 $ = 글 끝(m 깃발 없음) — 두 줄 · 빈 줄 덧붙임 = 꼴 밖
+const W_TARGET_MAX = 64;
+// 순수 함수 — 꼴이 맞으면 대상 글자 · 아니면 null
+function parseWTarget(text) {
+  if (typeof text !== 'string') return null;
+  const m = W_TARGET_LINE.exec(text);
+  return m ? m[1] : null;
+}
+// 표지 읽기 — 셸 0 · 고정 이름 · 따라가기 0(lstat · 보통 파일만) · 크기 상한. 결과 = { present, target, why }
+function wTargetScan(dir = __dirname) {
+  const p = path.join(dir, W_TARGET_FILE);
+  let st;
+  try {
+    st = fs.lstatSync(p);
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { present: false, target: null, why: null };
+    return { present: true, target: null, why: `표지 읽기 실패(${L.errorName(e)})` };
+  }
+  if (!st.isFile()) return { present: true, target: null, why: '표지가 보통 파일 아님' };
+  if (st.size > W_TARGET_MAX) return { present: true, target: null, why: `표지 크기 ${st.size} > ${W_TARGET_MAX}` };
+  const t = parseWTarget(fs.readFileSync(p, 'utf8'));
+  return { present: true, target: t, why: t ? null : '표지 꼴 밖(한 줄 main · A · B · AB)' };
+}
+// 칸 표 = 작업지시서 §4(대상 순서 main · A · B · AB · 'T' = TEST 자리 · 'D' = DEVICE 자리 · null = 그 대상 키 없음).
+//   키 = rowKey 꼴 `W|<id>|<묶음>|<대상>|chromium`.
+//   ⬛ 뺀 칸 3(개발명세서 §3 · [3] 착수 코드 확인 · PM 확인 필요) — 표에서 지우지 않고 여기 적는다(#1 뜻):
+//     WS01-M1c 도우미 바 링크 — U1 미해소(토큰 사용량 = DB 구독 칸 · 런 안 API 로 80% 를 만들 길 0) → D3 「⚠️ 대용」(G-A5 글자 대조)
+//     WS01-M1d 메뉴 검색 4낱말 — Sidebar · More 에 메뉴 검색칸 없음(ChatbotBar 검색창 = 도우미 질문 · 메뉴 검색 아님)
+//     WS01-M1e 즐겨찾기 — Web 에 즐겨찾기 저장 · 화면 없음(U2 = 기능 없음)
+const EXPECT_W_TABLE = Object.freeze([
+  ['WS01-M1a', 'M1', ['D', 'T', 'D', 'T']],
+  ['WS01-M1b', 'M1', ['D', 'T', 'D', 'T']],
+  ['WS01-M2a', 'M2', ['D', 'T', 'D', 'T']],
+  ['WS01-M2b', 'M2', ['D', 'T', 'D', 'T']],
+  ['WS01-M2c', 'M2', ['D', 'T', 'D', 'T']],
+  ['WS01-M2d', 'M2', ['D', 'T', 'D', 'T']],
+  ['WS01-M2e', 'M2', ['D', 'T', 'D', 'T']],
+  ['WS01-M2ctl', 'M2', ['D', 'D', 'D', 'D']],
+  ['WS01-M2f', 'M2', ['D', 'D', 'T', 'T']],
+  ['WS01-M3a', 'M3', ['D', 'T', 'D', 'T']],
+  ['WS01-M3b', 'M3', ['D', 'T', 'D', 'T']],
+  ['WS01-M3c', 'M3', ['D', 'T', 'D', 'T']],
+  ['WS01-R1', 'M4', ['D', 'T', 'T', 'T']],
+  ['WS01-R2', 'M4', ['D', 'T', 'T', 'T']],
+  ['WS01-R3', 'M4', ['D', 'T', 'T', 'T']],
+  ['WS01-R4', 'M4', ['D', 'T', 'D', 'T']],
+  ['WS01-R5', 'M4', ['D', 'T', 'D', 'T']],
+  ['WS01-R6', 'M4', ['D', 'T', 'T', 'T']],
+  ['WS01-M5a', 'M5', ['D', 'T', 'D', 'T']],
+  ['WS01-M6b', 'M6', ['D', 'D', 'T', 'T']],
+  ['WS01-M6c', 'M6', ['D', 'D', 'T', 'T']],
+  ['WS01-M6d', 'M6', [null, null, 'D', 'D']],
+  // ⬛ 11/27 [3-V] F2 앞: ['WS01-M6e', 'M6', [null, null, 'T', 'T']],
+  // 11/27 [3-V] F2 — main 대조 자리 더함(D · 일반 자식 역할 문은 main 에도 있음 → 「같음(눈 뜸)」 대조 · 최종 주소 / · 사이드바 · 빈 · 오류 화면 아님)
+  ['WS01-M6e', 'M6', ['D', null, 'T', 'T']],
+  ['WS01-M9p', 'M9', ['D', 'D', 'D', 'D']],
+  ['WS01-M9c', 'M9', ['D', 'D', 'D', 'D']],
+]);
+function wKey(id, g, target) {
+  return rowKey({ scope: 'W', id, g, path: target, browser: 'chromium' });
+}
+const EXPECT_W = {};
+const EXPECT_W_DEVICE = {};
+W_TARGETS.forEach((t, i) => {
+  const rows = EXPECT_W_TABLE.filter(([, , cols]) => cols[i] !== null);
+  EXPECT_W[t] = Object.freeze(rows.map(([id, g]) => wKey(id, g, t)));
+  EXPECT_W_DEVICE[t] = new Set(rows.filter(([, , cols]) => cols[i] === 'D').map(([id, g]) => wKey(id, g, t)));
+});
+Object.freeze(EXPECT_W);
+Object.freeze(EXPECT_W_DEVICE);
+
 // 🔴 F-PR [3-V] 03 — 결과표에서 온 글자를 찍기 전 제어 글자(줄바꿈 · 색 제어 등)를 \uXXXX 글자로 가린다
 //   (한 줄이 두 줄로 갈라져 러너 명령 줄처럼 읽히는 길 0). 소독 **뒤에** 가린다 — 값 안 제어 글자로 소독 대조가 깨지지 않게.
 function showCtl(s) {
   return String(s).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
-function checkExpectKeys(rows, { kFiles = 0 } = {}) {
+// ⬛ [낡은 줄 · K 연결 3차] function checkExpectKeys(rows, { kFiles = 0 } = {}) {
+// 🔴 W-S-01 ⑰ — w 칸 덧붙임(null = W 꺼짐 = 옛 동작 그대로). w = { files: W 본문 실행 수, present: 표지 있음, target: 대상|null }
+function checkExpectKeys(rows, { kFiles = 0, w = null } = {}) {
   const hKey = (id, browser = null) => rowKey({ scope: 'H', id, browser });
   const counts = new Map();
   const scopeOf = new Map();
@@ -158,6 +262,22 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
   for (const id of EXPECT_H.firstBrowser) required.add(hKey(id, EXPECT_BROWSERS[0]));
   // 🔴 K 연결 ① — 필수 집합 = H 필수 ∪ G 기대 키 전부(K 본문 수와 무관 · §4-2 A2)
   for (const k of EXPECT_G) required.add(k);
+  // 🔴 W-S-01 ⑰ — 본문 · 표지 짝이 맞고 표지 꼴이 맞을 때만 그 대상 키를 필수에 더한다(꺼짐이면 wKeys 빈 집합 = 옛 동작)
+  const wOn = !!w && ((w.files || 0) > 0 || w.present === true);
+  const wBad = [];
+  let wKeys = new Set();
+  let wDev = new Set();
+  if (wOn) {
+    if (!((w.files || 0) > 0 && w.present === true)) {
+      wBad.push(`W 본문 · 대상 짝 안 맞음(본문 ${w.files || 0} · 표지 ${w.present === true ? '있음' : '없음'})`);
+    } else if (!W_TARGETS.includes(w.target)) {
+      wBad.push('W 대상 표지 꼴 밖(한 줄 main · A · B · AB)');
+    } else {
+      wKeys = new Set(EXPECT_W[w.target]);
+      wDev = EXPECT_W_DEVICE[w.target];
+      for (const k of wKeys) required.add(k);
+    }
+  }
   const branchKeys = new Set();
   for (const b of EXPECT_BROWSERS) for (const grp of EXPECT_H.branchPerBrowser) for (const id of grp) branchKeys.add(hKey(id, b));
   const gKeys = new Set(EXPECT_G);
@@ -165,9 +285,13 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
   // ⬛ [낡은 줄 · F-PR 첫 꼴] const dup = [...counts].filter(([, n]) => n > 1).map(([k]) => k).sort();
   const cap = new Map(EXPECT_H.twoRowsFirstBrowser.map((id) => [hKey(id, EXPECT_BROWSERS[0]), 2])); // F-PR [4] P1
   const dup = [...counts].filter(([k, n]) => n > (cap.get(k) || 1)).map(([k]) => k).sort();
+  // ⬛ [낡은 줄 · K 연결] const unknown = [...counts.keys()].filter((k) => (scopeOf.get(k) === 'H'
+  // ⬛ [낡은 줄 · K 연결]   ? !required.has(k) && !branchKeys.has(k)
+  // ⬛ [낡은 줄 · K 연결]   : !gKeys.has(k))).sort();
+  // 🔴 W-S-01 ⑰ — 비H 키는 G 키 또는 (W 켜짐일 때) 그 대상 W 키만 받는다(W 꺼짐 = wKeys 빈 집합 = 옛 식과 같음)
   const unknown = [...counts.keys()].filter((k) => (scopeOf.get(k) === 'H'
     ? !required.has(k) && !branchKeys.has(k)
-    : !gKeys.has(k))).sort();
+    : !gKeys.has(k) && !wKeys.has(k))).sort();
   const branch = [];
   // ⬛ [낡은 줄 · F-PR 첫 꼴] 묶음마다 「다 있음」 수 = 1 · 일부만 있는 묶음 0 — 묶음끼리 id 가 겹치면(세 묶음) 셀 수 없다.
   // 🔴 F-PR [3-V] 01 — 브라우저마다 「갈래 id 집합」 이 묶음 하나와 정확히 같을 때만 통과.
@@ -191,12 +315,23 @@ function checkExpectKeys(rows, { kFiles = 0 } = {}) {
   gForm.sort();
   // 🔴 K 연결 ⑤ — K 본문 0 인데 G 기대 키가 정의됨 = 키 틀 빨강(이유 줄 「K 본문 0 · G 기대 n」)
   const kZero = kFiles === 0 && EXPECT_G.length > 0;
+  // 🔴 W-S-01 ⑱ — W 키 꼴(T 자리 통과 = TEST 만 · 실패 DEVICE 줄 허용 / D 자리 = DEVICE 만)
+  const wForm = [];
+  for (const x of rows) {
+    const k = rowKey(x);
+    if (!wKeys.has(k)) continue;
+    const okForm = wDev.has(k) ? x.kind === 'DEVICE' : (x.kind === 'TEST' || x.pass !== true);
+    if (!okForm && !wForm.includes(k)) wForm.push(k);
+  }
+  wForm.sort();
   // ⬛ [낡은 줄 · F-PR] return { missing, dup, unknown, branch, gEmpty };
-  return { missing, dup, unknown, branch, gEmpty, gForm, kZero };
+  // ⬛ [낡은 줄 · K 연결] return { missing, dup, unknown, branch, gEmpty, gForm, kZero };
+  return { missing, dup, unknown, branch, gEmpty, gForm, kZero, wForm, wBad, wKeyN: wKeys.size };
 }
 
 function isGTest(x) {
   if (x.scope === 'H') return false;
+  if (x.scope === 'W') return false; // W-S-01 — W 줄은 G 시험 수에 안 센다(K35 몫 그대로)
   return /^G/.test(String(x.id ?? '')) || /^G/.test(String(x.g ?? ''));
 }
 
@@ -229,10 +364,21 @@ function main() {
   const kScan = kBodyScan(); // 🔴 F-PR ⑧ — 실행기와 같은 함수
   const kFiles = kScan.run;
   const gTests = tests.filter(isGTest);
-  const keys = checkExpectKeys(good, { kFiles: kFiles.length }); // 🔴 F-PR ⑨
+  // 🔴 W-S-01 ⑮ ⑯ — W 본문 · 표지 · 이상 이름이 모두 0 이면 wInfo = null(옛 동작 · 옛 출력 글자 그대로)
+  const wScan = wBodyScan();
+  const wT = wTargetScan();
+  const wInfo = (wScan.run.length > 0 || wScan.odd.length > 0 || wT.present) ? { files: wScan.run.length, present: wT.present, target: wT.target } : null;
+  // ⬛ [낡은 줄 · F-PR ~ K 연결] const keys = checkExpectKeys(good, { kFiles: kFiles.length }); // 🔴 F-PR ⑨
+  const keys = checkExpectKeys(good, { kFiles: kFiles.length, w: wInfo }); // 🔴 F-PR ⑨ · W-S-01 ⑰
   const m = (v) => showCtl(L.sanitize(v, 120)); // 🔴 F-PR ⑩ — 메타 칸(키 칸 상한과 같은 120) · 제어 글자 가림([3-V] 03)
   const showList = (list) => showCtl(L.sanitize(list.join(', '), 600)); // 🔴 F-PR [3-V] 03 — 키 목록
 
+  // 🔴 W-S-01 ⑲ — 표지가 있으면(꼴 밖이어도) 판정표 머리에 크게
+  if (wT.present) {
+    const tShow = wT.target || '꼴 밖';
+    console.log(`══════ 측정 커밋 · 머지 금지(W-S-01 대상=${tShow}) ══════`);
+    console.log(`::warning::측정 커밋 · 머지 금지(W-S-01 대상=${tShow}) — 결과 받으면 PR 닫고 가지 지움`);
+  }
   console.log('── 판정표 ──');
   for (const x of good) {
     if (x.kind === 'OBS') {
@@ -270,6 +416,10 @@ function main() {
   // ⬛ [낡은 줄 · F-PR] console.log(`키 틀: 누락 … · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''}`);
   // 🔴 K 연결 — 끝에 G 통과 꼴 수를 더한다(앞 칸 꼴 그대로)
   console.log(`키 틀: 누락 ${keys.missing.length} · 중복 ${keys.dup.length} · 모르는 ${keys.unknown.length} · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''} · G 통과 꼴 ${keys.gForm.length}`);
+  // 🔴 W-S-01 — W 가 켜졌을 때만 한 줄 더(꺼짐이면 옛 출력 그대로)
+  if (wInfo) {
+    console.log(`W 본문 이름: 실행 ${wScan.run.length} · 이상 ${wScan.odd.length} · 표지 ${wT.present ? m(wT.target || '꼴 밖') : '없음'} · W 키 ${keys.wKeyN} · W 꼴 ${keys.wForm.length} · W 짝 ${keys.wBad.length ? '어긋남' : '맞음'}`);
+  }
   if (r && r.external_blocked > 0) {
     // ⬛ [낡은 줄 · 1~10차] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${(r.external_hosts || []).join(', ')}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
     // ⬛ [낡은 줄 · F-PR 첫 꼴] console.log(`🟡 외부 요청 끊음 ${r.external_blocked}건 · 호스트 [${L.sanitize((r.external_hosts || []).join(', '), 600)}] (기준 = 첫 런 뒤 PM · §8 ⑦)`);
@@ -298,9 +448,15 @@ function main() {
     console.log(`⚫ FAIL [장치] K 본문 이름 꼴 이상 ${kScan.odd.length}개 — 실행기도 아무것도 안 돌린다 · ${showList(kScan.odd.map((n) => JSON.stringify(n)))}`);
     process.exit(1);
   }
+  // 🔴 W-S-01 ⑮ — W 본문 이름 꼴 이상(K 이름 꼴 이상과 같은 층)
+  if (wScan.odd.length > 0) {
+    console.log(`⚫ FAIL [장치] W 본문 이름 꼴 이상 ${wScan.odd.length}개 — 실행기도 아무것도 안 돌린다 · ${showList(wScan.odd.map((n) => JSON.stringify(n)))}`);
+    process.exit(1);
+  }
   // 🔴 F-PR ⑨ — H 기대 키 틀
   // ⬛ [낡은 줄 · F-PR] if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length > 0 || keys.gEmpty) {
-  if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length + keys.gForm.length > 0 || keys.gEmpty || keys.kZero) {
+  // ⬛ [낡은 줄 · K 연결] if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length + keys.gForm.length > 0 || keys.gEmpty || keys.kZero) {
+  if (keys.missing.length + keys.dup.length + keys.unknown.length + keys.branch.length + keys.gForm.length + keys.wForm.length + keys.wBad.length > 0 || keys.gEmpty || keys.kZero) {
     const why = [];
     if (keys.missing.length) why.push(`누락 [${showList(keys.missing)}]`);
     if (keys.dup.length) why.push(`중복 [${showList(keys.dup)}]`);
@@ -309,6 +465,8 @@ function main() {
     if (keys.gEmpty) why.push(`K 본문 ${kFiles.length}개가 있는데 G 자리 비었음(G 기대 키 = K 연결 PR 몫)`);
     if (keys.gForm.length) why.push(`G 통과 꼴 이상(G 줄 통과는 TEST · N4 줄은 DEVICE) [${showList(keys.gForm)}]`); // K 연결 ②
     if (keys.kZero) why.push(`K 본문 0 · G 기대 ${EXPECT_G.length}`); // K 연결 ⑤
+    for (const b of keys.wBad) why.push(b); // W-S-01 ⑰ 짝 · 표지 꼴
+    if (keys.wForm.length) why.push(`W 꼴 이상(T 자리 통과는 TEST · D 자리는 DEVICE) [${showList(keys.wForm)}]`); // W-S-01 ⑱
     console.log(`⚫ FAIL [장치] 키 틀 — ${why.join(' · ')}`);
     process.exit(1);
   }
@@ -354,4 +512,6 @@ module.exports = {
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
   N4_WHY, n4Why, // K 연결 3차 ⑭
+  W_BODY_STRICT, classifyWNames, wBodyScan, W_TARGET_FILE, W_TARGETS, parseWTarget, wTargetScan, // W-S-01 ⑮ ⑯
+  EXPECT_W_TABLE, EXPECT_W, EXPECT_W_DEVICE, wKey, // W-S-01 ⑰ ⑱
 };
