@@ -90,15 +90,15 @@ public sealed class BetaClosedRoutesGateTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
+            if (File.Exists(Path.Join(dir.FullName, "HitPan.sln"))) return dir.Parent!.FullName;
             dir = dir.Parent;
         }
         throw new Xunit.Sdk.XunitException("HitPan.sln 을 못 찾았다.");
     }
 
-    private static string WebRoot() => Path.Combine(RepoRoot(), "src", "HitPan.Web");
+    private static string WebRoot() => Path.Join(RepoRoot(), "src", "HitPan.Web");
 
-    private static string ReadWeb(params string[] parts) => File.ReadAllText(Path.Combine(new[] { WebRoot() }.Concat(parts).ToArray()));
+    private static string ReadWeb(params string[] parts) => File.ReadAllText(Path.Join(new[] { WebRoot() }.Concat(parts).ToArray()));
 
     private static string BlankKeepLines(Match m) => Regex.Replace(m.Value, @"[^\r\n]", " ");
 
@@ -178,9 +178,8 @@ public sealed class BetaClosedRoutesGateTests
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i];
-                foreach (var route in Closed)
+                foreach (var route in Closed.Where(r => RouteRx(r).IsMatch(line)))
                 {
-                    if (!RouteRx(route).IsMatch(line)) continue;
 
                     if (name == "BetaClosedNoticePage.razor" && line.TrimStart().StartsWith("@page", StringComparison.Ordinal))
                     {
