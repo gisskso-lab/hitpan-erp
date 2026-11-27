@@ -188,7 +188,9 @@ CREATE USER '$RSU'@'localhost' IDENTIFIED BY '$RSPW';
 GRANT ALL ON \`$DB\`.* TO '$RSU'@'localhost';
 SQL
   local got verdict
-  got=$(qu -e "CREATE DATABASE g16_g0_probe" 2>&1 | head -1)
+  # 11/28 고침: 클라이언트가 오류 앞에 「--------------」 문장 테두리를 찍는다(첫 런 46064175410) → 첫 줄만 보면 1044 를 놓침 · 오류 줄을 골라 씀
+  got=$(qu -e "CREATE DATABASE g16_g0_probe" 2>&1 | grep -m1 -E "^ERROR" || true)
+  [ -n "$got" ] || got="(오류 줄 없음 = 만들어짐)"
   if echo "$got" | grep -q "ERROR 1044"; then verdict="초록"; else verdict="빨강"; fi
   qu -e "SHOW GRANTS" > "$OUT/grants.txt" 2>&1
   "${GEN[@]}" mkrec --kv kind=g0 --kv "got=\"$(echo "$got" | tr -d '"\\' | cut -c1-120)\"" --kv "verdict=\"$verdict\"" \
