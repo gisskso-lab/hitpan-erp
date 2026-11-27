@@ -2864,6 +2864,46 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const ok = c6ok && r3[0] === true && r3.slice(1).every((x) => x === false) && r3b[0] === true && r3b[1] === false;
         check('W-C24 M6c 칸 풀림 → 대조 참 · 잠김 + 안내 → 닫힘 참 · 칸 없음 · 잠김만 · 풀림 + 안내 → 둘 다 거짓 / R3 읽기 받음 · 200 · 뒤집힌 값 유지 → 참 · 읽기 못 받음 · 저장 500 · 값 안 유지 · 안 뒤집음 · 앞 값 없음 → 거짓 5/5', ok, `M6c ${c6ok} · R3 참 ${r3[0]} · 거짓 ${r3.slice(1).filter((x) => x === false).length}/5`);
       }
+      // ── 11/27 D5 — 측정 런 A 45994182213 · AB 45994214577 M5a 405 빈 본문(PM 결정 · CTO 전결 §280 · 개발명세서 §7) ──
+      { // W-C25 M5a 405 빈 본문 + Allow 에 그 방법 없음 = 닫힘 · 405 JSON · 401 · 403 · Allow 없음 · Allow 에 그 방법 있음 · GET 405 · 값 바뀜 = 거짓
+        const o200 = { status: 200, json: true, ctype: 'application/json', text: '{}' };
+        const html = { status: 200, json: false, ctype: 'text/html; charset=utf-8', text: '<html>', allow: '' };
+        const e405 = (m, allow = 'GET, HEAD') => ({ status: 405, json: false, ctype: '', text: '', allow, m });
+        // A 실물 꼴 — CLOSED_API 순서(GET PUT POST POST GET PUT PUT PUT POST GET) = 200h 405빈 405빈 405빈 200h 405빈 × 4 200h
+        const aRows = WS.CLOSED_API.map(([m]) => (m === 'GET' ? { ...html, m } : e405(m, m === 'PUT' ? 'DELETE, GET, HEAD' : 'GET, HEAD')));
+        const q = (k) => ({ status: 200, json: true, ctype: 'application/json; charset=utf-8', text: JSON.stringify({ aiMode: 'hitpan_pool', monthlyLimit: 100000, extraTokens: 0, subscriptionTier: 'basic', anthropicKeyConfigured: k, anthropicKeyLast4: k ? 'abcd' : null, usedTokens: 7, remaining: 9 }) });
+        const qUsed = { ...q(false), text: JSON.stringify({ aiMode: 'hitpan_pool', monthlyLimit: 100000, extraTokens: 0, subscriptionTier: 'basic', anthropicKeyConfigured: false, anthropicKeyLast4: null, usedTokens: 99, remaining: 1 }) };
+        const rbSame = WS.readbackJudge(q(false), q(false));
+        const rbUsed = WS.readbackJudge(q(false), qUsed);
+        const rbChanged = WS.readbackJudge(q(false), q(true));
+        const rbNoRead = WS.readbackJudge({ status: 403, json: true, ctype: 'application/json', text: '{}' }, { status: 403, json: true, ctype: 'application/json', text: '{}' });
+        const rbLost = WS.readbackJudge(q(false), { status: 500, json: false, ctype: '', text: '' });
+        const a = WS.m5aJudge(o200, aRows, o200, 10, rbSame);
+        const aUnread = WS.m5aJudge(o200, aRows, o200, 10, rbNoRead);
+        const aChanged = WS.m5aJudge(o200, aRows, o200, 10, rbChanged);
+        const aLost = WS.m5aJudge(o200, aRows, o200, 10, rbLost);
+        const aNoRb = WS.m5aJudge(o200, aRows, o200);
+        const swap = (x) => { const r = [...aRows]; r[1] = { ...x, m: 'PUT' }; return WS.m5aJudge(o200, r, o200, 10, rbSame).closedOk; };
+        const notClosed = [
+          swap({ status: 405, json: true, ctype: 'application/problem+json', text: '{"status":405}', allow: 'GET, HEAD' }),
+          swap({ status: 405, json: false, ctype: 'text/plain', text: '', allow: 'GET, HEAD' }),
+          swap({ status: 405, json: false, ctype: '', text: 'x', allow: 'GET, HEAD' }),
+          swap({ status: 401, json: false, ctype: '', text: '', allow: '' }),
+          swap({ status: 403, json: false, ctype: '', text: '', allow: '' }),
+          swap({ status: 401, json: true, ctype: 'application/json', text: '{}', allow: '' }),
+          swap({ status: 500, json: false, ctype: '', text: '', allow: '' }),
+          swap({ status: 405, json: false, ctype: '', text: '', allow: '' }),
+          swap({ status: 405, json: false, ctype: '', text: '', allow: 'GET, PUT, HEAD' }),
+        ];
+        const getRow = WS.isClosed405(e405('GET')) === false && WS.isClosed405({ ...e405('PUT'), m: undefined }) === false && WS.isClosed405(e405('POST')) === true && WS.isClosed405(e405('put', 'get,head')) === true;
+        const ok = a.closedOk === true && a.n405 === 7 && a.closedN === 10 && a.openOk === false
+          && aUnread.closedOk === true && aChanged.closedOk === false && aLost.closedOk === false && aNoRb.closedOk === false
+          && notClosed.every((x) => x === false) && getRow
+          && rbSame.ok === true && rbUsed.ok === true && rbChanged.ok === false && rbChanged.note === '바뀜' && rbNoRead.ok === true && rbNoRead.readable === false && rbLost.ok === false
+          && WS.READBACK_GET === '/api/chatbot/quota';
+        check('W-C25 M5a A 실물 꼴(200h 3 + 405빈 7 · Allow 에 그 방법 없음) + 다시 읽기 같음 → 닫힘 참 · 대조 거짓 · 못 읽는 경로 → 참 · 값 바뀜 · 뒤 못 읽음 · 다시 읽기 없음 → 거짓 · 405 JSON · text/plain · 본문 있음 · 401 · 403 · 401 JSON · 500 · Allow 없음 · Allow 에 PUT → 거짓 9/9 · GET 405 · 방법 없음 → 거짓 · 사용량만 바뀜 → 같음',
+          ok, `A ${a.closedOk}(${a.closedN} · 405빈 ${a.n405}) · 대조 ${a.openOk} · 못 읽음 ${aUnread.closedOk} · 바뀜 ${aChanged.closedOk} · 뒤 못 읽음 ${aLost.closedOk} · 없음 ${aNoRb.closedOk} · 거짓 ${notClosed.filter((x) => x === false).length}/9 · 방법 ${getRow} · 사용량 ${rbUsed.ok}`);
+      }
     }
   }
   const bad = results.filter((x) => !x.ok).length;
