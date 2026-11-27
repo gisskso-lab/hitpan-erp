@@ -110,6 +110,8 @@ jobs:
           put UI_PW_PARENT   "Ui#$(openssl rand -hex 16)"
           put UI_PW_GA       "Ui#$(openssl rand -hex 16)"
           put UI_PW_NA       "Ui#$(openssl rand -hex 16)"
+          # 🆕 11/28 쿨타임 1-b 실측 3 첫 CI 런 고침(PM 결정 (가)) — 쿨타임 몸 전용 자식 다 · 가 · 나와 같은 길(실행 때 난수 · 가림)
+          put UI_PW_DA       "Ui#$(openssl rand -hex 16)"
           {
             echo "UI_OUT=$RUNNER_TEMP/ui-out"
             echo "UI_API_DIR=$RUNNER_TEMP/ui-api"
@@ -118,6 +120,7 @@ jobs:
             echo "UI_LOGIN_PARENT=ci-parent"
             echo "UI_LOGIN_GA=ci-ga"
             echo "UI_LOGIN_NA=ci-na"
+            echo "UI_LOGIN_DA=ci-da"
             echo "HITPAN_LOG_DIR=$RUNNER_TEMP/ui-out/main/api-logs"
           } >> "$GITHUB_ENV"
           # 2차(10/29) ①: trace 는 기록·업로드 안 함 → trace 폴더를 만들지 않는다.
