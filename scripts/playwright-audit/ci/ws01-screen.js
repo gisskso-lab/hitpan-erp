@@ -210,8 +210,10 @@ function m6cJudge(v, closedTxt) {
 }
 // 11/27 main 런 진단 D3 — R3 = 워터마크 켜기 칸(print-common 이 저장하는 유일한 늘 보이는 칸) 바꿈 → [워터마크 설정 저장] → 새로 읽음.
 //   읽기 전 GET print-common 응답을 받은 뒤에만 값을 봄(loaded) — 못 받으면 기본값이 우연히 맞아 초록 되는 길을 막음.
+// 11/27 main 대조 런 45990910010 — main 실물 PUT print-common = 204(본문 없음) · 값은 유지됨 → 저장 응답 = 200 또는 204.
+// ⬛ 옛 줄: return v.loaded === true && v.st === 200 && typeof v.before === 'boolean' && v.want === !v.before && v.after === v.want;
 function r3Judge(v) {
-  return v.loaded === true && v.st === 200 && typeof v.before === 'boolean' && v.want === !v.before && v.after === v.want;
+  return v.loaded === true && (v.st === 200 || v.st === 204) && typeof v.before === 'boolean' && v.want === !v.before && v.after === v.want;
 }
 // 11/27 main 런 진단 D3 — M9 세션 놓기: 놓기 전 같은 출입증이 열린 길 200(살아 있음) → 로그아웃 200 → 캐시 10초 지나 401.
 //   놓기 전 200 이 아니면 「401 이 로그아웃 때문」 을 말할 수 없음 → 거짓.
