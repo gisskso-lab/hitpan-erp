@@ -577,6 +577,10 @@ jobs:
           #    비DB S1 ~ S10(출하 DDL · 마이그 폴더 CREATE TABLE 전수). 새 표를 분류 안 하면 빨강.
           #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A1_표분류계약_개발명세서.md
           GATES="$GATES|RestoreTableClassificationGate"
+          # 🔴 20261128작 W-G1-52 갈래 A-2② SafeRestoreGate — 안전 복원 걸음 ① ~ ③(제한 계정 G0 · 문 G1 · G2 · 고르기 G3 · G19 ·
+          #    사전 백업 G8 · 출하 판 덤프 붓기 G14 · 256 바이트 왕복 G20) + 비DB SafeRestoreStagingGate(변환기 변이 덤프 · 2차 검사 · G23).
+          #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A2-2_복원걸음_개발명세서.md
+          GATES="$GATES|SafeRestoreGate|SafeRestoreStagingGate"
           # 🔴 20260915작1 갈래 A MdbPostingClassifyGate (G1) — 자료이관 장부 반영 판정 · F3 잔액 · 기준일 · 재고 품목 키.
           #    순수 함수(DB 없음 · SKIP 없음). 무력화 시험 14종 전부 빨간불 · 원본 14/14 초록:
           #      종류 안 가림 · 판매/매입 집합 뒤바꿈 · 연결 키에 거래처 코드 · 머리O연결X→미반영 · DOCFE 없음→미반영 ·

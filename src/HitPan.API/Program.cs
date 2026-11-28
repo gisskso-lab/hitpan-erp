@@ -142,6 +142,7 @@ builder.Services.AddScoped<IApprovalLineService, ApprovalLineService>();
 builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
+builder.Services.AddScoped<IRestoreSafePath, RestoreSafePath>();   // W-G1-52 A-2② 안전 복원 걸음 ①~③ (깃발 닫힘 · 부르는 곳 = 시험 · A-2③)
 builder.Services.AddScoped<IDataResetService, DataResetService>();
 builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
 builder.Services.AddScoped<ITermsConsentService, TermsConsentService>();  // 헌법 #24 약관 4건 강제 동의
