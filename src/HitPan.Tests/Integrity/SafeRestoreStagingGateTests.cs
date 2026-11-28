@@ -259,6 +259,8 @@ public sealed class SafeRestoreStagingGateTests
     public static IEnumerable<object[]> AutocommitBroken() => new[]
     {
         new object[] { "COMMIT 만", "COMMIT;\n" },
+        new object[] { "끔 없이 COMMIT + 되돌림", AcEnd },
+        new object[] { "자료 묶음 안 COMMIT + 되돌림", AcOff + "LOCK TABLES `t_backup` WRITE;\n" + AcEnd + "UNLOCK TABLES;\n" },
         new object[] { "되돌림 SET 만", "SET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
         new object[] { "끔 SET 만(끝)", AcOff },
         new object[] { "끔 뒤 LOCK 아님", AcOff + "INSERT INTO `t_backup` VALUES (9,'T1',NULL,0);\n" },
