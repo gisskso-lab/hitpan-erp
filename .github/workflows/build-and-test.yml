@@ -1412,6 +1412,11 @@ jobs:
           GATES="$GATES|BackofficeAnonymousEntry"
           GATES="$GATES|FormYMigrationNoCoordsGate"
           GATES="$GATES|ReturnPrintItemTenantGate"
+          # 🔴 20261127 W-G1-51-후1(별 작업 25) — 품목 회사 일치: 전표 출력 7자리 · 판매 반품 상세 · 공용 검사 함수 · 저장 입구 13 + 전환 2 (TEMPORARY 표만)
+          GATES="$GATES|VoucherPrintItemTenantGate"
+          GATES="$GATES|SalesReturnDetailItemTenantGate"
+          GATES="$GATES|ItemTenantGuardGate"
+          GATES="$GATES|VoucherSaveItemTenantGate"
           # 🔴 20260928작4 쿨타임 1-b 갈래 ③ (설계 §7 · §D · §E) — G-C1~G-C21(④=G-C22 보류) · G-C14 진짜 파이프라인.
           #    CooltimeDbGate = 출하 DDL 격리 DB + 제품 공개 메서드(엔진 · HrService · SettingsService · UserService · AuthService)
           #    · CooltimeRuleGate = DB 없는 순수 규칙(화면 규칙 소스 링크). 음성 대조군 = 시험 안 짝 + 변이 런

@@ -214,6 +214,7 @@ public sealed class TaxInvoiceMigratedLockGateTests
         //   "The transaction associated with this command is not the connection's active transaction" 으로 던진다(이 게이트 실측).
         //   그래서 대조군은 「끝까지 저장됐나」가 아니라 「잠금이 사람 명세서를 막지 않았나」로 잰다:
         //   잠금 검사를 그대로 통과하고, 수정이 잠금 뒤 단계(헤더 UPDATE)까지 실제로 들어갔는지 본다.
+        //   ✅ 20261127 후1 §15 로 고쳐짐 — 성공 가지가 이제 돈다(위 종전 글은 보존 · 시험 동작 손 0).
         await MigratedDocumentLock.EnsureDeliveryEditableAsync(db, HumanDraftDelivery, Tid);
 
         string? error = null;
