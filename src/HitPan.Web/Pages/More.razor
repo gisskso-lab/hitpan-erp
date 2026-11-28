@@ -35,6 +35,12 @@
                 <div class="hp-menu-folder-items @(isOpen ? "hp-menu-folder-items--open" : "")">
                     @foreach (var item in group.Items)
                     {
+                        @* 🔴 W-S-01 갈래 A (2026-11-27 · 설계 §2-7) — 지금 판에서 닫은 화면(사용환경 · 계산서통계 · 세무사전송)은
+                             전체 메뉴에서 감춘다. 아래 _groups 의 줄은 그대로 둔다(#1) — 규칙(BetaClosedRoutes)이 그리기 때 거른다. *@
+                        if (BetaClosedRoutes.IsClosed(item.Href))
+                        {
+                            continue;
+                        }
                         <button type="button" class="hp-menu-item"
                                 @onclick:stopPropagation="true"
                                 @onclick="@(() => Navigate(item))">

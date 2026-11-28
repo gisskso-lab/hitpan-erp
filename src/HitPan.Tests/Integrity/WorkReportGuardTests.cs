@@ -72,6 +72,12 @@ public class WorkReportGuardTests
     /// 매출수익성 분석(<c>GetSalesProfitabilityAsync</c>)은 AI 도구가 부르는 기능이라
     /// 사라지면 AI 직원이 조용히 답을 못 한다.
     /// </summary>
+    /// <remarks>
+    /// 🔴 2026-11-27 W-S-01 갈래 A(설계 §2-3 · [1-V] 조건 2) — 판매수익성분석은 지금 판에서 <b>닫았다</b>
+    /// (컨트롤러 <c>[NonAction]</c> · 도구 · 대화 분석은 깃발로 보고서 함수를 부르지 않음). 그래도 이 시험의 뜻은 그대로다 —
+    /// 함수 자체는 <b>지우지 않고 남아 있어야</b> 정식 판에서 다시 연다(#1). 「부르지 않음」 은 <c>BetaClosedServerGateTests</c>
+    /// G-A2 · G-A3 이 보고서 가짜로 불러 호출 0 을 잰다(동작 시험).
+    /// </remarks>
     [Fact]
     public void 현황리포트_기능이_그대로_살아있다()
     {

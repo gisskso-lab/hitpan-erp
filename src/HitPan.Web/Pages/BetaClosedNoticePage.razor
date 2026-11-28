@@ -1,0 +1,36 @@
+@page "/settings"
+@page "/settings/ai-assistant"
+@page "/sales/profitability"
+@page "/tax-invoice-stats"
+@page "/accounting/export"
+@attribute [Authorize]
+@inject NavigationManager Nav
+
+@*
+    🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-7) — 지금 판에서 닫아 둔 화면 5개의 직접 주소를 받는 안내 화면.
+
+    닫힌 주소 목록의 진실원 = Services/BetaClosedRoutes.cs (메뉴 감춤도 같은 목록을 쓴다).
+    원래 화면 5개(Settings · AiAssistantPage · SalesProfitabilityPage · TaxInvoiceStatsPage · TaxExportPage)는
+    지우지 않았다 — @page 한 줄만 ⬛ 주석으로 내렸다(헌법 #1). 라우트가 겹치면 Blazor 가
+    AmbiguousMatchException 을 던지므로 둘 중 하나만 살아 있어야 한다.
+
+    다시 열 때(정식 판) = 이 파일에서 그 주소의 @page 한 줄을 떼고, 원래 화면의 ⬛ 줄을 되살리고,
+    BetaClosedRoutes 목록에서 그 주소를 뺀다.
+
+    안내 글은 고객 노출 — 개발 낱말 · 「베타」 낱말 0(#23). 글은 BetaClosedRoutes 상수(PM 결재 P2 초안)를 쓴다.
+*@
+
+<PageTitle>@BetaClosedRoutes.NoticeTitle</PageTitle>
+
+<div style="display:flex;justify-content:center;padding:48px 16px">
+    <MudPaper Elevation="1" Class="pa-8" Style="max-width:560px;width:100%;text-align:center">
+        <MudIcon Icon="@Icons.Material.Outlined.HourglassEmpty" Color="Color.Primary" Style="font-size:48px" />
+        <MudText Typo="Typo.h5" Class="mt-4 mb-3">@BetaClosedRoutes.NoticeTitle</MudText>
+        <MudText Typo="Typo.body1" Class="mb-6">@BetaClosedRoutes.NoticeBody</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GoHome">@BetaClosedRoutes.NoticeButton</MudButton>
+    </MudPaper>
+</div>
+
+@code {
+    private void GoHome() => Nav.NavigateTo("/");
+}

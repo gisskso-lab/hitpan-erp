@@ -20,6 +20,11 @@ public sealed class SettingsController : ControllerBase
         _logger = logger;
     }
 
+    // 🔴 W-S-01 갈래 A (2026-11-27 · 작업지시서 20261127작 §2 · 설계 §2-1 · PM 결재 P4) — 01a-6 사용환경 설정 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(부르면 404 가 아니다 — 실측(M-5a): GET 은 화면 첫 장 200 HTML · 그 밖 방법은 405 빈 본문 · 처리기에 닿지 않음). 닫는 액션 = 루트 GET · 루트 PUT · validate-unit-price ·
+    //   verify-force-edit-password 4개뿐. 같은 컨트롤러의 company · print-common · company-image 는 손대지 않는다.
+    //   아래 속성·본문은 보존한다(#1 · 다시 열 때 = [NonAction] 한 줄 뗌 · 정식 판).
+    [NonAction]
     [HttpGet]
     [Authorize(Policy = "TenantAdminOnly")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -34,6 +39,8 @@ public sealed class SettingsController : ControllerBase
         return Ok(dto);
     }
 
+    // W-S-01 갈래 A — 01a-6 루트 PUT 닫음(위 GET 주석과 같음 · 본문 보존 #1).
+    [NonAction]
     [HttpPut]
     [Authorize(Policy = "TenantAdminOnly")]
     public async Task<IActionResult> Save([FromBody] UpdateTenantSettingsDto dto, CancellationToken ct)
@@ -119,6 +126,8 @@ public sealed class SettingsController : ControllerBase
         return Ok(new { saved = true, rejectedFields = Array.Empty<string>() });
     }
 
+    // W-S-01 갈래 A — 01a-6 validate-unit-price 닫음(화면 호출 0 · 본문 보존 #1).
+    [NonAction]
     [HttpPost("validate-unit-price")]
     public async Task<IActionResult> ValidateUnitPrice(
         [FromBody] ValidateUnitPriceRequestDto dto,
@@ -139,6 +148,8 @@ public sealed class SettingsController : ControllerBase
         return Ok(result);
     }
 
+    // W-S-01 갈래 A — 01a-6 verify-force-edit-password 닫음(화면 호출 0 · 본문 보존 #1).
+    [NonAction]
     [HttpPost("verify-force-edit-password")]
     [Authorize(Policy = "TenantAdminOnly")]
     public async Task<IActionResult> VerifyForceEditPassword(
