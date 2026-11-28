@@ -282,6 +282,11 @@ public sealed class SafeRestoreStagingGateTests
         new object[] { "11.7 옛 꼴 commit", "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\ncommit;\n" },
         new object[] { "COMMIT WORK", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT WORK;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
         new object[] { "ROLLBACK", "ROLLBACK;\n" },
+        // 붙어 나오는 자리(원본 :4492 ~ :4500 · :4780 ~ :4789 — 사이에 다른 출력 0) 사이에 끼운 문장 = 멈춤(각 다음 문장 기대 한 줄씩 지킴)
+        new object[] { "끔과 LOCK 사이 다른 문장", AcOff + "/*!40101 SET NAMES utf8mb4 */;\nLOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\n" + AcEnd },
+        new object[] { "UNLOCK 과 COMMIT 사이 다른 문장", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\n/*!40101 SET NAMES utf8mb4 */;\n" + AcEnd },
+        new object[] { "COMMIT 과 되돌림 사이 다른 문장", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT;\n/*!40101 SET NAMES utf8mb4 */;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
+        new object[] { "자료 묶음 안 끔 뒤 LOCK", "LOCK TABLES `t_backup` WRITE;\n" + AcOff + "LOCK TABLES `t_keep` WRITE;\nUNLOCK TABLES;\n" + AcEnd },
     };
 
     [Theory(DisplayName = "G14-S2c 🔴 (고침 3) AUTOCOMMIT 감쌈 짝 깨짐(COMMIT 만 · SET 만 · 다른 값 · 같은 줄 둘째 문장 · 순서 어긋남 · 옛 꼴) = 멈춤")]
