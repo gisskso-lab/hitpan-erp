@@ -906,7 +906,12 @@ else
     {
         try
         {
-            _departments = await EmpSvc.GetDepartmentsAsync();
+            // ⬛ [낡은 줄 · 화면오류기록띠 넓힘 X2] _departments = await EmpSvc.GetDepartmentsAsync();
+            // 20261129 대표 ④(지시서 §8-3) — 옛 메서드는 실패를 빈 목록으로 뭉개 위 catch 가 돌지 않았다(이 화면은 실패 신호 0).
+            //   실패 = null 로 가르는 쪽을 불러 쉬운 알림 한 번(기록은 서비스가 남김). 화면은 막지 않는다 — 부서 없이 계정 생성은 그대로.
+            var depts = await EmpSvc.GetDepartmentsOrNullAsync();
+            if (depts is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+            _departments = depts ?? new();
         }
         catch (Exception ex)
         {

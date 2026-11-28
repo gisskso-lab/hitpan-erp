@@ -13,6 +13,8 @@
 //   B9 판정기와 따로 — 이름이 K 본문 머리 아님(judge.classifyKNames 실행 목록 밖) · 결과표 경로 ≠ K 결과표 · 판정기 G 기대 키에 띠 키 0
 //   B10 워크플로 글자 — S9b 단계가 S9 판정 뒤 · API 멈춤 앞 · always() · 모드 칸 · 자체시험 + 장면 두 줄 · S8 ~ S9 사이 글자 무접촉(K-C25g 자르기)
 //   B11 (고침1) G-S1 = 시험 장치 가로채기 403 · 어음 목록 주소만 · 실물 목록 real403 장면 0 · 가로챔 0 = 무효(B1 · B2 의 진짜 403 반례는 만든 장면으로)
+//   B12 (넓힘X1 · 지시서 §8-3 대표 ④) G-X1 = 백업 설정 조회 503 · 알림 글 = LoadFailedNotice.Text 앞머리 · [설정 저장] 막힘 · 고친 뒤에만(대조군 목록 밖)
+//   (B10 모드 칸 정규식 — 넓힘X1 에서 값 뒤 꼬리 주석 허용으로 고침 · 둘째 푸시 d54b6e9f 의 꼬리 주석 때문에 거짓이었음)
 'use strict';
 
 const fs = require('fs');
@@ -206,7 +208,10 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
   const between = iS8 >= 0 && iS9 > iS8 ? yml.slice(iS8, iS9) : '';
   const lines = [
     ['always', /^\s*if: always\(\)\s*$/m],
-    ['모드 칸', /^\s*UI_BAND_MODE: (control|fixed)\s*$/m],
+    // ⬛ 옛 줄: ['모드 칸', /^\s*UI_BAND_MODE: (control|fixed)\s*$/m],
+    //   넓힘X1 — 둘째 푸시(d54b6e9f)가 값 뒤에 「# ⬛ 옛: control(…)」 꼬리 주석을 달아 옛 정규식이 못 잡았다(B10 거짓 · S9b rc=1).
+    //   값은 그대로 control · fixed 둘 중 하나만 · 뒤에 「 # …」 주석만 허용.
+    ['모드 칸', /^\s*UI_BAND_MODE: (control|fixed)(\s+#.*)?\s*$/m],
     ['자체시험 줄', /node scripts\/playwright-audit\/ci\/console-error-band\.selftest\.js \|\| rc=1/],
     ['장면 줄', /node scripts\/playwright-audit\/ci\/console-error-band\.js \|\| rc=1/],
     ['단계 상한', /^\s*timeout-minutes: \d+\s*$/m],
@@ -233,6 +238,86 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
   check('B11 G-S1 고침1 — 가로채기 403 · 어음 목록 주소만(쿼리 무시 · 카드 · 상태 바꿈 아님) · real403 쓰는 장면 0 · 가로챔 0 = 무효',
     ok1 && realUsed.length === 0 && hitQs && passIntercept === true && noHit.pass === false && fixedOk === true,
     `꼴 ${ok1} · real403 장면 ${realUsed.length ? realUsed.join(',') : '0'} · 주소 ${hitQs} · 가로챔 참 ${passIntercept} · 가로챔 0 거짓 ${noHit.pass === false} · 고친 뒤 참 ${fixedOk}`);
+}
+
+// ── B12 (넓힘X1 · 지시서 §8-3 대표 ④) — G-X1 = 백업 설정 조회 503 · 쉬운 알림 · [설정 저장] 막힘 · 고친 뒤에만 ──
+{
+  const X1 = S('G-X1');
+  const noticeSrc = path.join(__dirname, '..', '..', '..', 'src', 'HitPan.Web', 'Services', 'LoadFailedNotice.cs');
+  const src = fs.existsSync(noticeSrc) ? fs.readFileSync(noticeSrc, 'utf8') : '';
+  const m = src.match(/public const string Text = "([^"]+)";/);
+  const ok1 = !!X1 && X1.branch === 'X' && X1.who === 'owner' && X1.page === '/data/backup' && X1.inject === '503'
+    && X1.match && X1.match.path === '/api/backup/settings' && X1.tags.length === 1 && X1.tags[0] === '[BackupService.GetSettingsAsync]'
+    && X1.block === '설정 저장' && X1.fixedOnly === true;
+  // 알림 글 = LoadFailedNotice.Text 앞머리(원문 글자와 맞춤 — 글이 바뀌면 여기서 먼저 잡힘)
+  const textOk = !!m && !!X1 && typeof X1.snack === 'string' && m[1].startsWith(X1.snack);
+  // 모드 목록 — 대조군엔 G-X1 없음 · 고친 뒤엔 전부
+  const ctrlKeys = B.scenesFor('control').map((s) => s.key);
+  const fixKeys = B.scenesFor('fixed').map((s) => s.key);
+  const modeOk = !ctrlKeys.includes('G-X1') && fixKeys.includes('G-X1') && fixKeys.length === B.SCENES.length
+    && ctrlKeys.length === B.SCENES.filter((s) => s.fixedOnly !== true).length && B.scenesFor(null).every((s) => s.fixedOnly !== true);
+  // 목록 꼴 반례 — 넓힘인데 fixedOnly 없음 · 막을 단추 빈 글자 · fixedOnly 글자
+  const base = clone(B.SCENES);
+  const ix = base.findIndex((s) => s.key === 'G-X1');
+  const listCases = [
+    ['fixedOnly 없음', (l) => { delete l[ix].fixedOnly; }],
+    ['막을 단추 빈 글자', (l) => { l[ix].block = '  '; }],
+    ['fixedOnly 글자', (l) => { l[ix].fixedOnly = 'yes'; }],
+    ['갈래 X 키 어긋남', (l) => { l[ix].key = 'G-S7'; }],
+  ];
+  const miss = [];
+  for (const [n, f] of listCases) {
+    const l = clone(base);
+    f(l);
+    if (B.sceneListProblems(l).length === 0) miss.push(n);
+  }
+  // 판정 — 참 1 · 거짓 5(단추 안 막힘 · 단추 못 읽음 · 쉬운 알림 0 · 경고 흔적 0 · +10초 띠)
+  const fx = (o) => ({ ...mat(X1, { band3: false, band10: false, err: 0, warn: 1 }), blocked: true, ...o });
+  const pass = B.judgeScene('fixed', X1, fx({})).pass;
+  const bad = [
+    ['단추 안 막힘', B.judgeScene('fixed', X1, fx({ blocked: false }))],
+    ['단추 못 읽음', B.judgeScene('fixed', X1, fx({ blocked: null }))],
+    ['쉬운 알림 0', B.judgeScene('fixed', X1, fx({ snackHit: 0 }))],
+    ['경고 흔적 0', B.judgeScene('fixed', X1, { ...mat(X1, { band3: false, band10: false, err: 0, warn: 0 }), blocked: true })],
+    ['+10초 띠', B.judgeScene('fixed', X1, fx({ band10: true }))],
+  ].filter(([, v]) => v.pass !== false || v.why.length === 0).map(([n]) => n);
+  // 막을 단추 없는 장면은 blocked 를 안 봄(G-R1a 고친 뒤 참 재료에 blocked 없음 → 참 그대로)
+  const noBlockOk = B.judgeScene('fixed', R1, FIX_OK).pass === true;
+  // 주소 — 백업 설정만(이력 · 복원 이력 · 실행 아님)
+  const hitOk = B.routeMatch(X1, 'http://127.0.0.1:18080/api/backup/settings') === true
+    && B.routeMatch(X1, 'http://127.0.0.1:18080/api/backup/history?limit=50') === false
+    && B.routeMatch(X1, 'http://127.0.0.1:18080/api/backup/run') === false;
+  check('B12 G-X1 넓힘X1 — 꼴 · 알림 글 = LoadFailedNotice.Text 앞머리 · 대조군 목록 밖 · 목록 반례 4 · 판정 참 1 거짓 5 · 막을 단추 없는 장면 무영향 · 주소',
+    ok1 && textOk && modeOk && miss.length === 0 && pass === true && bad.length === 0 && noBlockOk && hitOk,
+    `꼴 ${ok1} · 알림 글 ${textOk} · 모드 목록 ${modeOk} · 못 잡은 목록 반례 ${miss.length ? miss.join(' · ') : '0'} · 참 ${pass}`
+    + ` · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 무영향 ${noBlockOk} · 주소 ${hitOk}`);
+}
+// ── B13 (넓힘 X2 · 지시서 §8-3 대표 ④) — G-P4 발주 현황 = 503 가로채기 · 쉬운 알림 글 = 앱 LoadFailedNotice.Text 앞머리 · 띠 0 · 경고 흔적 · 알림 0 이면 거짓 ──
+{
+  const P4 = S('G-P4');
+  const svc = path.join(__dirname, '..', '..', '..', 'src', 'HitPan.Web', 'Services', 'LoadFailedNotice.cs');
+  const svcText = fs.existsSync(svc) ? fs.readFileSync(svc, 'utf8') : '';
+  const m = /public const string Text = "([^"]+)";/.exec(svcText);
+  const page = path.join(__dirname, '..', '..', '..', 'src', 'HitPan.Web', 'Pages', 'Purchase', 'PurchaseOrderStatusPage.razor');
+  const pageText = fs.existsSync(page) ? fs.readFileSync(page, 'utf8') : '';
+  const shape = !!P4 && P4.inject === '503' && P4.page === '/purchase-order-status' && P4.match.path === '/api/reports/purchase-orders'
+    && P4.tags.length === 1 && pageText.includes(`Logger.LogWarning(_hp15Ex, "${P4.tags[0]}");`) && pageText.includes('@page "/purchase-order-status"')
+    && pageText.includes('"api/reports/purchase-orders?"') && pageText.includes('LoadFailedNotice.Show(Snackbar, _hp15Ex);');
+  const snackOk = !!P4 && !!m && m[1].startsWith(P4.snack);
+  const last = B.SCENES.indexOf(P4) > B.SCENES.findIndex((s) => s.key === 'G-C2'); // 기존 11 장면 뒤에 덧붙임(X1 장면이 더 뒤에 와도 참)
+  const ok = P4 && B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, snackHit: 1 })).pass === true;
+  const bad = P4 ? [
+    ['알림 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, snackHit: 0 }))],
+    ['띠 +3초', B.judgeScene('fixed', P4, mat(P4, { band3: true, band10: false, err: 0, warn: 1 }))],
+    ['경고 흔적 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 0 }))],
+    ['앱 표준오류 1', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, appErr: 1 }))],
+    ['가로챔 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, routeHits: 0 }))],
+  ].filter(([, v]) => v.pass !== false).map(([n]) => n) : ['장면 없음'];
+  const hit = P4 && B.routeMatch(P4, 'http://127.0.0.1:18080/api/reports/purchase-orders?view=date&from=2026-11-01') === true
+    && B.routeMatch(P4, 'http://127.0.0.1:18080/api/reports/purchase-statistics?view=date') === false;
+  check('B13 G-P4 넓힘 X2 — 꼴 · 화면 원문 대조(표지 · 주소 · 알림 줄) · 알림 글 = 앱 글 앞머리 · G-C2 뒤 · 고친 뒤 참 1 · 거짓 5 · 주소 맞춤',
+    shape && snackOk && last && ok && bad.length === 0 && hit,
+    `꼴 ${shape} · 알림 글 ${snackOk} · 순서 ${last} · 참 ${ok} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 주소 ${hit}`);
 }
 
 const bad = results.filter((x) => !x.ok).length;

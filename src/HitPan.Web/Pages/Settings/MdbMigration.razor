@@ -698,6 +698,8 @@
             // 헌법 #15: 삼키지 않는다. 다만 이 조회가 실패해도 화면은 평소처럼 쓸 수 있어야 하므로 막지 않는다.
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration] 진행 중 작업 조회 실패: {ex.Message}");
             Logger.LogWarning(ex, "[MdbMigration] 진행 중 작업 조회 실패");
+            // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
+            LoadFailedNotice.Show(Snackbar, ex);
         }
     }
 

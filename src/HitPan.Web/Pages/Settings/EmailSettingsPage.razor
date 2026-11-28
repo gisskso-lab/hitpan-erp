@@ -68,7 +68,10 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _settings = await EmailApi.GetSettingsAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _settings = await EmailApi.GetSettingsAsync();
+        // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 화면을 열 때 조회가 실패하면 빈 SMTP(설정 안 된 것처럼)만 남기지 않고 쉬운 알림 한 번.
+        //   저장 · 시험 뒤 다시 읽기(아래 두 자리)는 그 단추의 결과 알림이 이미 있어 그대로 둔다.
+        _settings = await EmailApi.GetSettingsAsync(onLoadFailed: ex => LoadFailedNotice.Show(Snackbar, ex));
         _edit = new UpdateEmailSettingsModel
         {
             SmtpHost = _settings.SmtpHost,

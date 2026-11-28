@@ -123,14 +123,20 @@
 
     private async Task LoadAsync()
     {
-        _trail = await LogApi.GetAuditTrailAsync(from: _from, to: _to, limit: 300);
-        _api   = await LogApi.GetApiRequestsAsync(from: _from, to: _to, limit: 300);
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _trail = await LogApi.GetAuditTrailAsync(from: _from, to: _to, limit: 300);
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _api   = await LogApi.GetApiRequestsAsync(from: _from, to: _to, limit: 300);
+        // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 조회 실패면 빈 표 · 오류 0 만 남아 「로그가 없다」 로 오해하지 않게 쉬운 알림 한 번(둘 다 실패해도 한 번).
+        Exception? loadFailed = null;
+        _trail = await LogApi.GetAuditTrailAsync(from: _from, to: _to, limit: 300, onLoadFailed: ex => loadFailed ??= ex);
+        _api   = await LogApi.GetApiRequestsAsync(from: _from, to: _to, limit: 300, onLoadFailed: ex => loadFailed ??= ex);
         _apiErrors = _api.Count(x => x.StatusCode >= 400);
+        if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
     }
 
     private async Task FilterErrorsAsync()
     {
-        _api = await LogApi.GetApiRequestsAsync(from: _from, to: _to, statusCode: null, limit: 500);
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _api = await LogApi.GetApiRequestsAsync(from: _from, to: _to, statusCode: null, limit: 500);
+        _api = await LogApi.GetApiRequestsAsync(from: _from, to: _to, statusCode: null, limit: 500, onLoadFailed: ex => LoadFailedNotice.Show(Snackbar, ex));
         _api = _api.Where(x => x.StatusCode >= 400).ToList();
         _apiErrors = _api.Count;
     }
