@@ -227,7 +227,8 @@ public sealed class SafeRestoreGateDbTests : IDisposable
         using var selValue = sel.Value;
         Assert.True(sel.Ok, sel.DenyCode);
         var st = await c.Path.StageAsync(Tenant, sel.Value!);
-        Assert.True(st.Ok, $"{st.DenyCode} {st.LogDetail}");
+        // 고침 2 — 멈추면 단계 · 사유 · 멈춘 문장 앞 80 바이트를 실패 글에(시험 DB 덤프 · 고객 자료 0 · 제품 응답 · 로그 손 0)
+        Assert.True(st.Ok, st.Ok ? "" : $"{st.DenyCode} {st.LogDetail} {RestoreDumpDiagnostics.Describe(sel.Value!.DumpStream, RestoreDumpDiagnostics.ProductLikeDecide)}");
         Assert.True(st.Value!.StagedTables.ContainsKey("partner_contacts"));
         Assert.False(st.Value.StagedTables.ContainsKey("users"), "지금 값 표를 부었다");
         Assert.Contains("schema_migrations", st.Value.VersionOnlyTables, StringComparer.OrdinalIgnoreCase);
@@ -260,6 +261,10 @@ public sealed class SafeRestoreGateDbTests : IDisposable
         using var selValue = sel.Value;
         Assert.True(sel.Ok, sel.DenyCode);
         var st = await c.Path.StageAsync(Tenant, sel.Value!);
+        // 고침 2 — 기대와 다르면 변환기 멈춘 자리 진단을 실패 글에(아래 Assert.Equal 은 그대로)
+        Assert.True(st.DenyCode == SafeRestoreDenyCodes.OtherCompanyBackup,
+            st.DenyCode == SafeRestoreDenyCodes.OtherCompanyBackup ? ""
+                : $"기대 {SafeRestoreDenyCodes.OtherCompanyBackup} · 실제 {st.DenyCode} {st.LogDetail} {RestoreDumpDiagnostics.Describe(sel.Value!.DumpStream, RestoreDumpDiagnostics.ProductLikeDecide)}");
         Assert.Equal(SafeRestoreDenyCodes.OtherCompanyBackup, st.DenyCode);
         Assert.True(st.DataUnchanged);
         Assert.Equal(0, await c.App.ExecuteScalarAsync<long>(
