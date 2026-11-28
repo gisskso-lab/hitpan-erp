@@ -140,11 +140,70 @@ const EXPECT_CT_ROWS = [
   ['K35-CT4', 'CT4', 'root-put-405', 'chromium'],
   ['K35-CT-N4', 'N4', null, 'chromium'],
 ];
+// 🔴 W-S-03 고침 1(11/28 · [4] P2-1 화면 회귀 · 개발명세서 docs/개발/erp/20261128_W-S-03_서버문닫기_온보딩모바일_개발명세서.md 「고침 1」)
+//   K 본문 k35-ws03-closed.js 의 기대 키 7 = 시험 7(첫 로그인 2 · 닫힌 주소 2 · 기기 관문 1 · 닫힌 서버 문 2) · N4 0(그림 안 찍음). 선택 키 0 — 빠지면 누락 빨강.
+//   EXPECT_G_ROWS(앞 몸 · kit35.expectKeys 가 읽는 목록)와 따로 둔다 — 앞 몸이 브라우저 끝에 남은 키를 DEVICE 로 채울 때 이 키를 건드리지 않게.
+//   판정(필수 · 중복 · 모르는 · 통과 꼴)은 합친 EXPECT_G 로 같은 규칙.
+const EXPECT_S3_ROWS = [
+  ['K35-S3-1', 'S3', 'first-home', 'chromium'],
+  ['K35-S3-1', 'S3', 'first-update', 'chromium'],
+  ['K35-S3-2', 'S3', 'direct-welcome', 'chromium'],
+  ['K35-S3-2', 'S3', 'phone-register', 'chromium'],
+  ['K35-S3-3', 'S3', 'gate-mainpc', 'chromium'],
+  ['K35-S3-4', 'S3', 'mobile-token', 'chromium'],
+  ['K35-S3-4', 'S3', 'mobile-register', 'chromium'],
+];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
-const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// ⬛ [낡은 줄 · 쿨타임 화면 실측 3] const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// ⬛ [낡은 줄 · W-S-03 고침 1] const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// 🔴 main 합침(11/28 · c50ca6cf · PM 결재 「뒤에 머지하는 쪽이 앞 쪽 main 위로 올리고 맞춘다」) — 쿨타임 7 + W-S-03 7 을 함께 합친다(앞 몸 18 + 7 + 7 = 32).
+const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// 🔴 W-S-03 고침 3(11/28 · 작업지시서 docs/운영기록/20261128작_W-S-03_고침3_알려진결함대장_작업지시서.md §4 ① · PM 결재 Q1 (가) · Q2 (가) · Q3)
+//   알려진 결함 대장 — 목록은 **이 한 곳**. 줄 = [id, g, 길, 브라우저, 대장 이름, 닫는 조건]. 결함 근거 = 선행검증서
+//   docs/검증/선행/20261128_선행검증서_로그인경합_첫화면403띠_1V.md §1(로그인 경합) · §2(첫 화면 403 흰 띠).
+//   면제 = 알려진 꼴일 때만(knownDefectFail 넷 다 참) · 결과 줄이 없으면 누락 빨강 그대로 · 초록이면 🔵 알림(빨강 아님).
+//   닫을 때(새 작업 「로그인 경합 · 첫 화면 403 띠」 고침 PR · 같은 커밋) = 닫힌 줄만 ⬛ 주석으로 내림 + 자체시험 K-C27g 고정 수 · 따로 적은 목록 같이 줄임(작업지시서 §8).
+//   목록이 0 이 돼도 상수 · 함수 · 칸은 남긴다(다음 알려진 결함 자리).
+const KNOWN_DEFECT_ROWS = Object.freeze([
+  Object.freeze(['K35-S3-1', 'S3', 'first-home', 'chromium', '첫 화면 403 띠', '권한 0 직원 첫 화면 / 흰 띠 0(선행검증서 §2)']),
+  Object.freeze(['K35-S3-1', 'S3', 'first-update', 'chromium', '로그인 경합 · 첫 화면 403 띠', '[최신버젼업데이트] 뒤 /data/update 도착 · 흰 띠 0(선행검증서 §1 · §2 둘 다)']),
+]);
+// 결과 칸 머리 글자(N4_WHY 선례) — K 본문이 알려진 꼴일 때만 붙인다. 머리가 없으면 면제 0(닫힌 쪽).
+const KNOWN_WHY = '알려진 결함 꼴=';
+const knownKeyOf = (w) => rowKey({ scope: 'K', id: w[0], g: w[1], path: w[2], browser: w[3] });
+// 목록 무결성 — 문제 글 목록(빈 목록 = 꼴 맞음). 순수 함수(자체시험이 나쁜 목록으로도 부른다).
+function knownDefectListProblems(list = KNOWN_DEFECT_ROWS) {
+  const out = [];
+  const gSet = new Set(EXPECT_G);
+  const seenKeys = new Set();
+  if (!Array.isArray(list)) return ['목록이 배열 아님'];
+  list.forEach((w, i) => {
+    if (!Array.isArray(w) || w.length !== 6) { out.push(`${i + 1}번 줄 칸 수 6 아님`); return; }
+    const k = knownKeyOf(w);
+    if (!gSet.has(k)) out.push(`${i + 1}번 줄 키가 G 기대 키 밖`);
+    if (seenKeys.has(k)) out.push(`${i + 1}번 줄 키 중복`);
+    seenKeys.add(k);
+    if (typeof w[4] !== 'string' || w[4].trim() === '') out.push(`${i + 1}번 줄 대장 이름 빈 글자`);
+    if (typeof w[5] !== 'string' || w[5].trim() === '') out.push(`${i + 1}번 줄 닫는 조건 빈 글자`);
+  });
+  return out;
+}
+const KNOWN_DEFECT_MAP = new Map(KNOWN_DEFECT_ROWS.map((w) => [knownKeyOf(w), w]));
+// 결과 줄이 대장 키인가(꼴 무관) — 대장 줄 또는 null
+function knownDefectRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  return KNOWN_DEFECT_MAP.get(rowKey(row)) || null;
+}
+// 면제 = 넷 다 참일 때만: 키 ∈ 목록 · kind TEST · pass === false · 결과 칸이 KNOWN_WHY 로 시작. 하나라도 아니면 거짓(닫힌 쪽).
+function knownDefectFail(row) {
+  return !!knownDefectRow(row) && row.kind === 'TEST' && row.pass === false
+    && typeof row.got === 'string' && row.got.startsWith(KNOWN_WHY);
+}
 // N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
-const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · 쿨타임 화면 실측 3] const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · W-S-03 고침 1] const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
+const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
   .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
 // 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
 //   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
@@ -217,6 +276,12 @@ function isGTest(x) {
 }
 
 function main() {
+  // 🔴 W-S-03 고침 3 — 알려진 결함 목록 꼴(판정 시작 때 · 어기면 [장치] 빨강)
+  const knownBad = knownDefectListProblems();
+  if (knownBad.length > 0) {
+    console.log(`⚫ FAIL [장치] 알려진 결함 목록 꼴 이상 — ${knownBad.join(' · ')}`);
+    process.exit(1);
+  }
   const p = L.resultPath();
   if (!fs.existsSync(p)) {
     console.log('⚫ FAIL [장치] 결과표 없음 — 앞 단계(시드·기동·브라우저)가 결과표를 만들기 전에 섰다');
@@ -239,8 +304,14 @@ function main() {
   const good = rows.filter((x) => !bad.includes(x));
   const obs = good.filter((x) => x.kind === 'OBS');
   const tests = good.filter((x) => x.kind === 'TEST');
-  const failT = tests.filter((x) => x.pass !== true);
-  const failD = good.filter((x) => x.kind === 'DEVICE' && x.pass !== true);
+  // ⬛ [낡은 줄 · 고침 2] const failT = tests.filter((x) => x.pass !== true);
+  // ⬛ [낡은 줄 · 고침 2] const failD = good.filter((x) => x.kind === 'DEVICE' && x.pass !== true);
+  // 🔴 W-S-03 고침 3 — 알려진 꼴 실패 줄은 [시험] 실패에서 뺀다(known 묶음 · 관찰 줄로 찍음). 면제 판정은 knownDefectFail 한 곳
+  //   (kind TEST 만) — DEVICE 실패 줄(단언 전 실패)은 그 함수가 거짓이라 아래 failD 에 그대로 남는다(면제 0).
+  const known = tests.filter(knownDefectFail);
+  const knownGreen = tests.filter((x) => knownDefectRow(x) && x.pass === true);
+  const failT = tests.filter((x) => x.pass !== true && !knownDefectFail(x));
+  const failD = good.filter((x) => x.kind === 'DEVICE' && x.pass !== true && !knownDefectFail(x));
   // ⬛ [낡은 줄 · 1~10차] const kFiles = kBodyFiles();
   const kScan = kBodyScan(); // 🔴 F-PR ⑧ — 실행기와 같은 함수
   const kFiles = kScan.run;
@@ -258,6 +329,13 @@ function main() {
       console.log(`🟡 OBS ${m(x.scope || '-')} ${m(x.id)}${x.browser ? ` (${m(x.browser)})` : ''} — 제품 관찰(빨강 아님 · 별건) · ${showCtl(L.sanitize(x.got, 1200))}`);
       continue;
     }
+    // 🔴 W-S-03 고침 3 — 알려진 결함 대장 줄(관찰 줄 꼴 · 결과 칸 소독 1200 · 제어 글자 가림)
+    const kd = knownDefectRow(x);
+    const kdHead = () => `K ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`;
+    if (kd && knownDefectFail(x)) {
+      console.log(`🟡 알려진 결함 ${kdHead()} — 대장 「${m(kd[4])}」 · 빨강 아님 · 계속 잼 · ${showCtl(L.sanitize(x.got, 1200))}`);
+      continue;
+    }
     // ⬛ [낡은 줄 · F-PR] const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : '⚫ FAIL [장치]');
     // 🔴 PM 결정 4V-1 ④ — N4 거짓 줄은 「누출 의심」 표지(재실행 대상 아님 · kind 는 DEVICE 그대로)
     const n4Bad = x.pass !== true && x.kind === 'DEVICE' && x.scope !== 'H' && EXPECT_G_DEVICE.has(rowKey(x));
@@ -266,7 +344,15 @@ function main() {
     const n4Mark = n4Bad && n4Why(x) === 'device' ? '🔴 FAIL [장치 · 대조 못 함]' : '🔴 FAIL [장치 · 누출 의심]';
     const mark = x.pass === true ? '🟢 PASS' : (x.kind === 'TEST' ? '🔴 FAIL [시험]' : (n4Bad ? n4Mark : '⚫ FAIL [장치]'));
     // ⬛ [낡은 줄 · 1~10차] console.log(`${mark} ${x.scope || '-'} ${x.id}${x.g ? ` ${x.g}` : ''}${x.path ? ` ${x.path}` : ''}${x.browser ? ` (${x.browser})` : ''}`);
-    console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`);
+    // ⬛ [낡은 줄 · 고침 2] console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}`);
+    // 🔴 W-S-03 고침 3 — 알려진 결함 키인데 알려진 꼴이 아닌 시험 실패 줄은 꼬리로 알린다(빨강 그대로)
+    const kdTail = kd && x.kind === 'TEST' && x.pass !== true ? ' (알려진 결함 키 · 알려진 꼴 아님)' : '';
+    console.log(`${mark} ${m(x.scope || '-')} ${m(x.id)}${x.g ? ` ${m(x.g)}` : ''}${x.path ? ` ${m(x.path)}` : ''}${x.browser ? ` (${m(x.browser)})` : ''}${kdTail}`);
+    // 🔴 W-S-03 고침 3 — 알려진 결함 키가 초록(🟢 PASS 줄은 그대로 · 아래 알림 줄 둘 더 · 빨강 아님 · PM Q2 (가))
+    if (kd && x.kind === 'TEST' && x.pass === true) {
+      console.log(`🔵 알려진 결함 초록 ${kdHead()} — 대장 「${m(kd[4])}」 닫을 때(새 작업 PR 에서 목록에서 뺀다 · 빨강 아님)`);
+      console.log(`::notice::알려진 결함 초록 ${kdHead()} — 대장 「${m(kd[4])}」 닫을 때(새 작업 PR 에서 목록에서 뺀다)`);
+    }
   }
   for (const x of bad) {
     const id = x && typeof x === 'object' ? String(x.id ?? '-') : '-';
@@ -280,7 +366,9 @@ function main() {
   // ⬛ [낡은 줄 · 1~10차] console.log(`시드: ${r && r.seed ? `${r.seed.mode} · ${r.seed.path}` : '기록 없음'}`);
   console.log(`시드: ${r && r.seed ? `${m(r.seed.mode)} · ${m(r.seed.path)}` : '기록 없음'}`);
   // ⬛ [낡은 줄 · 2~3차] 끝에 「· 꼴 이상 ${bad.length}」 까지 — 4차: + 관찰 수(빨강 아님)
-  console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length} · 🟡 관찰 ${obs.length}(빨강 아님)`);
+  // ⬛ [낡은 줄 · 고침 2] console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length} · 🟡 관찰 ${obs.length}(빨강 아님)`);
+  // 🔴 W-S-03 고침 3 — 끝에 알려진 결함 수(시험 실패 수에는 안 셈 · 돈 시험 수에는 셈)
+  console.log(`돈 시험 ${tests.length}건(G ${gTests.length} · K 본문 파일 ${kFiles.length}) · 시험 실패 ${failT.length} · 장치 실패 ${failD.length} · 꼴 이상 ${bad.length} · 🟡 관찰 ${obs.length}(빨강 아님) · 🟡 알려진 결함 빨강 ${known.length} · 🔵 초록 ${knownGreen.length}(목록 ${KNOWN_DEFECT_ROWS.length} · 빨강 아님)`);
   // 🔴 F-PR ⑧⑨ — 이름 · 키 틀 한 줄(키 글자는 빨강 줄에서 소독 뒤)
   console.log(`K 본문 이름: 실행 ${kFiles.length} · 이상 ${kScan.odd.length}`);
   // ⬛ [낡은 줄 · F-PR] console.log(`키 틀: 누락 … · 갈래 ${keys.branch.length} · G 자리 ${EXPECT_G.length}${keys.gEmpty ? '(비었음 · K 본문 있음)' : ''}`);
@@ -370,5 +458,7 @@ module.exports = {
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
   EXPECT_CT_ROWS, // 쿨타임 화면 실측 3(11/28)
+  EXPECT_S3_ROWS, // W-S-03 고침 1(11/28)
   N4_WHY, n4Why, // K 연결 3차 ⑭
+  KNOWN_DEFECT_ROWS, KNOWN_WHY, knownDefectFail, knownDefectRow, knownDefectListProblems, // W-S-03 고침 3(11/28)
 };

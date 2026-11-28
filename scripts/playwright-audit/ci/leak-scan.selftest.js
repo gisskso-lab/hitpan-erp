@@ -96,6 +96,10 @@
 //   K-C25a 그림 도우미 6길 · K-C25h 찍은 직후 죽음 → 업로드 자리 0 · K-C25b N4 판정·표지 먼저·강제 거짓 · K-C25c 판정기 끝 줄 둘
 //   K-C25d 초기 스크립트 한 덩어리 순서 · K-C25e G4 되돌림 판단 · K-C25f 콘솔 쌓기 · K-C25g 시간 상한
 //   바뀐 칸: K-C24h(워크플로 지킴 셋 → 넷 · 업로드 조건 표지 줄)
+// 🔴 W-S-03 고침 3(11/28 · 작업지시서 20261128작_W-S-03_고침3_알려진결함대장 §5) — 123 → 131(새 8 · 바뀐 칸 0)
+//   K-C27a~f 판정기 알려진 결함 대장(양성 2 · 음성 4) · K-C27g 대장 목록 고정(2) · K-C27h K 본문 endCode
+// 🔴 W-S-03 고침 3-2(11/28 · 같은 작업지시서 §9) — 131 → 132(새 1 · 바뀐 칸 0)
+//   K-C27i K 본문 알려진 꼴 두 식(homeKnown · updateKnown) 참 · 거짓 반례 · U7 · U8 최종 착지
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1380,6 +1384,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2(작업지시서 고침 1 표에서 따로 적음)
       fG('K35-CT4', 'CT4', 'child-put-403', 'chromium'), fG('K35-CT4', 'CT4', 'root-put-405', 'chromium'),
       fG('K35-CT-N4', 'N4', null, 'chromium', 'DEVICE'),
+      // 🔴 W-S-03 고침 1(11/28 · [4] P2-1) — 화면 회귀 · 닫힌 서버 문 탐침 7(개발명세서 「고침 1」 표에서 따로 적는다 · 판정기 EXPECT_S3_ROWS 를 읽지 않음)
+      fG('K35-S3-1', 'S3', 'first-home', 'chromium'), fG('K35-S3-1', 'S3', 'first-update', 'chromium'),
+      fG('K35-S3-2', 'S3', 'direct-welcome', 'chromium'), fG('K35-S3-2', 'S3', 'phone-register', 'chromium'),
+      fG('K35-S3-3', 'S3', 'gate-mainpc', 'chromium'),
+      fG('K35-S3-4', 'S3', 'mobile-token', 'chromium'), fG('K35-S3-4', 'S3', 'mobile-register', 'chromium'),
     ];
     const F_G_N = fGRows().length;
     // 🔴 K 연결 1차 — 판정기를 부르는 칸은 사본 폴더(K 본문 꼴 1개 기본)에서 돈다 · 실물 폴더의 K 본문 수에 묶이지 않게(§5-1).
@@ -1890,8 +1899,14 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 고침 1 F2 이전] const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 고침 1 F2 이전] check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 W-S-03 고침 1(11/28) — 화면 회귀 · 닫힌 문 탐침 7 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — 쿨타임 7 + W-S-03 7 을 함께 합쳐 32(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 32 && mine.length === 32 && new Set(theirs).size === 32 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 32 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
@@ -2593,6 +2608,156 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         why = x.v ? `등록 전 값(대조) ${v.beforeHas} · 등록 뒤 값 ${v.afterHas} · 가림 ${v.masked} · 글에 값 ${v.msgHas} · 숫자 없음 표시 ${v.noCount} · 항목 클릭 뒤 다시 안 함 · 팝업 기다림 클릭 바로 전 ${noRepeat}` : `rc=${x.code} · 결과 줄 없음 ${x.err}`;
       }
       check('K-C26b 종 길 사유 소독(등록값 가림 · 대조 = 등록 전엔 보임) · 항목 클릭 실패 뒤 다시 안 누름 · 팝업 기다림은 항목 클릭 바로 전', ok, why);
+    }
+    // ── 🔴 W-S-03 고침 3(11/28 · 작업지시서 20261128작_W-S-03_고침3_알려진결함대장 §5) — 알려진 결함 대장 ──
+    //   판정기를 실제로 돌린다(사본 폴더 · 끝 코드 + 끝 줄 대조). 표지 글자 · 대장 목록은 판정기 상수를 읽지 않고 여기 따로 적는다(자기 증명 0).
+    //   대장 닫을 때(작업지시서 §8) = K27_LIST · K-C27g 고정 수를 같은 커밋에서 줄이고 K-C27a/f 는 남은 줄 기준으로.
+    const K27_WHY = '알려진 결함 꼴='; // 판정기 KNOWN_WHY 와 따로 적음
+    const K27_LIST = [ // [id, g, 길, 브라우저, 대장 이름] — 판정기 KNOWN_DEFECT_ROWS 와 따로 적음
+      ['K35-S3-1', 'S3', 'first-home', 'chromium', '첫 화면 403 띠'],
+      ['K35-S3-1', 'S3', 'first-update', 'chromium', '로그인 경합 · 첫 화면 403 띠'],
+    ];
+    const K27_N = 2;
+    const k27Is = (w, p) => w.id === 'K35-S3-1' && w.path === p;
+    // 기본 = 전 키(H + G) · 두 대장 줄 = 시험 거짓 + 표지. 바꿀 줄은 fn 으로.
+    const k27Rows = (fn = (w) => w) => kAll().map((w) => (w.scope === 'K' && w.id === 'K35-S3-1'
+      ? fn({ ...w, pass: false, got: `${K27_WHY}대장 · {"where":"main"}` }) : fn(w))).filter((w) => w !== null);
+    const k27Lines = (out, head) => out.split('\n').filter((s) => s.startsWith(head)).length;
+    { // K-C27a 양성 — 두 대장 줄 알려진 꼴 → 끝 0 · 🟡 2 줄 · 시험 실패 0
+      const x = kJ('k27a', k27Rows());
+      const n = k27Lines(x.out, '🟡 알려진 결함 K K35-S3-1');
+      const ok = x.code === 0 && kLast(x.out) === '🟢 PASS 전부' && n === 2 && /시험 실패 0 /.test(x.out) && /🟡 알려진 결함 빨강 2 · 🔵 초록 0/.test(x.out);
+      check('K-C27a 대장 양성 · 두 장면 시험 거짓 + 표지 → rc 0 · 🟡 알려진 결함 2 줄 · 시험 실패 0', ok, `rc=${x.code} · 🟡 ${n} · 끝 ${kLast(x.out)}`);
+    }
+    { // K-C27b 음성 — first-home 줄 없음 → 누락 빨강 그대로
+      const x = kJ('k27b', k27Rows((w) => (k27Is(w, 'first-home') ? null : w)));
+      const ok = x.code === 1 && x.out.includes('누락 [K|K35-S3-1|S3|first-home|chromium]');
+      check('K-C27b 대장 음성 · first-home 결과 줄 없음 → rc 1 · 키 틀 누락 [그 키]', ok, `rc=${x.code} · 끝 ${kLast(x.out)}`);
+    }
+    { // K-C27c 음성 — 목록 밖 키(direct-welcome) 시험 거짓 + 표지 → 면제 0
+      const x = kJ('k27c', k27Rows((w) => (w.path === 'direct-welcome' ? { ...w, pass: false, got: `${K27_WHY}대장 · x` } : w)));
+      const ok = x.code === 1 && /^🔴 FAIL \[시험\] K K35-S3-2 S3 direct-welcome \(chromium\)$/m.test(x.out) && kLast(x.out).startsWith('🔴 FAIL [시험]');
+      check('K-C27c 대장 음성 · 목록 밖 키 시험 거짓 + 표지 → rc 1 · 🔴 FAIL [시험]', ok, `rc=${x.code} · 끝 ${kLast(x.out)}`);
+    }
+    { // K-C27d 음성 — first-update 시험 거짓 · 표지 없음 → 알려진 꼴 아님
+      const x = kJ('k27d', k27Rows((w) => (k27Is(w, 'first-update') ? { ...w, got: '{"navs":["/welcome"]}' } : w)));
+      const ok = x.code === 1 && /^🔴 FAIL \[시험\] K K35-S3-1 S3 first-update \(chromium\) \(알려진 결함 키 · 알려진 꼴 아님\)$/m.test(x.out)
+        && kLast(x.out).startsWith('🔴 FAIL [시험]') && k27Lines(x.out, '🟡 알려진 결함 K') === 1;
+      check('K-C27d 대장 음성 · first-update 시험 거짓 · 표지 없음 → rc 1 · 🔴 FAIL [시험] 「알려진 꼴 아님」', ok, `rc=${x.code} · 끝 ${kLast(x.out)}`);
+    }
+    { // K-C27e 음성 — first-home DEVICE 거짓(단언 전 실패 · 표지까지 붙여 최악 꼴) → 면제 0
+      const x = kJ('k27e', k27Rows((w) => (k27Is(w, 'first-home') ? { ...w, kind: 'DEVICE' } : w)));
+      const ok = x.code === 1 && /^⚫ FAIL \[장치\] K K35-S3-1 S3 first-home \(chromium\)$/m.test(x.out) && kLast(x.out).startsWith('⚫ FAIL [장치]');
+      check('K-C27e 대장 음성 · first-home DEVICE 거짓(표지 있어도) → rc 1 · ⚫ FAIL [장치](면제 0)', ok, `rc=${x.code} · 끝 ${kLast(x.out)}`);
+    }
+    { // K-C27f 양성 — 두 대장 키 모두 시험 참 → 빨강 아님 · 🔵 2 줄 · ::notice::
+      const x = kJ('k27f', kAll());
+      const n = k27Lines(x.out, '🔵 알려진 결함 초록 K K35-S3-1');
+      const nn = k27Lines(x.out, '::notice::알려진 결함 초록 K K35-S3-1');
+      const ok = x.code === 0 && kLast(x.out) === '🟢 PASS 전부' && n === 2 && nn === 2 && /🟡 알려진 결함 빨강 0 · 🔵 초록 2/.test(x.out);
+      check('K-C27f 대장 양성 · 두 키 시험 참 → rc 0 · 🔵 알려진 결함 초록 2 줄 · ::notice:: 2 줄', ok, `rc=${x.code} · 🔵 ${n} · 알림 ${nn}`);
+    }
+    { // K-C27g 판정기 대장 목록 = 따로 적은 목록 · 크기 2 고정 · 키 ∈ G 기대 키 · 대장 · 닫는 조건 빈 글자 0 · 무결성 함수가 나쁜 목록을 잡음
+      const J = require(F_JUDGE);
+      let ok = false;
+      let why = '대장 목록 · 함수 없음';
+      if (Array.isArray(J.KNOWN_DEFECT_ROWS) && typeof J.knownDefectListProblems === 'function') {
+        const L27 = J.KNOWN_DEFECT_ROWS;
+        const g = new Set(J.EXPECT_G);
+        const keyOf = (w) => ['K', w[0], w[1], w[2], w[3]].join('|');
+        const mine = K27_LIST.map((w) => [keyOf(w), w[4]].join('#')).sort();
+        const theirs = L27.map((w) => [keyOf(w), w[4]].join('#')).sort();
+        const sizeOk = L27.length === K27_N && K27_LIST.length === K27_N && new Set(L27.map(keyOf)).size === K27_N;
+        const same = mine.length === theirs.length && mine.every((k, i) => k === theirs[i]);
+        const inG = L27.every((w) => g.has(keyOf(w)));
+        const full = L27.every((w) => w.length === 6 && typeof w[4] === 'string' && w[4].trim() !== '' && typeof w[5] === 'string' && w[5].trim() !== '');
+        const frozen = Object.isFrozen(L27) && L27.every((w) => Object.isFrozen(w));
+        const clean = J.knownDefectListProblems().length === 0;
+        const w0 = [...L27[0]];
+        const badDup = J.knownDefectListProblems([w0, [...w0]]).length > 0;
+        const badOut = J.knownDefectListProblems([['K35-ZZ', 'S3', 'x', 'chromium', '대장', '조건']]).length > 0;
+        const badEmpty = J.knownDefectListProblems([[...w0.slice(0, 4), ' ', '조건'], [...L27[1].slice(0, 5), '']]).length === 2;
+        ok = sizeOk && same && inG && full && frozen && clean && badDup && badOut && badEmpty;
+        why = `크기 ${L27.length}(고정 ${K27_N}) · 같음 ${same} · G 안 ${inG} · 빈 글자 0 ${full} · 동결 ${frozen} · 무결성 ${clean} · 나쁜 목록 잡음 중복 ${badDup} 밖 ${badOut} 빈 ${badEmpty}`;
+      }
+      check(`K-C27g 판정기 알려진 결함 목록 = 따로 적은 목록 · 크기 ${K27_N} 고정 · 키 ∈ G 기대 키 · 대장 · 닫는 조건 빈 글자 0 · 무결성 함수`, ok, why);
+    }
+    { // K-C27h K 본문 endCode — 표지 거짓 줄만 → 0 · 표지 없는 거짓 줄 1 더 → 1 · 로그아웃 실패 1 → 1
+      let ok = false;
+      let why = 'K 본문 endCode 없음';
+      let W = null;
+      try {
+        W = require(path.join(F_CI, 'k35-ws03-closed.js'));
+      } catch (e) {
+        why = `K 본문 불러오기 실패 ${L.errorName(e)}`;
+      }
+      if (W && typeof W.endCode === 'function') {
+        const r = (p, pass, got) => ({ scope: 'K', id: 'K35-S3-1', g: 'S3', path: p, browser: 'chromium', kind: 'TEST', pass, got });
+        const ok2 = (p) => ({ scope: 'K', id: 'K35-S3-2', g: 'S3', path: p, browser: 'chromium', kind: 'TEST', pass: true, got: 'x' });
+        const base = [r('first-home', false, `${K27_WHY}대장 · x`), r('first-update', false, `${K27_WHY}대장 · y`), ok2('direct-welcome')];
+        const a = W.endCode(base, 0);
+        const b = W.endCode([...base, { ...ok2('phone-register'), pass: false }], 0);
+        const c = W.endCode(base, 1);
+        const d = W.endCode([r('first-home', false, '{"x":1}'), base[1]], 0); // 대장 키라도 표지 없음 → 1
+        ok = a === 0 && b === 1 && c === 1 && d === 1;
+        why = `표지 거짓만 ${a} · 표지 없는 거짓 더 ${b} · 로그아웃 실패 ${c} · 대장 키 표지 없음 ${d}`;
+      }
+      check('K-C27h K 본문 endCode · 표지 거짓 줄만 → 0 · 표지 없는 거짓 줄 1 더 → 1 · 로그아웃 실패 1 → 1', ok, why);
+    }
+    { // 🔴 고침 3-2(작업지시서 §9 P2-2) K-C27i 알려진 꼴 두 식 — homeKnown · updateKnown 를 직접 부름(참 · 거짓 반례 · U7 · U8 포함)
+      //   입력은 리뷰서(짧은 재확인 §2) 반례 표 꼴을 여기 따로 적는다. 한 줄이라도 기대와 다르면 빨강(변이 M7 · M8 이 여기서 잡힘).
+      let ok = false;
+      let why = 'K 본문 알려진 꼴 두 식 없음';
+      let W = null;
+      try {
+        W = require(path.join(F_CI, 'k35-ws03-closed.js'));
+      } catch (e) {
+        why = `K 본문 불러오기 실패 ${L.errorName(e)}`;
+      }
+      if (W && typeof W.homeKnown === 'function' && typeof W.updateKnown === 'function') {
+        const at = (where, p) => ({ where, path: p });
+        const CUT = '/data/update=실패 net::ERR_ABORTED';
+        const H = [ // [이름, s, navs, band, 기대]
+          ['H1 정상 꼴 · 띠만 참', at('main', '/'), ['/'], true, true],
+          ['H0 띠 거짓', at('main', '/'), ['/'], false, false],
+          ['H2 /welcome 이동', at('main', '/'), ['/', '/welcome'], true, false],
+          ['H3 /Welcome/ 이동', at('main', '/'), ['/', '/Welcome/'], true, false],
+          ['H4 /data/update 착지', at('main', '/data/update'), ['/', '/data/update'], true, false],
+          ['H5 띠 null', at('main', '/'), ['/'], null, false],
+          ['H6 where=login', at('login', '/'), ['/'], true, false],
+          ['H7 이동 기록에 / 없음', at('main', '/'), [], true, false],
+        ];
+        const U = [ // [이름, s, navs, docNavs, band, 기대]
+          ['U1 끊김 → / (띠 거짓)', at('main', '/'), ['/'], [CUT, '/=200'], false, true],
+          ['U1b 끊김 → / (띠 참)', at('main', '/'), ['/'], [CUT, '/=200'], true, true],
+          ['U2 /data/update 도착 + 띠 참', at('main', '/data/update'), ['/data/update'], ['/data/update=200'], true, true],
+          ['U2b /data/update 도착 · 띠 거짓', at('main', '/data/update'), ['/data/update'], ['/data/update=200'], false, false],
+          ['U3 /data/update 시도 0', at('main', '/'), ['/'], ['/=200'], true, false],
+          ['U4 /welcome 이동', at('main', '/'), ['/', '/welcome'], [CUT, '/=200'], true, false],
+          ['U5 =대기', at('main', '/'), ['/'], ['/data/update=대기', '/=200'], true, false],
+          ['U6 띠 null', at('main', '/'), ['/'], [CUT, '/=200'], null, false],
+          ['U9 =404 뒤 /', at('main', '/'), ['/'], ['/data/update=404', '/=200'], true, false],
+          ['U7 끊김 → / → /login', at('login', '/login'), ['/', '/login'], [CUT, '/=200', '/login=200'], true, false],
+          ['U7b 끊김 → / → main@/login', at('main', '/login'), ['/', '/login'], [CUT, '/=200', '/login=200'], true, false],
+          ['U8 끊김 → / → /terms', at('terms', '/terms'), ['/', '/terms'], [CUT, '/=200', '/terms=200'], false, false],
+          ['U8b 끊김 → / → main@/terms', at('main', '/terms'), ['/', '/terms'], [CUT, '/=200', '/terms=200'], true, false],
+          ['U0 장면 없음(null)', null, ['/'], [CUT, '/=200'], true, false],
+        ];
+        const bad = [];
+        for (const [n, s, navs, band, want] of H) {
+          let got;
+          try { got = W.homeKnown(s, navs, band); } catch (e) { got = `예외 ${L.errorName(e)}`; }
+          if (got !== want) bad.push(`${n}=${got}`);
+        }
+        for (const [n, s, navs, docs, band, want] of U) {
+          let got;
+          try { got = W.updateKnown(s, navs, docs, band); } catch (e) { got = `예외 ${L.errorName(e)}`; }
+          if (got !== want) bad.push(`${n}=${got}`);
+        }
+        ok = bad.length === 0;
+        why = ok ? `첫 화면 ${H.length} · 업데이트 ${U.length} 줄 기대대로` : `기대와 다름 ${bad.join(' · ')}`;
+      }
+      check('K-C27i 알려진 꼴 두 식 · homeKnown 참 1 · 거짓 7 · updateKnown 참 3 · 거짓 11(U7 · U8 최종 착지 = 꼴 아님)', ok, why);
     }
   }
   // 🆕 11/28 쿨타임 CT3 장치 고침 F3(지시서 20261128작_쿨타임1b_CT3자정넘김_장치고침) — 둘째 값 눈금 pickGrid 순수 함수 3꼴.

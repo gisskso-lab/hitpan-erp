@@ -28,6 +28,10 @@ namespace HitPan.Tests.Integrity;
 /// 고침 1 F2 — 채팅 대조군 6 경로를 더 더했다(대조군 23 · 채팅 11).
 /// 06-9 동작 · 웹 호출 0 은 <see cref="BetaClosedChatGateTests"/> · HTTP 바인딩은 <see cref="BetaClosedChatHttpGateTests"/> · 변이 기록은 <c>docs/개발/erp/20261128_W-S-04_서버문닫기_채팅_개발명세서.md</c>.
 /// </para>
+/// <para>
+/// 🔴 W-S-03 (2026-11-28 · 설계 §5 G-S3-1) — 1A·07-1 옛 휴대폰 QR 등록 닫힌 2 경로 · DeviceController 대조군 11 경로를 더했다(닫힌 14 · 대조군 34).
+/// HTTP 응답 꼴은 <see cref="BetaClosedDeviceHttpGateTests"/> · 변이 기록은 <c>docs/개발/erp/20261128_W-S-03_서버문닫기_온보딩모바일_개발명세서.md</c>.
+/// </para>
 /// </remarks>
 public sealed class BetaClosedServerGateTests
 {
@@ -51,6 +55,9 @@ public sealed class BetaClosedServerGateTests
         // 🔴 W-S-04 (2026-11-28 · 설계 §5 G-S4-1) — ERP 채팅 2 경로(19·06-21 · 19·06-22). 06-9 는 따로 된 경로가 없어 BetaClosedChatGateTests G-S4-2 가 동작으로 잰다.
         "DELETE api/chat/messages/{messageId}",
         "GET api/chat/storage",
+        // 🔴 W-S-03 (2026-11-28 · 설계 §5 G-S3-1) — 1A·07-1 옛 휴대폰 QR 등록 입구 2(D-3 = 폐기 · §325). HTTP 응답 꼴은 BetaClosedDeviceHttpGateTests 가 잰다.
+        "POST api/devices/mobile-token",
+        "POST api/devices/mobile-register",
     };
 
     /// <summary>
@@ -87,6 +94,19 @@ public sealed class BetaClosedServerGateTests
         "GET api/chat/employees",
         "GET api/chat/documents",
         "GET api/chat/files/{fileId}",
+        // 🔴 W-S-03 (2026-11-28 · 설계 §5 G-S3-1) — 같은 DeviceController 넓게 11. 기기 관문 · 인증키 · 메인PC 확인이 쓰는 길 —
+        //   이웃 액션을 잘못 닫으면 기기 관문 · 메인PC 확인이 멈춘다(#20). mainpc-proof = 대조군 변이 M4 자리.
+        "GET api/devices",
+        "GET api/devices/admin-contact",
+        "GET api/devices/is-main-pc",
+        "GET api/devices/gate-status",
+        "POST api/devices/verify-key",
+        "POST api/devices/approve/{id}",
+        "POST api/devices/reissue-key/{id}",
+        "POST api/devices/mainpc-challenge",
+        "POST api/devices/mainpc-proof",
+        "POST api/devices/mainpc-verify",
+        "POST api/devices/mainpc-register",
     };
 
     private static readonly Lazy<HashSet<string>> Discovered = new(DiscoverRoutes);
