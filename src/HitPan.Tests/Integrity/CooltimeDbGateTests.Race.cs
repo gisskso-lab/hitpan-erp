@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Dapper;
 using HitPan.API.Services.Cooltime;
 using HitPan.Application.DTOs.Settings;
@@ -280,11 +281,158 @@ public sealed partial class CooltimeDbGateTests
 
     private static Task<long> ThreadIdAsync(MySqlConnection c) => c.ExecuteScalarAsync<long>("SELECT CONNECTION_ID()");
 
+    // ──────────────────────────────────────────────────────────────
+    // 🆕 11/28 고침 3 ① 진단 — 판정 0. 본래 실패가 연결 정리(dispose) 예외에 가려지지 않게 한다.
+    // CI 런 46130344428 · 잡 140933873533: G-C26 ⓐ ⓑ 실패 글 = 옛 `await using` 끝의 MySqlConnection.DisposeAsync
+    // → 열린 거래 되돌림 NRE(아직 도는 엔진 · 저장 과제의 연결을 정리하다 난 것으로 보임 · 원인 확정은 진단 런 뒤 PM).
+    // 두 시험이 같은 도우미(RaceRig · RunRaceAsync · WaitLockWaitAsync)를 함께 쓴다 — 복사 0.
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>엔진 · 저장 과제를 끝까지 기다리는 상한(진단용 · 판정 상한 10초와 따로).</summary>
+    private static readonly TimeSpan RaceDrainLimit = TimeSpan.FromSeconds(10);
+
+    /// <summary>G-C26 경주 한 벌의 연결 · 거래 · 과제 — 실패 때 정리 차례를 쥐고, 기다림 상한 실패 글에 상태를 싣는다.</summary>
+    private sealed class RaceRig
+    {
+        public MySqlConnection? Engine;
+        public MySqlConnection? Save;
+        public MySqlConnection? Hold;
+        public MySqlTransaction? HoldTx;
+        public Task? EngineTask;
+        public Task? SaveTask;
+        public long ObserverThread;
+        public long EngineThread;
+        public long SaveThread;
+        public long HoldThread;
+    }
+
+    /// <summary>
+    /// 경주 본문을 돌리고 연결을 정리한다. 본문이 실패하면 ① L 되돌림 → ② 엔진 · 저장 과제를 상한 둔 채 끝까지 기다림(예외는 따로 모음)
+    /// → ③ 연결 정리 → <b>본래 예외를 그대로 다시 던진다</b>(정리 · 과제 예외는 시험 출력의 덧 글로만).
+    /// 본문이 통과하면 정리만 한다(정리 예외가 나면 옛 <c>await using</c> 처럼 FAIL).
+    /// </summary>
+    private async Task RunRaceAsync(string label, RaceRig rig, Func<Task> body)
+    {
+        Exception? original = null;
+        try
+        {
+            await body();
+        }
+        catch (Exception ex)
+        {
+            original = ex;
+            _out.WriteLine($"[G-C26] {label} — 본래 예외: {ex.GetType().FullName}: {ex.Message}");
+        }
+
+        var notes = new List<string>();
+        if (original is not null)
+        {
+            // ① L 되돌림 — 기다리던 엔진 · 저장이 풀려 끝까지 가게(이미 되돌렸으면 Connection = null 이라 건너뜀)
+            if (rig.HoldTx?.Connection is not null)
+            {
+                try
+                {
+                    await rig.HoldTx.RollbackAsync();
+                }
+                catch (Exception ex)
+                {
+                    notes.Add($"L 되돌림 예외 — {ex.GetType().FullName}: {ex.Message}");
+                }
+            }
+            // ② 과제를 하나씩 상한 둔 채 기다림(#16 Task.WhenAll 0)
+            await DrainRaceTaskAsync("tEngine", rig.EngineTask, notes);
+            await DrainRaceTaskAsync("tSave", rig.SaveTask, notes);
+        }
+
+        // ③ 연결 정리 — 옛 `await using` 의 거꾸로 차례(L 거래 → L → 저장 → 엔진)
+        await DisposeRaceAsync("L 거래", rig.HoldTx, notes);
+        await DisposeRaceAsync("L 연결", rig.Hold, notes);
+        await DisposeRaceAsync("저장 연결", rig.Save, notes);
+        await DisposeRaceAsync("엔진 연결", rig.Engine, notes);
+
+        foreach (var n in notes)
+            _out.WriteLine($"[G-C26] {label} — 덧: {n}");
+        if (original is not null)
+            ExceptionDispatchInfo.Capture(original).Throw();
+        if (notes.Count > 0)
+            throw new Xunit.Sdk.XunitException($"[G-C26] {label} — 본문은 통과 · 연결 정리에서 예외: " + string.Join(" / ", notes));
+    }
+
+    private static async Task DrainRaceTaskAsync(string name, Task? t, List<string> notes)
+    {
+        if (t is null)
+            return;
+        try
+        {
+            await t.WaitAsync(RaceDrainLimit);
+        }
+        catch (TimeoutException) when (!t.IsCompleted)
+        {
+            notes.Add($"{name} — {RaceDrainLimit.TotalSeconds:0}초 상한 안에 안 끝남({t.Status}) · 이 과제 연결의 정리 예외는 경주 중 정리 탓일 수 있다");
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"{name} 과제 예외 — {ex.GetType().FullName}: {ex.Message}");
+        }
+    }
+
+    private static async Task DisposeRaceAsync(string name, IAsyncDisposable? d, List<string> notes)
+    {
+        if (d is null)
+            return;
+        try
+        {
+            await d.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"{name} 정리 예외 — {ex.GetType().FullName}: {ex.Message}");
+        }
+    }
+
+    private static string RaceTaskState(Task? t)
+    {
+        if (t is null)
+            return "아직 안 띄움";
+        if (!t.IsCompleted)
+            return $"도는 중({t.Status})";
+        if (t.IsFaulted)
+        {
+            var e = t.Exception!.GetBaseException();
+            return $"예외 — {e.GetType().FullName}: {e.Message}";
+        }
+        return t.IsCanceled ? "취소" : "끝남(성공)";
+    }
+
+    /// <summary>기다림 상한 실패 글의 덧 — 각 연결 CONNECTION_ID · 과제 상태 · <c>SHOW ENGINE INNODB STATUS</c> TRANSACTIONS 앞 2000자.</summary>
+    private async Task<string> LockWaitDiagnosisAsync(MySqlConnection observer, RaceRig rig)
+    {
+        string trx;
+        try
+        {
+            var status = await observer.QueryFirstOrDefaultAsync<(string Type, string Name, string Status)>("SHOW ENGINE INNODB STATUS");
+            var text = status.Status ?? "";
+            var i = text.IndexOf("\nTRANSACTIONS\n", StringComparison.Ordinal);
+            var part = i < 0 ? "(TRANSACTIONS 절 못 찾음 · 앞부분) " + text : text[(i + 1)..];
+            trx = part.Length > 2000 ? part[..2000] : part;
+        }
+        catch (Exception ex)
+        {
+            trx = $"(못 읽음 — {ex.GetType().FullName}: {ex.Message})";
+            _out.WriteLine($"[G-C26] SHOW ENGINE INNODB STATUS 못 읽음 — {ex.Message}");
+        }
+        return $" · CONNECTION_ID = 관찰 {rig.ObserverThread} · 엔진 {rig.EngineThread} · 저장 {rig.SaveThread} · L {rig.HoldThread}"
+            + $" · tEngine = {RaceTaskState(rig.EngineTask)} · tSave = {RaceTaskState(rig.SaveTask)}"
+            + $" · INNODB STATUS TRANSACTIONS(앞 2000자) = {trx}";
+    }
+
     /// <summary>
     /// 주어진 연결 번호들이 <b>전부</b> InnoDB 잠금 기다림(<c>trx_state = 'LOCK WAIT'</c>)에 들어갈 때까지 본다 — 시간이 아니라 조건.
     /// 10초 안에 안 되면 FAIL(건너뜀 아님 · 지시서 §7 W2) · 그때 INNODB_TRX 를 그대로 남긴다(원인 찾기).
+    /// 🆕 11/28 고침 3 ①: 그 FAIL 글에 <see cref="LockWaitDiagnosisAsync"/> 덧을 싣는다(조건 · 상한 불변).
     /// </summary>
-    private async Task WaitLockWaitAsync(MySqlConnection observer, string step, params long[] threadIds)
+    // ⬛ private async Task WaitLockWaitAsync(MySqlConnection observer, string step, params long[] threadIds)   ← 11/28 고침 3 ①: rig 를 받아 상한 실패 글에 경주 상태를 싣는다
+    private async Task WaitLockWaitAsync(MySqlConnection observer, RaceRig rig, string step, params long[] threadIds)
     {
         var sw = Stopwatch.StartNew();
         while (true)
@@ -301,9 +449,13 @@ public sealed partial class CooltimeDbGateTests
             {
                 var rows = await observer.QueryAsync<(long Thread, string State, string? Query)>(
                     "SELECT CAST(trx_mysql_thread_id AS SIGNED), trx_state, trx_query FROM information_schema.INNODB_TRX");
+                // ⬛ throw new Xunit.Sdk.XunitException(
+                // ⬛     $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
+                // ⬛     + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}")));   ← 11/28 고침 3 ①: 같은 글 뒤에 진단 덧
                 throw new Xunit.Sdk.XunitException(
                     $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
-                    + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}")));
+                    + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}"))
+                    + await LockWaitDiagnosisAsync(observer, rig));
             }
             await Task.Delay(50);
         }
@@ -320,34 +472,46 @@ public sealed partial class CooltimeDbGateTests
         var u2 = await InsertUserAsync(db, _tenantA);
         var other = await InsertSessionAsync(db, _tenantA, u2, "pc", loginAgoSec: 600, askedAgoSec: 10);
 
-        await using var cEngine = await OpenAsync();
-        await using var cSave = await OpenAsync();
-        await using var cHold = await OpenAsync();
-        var engineThread = await ThreadIdAsync(cEngine);
-        var saveThread = await ThreadIdAsync(cSave);
-        var engine = Engine(cEngine, pusher);
-        var snap = await SnapshotAsync(engine, _tenantA);
+        // ⬛ 11/28 고침 3 ① 전 — 아래 `await using` 넷은 RunRaceAsync 정리로 옮겼다(본래 실패가 dispose NRE 에 가려짐):
+        // ⬛ await using var cEngine = await OpenAsync();
+        // ⬛ await using var cSave = await OpenAsync();
+        // ⬛ await using var cHold = await OpenAsync();
+        // ⬛ await using var hold = await cHold.BeginTransactionAsync();
+        var rig = new RaceRig { ObserverThread = await ThreadIdAsync(db) };
+        await RunRaceAsync("G-C26 ⓐ", rig, async () =>
+        {
+            var cEngine = rig.Engine = await OpenAsync();
+            var cSave = rig.Save = await OpenAsync();
+            var cHold = rig.Hold = await OpenAsync();
+            var engineThread = rig.EngineThread = await ThreadIdAsync(cEngine);
+            var saveThread = rig.SaveThread = await ThreadIdAsync(cSave);
+            rig.HoldThread = await ThreadIdAsync(cHold);
+            var engine = Engine(cEngine, pusher);
+            var snap = await SnapshotAsync(engine, _tenantA);
 
-        await using var hold = await cHold.BeginTransactionAsync();
-        await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
+            var hold = rig.HoldTx = await cHold.BeginTransactionAsync();
+            await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
 
-        var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
-        await WaitLockWaitAsync(db, "ⓐ 기다림 1 — 엔진이 세션 행을 기다림", engineThread);
-        var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
-        await WaitLockWaitAsync(db, "ⓐ 기다림 2 — 저장이 설정 행을 기다림(엔진이 먼저 공유 잠금)", engineThread, saveThread);
-        await hold.RollbackAsync();
+            var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
+            rig.EngineTask = tEngine;
+            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 1 — 엔진이 세션 행을 기다림", engineThread);
+            var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
+            rig.SaveTask = tSave;
+            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 2 — 저장이 설정 행을 기다림(엔진이 먼저 공유 잠금)", engineThread, saveThread);
+            await hold.RollbackAsync();
 
-        var r = await tEngine;
-        var saveError = await Record.ExceptionAsync(() => tSave);
-        Assert.True(saveError is null, $"G-C26 ⓐ: 저장이 실패했다 — {saveError}");   // 1213(교착)이면 여기서 잡힌다
-        Assert.Equal(0, r.Deadlocks);
-        Assert.Equal(1, r.EndedMissed);
-        Assert.Equal(0, await SessionExistsAsync(db, s.Sid));
-        Assert.Equal(1, await RevokedAsync(db, s.RefreshId));
-        Assert.Equal(0, await db.ExecuteScalarAsync<int>(
-            "SELECT CAST(cooltime_enabled AS SIGNED) FROM tenant_settings WHERE tenant_id = @T", new { T = _tenantA }));
-        Assert.Equal(1, await SessionExistsAsync(db, other));
-        Assert.Null(await AskedAtAsync(db, other));
+            var r = await tEngine;
+            var saveError = await Record.ExceptionAsync(() => tSave);
+            Assert.True(saveError is null, $"G-C26 ⓐ: 저장이 실패했다 — {saveError}");   // 1213(교착)이면 여기서 잡힌다
+            Assert.Equal(0, r.Deadlocks);
+            Assert.Equal(1, r.EndedMissed);
+            Assert.Equal(0, await SessionExistsAsync(db, s.Sid));
+            Assert.Equal(1, await RevokedAsync(db, s.RefreshId));
+            Assert.Equal(0, await db.ExecuteScalarAsync<int>(
+                "SELECT CAST(cooltime_enabled AS SIGNED) FROM tenant_settings WHERE tenant_id = @T", new { T = _tenantA }));
+            Assert.Equal(1, await SessionExistsAsync(db, other));
+            Assert.Null(await AskedAtAsync(db, other));
+        });
     }
 
     [Fact(DisplayName = "G-C26 ⓑ 저장 먼저 — 읽기 → L 이 세션 행 쥠 → 저장(끔) 세션 행 기다림(설정 행 쥔 채) → 엔진(먼저 읽은 값) 설정 행 기다림 → L 되돌림 = 저장 예외 0 · 엔진 끝냄 0 · 세션 유지 · 토큰 미폐기 · 근태 무변경")]
@@ -358,28 +522,40 @@ public sealed partial class CooltimeDbGateTests
         var pusher = new CountingPusher();
         var s = await MissedSetupAsync(db, _tenantA);
 
-        await using var cEngine = await OpenAsync();
-        await using var cSave = await OpenAsync();
-        await using var cHold = await OpenAsync();
-        var engineThread = await ThreadIdAsync(cEngine);
-        var saveThread = await ThreadIdAsync(cSave);
-        var engine = Engine(cEngine, pusher);
-        var snap = await SnapshotAsync(engine, _tenantA);
+        // ⬛ 11/28 고침 3 ① 전 — 아래 `await using` 넷은 RunRaceAsync 정리로 옮겼다(본래 실패가 dispose NRE 에 가려짐):
+        // ⬛ await using var cEngine = await OpenAsync();
+        // ⬛ await using var cSave = await OpenAsync();
+        // ⬛ await using var cHold = await OpenAsync();
+        // ⬛ await using var hold = await cHold.BeginTransactionAsync();
+        var rig = new RaceRig { ObserverThread = await ThreadIdAsync(db) };
+        await RunRaceAsync("G-C26 ⓑ", rig, async () =>
+        {
+            var cEngine = rig.Engine = await OpenAsync();
+            var cSave = rig.Save = await OpenAsync();
+            var cHold = rig.Hold = await OpenAsync();
+            var engineThread = rig.EngineThread = await ThreadIdAsync(cEngine);
+            var saveThread = rig.SaveThread = await ThreadIdAsync(cSave);
+            rig.HoldThread = await ThreadIdAsync(cHold);
+            var engine = Engine(cEngine, pusher);
+            var snap = await SnapshotAsync(engine, _tenantA);
 
-        await using var hold = await cHold.BeginTransactionAsync();
-        await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
+            var hold = rig.HoldTx = await cHold.BeginTransactionAsync();
+            await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
 
-        var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
-        await WaitLockWaitAsync(db, "ⓑ 기다림 1 — 저장이 세션 행을 기다림(설정 행은 쥔 채)", saveThread);
-        var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
-        await WaitLockWaitAsync(db, "ⓑ 기다림 2 — 엔진이 기다림(고친 코드 = 설정 행 공유 잠금)", saveThread, engineThread);
-        await hold.RollbackAsync();
+            var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
+            rig.SaveTask = tSave;
+            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 1 — 저장이 세션 행을 기다림(설정 행은 쥔 채)", saveThread);
+            var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
+            rig.EngineTask = tEngine;
+            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 2 — 엔진이 기다림(고친 코드 = 설정 행 공유 잠금)", saveThread, engineThread);
+            await hold.RollbackAsync();
 
-        var saveError = await Record.ExceptionAsync(() => tSave);
-        Assert.True(saveError is null, $"G-C26 ⓑ: 저장이 실패했다 — {saveError}");
-        var r = await tEngine;
-        Assert.Equal(0, r.Deadlocks);
-        Assert.Equal(0, r.EndedMissed);
-        await AssertNotEndedAsync(db, pusher, s, "G-C26 ⓑ");
+            var saveError = await Record.ExceptionAsync(() => tSave);
+            Assert.True(saveError is null, $"G-C26 ⓑ: 저장이 실패했다 — {saveError}");
+            var r = await tEngine;
+            Assert.Equal(0, r.Deadlocks);
+            Assert.Equal(0, r.EndedMissed);
+            await AssertNotEndedAsync(db, pusher, s, "G-C26 ⓑ");
+        });
     }
 }
