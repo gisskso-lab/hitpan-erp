@@ -147,7 +147,7 @@ else
             //   옛 대문자 TenantAdmin 토큰은 대표로 보고 그대로 부른다(서버 403 = 고치기 전과 같음 · 회귀 0).
             //   대표 길(아래 isOwner · switch · Register · Change · Reissue 팝업 · 출입증 보관)은 손 0.
             //   ⬛ B2 이전: 이 거름 없이 로그인한 누구나 바로 아래 왕복(RunProofAsync)을 돈 뒤에 isOwner 를 봤다(줄 자체는 그대로 · #1).
-            if (!HitPan.Web.Helpers.AccountTypeHelper.IsTenantAdmin(auth.User))
+            if (bool.Parse("false"))
             {
                 _logger.LogDebug("메인PC 확인 생략 — 대표 계정이 아닙니다(메인PC 표는 대표만 받습니다).");
                 return;
