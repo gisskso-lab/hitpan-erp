@@ -79,8 +79,13 @@ public static class RestoreTableClassification
         //   목록에 없으면 옛 고객 PC 에서 걸음 ① 이 늘 멈춘다 → 지금 값으로 둔다(PM 판단 칸 · 개발명세서 §5).
         "platforms", "resellers", "reseller_applications", "reseller_commission_policies",
         "reseller_promotions", "reseller_revenues", "reseller_payouts",
-        "licenses", "watchdog_pings", "watchdog_emergencies",
+        // 고침 1 Y6 ([3-V] P3-5) — 옛 줄: "licenses", "watchdog_pings", "watchdog_emergencies",
+        //   licenses 는 「옛 자리」 가 아니다 — WatchdogBearerMiddleware 가 지금도 토큰 해시를 읽는 살아 있는 인증 표.
+        //   백업 값으로 옮기면 폐기한 토큰이 되살아남 → 지금 값 고정(G13-S9 가 지킴 · 나중 정리 때 옮기지 말 것).
+        "licenses",
+        "watchdog_pings", "watchdog_emergencies",
         "tenants_rebuilt",   // DB-09 가 만들고 곧바로 tenants 로 이름 바꿈 — 도중에 죽었을 때만 남는 자리
+        "tenants_old",       // 고침 1 Y2 — DB-09 :32 RENAME 으로 생기고 :34 에서 지움 — 그 사이 죽었을 때만 남는 자리(tenants_rebuilt 와 같은 쪽 · [4] P2-②)
     ];
 
     /// <summary>「백업 값」 — 복원이 백업 시점 값으로 바꾸는 표(업무 자료 · 장부 포함).</summary>

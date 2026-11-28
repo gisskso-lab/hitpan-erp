@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using HitPan.Application.DTOs.Backup;
 using HitPan.Application.Services;
 using Xunit;
 
@@ -55,17 +56,129 @@ public sealed class RestoreTableClassificationGateTests
         return Regex.Replace(noBlock, @"(?m)^\s*--.*$|(?m)\s--\s.*$", "");
     }
 
+    // 고침 1 Y2 ([4] P2-② · [3-V] P2-1) — 옛 줄: `CREATE OR REPLACE TABLE x`(MariaDB 문법)를 못 봄
+    // private static readonly Regex CreateTableRx = new(
+    //     @"\bCREATE\s+(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(?<n>[A-Za-z0-9_]+)`?",
+    //     RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex CreateTableRx = new(
-        @"\bCREATE\s+(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(?<n>[A-Za-z0-9_]+)`?",
+        @"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(?<n>[A-Za-z0-9_]+)`?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // 고침 1 Y1 ([4] P2-① · V3) — 옛 줄: `CREATE TRIGGER IF NOT EXISTS t …` 를 못 봄(TRIGGER 바로 뒤 이름을 요구)
+    // private static readonly Regex TriggerRx = new(
+    //     @"\bTRIGGER\s+`?[A-Za-z0-9_]+`?\s+(?:BEFORE|AFTER)\s+(?:INSERT|UPDATE|DELETE)\s+ON\s+`?(?<t>[A-Za-z0-9_]+)`?",
+    //     RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TriggerRx = new(
-        @"\bTRIGGER\s+`?[A-Za-z0-9_]+`?\s+(?:BEFORE|AFTER)\s+(?:INSERT|UPDATE|DELETE)\s+ON\s+`?(?<t>[A-Za-z0-9_]+)`?",
+        @"\bTRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?`?[A-Za-z0-9_]+`?\s+(?:BEFORE|AFTER)\s+(?:INSERT|UPDATE|DELETE)\s+ON\s+`?(?<t>[A-Za-z0-9_]+)`?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>고침 1 Y2 — <c>RENAME TABLE a TO b[, c TO d …]</c> 의 글 덩어리(첫 <c>;</c> 까지).</summary>
+    private static readonly Regex RenameTableRx = new(
+        @"\bRENAME\s+TABLES?\s+(?<body>[^;]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>고침 1 Y2 — RENAME TABLE 덩어리 안 <c>옛이름 TO 새이름</c> 짝의 새 이름.</summary>
+    private static readonly Regex RenamePairRx = new(
+        @"`?[A-Za-z0-9_.]+`?\s+TO\s+`?(?<n>[A-Za-z0-9_]+)`?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 고침 1 Y2 — <c>ALTER TABLE a … RENAME [TO|AS] b</c> 의 새 이름.
+    /// <c>RENAME COLUMN</c> · <c>RENAME INDEX</c> · <c>RENAME KEY</c> · <c>RENAME CONSTRAINT</c>(칸 · 인덱스 이름 바꾸기)는 표가 아니라 안 셈.
+    /// </summary>
+    private static readonly Regex AlterRenameRx = new(
+        @"\bALTER\s+(?:ONLINE\s+)?(?:IGNORE\s+)?TABLE\s+[^;]*?\bRENAME\s+(?:TO\s+|AS\s+)?(?!(?:COLUMN|INDEX|KEY|CONSTRAINT)\b)`?(?<n>[A-Za-z0-9_]+)`?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>글 속 <c>CREATE TABLE</c> 이름들(소문자 · 중복 제거).</summary>
     internal static SortedSet<string> CreatedTables(string sql) =>
         new(CreateTableRx.Matches(StripComments(sql)).Select(m => m.Groups["n"].Value.ToLowerInvariant()), StringComparer.Ordinal);
+
+    /// <summary>
+    /// 고침 1 Y2 — 이름 바꾸기로 생기는 새 표 이름들(<c>RENAME TABLE</c> · <c>ALTER TABLE … RENAME TO</c> · 소문자 · 중복 제거).
+    /// 실례: <c>DB-09</c> :32 <c>RENAME TABLE tenants TO tenants_old, tenants_rebuilt TO tenants</c> → <c>tenants_old</c> · <c>tenants</c>.
+    /// </summary>
+    internal static SortedSet<string> RenamedTables(string sql)
+    {
+        var text = StripComments(sql);
+        var set = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (Match m in RenameTableRx.Matches(text))
+            foreach (Match p in RenamePairRx.Matches(m.Groups["body"].Value))
+                set.Add(p.Groups["n"].Value.ToLowerInvariant());
+        foreach (Match m in AlterRenameRx.Matches(text))
+            set.Add(m.Groups["n"].Value.ToLowerInvariant());
+        return set;
+    }
+
+    /// <summary>고침 1 Y2 — 글이 만드는 표 전부 = <c>CREATE [OR REPLACE] TABLE</c> ∪ 이름 바꾸기 새 이름.</summary>
+    internal static SortedSet<string> DefinedTables(string sql)
+    {
+        var set = CreatedTables(sql);
+        set.UnionWith(RenamedTables(sql));
+        return set;
+    }
+
+    /// <summary>
+    /// 고침 1 Y3 ([3-V] P2-1 ③) — 제품 C# 코드의 <c>CREATE TABLE</c>. <c>SHOW CREATE TABLE</c> 은 안 셈.
+    /// 이름 자리는 넓게 잡고(<c>[^\s(;]+</c>) 뒤에서 거른다 — <c>"… TABLE " + x</c> · <c>{name}</c> · <c>db.t</c> 같은 못 읽는 이름을 빨강으로 보이려고.
+    /// </summary>
+    private static readonly Regex CsCreateTableRx = new(
+        @"(?<!\bSHOW\s+)\bCREATE\s+(?:OR\s+REPLACE\s+)?(?<tmp>TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<n>[^\s(;]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex PlainNameRx = new(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// C# 줄 주석(<c>// …</c> · <c>/// …</c>)만 걷는다. <c>https://</c> 처럼 앞에 빈칸이 없는 <c>//</c> 는 안 걷음.
+    /// <c>/* … */</c> 는 걷지 않는다 — 글자 속 <c>"image/*"</c> 같은 것이 주석 시작으로 읽혀 뒤 코드를 삼키면 표를 놓친다(초록 쪽 위험).
+    /// 블록 주석 속 <c>CREATE TABLE</c> 은 세어져 빨강 쪽(멈춤 쪽)으로만 틀린다.
+    /// </summary>
+    internal static string StripCsComments(string cs) =>
+        Regex.Replace(cs, @"(?m)(?:^|(?<=\s))//.*$", "");
+
+    /// <summary>
+    /// 고침 1 Y3 — C# 글 속 영구 표 <c>CREATE TABLE</c>: 읽은 이름(소문자) · 못 읽는 이름(그대로) · 세션 임시 표 수(TEMPORARY = 연결이 끝나면 사라짐 · 분류 밖).
+    /// </summary>
+    internal static (SortedSet<string> Names, List<string> Unreadable, int Temporary) CsCreatedTables(string cs)
+    {
+        var names = new SortedSet<string>(StringComparer.Ordinal);
+        var unreadable = new List<string>();
+        var temporary = 0;
+        foreach (Match m in CsCreateTableRx.Matches(StripCsComments(cs)))
+        {
+            if (m.Groups["tmp"].Success) { temporary++; continue; }
+            var raw = m.Groups["n"].Value;
+            var name = raw.Trim('`', '"', '\'', ',');
+            if (PlainNameRx.IsMatch(name)) names.Add(name.ToLowerInvariant());
+            else unreadable.Add(raw);
+        }
+        return (names, unreadable, temporary);
+    }
+
+    /// <summary>
+    /// 고침 1 Y3 — ERP 고객 DB 에 닿는 제품 C# 파일(<c>src/</c> 아래). 시험 프로젝트(이름에 <c>Tests</c>) ·
+    /// 백오피스(<c>HitPan.Backoffice*</c> — 본사 NCP 의 다른 DB · 복원 대상 아님) · 랜딩(<c>HitPan.Landing</c>) · <c>bin</c> · <c>obj</c> 제외.
+    /// </summary>
+    private static IEnumerable<(string File, string Text)> ProductCsTexts()
+    {
+        var src = Path.Join(RepoRoot(), "src");
+        var list = new List<(string, string)>();
+        foreach (var projDir in Directory.GetDirectories(src).OrderBy(d => d, StringComparer.Ordinal))
+        {
+            var proj = Path.GetFileName(projDir);
+            if (proj.Contains("Tests", StringComparison.OrdinalIgnoreCase)
+                || proj.StartsWith("HitPan.Backoffice", StringComparison.OrdinalIgnoreCase)
+                || proj.StartsWith("HitPan.Landing", StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (var f in Directory.GetFiles(projDir, "*.cs", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
+            {
+                var rel = Path.GetRelativePath(src, f).Replace('\\', '/');
+                if (rel.Contains("/bin/", StringComparison.Ordinal) || rel.Contains("/obj/", StringComparison.Ordinal)) continue;
+                list.Add((rel, File.ReadAllText(f)));
+            }
+        }
+        Assert.True(list.Count >= 100, $"제품 C# 파일을 {list.Count}개만 읽었다 — 읽기가 깨졌다(0건 no-op 초록 막음).");
+        return list;
+    }
 
     /// <summary>글 속 트리거가 걸린 표 이름들(소문자).</summary>
     internal static SortedSet<string> TriggerTables(string sql) =>
@@ -125,7 +238,8 @@ public sealed class RestoreTableClassificationGateTests
     [Fact(DisplayName = "G13-S1 🔴 출하 DDL 의 CREATE TABLE 전부가 두 목록 중 정확히 하나 (ⓐ · 새 표 분류 안 하면 빨강)")]
     public void G13_S1_출하DDL_전수_정확히하나()
     {
-        var tables = CreatedTables(CleanDdlText());
+        // 고침 1 Y2 — 옛 줄: var tables = CreatedTables(CleanDdlText());  (이름 바꾸기 새 이름 · CREATE OR REPLACE 를 안 셈)
+        var tables = DefinedTables(CleanDdlText());
         Assert.True(tables.Count >= 100, $"출하 DDL 에서 표를 {tables.Count}개만 읽었다 — 읽기가 깨졌다(0건 no-op 초록 막음).");
 
         var missing = tables.Where(t => !RestoreTableClassification.KeepCurrent.Contains(t)
@@ -146,7 +260,8 @@ public sealed class RestoreTableClassificationGateTests
     {
         var bad = new List<string>();
         foreach (var (file, text) in MigrationTexts())
-            foreach (var t in CreatedTables(text))
+            // 고침 1 Y2 — 옛 줄: foreach (var t in CreatedTables(text))  (RENAME TABLE · ALTER … RENAME TO 새 이름을 안 셈 · [4] V4)
+            foreach (var t in DefinedTables(text))
                 if (RestoreTableClassification.Classify(t) == RestoreTableClass.Unclassified)
                     bad.Add($"{t}({file})");
 
@@ -159,8 +274,12 @@ public sealed class RestoreTableClassificationGateTests
     [Fact(DisplayName = "G13-S3 🔴 두 목록의 이름은 전부 출하 DDL 또는 마이그 폴더에 실제로 있다 (오타 · 지운 표 0)")]
     public void G13_S3_죽은이름_0()
     {
-        var known = new HashSet<string>(CreatedTables(CleanDdlText()), StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, text) in MigrationTexts()) known.UnionWith(CreatedTables(text));
+        // 고침 1 Y2 · Y3 — 옛 두 줄(CREATE TABLE 만 셈):
+        // var known = new HashSet<string>(CreatedTables(CleanDdlText()), StringComparer.OrdinalIgnoreCase);
+        // foreach (var (_, text) in MigrationTexts()) known.UnionWith(CreatedTables(text));
+        var known = new HashSet<string>(DefinedTables(CleanDdlText()), StringComparer.OrdinalIgnoreCase);
+        foreach (var (_, text) in MigrationTexts()) known.UnionWith(DefinedTables(text));
+        foreach (var (_, text) in ProductCsTexts()) known.UnionWith(CsCreatedTables(text).Names);
 
         var dead = RestoreTableClassification.KeepCurrentNames
             .Concat(RestoreTableClassification.FromBackupNames)
@@ -273,6 +392,11 @@ public sealed class RestoreTableClassificationGateTests
     [InlineData("restore_history", RestoreTableClass.KeepCurrent)]
     [InlineData("schema_migrations", RestoreTableClass.KeepCurrent)]
     [InlineData("device_register_tokens", RestoreTableClass.KeepCurrent)]
+    // 고침 1 Y6 ([3-V] P3-5) — licenses = 지금도 쓰는 인증 표(WatchdogBearerMiddleware 가 토큰 해시를 읽음). 백업 값이면 폐기 토큰이 되살아남
+    [InlineData("licenses", RestoreTableClass.KeepCurrent)]
+    // 고침 1 Y2 — DB-09 이름 바꾸기 도중 사망 자리 두 짝(tenants_rebuilt · tenants_old)은 같은 쪽
+    [InlineData("tenants_rebuilt", RestoreTableClass.KeepCurrent)]
+    [InlineData("tenants_old", RestoreTableClass.KeepCurrent)]
     [InlineData("stock_ledger", RestoreTableClass.FromBackup)]
     [InlineData("journal_lines", RestoreTableClass.FromBackup)]
     [InlineData("stock_adjust_logs", RestoreTableClass.FromBackup)]
@@ -298,5 +422,107 @@ public sealed class RestoreTableClassificationGateTests
                          + "create table real_two (x int); -- CREATE TABLE trailing_comment\n"
                          + "/*!50001 CREATE TABLE versioned_one (x int)*/;\n";
         Assert.Equal(["real_one", "real_two", "versioned_one"], CreatedTables(sql).ToList());
+    }
+
+    // ══ 고침 1 — 읽기 도우미 자체(Y1 · Y2 · Y3) ══
+
+    [Fact(DisplayName = "G13-S10b 읽기 도우미(고침 1) — CREATE OR REPLACE · RENAME TABLE · ALTER … RENAME TO 는 셈 · RENAME COLUMN/INDEX 는 안 셈 · 트리거 IF NOT EXISTS 셈")]
+    public void G13_S10b_읽기도우미_고침1()
+    {
+        // Y2 — CREATE OR REPLACE
+        Assert.Equal(["cor_one"], CreatedTables("CREATE OR REPLACE TABLE `cor_one` (x int);").ToList());
+
+        // Y2 — 이름 바꾸기
+        const string ren = "RENAME TABLE tenants TO tenants_old, `tenants_rebuilt` TO `tenants`;\n"
+                         + "ALTER TABLE items RENAME TO zz_two;\n"
+                         + "alter table a2 rename as zz_three;\n"
+                         + "ALTER TABLE b2 ADD COLUMN c int, RENAME zz_four;\n"
+                         + "ALTER TABLE c2 RENAME COLUMN old_c TO new_c;\n"
+                         + "ALTER TABLE d2 RENAME INDEX ix_a TO ix_b;\n"
+                         + "ALTER TABLE e2 RENAME KEY k_a TO k_b;\n"
+                         + "-- RENAME TABLE in_comment TO zz_comment;\n";
+        Assert.Equal(["tenants", "tenants_old", "zz_four", "zz_three", "zz_two"], RenamedTables(ren).ToList());
+        Assert.Contains("tenants_old", DefinedTables("CREATE TABLE tenants_rebuilt (x int);\n" + ren));
+
+        // Y1 — 트리거 IF NOT EXISTS
+        Assert.Equal(["stock_ledger"],
+            TriggerTables("CREATE TRIGGER IF NOT EXISTS trg_zz BEFORE INSERT ON stock_ledger FOR EACH ROW SET @a = 1;").ToList());
+        Assert.Equal(["tax_invoices"],
+            TriggerTables("CREATE DEFINER=`root`@`localhost` TRIGGER `trg_t` AFTER UPDATE ON `tax_invoices` FOR EACH ROW SET @a = 1;").ToList());
+
+        // Y3 — C# 읽기: 주석 · SHOW CREATE TABLE · TEMPORARY 는 영구 표가 아님 · 동적 · 점 이름은 못 읽는 이름
+        const string cs = "// CREATE TABLE IF NOT EXISTS(in_comment)\n"
+                        + "/// CREATE TABLE doc_comment (x int)\n"
+                        + "var a = \"CREATE TABLE IF NOT EXISTS `Cs_One` (\" + \"x int)\";\n"
+                        + "var b = @\"create table cs_two (x int)\";\n"
+                        + "var c = $\"CREATE TEMPORARY TABLE `{stage}` LIKE stock_ledger\";\n"
+                        + "var d = $\"SHOW CREATE TABLE `{stage}`\";\n"
+                        + "var e = \"CREATE TABLE \" + dyn;\n"
+                        + "var f = \"CREATE TABLE other_db.zz (x int)\";\n"
+                        + "var g = \"https://x.example/CREATE\";\n";
+        var r = CsCreatedTables(cs);
+        Assert.Equal(["cs_one", "cs_two"], r.Names.ToList());
+        Assert.Equal(1, r.Temporary);
+        Assert.Equal(2, r.Unreadable.Count);
+    }
+
+    // ══ 고침 1 Y3 — 제품 C# 코드의 CREATE TABLE ══
+
+    [Fact(DisplayName = "G13-S11 🔴 제품 C# 코드(src/ · 시험 · 백오피스 · 랜딩 제외)의 영구 CREATE TABLE 전부가 두 목록 중 정확히 하나 · 못 읽는 이름 0")]
+    public void G13_S11_제품CS_전수_정확히하나()
+    {
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+        var bad = new List<string>();
+        var unreadable = new List<string>();
+        foreach (var (file, text) in ProductCsTexts())
+        {
+            var r = CsCreatedTables(text);
+            foreach (var t in r.Names)
+            {
+                found.Add(t);
+                if (RestoreTableClassification.Classify(t) == RestoreTableClass.Unclassified) bad.Add($"{t}({file})");
+            }
+            unreadable.AddRange(r.Unreadable.Select(u => $"{u}({file})"));
+        }
+
+        // 지금 3(schema_migrations = MigrationRunner · local_update_attempts · local_update_apply_status = 워치독 자가생성)
+        Assert.True(found.Contains("schema_migrations"),
+            $"C# 에서 schema_migrations(MigrationRunner)를 못 읽었다 — 읽기가 깨졌다. 읽은 것: {string.Join(", ", found)}");
+        Assert.True(unreadable.Count == 0,
+            Report("🔴 C# 의 CREATE TABLE 이름을 못 읽음(동적 · 다른 DB 이름) — 고정 이름으로 쓰고 분류하라", unreadable));
+        Assert.True(bad.Count == 0,
+            Report("🔴 C# 코드가 만드는데 분류 안 된(또는 두 목록에 다 있는) 표 — 고객 PC 에서 복원 걸음 ① 이 늘 멈춘다", bad));
+    }
+
+    // ══ 고침 1 Y4 · Y5 — 안전 복원 계약 기본값(실패 쪽) ══
+
+    [Fact(DisplayName = "G13-S12 🔴 안전 복원 계약 기본값 = 실패 쪽 — DataUnchanged · Selectable 기본 false · 잠김 남은 시간 · 마지막 결과 기본 null · 경로 · 회사 칸 0")]
+    public void G13_S12_계약기본값_실패쪽()
+    {
+        var res = new SafeRestoreResponse();
+        Assert.False(res.DataUnchanged);                 // Y4 — 서버가 확인했을 때만 true
+        Assert.False(res.Success);
+        Assert.Null(res.LockoutRemainingSeconds);        // Y5 — 잠김일 때만 값
+
+        var cand = new SafeRestoreCandidateDto();
+        Assert.False(cand.Selectable);                   // Y5 — 서버가 고를 수 있다고 확인한 것만 true
+        Assert.Null(cand.DenyCode);
+
+        var last = new SafeRestoreLastResultDto();
+        Assert.False(last.DataUnchanged);
+        Assert.False(last.Success);
+
+        Assert.Null(new SafeRestoreStatusDto().LastResult);
+
+        // 화면 계약에 경로 · 회사 칸 0(K9 · #2)
+        foreach (var type in new[] { typeof(SafeRestoreCandidateDto), typeof(SafeRestoreResponse), typeof(SafeRestoreLastResultDto), typeof(SafeRestoreStatusDto) })
+        {
+            var leaks = type.GetProperties()
+                .Where(p => p.Name.Contains("Path", StringComparison.OrdinalIgnoreCase)
+                         || p.Name.Contains("Tenant", StringComparison.OrdinalIgnoreCase)
+                         || p.Name.Contains("Password", StringComparison.OrdinalIgnoreCase))
+                .Select(p => p.Name).ToList();
+            Assert.True(leaks.Count == 0, Report($"🔴 {type.Name} 에 경로 · 회사 · 비번 칸", leaks));
+        }
     }
 }
