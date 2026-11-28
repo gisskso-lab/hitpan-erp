@@ -486,4 +486,116 @@ public sealed class SafeRestoreStaticGateTests
         var src = File.ReadAllText(Path.Join(RepoRoot(), "src", "HitPan.Application", "Services", "RestoreSwapStep.cs"));
         Assert.DoesNotContain("UtcNow", src, StringComparison.Ordinal);   // restore_history 에 UTC 로 쓰는 길 0
     }
+
+    // ══ A-2③ 고침 1 — P3-5 · P3-9 동작 · P3-1 그물 · D14 (비DB) ══
+
+    [Fact(DisplayName = "P3-5 🔴 ⓐ″ 다시 셈의 활성 계정 조각(따로 적은 글) = 상수 ActiveAccount(\"u\") 와 같은 뜻(빈칸 정규화) — 표식이 늘어 한쪽만 바뀌면 빨강")]
+    public void P3_5_활성조각_같음()
+    {
+        static string N(string s) => Regex.Replace(s, @"\s+", " ");
+        var copy = N(RestoreSwapSql.CountBackupOnlyLinkMismatch);
+        var active = N(RestoreOverlayRules.ActiveAccount("u"));
+        Assert.Contains("u.is_deleted = 0", active, StringComparison.Ordinal);   // 양성 대조(빈 조각 no-op 막음)
+        Assert.True(copy.Contains(active, StringComparison.Ordinal),
+            "🔴 ⓐ″ 다시 셈(CountBackupOnlyLinkMismatch)의 활성 계정 조각이 상수와 다름 — 상수: " + active);
+        // 덧2-4 ③ 「따로 다시 셈」 의도 그대로 — 넣는 식(LinkBackupOnly)을 부르지 않음
+        Assert.DoesNotContain("IF(", copy, StringComparison.Ordinal);
+    }
+
+    private sealed class MarkerBusy : HitPan.Application.Interfaces.IRestoreBusyProbe
+    {
+        private readonly Func<string?> _f;
+        public MarkerBusy(Func<string?> f) => _f = f;
+        public string? BusyCode(string tenantId) => _f();
+    }
+
+    private const string Marker = "C:\\secret\\path<script>표식";
+
+    private static (RestoreSwapStep Step, Moq.Mock<HitPan.Application.Interfaces.IRestoreSafePath> Path) FakeStep(HitPan.Application.Interfaces.IRestoreBusyProbe busy)
+    {
+        // DB 0 — 닿지 않는 자리(1번 문) · 연결 실패는 제품이 기록만 하고 넘어감
+        var conn = new MySqlConnection("Server=127.0.0.1;Port=1;Database=x;User=x;Connection Timeout=1");
+        var path = new Moq.Mock<HitPan.Application.Interfaces.IRestoreSafePath>();
+        var step = new RestoreSwapStep(conn, path.Object, Moq.Mock.Of<HitPan.Application.Interfaces.ILocalAuditFile>(),
+            NullLogger<RestoreSwapStep>.Instance, busy);
+        return (step, path);
+    }
+
+    [Fact(DisplayName = "P3-9 동작 🔴 표식 글(경로 · 꺾쇠)이 든 멈춤 글자 · 예외 → 응답 Message ∈ 고정 문구 표 · 표식 0 (글자 검사 아님 · 실제로 부름)")]
+    public async Task P3_9_동작_표식글_응답0()
+    {
+        var fixedTexts = RestoreOverlayRules.Messages.Values.Append(RestoreOverlayRules.UnknownMessage).ToHashSet(StringComparer.Ordinal);
+
+        // ① 모르는 멈춤 글자(표식)가 바쁨 문에서 옴
+        var (s1, _) = FakeStep(new MarkerBusy(() => Marker));
+        var r1 = await s1.RunAsync("t", "u", "r", new HitPan.Application.Interfaces.RestoreStaging());
+        Assert.False(r1.Ok);
+        Assert.Contains(r1.Message, fixedTexts);
+        Assert.DoesNotContain("secret", r1.Message, StringComparison.Ordinal);
+
+        // ② 표식 글을 실은 예외가 걸음 밖으로 샘(P3-1 그물이 받음)
+        var (s2, _) = FakeStep(new MarkerBusy(() => throw new InvalidOperationException(Marker)));
+        var r2 = await s2.RunAsync("t", "u", "r", new HitPan.Application.Interfaces.RestoreStaging());
+        Assert.False(r2.Ok);
+        Assert.Contains(r2.Message, fixedTexts);
+        Assert.DoesNotContain("secret", r2.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", r2.LogDetail ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "P3-1 🔴 걸음 밖으로 샌 예외(대조 중) = 던지지 않고 멈춤 응답 · 자료 그대로 · 임시 표 지우기 부름(그물) · 요청 취소도 같음")]
+    public async Task P3_1_그물_예외_뒷정리()
+    {
+        var (s, path) = FakeStep(new MarkerBusy(() => throw new InvalidOperationException("시험 예외")));
+        var r = await s.RunAsync("t", "u", "r", new HitPan.Application.Interfaces.RestoreStaging());
+        Assert.False(r.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.VerifyFailed, r.DenyCode);
+        Assert.True(r.DataUnchanged);
+        path.Verify(p => p.DropStagingTablesAsync(Moq.It.IsAny<CancellationToken>()), Moq.Times.Once());
+
+        var (s2, path2) = FakeStep(new MarkerBusy(() => null));
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var r2 = await s2.RunAsync("t", "u", "r", new HitPan.Application.Interfaces.RestoreStaging
+        {
+            StagedTables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            { ["schema_migrations"] = "rs_new__schema_migrations", ["__efmigrationshistory"] = "rs_new__efmigrationshistory" },
+        }, cts.Token);
+        Assert.False(r2.Ok);
+        Assert.True(r2.DataUnchanged);
+        path2.Verify(p => p.DropStagingTablesAsync(Moq.It.IsAny<CancellationToken>()), Moq.Times.Once());
+    }
+
+    [Fact(DisplayName = "D14 🔴 복원 전 자동 백업도 보관 정리 — 사전 n+1 개 → 가장 최근 n 남음 · 일반 백업이 많아도 사전 n 그대로(따로 셈) · 0바이트는 안 셈")]
+    public void D14_사전백업_보관정리()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "hitpan_d14_" + Guid.NewGuid().ToString("N")[..10]);
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var t0 = DateTime.Now.AddDays(-10);
+            void Make(string name, int minutes, int bytes = 4)
+            {
+                var f = Path.Combine(folder, name);
+                File.WriteAllBytes(f, new byte[bytes]);
+                File.SetCreationTime(f, t0.AddMinutes(minutes));
+            }
+            for (var i = 0; i < 4; i++) Make($"hitpan_pre_restore_{i}.sql", i);            // 사전 4 = n+1
+            for (var i = 0; i < 8; i++) Make($"hitpan_backup_{i}.sql", 100 + i);            // 일반 8 (사전보다 최근)
+            Make("hitpan_pre_restore_empty.sql", 999, bytes: 0);                             // 0바이트 — 안 셈 · 안 지움
+
+            var svc = new BackupService(new MySqlConnection(), NullLogger<BackupService>.Instance);
+            var m = typeof(BackupService).GetMethod("ApplyRetention", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(m);
+            m!.Invoke(svc, [folder, 3]);
+
+            var pre = Directory.GetFiles(folder, "hitpan_pre_restore_*.sql").Select(x => Path.GetFileName(x)!).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            Assert.Equal(new[] { "hitpan_pre_restore_1.sql", "hitpan_pre_restore_2.sql", "hitpan_pre_restore_3.sql", "hitpan_pre_restore_empty.sql" }, pre);
+            Assert.Equal(3, Directory.GetFiles(folder, "hitpan_backup_*.sql").Length);
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); }
+            catch (IOException ex) { Console.Error.WriteLine($"[D14] 시험 폴더 정리 실패: {ex.Message}"); }   // #15
+        }
+    }
 }

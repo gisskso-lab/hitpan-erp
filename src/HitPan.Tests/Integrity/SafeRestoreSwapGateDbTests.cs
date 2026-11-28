@@ -173,7 +173,8 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND LEFT(TABLE_NAME, 8) = 'rs_new__' AND TABLE_TYPE = 'BASE TABLE'");
 
     /// <summary>실제 로그인(<c>AuthService.LoginAsync</c>)으로 받은 토큰의 <c>employee_id</c> · <c>role</c> 클레임.</summary>
-    private async Task<(string? EmployeeId, List<string> Roles)> LoginClaimsAsync(string loginId)
+    /// <remarks>A-2③ 고침 1 — <paramref name="password"/> 덧(G5 대표 「지금 비번」) · 없으면 씨앗 비번.</remarks>
+    private async Task<(string? EmployeeId, List<string> Roles)> LoginClaimsAsync(string loginId, string? password = null)
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("JWT_SECRET")))
             Environment.SetEnvironmentVariable("JWT_SECRET", Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
@@ -183,11 +184,38 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         await using var conn = new MySqlConnection(_appConnString);
         await conn.OpenAsync();
         var auth = new AuthService(new SwapGateUnitOfWork(conn), new AuthUserLookup(ef));
-        var resp = await auth.LoginAsync(new LoginRequest { Email = loginId, Password = _parentSecret, DeviceType = "pc", UserAgent = PcUa });
+        var resp = await auth.LoginAsync(new LoginRequest { Email = loginId, Password = password ?? _parentSecret, DeviceType = "pc", UserAgent = PcUa });
         Assert.False(string.IsNullOrEmpty(resp.AccessToken), "로그인 토큰을 못 받았다");
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(resp.AccessToken);
         return (jwt.Claims.FirstOrDefault(x => x.Type == "employee_id")?.Value,
                 jwt.Claims.Where(x => x.Type == "role").Select(x => x.Value).Distinct().ToList());
+    }
+
+    /// <summary>A-2③ 고침 1 — 실제 로그인이 거절되는가(<c>UnauthorizedAccessException</c> · 토큰 0).</summary>
+    private async Task<bool> LoginRejectedAsync(string loginId)
+    {
+        try
+        {
+            await LoginClaimsAsync(loginId);
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.WriteLine($"[SR3] 로그인 거절 확인 {loginId}: {ex.GetType().Name}");
+            return true;
+        }
+    }
+
+    private Task<long> EmployeeCountAsync(Ctx c) => CountAsync(c.Admin, "SELECT COUNT(*) FROM employees WHERE tenant_id = @T", new { T = Tenant });
+
+    private static Task<long> UncommittedWritesAsync(MySqlConnection admin, long connId) => admin.ExecuteScalarAsync<long>(
+        "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = @Id AND trx_rows_modified > 0", new { Id = connId });
+
+    private static Mock<IRestoreBusyProbe> Busy(string? code)
+    {
+        var busy = new Mock<IRestoreBusyProbe>();
+        busy.Setup(b => b.BusyCode(Tenant)).Returns(code);
+        return busy;
     }
 
     // ══ G4 · G5 · G7 · D2 · D3 · D9 · G16 ══
@@ -210,6 +238,9 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
         Assert.Equal(RestoreSwapStep.ExpectedIsolation, r.Value!.Isolation);
         Console.WriteLine($"[SR3-G16] ④-끝 {r.Value.Counts.Elapsed.TotalMilliseconds:F0}ms · ⑤ {r.Value.Elapsed.TotalMilliseconds:F0}ms · 지움 {r.Value.DeletedRows} · 부음 {r.Value.InsertedRows}");
+        // 🔴 A-2③ 고침 1 G16 — 기록만이 아니라 문턱 X(= 10분 · 리뷰서 §6 G16 줄) 넘으면 빨강 1줄(크기 표본 · 1206 · undo · 강제 종료 재기동 = 시험 PC 몫 · 명세서 넘김)
+        Assert.True(r.Value.Elapsed < TimeSpan.FromMinutes(10), $"G16 — ⑤ 교체 {r.Value.Elapsed} ≥ 문턱 10분");
+        Assert.True(r.Value.Counts.Elapsed < TimeSpan.FromMinutes(10), $"G16 — ④-끝 {r.Value.Counts.Elapsed} ≥ 문턱 10분");
 
         Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-a'"));
         Assert.Equal(0, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-b'"));
@@ -311,13 +342,22 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         var c = await SetupAsync("SR3-D15");
         if (c is null) return;
         await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-a', @T, '전')", new { T = Tenant });
+        // 🔴 A-2③ 고침 1 D15 ③ — 붓기 차례 끝 쪽 표에 씨앗(DDL 은 암묵 커밋 → ① 을 빼도 앞 표는 커밋됨 · 끝 표 INSERT 만 열린 채 남음 · 리뷰서 §2)
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at) VALUES ('sr3-wh-1', @T, 'W1', '끝표', 'normal', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+            new { T = Tenant });
         var id = await BackupAsync(c);
+        var appConnId = await c.App.ExecuteScalarAsync<long>("SELECT CONNECTION_ID()");
         await c.App.ExecuteAsync("SET SESSION autocommit = 0");
 
         var sel = await c.Path.SelectAsync(Tenant, id);
         using var selection = sel.Value!;
         var st = await c.Path.StageAsync(Tenant, selection);
         Assert.True(st.Ok, st.DenyCode);
+        // D15 ①(고침 1) — 붓기 연결에 커밋 안 된 쓰기 0(다른 연결이 INNODB_TRX 로 봄 · 읽기 거래는 셈 밖)
+        Assert.Equal(0, await UncommittedWritesAsync(c.Admin, appConnId));
+        Assert.Equal(1, await c.Admin.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM `{st.Value!.StagedTables["warehouses"]}` WHERE warehouse_id = 'sr3-wh-1'"));
         Assert.Equal(0, await c.App.ExecuteScalarAsync<long>("SELECT @@SESSION.autocommit"));   // D15 ② — 붓기 전 값(0)으로 되돌림
         foreach (var (src, staged) in st.Value!.StagedTables)
         {
@@ -386,6 +426,13 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.Equal(0, await CountAsync(c.Admin, "SELECT COUNT(*) FROM employees WHERE employee_id = 'sr3-emp-n'"));
         Assert.Equal("sr3-user-z", await c.Admin.ExecuteScalarAsync<string?>("SELECT user_id FROM employees WHERE employee_id = 'sr3-emp-z'"));
         Assert.Equal(1, r.Value!.Counts.LiveOnlyEmployees);   // ⑤ 라이브에만 1(멈추지 않음 · C1′ ⓒ 새 셈)
+
+        // 🔴 A-2③ 고침 1 §12-4 — 실제 로그인 토큰으로: ③ 퇴사자 로그인 거절 · ⑥ 이은 계정 토큰 employee_id = 백업 행 · 로그인 뒤 백필 새 행 0
+        var empAfter = await EmployeeCountAsync(c);
+        Assert.True(await LoginRejectedAsync("x-id"), "③ 퇴사자 x-id 로그인이 통과했다");
+        var (zEmp, _) = await LoginClaimsAsync("z-id");
+        Assert.Equal("sr3-emp-z", zEmp);
+        Assert.Equal(empAfter, await EmployeeCountAsync(c));
     }
 
     [Fact(DisplayName = "G21 ⑦ ⑯ 🔴 사원 행이 라이브에서 사라짐 = 되살리되 연결은 ⓐ″(계정 살아 있고 겹침 0 이면 이음) · 기동 재맞춤 FillSql · ClearSql 0행")]
@@ -405,6 +452,12 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         var sync = await EmployeeLoginIdSync.ResyncAsync(c.App, null);
         Assert.Equal(0, sync.Filled);
         Assert.Equal(0, sync.Cleared);
+
+        // 🔴 A-2③ 고침 1 §12-4 — ⑦ 되살린 행 = 실제 로그인 토큰 employee_id(⑩ 과 같은 백필 사고 꼴 막음) · 로그인 뒤 행 수 같음
+        var empAfter = await EmployeeCountAsync(c);
+        var (wEmp, _) = await LoginClaimsAsync("w-id");
+        Assert.Equal("sr3-emp-w", wEmp);
+        Assert.Equal(empAfter, await EmployeeCountAsync(c));
     }
 
     [Fact(DisplayName = "G21 ⑧ ⑪ ⑭ ⑰ 🔴 방에서 뺌 = 빠진 그대로 · 뺐다 다시 넣음 = 참여 · 새 방에 넣음 = 줄 없음(멈춤 0) · C4 방 있음 갈래 = 나감 표시")]
@@ -430,6 +483,14 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.NotNull(await c.Admin.ExecuteScalarAsync<DateTime?>("SELECT left_at FROM chat_room_members WHERE room_id = 'room-1' AND employee_id = 'sr3-emp-a'"));
         Assert.True(r.Value!.Counts.LiveOnlyChat >= 2);   // ⑭ 라이브에만 있는 방 참여 줄(셈 · 감사)
         Assert.Equal(1, r.Value.Counts.ChatNarrowed);
+
+        // 🔴 A-2③ 고침 1 §12-4 — 실제 로그인 토큰 employee_id 로 방 관문(IsMemberAsync)을 부름
+        var (childEmp, _) = await LoginClaimsAsync("child-id");
+        Assert.Equal(ChildEmp, childEmp);
+        var chat = new ChatService(c.App, Mock.Of<IChatFileStore>());
+        Assert.False(await chat.IsMemberAsync(Tenant, childEmp!, "room-1"));   // ⑧ 뺀 그대로
+        Assert.True(await chat.IsMemberAsync(Tenant, childEmp!, "room-2"));    // ⑪ 다시 넣음 = 참여
+        Assert.False(await chat.IsMemberAsync(Tenant, childEmp!, "room-3"));   // ⑭ 새 방 줄 없음
     }
 
     [Fact(DisplayName = "G21 ⑨ ⑨′ 🔴 결재자가 백업 뒤 퇴사 = 줄 끔 · 진행 문서 회수(퇴사 뒤처리와 같은 memo) · 계정 지워진 백업에만 있는 결재자(R′)도")]
@@ -466,6 +527,17 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.Equal(1, await c.Admin.ExecuteScalarAsync<int>("SELECT is_active FROM employees WHERE employee_id = 'sr3-emp-v'"));   // 사원 칸 손 0(C8)
         Assert.Equal(2, r.Value!.Counts.LinesOff);
         Assert.Equal(2, r.Value.Counts.DocsRecalled);
+
+        // 🔴 A-2③ 고침 1 §12-4 — 결재함(서비스 호출): 결재자 쪽 회수 문서 0 · 기안자(대표 토큰 employee_id) 쪽 둘 다 cancelled · 퇴사자 로그인 거절
+        var approval = new ApprovalService(c.App, new NoOpAudit());
+        Assert.Empty(await approval.GetPendingAsync(Tenant, "sr3-emp-x"));
+        Assert.Empty(await approval.GetPendingAsync(Tenant, "sr3-emp-v"));
+        var (ownerEmp, _) = await LoginClaimsAsync("owner-id");
+        Assert.Equal(OwnerEmp, ownerEmp);
+        var sent = await approval.GetSentAsync(Tenant, ownerEmp!);
+        Assert.Equal(2, sent.Count);
+        Assert.All(sent, d => Assert.Equal("cancelled", d.Status));
+        Assert.True(await LoginRejectedAsync("x-id"), "⑨ 퇴사자 x-id 로그인이 통과했다");
     }
 
     // ══ G21 ⑩ · ⑩-neg · G12 · G18 — 초기화 뒤 복원 · ⓑ′ ══
@@ -577,6 +649,8 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         var (r, _) = await RestoreAsync(c, id);
         Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
         Assert.Equal(ChildId, await c.Admin.ExecuteScalarAsync<string?>("SELECT user_id FROM employees WHERE employee_id = @E", new { E = ChildEmp }));
+        // 🔴 A-2③ 고침 1 §12-4 — ⑬ 실제 로그인 거절(계정 멈춤 = 지금 값 그대로)
+        Assert.True(await LoginRejectedAsync("child-id"), "⑬ 멈춘 계정 child-id 로그인이 통과했다");
     }
 
     // ══ G13 덧 · G22 ①③ (시험 DB information_schema) ══
@@ -614,6 +688,304 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         var (r, _) = await RestoreAsync(c, id);
         Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
         Assert.Equal("dept-after-backup", await c.Admin.ExecuteScalarAsync<string?>("SELECT dept_id FROM users WHERE user_id = @U", new { U = ChildId }));
+    }
+
+    // ══ A-2③ 고침 1 — 지시서 §13 · 리뷰서 §2 · §3 · §5 · §6 · [3-V] P2-1 · P3-1 ~ 4 ══
+
+    private const string OtherTenant = "sr3-gate-tenant-0002";
+
+    private async Task<(RestoreStaging Staging, string RestoreId, RestoreSwapStep Step)> StageAndBeginAsync(Ctx c, string backupId, RestoreSwapStep? step = null)
+    {
+        var sel = await c.Path.SelectAsync(Tenant, backupId);
+        Assert.True(sel.Ok, $"① {sel.DenyCode} {sel.LogDetail}");
+        using var selection = sel.Value!;
+        var st = await c.Path.StageAsync(Tenant, selection);
+        Assert.True(st.Ok, $"③ {st.DenyCode} {st.LogDetail}");
+        step ??= Step(c);
+        return (st.Value!, await step.BeginHistoryAsync(Tenant, ParentId, backupId), step);
+    }
+
+    [Fact(DisplayName = "P2-1 🔴 두 회사 — ④ 라이브에 다른 회사 줄 = 멈춤(verify_failed) · 그 줄 그대로 / ④ 뒤 ⑤ 앞 들어온 다른 회사 줄 = 지우기 WHERE 가 지킴(그 줄 그대로)")]
+    public async Task P2_1_두회사_다른회사줄()
+    {
+        var c = await SetupAsync("SR3-P21");
+        if (c is null) return;
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-a', @T, '전')", new { T = Tenant });
+        var id = await BackupAsync(c);
+        // ⓐ 라이브에만 둘째 회사 줄(백업엔 없음 → ③ G3 는 통과 · ④ 가 막아야 함)
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-o', @T, '남')", new { T = OtherTenant });
+        var (r, rid) = await RestoreAsync(c, id);
+        Assert.False(r.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.VerifyFailed, r.DenyCode);
+        Assert.True(r.DataUnchanged);
+        Assert.Contains("다른 회사", r.LogDetail, StringComparison.Ordinal);
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-o' AND tenant_id = @O", new { O = OtherTenant }));
+        Assert.Equal("failed", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = rid }));
+        Assert.Equal(0, await StagingCountAsync(c.Admin));
+
+        // ⓑ ④ 를 지난 뒤(⑤ 앞) 둘째 회사 줄이 들어옴 → ⑤ 지우기는 이 회사 줄만(WHERE) · 둘째 회사 줄 그대로
+        await c.Admin.ExecuteAsync("DELETE FROM partner_contacts WHERE contact_id = 'pc-o'");
+        var (staging, rid2, step) = await StageAndBeginAsync(c, id);
+        var v = await step.VerifyAsync(Tenant, staging);
+        Assert.True(v.Ok, v.LogDetail);
+        var o = await step.OverlayAsync(Tenant, step.LocalNow());
+        Assert.True(o.Ok, o.LogDetail);
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-o2', @T, '남')", new { T = OtherTenant });
+        var s = await step.SwapAsync(Tenant, ParentId, rid2, v.Value!, o.Value!);
+        Assert.True(s.Ok, $"{s.DenyCode} {s.LogDetail}");
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-o2' AND tenant_id = @O", new { O = OtherTenant }));
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-a' AND tenant_id = @T", new { T = Tenant }));
+    }
+
+    [Fact(DisplayName = "G21 ⑬b 🔴 C3′ 단언 — 덧씌움을 틀리게 만든 임시 표(시험 전용 트리거 role ← evil) = ④-끝 멈춤(verify_failed · C3′) · 라이브 role 그대로")]
+    public async Task G21_13b_C3단언_어긋남_멈춤()
+    {
+        var c = await SetupAsync("SR3-G21-13b");
+        if (c is null) return;
+        var id = await BackupAsync(c);
+        var (staging, _, step) = await StageAndBeginAsync(c, id);
+        var v = await step.VerifyAsync(Tenant, staging);
+        Assert.True(v.Ok, v.LogDetail);
+        // 시험 전용 — 임시 표에만 트리거(제품 손 0 · 임시 표와 함께 사라짐)
+        await c.Admin.ExecuteAsync("CREATE TRIGGER sr3_evil_role BEFORE UPDATE ON rs_new__employees FOR EACH ROW SET NEW.role = 'evil'");
+        var o = await step.OverlayAsync(Tenant, step.LocalNow());
+        Assert.False(o.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.VerifyFailed, o.DenyCode);
+        Assert.Contains("C3′", o.LogDetail, StringComparison.Ordinal);
+        Assert.Equal("hr_manager", await c.Admin.ExecuteScalarAsync<string>("SELECT role FROM employees WHERE employee_id = @E", new { E = ChildEmp }));
+    }
+
+    [Fact(DisplayName = "G21 ⑨b 🔴 오래된 퇴사자(백업 전 퇴사 · 결재 줄 이미 꺼짐)는 R 밖 — 남의 진행 문서 회수 0 · pending 그대로")]
+    public async Task G21_9b_오래된퇴사자_결재그대로()
+    {
+        var c = await SetupAsync("SR3-G21-9b");
+        if (c is null) return;
+        await AddEmployeeAsync(c.Admin, "sr3-emp-q", "0003", "오래된퇴사자", null, null, "sales_user", active: 0);
+        await c.Admin.ExecuteAsync("UPDATE employees SET is_resigned = 1 WHERE employee_id = 'sr3-emp-q'");
+        await AddApprovalAsync(c.Admin, OwnerEmp, "leave");   // 대표 줄 켜짐 + pending 문서
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO approval_doc_lines (line_id, tenant_id, doc_type, seq_no, approver_id, approver_name, is_active) VALUES (UUID(), @T, 'leave', 2, 'sr3-emp-q', '퇴사자', 0)",
+            new { T = Tenant });
+        var id = await BackupAsync(c);
+        var (r, _) = await RestoreAsync(c, id);
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.Equal("pending", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM approval_documents WHERE doc_type = 'leave'"));
+        Assert.Equal(0, r.Value!.Counts.DocsRecalled);
+        Assert.Equal(0, r.Value.Counts.LinesOff);
+    }
+
+    [Fact(DisplayName = "G21 ⑦b 🔴 되살림 겹침 — 백업에만 있는 W 의 계정 U 를 라이브에서 다른 행 K 가 가짐 = W 안 이음 · K 그대로 · 실제 로그인 토큰 = K")]
+    public async Task G21_7b_되살림_겹침_안이음()
+    {
+        var c = await SetupAsync("SR3-G21-7b");
+        if (c is null) return;
+        var hash = BCrypt.Net.BCrypt.HashPassword(_parentSecret);
+        await AddUserAsync(c.Admin, "sr3-user-w", "w-id", "되살림", false, hash);
+        await AddEmployeeAsync(c.Admin, "sr3-emp-w", "0003", "되살림", "sr3-user-w", "w-id", "sales_user");
+        await AddEmployeeAsync(c.Admin, "sr3-emp-k", "0004", "새주인", null, null, "sales_user");
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("DELETE FROM employees WHERE employee_id = 'sr3-emp-w'");
+        await c.Admin.ExecuteAsync("UPDATE employees SET user_id = 'sr3-user-w', login_id = 'w-id' WHERE employee_id = 'sr3-emp-k'");
+        var (r, _) = await RestoreAsync(c, id);
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.Null(await c.Admin.ExecuteScalarAsync<string?>("SELECT user_id FROM employees WHERE employee_id = 'sr3-emp-w'"));
+        Assert.Equal("sr3-user-w", await c.Admin.ExecuteScalarAsync<string?>("SELECT user_id FROM employees WHERE employee_id = 'sr3-emp-k'"));
+        var (emp, _) = await LoginClaimsAsync("w-id");
+        Assert.Equal("sr3-emp-k", emp);
+    }
+
+    [Fact(DisplayName = "G21 ⑦c 🔴 되살림 · 계정만 멈춤(users.is_active = 0 · 지움 · 표식 아님) = W 안 이음(ⓐ″ 길 is_active 낱)")]
+    public async Task G21_7c_되살림_멈춘계정_안이음()
+    {
+        var c = await SetupAsync("SR3-G21-7c");
+        if (c is null) return;
+        var hash = BCrypt.Net.BCrypt.HashPassword(_parentSecret);
+        await AddUserAsync(c.Admin, "sr3-user-w", "w-id", "되살림", false, hash);
+        await AddEmployeeAsync(c.Admin, "sr3-emp-w", "0003", "되살림", "sr3-user-w", "w-id", "sales_user");
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("DELETE FROM employees WHERE employee_id = 'sr3-emp-w'");
+        await c.Admin.ExecuteAsync("UPDATE users SET is_active = 0 WHERE user_id = 'sr3-user-w'");
+        var (r, _) = await RestoreAsync(c, id);
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        var w = await c.Admin.QuerySingleAsync<(string? U, string? L)>("SELECT user_id, login_id FROM employees WHERE employee_id = 'sr3-emp-w'");
+        Assert.Equal(((string?)null, (string?)null), w);
+    }
+
+    [Fact(DisplayName = "G7b 🔴 기록 success 갱신이 0줄(running 아님) = 교체 실패 · 되돌림 · 백업 뒤 줄 그대로")]
+    public async Task G7b_기록0줄_실패()
+    {
+        var c = await SetupAsync("SR3-G7b");
+        if (c is null) return;
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-b', @T, '뒤')", new { T = Tenant });
+        var (staging, rid, step) = await StageAndBeginAsync(c, id);
+        await c.Admin.ExecuteAsync("UPDATE restore_history SET status = 'failed' WHERE restore_id = @R", new { R = rid });
+        var r = await step.RunAsync(Tenant, ParentId, rid, staging);
+        Assert.False(r.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.SwapFailed, r.DenyCode);
+        Assert.True(r.DataUnchanged);
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-b'"));
+    }
+
+    [Fact(DisplayName = "G15 🔴 트리거 2표 — ⑤ 도중 다른 연결의 발행 계산서 UPDATE = 잠금 오류 · 교체 뒤에도 발행 잠금(45000) 그대로 · partner_special_prices 붓기 전후 값 같음(BEFORE INSERT 재계산 뒤)")]
+    public async Task G15_교체중_다른연결()
+    {
+        var c = await SetupAsync("SR3-G15");
+        if (c is null) return;
+        await c.Admin.ExecuteAsync(
+            """
+            INSERT INTO tax_invoices (invoice_id, tenant_id, invoice_no, issued_at, issued_by, amount_total, vat_total, status)
+            VALUES ('sr3-ti-1', @T, 'SR3-0001', UTC_TIMESTAMP(6), @U, 10000.00, 1000.00, 'etax_confirmed')
+            """, new { T = Tenant, U = ParentId });
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price) VALUES ('sr3-psp-1', @T, 'p-1', 'i-1', 8000.00, 10000.00)", new { T = Tenant });
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price, vs_ratio) VALUES ('sr3-psp-2', @T, 'p-1', 'i-2', 5000.00, NULL, 55.55)", new { T = Tenant });
+        const string PspSql = "SELECT id, special_price, std_price, vs_ratio FROM partner_special_prices WHERE tenant_id = @T ORDER BY id";
+        var pspBefore = (await c.Admin.QueryAsync<(string Id, decimal Special, decimal? Std, decimal? Ratio)>(PspSql, new { T = Tenant })).ToList();
+        Assert.Equal(2, pspBefore.Count);
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("UPDATE partner_special_prices SET special_price = 9000.00 WHERE id = 'sr3-psp-1'");   // 백업 뒤 바꿈(복원 = 백업 값)
+
+        await using var other = await _db.OpenAsync();
+        await other.ExecuteAsync("SET SESSION innodb_lock_wait_timeout = 1");
+        MySqlException? during = null;
+        var (r, _) = await RestoreAsync(c, id, Step(c, hook: async (_, _) =>
+        {
+            try { await other.ExecuteAsync("UPDATE tax_invoices SET remark1 = 'during' WHERE invoice_id = 'sr3-ti-1'"); }
+            catch (MySqlException ex) { during = ex; }
+        }));
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.NotNull(during);   // ⑤ 도중 = 잠금 오류(교체 거래가 줄을 쥠 · 1205)
+        Console.WriteLine($"[SR3-G15] ⑤ 도중 다른 연결 오류 {during!.ErrorCode} {during.SqlState}");
+
+        var after = await Assert.ThrowsAsync<MySqlException>(() => other.ExecuteAsync("UPDATE tax_invoices SET remark1 = 'after' WHERE invoice_id = 'sr3-ti-1'"));
+        Assert.Equal("45000", after.SqlState);   // 발행 잠금 트리거 그대로(떼지도 다시 걸지도 않음)
+        Assert.Null(await c.Admin.ExecuteScalarAsync<string?>("SELECT remark1 FROM tax_invoices WHERE invoice_id = 'sr3-ti-1'"));
+        var pspAfter = (await c.Admin.QueryAsync<(string Id, decimal Special, decimal? Std, decimal? Ratio)>(PspSql, new { T = Tenant })).ToList();
+        Assert.Equal(pspBefore, pspAfter);
+    }
+
+    [Fact(DisplayName = "G5 🔴 백업 뒤 토큰 폐기 · 기기 차단 · 대표 비번 바꿈 → 복원 = 셋 다 지금 값 그대로 · 대표 「지금 비번」 실제 로그인 성공")]
+    public async Task G5_토큰_기기_대표비번()
+    {
+        var c = await SetupAsync("SR3-G5");
+        if (c is null) return;
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO refresh_tokens (token_id, user_id, token_hash, expires_at, is_revoked) VALUES ('sr3-rt-1', @U, 'sr3-hash', UTC_TIMESTAMP(6) + INTERVAL 7 DAY, 0)", new { U = ChildId });
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO tenant_devices (device_id, tenant_id, user_id, device_type, fingerprint, status) VALUES ('sr3-dev-1', @T, @U, 'pc', 'sr3-fp', 'approved')", new { T = Tenant, U = ChildId });
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("UPDATE refresh_tokens SET is_revoked = 1 WHERE token_id = 'sr3-rt-1'");
+        await c.Admin.ExecuteAsync("UPDATE tenant_devices SET status = 'revoked', revoked_at = UTC_TIMESTAMP(6) WHERE device_id = 'sr3-dev-1'");
+        var newSecret = "Nw-" + Guid.NewGuid().ToString("N")[..16];
+        await c.Admin.ExecuteAsync("UPDATE users SET password_hash = @H WHERE user_id = @U", new { H = BCrypt.Net.BCrypt.HashPassword(newSecret), U = ParentId });
+
+        var (r, _) = await RestoreAsync(c, id);
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.Equal(1, await c.Admin.ExecuteScalarAsync<int>("SELECT is_revoked FROM refresh_tokens WHERE token_id = 'sr3-rt-1'"));
+        Assert.Equal("revoked", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM tenant_devices WHERE device_id = 'sr3-dev-1'"));
+        var (emp, _) = await LoginClaimsAsync("owner-id", newSecret);
+        Assert.Equal(OwnerEmp, emp);
+    }
+
+    [Fact(DisplayName = "D9b 🔴 기본 시계(주입 0) — restore_history 시각 = 서버 지역 시각 · 이 클래스만 도는 CI 단계 TZ=Asia/Seoul 에서 UTC+9(UTC 로 쓰면 빨강)")]
+    public async Task D9b_기본시계_지역시각()
+    {
+        var c = await SetupAsync("SR3-D9b");
+        if (c is null) return;
+        var offset = TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow);
+        Assert.True(offset == TimeSpan.FromHours(9),
+            $"D9b — 이 시험은 TZ=Asia/Seoul 단계에서만 돈다(지금 시간대 차 {offset}) · CI db-gate 「복원 교체 게이트(TZ=Asia/Seoul)」 단계");
+        var id = await BackupAsync(c);
+        var (r, rid) = await RestoreAsync(c, id);   // Step(c) = 주입 0 · 제품 기본 시계
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        var h = await c.Admin.QuerySingleAsync<(DateTime Started, DateTime Finished)>(
+            "SELECT started_at, finished_at FROM restore_history WHERE restore_id = @R", new { R = rid });
+        var nowUtc = DateTime.UtcNow;
+        foreach (var t in new[] { h.Started, h.Finished })
+            Assert.InRange(t - nowUtc, TimeSpan.FromHours(9) - TimeSpan.FromMinutes(10), TimeSpan.FromHours(9) + TimeSpan.FromMinutes(1));
+    }
+
+    [Fact(DisplayName = "D15b 🔴 세션 autocommit = 0 — 기록 쓰기(running · 사전 백업 · 멈춤 failed)가 다른 연결에 바로 보임(명시 커밋 P3-4) · 붓기 연결 커밋 안 된 쓰기 0")]
+    public async Task D15b_autocommit0_멈춤기록()
+    {
+        var c = await SetupAsync("SR3-D15b");
+        if (c is null) return;
+        var id = await BackupAsync(c);
+        var sel = await c.Path.SelectAsync(Tenant, id);
+        using var selection = sel.Value!;
+        var st = await c.Path.StageAsync(Tenant, selection);
+        Assert.True(st.Ok, st.DenyCode);
+        var appConnId = await c.App.ExecuteScalarAsync<long>("SELECT CONNECTION_ID()");
+        await c.App.ExecuteAsync("SET SESSION autocommit = 0");
+
+        var step = Step(c, busy: Busy(SafeRestoreDenyCodes.UpdateRunning).Object);
+        var rid = await step.BeginHistoryAsync(Tenant, ParentId, id);
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM restore_history WHERE restore_id = @R AND status = 'running'", new { R = rid }));
+        await step.RecordPreBackupAsync(Tenant, rid, "sr3-pre-1");
+        Assert.Equal("sr3-pre-1", await c.Admin.ExecuteScalarAsync<string?>("SELECT pre_restore_backup FROM restore_history WHERE restore_id = @R", new { R = rid }));
+        var r = await step.RunAsync(Tenant, ParentId, rid, st.Value!);
+        Assert.Equal(SafeRestoreDenyCodes.UpdateRunning, r.DenyCode);
+        var h = await c.Admin.QuerySingleAsync<(string Status, string? Err)>("SELECT status, error_message FROM restore_history WHERE restore_id = @R", new { R = rid });
+        Assert.Equal(("failed", (string?)SafeRestoreDenyCodes.UpdateRunning), h);
+        Assert.Equal(0, await UncommittedWritesAsync(c.Admin, appConnId));
+    }
+
+    [Fact(DisplayName = "P3-1 🔴 끝 그물 — 이미 취소된 요청(대조 중 예외) = 던지지 않고 멈춤 · 기록 failed · 임시 표 0 · 라이브 그대로")]
+    public async Task P3_1_그물_취소_뒷정리()
+    {
+        var c = await SetupAsync("SR3-P31");
+        if (c is null) return;
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-b', @T, '뒤')", new { T = Tenant });
+        var (staging, rid, step) = await StageAndBeginAsync(c, id);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var r = await step.RunAsync(Tenant, ParentId, rid, staging, cts.Token);
+        Assert.False(r.Ok);
+        Assert.True(r.DataUnchanged);
+        Assert.Equal("failed", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = rid }));
+        Assert.Equal(0, await StagingCountAsync(c.Admin));
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-b'"));
+    }
+
+    [Fact(DisplayName = "P3-2 🔴 기동 청소 — 앞 프로세스가 남긴 running 줄 = failed(restore_interrupted) · 끝난 줄(success) 손 0")]
+    public async Task P3_2_기동청소_running닫음()
+    {
+        var c = await SetupAsync("SR3-P32");
+        if (c is null) return;
+        var step = Step(c, localNow: () => DateTime.Now.AddMinutes(-5));
+        var stale = await step.BeginHistoryAsync(Tenant, ParentId, "sr3-src");
+        var done = await step.BeginHistoryAsync(Tenant, ParentId, "sr3-src");
+        await c.Admin.ExecuteAsync("UPDATE restore_history SET status = 'success', finished_at = NOW() WHERE restore_id = @R", new { R = done });
+
+        var closed = await RestoreHistoryRecovery.CloseInterruptedAsync(c.App, DateTime.Now);
+        Assert.Equal(1, closed);
+        var h = await c.Admin.QuerySingleAsync<(string Status, string? Err, DateTime? Finished)>(
+            "SELECT status, error_message, finished_at FROM restore_history WHERE restore_id = @R", new { R = stale });
+        Assert.Equal("failed", h.Status);
+        Assert.Equal(SafeRestoreDenyCodes.RestoreInterrupted, h.Err);
+        Assert.NotNull(h.Finished);
+        Assert.Equal("success", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = done }));
+        Assert.Equal(0, await RestoreHistoryRecovery.CloseInterruptedAsync(c.App, DateTime.Now));   // 두 번째 = 0줄(멱등)
+    }
+
+    [Fact(DisplayName = "P3-3 🔴 ⑤ 도중 부르는 쪽 요청이 취소돼도(브라우저 닫음) 교체는 끝까지 · 커밋 · 결과 = 성공")]
+    public async Task P3_3_교체중_취소_무시()
+    {
+        var c = await SetupAsync("SR3-P33");
+        if (c is null) return;
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-a', @T, '전')", new { T = Tenant });
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-b', @T, '뒤')", new { T = Tenant });
+        using var cts = new CancellationTokenSource();
+        var (staging, rid, step) = await StageAndBeginAsync(c, id, Step(c, hook: async (_, _) => await cts.CancelAsync()));
+        var r = await step.RunAsync(Tenant, ParentId, rid, staging, cts.Token);
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.Equal(0, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-b'"));
+        Assert.Equal("success", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = rid }));
     }
 
     private sealed class NoOpAudit : IAuditService
