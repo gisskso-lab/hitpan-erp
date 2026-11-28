@@ -271,7 +271,12 @@ else
         try
         {
             // 재직자만 고른다 — 퇴직자에게 휴직을 넣을 일은 없다.
-            var all = await EmpSvc.GetListAsync();
+            // ⬛ [낡은 줄 · 화면오류기록띠 넓힘 X2] var all = await EmpSvc.GetListAsync();
+            // 20261129 대표 ④(지시서 §8-3) — 옛 메서드는 실패를 빈 목록으로 뭉개 아래 catch 가 돌지 않았다(사원 고르기 칸만 빈 채).
+            //   실패 = null 로 가르는 쪽(같은 주소 · 재직자 기본)을 불러 쉬운 알림 한 번(기록은 서비스가 남김).
+            var all = await EmpSvc.GetListOrNullAsync();
+            if (all is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+            all ??= new List<EmployeeListItemModel>();
             _employees = all.Where(e => e.IsActive).ToList();
         }
         catch (Exception ex)

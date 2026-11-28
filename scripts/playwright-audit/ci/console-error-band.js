@@ -82,6 +82,12 @@ const SCENES = Object.freeze([
   Object.freeze({ key: 'G-C2', branch: 'C', who: 'owner', page: '/print-settings', match: { path: '/api/settings/print-common' }, inject: '404',
     tags: ['[PrintSettings] 공통 설정을 못 읽었다'], snack: '워터마크 설정을 불러오지 못했습니다',
     lines: 'PrintSettingsPage.razor:395', what: '설정 · 인쇄 공통 설정 404(알림 그대로)' }),
+  // 넓힘 X2(지시서 §8-3 대표 ④ · 개발명세서 docs/개발/erp/20261128_화면오류기록띠_넓힘X2_개발명세서.md) — 무음 화면 넓힘 대표 1(발주 현황).
+  //   snack = 이번에 새로 붙인 쉬운 알림 글(LoadFailedNotice.Text 앞머리) — 고친 뒤 판(fixed) 장면이다. 대조군(control)으로 돌리면 이 글이 없어 거짓이 맞다
+  //   (대조군 런은 §8-3 에서 끝남 · 판정 함수 손 0 — X1 장면과 겹침 줄임). 키 꼴 검사(G-[RSPC]n)에 맞춰 P 갈래 다음 번호.
+  Object.freeze({ key: 'G-P4', branch: 'P', who: 'owner', page: '/purchase-order-status', match: { path: '/api/reports/purchase-orders' }, inject: '503',
+    tags: ['[HP15] 발주현황 조회 실패'], snack: '정보를 불러오지 못했습니다',
+    lines: 'PurchaseOrderStatusPage.razor:130', what: '넓힘 X2 · 발주 현황 503(띠 0 · 경고 흔적 · 쉬운 알림)' }),
 ]);
 
 // ── 순수 함수(자체시험 대상 · 화면 · 브라우저 0) ──
