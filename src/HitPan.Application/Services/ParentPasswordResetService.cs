@@ -186,7 +186,9 @@ public sealed class ParentPasswordResetService : IParentPasswordResetService
         catch (LocalAuditWriteException ex)
         {
             // 「시작」 줄은 이미 남았다(같은 OpId) — 끝 줄만 빠짐을 오류로 남긴다(#15). 줄이 남았으면(LineWritten) 다시 쓰지 않는다.
-            _logger.LogError(ex, "[ParentReset] 감사 끝 줄을 못 씀 op={OpId} · 동작 {Action} · 까닭 {Reason} · 줄 남음 {LineWritten}", opId, action, ex.Reason, ex.LineWritten);
+            // ⬛ 옛 줄(11/28 고침 2 · CodeQL #4404 오탐 — 동작 enum 이름의 「Password」 글자를 민감정보로 봄 · 동작 ↔ 결과 1:1 이라 결과로 남김):
+            // _logger.LogError(ex, "[ParentReset] 감사 끝 줄을 못 씀 op={OpId} · 동작 {Action} · 까닭 {Reason} · 줄 남음 {LineWritten}", opId, action, ex.Reason, ex.LineWritten);
+            _logger.LogError(ex, "[ParentReset] 감사 끝 줄을 못 씀 op={OpId} · 결과 {Result} · 까닭 {Reason} · 줄 남음 {LineWritten}", opId, result, ex.Reason, ex.LineWritten);
             return false;
         }
     }
