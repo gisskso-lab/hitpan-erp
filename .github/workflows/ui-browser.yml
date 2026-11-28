@@ -93,9 +93,14 @@ jobs:
     # 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — S8 에 쿨타임 K 본문(자체 상한 14분 · 설정 시각 기다림 2바퀴)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 45
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
+    # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 46
     # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 37
     # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — S8 단계 상한 41분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 54분(판정 규칙 무접촉).
-    timeout-minutes: 54
+    # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 54
+    # 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — S8 단계 상한 50분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 63분(판정 규칙 무접촉).
+    timeout-minutes: 63
 
     steps:
       - name: Checkout
@@ -240,6 +245,7 @@ jobs:
           echo "::error::[장치] API 기동 90초 시간초과 · 마지막 index.html 응답=$code"; exit 1
 
       - name: "[장치] S5 시드 ② 자식 2 · 대화방 2 (API 기동 뒤)"
+        # 🧪 측정 가지 — ⬛ [낡은 줄 · 측정 1회째] if: false(자식 시드 끔) · 사유: 이 시드가 부모 약관 동의도 해서 끄면 직원 만들기 403(런 46176147173)
         run: node scripts/playwright-audit/ci/seed-children.js
 
       - name: "[장치] S7 브라우저 설치 (playwright 판 고정 1.60.0 · 3회 제한)"
@@ -270,26 +276,29 @@ jobs:
         #   쿨타임 몸은 ui-k35 가 돌면 늘 돈다(실행기 = 판정기와 같은 고르기 · 이름 알파벳 순 = 앞 몸 뒤) · 기대 키 5 는 judge.js EXPECT_CT_ROWS.
         # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 32
         # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
+        # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 27
+        # 🔴 20261128작 로그인 경합 갈래 T — k35-popup 12분 + k35-ws03-closed 16분 + 장치 점검 몫 8분(잡 46분 안).
+        # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 36
         # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 27
         # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다
         #   = 33분 + 장치 점검 여유 8분(두 갈래 중 큰 여유 = W-S-03 27 − 19) → 단계 상한 41분(잡 54분 안).
         #   기대 키 = judge.js EXPECT_CT_ROWS 7 · EXPECT_S3_ROWS 7(앞 몸 EXPECT_G_ROWS 18 과 합쳐 32).
-        timeout-minutes: 41
+        # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 41
+        # 🔴 #1032 main 합침(11/29 · f744af38 · PM) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 16분 자체 상한)이 차례로 돈다
+        #   = 42분 + 장치 점검 여유 8분 → 단계 상한 50분(잡 63분 안). 기대 키 = EXPECT_G_ROWS 18 + EXPECT_CT_ROWS 7 + EXPECT_S3_ROWS 16 = 41.
+        # 🧪 측정 가지(m1032 · 머지 금지 · 결과 뒤 닫고 가지 지움) — 장치 점검 · K 본문 셋 대신 측정 몸 하나만 돈다(16분 상한).
+        #   가지 꼴 = Login.razor 에 정적 칸(s_loginInFlight)이 있으면 고침몸 · 없으면 대조(고치기 전 몸).
+        timeout-minutes: 16
         run: |
           set -uo pipefail
-          rc=0
-          node scripts/playwright-audit/ci/device-check.js || rc=1
-          # ⬛ [낡은 줄 · F-PR] shopt -s nullglob
-          # ⬛ [낡은 줄 · F-PR] for f in scripts/playwright-audit/ci/k35-*.js; do
-          # ⬛ [낡은 줄 · F-PR]   echo "── $f"; node "$f" || rc=1
-          # ⬛ [낡은 줄 · F-PR] done
-          # 🔴 F-PR N1 — 셸 글롭 대신 판정기와 같은 함수로 고르는 실행기(이상한 이름 = 아무것도 안 돌리고 실패)
-          node scripts/playwright-audit/ci/run-k-bodies.js || rc=1
-          exit $rc
+          if grep -q 's_loginInFlight' src/HitPan.Web/Pages/Login.razor; then export M1032_ARM=고침몸; else export M1032_ARM=대조-고치기전몸; fi
+          echo "측정 가지 꼴 $M1032_ARM"
+          node scripts/playwright-audit/ci/m1032-measure.js
 
       - name: "[시험] S9 판정"
         if: always()
-        run: node scripts/playwright-audit/ci/judge.js
+        # 🧪 측정 가지 — 판정기 안 돎(기대 키 없음 · 결과는 S8 로그의 「M1032」 줄만 읽는다)
+        run: echo "측정 가지 — 판정기 안 돎(S8 로그 M1032 줄이 결과)"
 
       - name: "[장치] API 멈춤 (로그 마무리)"
         if: always()
