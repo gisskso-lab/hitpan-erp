@@ -196,6 +196,13 @@ const docsShow = (kb) => kb.docs.map((d) => `${d.path}=${d.end}@${d.at}${d.endAt
 async function closeKb(st, kb) {
   if (kb.closed) return;
   kb.closed = true;
+  // 🔴 측정 2회째 — 로그인 응답 본문을 못 읽은 창(대조 몸은 다시 만들어진 화면이 곧바로 문서를 바꿔 본문 읽기가 실패)은
+  //   화면 저장소의 출입증으로 로그아웃한다(값은 가림 등록 · 출력 0). 런 46178432604 에서 길B 세션이 안 놓여 길A · A2 가 409.
+  if (!kb.tok.access) {
+    const t = await K.withTimeout(kb.page.evaluate((k) => localStorage.getItem(k), TOKEN_KEY), 5000, '저장소 출입증')
+      .then((v) => v, (e) => { log(`${kb.who} 저장소 출입증 읽기 실패 ${errName(e)}`); return null; });
+    if (t) { L.maskAndRegister('TOKEN_ACCESS_M1032_STORE', t); kb.tok.access = t; log(`${kb.who} 출입증 = 화면 저장소에서(응답 본문 못 읽음)`); }
+  }
   if (kb.tok.access) {
     const lo = await K.apiLogout({ who: kb.who, token: kb.tok.access, deviceId: kb.tok.deviceId });
     log(`${kb.who} 로그아웃 ${lo.got}`);
@@ -432,7 +439,9 @@ async function sceneBack(st, br, brNote) {
     await sleep(OBS_MS);
     const newDocs = kb.docs.slice(docsBefore);
     const shows = kb.hm.filter((x) => x.at >= backAt - 50 && /^\[hp-m\] page(show|hide)/.test(x.t)).map((x) => x.t.replace('[hp-m] ', ''));
-    const showAfter = kb.hm.find((x) => x.at >= backAt - 50 && x.t.startsWith('[hp-m] pageshow'));
+    // ⬛ [낡은 줄 · 측정 1회째] const showAfter = kb.hm.find((x) => x.at >= backAt - 50 && x.t.startsWith('[hp-m] pageshow'));
+    //   사유: 복원 때 앞 문서의 첫 pageshow(persisted=false) 줄이 뒤늦게 같이 들어와 첫 줄을 잡음 → 「판별 불일치」(런 46178422585 · 46178432604)
+    const showAfter = kb.hm.filter((x) => x.at >= backAt - 50 && x.t.startsWith('[hp-m] pageshow')).pop();
     const persisted = showAfter ? /persisted=true/.test(showAfter.t) : null;
     const loginDocAfter = newDocs.some((d) => d.path === '/login');
     const restoreJudge = persisted === null ? '판별 못 함(pageshow 못 봄)'
