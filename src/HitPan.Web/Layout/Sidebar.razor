@@ -551,6 +551,12 @@
     /// <summary>20261005작5 — 「직원 계정 관리」 단계(대표·관리자 아닌 직원만 읽는다). 1 이상이면 설정관리에 그 한 줄.</summary>
     private int _usersLevel;
 
+    /// <summary>
+    /// 20261128작 로그인경합 갈래 B2 (D16) — 직원의 「결재 보기」(my-level approvalView · 서버 판정 그대로).
+    /// <c>false</c> 일 때만 결재 대기 수를 안 부른다 · <c>null</c>(못 읽음) = 옛 동작 · 대표는 늘 부른다.
+    /// </summary>
+    private bool? _approvalView;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -571,6 +577,8 @@
         {
             var me = await new AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
             _usersLevel = me?.Level ?? 0;
+            // 20261128작 B2 (D16) — 같은 응답(새 부름 0)에서 결재 보기 칸을 읽는다. 못 읽으면 null = 옛 동작.
+            _approvalView = me?.ApprovalView;
         }
 
         // 20261125작 K4 (가) — 관리자면 my-level 을 한 번 읽어 「모든데이터 초기화」 한 줄을 가른다(대표만 · 못 읽으면 안 보임).
@@ -587,17 +595,29 @@
         await LoadCsUnreadAsync();
 
         // 결재 대기 건수 로딩
-        try
+        // 20261128작 로그인경합 갈래 B2 (D16 · 설계 §7-2-2 P1) — 서버가 「결재 보기 없음」 이라고 답한 직원(approvalView == false)은
+        //   부르지 않는다. 불러도 서버 문(RequirePermission APPROVAL view)이 403 을 돌려주고, 그 403 이 첫 화면에
+        //   「이 기능에 접근할 권한이 없습니다」 알림으로 뜬다(직원 첫 화면 = 안내 한 장 · 403 알림 0 · D5).
+        //   대표는 그대로 부름 · null(못 읽음)은 옛 동작(부르고 서버가 판정) · 결재 보기 받은 직원은 배지 그대로.
+        //   ⬛ B2 이전: 아래 try 를 계정 구분 없이 늘 돌렸다(줄 자체는 그대로 · 거름 if 만 더함 · #1).
+        if (!_isTenantAdmin && _approvalView == false)
         {
-            var pending = await ApprovalSvc.GetPendingAsync();
-            _approvalPendingCount = pending.Count;
-        }
-        catch (Exception _hp15Ex)
-        {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
-            // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
-            // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
             _approvalPendingCount = 0;
+        }
+        else
+        {
+            try
+            {
+                var pending = await ApprovalSvc.GetPendingAsync();
+                _approvalPendingCount = pending.Count;
+            }
+            catch (Exception _hp15Ex)
+            {
+                Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+                // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
+                // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
+                _approvalPendingCount = 0;
+            }
         }
     }
 
