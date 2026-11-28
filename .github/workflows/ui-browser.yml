@@ -281,6 +281,22 @@ jobs:
         if: always()
         run: node scripts/playwright-audit/ci/judge.js
 
+      # 🔴 20261128작 화면 오류 기록 띠 갈래 T(설계 docs/설계/erp/화면오류기록띠_설계_20261128.md §5 · 작업지시서 §2 · §4 · 개발명세서 …_갈래T_개발명세서.md)
+      #   새 단계 1개만 더함 — 위 · 아래 기존 단계 손 0. 장면 · 판정 · 결과표가 따로(ui-out/main/console-error-band-result.json) → judge.js 키 틀 무접촉.
+      #   모드 칸 UI_BAND_MODE: control = 대조군 런(고치기 전 판 · 장면마다 흰 띠 1 + 그 줄 표지 표준오류 1 이상이어야 초록) · fixed = 고친 뒤(흰 띠 0 · 경고 흔적 1 이상).
+      #   API 멈춤 · 누출 검사 · 업로드 앞(결과표가 누출 검사를 지나 함께 올라간다). 앞 단계가 빨강이어도 돈다(대조군 재료를 남김).
+      - name: "[시험] S9b 화면 오류 기록 띠 장면 (갈래 T · 모드 칸 UI_BAND_MODE)"
+        if: always()
+        timeout-minutes: 10
+        env:
+          UI_BAND_MODE: control
+        run: |
+          set -uo pipefail
+          rc=0
+          node scripts/playwright-audit/ci/console-error-band.selftest.js || rc=1
+          node scripts/playwright-audit/ci/console-error-band.js || rc=1
+          exit $rc
+
       - name: "[장치] API 멈춤 (로그 마무리)"
         if: always()
         run: |
