@@ -35,6 +35,9 @@ public class PurchaseService : IPurchaseService
         // 🔴 W-G1-51 후1 E8 — 번호 따기 · 첫 쓰기 전에 품목이 이 회사 것인지 본다(회사 값 = JWT).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W4(작업지시서 20261129작 · 설계 §4-2) — 같은 자리에서 창고도 본다: 이 회사 · 활성 창고만(요청 원값 · 빈 칸 = 건너뜀).
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.WarehouseId), null, ct);
 
         var poRepo = _unitOfWork.Repository<PurchaseOrder>();
         var poItemRepo = _unitOfWork.Repository<PurchaseOrderItem>();
@@ -98,11 +101,33 @@ public class PurchaseService : IPurchaseService
         return poId;
     }
 
-    public async Task<string> CreateReceiptAsync(CreateReceiptRequest request, CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 후7후9] public async Task<string> CreateReceiptAsync(CreateReceiptRequest request, CancellationToken ct = default)
+    // 🔴 후9 W5(작업지시서 20261129작 · 설계 §4-2 W5 · CTO 전결 K4 C1) — 공개 입구(인터페이스 · API POST)는 서명 그대로
+    //   몸통을 안쪽 CreateReceiptCoreAsync 로 옮기고 「회사 + 활성」 창고 검사로 보낸다. DTO 칸 · 선택 인자 0.
+    public Task<string> CreateReceiptAsync(CreateReceiptRequest request, CancellationToken ct = default)
+        => CreateReceiptCoreAsync(request, requireActiveWarehouse: true, ct);
+
+    /// <summary>
+    /// 🔴 후9 W5 · W5c — 매입명세서 신규 몸통(옛 <c>CreateReceiptAsync</c> 본문 그대로 · 줄 지움 0).
+    /// <paramref name="requireActiveWarehouse"/> 가 참 = 회사 + 활성(공개 입구) · 거짓 = 회사만(발주→매입 전환 안쪽 한 곳 · CTO 전결 K4 (나)).
+    /// </summary>
+    private async Task<string> CreateReceiptCoreAsync(CreateReceiptRequest request, bool requireActiveWarehouse, CancellationToken ct)
     {
         // 🔴 W-G1-51 후1 E9 — 번호 따기 · 첫 쓰기 전에 본다(회사 값 = JWT). 발주 → 매입 전환도 이 입구를 지난다.
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W5 · W5c — 같은 자리에서 창고도 본다(요청 원값 · 빈 칸 채우기 전 · 빈 칸 = 건너뜀).
+        //   공개 입구 = 회사 + 활성 / 발주→매입 전환 = 회사만(창고 고를 칸 · 발주 고칠 길 · 되살릴 길이 없어 활성까지 보면 #20 끊김).
+        if (requireActiveWarehouse)
+        {
+            await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+                _db, _currentTenant.TenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        }
+        else
+        {
+            await WarehouseTenantGuard.EnsureWarehousesBelongToTenantAsync(
+                _db, _currentTenant.TenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        }
 
         var receiptRepo = _unitOfWork.Repository<PurchaseReceipt>();
         var receiptItemRepo = _unitOfWork.Repository<PurchaseReceiptItem>();
@@ -822,7 +847,10 @@ public class PurchaseService : IPurchaseService
             Items = receiptItems
         };
 
-        var receiptId = await CreateReceiptAsync(request, ct);
+        // ⬛ [낡은 줄 · 후7후9] var receiptId = await CreateReceiptAsync(request, ct);
+        // 🔴 후9 W5c(설계 §4-2 · CTO 전결 K4 (나)) — 전환은 창고 회사만 본다(쉬게 한 내 창고가 든 발주도 통과 · 남의 · 없는 창고는 거절).
+        //   회사만 길로 가는 문은 여기 한 곳뿐이다(공개 CreateReceiptAsync 는 회사 + 활성).
+        var receiptId = await CreateReceiptCoreAsync(request, requireActiveWarehouse: false, ct);
 
         // 생성된 입고 전표의 번호를 조회한다.
         var receiptRepo = _unitOfWork.Repository<PurchaseReceipt>();
@@ -1057,6 +1085,17 @@ public class PurchaseService : IPurchaseService
         }
     }
 
+    /// <summary>
+    /// 🔴 후9 전결 2(PR #1058 고침 1 · 작업지시서 §15-2 #5) — 반품 줄 창고 id 가 <b>공백만</b>(<c>"   "</c> · <c>"\t"</c>)이면 거절한다.
+    /// 공용 가드는 공백만을 「서버가 채움」 으로 보고 빼는데, 반품 확정 · 취소는 <c>IsNullOrEmpty</c> 로만 채워 그 값이
+    /// <c>stock_ledger</c>(INSERT ONLY · 헌법 #3)에 유령 창고로 남는다 → 입구에서 막는다. <c>null</c> · <c>""</c> 은 통과(화면 빈 칸 = 서버 채움).
+    /// </summary>
+    private static void RejectWhitespaceOnlyWarehouseIds(IEnumerable<string?> ids)
+    {
+        if (ids.Any(id => !string.IsNullOrEmpty(id) && string.IsNullOrWhiteSpace(id)))
+            throw new InvalidOperationException(WarehouseTenantGuard.NotUsableWarehouseMessage);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // P0 #1 — 매입반품 신규 작성 (헌법 #20 흐름 끊김 봉합)
     // receipt_id 없이도 발행 가능. status='draft' 로 INSERT (헌법 #6 정합).
@@ -1079,6 +1118,13 @@ public class PurchaseService : IPurchaseService
         // 🔴 W-G1-51 후1 E10 — 원 매입 조회 · 트랜잭션 · 첫 쓰기 전에 본다(회사 값 = JWT 에서 온 인자).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W6a(작업지시서 20261129작 · 설계 §4-2) — 같은 자리에서 창고도 본다: 이 회사 · 활성 창고만(요청 원값 · 빈 칸 = 건너뜀).
+        // 🔴 전결 2 — 회사만(PR #1058 고침 1 · 작업지시서 §15-2 #1 · ⬛ 위 줄 「활성 창고만」 은 낡음): 반품 화면엔 줄 창고 칸이 없어
+        //   쉬게 한 내 창고에서 나간 물건의 반품이 막히면 흐름이 끊긴다(#20) → 남의 · 없는 창고만 거절 · 쉬게 한 내 창고 통과.
+        await WarehouseTenantGuard.EnsureWarehousesBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        // 🔴 전결 2 — 공백만 창고 id 는 첫 쓰기 전 거절(확정 · 취소가 IsNullOrEmpty 로만 채워 원장에 유령 창고로 남던 길 · null · "" 은 통과).
+        RejectWhitespaceOnlyWarehouseIds(request.Items.Select(x => x.WarehouseId));
 
         // 🔴🔴 20260827작7 W2-1 (사장님 지시 "당장 봉합") — **중복 발행 차단 + 상태 가드.**
         //
@@ -1229,6 +1275,14 @@ public class PurchaseService : IPurchaseService
         //   반드시 머리 UPDATE 앞에서 본다(거절되면 머리 · 기존 줄 그대로).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W6b(작업지시서 20261129작 · 설계 §4-2) — 같은 자리 · 머리 UPDATE 앞에서 창고도 본다: 이 회사 · 활성 창고만
+        //   (쉬게 한 창고가 든 옛 초안 수정도 거절 = CTO 전결 K4 (가) · 확정 · 취소는 그대로 됨).
+        // 🔴 전결 2 — 회사만(PR #1058 고침 1 · 작업지시서 §15-2 #2 · ⬛ 위 두 줄 「활성 · K4 (가)」 는 낡음): [반품전환] 초안의 수량만 고쳐
+        //   저장해도 고를 칸이 없어 막히던 길(#20) → 남의 · 없는 창고만 거절 · 쉬게 한 내 창고 통과.
+        await WarehouseTenantGuard.EnsureWarehousesBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        // 🔴 전결 2 — 공백만 창고 id 는 머리 UPDATE 앞에서 거절(null · "" 은 통과).
+        RejectWhitespaceOnlyWarehouseIds(request.Items.Select(x => x.WarehouseId));
 
         var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         decimal totalAmount = 0, totalVat = 0;

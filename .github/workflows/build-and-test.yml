@@ -1417,6 +1417,9 @@ jobs:
           GATES="$GATES|SalesReturnDetailItemTenantGate"
           GATES="$GATES|ItemTenantGuardGate"
           GATES="$GATES|VoucherSaveItemTenantGate"
+          GATES="$GATES|WarehouseTenantGuardGate"
+          GATES="$GATES|StockWriteTenantGate"
+          GATES="$GATES|VoucherSaveWarehouseTenantGate"
           # 🔴 20260928작4 쿨타임 1-b 갈래 ③ (설계 §7 · §D · §E) — G-C1~G-C21(④=G-C22 보류) · G-C14 진짜 파이프라인.
           #    CooltimeDbGate = 출하 DDL 격리 DB + 제품 공개 메서드(엔진 · HrService · SettingsService · UserService · AuthService)
           #    · CooltimeRuleGate = DB 없는 순수 규칙(화면 규칙 소스 링크). 음성 대조군 = 시험 안 짝 + 변이 런

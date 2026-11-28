@@ -41,6 +41,11 @@ public sealed class DeliveryBatchService : IDeliveryBatchService
             //   id 가 빈 줄(이름으로 찾기 · 이미 이 회사 안에서만 찾음)은 함수가 뺀다.
             await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
                 _db, tenantId, requests.SelectMany(r => r.Items).Select(x => x.ItemId?.Trim()), tx, ct);
+            // 🔴 후9 W10(작업지시서 20261129작 · 설계 §2-4 · §4-2) — 같은 자리에서 모든 요청 줄의 창고도 한 번에 본다:
+            //   이 회사 · 활성 창고만(요청 원값 · 빈 칸 = 기본창고 길이라 건너뜀). 트랜잭션이 열린 연결이라 반드시 tx 를 넘긴다(후4 교훈).
+            //   거절되면 아래 catch 가 롤백하고 건별 실패 문구(= 가드 문구)로 돌려준다.
+            await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+                _db, tenantId, requests.SelectMany(r => r.Items).Select(x => x.WarehouseId), tx, ct);
 
             var now = DateTime.Now;
             var dateToken = now.ToString("yyyyMMdd");
