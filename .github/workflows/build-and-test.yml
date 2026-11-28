@@ -567,6 +567,11 @@ jobs:
           #      · partner UNIQUE 를 일반 KEY 로(두 파일)     → G7-1 · G7-2 (병렬이슈39)
           #    근거: docs/개발/erp/20260915작1_갈래F_DDL_개발명세서.md
           GATES="$GATES|LegacyUnpostedDdlGate"
+          # 🔴 20261128작 W-G1-52 갈래 A-2① RestoreMaintenanceGate(G17 · CTO N1-a 표지) — 복원 점검 상태 · 복원 시각 표지.
+          #    DB D1 · D2(출하 DDL 신규설치본 restore_history 표지 → 재기동 뒤 복원 전 토큰 401 · 도중 죽음 = 시작 시각) ·
+          #    비DB M1 ~ M9 · S1 ~ S7(깃발 · 비우기 · 일꾼 멈춤 · 캐시 비움 · 503 · 허용 목록 · 표지 401 · 배선).
+          #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A2-1_점검끊기_개발명세서.md
+          GATES="$GATES|RestoreMaintenanceGate"
           # 🔴 20261125작 DataResetParentOnlyGate — 「모든데이터 초기화」 = 대표 계정(is_parent=1) 전용(대표 결재 §146).
           #    DB P1~P8(대표 1 통과 · 관리자 자식 not_parent · 대표 0 no_parent · 2+ multiple_parents · 지운/멈춘 대표 안 셈 ·
           #    다른 회사 대표 안 셈 · 덮어쓰기 이관 길도 막힘 · 판정 직접) + 비DB N1~N4(메뉴 규칙 · 사이드바 감쌈 · 문 · 확인 문구).

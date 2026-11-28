@@ -70,6 +70,8 @@ var isDevelopment = builder.Environment.IsDevelopment();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
+// 🔴 W-G1-52 갈래 A-2① — 복원 점검 상태 · 복원 시각 표지(프로세스 안 깃발 1개 · Singleton 필수 · 설계 §15-5 ①).
+builder.Services.AddSingleton<HitPan.Application.Interfaces.IRestoreMaintenance, HitPan.API.Middleware.RestoreMaintenanceState>();
 builder.Services.AddDataProtection();  // DPAPI 기반 비밀번호 보호 (인증서 등)
 builder.Services.AddScoped<CurrentTenant>();
 builder.Services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<CurrentTenant>());
@@ -801,6 +803,8 @@ app.UseMiddleware<AuditLogMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
+// 🔴 W-G1-52 갈래 A-2① — 복원 점검 중 /api · /hubs = 503(허용 목록 = [AllowDuringRestoreMaintenance] 끝점만 · GET 도). 인증 뒤 · 도는 셈의 시작점.
+app.UseMiddleware<RestoreMaintenanceMiddleware>();
 // 작20260428이7 #4: RateLimit은 Authentication 이후로 이동.
 // 인증된 user_id 기반 카운트 → 터널 환경에서 다수 사용자가 같은 IP로 인식되어도 오차단 안 발생.
 app.UseMiddleware<RateLimitMiddleware>();
@@ -810,6 +814,8 @@ app.UseMiddleware<TenantMiddleware>();
 //   ⚠️ 아래 SessionLimitMiddleware 는 **축이 달라**(테넌트 총량 COUNT(DISTINCT user_id))
 //     한 줄도 건드리지 않았다. 섞지 않는다(헌법 #1 추가만).
 app.UseMiddleware<SessionValidityMiddleware>();
+// 🔴 W-G1-52 갈래 A-2① — 복원 시각 표지 앞에 발급된 토큰 = 401(CTO N1-a). 회사 번호 = JWT Items 뒤라 여기.
+app.UseMiddleware<RestoreStampMiddleware>();
 // 🔴 20260927작1 절E — 축 A(테넌트 총량 동시세션 제한) 킬스위치.
 //   [왜 UseWhen 인가] `SessionLimitMiddleware` 를 **한 줄도 안 건드리기 위해서**다(작지 금지 #1).
 //     파일 안에 조건을 넣는 대신, 아예 **태울지 말지**를 여기서 고른다.
