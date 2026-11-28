@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using HitPan.Web.Providers;
 using HitPan.Web.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 
 namespace HitPan.Tests.Integrity
@@ -70,7 +71,9 @@ namespace HitPan.Tests.Integrity
                 new HitPanProtectedLocalStorage(js),
                 new HitPanAuthStateProvider(calls),
                 new NoRefresh(),
-                js);
+                // 화면오류기록띠 갈래 U — AuthService 생성자에 기록기 1개가 늘었다(#12 · 기록은 버림).
+                js,
+                NullLogger<AuthService>.Instance);
         }
 
         private sealed class RecordingJs(List<string> calls) : IJSRuntime

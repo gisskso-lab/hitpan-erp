@@ -23,6 +23,7 @@
      M-22 R-1 경주 대기(대표인데 메인PC 확인이 아직 안 왔을 때 한 바퀴를 기다린다). *@
 @inject UpdatePromptBus PromptBus
 @inject MainPcProofRunner Proof
+@inject ILogger<UpdateConsentGate> Logger
 @implements IDisposable
 
 @* 업데이트 중 안내화면 (20260806작7). 평소엔 아무것도 그리지 않고, [예] 직후에만 화면을 덮는다.
@@ -113,7 +114,8 @@
                 catch (Exception proofEx)
                 {
                     // 다른 PC 에서는 실패가 정상이다 — 흔적만 남기고 아래 재조회로 간다(#15).
-                    Console.Error.WriteLine("[UpdateConsentGate] 메인PC 확인 실패(다른 PC 면 정상): " + proofEx.GetType().Name + ": " + proofEx.Message);
+                    // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[UpdateConsentGate] 메인PC 확인 실패(다른 PC 면 정상): " + proofEx.GetType().Name + ": " + proofEx.Message);
+                    Logger.LogWarning(proofEx, "[UpdateConsentGate] 메인PC 확인 실패(다른 PC 면 정상)");
                 }
 
                 var again = await Http.GetFromJsonAsync<UpdateStatusResponse>("api/auth/update-status");
@@ -209,7 +211,8 @@
             // ★ 봉합 20260804작2 P0-3 ([3-V] 병렬검증 적발): 종전엔 주석만 있고 로그가 0줄이었다(헌법 #15 위반).
             //   그래서 "업데이트 안내가 왜 안 뜨나" 를 추적할 수단이 아예 없었다 — 팝업 미노출 조사 시
             //   조회 실패인지·미인증인지·세션가드인지 구분이 불가능하다. 흔적은 남기되 화면은 막지 않는다.
-            Console.Error.WriteLine("[HP15][UpdateConsentGate] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[HP15][UpdateConsentGate] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15][UpdateConsentGate] 업데이트 안내 조회 · 표시 실패(다음 세션에 재안내)");
         }
         finally
         {

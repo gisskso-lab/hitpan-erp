@@ -24,19 +24,23 @@ public sealed class AuthService : IAuthService
     private readonly HitPanAuthStateProvider _authState;
     private readonly IAuthTokenRefresher _tokenRefresher;
     private readonly IJSRuntime _js;
+    private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         HttpClient http,
         HitPanProtectedLocalStorage storage,
         HitPanAuthStateProvider authState,
         IAuthTokenRefresher tokenRefresher,
-        IJSRuntime js)
+        // ⬛ [낡은 줄 · 화면오류기록띠] IJSRuntime js)
+        IJSRuntime js,
+        ILogger<AuthService> logger)
     {
         _http = http;
         _storage = storage;
         _authState = authState;
         _tokenRefresher = tokenRefresher;
         _js = js;
+        _logger = logger;
     }
 
     /// <param name="forceSignOutOtherPc">
@@ -98,7 +102,8 @@ public sealed class AuthService : IAuthService
             {
                 OtherPcInUseDto? conflict = null;
                 try { conflict = await response.Content.ReadFromJsonAsync<OtherPcInUseDto>(cancellationToken: ct); }
-                catch (Exception ex) { Console.Error.WriteLine($"[Auth] 409 본문 해석 실패: {ex.Message}"); }
+                // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Auth] 409 본문 해석 실패: {ex.Message}"); }
+                catch (Exception ex) { _logger.LogWarning(ex, "[Auth] 409 본문 해석 실패"); }
 
                 return new AuthLoginResult
                 {
@@ -250,7 +255,8 @@ public sealed class AuthService : IAuthService
             completed = LogoutGate.IsServerLogoutDone(response);
             if (!completed)
             {
-                Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({status})");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Auth] 로그아웃 서버 처리 실패 ({status})");
+                _logger.LogWarning("[Auth] 로그아웃 서버 처리 실패 ({Status})", status);
             }
             else if (status == 401)
             {
@@ -259,7 +265,8 @@ public sealed class AuthService : IAuthService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Auth] 로그아웃 요청 실패: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Auth] 로그아웃 요청 실패: {ex.Message}");
+            _logger.LogWarning(ex, "[Auth] 로그아웃 요청 실패");
         }
 
         if (!completed)
@@ -272,7 +279,8 @@ public sealed class AuthService : IAuthService
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[Auth] 로그아웃 미완료 표시 저장 실패: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Auth] 로그아웃 미완료 표시 저장 실패: {ex.Message}");
+                _logger.LogWarning(ex, "[Auth] 로그아웃 미완료 표시 저장 실패");
             }
         }
 
@@ -299,7 +307,8 @@ public sealed class AuthService : IAuthService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Auth] 업데이트 안내 표 지우기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Auth] 업데이트 안내 표 지우기 실패: {ex.GetType().Name}: {ex.Message}");
+            _logger.LogWarning(ex, "[Auth] 업데이트 안내 표 지우기 실패");
         }
     }
 

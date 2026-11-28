@@ -708,7 +708,8 @@
         catch (Exception _hp15Ex)
         {
             // §원칙 #15 빈 catch 금지 — 흔적은 남기되 화면은 막지 않는다.
-            Console.Error.WriteLine("[HP15][Sidebar/Version] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[HP15][Sidebar/Version] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15][Sidebar/Version] 버전 · 업데이트 상태 조회 실패");
         }
     }
 
@@ -746,12 +747,16 @@
             if (!handled)
             {
                 // 게이트가 없다(ERP 메인 밖) — 흔적만 남긴다(#15). 화면은 막지 않는다(#20).
-                Console.Error.WriteLine("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                Logger.LogWarning("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                Snackbar.Add("{자리표 — 업데이트 창 못 엶 안내}", Severity.Warning); // E8 대표 확정 전 자리표(화면 실측 때 확정 · 대표 §330 ①)
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[Sidebar/UpdateIssue] " + ex.GetType().Name + ": " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[Sidebar/UpdateIssue] " + ex.GetType().Name + ": " + ex.Message);
+            Logger.LogWarning(ex, "[Sidebar/UpdateIssue] 업데이트 팝업 열기 실패");
+            Snackbar.Add("{자리표 — 업데이트 창 못 엶 안내}", Severity.Warning); // E8 대표 확정 전 자리표(화면 실측 때 확정 · 대표 §330 ①)
         }
         finally
         {
