@@ -19,7 +19,14 @@
     <strong>3중 보안 적용</strong>: 사용자 PIN + ERP 마스터 키 + TPM 2.0 봉인. 인증서는 사장님 PC에만 저장되며 본사는 보지 않습니다.
 </MudAlert>
 
-@if (_certInfo is null)
+@* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] @if (_certInfo is null)
+     화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 인증서 정보를 못 불러왔으면 「신규 등록」 꼴을 띄우지 않는다.
+     못 불러온 것을 「인증서 없음」 으로 보이면 거짓 안내이고, 이미 등록된 인증서 위에 새로 등록하게 만든다.
+     쉬운 알림(LoadFailedNotice)이 대신 알린다 · 화면을 다시 열면 다시 읽는다. *@
+@if (_certInfo is null && _certLoadFailed)
+{
+}
+else if (_certInfo is null)
 {
     <SectionCard Title="공인인증서 신규 등록">
         <MudGrid Spacing="2">
@@ -105,6 +112,9 @@ else
         </MudGrid>
     </SectionCard>
 
+    @* 화면오류기록띠 넓힘X1 — 보안 상태를 못 불러왔으면 이 칸을 띄우지 않는다(못 불러온 빈 값이 「원격제어 차단」 초록으로 보이는 거짓 방지). *@
+    @if (!_securityLoadFailed)
+    {
     <SectionCard Title="보안 상태" Class="mt-3" Variant="SectionCard.SectionVariant.Flat">
         <MudList T="string" Dense="true">
             <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">
@@ -136,6 +146,7 @@ else
             </MudListItem>
         </MudList>
     </SectionCard>
+    }
 
     @* 워치독 무결성 보고서 — WS-23 (TPM) + WS-24 (클라우드) + WS-25 (만료) *@
     @if (_watchdog is not null && _watchdog.Warnings.Count > 0)
@@ -159,6 +170,10 @@ else
     private string _pin = string.Empty;
     private bool _busy;
 
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 조회가 실패했나. 참이면 그 칸의 거짓 안내(신규 등록 꼴 · 초록 보안 상태)를 감춘다.
+    private bool _certLoadFailed;
+    private bool _securityLoadFailed;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
@@ -166,12 +181,21 @@ else
 
     private async Task LoadAsync()
     {
-        _certInfo = await CertApi.GetCertInfoAsync();
-        _securityStatus = await CertApi.GetSecurityStatusAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _certInfo = await CertApi.GetCertInfoAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _securityStatus = await CertApi.GetSecurityStatusAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _watchdog = await CertApi.GetWatchdogReportAsync();
+        //   세 조회 중 몇이 실패해도 쉬운 알림은 한 번. 인증서 없음(서버 204)은 실패가 아니다(서비스가 가름).
+        Exception? loadFailed = null;
+        bool certFailed = false, securityFailed = false;
+        _certInfo = await CertApi.GetCertInfoAsync(onLoadFailed: ex => { loadFailed ??= ex; certFailed = true; });
+        _securityStatus = await CertApi.GetSecurityStatusAsync(onLoadFailed: ex => { loadFailed ??= ex; securityFailed = true; });
         if (_certInfo is not null)
         {
-            _watchdog = await CertApi.GetWatchdogReportAsync();
+            _watchdog = await CertApi.GetWatchdogReportAsync(onLoadFailed: ex => loadFailed ??= ex);
         }
+        _certLoadFailed = certFailed;
+        _securityLoadFailed = securityFailed;
+        if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
     }
 
     private Severity GetWarningSeverity(string warning)

@@ -6,7 +6,10 @@ namespace HitPan.Web.Services;
 // ⬛ [낡은 줄 · 화면오류기록띠] public sealed class ApprovalLineService(HttpClient http)
 public sealed class ApprovalLineService(HttpClient http, ILogger<ApprovalLineService> logger)
 {
-    public async Task<List<ApprovalLineListItemModel>> GetListAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 결재선(보기 전용) 화면 조회 2자리에 onLoadFailed 를 더했다.
+    //   빈 목록만 남지 않게 화면이 쉬운 알림을 띄운다 · 돌려주는 값은 그대로.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<ApprovalLineListItemModel>> GetListAsync(CancellationToken ct = default)
+    public async Task<List<ApprovalLineListItemModel>> GetListAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -17,11 +20,13 @@ public sealed class ApprovalLineService(HttpClient http, ILogger<ApprovalLineSer
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.GetListAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[ApprovalLineService.GetListAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new List<ApprovalLineListItemModel>();
         }
     }
 
-    public async Task<ApprovalLineDetailModel?> GetAsync(string id, CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<ApprovalLineDetailModel?> GetAsync(string id, CancellationToken ct = default)
+    public async Task<ApprovalLineDetailModel?> GetAsync(string id, CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -31,6 +36,7 @@ public sealed class ApprovalLineService(HttpClient http, ILogger<ApprovalLineSer
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.GetAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[ApprovalLineService.GetAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return null;
         }
     }

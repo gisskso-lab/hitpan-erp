@@ -7,6 +7,8 @@
    직급·사원은 결재 단계를 고를 때만 쓰던 것이고, 이제 고르는 화면이 없다. *@
 @inject ApprovalLineService LineSvc
 @inject NavigationManager Nav
+@* 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 알림창을 다시 받는다: 목록 조회가 실패하면 빈 목록만 남지 않게 쉬운 알림 한 번(LoadFailedNotice). *@
+@inject ISnackbar Snackbar
 
 @* 사장님 결재(2026-08-09) "통일": 이 화면은 더 이상 쓰지 않는다.
    여기서 저장하던 결재라인은 실제 결재 흐름이 읽지 않는 별도 표에 들어가, 아무리 채워 넣어도
@@ -109,20 +111,25 @@ else
     private async Task ReloadAsync()
     {
         _loading = true;
-        _lines = await LineSvc.GetListAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _lines = await LineSvc.GetListAsync();
+        // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 목록 · 단계 조회 중 몇이 실패해도 쉬운 알림은 한 번.
+        Exception? loadFailed = null;
+        _lines = await LineSvc.GetListAsync(onLoadFailed: ex => loadFailed ??= ex);
 
         // 단계 내용은 결재라인 하나씩 읽어 온다. 이 화면은 더 이상 쓰지 않는 화면이라
         // 건수가 늘어날 일이 없고, 목록도 회사당 몇 건 수준이다.
         var steps = new Dictionary<string, List<ApprovalLineStepModel>>();
         foreach (var line in _lines)
         {
-            var detail = await LineSvc.GetAsync(line.ApprovalLineId);
+            // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var detail = await LineSvc.GetAsync(line.ApprovalLineId);
+            var detail = await LineSvc.GetAsync(line.ApprovalLineId, onLoadFailed: ex => loadFailed ??= ex);
             if (detail is not null)
             {
                 steps[line.ApprovalLineId] = detail.Steps.OrderBy(s => s.StepOrder).ToList();
             }
         }
         _steps = steps;
+        if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
 
         _loading = false;
     }
