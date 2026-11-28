@@ -23,8 +23,10 @@ namespace HitPan.Tests.Integrity;
 /// 🆕 11/28 고침 3 ②(지시서 §9-3 · CTO 전결 범위 · 시험 장치만) — 쿨타임 DB 게이트 묶음의 <b>병렬 끔</b> 정의.
 /// </summary>
 /// <remarks>
-/// <para>근거: 진단 런 1(BT 46132829606) · 2(BT 46135153651) 모두 G-C26 기다림 상한 실패 때 같은 서버에서 다른 시험 묶음의
-/// DDL(<c>CREATE TABLE</c> · <c>DROP DATABASE</c>)이 겹쳐 돌았다 → 「기다림 = INNODB_TRX LOCK WAIT」 조건이 10초 안에 안 보임(PM 판단 · 가설 — 새 머리 CI 5런으로 확인).</para>
+/// <para>⬛ 근거: 진단 런 1(BT 46132829606) · 2(BT 46135153651) 모두 G-C26 기다림 상한 실패 때 같은 서버에서 다른 시험 묶음의
+/// ⬛ DDL(<c>CREATE TABLE</c> · <c>DROP DATABASE</c>)이 겹쳐 돌았다 → 「기다림 = INNODB_TRX LOCK WAIT」 조건이 10초 안에 안 보임(PM 판단 · 가설 — 새 머리 CI 5런으로 확인).</para>
+/// <para>🆕 11/28 — 위 원인 글은 <b>§9-4 철회 · 원인 = §9-5 ①</b>(지시서 — 유력 (b) INNODB_TRX 0.1초 캐시 굶김 · 실측 확인 남음).
+/// 이 묶음은 이번 확인 동안 유지(바꾸는 변수를 신호 하나로 · 5런 뒤 되돌림 여부 PM). 「DDL 중 연결」 관찰 줄 유지 · 판정 0.</para>
 /// <para>이름은 옛 <c>[Collection("CooltimeDbGate")]</c> 와 같다(이 클래스 혼자 쓰던 이름 · 고정물 0) — 바뀌는 것은 「다른 묶음과 함께 안 돈다」 하나뿐.
 /// 고정물(<c>ICollectionFixture</c>)은 두지 않는다. xUnit 2.9.3 <c>CollectionDefinitionAttribute.DisableParallelization</c>.</para>
 /// </remarks>

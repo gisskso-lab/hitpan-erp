@@ -20,7 +20,10 @@ namespace HitPan.Tests.Integrity;
 /// <para>🔴 순서는 시간이 아니라 호출 차례와 잠금 조건으로 세운다 — 지연 · 대리자 갈고리 0.
 /// G-C25 = <see cref="CooltimeEngine.ReadTenantsAsync"/> → <b>실물</b> <see cref="SettingsService.SaveAsync"/> 커밋 →
 /// <see cref="CooltimeEngine.RunTenantAsync"/>(먼저 읽은 값). G-C26 = 지키는 연결이 세션 행을 쥐고,
-/// 기다림은 <c>information_schema.INNODB_TRX</c> 의 그 연결 번호 <c>trx_state = 'LOCK WAIT'</c> 로 확인(상한 10초 넘으면 FAIL · 건너뜀 아님).</para>
+/// ⬛(11/28 고침 3 ③ 전) 기다림은 <c>information_schema.INNODB_TRX</c> 의 그 연결 번호 <c>trx_state = 'LOCK WAIT'</c> 로 확인(상한 10초 넘으면 FAIL · 건너뜀 아님).
+/// 🆕 고침 3 ③(지시서 §9-5 ② · §9-6) — 기다림 = 그 연결의 <c>SHOW ENGINE INNODB STATUS</c> 거래 블록(<c>LOCK WAIT</c> + <c>TRX HAS BEEN WAITING</c> +
+/// 기다리는 잠금이 <b>기대 표</b> · 시험 DB 이름까지) + <c>PROCESSLIST</c>(<c>Query</c> · 기대 문장 머리) 넷 모두 참. 상한 10초 · FAIL(건너뜀 아님) 그대로.
+/// INNODB_TRX 는 진단 글 · 관찰 줄에만 남는다(0.1초 캐시 — 원인 후보 (b) · 실측 확인 남음).</para>
 /// <para>🔴 판정은 제품 공개 메서드가 한다 — 이 파일의 SQL 은 준비 · 읽기 · 잠금 쥐기 · 기다림 관찰뿐.
 /// 연결은 일마다 따로 연다(한 연결 동시 사용 0 · #16 · Task.WhenAll 0).</para>
 /// <para>이 PC(개발 PC)는 3306 = 실물 DB 라 돌리지 않는다 — CI <c>db-gate</c> 잡(<c>HITPAN_REQUIRE_DB</c>)이 계측 경로(SKIP = FAIL).</para>
@@ -404,17 +407,25 @@ public sealed partial class CooltimeDbGateTests
         return t.IsCanceled ? "취소" : "끝남(성공)";
     }
 
-    /// <summary>기다림 상한 실패 글의 덧 — 각 연결 CONNECTION_ID · 과제 상태 · <c>SHOW ENGINE INNODB STATUS</c> TRANSACTIONS 앞 2000자.</summary>
-    private async Task<string> LockWaitDiagnosisAsync(MySqlConnection observer, RaceRig rig)
+    /// <summary>기다림 상한 실패 글의 덧 — 각 연결 CONNECTION_ID · 과제 상태 ·
+    /// ⬛(고침 3 ③ 전) <c>SHOW ENGINE INNODB STATUS</c> TRANSACTIONS 앞 2000자 → 🆕 기대 연결마다 그 연결 거래 블록 전문(최대 2000자 · 없으면 「블록 없음」).</summary>
+    // ⬛ private async Task<string> LockWaitDiagnosisAsync(MySqlConnection observer, RaceRig rig)   ← 11/28 고침 3 ③(지시서 §9-5 ② 진단): 기대 연결을 받는다
+    private async Task<string> LockWaitDiagnosisAsync(MySqlConnection observer, RaceRig rig, IReadOnlyList<LockWaitExpect> expects)
     {
         string trx;
         try
         {
-            var status = await observer.QueryFirstOrDefaultAsync<(string Type, string Name, string Status)>("SHOW ENGINE INNODB STATUS");
-            var text = status.Status ?? "";
-            var i = text.IndexOf("\nTRANSACTIONS\n", StringComparison.Ordinal);
-            var part = i < 0 ? "(TRANSACTIONS 절 못 찾음 · 앞부분) " + text : text[(i + 1)..];
-            trx = part.Length > 2000 ? part[..2000] : part;
+            // ⬛ var status = await observer.QueryFirstOrDefaultAsync<(string Type, string Name, string Status)>("SHOW ENGINE INNODB STATUS");
+            // ⬛ var text = status.Status ?? "";
+            // ⬛ var i = text.IndexOf("\nTRANSACTIONS\n", StringComparison.Ordinal);
+            // ⬛ var part = i < 0 ? "(TRANSACTIONS 절 못 찾음 · 앞부분) " + text : text[(i + 1)..];
+            // ⬛ trx = part.Length > 2000 ? part[..2000] : part;
+            var text = await InnodbStatusTextAsync(observer);
+            trx = string.Join(" / ", expects.Select(e =>
+            {
+                var block = TrxBlockOf(text, e.Thread);
+                return $"{e.Who} {e.Thread} = " + (block is null ? "블록 없음" : block.Length > 2000 ? block[..2000] : block);
+            }));
         }
         catch (Exception ex)
         {
@@ -423,7 +434,8 @@ public sealed partial class CooltimeDbGateTests
         }
         return $" · CONNECTION_ID = 관찰 {rig.ObserverThread} · 엔진 {rig.EngineThread} · 저장 {rig.SaveThread} · L {rig.HoldThread}"
             + $" · tEngine = {RaceTaskState(rig.EngineTask)} · tSave = {RaceTaskState(rig.SaveTask)}"
-            + $" · INNODB STATUS TRANSACTIONS(앞 2000자) = {trx}";
+            // ⬛ + $" · INNODB STATUS TRANSACTIONS(앞 2000자) = {trx}";   ← 11/28 고침 3 ③: 그 연결 거래 블록
+            + $" · INNODB STATUS 거래 블록(기대 연결 · 각 최대 2000자) = {trx}";
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -550,19 +562,30 @@ public sealed partial class CooltimeDbGateTests
     /// 주어진 연결 번호들이 <b>전부</b> InnoDB 잠금 기다림(<c>trx_state = 'LOCK WAIT'</c>)에 들어갈 때까지 본다 — 시간이 아니라 조건.
     /// 10초 안에 안 되면 FAIL(건너뜀 아님 · 지시서 §7 W2) · 그때 INNODB_TRX 를 그대로 남긴다(원인 찾기).
     /// 🆕 11/28 고침 3 ①: 그 FAIL 글에 <see cref="LockWaitDiagnosisAsync"/> 덧을 싣는다(조건 · 상한 불변).
+    /// 🆕 11/28 고침 3 ③(지시서 §9-5 ②): 위 「trx_state = 'LOCK WAIT'」 판정은 ⬛ — 기대(<see cref="LockWaitExpect"/>)마다
+    /// <see cref="LockWaitMiss"/> 넷 조건(STATUS 거래 블록 · 기대 표 · PROCESSLIST 문장 머리)이 <b>전부</b> 참일 때까지 150ms 마다 본다.
+    /// 10초 상한 · FAIL(건너뜀 아님) 그대로. 잡은 뒤 <see cref="ObserveTrxCacheAfterAsync"/> 관찰 줄(판정 아님).
     /// </summary>
     // ⬛ private async Task WaitLockWaitAsync(MySqlConnection observer, string step, params long[] threadIds)   ← 11/28 고침 3 ①: rig 를 받아 상한 실패 글에 경주 상태를 싣는다
-    private async Task WaitLockWaitAsync(MySqlConnection observer, RaceRig rig, string step, params long[] threadIds)
+    // ⬛ private async Task WaitLockWaitAsync(MySqlConnection observer, RaceRig rig, string step, params long[] threadIds)   ← 11/28 고침 3 ③(지시서 §9-5 ②): 연결 번호 → 기대(연결 · 표 · 문장 머리)
+    private async Task WaitLockWaitAsync(MySqlConnection observer, RaceRig rig, string step, params LockWaitExpect[] expects)
     {
         var sw = Stopwatch.StartNew();
         while (true)
         {
-            var waiting = await observer.ExecuteScalarAsync<long>(
-                "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT' AND trx_mysql_thread_id IN @Ids",
-                new { Ids = threadIds });
-            if (waiting == threadIds.Length)
+            // ⬛ var waiting = await observer.ExecuteScalarAsync<long>(
+            // ⬛     "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT' AND trx_mysql_thread_id IN @Ids",
+            // ⬛     new { Ids = threadIds });
+            // ⬛ if (waiting == threadIds.Length)   ← 11/28 고침 3 ③: INNODB_TRX(0.1초 캐시)는 판정에서 뺌 · 진단 글 · 관찰 줄에만
+            var probe = await ProbeLockWaitAsync(observer, expects);
+            var waiting = probe.Count(p => p.Why is null);
+            if (waiting == expects.Length)
             {
-                _out.WriteLine($"[G-C26] {step} — 잠금 기다림 {waiting}/{threadIds.Length} 확인({sw.ElapsedMilliseconds}ms)");
+                // ⬛ _out.WriteLine($"[G-C26] {step} — 잠금 기다림 {waiting}/{threadIds.Length} 확인({sw.ElapsedMilliseconds}ms)");
+                var ok = $"[G-C26] {step} — 잠금 기다림 {waiting}/{expects.Length} 확인({sw.ElapsedMilliseconds}ms · 신호 = INNODB STATUS 거래 블록 + PROCESSLIST)";
+                _out.WriteLine(ok);
+                Console.WriteLine(ok);
+                await ObserveTrxCacheAfterAsync(observer, step, expects);
                 return;
             }
             if (sw.Elapsed > TimeSpan.FromSeconds(10))
@@ -572,14 +595,161 @@ public sealed partial class CooltimeDbGateTests
                 // ⬛ throw new Xunit.Sdk.XunitException(
                 // ⬛     $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
                 // ⬛     + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}")));   ← 11/28 고침 3 ①: 같은 글 뒤에 진단 덧
+                // ⬛ throw new Xunit.Sdk.XunitException(
+                // ⬛     $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
+                // ⬛     + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}"))
+                // ⬛     + await LockWaitDiagnosisAsync(observer, rig)
+                // ⬛     + await ProcesslistDiagnosisAsync(observer, rig));   ← 11/28 고침 3 ③: 신호 까닭 · INNODB_TRX 머리 「캐시 · 판정 아님」 · 진단 1 = 그 연결 거래 블록
                 throw new Xunit.Sdk.XunitException(
-                    $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
+                    $"[G-C26] {step} — 10초 안에 잠금 기다림 {expects.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다."
+                    + " 신호(마지막 탐침) = " + string.Join(" / ", probe.Select(p => $"{p.E.Who} {p.E.Thread} → {p.E.Table}: {p.Why ?? "기다림"}"))
+                    + " · INNODB_TRX(캐시 · 판정 아님) = "
                     + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}"))
-                    + await LockWaitDiagnosisAsync(observer, rig)
+                    + await LockWaitDiagnosisAsync(observer, rig, expects)
                     + await ProcesslistDiagnosisAsync(observer, rig));   // 🆕 11/28 진단 2(지시서 §9-2): 같은 글 뒤에 PROCESSLIST · METADATA_LOCK_INFO 덧
             }
-            await Task.Delay(50);
+            // ⬛ await Task.Delay(50);   ← 11/28 고침 3 ③: 150ms(작5 G-E16 선례 EmployeeAccountLinkGateDbTests.Link.cs TrxProbeIntervalMs)
+            await Task.Delay(LockWaitProbeIntervalMs);
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // 🆕 11/28 고침 3 ③ — G-C26 기다림 신호 재설계(지시서 §9-5 ② · PM 결재 §9-5 · §9-6 · 시험 장치만 · 제품 손 0).
+    // 옛 신호 = INNODB_TRX LOCK WAIT — 그 표는 서버 캐시(마지막 읽힘 0.1초 뒤에만 다시 채움 · MariaDB trx0i_s.cc)라
+    // 50ms 탐침이 자기 읽기로 캐시를 얼려 기다리는 거래를 못 볼 수 있다(원인 후보 (b) · 「유력 · 실측 확인 남음」 · 5런 전엔 확정 아님).
+    // 새 신호 = 연결 T 마다 넷 모두 참:
+    //   1. STATUS TRANSACTIONS 절을 「---TRANSACTION 」 로 나눈 블록 가운데 「MariaDB thread id {T},」 를 담은 블록이 있다
+    //   2. 그 블록에 줄머리 「LOCK WAIT 」 과 「------- TRX HAS BEEN WAITING」 이 있다
+    //   3. WAITING 다음 잠금 줄이 「of table `{시험 DB}`.`{기대 표}`」 와 「 waiting」 을 담는다
+    //   4. PROCESSLIST T 줄 = COMMAND Query · INFO 가 기대 문장 머리로 시작 · STATE ≠ Waiting for table metadata lock
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>탐침 간격 — STATUS 가 무거운 몫 · 진단 · 관찰의 INNODB_TRX 읽기도 0.1초 캐시보다 길게(작5 G-E16 선례 150ms).</summary>
+    private const int LockWaitProbeIntervalMs = 150;
+
+    /// <summary>기대 표 — 세션 행.</summary>
+    private const string SessionTable = "user_sessions";
+
+    /// <summary>기대 표 — 설정 행.</summary>
+    private const string SettingsTable = "tenant_settings";
+
+    /// <summary>엔진 세션 행 <c>FOR UPDATE</c> 문장 머리 — <c>CooltimeEngine.cs</c> 끝내기 거래(원문 그대로).</summary>
+    private const string EngineSessionRowHead = "SELECT user_id AS UserId";
+
+    /// <summary>엔진 재확인 <c>StillSameSettingAsync</c> 문장 머리 — 설정 행 공유 잠금(원문 그대로).</summary>
+    private const string EngineSettingRowHead = "SELECT 1 FROM tenant_settings";
+
+    /// <summary>저장 루트 UPSERT 문장 머리 — <c>SettingsService.SaveAsync</c> 의 <c>upsert</c>(거래 밖 · 자동 커밋 · 쿨타임 거래보다 먼저).
+    /// 지시서 §9-6 (가): ⓐ 기다림 2 에서 저장이 처음 막히는 문장은 :328 <c>FOR UPDATE</c> 가 아니라 이것이다.</summary>
+    private const string SaveRootUpsertHead = "INSERT INTO tenant_settings (";
+
+    /// <summary>저장 물음 칸 비우기 문장 머리 — <c>SettingsService.SaveCooltimeAsync</c>(원문 그대로).</summary>
+    private const string SaveSessionUpdateHead = "UPDATE user_sessions";
+
+    /// <summary>기다림 기대 한 줄 — 누가(글) · 연결 번호 · 기다리는 표 · PROCESSLIST 문장 머리.</summary>
+    private sealed record LockWaitExpect(string Who, long Thread, string Table, string QueryHead);
+
+    private static async Task<string> InnodbStatusTextAsync(MySqlConnection observer)
+    {
+        var status = await observer.QueryFirstOrDefaultAsync<(string Type, string Name, string Status)>("SHOW ENGINE INNODB STATUS");
+        return status.Status ?? "";
+    }
+
+    /// <summary>STATUS 의 TRANSACTIONS 절(FILE I/O 앞까지)에서 그 연결 번호의 거래 블록 — 없으면 null.</summary>
+    private static string? TrxBlockOf(string status, long thread)
+    {
+        var i = status.IndexOf("\nTRANSACTIONS\n", StringComparison.Ordinal);
+        if (i < 0)
+            return null;
+        var section = status[(i + 1)..];
+        var j = section.IndexOf("\nFILE I/O\n", StringComparison.Ordinal);
+        if (j >= 0)
+            section = section[..j];
+        var mark = $"MariaDB thread id {thread},";
+        foreach (var b in section.Split("---TRANSACTION ").Skip(1))
+        {
+            if (b.Contains(mark, StringComparison.Ordinal))
+                return "---TRANSACTION " + b;
+        }
+        return null;
+    }
+
+    /// <summary>한 기대의 신호 — 넷 모두 참이면 null · 아니면 처음 어긋난 조건의 까닭.</summary>
+    private string? LockWaitMiss(string status, IReadOnlyList<(long Id, string Command, long Time, string? State, string? Info)> procs, LockWaitExpect e)
+    {
+        var block = TrxBlockOf(status, e.Thread);
+        if (block is null)
+            return "조건 1 — 거래 블록 없음";
+        var lines = block.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+        if (!lines.Any(l => l.StartsWith("LOCK WAIT ", StringComparison.Ordinal)))
+            return "조건 2 — LOCK WAIT 줄 없음";
+        var w = lines.FindIndex(l => l.StartsWith("------- TRX HAS BEEN WAITING", StringComparison.Ordinal));
+        if (w < 0 || w + 1 >= lines.Count)
+            return "조건 2 — TRX HAS BEEN WAITING 줄 없음";
+        var lockLine = lines[w + 1];
+        if (!lockLine.Contains($"of table `{_dbName}`.`{e.Table}`", StringComparison.Ordinal) || !lockLine.Contains(" waiting", StringComparison.Ordinal))
+            return "조건 3 — 기다리는 잠금이 기대 표 아님: " + (lockLine.Length > 200 ? lockLine[..200] : lockLine);
+        var hit = procs.Where(r => r.Id == e.Thread).ToList();
+        if (hit.Count == 0)
+            return "조건 4 — PROCESSLIST 줄 없음";
+        var p = hit[0];
+        if (!string.Equals(p.Command, "Query", StringComparison.Ordinal))
+            return $"조건 4 — COMMAND {p.Command}";
+        if (!(p.Info ?? "").TrimStart().StartsWith(e.QueryHead, StringComparison.Ordinal))
+            return $"조건 4 — 문장 머리 다름(기대 「{e.QueryHead}」): {ProcRow(p)}";
+        if (string.Equals(p.State, "Waiting for table metadata lock", StringComparison.Ordinal))
+            return $"조건 4 — 메타데이터 잠금 기다림: {ProcRow(p)}";
+        return null;
+    }
+
+    /// <summary>탐침 한 번 — STATUS 한 번 · PROCESSLIST 한 번 읽고 기대마다 신호를 판정(읽기 실패는 던짐 = FAIL 쪽).</summary>
+    private async Task<List<(LockWaitExpect E, string? Why)>> ProbeLockWaitAsync(MySqlConnection observer, IReadOnlyList<LockWaitExpect> expects)
+    {
+        var status = await InnodbStatusTextAsync(observer);
+        var procs = (await observer.QueryAsync<(long Id, string Command, long Time, string? State, string? Info)>(
+            "SELECT CAST(ID AS SIGNED), COALESCE(COMMAND, ''), CAST(COALESCE(TIME, 0) AS SIGNED), STATE, LEFT(INFO, 300)"
+            + " FROM information_schema.PROCESSLIST WHERE ID IN @Ids",
+            new { Ids = expects.Select(e => e.Thread).ToArray() })).ToList();
+        return expects.Select(e => (e, LockWaitMiss(status, procs, e))).ToList();
+    }
+
+    /// <summary>
+    /// T2 음성 대조(지시서 §9-5 ④) — 과제를 띄우기 전 같은 신호로 그 연결을 한 번 보고 「기다림 아님」 을 단언한다.
+    /// 신호가 「늘 참」 으로 무력화되면 여기서 빨강이다.
+    /// </summary>
+    private async Task AssertNotLockWaitAsync(MySqlConnection observer, string step, LockWaitExpect e)
+    {
+        var probe = await ProbeLockWaitAsync(observer, new[] { e });
+        Assert.True(probe[0].Why is not null, $"[G-C26] {step} — 과제를 띄우기 전인데 신호가 「기다림」 이다(음성 대조 T2 · {e.Who} {e.Thread} → {e.Table})");
+        _out.WriteLine($"[G-C26] {step} — 기다림 아님 확인({probe[0].Why})");
+    }
+
+    /// <summary>
+    /// 원인 후보 (b) 실측 관찰(지시서 §9-5 ① · 판정 아님) — 새 신호가 기다림을 잡은 뒤 150ms 쉬고 INNODB_TRX 를 한 번 더 읽어
+    /// 그 연결들의 <c>trx_state</c> 를 한 줄로 남긴다. 「쉰 뒤 = LOCK WAIT」 이 5런 이어지면 (b) 확정 · 아니면 (b) 철회(PM). 읽기 실패 = 까닭 줄.
+    /// </summary>
+    private async Task ObserveTrxCacheAfterAsync(MySqlConnection observer, string step, IReadOnlyList<LockWaitExpect> expects)
+    {
+        string line;
+        try
+        {
+            await Task.Delay(LockWaitProbeIntervalMs);
+            var rows = (await observer.QueryAsync<(long Thread, string State)>(
+                "SELECT CAST(trx_mysql_thread_id AS SIGNED), trx_state FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id IN @Ids",
+                new { Ids = expects.Select(e => e.Thread).ToArray() })).ToList();
+            line = $"[G-C26] {step} — 관찰(판정 아님 · 원인 후보 (b)) {LockWaitProbeIntervalMs}ms 뒤 INNODB_TRX = "
+                + string.Join(" / ", expects.Select(e =>
+                {
+                    var hit = rows.Where(r => r.Thread == e.Thread).ToList();
+                    return $"{e.Who} {e.Thread}:" + (hit.Count == 0 ? "없음" : hit[0].State);
+                }));
+        }
+        catch (Exception ex)
+        {
+            line = $"[G-C26] {step} — 관찰(판정 아님) INNODB_TRX 못 읽음 — {ex.GetType().FullName}: {ex.Message}";
+        }
+        _out.WriteLine(line);
+        Console.WriteLine(line);
     }
 
     [Fact(DisplayName = "G-C26 ⓐ 엔진 먼저 — L 이 세션 행 쥠 → 엔진(② 참) 세션 행 기다림 → 저장(끔) 설정 행 기다림 → L 되돌림 = 저장 예외 0(1213 0) · 엔진 끝냄 1 · 교착 0 · 남은 PC 세션 물음 NULL")]
@@ -614,12 +784,18 @@ public sealed partial class CooltimeDbGateTests
             var hold = rig.HoldTx = await cHold.BeginTransactionAsync();
             await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
 
+            // 🆕 11/28 고침 3 ③ T2 음성 대조 — 엔진 과제를 띄우기 전 = 기다림 아님(빈 연결 · Sleep)
+            await AssertNotLockWaitAsync(db, "ⓐ 띄우기 전(T2) — 엔진", new LockWaitExpect("엔진", engineThread, SessionTable, EngineSessionRowHead));
             var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
             rig.EngineTask = tEngine;
-            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 1 — 엔진이 세션 행을 기다림", engineThread);
+            // ⬛ await WaitLockWaitAsync(db, rig, "ⓐ 기다림 1 — 엔진이 세션 행을 기다림", engineThread);   ← 11/28 고침 3 ③: 기대 표 · 문장 머리
+            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 1 — 엔진이 세션 행을 기다림", new LockWaitExpect("엔진", engineThread, SessionTable, EngineSessionRowHead));
             var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
             rig.SaveTask = tSave;
-            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 2 — 저장이 설정 행을 기다림(엔진이 먼저 공유 잠금)", engineThread, saveThread);
+            // ⬛ await WaitLockWaitAsync(db, rig, "ⓐ 기다림 2 — 저장이 설정 행을 기다림(엔진이 먼저 공유 잠금)", engineThread, saveThread);   ← 11/28 고침 3 ③
+            await WaitLockWaitAsync(db, rig, "ⓐ 기다림 2 — 저장이 설정 행을 기다림(엔진이 먼저 공유 잠금)",
+                new LockWaitExpect("엔진", engineThread, SessionTable, EngineSessionRowHead),
+                new LockWaitExpect("저장", saveThread, SettingsTable, SaveRootUpsertHead));
             await hold.RollbackAsync();
 
             var r = await tEngine;
@@ -665,12 +841,18 @@ public sealed partial class CooltimeDbGateTests
             var hold = rig.HoldTx = await cHold.BeginTransactionAsync();
             await cHold.QueryAsync<string>("SELECT session_id FROM user_sessions WHERE session_id = @S FOR UPDATE", new { S = s.Sid }, hold);
 
+            // 🆕 11/28 고침 3 ③ T2 음성 대조 — 저장 과제를 띄우기 전 = 기다림 아님(빈 연결 · Sleep)
+            await AssertNotLockWaitAsync(db, "ⓑ 띄우기 전(T2) — 저장", new LockWaitExpect("저장", saveThread, SessionTable, SaveSessionUpdateHead));
             var tSave = new SettingsService(cSave).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
             rig.SaveTask = tSave;
-            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 1 — 저장이 세션 행을 기다림(설정 행은 쥔 채)", saveThread);
+            // ⬛ await WaitLockWaitAsync(db, rig, "ⓑ 기다림 1 — 저장이 세션 행을 기다림(설정 행은 쥔 채)", saveThread);   ← 11/28 고침 3 ③: 기대 표 · 문장 머리
+            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 1 — 저장이 세션 행을 기다림(설정 행은 쥔 채)", new LockWaitExpect("저장", saveThread, SessionTable, SaveSessionUpdateHead));
             var tEngine = engine.RunTenantAsync(snap, s.NowLocal);
             rig.EngineTask = tEngine;
-            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 2 — 엔진이 기다림(고친 코드 = 설정 행 공유 잠금)", saveThread, engineThread);
+            // ⬛ await WaitLockWaitAsync(db, rig, "ⓑ 기다림 2 — 엔진이 기다림(고친 코드 = 설정 행 공유 잠금)", saveThread, engineThread);   ← 11/28 고침 3 ③
+            await WaitLockWaitAsync(db, rig, "ⓑ 기다림 2 — 엔진이 기다림(고친 코드 = 설정 행 공유 잠금)",
+                new LockWaitExpect("저장", saveThread, SessionTable, SaveSessionUpdateHead),
+                new LockWaitExpect("엔진", engineThread, SettingsTable, EngineSettingRowHead));
             await hold.RollbackAsync();
 
             var saveError = await Record.ExceptionAsync(() => tSave);

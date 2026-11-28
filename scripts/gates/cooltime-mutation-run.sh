@@ -25,6 +25,7 @@ SCREEN=src/HitPan.Web/Services/CooltimeScreenRules.cs   # 🆕 11/27 고침 차�
 PROMPT=src/HitPan.Web/Components/Common/CooltimePrompt.razor   # 🆕 11/28 고침 1
 API_PROGRAM=src/HitPan.API/Program.cs                                           # 🆕 11/28 다음 묶음(§288) ⓨ
 MIG132=src/HitPan.API/Migrations/SQL/DB-132_tenant_settings_cooltime.sql        # 🆕 11/28 다음 묶음(§288) ⓩ
+RACE=src/HitPan.Tests/Integrity/CooltimeDbGateTests.Race.cs                     # 🆕 11/28 고침 3 ③ T3(시험 쪽 변이 · 지시서 §9-5 ④ · §9-6 (나))
 DB="CooltimeDbGateTests"
 RULE="CooltimeRuleGateTests"
 MIG="ErpMigrationApplyGateTests"                                                # 🆕 11/28 ⓩ
@@ -84,6 +85,9 @@ MUTATIONS=(
   # ── 🆕 11/28 고침 2([4] P2-1) — M6 재확인 비교에서 cooltime_changed_at 조건만 뺌 → G-C25 ⓗ(끄고 바로 다시 켬 · 시각 같음) 빨강 ──
   #   ⓒ ⓓ 는 cooltime_at 도 바꾸므로 M6 로는 안 빨개진다(그 칸 비교가 남음) ⇒ 대상 = ⓗ 하나.
   "M6|$ENGINE| AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE\"| LOCK IN SHARE MODE\"|$DB.G_C25h_|1"
+  # ── 🆕 11/28 고침 3 ③(지시서 §9-5 ④ · PM 결재 §9-5 ⑤ · §9-6 (나)) — T3 = 시험 쪽 변이: G-C26 ⓐ 기다림 1 의 기대 표를 tenant_settings 로 바꿈
+  #   → 엔진은 user_sessions 에서 기다리므로 새 신호 조건 3 이 거짓 → ⓐ 기다림 1 10초 상한 FAIL(신호가 표를 실제로 가림). 원복 확인 = 아래 git diff 목록의 $RACE.
+  "T3|$RACE|\"ⓐ 기다림 1 — 엔진이 세션 행을 기다림\", new LockWaitExpect(\"엔진\", engineThread, SessionTable,|\"ⓐ 기다림 1 — 엔진이 세션 행을 기다림\", new LockWaitExpect(\"엔진\", engineThread, SettingsTable,|$DB.G_C26a_|1"
 )
 
 want=" $* "
@@ -120,7 +124,8 @@ for m in "${MUTATIONS[@]}"; do
 done
 
 # 원복 확인 — 변이가 남아 있으면 안 된다
-if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT" "$API_PROGRAM" "$MIG132"; then
+# ⬛ if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT" "$API_PROGRAM" "$MIG132"; then   ← 11/28 고침 3 ③: $RACE(T3) 더함
+if ! git diff --quiet -- "$ENGINE" "$HR" "$SETTINGS" "$SESSION_MW" "$NOTIFY" "$SCREEN" "$PROMPT" "$API_PROGRAM" "$MIG132" "$RACE"; then
   echo "::error::변이 원복 실패 — 제품 파일에 변경이 남았다"; git diff --stat; exit 2
 fi
 if [ "$fails" -gt 0 ]; then echo "::error::변이 런 실패 $fails 건"; exit 1; fi
