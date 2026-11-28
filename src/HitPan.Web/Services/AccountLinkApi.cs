@@ -26,6 +26,12 @@ public sealed class UsersLevelModel
 
     /// <summary>20261125작 K4 (가) — 「모든데이터 초기화」 대표 판정 글자(<see cref="DataResetMenuRule"/> 상수). 못 읽으면 null → 메뉴 안 보임.</summary>
     public string? DataResetGate { get; set; }
+
+    /// <summary>
+    /// 20261128작 로그인경합 갈래 B2 (D16) — 내 「결재 보기」 권한(서버 <c>HasPermissionAsync("APPROVAL","view")</c> 판정 그대로).
+    /// <c>false</c> 일 때만 사이드바가 결재 대기 수를 안 부른다 · <c>null</c>(못 읽음 · 옛 서버) = 옛 동작(부르고 서버가 판정).
+    /// </summary>
+    public bool? ApprovalView { get; set; }
 }
 
 /// <summary>[구독계정추가] 창이 읽는 숫자(GET api/users/seat-subscription · 3단계 전용).</summary>
