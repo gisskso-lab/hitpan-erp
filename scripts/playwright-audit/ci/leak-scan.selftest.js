@@ -98,8 +98,11 @@
 //   바뀐 칸: K-C24h(워크플로 지킴 셋 → 넷 · 업로드 조건 표지 줄)
 // 🔴 W-S-03 고침 3(11/28 · 작업지시서 20261128작_W-S-03_고침3_알려진결함대장 §5) — 123 → 131(새 8 · 바뀐 칸 0)
 //   K-C27a~f 판정기 알려진 결함 대장(양성 2 · 음성 4) · K-C27g 대장 목록 고정(2) · K-C27h K 본문 endCode
+// 🔴 W-S-03 고침 3-2(11/28 · 같은 작업지시서 §9) — 131 → 132(새 1 · 바뀐 칸 0)
+//   K-C27i K 본문 알려진 꼴 두 식(homeKnown · updateKnown) 참 · 거짓 반례 · U7 · U8 최종 착지
 // 🔴 20261128작 로그인 경합 · 첫 화면 403 띠 갈래 T — 131 → 132(새 1 · 바뀐 칸 K-C22k 25 → 33 · K-C27a · d · f · g · h 대장 닫음 = 목록 0 기준)
 //   K-C28a K 본문 판정 함수 JUDGE 10(양성 10 · 고치기 전 꼴 반례)
+// 🔴 main 합침(c50ca6cf · 갈래 T 가지) — 두 갈래가 131 에서 각 +1 → 합계 131 → 133(K-C27i + K-C28a · 위 두 줄 글자 그대로 둘 다 살림)
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -2776,6 +2779,61 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         why = `양성 거짓 ${posBad.join(',') || '0'} · 음성 참 ${negBad.join(',') || '0'}(반례 ${neg.length}) · 이동 1건 ${one} · 날 예외 꼴 ${sb} · 20초 · 카드 3 ${hold}`;
       }
       check('K-C28a K 본문 판정 함수 10(G1 ~ G5 · G7 ~ G8+ · G10 ~ G12 · 장면 G 줄 둘) · 양성 10 · 음성 반례(고치기 전 꼴) 전부 거짓', ok, why);
+    }
+    { // 🔴 고침 3-2(작업지시서 §9 P2-2) K-C27i 알려진 꼴 두 식 — homeKnown · updateKnown 를 직접 부름(참 · 거짓 반례 · U7 · U8 포함)
+      //   입력은 리뷰서(짧은 재확인 §2) 반례 표 꼴을 여기 따로 적는다. 한 줄이라도 기대와 다르면 빨강(변이 M7 · M8 이 여기서 잡힘).
+      let ok = false;
+      let why = 'K 본문 알려진 꼴 두 식 없음';
+      let W = null;
+      try {
+        W = require(path.join(F_CI, 'k35-ws03-closed.js'));
+      } catch (e) {
+        why = `K 본문 불러오기 실패 ${L.errorName(e)}`;
+      }
+      if (W && typeof W.homeKnown === 'function' && typeof W.updateKnown === 'function') {
+        const at = (where, p) => ({ where, path: p });
+        const CUT = '/data/update=실패 net::ERR_ABORTED';
+        const H = [ // [이름, s, navs, band, 기대]
+          ['H1 정상 꼴 · 띠만 참', at('main', '/'), ['/'], true, true],
+          ['H0 띠 거짓', at('main', '/'), ['/'], false, false],
+          ['H2 /welcome 이동', at('main', '/'), ['/', '/welcome'], true, false],
+          ['H3 /Welcome/ 이동', at('main', '/'), ['/', '/Welcome/'], true, false],
+          ['H4 /data/update 착지', at('main', '/data/update'), ['/', '/data/update'], true, false],
+          ['H5 띠 null', at('main', '/'), ['/'], null, false],
+          ['H6 where=login', at('login', '/'), ['/'], true, false],
+          ['H7 이동 기록에 / 없음', at('main', '/'), [], true, false],
+        ];
+        const U = [ // [이름, s, navs, docNavs, band, 기대]
+          ['U1 끊김 → / (띠 거짓)', at('main', '/'), ['/'], [CUT, '/=200'], false, true],
+          ['U1b 끊김 → / (띠 참)', at('main', '/'), ['/'], [CUT, '/=200'], true, true],
+          ['U2 /data/update 도착 + 띠 참', at('main', '/data/update'), ['/data/update'], ['/data/update=200'], true, true],
+          ['U2b /data/update 도착 · 띠 거짓', at('main', '/data/update'), ['/data/update'], ['/data/update=200'], false, false],
+          ['U3 /data/update 시도 0', at('main', '/'), ['/'], ['/=200'], true, false],
+          ['U4 /welcome 이동', at('main', '/'), ['/', '/welcome'], [CUT, '/=200'], true, false],
+          ['U5 =대기', at('main', '/'), ['/'], ['/data/update=대기', '/=200'], true, false],
+          ['U6 띠 null', at('main', '/'), ['/'], [CUT, '/=200'], null, false],
+          ['U9 =404 뒤 /', at('main', '/'), ['/'], ['/data/update=404', '/=200'], true, false],
+          ['U7 끊김 → / → /login', at('login', '/login'), ['/', '/login'], [CUT, '/=200', '/login=200'], true, false],
+          ['U7b 끊김 → / → main@/login', at('main', '/login'), ['/', '/login'], [CUT, '/=200', '/login=200'], true, false],
+          ['U8 끊김 → / → /terms', at('terms', '/terms'), ['/', '/terms'], [CUT, '/=200', '/terms=200'], false, false],
+          ['U8b 끊김 → / → main@/terms', at('main', '/terms'), ['/', '/terms'], [CUT, '/=200', '/terms=200'], true, false],
+          ['U0 장면 없음(null)', null, ['/'], [CUT, '/=200'], true, false],
+        ];
+        const bad = [];
+        for (const [n, s, navs, band, want] of H) {
+          let got;
+          try { got = W.homeKnown(s, navs, band); } catch (e) { got = `예외 ${L.errorName(e)}`; }
+          if (got !== want) bad.push(`${n}=${got}`);
+        }
+        for (const [n, s, navs, docs, band, want] of U) {
+          let got;
+          try { got = W.updateKnown(s, navs, docs, band); } catch (e) { got = `예외 ${L.errorName(e)}`; }
+          if (got !== want) bad.push(`${n}=${got}`);
+        }
+        ok = bad.length === 0;
+        why = ok ? `첫 화면 ${H.length} · 업데이트 ${U.length} 줄 기대대로` : `기대와 다름 ${bad.join(' · ')}`;
+      }
+      check('K-C27i 알려진 꼴 두 식 · homeKnown 참 1 · 거짓 7 · updateKnown 참 3 · 거짓 11(U7 · U8 최종 착지 = 꼴 아님)', ok, why);
     }
   }
   const bad = results.filter((x) => !x.ok).length;
