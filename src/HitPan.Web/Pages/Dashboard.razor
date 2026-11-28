@@ -456,7 +456,7 @@ else if (_vizMode == "aging")
         {
             var state = await AuthState.GetAuthenticationStateAsync();
             var user = state.User;
-            _canSeeSalesFinance = SalesFinanceRoles.Any(r => user.IsInRole(r));
+            _canSeeSalesFinance = true;
         }
         catch (Exception ex)
         {
