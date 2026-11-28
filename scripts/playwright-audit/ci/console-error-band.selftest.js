@@ -412,8 +412,15 @@ const srcOf = (rel) => { const p = path.join(ROOT, ...rel.split('/')); return fs
     `꼴 ${shape} · 모드 목록 ${modeOk} · 참 ${pass} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 반례 ${listBad}`);
 }
 
-// ── B16 (고침1 · §8-5 #4 · [4] P2-1) — G-P5 매입현황(설계 §6 VP 자리) ──
+// ── B16 (고침1 CI 뒤 · 지시서 §8-6) — G-P5 뺌 확인: 장면 목록에 없음 · 까닭(매입현황 기본 보기 = 전표별)이 화면 원문 그대로 ──
 {
+  const page16 = srcOf('src/HitPan.Web/Pages/Purchase/PurchaseStatusPage.razor');
+  const gone = !S('G-P5');
+  const why = page16.includes('private string _viewType = "doc";') && page16.includes('if (_viewType == "doc")') && page16.includes('"api/reports/purchases?"');
+  check('B16 G-P5 뺌 — 장면 목록에 없음 · 까닭 = 매입현황 기본 보기 전표별(집계 주소는 콤보 조작 뒤에만)', gone && why, `뺌 ${gone} · 까닭 원문 ${why}`);
+}
+// ⬛ [낡은 몸 · 고침1 B16 — G-P5 가 CI 에서 가로챔 0(무효) · 지시서 §8-6 으로 장면 뺌] 아래 블록은 G-P5 가 없으면 「장면 없음」 으로 빨강이 되므로 if (false) 로 묶어 남김
+if (false) {
   const P5 = S('G-P5');
   const page = srcOf('src/HitPan.Web/Pages/Purchase/PurchaseStatusPage.razor');
   const shape = !!P5 && P5.inject === '503' && P5.page === '/purchase-status' && P5.match.path === '/api/reports/purchases' && P5.notice === 'once'

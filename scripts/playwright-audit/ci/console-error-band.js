@@ -118,9 +118,12 @@ const SCENES = Object.freeze([
     tags: ['[HP15] 발주현황 조회 실패'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
     lines: 'PurchaseOrderStatusPage.razor:130', what: '넓힘 X2 · 발주 현황 503(띠 0 · 경고 흔적 · 쉬운 알림 한 번)' }),
   // 고침1(지시서 §8-5 #4 · [4] P2-1) — 설계 §6 VP 자리(PurchaseStatusPage :221 「[HP15] 매입현황 조회 실패」)를 여는 장면. 원래 알림(Error) 한 번 · 쉬운 알림 0.
-  Object.freeze({ key: 'G-P5', branch: 'P', who: 'owner', page: '/purchase-status', match: { path: '/api/reports/purchases' }, inject: '503',
-    tags: ['[HP15] 매입현황 조회 실패'], snack: '매입현황 조회에 실패했습니다', notice: 'once', fixedOnly: true,
-    lines: 'PurchaseStatusPage.razor:221', what: '업무 현황 · 매입현황 503(알림 그대로 한 번)' }),
+  // ⬛ [낡은 줄 · 고침1 CI 0f036dcf G-P5 무효(가로챔 0) · 지시서 §8-6] 매입현황 기본 보기 = 「전표별」(PurchaseStatusPage `_viewType = "doc"`)이라
+  //   첫 화면은 전표 목록 서비스를 부르고 `api/reports/purchases` 는 집계 보기(콤보 조작)에서만 부른다 → 장면 틀에 콤보 조작이 없어 VP 자리(:221)를 못 연다.
+  //   PM 결정 = 장면 뺌 · VP 는 「장면으로 못 잼」 기록(같은 꼴 catch 13 장면이 잼) · 자체시험 B16 = 뺌 확인으로 바꿈.
+  // Object.freeze({ key: 'G-P5', branch: 'P', who: 'owner', page: '/purchase-status', match: { path: '/api/reports/purchases' }, inject: '503',
+  //   tags: ['[HP15] 매입현황 조회 실패'], snack: '매입현황 조회에 실패했습니다', notice: 'once', fixedOnly: true,
+  //   lines: 'PurchaseStatusPage.razor:221', what: '업무 현황 · 매입현황 503(알림 그대로 한 번)' }),
 ]);
 
 // 모드에 도는 장면 — 대조군은 고치기 전 판에 있던 자리만(fixedOnly 뺌) · 고친 뒤는 전부
