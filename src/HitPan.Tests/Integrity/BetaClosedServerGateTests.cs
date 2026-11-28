@@ -23,6 +23,11 @@ namespace HitPan.Tests.Integrity;
 /// <item><b>G-A3</b> — 도구(<see cref="SalesProfitabilityTool"/>)를 같은 가짜로 불러 보고서 호출 0 · 기존 실패 꼴 + 안내 글.</item>
 /// </list>
 /// 변이 대조(빼면 빨강)는 개발명세서 <c>docs/개발/erp/20261127_W-S-01_갈래A_개발명세서.md</c> 에 런 기록.
+/// <para>
+/// 🔴 W-S-04 (2026-11-28 · 설계 §5 G-S4-1) — 같은 장치에 ERP 채팅 닫힌 2 경로 · 대조군 5 경로를 더했다(닫힌 12 · 대조군 17).
+/// 고침 1 F2 — 채팅 대조군 6 경로를 더 더했다(대조군 23 · 채팅 11).
+/// 06-9 동작 · 웹 호출 0 은 <see cref="BetaClosedChatGateTests"/> · HTTP 바인딩은 <see cref="BetaClosedChatHttpGateTests"/> · 변이 기록은 <c>docs/개발/erp/20261128_W-S-04_서버문닫기_채팅_개발명세서.md</c>.
+/// </para>
 /// </remarks>
 public sealed class BetaClosedServerGateTests
 {
@@ -43,6 +48,9 @@ public sealed class BetaClosedServerGateTests
         "PUT api/ai-settings/provider/{providerId}",
         "POST api/ai-settings/check/{providerId}",
         "GET api/reports/sales-profitability",
+        // 🔴 W-S-04 (2026-11-28 · 설계 §5 G-S4-1) — ERP 채팅 2 경로(19·06-21 · 19·06-22). 06-9 는 따로 된 경로가 없어 BetaClosedChatGateTests G-S4-2 가 동작으로 잰다.
+        "DELETE api/chat/messages/{messageId}",
+        "GET api/chat/storage",
     };
 
     /// <summary>
@@ -63,6 +71,20 @@ public sealed class BetaClosedServerGateTests
         "GET api/finance/purchase-sales-ledger",      // 01b-11 은 화면만 닫음 — 매입매출장이 이 서버를 쓴다
         "POST api/data-reset",                        // 갈래 B 소관 — 갈래 A 는 손대지 않음
         "GET api/reports/sales-ranking",              // 같은 보고서 컨트롤러의 다른 경로
+        // 🔴 W-S-04 (2026-11-28 · 설계 §5 G-S4-1) — 메신저가 쓰는 공용 경로. 특히 대화 읽기(첫 줄)를 닫으면 메신저 전체가 멈춘다(#20).
+        "GET api/chat/rooms/{roomId}/messages",
+        "POST api/chat/rooms/{roomId}/messages",
+        "GET api/chat/unread-count",
+        "POST api/chat/rooms/{roomId}/files",
+        "GET api/chat/rooms",
+        // 🔴 W-S-04 고침 1 F2 (2026-11-28 · [4] P3-2 · [3-V] P3-1) — 남은 채팅 경로 6(ChatController 라우트로 실재 확인).
+        //   이웃 액션을 잘못 닫으면 여기서 빨강. employees = CI 약관 차단 탐침(device-check.js) · POST rooms = CI 씨앗(seed-children.js) 이 쓴다.
+        "POST api/chat/rooms",
+        "POST api/chat/rooms/{roomId}/leave",
+        "POST api/chat/rooms/{roomId}/read",
+        "GET api/chat/employees",
+        "GET api/chat/documents",
+        "GET api/chat/files/{fileId}",
     };
 
     private static readonly Lazy<HashSet<string>> Discovered = new(DiscoverRoutes);
