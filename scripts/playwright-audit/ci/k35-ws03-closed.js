@@ -162,7 +162,20 @@ function homeKnown(s, navs, band) {
 }
 //   업데이트: /welcome 이동 0 · 문서 이동 기록에 /data/update 시도 있음(갈 곳 계산은 맞았다) · 실패 사유는
 //   「/data/update 끊김(실패) 뒤 / 」 또는 흰 띠뿐(선행검증서 §1 · §2). 흰 띠 읽기 실패(null) = 꼴 아님.
-function updateKnown(navs, docNavs, band) {
+// ⬛ [낡은 몸 · 고침 3] function updateKnown(navs, docNavs, band) {
+// ⬛     if (navs.some(isWelcome)) return false;
+// ⬛     const ui = docNavs.findIndex((d) => d.startsWith(`${UPDATE_PATH}=`));
+// ⬛     if (ui < 0) return false;
+// ⬛     if (band !== true && band !== false) return false;
+// ⬛     const navOk = navs.includes(UPDATE_PATH);
+// ⬛     const cutThenHome = !navOk && docNavs[ui].startsWith(`${UPDATE_PATH}=실패`)
+// ⬛       && docNavs.slice(ui + 1).some((d) => d.startsWith(`${HOME_PATH}=`)) && navs.includes(HOME_PATH);
+// ⬛     return (navOk || cutThenHome) && !(navOk && band === false);
+// ⬛   }
+// 🔴 고침 3-2(작업지시서 §9 P2-1) — 최종 착지 조건 추가(homeKnown 과 같은 결 · 장면 s 를 받음):
+//   마지막 자리가 본 화면 `/` 또는 `/data/update` 일 때만 알려진 꼴. 끊김 뒤 `/login` · `/terms` 등에 앉으면 꼴 아님(반례 U7 · U8).
+function updateKnown(s, navs, docNavs, band) {
+  if (!s || s.where !== 'main' || (s.path !== HOME_PATH && s.path !== UPDATE_PATH)) return false;
   if (navs.some(isWelcome)) return false;
   const ui = docNavs.findIndex((d) => d.startsWith(`${UPDATE_PATH}=`));
   if (ui < 0) return false;
@@ -457,7 +470,9 @@ async function sceneUpdate(st) {
     // ⬛ [낡은 줄 · 고침 1] rec(st, 'update', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
     // ⬛ [낡은 줄 · 고침 2] rec(st, 'update', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
     // 🔴 고침 3 — 판정 식 그대로 · 거짓일 때만 알려진 꼴 계산(문서 이동 기록 = diag 와 같은 글자 꼴)
-    const known = !pass && updateKnown(navs, kb.dx.docs.map((d) => `${d.path}=${d.end}`), band);
+    // ⬛ [낡은 줄 · 고침 3] const known = !pass && updateKnown(navs, kb.dx.docs.map((d) => `${d.path}=${d.end}`), band);
+    // 🔴 고침 3-2 — 장면 s(최종 착지)를 같이 넘김
+    const known = !pass && updateKnown(s, navs, kb.dx.docs.map((d) => `${d.path}=${d.end}`), band);
     rec(st, 'update', { pass, known, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
   } catch (e) {
     dev(st, 'update', step, e);
