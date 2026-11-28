@@ -558,6 +558,16 @@ public sealed class ChatbotService : IChatbotService
     // AI 직원 — 분석 결과 답변 구성 (실데이터 표+차트 + 요약 문구)
     //   클로드 호출 0(로컬 분석) → 크레딧 0. 대화 이력은 동일하게 적재.
     // ─────────────────────────────────────────────────────────────
+    /// <summary>
+    /// W-S-01 갈래 A P2-2 — 판매수익성분석이 닫혀 돌아온 결과(행 0 · 제목 = 닫힘 안내 글)이면 안내 글만 돌려주고, 아니면 null(기존 요약 그대로).
+    /// DB 없이 잴 수 있게 따로 뗀 정적 함수(시험 = BetaClosedServerGateTests G-A2-4).
+    /// </summary>
+    internal static string? ClosedAnalysisAnswer(AiAnalysisResultDto analysis)
+        => analysis.Rows.Count == 0
+           && string.Equals(analysis.Title, AiEmployeeAnalysisService.SalesProfitabilityClosedNotice, StringComparison.Ordinal)
+            ? analysis.Title
+            : null;
+
     private async Task<ChatAnswerDto> BuildAnalysisAnswerAsync(
         ChatAskRequest req,
         string tenantId,
@@ -568,7 +578,14 @@ public sealed class ChatbotService : IChatbotService
     {
         // 요약 문구: 데이터 있으면 상위 항목 한 줄 요약, 없으면 안내.
         string answer;
-        if (analysis.Rows.Count == 0)
+        // 🔴 W-S-01 갈래 A [3-V]·[4] P2-2 — 닫힘 안내 결과(행 0 · 제목 = 안내 글)에 「자료가 없습니다 … 다시 말씀해 주세요」 가 붙지 않게 안내 글만 답으로 쓴다.
+        var closedAnswer = ClosedAnalysisAnswer(analysis);
+        if (closedAnswer is not null)
+        {
+            answer = closedAnswer;
+        }
+        // ⬛ 종전: if (analysis.Rows.Count == 0) — 위 닫힘 갈래를 앞에 두려고 else 만 붙임(조건 · 본문 그대로)
+        else if (analysis.Rows.Count == 0)
         {
             answer = $"**{analysis.Title}**\n\n해당 조건에 맞는 거래 자료가 없습니다. 기간이나 거래처명을 바꿔서 다시 말씀해 주세요.";
         }
