@@ -874,6 +874,7 @@ function recN4(r, kb, forcedWhy = null) {
 
 module.exports = {
   BASE, POPUP_NAME, BLOCKER, INIT_SCRIPT, initScript,
+  UA, // 🆕 11/28 쿨타임1b 고침 1 F2 — 쿨타임 몸 HTTP 거절 탐침이 같은 기기 꼴(본문 꼴까지 남기는 요청)로 부르게 내보냄만(값 그대로)
   KitContractError, KitStepError,
   kKey, recK, isWritten, fillDevice, expectKeys,
   sameWindowName, g3SelfCheck,

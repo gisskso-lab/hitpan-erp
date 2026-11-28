@@ -341,6 +341,13 @@ builder.Services.AddHostedService<IntegrityCheckService>();
 builder.Services.AddHostedService<MainPcRegistrationService>();
 // 워치독 emergency → CS 자동 발신 (헌법 #28-F, appsettings.CsAutoDispatch.Enabled=true 시만)
 builder.Services.AddHostedService<HitPan.API.Services.CsAutoDispatchService>();
+// 20260928작4 쿨타임(설정 시각 자동 로그아웃 · PC 만) — 서버 시각 작업 15초 바퀴 + 끝내기 함수 하나 + 팝업 API 3개
+//   - 판단 본체 CooltimeEngine(Scoped · IDbConnection 과 같은 수명) · 푸시는 NotificationHub 의 로그인 한 건 그룹 s:{tenant}:{sid}
+//   - 켜진 회사가 없으면 한 바퀴 = tenant_settings 가벼운 조회 1회 · 본사 호출 0(#30)
+//   - 🆕 11/28 리뷰 P3-2 — ⚠️ 아래 세 줄 중 하나라도 빼면 G-C24(이 진입점을 실제로 돌려 서비스 목록을 읽는 게이트)가 FAIL 한다(음성 대조군 ⓨ)
+builder.Services.AddSingleton<HitPan.API.Services.Cooltime.ICooltimePusher, HitPan.API.Services.Cooltime.SignalRCooltimePusher>();
+builder.Services.AddScoped<HitPan.API.Services.Cooltime.CooltimeEngine>();
+builder.Services.AddHostedService<HitPan.API.Services.Cooltime.CooltimeService>();
 // 본사 ERP ↔ 백오피스 단방향 Outbox (WS-20260601-20, 8명제 #3 + 헌법 #18·#22)
 //   - 단방향 절대: 백오피스(클라우드) → 본사 ERP(로컬) Push 만. 역방향 절대 금지.
 //   - 폴러는 appsettings Outbox:Enabled=true + BackofficeConnectionString 설정 시만 가동.

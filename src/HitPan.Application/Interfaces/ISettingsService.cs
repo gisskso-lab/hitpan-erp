@@ -67,6 +67,18 @@ public interface ISettingsService
     /// <remarks>🔴 수치는 <b>범위로 조여서</b> 넣는다 — 종이가 안 나가는 일은 없어야 한다(#20).</remarks>
     Task SavePrintCommonAsync(string tenantId, PrintCommonSettingsDto dto, CancellationToken ct = default);
 
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸만 읽는다(행 없음 = 끔 · <c>null</c> · <c>null</c>).
+    /// </summary>
+    Task<CooltimeSettingsDto> GetCooltimeAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸만 저장한다(<c>null</c> = 그대로).
+    /// 🔴 루트 저장(<see cref="SaveAsync"/>)을 부르지 않는다 — 다른 칸이 DTO 기본값으로 덮이는 길을 막는다.
+    /// 켜짐인데 시각이 비거나 모양이 틀리면 아무것도 저장하지 않고 <see cref="ArgumentException"/>.
+    /// </summary>
+    Task SaveCooltimeOnlyAsync(UpdateCooltimeSettingsDto dto, string tenantId, CancellationToken ct = default);
+
     Task<UnitPriceValidationDto> ValidateUnitPriceAsync(
         string tenantId,
         decimal unitPrice,

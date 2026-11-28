@@ -84,6 +84,7 @@ async function main() {
       parent: process.env.UI_LOGIN_PARENT || 'ci-parent',
       ga: process.env.UI_LOGIN_GA || 'ci-ga',
       na: process.env.UI_LOGIN_NA || 'ci-na',
+      da: process.env.UI_LOGIN_DA || 'ci-da', // 🆕 11/28 쿨타임 몸 전용(아래 「다 로그인」 주석)
     };
     stage.now = '부모 로그인';
     const p = await login('PARENT', ids.parent, process.env.UI_PW_PARENT);
@@ -94,6 +95,9 @@ async function main() {
     for (const [who, loginId, pw, name] of [
       ['GA', ids.ga, process.env.UI_PW_GA, '시험 가'],
       ['NA', ids.na, process.env.UI_PW_NA, '시험 나'],
+      // 🆕 11/28 쿨타임 1-b 실측 3(PM 결정 (가)) — 쿨타임 몸 전용 자식 다. 계정 한도: 시드 요금제 MaxUsers 5(seed-parent.js ·
+      //   AccountSeatGuard 셈 = 활성 대표 포함) — 부모 · 가 · 나 · 다 = 4 ≤ 5. 다른 몸(G · K 앞 몸)은 다를 쓰지 않는다.
+      ['DA', ids.da, process.env.UI_PW_DA, '시험 다'],
     ]) {
       stage.now = `자식 ${who} 만들기`;
       const res = await call('POST', '/api/users', {
@@ -128,11 +132,22 @@ async function main() {
     const roomB = b.json.roomId || b.json.RoomId;
     if (!roomA || !roomB || roomA === roomB) throw new SeedError(`방 번호 이상 (A·B 같음 또는 빈 값)`);
 
+    // 🆕 11/28 다 로그인 — **로그아웃하지 않는다**(opened 에 안 넣음 · H-S5c 셈 2 그대로).
+    //   로그인 그 자체가 출근이다(AuthController 로그인 → CheckInAsync 「자동출근」) ⇒ 오늘 근태 행이 **열린 채**(퇴근 빈칸) 쿨타임 몸까지 간다.
+    //   쿨타임 몸은 이 세션을 「물음 무응답」 대상으로 쓴다(login_at < C1 → 서버가 묻고 65초 뒤 끝냄 → 퇴근 cooltime).
+    //   로그아웃하면 자동 퇴근(Logout → CheckOutAsync · 출처 NULL)이 행을 닫고, 하루 1행이라 다시 못 연다(첫 CI 런 46064948848 · 가 행).
+    stage.now = '다 로그인(열린 출근 행 · 로그아웃 안 함)';
+    const da = await login('DA', ids.da, process.env.UI_PW_DA);
+    if (da.awaiting) throw new SeedError('다 기기 승인 대기');
+    if (da.terms) { stage.now = '다 약관'; await agreeTerms('DA', da); }
+
     L.exportPlain('UI_ROOM_A', roomA);
     L.exportPlain('UI_ROOM_B', roomB);
     L.exportPlain('UI_LOGIN_GA', ids.ga);
     L.exportPlain('UI_LOGIN_NA', ids.na);
-    L.rec(r, { id: 'H-S5b', what: '시드② 자식 2(가·나) + 방 2(A·B)', got: 'ok', pass: true, kind: 'DEVICE' });
+    L.exportPlain('UI_LOGIN_DA', ids.da);
+    // ⬛ [낡은 줄 · 11/28 이전] L.rec(r, { id: 'H-S5b', what: '시드② 자식 2(가·나) + 방 2(A·B)', got: 'ok', pass: true, kind: 'DEVICE' });
+    L.rec(r, { id: 'H-S5b', what: '시드② 자식 3(가·나 + 쿨타임 전용 다 · 다는 로그인 유지) + 방 2(A·B)', got: 'ok', pass: true, kind: 'DEVICE' });
     // ⬛ [낡은 줄 · 1~2차] L.saveResult(r); — 3차: finally 에서 로그아웃 줄까지 적은 뒤 한 번 저장.
   } catch (e) {
     const got = e instanceof SeedError ? e.message : `예외 ${e.name} (원문 생략)`;

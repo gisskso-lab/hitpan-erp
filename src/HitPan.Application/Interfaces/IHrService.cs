@@ -16,6 +16,12 @@ public interface IHrService
     Task<string> CheckInProxyAsync(string tenantId, string targetEmployeeId, string actorEmployeeId, CheckInOutRequest req, CancellationToken ct = default);
     Task CheckOutProxyAsync(string tenantId, string targetEmployeeId, string actorEmployeeId, CancellationToken ct = default);
 
+    // 🆕 20260928작4 쿨타임 §6 · C-5 — 자동 로그아웃으로 적힌 퇴근 고치기 · 고치기 이력 (추가 · #1 · #12 구현 1 = HrService).
+    //    tenantId = JWT · editorUserId = JWT(고친 사람). attendanceId 는 반드시 WHERE tenant_id 로 가둔다(#2 · G-C12).
+    Task<EditCheckOutResult> EditCheckOutAsync(string tenantId, string attendanceId, string editorUserId, EditCheckOutRequest req, CancellationToken ct = default);
+    /// <summary>이력. <c>null</c> = 우리 회사에 그런 근태 행이 없다(404).</summary>
+    Task<List<AttendanceEditHistoryDto>?> GetCheckOutHistoryAsync(string tenantId, string attendanceId, CancellationToken ct = default);
+
     // 초과근무
     Task<List<OvertimeDto>> GetOvertimeAsync(string tenantId, DateTime? from, DateTime? to, CancellationToken ct = default);
     Task<string> CreateOvertimeAsync(CreateOvertimeRequest req, string tenantId, string employeeId, CancellationToken ct = default);

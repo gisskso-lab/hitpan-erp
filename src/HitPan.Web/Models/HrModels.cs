@@ -10,6 +10,23 @@ public class AttendanceModel
     public decimal? WorkHours { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 🆕 20260928작4 쿨타임 §6 — 퇴근 기록 출처(추가 · #1). <c>null</c> = 사람 · <c>cooltime</c> = 「자동」 ·
+    /// <c>cooltime_blank</c> = 「자동 로그아웃 · 퇴근 빈칸」 · <c>edited</c> = 「고침」.
+    /// </summary>
+    public string? CheckOutSource { get; set; }
+}
+
+/// <summary>🆕 20260928작4 쿨타임 §6 — 퇴근 고치기 이력 한 줄(서버 <c>AttendanceEditHistoryDto</c> 짝).</summary>
+public class AttendanceEditHistoryModel
+{
+    public DateTime ChangedAt { get; set; }
+    public string? ChangedByName { get; set; }
+    public DateTime? BeforeCheckOut { get; set; }
+    public DateTime? AfterCheckOut { get; set; }
+    public string? BeforeSource { get; set; }
+    public string? Reason { get; set; }
 }
 
 public class OvertimeModel

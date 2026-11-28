@@ -70,6 +70,48 @@ public sealed class HrClientService(HttpClient http)
         }
     }
 
+    // ── 🆕 20260928작4 쿨타임 §6 · C-5 — 퇴근 고치기 · 고치기 이력 (추가 · #1) ─────────────
+    //    주소는 서버 `HrController` 와 글자까지 같아야 한다(대리 근태 게이트와 같은 자리).
+
+    /// <summary>자동 로그아웃으로 적힌 퇴근을 고친다. 서버가 준 사유를 살려서 돌려준다.</summary>
+    public async Task<(bool Ok, string Message)> EditCheckOutAsync(string attendanceId, DateTime checkOut, string reason, CancellationToken ct = default)
+    {
+        try
+        {
+            using var r = await http.PutAsJsonAsync(
+                $"api/hr/attendance/{Uri.EscapeDataString(attendanceId)}/check-out",
+                new { checkOut, reason }, ct);
+            if (r.IsSuccessStatusCode) return (true, string.Empty);
+
+            if (r.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                return (false, "권한이 없습니다. 관리자에게 [근태 대리입력] 권한을 요청해 주세요.");
+
+            var msg = await ReadMessageAsync(r, ct);
+            return (false, string.IsNullOrWhiteSpace(msg) ? "고치지 못했습니다." : msg!);
+        }
+        catch (Exception ex)
+        {
+            LogFailure(nameof(EditCheckOutAsync), ex);
+            return (false, "서버에 연결하지 못했습니다.");
+        }
+    }
+
+    /// <summary>퇴근 고치기 이력(최근 것이 앞). 실패하면 빈 목록 — 화면은 「불러오지 못했습니다」 를 따로 띄운다.</summary>
+    public async Task<(bool Ok, List<AttendanceEditHistoryModel> Items)> GetCheckOutHistoryAsync(string attendanceId, CancellationToken ct = default)
+    {
+        try
+        {
+            var list = await http.GetFromJsonAsync<List<AttendanceEditHistoryModel>>(
+                $"api/hr/attendance/{Uri.EscapeDataString(attendanceId)}/history", ct);
+            return (true, list ?? new());
+        }
+        catch (Exception ex)
+        {
+            LogFailure(nameof(GetCheckOutHistoryAsync), ex);
+            return (false, new());
+        }
+    }
+
 
     // 초과근무
     public async Task<List<OvertimeModel>> GetOvertimeAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)

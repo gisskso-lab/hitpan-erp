@@ -459,6 +459,13 @@ public partial class UserInfoPage : ComponentBase, IDisposable
         // current.IndustryType = _model.BusinessType;
         // var okSettings = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
         var okSettings = true;
+        // ⬛ [합류 쪽 · 11/27 쿨타임 고침 차례 §273 V4 · 11/28 main(W-S-01 A) 합류 때 채택 안 함 — 이 화면은 이제 루트 PUT 을 안 부름]
+        // var current = await SettingsSvc.GetAsync().ConfigureAwait(false) ?? new TenantSettingsModel();
+        // current.IndustryType = _model.BusinessType;
+        // // ⬛ [낡은 줄 · 11/27 쿨타임 고침 차례 이전] var okSettings = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
+        // // 🆕 11/27 쿨타임 고침 차례(§273 V4) — 이 화면은 자동 로그아웃을 고치지 않는다 ⇒ 세 칸을 null(= 그대로 둠)로 보낸다.
+        // //   GET 이 실패해 새 모델로 대신하면 켬/끔 칸 false 가 실려 자동 로그아웃이 조용히 꺼지던 길을 닫는다.
+        // var okSettings = await SettingsSvc.SaveKeepCooltimeAsync(current).ConfigureAwait(false);
 
         // local_company 사업장 컬럼과 동일한 필드를 API로 전달한다(비고는 저장 대상 아님).
         var company = new TenantCompanyModel

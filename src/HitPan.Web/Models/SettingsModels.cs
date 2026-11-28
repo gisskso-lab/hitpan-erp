@@ -135,4 +135,35 @@ public class TenantSettingsModel
     public bool UsePersonalInfoProtect { get; set; } = true;
 
     public string IndustryType { get; set; } = "retail";
+
+    // ── 🆕 20260928작4 쿨타임 §5-1 · 갈래 ① 명세서 §1-3 (추가 · #1) ──────────────────
+    // 서버 약속: 시각 = "HH:mm" · 조회 미설정 = null · 저장 때 null = 그대로 · "" = 비움.
+    // 이 화면은 저장 때 시각 두 칸을 늘 채워 보낸다(비웠으면 "") — Settings.razor `ApplyCooltimeToModel`.
+    // ⚠️ [초기화]는 새 모델을 보내므로 켬 = false(기본 꺼짐 · Q4) · 시각 두 칸 = null(그대로).
+
+    /// <summary>자동 로그아웃 켬/끔.</summary>
+    public bool CooltimeEnabled { get; set; }
+
+    /// <summary>자동 로그아웃 시각 <c>"HH:mm"</c>.</summary>
+    public string? CooltimeAt { get; set; }
+
+    /// <summary>정시 퇴근 시각 <c>"HH:mm"</c>.</summary>
+    public string? RegularLeaveTime { get; set; }
+}
+
+/// <summary>
+/// 🆕 2026-11-28 쿨타임1b(설계 쿨타임_설정자리옮김 §2 안 A · §3) — 「자동 로그아웃 설정」 화면의 세 칸.
+/// 서버 <c>GET/PUT api/settings/cooltime</c> 와 같은 모양. 시각 = <c>"HH:mm"</c> · 조회 미설정 = <c>null</c> ·
+/// 저장 때 <c>null</c> = 그대로 · <c>""</c> = 비움(이 화면은 시각 두 칸을 늘 채워 보낸다).
+/// </summary>
+public sealed class CooltimeSettingsModel
+{
+    /// <summary>자동 로그아웃 켬/끔.</summary>
+    public bool CooltimeEnabled { get; set; }
+
+    /// <summary>자동 로그아웃 시각 <c>"HH:mm"</c>.</summary>
+    public string? CooltimeAt { get; set; }
+
+    /// <summary>정시 퇴근 시각 <c>"HH:mm"</c>.</summary>
+    public string? RegularLeaveTime { get; set; }
 }

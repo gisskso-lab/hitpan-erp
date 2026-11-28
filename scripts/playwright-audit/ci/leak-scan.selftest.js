@@ -123,8 +123,11 @@ const work = process.argv[2];
 if (!work) { console.log('사용: node leak-scan.selftest.js <빈 작업 폴더>'); process.exit(2); }
 const SCAN = path.join(__dirname, 'leak-scan.js');
 
+// 🆕 11/28 쿨타임 몸 전용 자식 다 — S0 여덟째 이름. 가짜 값도 실행 때 만든다(파일에 고정 값 글자 0).
+const FAKE_PW_DA = `SELFTEST_PWDA_${crypto.randomBytes(4).toString('hex')}`;
 function fakeEnv() {
   return {
+    UI_PW_DA: FAKE_PW_DA,
     UI_DB_PASSWORD: 'SELFTEST_DBPW_7f3a9c2e',
     UI_JWT_SECRET: 'SELFTEST_JWT_1b8d4e6f',
     UI_ENC_KEY: 'SELFTEST_ENC_9e2c7a1d',
@@ -1383,6 +1386,13 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'),
       fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
       fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
+      // 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — 개발명세서 표에서 따로 적는다(판정기 EXPECT_CT_ROWS 를 읽지 않음)
+      fG('K35-CT1', 'CT1', 'tab2-continue', 'chromium'),
+      fG('K35-CT2', 'CT2', 'off-logout', 'chromium'), fG('K35-CT2', 'CT2', 'off-continue', 'chromium'),
+      fG('K35-CT3', 'CT3', 'reedit', 'chromium'),
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2(작업지시서 고침 1 표에서 따로 적음)
+      fG('K35-CT4', 'CT4', 'child-put-403', 'chromium'), fG('K35-CT4', 'CT4', 'root-put-405', 'chromium'),
+      fG('K35-CT-N4', 'N4', null, 'chromium', 'DEVICE'),
       // 🔴 W-S-03 고침 1(11/28 · [4] P2-1) — 화면 회귀 · 닫힌 서버 문 탐침 7(개발명세서 「고침 1」 표에서 따로 적는다 · 판정기 EXPECT_S3_ROWS 를 읽지 않음)
       fG('K35-S3-1', 'S3', 'first-home', 'chromium'), fG('K35-S3-1', 'S3', 'first-update', 'chromium'),
       fG('K35-S3-2', 'S3', 'direct-welcome', 'chromium'), fG('K35-S3-2', 'S3', 'phone-register', 'chromium'),
@@ -1903,6 +1913,12 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // 🔴 2차(A7) — G4 토스트 길 2 추가로 18(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
       // ⬛ [낡은 줄 · 2차] const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 2차] check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 쿨타임 화면 실측 3(11/28) — 쿨타임 키 5(시험 4 · N4 1) 추가로 23(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 W-S-03 고침 1(11/28) — 화면 회귀 · 닫힌 문 탐침 7 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
       // ⬛ [낡은 줄 · W-S-03 고침 1] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · W-S-03 고침 1] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
@@ -1910,8 +1926,16 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 갈래 T] const ok = theirs.length === 33 && mine.length === 33 && new Set(theirs).size === 33 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 갈래 T] check('K-C22k G 기대 키 수 33 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 20261128작 갈래 B2 — owner-json 1 추가로 34(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 34 && mine.length === 34 && new Set(theirs).size === 34 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 34 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 갈래 B2 · #1011 합침 전] const ok = theirs.length === 34 && mine.length === 34 && new Set(theirs).size === 34 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 갈래 B2 · #1011 합침 전] check('K-C22k G 기대 키 수 34 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — 쿨타임 7 + W-S-03 7 을 함께 합쳐 32(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] const ok = theirs.length === 32 && mine.length === 32 && new Set(theirs).size === 32 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] check('K-C22k G 기대 키 수 32 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — 앞 18 + 쿨타임 7 + W-S-03 7 + 갈래 T 8 + 갈래 B2 1 = 41(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 41 && mine.length === 41 && new Set(theirs).size === 41 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 41 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
@@ -2232,7 +2256,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     { // K-C25c 판정기 끝 줄 둘 — 대조 못 함만 → 장치 이유 끝 줄 / 섞이면 누출 신호 먼저 / 다른 [장치] 와 섞여도 재실행 1회 아님
       const DEV = 'N4 이유=대조 못 함(장치)'; // 판정기 상수와 따로 적는다(글자 잠금)
       const LEAK = 'N4 이유=누출 신호';
-      const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // ⬛ [낡은 줄 · 3차] const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // 🔴 쿨타임 화면 실측 3(11/28) — chromium N4 키가 둘(앞 몸 K35-N4 · 쿨타임 K35-CT-N4)이 되어 앞 몸 N4 만 고른다(칸 뜻 · 기대 수 그대로)
+      const n4 = (b, got) => (w) => (w.g === 'N4' && w.id === 'K35-N4' && w.browser === b ? { ...w, pass: false, got } : w);
       const devOff = (w) => (w.id === 'K35-G1' && w.path === 'bell' && w.browser === 'webkit' ? { ...w, kind: 'DEVICE', pass: false } : w);
       const a = kJ('k25c-1', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · 가린 K 토큰 0`))]);
       const b = kJ('k25c-2', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · x`)).map(n4('chromium', `${LEAK} · 걸림 1`))]);
@@ -3158,6 +3184,31 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       }
       check('K-C27i 알려진 꼴 두 식 · homeKnown 참 1 · 거짓 7 · updateKnown 참 3 · 거짓 11(U7 · U8 최종 착지 = 꼴 아님)', ok, why);
     }
+  }
+  // 🆕 11/28 쿨타임 CT3 장치 고침 F3(지시서 20261128작_쿨타임1b_CT3자정넘김_장치고침) — 둘째 값 눈금 pickGrid 순수 함수 3꼴.
+  //   런 46080568966 시도 4 꼴(출근 23:53 D · 자동 퇴근 00:01 D+1 · 지금 00:04 D+1)이 CI 에서 저절로 나오기 어려워 여기서 잰다.
+  //   대조 = 옛 동작(outDay 없음 = 출근 날짜) 은 같은 꼴에서 23:55(D) 를 골랐다 — 그 값도 함께 확인(고침이 실제로 달라졌나).
+  {
+    const CT = require('./k35-session-cooltime');
+    const d = (day, h, mi) => new Date(2026, 10, day, h, mi, 0, 0); // 로컬 생성 = 러너 시간대 무관
+    const hmOf = (x) => (x ? `${String(x.getDate()).padStart(2, '0')} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}` : 'null');
+    // ① 자정 넘김 — 퇴근 날짜(D+1 = 11/28)에서 골라야 함 → 28일 00:00
+    const a1 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01', '2026-11-28');
+    const a0 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01'); // 옛 동작 대조
+    // ② 같은 날 — 출근 23:10 · 퇴근 23:16 · 지금 23:22 → 23:20
+    const b1 = CT.pickGrid(d(27, 23, 10), d(27, 23, 22).getTime(), '23:16', '2026-11-27');
+    // ③ 눈금 없음 — 출근 23:58(D) · 지금 23:59(D) · 퇴근 날짜 D → (출근, 지금] 안 눈금 0 → null
+    const c1 = CT.pickGrid(d(27, 23, 58), d(27, 23, 59).getTime(), '23:59', '2026-11-27');
+    // ④ 퇴근 글자에서 날짜 읽기(시간대 바꿈 0)
+    const y1 = CT.ymdOfText('2026-11-28T00:01:00');
+    const y2 = CT.ymdOfText('00:01');
+    // ⑤ 🆕 짧은 재확인 P3 ④ — 퇴근은 D(23:46) 인데 시험이 늦어 지금이 D+1 00:02 → 날짜 조건이 없으면 D+1 00:00 을 골라 틀림 · 맞음 = D 23:55
+    const e1 = CT.pickGrid(d(27, 23, 40), d(28, 0, 2).getTime(), '23:46', '2026-11-27');
+    // ⬛ [낡은 줄 · 11/28 P3 ④ 이전] check('K-CT3-F 둘째 값 눈금 = 고침 창 날짜(자동 퇴근 날짜) — 자정 넘김 28 00:00(옛 동작 대조 27 23:55) · 같은 날 27 23:20 · 눈금 없음 null · 날짜 읽기',
+    check('K-CT3-F 둘째 값 눈금 = 고침 창 날짜(자동 퇴근 날짜) — 자정 넘김 28 00:00(옛 동작 대조 27 23:55) · 같은 날 27 23:20 · 눈금 없음 null · 날짜 읽기 · 퇴근 D 지금 D+1 = 27 23:55',
+      // ⬛ [낡은 줄 · 11/28 P3 ④ 이전] hmOf(a1) === '28 00:00' && hmOf(a0) === '27 23:55' && hmOf(b1) === '27 23:20' && c1 === null && y1 === '2026-11-28' && y2 === null,
+      hmOf(a1) === '28 00:00' && hmOf(a0) === '27 23:55' && hmOf(b1) === '27 23:20' && c1 === null && y1 === '2026-11-28' && y2 === null && hmOf(e1) === '27 23:55',
+      `자정 넘김 ${hmOf(a1)} · 옛 동작 ${hmOf(a0)} · 같은 날 ${hmOf(b1)} · 없음 ${hmOf(c1)} · 날짜 ${y1} / ${y2} · 퇴근 D 지금 D+1 ${hmOf(e1)}`);
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);
