@@ -257,7 +257,7 @@ jobs:
           Get-ChildItem $outDir | ForEach-Object { Write-Host "[update] 산출: $($_.Name)" }
 
       - name: Upload update package artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: HitPanUpdate-${{ steps.ver.outputs.version }}
           path: |
@@ -267,7 +267,7 @@ jobs:
           retention-days: 30
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: HitPanInstaller-${{ steps.ver.outputs.version }}
           path: installer/output/*.exe
