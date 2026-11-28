@@ -65,6 +65,15 @@ public sealed class MigrationJobStore
     public MigrationJob? Get(string jobId)
         => _jobs.TryGetValue(jobId, out var job) ? job : null;
 
+    /// <summary>
+    /// 🔴 W-G1-52 갈래 A-2③ D4 — 이 회사 자료이관이 도는 중인가(대기 · 실행 — 일꾼 <c>Task.Run</c> 은 <c>IHostedService</c> 가 아니라 점검 상태가 모른다).
+    /// 읽기만 · 정적 사전 그대로(프로세스 안 진행 상태 = 요청 모두가 나눠 봄). 복원 걸음 ④ 앞에서 부른다.
+    /// </summary>
+    public static bool AnyRunning(string tenantId) =>
+        _jobs.Values.Any(j => string.Equals(j.TenantId, tenantId, StringComparison.Ordinal)
+                              && (string.Equals(j.Status, "queued", StringComparison.Ordinal)
+                                  || string.Equals(j.Status, "running", StringComparison.Ordinal)));
+
     public void Update(string jobId, Action<MigrationJob> update)
     {
         if (_jobs.TryGetValue(jobId, out var job))

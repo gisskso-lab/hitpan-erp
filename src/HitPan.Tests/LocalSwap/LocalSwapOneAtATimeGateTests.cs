@@ -328,6 +328,7 @@ public sealed class LocalSwapOneAtATimeGateTests : IDisposable
         public Task UpdateSettingsAsync(string tenantId, UpdateBackupSettingsRequest req, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<List<BackupHistoryDto>> GetHistoryAsync(string tenantId, int limit = 50, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<RestoreResponse> RestoreAsync(string tenantId, string? userId, RestoreRequest req, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<SafeRestoreResponse> SafeRestoreAsync(string tenantId, string? userId, SafeRestoreRequest req, CancellationToken ct = default) => throw new NotSupportedException(); // W-G1-52 A-2② #12
         public Task<List<RestoreHistoryDto>> GetRestoreHistoryAsync(string tenantId, int limit = 50, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
