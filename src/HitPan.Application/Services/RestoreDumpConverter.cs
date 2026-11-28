@@ -5,7 +5,8 @@ namespace HitPan.Application.Services;
 // ══════════════════════════════════════════════════════════════════════
 // 🔴 W-G1-52 갈래 A-2② — 걸음 ③-2 변환기(설계 §15-3 ③-2 ⓐ ~ ⓔ · §15-10 R1 · R2 · R3 · 작업지시서 §4-1 A-2② 줄).
 //   ⓐ 바이트 단위 — 덤프를 글자로 풀지 않는다 · 따옴표 안 바이트 손 0 · 이름 바꿈은 따옴표 밖 ASCII 머리만.
-//   ⓑ 허용 목록 = CREATE TABLE · INSERT INTO · LOCK/UNLOCK TABLES · ALTER TABLE … DISABLE/ENABLE KEYS · SET · 주석.
+//   ⓑ 허용 목록 = CREATE TABLE · INSERT INTO · LOCK/UNLOCK TABLES · ALTER TABLE … DISABLE/ENABLE KEYS · SET · 주석
+//      · (고침 3) 자료 묶음 AUTOCOMMIT 감쌈 세 문장 짝(버림).
 //      덤프의 DROP 은 버리고(짝 검사만) 변환기가 `DROP TABLE IF EXISTS rs_new__…` 를 스스로 만든다.
 //   ⓒ DELIMITER 를 아는 나눔기 · 건너뜀 목록 이름 붙임(모래상자 첫 줄 · 뷰 · 트리거 · 루틴) — `/*!` 접두만 보고 통과 0.
 //   ⓓ 출력 2차 검사 = 아래 RestoreStageOutputCheck(독립 · 나눔기와 코드 공유 0).
@@ -68,6 +69,16 @@ public static class RestoreDumpConverter
     private static readonly byte[] DropFunction = A("/*!50003 DROP FUNCTION IF EXISTS `");
     private static readonly byte[] Set = A("SET ");
 
+    // 🔴 고침 3(CI 런 46117272776 G14 · G20 · G3 「허용 목록 밖 문장: COMMIT」) — mariadb-dump 11.8.6 `--no-autocommit` 기본 켜짐(원본 :505 ~ :507 def 1)
+    //    표 자료 묶음 감쌈(원본 :4492 ~ :4494 · :4786 ~ :4788 · 11.4.10 실행 파일 같은 글자 · 기본 꺼짐) — 세 문장을 짝으로만 받아 모두 버린다(실행 0).
+    //    붓기 세션은 제품 연결의 autocommit 그대로(문장마다 확정 · 실패 = 임시 표 지움) — 덤프의 AUTOCOMMIT=0 · COMMIT 을 흘리지 않는다(개발명세서 §10).
+    private static readonly byte[] AutocommitOff = A("SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0");
+    private static readonly byte[] Commit = A("COMMIT");
+    private static readonly byte[] AutocommitRestore = A("SET AUTOCOMMIT=@OLD_AUTOCOMMIT");
+
+    // 감쌈 짝 상태 — 끔 → LOCK → … → UNLOCK → COMMIT → 되돌림 순서만(다른 순서 · 짝 깨짐 = 멈춤)
+    private const int WrapNone = 0, WrapOff = 1, WrapLocked = 2, WrapUnlocked = 3, WrapCommitted = 4;
+
     private static byte[] A(string s) => Encoding.ASCII.GetBytes(s);
 
     /// <summary>
@@ -79,11 +90,36 @@ public static class RestoreDumpConverter
         var created = new Dictionary<string, RestoreStageDecision>(StringComparer.OrdinalIgnoreCase);
         string? pendingDrop = null;     // 덤프의 DROP TABLE IF EXISTS — 바로 다음 문장이 같은 이름의 CREATE · 뷰 자리표여야 함
         string? dataTable = null;       // LOCK TABLES … WRITE 안의 표
+        var wrap = WrapNone;            // 고침 3 — AUTOCOMMIT 감쌈 짝
 
         foreach (var raw in DumpSplitter.Split(dump))
         {
             var t = Trim(raw);
             if (t.Length == 0) continue;
+
+            // ── 고침 3 · AUTOCOMMIT 감쌈 짝(버림 · 실행 0) — 정확한 글자 · 정해진 다음 문장만 ──
+            if (wrap == WrapOff && !StartsWith(t, LockTables)) throw new RestoreDumpRejectedException("AUTOCOMMIT=0 뒤 LOCK TABLES 아님");
+            if (wrap == WrapUnlocked && !Eq(t, Commit)) throw new RestoreDumpRejectedException("자료 묶음 감쌈 UNLOCK 뒤 COMMIT 아님");
+            if (wrap == WrapCommitted && !Eq(t, AutocommitRestore)) throw new RestoreDumpRejectedException("COMMIT 뒤 AUTOCOMMIT 되돌림 아님");
+            if (Eq(t, AutocommitOff))
+            {
+                if (wrap != WrapNone || dataTable is not null || pendingDrop is not null)
+                    throw new RestoreDumpRejectedException("AUTOCOMMIT=0 자리 어긋남");
+                wrap = WrapOff;
+                continue;
+            }
+            if (Eq(t, Commit))
+            {
+                if (wrap != WrapUnlocked) throw new RestoreDumpRejectedException("짝 없는 COMMIT");
+                wrap = WrapCommitted;
+                continue;
+            }
+            if (Eq(t, AutocommitRestore))
+            {
+                if (wrap != WrapCommitted) throw new RestoreDumpRejectedException("짝 없는 AUTOCOMMIT 되돌림");
+                wrap = WrapNone;
+                continue;
+            }
 
             // ── 버림(실행 0) · 짝 검사 없음 ──
             if (Eq(t, SandboxLine)) continue;                                   // 모래상자 첫 줄(이름 붙인 건너뜀)
@@ -134,9 +170,15 @@ public static class RestoreDumpConverter
                 var name = ExactName(t, LockTables.Length, " WRITE", "LOCK TABLES");
                 if (!created.ContainsKey(name)) throw new RestoreDumpRejectedException($"만들지 않은 표 LOCK `{name}`");
                 dataTable = name;
+                if (wrap == WrapOff) wrap = WrapLocked;
                 continue;
             }
-            if (Eq(t, UnlockTables)) { dataTable = null; continue; }
+            if (Eq(t, UnlockTables))
+            {
+                dataTable = null;
+                if (wrap == WrapLocked) wrap = WrapUnlocked;
+                continue;
+            }
             if (StartsWith(t, AlterKeys))
             {
                 var name = NameAfter(t, AlterKeys.Length) ?? throw new RestoreDumpRejectedException("ALTER TABLE 이름 꼴 어긋남");
@@ -169,6 +211,7 @@ public static class RestoreDumpConverter
         }
 
         if (pendingDrop is not null) throw new RestoreDumpRejectedException($"짝 없는 DROP TABLE IF EXISTS `{pendingDrop}`(끝)");
+        if (wrap != WrapNone) throw new RestoreDumpRejectedException("AUTOCOMMIT 감쌈 짝 어긋남(끝)");
     }
 
     private static RestoreStageDecision DecideFor(string name, Func<string, RestoreStageDecision> decide)
@@ -314,7 +357,8 @@ public static class RestoreDumpConverter
     private static void CheckSet(byte[] t)
     {
         var s = Encoding.ASCII.GetString(StripQuoted(t)).ToUpperInvariant();
-        foreach (var bad in new[] { "GLOBAL", "PASSWORD", "ROLE", "STATEMENT", "PERSIST", "`", ";" })
+        // 고침 3 — AUTOCOMMIT 은 위의 정확한 두 꼴만(짝) · 그 밖 꼴(다른 값 · 덧붙인 변수 · 소문자 · 판 주석 감쌈) = 멈춤
+        foreach (var bad in new[] { "GLOBAL", "PASSWORD", "ROLE", "STATEMENT", "PERSIST", "AUTOCOMMIT", "`", ";" })
             if (s.Contains(bad, StringComparison.Ordinal)) throw new RestoreDumpRejectedException("SET 허용 꼴 밖");
     }
 

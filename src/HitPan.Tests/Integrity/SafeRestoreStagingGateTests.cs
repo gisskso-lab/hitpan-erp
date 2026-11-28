@@ -230,6 +230,66 @@ public sealed class SafeRestoreStagingGateTests
         Assert.Contains("상수 밖", ex.Message, StringComparison.Ordinal);
     }
 
+    // 🔴 고침 3 — mariadb-dump 11.8.6 `--no-autocommit` 기본 켜짐(원본 :505 ~ :507 def 1) 감쌈 글자(원본 :4494 · :4788 · 11.4.10 실행 파일 같은 글자)
+    private const string AcOff = "SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;\n";
+    private const string AcEnd = "COMMIT;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n";
+
+    private static string WrapAutocommit(string dump, int expectTables)
+    {
+        var lockCount = dump.Split("\nLOCK TABLES `").Length - 1;
+        var unlockCount = dump.Split("\nUNLOCK TABLES;\n").Length - 1;
+        Assert.Equal(expectTables, lockCount);
+        Assert.Equal(expectTables, unlockCount);
+        return dump.Replace("\nLOCK TABLES `", "\n" + AcOff + "LOCK TABLES `", StringComparison.Ordinal)
+                   .Replace("\nUNLOCK TABLES;\n", "\nUNLOCK TABLES;\n" + AcEnd, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "G14-S1d 🔴 (고침 3) 11.8.6 기본 꼴 = 자료 묶음마다 AUTOCOMMIT 감쌈(빈 표 포함) 통과 · 출력 바이트 = 감쌈 없는 꼴(S1c)과 같음 · COMMIT 실행 0")]
+    public void G14_S1d_11_8_6_AUTOCOMMIT_감쌈_통과()
+    {
+        var plain = Run(Golden118);
+        var wrapped = Run(WrapAutocommit(Golden118, 2));
+        Assert.Equal(plain.Count, wrapped.Count);
+        for (var i = 0; i < plain.Count; i++) Assert.Equal(plain[i].Sql, wrapped[i].Sql);
+        Assert.All(wrapped, s => Assert.DoesNotContain("COMMIT", Text(s), StringComparison.OrdinalIgnoreCase));
+        // 11.4 꼴 golden 도 같은 감쌈으로 통과(판마다 있음 · 없음 둘 다 받음)
+        Assert.Equal(Run(Golden).Count, Run(WrapAutocommit(Golden, 2)).Count);
+    }
+
+    public static IEnumerable<object[]> AutocommitBroken() => new[]
+    {
+        new object[] { "COMMIT 만", "COMMIT;\n" },
+        new object[] { "되돌림 SET 만", "SET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
+        new object[] { "끔 SET 만(끝)", AcOff },
+        new object[] { "끔 뒤 LOCK 아님", AcOff + "INSERT INTO `t_backup` VALUES (9,'T1',NULL,0);\n" },
+        new object[] { "끔 두 번", AcOff + AcOff },
+        new object[] { "UNLOCK 뒤 COMMIT 없음(끝)", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\n" },
+        new object[] { "UNLOCK 뒤 되돌림 먼저", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
+        new object[] { "자료 묶음 안 COMMIT", AcOff + "LOCK TABLES `t_backup` WRITE;\nCOMMIT;\nUNLOCK TABLES;\n" + AcEnd },
+        new object[] { "COMMIT 뒤 되돌림 없음(끝)", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT;\n" },
+        new object[] { "COMMIT 같은 줄 둘째 문장", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT;DELETE FROM `t_keep`;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
+        new object[] { "COMMIT 뒤 다른 묶음", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT;\nLOCK TABLES `t_keep` WRITE;\nUNLOCK TABLES;\n" },
+        new object[] { "자료 묶음 안 끔", "LOCK TABLES `t_backup` WRITE;\n" + AcOff + "UNLOCK TABLES;\n" },
+        new object[] { "다른 값 =1", "SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=1;\n" },
+        new object[] { "끔 꼴에 덧붙인 변수", "SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0, @@sql_mode='';\n" },
+        new object[] { "그냥 SET AUTOCOMMIT=0", "SET AUTOCOMMIT=0;\n" },
+        new object[] { "소문자 SET autocommit", "SET autocommit=1;\n" },
+        new object[] { "판 주석 감싼 AUTOCOMMIT", "/*!40101 SET AUTOCOMMIT=0 */;\n" },
+        new object[] { "되돌림 꼴에 덧붙인 변수", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT, @x=1;\n" },
+        new object[] { "11.7 옛 꼴 set autocommit=0", "LOCK TABLES `t_backup` WRITE;\nset autocommit=0;\nUNLOCK TABLES;\n" },
+        new object[] { "11.7 옛 꼴 commit", "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\ncommit;\n" },
+        new object[] { "COMMIT WORK", AcOff + "LOCK TABLES `t_backup` WRITE;\nUNLOCK TABLES;\nCOMMIT WORK;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n" },
+        new object[] { "ROLLBACK", "ROLLBACK;\n" },
+    };
+
+    [Theory(DisplayName = "G14-S2c 🔴 (고침 3) AUTOCOMMIT 감쌈 짝 깨짐(COMMIT 만 · SET 만 · 다른 값 · 같은 줄 둘째 문장 · 순서 어긋남 · 옛 꼴) = 멈춤")]
+    [MemberData(nameof(AutocommitBroken))]
+    public void G14_S2c_AUTOCOMMIT_짝깨짐_멈춤(string label, string tail)
+    {
+        var ex = Assert.Throws<RestoreDumpRejectedException>(() => Run(Golden + tail));
+        Assert.False(string.IsNullOrWhiteSpace(ex.Message), label);
+    }
+
     [Fact(DisplayName = "G14-D (고침 2) 시험 진단 — 멈춘 단계 · 사유 · 멈춘 문장 머리를 글로(DB 게이트 실패 글 도우미가 늘 「재현 0」 아님)")]
     public void G14_D_시험진단_멈춘자리()
     {
