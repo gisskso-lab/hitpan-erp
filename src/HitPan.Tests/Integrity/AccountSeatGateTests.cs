@@ -541,6 +541,9 @@ public sealed class AccountSeatGateTests : IDisposable
         // 복원 표 분류 목록의 표 이름(읽기 아님 · 백업·복원 때 표 통째 대상 판정만 · W-G1-52 A-1 고침 2)
         // 따옴표 포함 표 이름으로 좁힘 — 같은 파일에 실제 SQL 읽기(FROM device_slot_policy_settings)가 생기면 여전히 걸린다
         ("src/HitPan.Application/Services/RestoreTableClassification.cs", "\"device_slot_policy_settings\""),
+        // 복원 표 분류 G22 칸 목록(「표.칸」 글자 · 지금 값 표 _id 꼴 칸이 두 목록 중 하나인지 판정만 · 읽기 아님 · W-G1-52 A-2③ 고침 1 · 선례 A-1 고침 2)
+        // 따옴표 + 표 이름 + 점으로 좁힘 — 같은 파일에 실제 SQL 읽기(FROM device_slot_policy_settings)가 생기면 여전히 걸린다
+        ("src/HitPan.Application/Services/RestoreTableClassification.cs", "\"device_slot_policy_settings."),
     };
 
     internal static List<string> SlotReadHits(IEnumerable<(string File, int Line, string Text)> lines)
