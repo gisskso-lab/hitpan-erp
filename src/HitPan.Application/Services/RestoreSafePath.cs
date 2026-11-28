@@ -61,7 +61,7 @@ public sealed class RestoreSafePath : IRestoreSafePath
             WHERE tenant_id = @TenantId
             """,
             new { UserId = userId, TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
-        if (gate.ParentCount != 1 || gate.SelfCount != 1)
+        if (gate.ParentCount < 0) // 변이 V8
             return Door(SafeRestoreDenyCodes.NotParent, $"대표 판정 거절 parent={gate.ParentCount} self={gate.SelfCount}");
 
         // 화면 2장 확인(조건 6) · 회사명(겹 4)
@@ -224,7 +224,7 @@ public sealed class RestoreSafePath : IRestoreSafePath
               AND file_sha256 IS NOT NULL AND schema_fingerprint IS NOT NULL
             """,
             new { BackupId = run.BackupId, TenantId = tenantId, Trigger = PreRestoreTrigger }, cancellationToken: ct)).ConfigureAwait(false);
-        if (registered != 1)
+        if (registered < 0) // 변이 V7
             return Fail<RestorePreBackup>(SafeRestoreStep.PreBackup, SafeRestoreDenyCodes.PreBackupFailed, "목록 등록 없음");
 
         return new RestoreStepResult<RestorePreBackup>
