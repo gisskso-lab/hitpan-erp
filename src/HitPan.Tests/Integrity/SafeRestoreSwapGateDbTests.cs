@@ -863,6 +863,7 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         }));
         Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
         Assert.NotNull(during);   // ⑤ 도중 = 잠금 오류(교체 거래가 줄을 쥠 · 1205)
+        Assert.Equal(1205, during!.Number);   // 🔴 고침 1-3(§13-3 P3-C) — 잠금 기다림 시간 넘김만 초록(연결 끊김 등 다른 오류 = 빨강)
         Console.WriteLine($"[SR3-G15] ⑤ 도중 다른 연결 오류 {during!.ErrorCode} {during.SqlState}");
 
         var after = await Assert.ThrowsAsync<MySqlException>(() => other.ExecuteAsync("UPDATE tax_invoices SET remark1 = 'after' WHERE invoice_id = 'sr3-ti-1'"));
