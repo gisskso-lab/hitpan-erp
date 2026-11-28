@@ -8,6 +8,8 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject Microsoft.JSInterop.IJSRuntime JS
+@* 🔴 20261128작 갈래 A 고침 1 (설계 §7-1-8 · D13) — 이 화면의 기록 줄은 ILogger 로(Console.Error 한 줄이 WASM 에서 흰 오류 띠를 켠다 · 측정 M). *@
+@inject ILogger<Login> Logger
 @using HitPan.Web.Components.Common
 
 <PageTitle>로그인 — 히트판 ERP</PageTitle>
@@ -284,7 +286,8 @@
         var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
         if (string.Equals(path, "login", StringComparison.OrdinalIgnoreCase))
         {
-            Console.Error.WriteLine("[Login] 로그인 진행 중 이동이 15초 안에 나가지 않아 첫 화면으로 보낸다(안전망).");
+            // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 로그인 진행 중 이동이 15초 안에 나가지 않아 첫 화면으로 보낸다(안전망).");
+            Logger.LogWarning("[Login] 로그인 진행 중 이동이 15초 안에 나가지 않아 첫 화면으로 보낸다(안전망).");
             Navigation.NavigateTo("/", forceLoad: true);
         }
     }
@@ -308,7 +311,8 @@
         catch (Exception ex)
         {
             // #15 — 안내를 못 읽어도 로그인 화면은 그대로 뜬다.
-            Console.Error.WriteLine("[Login] 로그아웃 미완료 표시 읽기 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 로그아웃 미완료 표시 읽기 실패: " + ex.Message);
+            Logger.LogWarning(ex, "[Login] 로그아웃 미완료 표시 읽기 실패");
         }
     }
 
@@ -338,7 +342,8 @@
             //   실제로 터널 접속은 서버가 404 를 주는데(설계상 loopback 전용) 화면엔 아무 흔적도 없었다.
             //   ⇒ 이제 버튼이 "업데이트 확인 실패" 로 **보이게** 한다. 고장은 보여야 고칠 수 있다.
             _updateCheckFailed = true;
-            Console.Error.WriteLine("[Login] 업데이트 안내 조회 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 업데이트 안내 조회 실패: " + ex.Message);
+            Logger.LogWarning(ex, "[Login] 업데이트 안내 조회 실패");
         }
         finally
         {
@@ -415,7 +420,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[Login] 업데이트 시작 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 업데이트 시작 실패: " + ex.Message);
+            Logger.LogWarning(ex, "[Login] 업데이트 시작 실패");
             Snackbar.Add("업데이트를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
             _updateStarting = false;
         }
@@ -543,7 +549,8 @@
                 // 🔴 고침 1 (§8-2 A-③) — 통지 실패해도 로그인 진행(그대로) · 흔적 1줄만 남긴다(이 화면의 기록 방식 그대로).
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine("[Login] 새 기기 안내 창 띄우기 실패: " + ex.Message);
+                    // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 새 기기 안내 창 띄우기 실패: " + ex.Message);
+                    Logger.LogWarning(ex, "[Login] 새 기기 안내 창 띄우기 실패");
                 }
                 finally
                 {
@@ -587,7 +594,8 @@
             }
             else if (!navigated)
             {
-                Console.Error.WriteLine("[Login] 로그인은 됐는데 이동을 내지 못해 첫 화면으로 보낸다.");
+                // ⬛ [낡은 줄 · D13] Console.Error.WriteLine("[Login] 로그인은 됐는데 이동을 내지 못해 첫 화면으로 보낸다.");
+                Logger.LogWarning("[Login] 로그인은 됐는데 이동을 내지 못해 첫 화면으로 보낸다.");
                 Navigation.NavigateTo("/", forceLoad: true);
                 s_inFlightSafetyNet.MarkNavigated();
             }
