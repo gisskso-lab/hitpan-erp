@@ -259,4 +259,53 @@ public sealed class SafeRestoreGateDbTests : IDisposable
             "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND LEFT(TABLE_NAME, 8) = 'rs_new__'"));
         Assert.Equal(1, await CountAsync(c.Admin, "partner_contacts"));
     }
+
+    [Fact(DisplayName = "G8-S2 🔴 사전 백업이 지문 칸 빈 채 목록에 오름(등록 실패) = 거절(pre_backup_failed) — 등록 확인(:227) 뺌 변이 = 빨강")]
+    public async Task G8_S2_사전백업_등록실패_거절()
+    {
+        var c = await SetupAsync("SR-G8b");
+        if (c is null) return;
+        // 지문 기록만 실패시킴 — backup_history 를 고치는 UPDATE 마다 지문 칸을 비움(덤프 · 성공 표시는 그대로 · 시험 DB 는 매 시험 새로 만듦)
+        await c.Admin.ExecuteAsync(
+            "CREATE TRIGGER gate_sr_g8b_no_sha BEFORE UPDATE ON backup_history FOR EACH ROW SET NEW.file_sha256 = NULL");
+
+        var pre = await c.Path.PreBackupAsync(Tenant, "r-2", maintenanceActive: true);
+
+        // 준비가 먹었나 — 덤프 성공 · pre_restore 1줄 · 지문 칸 빔(아니면 「덤프 실패」 같은 다른 길로 초록이 나와 변이를 못 잡음)
+        var rows = (await c.Admin.QueryAsync<(string Status, string? Sha)>(
+            "SELECT status, file_sha256 FROM backup_history WHERE tenant_id = @T AND triggered_by = 'pre_restore'",
+            new { T = Tenant })).ToList();
+        Assert.Single(rows);
+        Assert.Equal("success", rows[0].Status);
+        Assert.Null(rows[0].Sha);
+
+        Assert.False(pre.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.PreBackupFailed, pre.DenyCode);
+        Assert.True(pre.DataUnchanged);
+    }
+
+    [Fact(DisplayName = "G1-S2 🔴 대표(is_parent=1) 2명인 회사 = 대표 본인도 거절(not_parent) — 첫 판정(:64)만 막는 꼴 · 부모 판정 뺌 변이 = 빨강")]
+    public async Task G1_S2_대표2명_거절()
+    {
+        var c = await SetupAsync("SR-G1b");
+        if (c is null) return;
+        // 대표 1명이면 본인 통과(늘 거절하는 판정 = 초록 구멍 막음)
+        var one = await c.Path.CheckDoorAsync(Tenant, ParentId, Req(_parentSecret));
+        Assert.True(one.Ok, one.DenyCode);
+
+        // 대표 하나 더 — 본인(ParentId)은 대표 행 그대로라 비번 질의(:82 is_parent = 1)는 통과하는 사람 → 막는 것은 「대표 수 = 1」 첫 판정뿐
+        await AddSecondParentAsync(c.Admin);
+        var two = await c.Path.CheckDoorAsync(Tenant, ParentId, Req(_parentSecret));
+        Assert.False(two.Ok);
+        Assert.Equal(SafeRestoreDenyCodes.NotParent, two.DenyCode);
+        Assert.Equal(0, await c.Admin.ExecuteScalarAsync<int>("SELECT failed_login_count FROM users WHERE user_id = @U", new { U = ParentId }));
+
+        static Task<int> AddSecondParentAsync(MySqlConnection admin) => admin.ExecuteAsync(
+            """
+            INSERT INTO users (user_id, tenant_id, email, password_hash, user_name, role, account_type, is_parent, is_active, created_at, updated_at)
+            SELECT 'sr-gate-parent-0002', tenant_id, 'owner2-id', password_hash, '대표둘', 'admin', 'tenant_admin', 1, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+            FROM users WHERE user_id = @P
+            """,
+            new { P = ParentId });
+    }
 }
