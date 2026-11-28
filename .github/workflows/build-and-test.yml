@@ -581,6 +581,10 @@ jobs:
           #    사전 백업 G8 · 출하 판 덤프 붓기 G14 · 256 바이트 왕복 G20) + 비DB SafeRestoreStagingGate(변환기 변이 덤프 · 2차 검사 · G23).
           #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A2-2_복원걸음_개발명세서.md
           GATES="$GATES|SafeRestoreGate|SafeRestoreStagingGate"
+          # 🔴 20261128작 W-G1-52 갈래 A-2③ SafeRestoreSwapGate — 걸음 ④ 본 대조 · ④-끝 덧씌움 · ⑤ 교체(G4 ~ G7 · G12 · G13 덧 · G18 ·
+          #    G21 ① ~ ⑰ · G22 · D2 격리 · D3/D9 지역 시각 · D4/D13 바쁨 · D15 autocommit) + 비DB SafeRestoreStaticGate(G9 · 문장 허용 · C6 · P3).
+          #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A2-3_대조교체_개발명세서.md
+          GATES="$GATES|SafeRestoreSwapGate|SafeRestoreStaticGate"
           # 🔴 20260915작1 갈래 A MdbPostingClassifyGate (G1) — 자료이관 장부 반영 판정 · F3 잔액 · 기준일 · 재고 품목 키.
           #    순수 함수(DB 없음 · SKIP 없음). 무력화 시험 14종 전부 빨간불 · 원본 14/14 초록:
           #      종류 안 가림 · 판매/매입 집합 뒤바꿈 · 연결 키에 거래처 코드 · 머리O연결X→미반영 · DOCFE 없음→미반영 ·
@@ -1440,6 +1444,21 @@ jobs:
             --configuration Release --no-build --nologo --verbosity normal \
             --filter "FullyQualifiedName~$FILTER" \
             --logger "trx;LogFileName=db-gate-results.trx" 2>&1 | tee "$RUNNER_TEMP/dbgate.log"
+
+      - name: Gate — 복원 게이트 클래스마다 한 건 이상 돌았다 (W-G1-52 P3-4)
+        # 🔴 W-G1-52 갈래 A-2③ P3-4 — 필터 글자가 맞아도 클래스가 빠지면(이름 바뀜 · 0건) 초록이 된다 → trx 결과를 클래스마다 센다.
+        if: always()
+        run: |
+          TRX=$(find . -name 'db-gate-results.trx' -print | head -n 1)
+          if [ -z "$TRX" ]; then echo "::error::db-gate-results.trx 가 없다 — 게이트가 안 돌았다"; exit 1; fi
+          MISSING=""
+          for g in RestoreTableClassificationGateDbTests RestoreTableClassificationGateTests SafeRestoreGateDbTests SafeRestoreStagingGateTests SafeRestoreSwapGateDbTests SafeRestoreStaticGateTests; do
+            n=$(grep -o "className=\"[^\"]*\.$g\"" "$TRX" | wc -l)
+            echo "  $g : $n 건"
+            if [ "$n" -eq 0 ]; then MISSING="$MISSING $g"; fi
+          done
+          if [ -n "$MISSING" ]; then echo "::error::한 건도 안 돈 복원 게이트:$MISSING"; exit 1; fi
+          echo "복원 게이트 클래스 전부 실제로 돌았다."
 
       - name: Gate — SKIP 이 한 건도 없어야 한다
         # 🔴 초록불이 어디서 왔는지 본다. [SKIP] 이 찍혔다면 그 게이트는 안 돈 것이고,

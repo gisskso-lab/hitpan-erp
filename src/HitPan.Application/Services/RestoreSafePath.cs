@@ -258,8 +258,11 @@ public sealed class RestoreSafePath : IRestoreSafePath
         // 둘째 바퀴 — 같은 손잡이 되감아 실행(문장마다 2차 검사 다시)
         var executed = 0;
         var sessionChanged = false;
+        // 🔴 A-2③ D15 ② — 붓기 전 세션 autocommit 을 기억했다가 그 값으로 되돌림(전역 0 인 PC 의 새 세션 = 0 · 열린 거래가 생기지 않게 붓기 동안만 1)
+        var priorAutocommit = 1L;
         try
         {
+            priorAutocommit = await _db.ExecuteScalarAsync<long>(new CommandDefinition("SELECT @@SESSION.autocommit", cancellationToken: ct)).ConfigureAwait(false);
             // ⬛ A-2② 옛 줄: "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO', time_zone = '+00:00', foreign_key_checks = 0, unique_checks = 0",
             // 🔴 A-2③ D15 ① — 서버 전역 autocommit = 0 인 고객 PC 대비: 붓기 세션은 autocommit = 1 을 명시(문장마다 커밋 · 열린 거래 0 · 다른 연결이 임시 표를 다 봄)
             await _db.ExecuteAsync(new CommandDefinition(
@@ -289,7 +292,8 @@ public sealed class RestoreSafePath : IRestoreSafePath
         }
         finally
         {
-            if (sessionChanged) await ResetSessionAsync().ConfigureAwait(false);
+            // ⬛ A-2② 옛 줄: if (sessionChanged) await ResetSessionAsync().ConfigureAwait(false);
+            if (sessionChanged) await ResetSessionAsync(priorAutocommit).ConfigureAwait(false);
         }
 
         // 붓기 뒤 회사 표지 — 임시 표에 다른 회사 줄 0(조건 4 · G3) · 대조 ④ 본체는 A-2③
@@ -446,15 +450,15 @@ public sealed class RestoreSafePath : IRestoreSafePath
         }
     }
 
-    private async Task ResetSessionAsync()
+    private async Task ResetSessionAsync(long priorAutocommit)
     {
         try
         {
             // ⬛ A-2② 옛 줄: "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1",
-            // 🔴 A-2③ D15 ② — autocommit 도 전역 값으로 되돌림(붓기 때 1 로 바꿨으므로)
+            // 🔴 A-2③ D15 ② — autocommit 도 붓기 전 값으로 되돌림(붓기 때 1 로 바꿨으므로 · 0/1 만)
             await _db.ExecuteAsync(new CommandDefinition(
-                "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1, autocommit = @@GLOBAL.autocommit",
-                cancellationToken: CancellationToken.None)).ConfigureAwait(false);
+                "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1, autocommit = @Ac",
+                new { Ac = priorAutocommit == 0 ? 0 : 1 }, cancellationToken: CancellationToken.None)).ConfigureAwait(false);
         }
         catch (DbException ex)
         {
