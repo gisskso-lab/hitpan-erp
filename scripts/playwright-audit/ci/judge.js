@@ -135,6 +135,9 @@ const EXPECT_CT_ROWS = [
   ['K35-CT2', 'CT2', 'off-logout', 'chromium'],
   ['K35-CT2', 'CT2', 'off-continue', 'chromium'],
   ['K35-CT3', 'CT3', 'reedit', 'chromium'],
+  // 🆕 11/28 쿨타임1b 고침 1 F2([4] P2-1) — HTTP 거절 탐침 2 · 기대 키 5 → 7(시험 6 · N4 1) · 자체시험 K-C22k 23 → 25 같은 커밋
+  ['K35-CT4', 'CT4', 'child-put-403', 'chromium'],
+  ['K35-CT4', 'CT4', 'root-put-405', 'chromium'],
   ['K35-CT-N4', 'N4', null, 'chromium'],
 ];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));

@@ -10,6 +10,7 @@
 @attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
 @inject SettingsService SettingsSvc
 @inject ISnackbar Snackbar
+@inject ILogger<AutoLogoutSettingsPage> Logger
 
 <PageTitle>자동 로그아웃 설정</PageTitle>
 
@@ -131,7 +132,10 @@ else
         catch (Exception ex)
         {
             _loadFailed = true;
-            Snackbar.Add($"설정을 불러오지 못했습니다: {ex.Message}", Severity.Error);
+            // ⬛ [옛 줄 · 고침 1 F1 이전 — 고객 화면에 기술 문구(ex.Message)가 그대로 보였다] Snackbar.Add($"설정을 불러오지 못했습니다: {ex.Message}", Severity.Error);
+            // 🆕 11/28 고침 1 F1([4] P2-3) — 화면엔 쉬운 말과 할 일만 · 원인은 기록으로(#15).
+            Logger.LogWarning(ex, "자동 로그아웃 설정 불러오기 실패");
+            Snackbar.Add("설정을 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.", Severity.Error);
         }
         finally
         {

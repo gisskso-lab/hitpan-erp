@@ -21,6 +21,7 @@ namespace HitPan.Tests.Integrity;
 /// <item><b>G-P3</b> 화면 — <c>@page "/settings/auto-logout"</c> 가 Web 전체에 정확히 1 · 부모 역할 <c>[Authorize]</c>.</item>
 /// <item><b>G-P4</b> 메뉴 — Sidebar 줄이 <c>@if (_isTenantAdmin)</c> 블록 안 · 닫힘 규칙에 안 걸림 · More 줄 1 + 부모 판정 거름([3-V] 보안상무 🟡).</item>
 /// <item><b>G-P5</b> 저장 배선 — <c>SaveCooltimeOnlyAsync</c> 본문 = Resolve + SaveCooltime · 루트 <c>SaveAsync(</c> 0.</item>
+/// <item><b>G-P6</b>(🆕 고침 1 F1) 화면 안내 — Snackbar 에 <c>ex.Message</c> 0 · 원인은 <c>LogWarning(ex, …)</c>.</item>
 /// </list>
 /// 변이 대조(빼면 빨강)는 개발명세서 <c>docs/개발/erp/20261128_쿨타임1b_설정자리옮김_개발명세서.md</c> 변이 표.
 /// </remarks>
@@ -210,5 +211,27 @@ public sealed class CooltimeSettingsPlaceGateTests
         Assert.Contains("ResolveCooltimeAsync(", body);
         Assert.Contains("SaveCooltimeAsync(tenantId, cooltime, ct)", body);
         Assert.DoesNotContain("SaveAsync(", body);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-P6 — 고객 화면 안내 글(🆕 11/28 고침 1 F1 · [4] P2-3)
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "G-P6 자동 로그아웃 설정 화면 — Snackbar 안내에 ex.Message 0 · 불러오기 실패 원인은 LogWarning(ex, …)")]
+    public void G_P6_안내글에_기술문구_0()
+    {
+        var path = Path.Combine(RepoRoot(), "src", "HitPan.Web", "Pages", "Settings", "AutoLogoutSettingsPage.razor");
+        var live = StripRazorComments(Live(path));
+
+        var calls = System.Text.RegularExpressions.Regex.Matches(live, @"Snackbar\.Add\(.*?\);", System.Text.RegularExpressions.RegexOptions.Singleline)
+            .Select(m => m.Value)
+            .ToList();
+        Assert.NotEmpty(calls);
+        var leaking = calls.Where(c => c.Contains("ex.Message", StringComparison.Ordinal)).ToList();
+        Assert.True(leaking.Count == 0, "G-P6 Snackbar 안내에 ex.Message 가 보인다: " + string.Join(" | ", leaking));
+
+        Assert.Contains("@inject ILogger<AutoLogoutSettingsPage> Logger", live);
+        Assert.Contains("Logger.LogWarning(ex, \"자동 로그아웃 설정 불러오기 실패\");", live);
+        Assert.Contains("Snackbar.Add(\"설정을 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요.\", Severity.Error);", live);
     }
 }

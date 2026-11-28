@@ -1377,6 +1377,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-CT1', 'CT1', 'tab2-continue', 'chromium'),
       fG('K35-CT2', 'CT2', 'off-logout', 'chromium'), fG('K35-CT2', 'CT2', 'off-continue', 'chromium'),
       fG('K35-CT3', 'CT3', 'reedit', 'chromium'),
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2(작업지시서 고침 1 표에서 따로 적음)
+      fG('K35-CT4', 'CT4', 'child-put-403', 'chromium'), fG('K35-CT4', 'CT4', 'root-put-405', 'chromium'),
       fG('K35-CT-N4', 'N4', null, 'chromium', 'DEVICE'),
     ];
     const F_G_N = fGRows().length;
@@ -1885,8 +1887,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 2차] const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 2차] check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 쿨타임 화면 실측 3(11/28) — 쿨타임 키 5(시험 4 · N4 1) 추가로 23(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음

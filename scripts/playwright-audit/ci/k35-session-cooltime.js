@@ -1,7 +1,8 @@
 // K 본문 — 쿨타임(설정 시각 자동 로그아웃) 화면 실측 3 (PM 결정 §288 ④ · 개발명세서 docs/개발/erp/20261128_쿨타임1b_화면실측3_개발명세서.md)
 //
 // 🔴 이 파일의 규칙(k35-popup.js 와 같은 꼴)
-//   ① 기록은 kit35.recK 하나로만 — 키 = judge.js EXPECT_CT_ROWS(쿨타임 기대 키 5 = 시험 4 · N4 1). 밖 = 던짐.
+// ⬛ [낡은 줄 · 고침 1 F2 이전] //   ① 기록은 kit35.recK 하나로만 — 키 = judge.js EXPECT_CT_ROWS(쿨타임 기대 키 5 = 시험 4 · N4 1). 밖 = 던짐.
+//   ① 기록은 kit35.recK 하나로만 — 키 = judge.js EXPECT_CT_ROWS(쿨타임 기대 키 7 = 시험 6(CT1 · CT2 둘 · CT3 · CT4 HTTP 거절 둘) · N4 1). 밖 = 던짐.
 //   ② 판정은 주소 · 팝업(물음 창) 보임 · 서버 응답 코드 · 서버 값으로만. 단언 전 실패(로그인 · 설정 저장 · 시간초과) = 그 키에 DEVICE 거짓.
 //   ③ 그림은 kit35.guardedShot 하나로만(찍기 전·뒤 화면 글자 대조 · 그림 픽셀 = 미측정) → 쿨타임 N4 줄(K35-CT-N4) 한 줄.
 //   ④ 시각 맞추기 — 러너 시계 = 서버 시계(같은 러너). 설정 시각 C = 지금+45초 뒤 첫 분 경계(첫 바퀴는 5분 눈금이 아니게 1분 더).
@@ -40,6 +41,9 @@ const KEY = {
   offOut: key('K35-CT2', 'CT2', 'off-logout'),
   offCont: key('K35-CT2', 'CT2', 'off-continue'),
   reedit: key('K35-CT3', 'CT3', 'reedit'),
+  // 🆕 11/28 쿨타임1b 고침 1 F2([4] P2-1) — HTTP 거절 탐침 2(기대 키 5 → 7 · judge.js EXPECT_CT_ROWS · 자체시험 K-C22k 같은 커밋)
+  childPut: key('K35-CT4', 'CT4', 'child-put-403'),
+  rootPut: key('K35-CT4', 'CT4', 'root-put-405'),
 };
 const N4_KEY = key('K35-CT-N4', 'N4', null);
 const WHAT = {
@@ -47,6 +51,8 @@ const WHAT = {
   offOut: 'CT2 물음 중 끔(지금 로그아웃): 물음 떠 있는 동안 관리자가 끔 → [아니요 — 지금 로그아웃] → /login · 옛 토큰 요청 401(서버 세션 끝)',
   offCont: 'CT2 물음 중 끔([계속]): 물음 떠 있는 동안 관리자가 끔 → [예 — 계속 작업] → 서버 409 → 다시 물음 → 물음만 닫힘 · 로그인 유지 · state 200',
   reedit: 'CT3 고친 퇴근 다시 고치기: 자동 로그아웃이 적은 퇴근(자동)을 근태 화면에서 고침 → 다시 고침 → 둘째 값이 화면 · API 같음 · 출처 edited · 고친 기록 2',
+  childPut: 'CT4 자식 거절: 자식(직원) 세션으로 PUT /api/settings/cooltime → 403(부모만 · 값은 지금 값 그대로 보냄 = 뚫려도 바뀜 0) · 본문 꼴 기록',
+  rootPut: 'CT4 루트 닫힘: 부모 세션으로 루트 PUT /api/settings → 405(닫힌 주소) · 본문 꼴 그대로 기록(빈 본문이라 단정 안 함)',
 };
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -669,6 +675,61 @@ async function ct3(st) {
   }
 }
 
+// ── 🆕 11/28 쿨타임1b 고침 1 F2([4] P2-1) — HTTP 거절 탐침 2(CT4 · 바퀴 A 앞 · 쿨타임 켜기 전) ──
+//   ⓐ 자식(가 · seed-children.js 와 같은 기기 꼴 'GA') 세션으로 PUT /api/settings/cooltime → 403
+//   ⓑ 부모 세션으로 루트 PUT /api/settings → 405(W-S-01 A 로 닫힘). 본문은 실제 꼴(길이 · 꼴 · 앞 60자 가림)을 남긴다 — 빈 본문이라 단정하지 않는다(§321).
+//   보내는 본문 = 부모가 읽은 지금 쿨타임 값 그대로 — 탐침이 뚫려도 바뀌는 값 0. 연 세션은 끝에 모두 놓는다.
+//   kit35.apiCall 은 JSON 아닌 본문을 버려서 본문 꼴을 못 남긴다 → 같은 머리(기기 꼴 UA · 출입증 · 기기 번호)로 여기서 따로 부른다.
+async function rawCall(method, p, sess, body) {
+  const headers = { 'Content-Type': 'application/json', 'User-Agent': K.UA };
+  if (sess && sess.token) headers.Authorization = `Bearer ${sess.token}`;
+  if (sess && sess.deviceId) headers['X-HitPan-Device-Id'] = sess.deviceId;
+  const res = await fetch(`${K.BASE}${p}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  return {
+    status: res.status,
+    contentType: res.headers.get('content-type') || null,
+    allow: res.headers.get('allow') || null,
+    bodyLength: text.length,
+    bodyHead: text ? L.sanitize(text.replace(/\s+/g, ' ').trim(), 60) : '',
+  };
+}
+async function probes(st) {
+  let cur = null;
+  const stepR = { now: '부모 API 로그인 · 지금 값 읽기' };
+  try {
+    cur = await adminCall(async (s) => {
+      const g = await K.apiCall('GET', '/api/settings/cooltime', { sess: s });
+      if (g.status !== 200 || !g.json) throw new K.KitStepError(`부모 설정 읽기 status=${g.status}`);
+      stepR.now = '부모 루트 PUT /api/settings';
+      const r = await rawCall('PUT', '/api/settings', s, g.json);
+      console.log(`K 쿨타임 CT4 루트 PUT status=${r.status} · 꼴 ${r.contentType || '-'} · 본문 ${r.bodyLength}자`);
+      rec(st, 'rootPut', { pass: r.status === 405, got: r });
+      return g.json;
+    });
+  } catch (e) {
+    dev(st, 'rootPut', stepR, e);
+  }
+  const stepC = { now: '자식(가) API 로그인' };
+  let ga = null;
+  try {
+    if (!cur) throw new K.KitStepError('지금 값 못 읽음 — 보낼 본문 없음(바뀜 0 을 지킬 수 없어 안 보냄)');
+    ga = await K.apiLogin('GA', ID.ga, PW.ga);
+    stepC.now = '자식 PUT /api/settings/cooltime';
+    const r = await rawCall('PUT', '/api/settings/cooltime', ga, cur);
+    console.log(`K 쿨타임 CT4 자식 PUT status=${r.status} · 꼴 ${r.contentType || '-'} · 본문 ${r.bodyLength}자`);
+    rec(st, 'childPut', { pass: r.status === 403, got: r });
+  } catch (e) {
+    dev(st, 'childPut', stepC, e);
+  } finally {
+    if (ga) {
+      const lo = await K.apiLogout(ga);
+      console.log(`K 쿨타임 CT4 가 API 로그아웃 ${lo.got}`);
+      if (!lo.ok) st.logoutFail += 1;
+    }
+  }
+}
+
 // ── 쿨타임 N4 줄(이 몸 그림 전부 · DEVICE) — kit35.recN4 와 같은 순서: 봉인 → 판정 → (거짓이면) 표지 먼저 → 기록 ──
 function recCtN4(st, forcedWhy = null) {
   for (const kb of st.kbs) kb.sealed = true;
@@ -727,7 +788,8 @@ async function main() {
   const st = st0;
   st.r = L.loadResult();
   L.bindAutosave(st.r);
-  const allKeys = [KEY.tab2, KEY.offOut, KEY.offCont, KEY.reedit];
+  // ⬛ [낡은 줄 · 고침 1 F2 이전] const allKeys = [KEY.tab2, KEY.offOut, KEY.offCont, KEY.reedit];
+  const allKeys = [KEY.tab2, KEY.offOut, KEY.offCont, KEY.reedit, KEY.childPut, KEY.rootPut];
   let fatalOnce = false;
   const fatal = (where) => (e) => {
     if (fatalOnce) return;
@@ -762,6 +824,7 @@ async function main() {
     console.log(`K 쿨타임 시작 전 실패 — ${pre}`);
     K.fillDevice(st.r, allKeys, `단언 전 실패 — ${pre}`);
   } else {
+    await probes(st); // 🆕 고침 1 F2 — 쿨타임 켜기 전(물음 · 끝냄과 겹침 0)
     await cycleA(st);
     await cycleB(st);
     await ct3(st);
