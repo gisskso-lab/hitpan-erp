@@ -25,7 +25,8 @@ namespace HitPan.Tests.Integrity;
 /// 변이 대조(빼면 빨강)는 개발명세서 <c>docs/개발/erp/20261127_W-S-01_갈래A_개발명세서.md</c> 에 런 기록.
 /// <para>
 /// 🔴 W-S-04 (2026-11-28 · 설계 §5 G-S4-1) — 같은 장치에 ERP 채팅 닫힌 2 경로 · 대조군 5 경로를 더했다(닫힌 12 · 대조군 17).
-/// 06-9 동작 · 웹 호출 0 은 <see cref="BetaClosedChatGateTests"/> · 변이 기록은 <c>docs/개발/erp/20261128_W-S-04_서버문닫기_채팅_개발명세서.md</c>.
+/// 고침 1 F2 — 채팅 대조군 6 경로를 더 더했다(대조군 23 · 채팅 11).
+/// 06-9 동작 · 웹 호출 0 은 <see cref="BetaClosedChatGateTests"/> · HTTP 바인딩은 <see cref="BetaClosedChatHttpGateTests"/> · 변이 기록은 <c>docs/개발/erp/20261128_W-S-04_서버문닫기_채팅_개발명세서.md</c>.
 /// </para>
 /// </remarks>
 public sealed class BetaClosedServerGateTests
@@ -76,6 +77,14 @@ public sealed class BetaClosedServerGateTests
         "GET api/chat/unread-count",
         "POST api/chat/rooms/{roomId}/files",
         "GET api/chat/rooms",
+        // 🔴 W-S-04 고침 1 F2 (2026-11-28 · [4] P3-2 · [3-V] P3-1) — 남은 채팅 경로 6(ChatController 라우트로 실재 확인).
+        //   이웃 액션을 잘못 닫으면 여기서 빨강. employees = CI 약관 차단 탐침(device-check.js) · POST rooms = CI 씨앗(seed-children.js) 이 쓴다.
+        "POST api/chat/rooms",
+        "POST api/chat/rooms/{roomId}/leave",
+        "POST api/chat/rooms/{roomId}/read",
+        "GET api/chat/employees",
+        "GET api/chat/documents",
+        "GET api/chat/files/{fileId}",
     };
 
     private static readonly Lazy<HashSet<string>> Discovered = new(DiscoverRoutes);
