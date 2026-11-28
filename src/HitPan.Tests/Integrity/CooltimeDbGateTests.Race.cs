@@ -9,7 +9,7 @@ using Xunit;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
-/// 🆕 2026-11-28 쿨타임 1-b HQA 반려 P1 — <b>G-C25 ⓐ ~ ⓖ</b>(설정 끄기 · 시각 바꾸기 경주 · 순서 강제) ·
+/// 🆕 2026-11-28 쿨타임 1-b HQA 반려 P1 — <b>G-C25 ⓐ ~ ⓖ</b>(설정 끄기 · 시각 바꾸기 경주 · 순서 강제 · 🆕 고침 2 <b>ⓗ</b> 끄고 바로 다시 켬) ·
 /// <b>G-C26 ⓐ ⓑ</b>(잠금 순서 · 교착 0)를 <b>실제 DB</b>로 잰다.
 /// </summary>
 /// <remarks>
@@ -240,6 +240,38 @@ public sealed partial class CooltimeDbGateTests
         Assert.Equal(0, await SessionExistsAsync(db, sid));
         Assert.Equal(1, await RevokedAsync(db, rt));
         Assert.Contains((_tenantA, sid, CooltimeEndCause.NoAnswer), pusher.Ended);
+    }
+
+    // 🆕 11/28 고침 2([4] P2-1) — 「끄고 바로 다시 켬(시각 같음)」. 켬 · cooltime_at 은 읽은 값과 같아지고
+    //   cooltime_changed_at 만 바뀐다(저장 UPSERT 의 CASE 가 0→1 에서 새로 적음) ⇒ 재확인의 그 칸 비교만 이 경주를 막는다.
+    //   ⓒ ⓓ 는 cooltime_at 도 바꾸므로 그 칸 비교만으로 빨개진다 — 이 시험이 없으면 changed_at 비교를 빼도(변이 M6) 아무것도 안 빨개진다.
+    [Fact(DisplayName = "G-C25 ⓗ 읽기 → 저장(끔) 커밋 → 저장(켬 · 같은 시각) 커밋 → 오래된 값으로 ② 놓침 = 끝냄 0 · 세션 유지 · refresh 미폐기 · 근태 무변경(cooltime_changed_at 이 바뀌어 물러남)")]
+    public async Task G_C25h_끄고_바로_다시_켠_뒤_오래된_바퀴는_놓침으로_끝내지_않는다()
+    {
+        if (!Ready("G-C25 ⓗ")) return;
+        await using var db = await OpenAsync();
+        var pusher = new CountingPusher();
+        var s = await MissedSetupAsync(db, _tenantA);
+        var engine = Engine(db, pusher);
+
+        var snap = await SnapshotAsync(engine, _tenantA);
+        Assert.Null(snap.ChangedAtUtc);                                                // 준비 확인 — 읽은 값 = 기록 없는 옛 행(NULL)
+        await new SettingsService(db).SaveAsync(CooltimeDto(false, "22:00"), _tenantA);
+        await new SettingsService(db).SaveAsync(CooltimeDto(true, "22:00"), _tenantA);
+        var after = await db.QueryFirstAsync<(long On, TimeSpan? At, DateTime? Changed)>(
+            "SELECT CAST(cooltime_enabled AS SIGNED), cooltime_at, cooltime_changed_at FROM tenant_settings WHERE tenant_id = @T",
+            new { T = _tenantA });
+        // 준비 확인 — 켬 · 시각은 읽은 값과 같고 변경 시각만 새로 적혔다(이 칸 하나가 다른 경주임을 보인다)
+        Assert.Equal(1, after.On);
+        Assert.Equal<TimeSpan?>(snap.CooltimeAt, after.At);
+        Assert.NotNull(after.Changed);
+        var r = await engine.RunTenantAsync(snap, s.NowLocal);
+
+        Assert.Equal(0, r.EndedMissed);
+        Assert.Equal(0, r.EndedNoAnswer);
+        Assert.Equal(0, r.Asked);
+        await AssertNotEndedAsync(db, pusher, s, "G-C25 ⓗ");
+        Assert.Empty(pusher.Prompts);
     }
 
     // ══════════════════════════════════════════════════════════════

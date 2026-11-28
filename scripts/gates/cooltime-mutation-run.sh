@@ -81,6 +81,9 @@ MUTATIONS=(
   "M3d|$ENGINE| AND cooltime_at <=> @At AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE\"| LOCK IN SHARE MODE\"|$DB.G_C25d_|1"
   "M4-26b|$ENGINE|<=> @Changed LOCK IN SHARE MODE\"|<=> @Changed\"|$DB.G_C26b_|1"
   "M5-26a|$ENGINE|if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|if (expected is not null && await _db.ExecuteAsync(new CommandDefinition(\"SELECT session_id FROM user_sessions WHERE session_id = @Sid FOR UPDATE\", new { Sid = sessionId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false) > int.MinValue && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|$DB.G_C26a_|1"
+  # ── 🆕 11/28 고침 2([4] P2-1) — M6 재확인 비교에서 cooltime_changed_at 조건만 뺌 → G-C25 ⓗ(끄고 바로 다시 켬 · 시각 같음) 빨강 ──
+  #   ⓒ ⓓ 는 cooltime_at 도 바꾸므로 M6 로는 안 빨개진다(그 칸 비교가 남음) ⇒ 대상 = ⓗ 하나.
+  "M6|$ENGINE| AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE\"| LOCK IN SHARE MODE\"|$DB.G_C25h_|1"
 )
 
 want=" $* "
