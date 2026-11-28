@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ChatService Chat
 @inject NotificationClient Notify
+@inject ILogger<ChatButton> Logger
 
 @* ═══════════════════════════════════════════════════════════════
    상단바 메신저 버튼 + 안 읽은 수 배지. 작(2026-08-13).
@@ -85,7 +86,8 @@
             catch (Exception ex)
             {
                 // 헌법 #15 — 빈 catch 금지. 배지만 못 세고 화면은 살려 둔다.
-                Console.Error.WriteLine($"[ChatButton] 안 읽은 수 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ChatButton] 안 읽은 수 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+                Logger.LogWarning(ex, "[ChatButton] 안 읽은 수 갱신 실패");
             }
         });
     }
@@ -103,7 +105,8 @@
         {
             // 🔴 작(2026-08-14): 여기서 터지면 부르는 쪽(상단바)까지 함께 죽어 흰 띠가 뜬다.
             //   못 세면 종전 숫자를 그대로 둔다 — 0 으로 되돌리면 "읽었다"는 거짓말이 된다.
-            Console.Error.WriteLine($"[ChatButton] 안 읽은 수 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ChatButton] 안 읽은 수 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[ChatButton] 안 읽은 수 조회 실패");
         }
 
         StateHasChanged();

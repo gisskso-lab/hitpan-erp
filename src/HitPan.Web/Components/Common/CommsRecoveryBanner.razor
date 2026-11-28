@@ -7,6 +7,7 @@
 @using System.Threading
 @inject HttpClient Http
 @inject NavigationManager Nav
+@inject ILogger<CommsRecoveryBanner> Logger
 @implements IDisposable
 
 @if (_state == CommsState.Down)
@@ -100,7 +101,8 @@ else if (_state == CommsState.Recovering)
                 catch (Exception ex)
                 {
                     // 헌법 #15 — 빈 catch 금지. 다음 주기에 다시 재본다.
-                    Console.Error.WriteLine($"[CommsRecoveryBanner] 통신 점검 실패: {ex.GetType().Name}: {ex.Message}");
+                    // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[CommsRecoveryBanner] 통신 점검 실패: {ex.GetType().Name}: {ex.Message}");
+                    Logger.LogWarning(ex, "[CommsRecoveryBanner] 통신 점검 실패");
                 }
             });
         }, null, 5_000, PollIntervalMs);

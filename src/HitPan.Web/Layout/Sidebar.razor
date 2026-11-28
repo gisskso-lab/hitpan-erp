@@ -15,6 +15,7 @@
 @inject UpdatePromptBus PromptBus
 @* 20261005작5 §5-4 — 「직원 계정 관리」 단계 읽기(AccountLinkApi · DI 등록 없이) *@
 @inject ILogger<AccountLinkApi> LinkLog
+@inject ILogger<Sidebar> Logger
 @implements IDisposable
 
 @*
@@ -514,7 +515,8 @@
         {
             // 헌법 #15 — 빈 catch 금지. 여기서 터져도 메신저는 열어 준다.
             // (JS 가 아직 안 올라온 순간에 누르면 날 수 있다 — 일을 막을 이유가 아니다.)
-            Console.Error.WriteLine($"[Sidebar] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[Sidebar] 메신저 창 열기 실패");
         }
 
         Nav.NavigateTo("/chat");
@@ -567,7 +569,8 @@
         catch (Exception ex)
         {
             // 판정에 실패하면 **안 보여준다.** 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
-            Console.Error.WriteLine($"[Sidebar] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[Sidebar] 계정 유형 판정 실패");
             _isTenantAdmin = false;
         }
 
@@ -613,7 +616,8 @@
             }
             catch (Exception _hp15Ex)
             {
-                Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+                Logger.LogWarning(_hp15Ex, "[HP15] 결재 대기 수 조회 실패");
                 // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
                 // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
                 _approvalPendingCount = 0;
@@ -657,7 +661,8 @@
         {
             _csHqUnread = 0;
             _csReplyUnread = 0;
-            Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
+            Logger.LogWarning(ex, "[Sidebar] CS 안읽음 수 조회 실패");   // #15
         }
     }
 

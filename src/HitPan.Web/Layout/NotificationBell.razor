@@ -5,6 +5,7 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject ILogger<NotificationBell> Logger
 
 @* 작(2026-08-13) 그룹웨어 단계2 — 앱 내 알림.
 
@@ -155,7 +156,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[NotificationBell] 토스트에서 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[NotificationBell] 토스트에서 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[NotificationBell] 토스트에서 메신저 창 열기 실패");
             Snackbar.Add("메신저 창을 열지 못해 히트판 화면 안에서 대화방을 엽니다.", Severity.Warning);
             Nav.NavigateTo(link);
         }
@@ -182,7 +184,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지. 못 열었다고 화면을 죽이지 않는다(TopHeader 와 같은 꼴).
-            Console.Error.WriteLine($"[NotificationBell] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[NotificationBell] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[NotificationBell] 메신저 창 열기 실패");
             Snackbar.Add("메신저 창을 열지 못해 히트판 화면 안에서 대화방을 엽니다.", Severity.Warning);
             Nav.NavigateTo(link);
         }
