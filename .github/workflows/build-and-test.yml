@@ -358,7 +358,7 @@ jobs:
   db-gate:
     name: DB 게이트 (Integrity — 실제 DB 실행)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60   # 측정 전용(머지 금지) — 복원 교체 변이 재측정 M10 · S15
     services:
       mariadb:
         image: mariadb:11.4
@@ -1499,6 +1499,21 @@ jobs:
             exit 1
           fi
           echo "SKIP 없음 — 게이트가 실제로 돌았다."
+
+      - name: 측정 전용 — 복원 교체 변이 런 (머지 금지 · W-G1-52 A-2③ 고침 1-3)
+        if: always()
+        env:
+          CI: 'true'
+          HITPAN_REQUIRE_DB: 'true'
+          HITPAN_MYSQL: 'mysql'
+          HITPAN_DB_HOST: '127.0.0.1'
+          HITPAN_DB_PORT: '3306'
+          HITPAN_DB_USER: 'root'
+          HITPAN_DB_PASS: 'dbgate_ci'
+          HITPAN_TEST_DB: 'hitpan_e2e'
+        run: |
+          set -o pipefail
+          bash scripts/gates/restore-swap-mutation-run.sh M10 S15 2>&1 | tee "$RUNNER_TEMP/restore-swap-mut.log"
 
       - name: Upload gate results
         if: always()
