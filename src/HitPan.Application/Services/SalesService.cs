@@ -125,6 +125,10 @@ public class SalesService : ISalesService
         //   id 가 빈 줄(이름으로 찾기 · 이미 이 회사 안에서만 찾음)은 함수가 뺀다.
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId?.Trim()), null, ct);
+        // 🔴 후9 W7(작업지시서 20261129작 · 설계 §4-2) — 같은 자리에서 창고도 본다: 이 회사 · 활성 창고만
+        //   (ResolveLineWarehouse 가 받는 요청 원값 · 빈 칸 = 서버 기본창고 길이라 건너뜀).
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.WarehouseId), null, ct);
 
         // 🔴 20260828작14 W5 — P0-1 봉합: **화면이 지나가는 경로에 잔량 검사를 둔다.**
         //
@@ -994,6 +998,10 @@ public class SalesService : ISalesService
         // 🔴 W-G1-51 후1 E6 — 트랜잭션 · 머리 UPDATE 전에 본다(회사 값 = JWT 에서 온 인자).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, dto.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W8(작업지시서 20261129작 · 설계 §4-2) — 같은 자리 · 트랜잭션 전에 창고도 본다: 이 회사 · 활성 창고만
+        //   (요청 원값 · 쉬게 한 창고가 든 옛 초안 수정도 거절 = CTO 전결 K4 (가) · 확정 · 취소는 그대로 됨).
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _db, tenantId, dto.Items.Select(x => x.WarehouseId), null, ct);
 
         // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 자동 2배 제거 — 생성 경로(:112)와 동일 사유.
         //   두 경로를 함께 뺀다. 한쪽만 빼면 "만들 때와 고칠 때 수량이 달라지는" 더 나쁜 상태가 된다.
@@ -2295,6 +2303,9 @@ public class SalesService : ISalesService
         //   원 거래명세 잔량으로 걸리는 간접 차단은 그대로 둔다(원본이 옛 무검사 자료일 수 있어 그것만 믿지 않는다).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W9a(작업지시서 20261129작 · 설계 §4-2) — 같은 자리에서 창고도 본다: 이 회사 · 활성 창고만(요청 원값 · 빈 칸 = 건너뜀).
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
 
         // 🔴 20260828작14 W5 — 잔량 기준 (사장님 결재 4·6).
         //
@@ -2450,6 +2461,10 @@ public class SalesService : ISalesService
         //   반드시 머리 UPDATE 앞에서 본다(거절되면 머리 · 기존 줄 그대로).
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
+        // 🔴 후9 W9b(작업지시서 20261129작 · 설계 §4-2) — 같은 자리 · 머리 UPDATE 앞에서 창고도 본다: 이 회사 · 활성 창고만
+        //   (쉬게 한 창고가 든 옛 초안 수정도 거절 = CTO 전결 K4 (가) · 확정 · 취소는 그대로 됨).
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
 
         var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
         decimal totalAmount = 0, totalVat = 0;
