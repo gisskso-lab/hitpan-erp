@@ -12,6 +12,8 @@
 //   ⑥ 연 세션은 장면 끝 finally 에서 반드시 로그아웃(§255 · 계정 잠김 사고 선례) · 브라우저를 닫는다.
 //   ⑦ 이 PC 에서 돌리지 않는다(이 PC DB = 실물) — CI 의 S8 에서만. 이름 = 다른 K 몸 뒤에 돈다(알파벳 순).
 //   ⑧ 고침 3 — 알려진 결함 대장(judge.js KNOWN_DEFECT_ROWS · 첫 화면 2 장면) 꼴일 때만 결과 칸 머리에 표지 · 끝 코드는 판정기 면제 함수를 쓴다(endCode).
+//   ⑨ 측정 M(11/28 · [1-V] 보충 1 · 검증팀 몫) — 진단은 로그 줄(K 닫힌문 dx* · 관찰 *)로만. 판정 식 · 기대 키 · 결과표 got · 알려진 결함 목록 손 0.
+//      관찰 장면 O1 · T1 · D1 은 recK 를 부르지 않는다(기대 키 7 그대로 · 자체시험 K-C22k).
 'use strict';
 
 const crypto = require('crypto');
@@ -42,8 +44,20 @@ const UPDATE_PATH = '/data/update'; // LocalSwapUiText.UpdatePath = PostLoginPat
 const WELCOME_PATH = '/welcome'; // BetaClosedRoutes.Welcome
 // 처리기가 돌았다는 표지(DeviceController 의 두 액션이 내는 응답 글자 · 칸 이름)
 const HANDLER_WORDS = ['등록 정보가 올바르지 않습니다', '만료되었거나 이미 사용된 코드', 'qrImage', 'expiresInMinutes'];
-const S3_TOTAL_MS = 7 * 60 * 1000; // 이 몸 전체 상한(워크플로 S8 단계 상한 안)
+// ⬛ [낡은 줄 · 고침 3] const S3_TOTAL_MS = 7 * 60 * 1000; // 이 몸 전체 상한(워크플로 S8 단계 상한 안)
+// 🔴 측정 M(11/28 · [1-V] 보충 1 · 설계 로그인경합_첫화면403띠 §6) — 관찰 장면 셋(O1 · T1 · D1 · 각 150초 상한)이 판정 장면 뒤에 붙는다 → 14분.
+const S3_TOTAL_MS = 14 * 60 * 1000; // 이 몸 전체 상한(워크플로 S8 단계 상한 안)
 const TEXT_MS = 30000;
+// 🔴 측정 M — 진단 줄 상한(판정 칸 · 기대 키 · 알려진 결함 목록 손 0 · 로그 줄만 · 결과표 got 손 0)
+const MX_CON_MAX = 30; // 창 한 벌 · 구간 하나당 콘솔 error 줄 · 화면 예외 줄 각각
+const MX_LINE = 1500; // 줄당 글자(소독 뒤 자름)
+const MX_DOC_MAX = 30; // 문서 이동 기록
+const MX_FX_MAX = 200; // 4xx · 5xx 한 건 한 줄(로그 넘침 막기만 · 넘친 수는 끝 줄에)
+const OBS_SCENE_MS = 150000; // 관찰 장면 하나 상한
+const OBS_ID = { terms: 'ci-s3terms' }; // 장면 T1 — 약관 미동의 새 직원(기존 준비와 같은 만들기 길)
+const OBS_TERMS_NAME = '시험 약관미동의';
+// 장면 D1 — 지문(device-fingerprint.js _envSeed = 화면 크기 · 언어 · 시간대 · UA 숫자 뺀 글자)이 앞 장면들과 다르게 → 새 기기 꼴
+const D1_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36 HitPanCiNewDevice/1';
 
 const key = (id, g, p) => ({ id, g, path: p, browser: BROWSER });
 const KEY = {
@@ -308,7 +322,118 @@ async function openCtx(st, who, extra = {}) {
   page.on('pageerror', (e) => {
     if (kb.dx.unhandled.length < 6) kb.dx.unhandled.push(`화면 예외 ${L.errorName(e)}`);
   });
+  mxWatch(kb);
   return kb;
+}
+
+// ── 🔴 측정 M 진단(로그 줄만 · 판정 · got 손 0) ──
+//   받을 때 = 원문을 메모리에만 쌓음 · 찍을 때 = mxText(쿼리 뗌 · 출입증 꼴 가림 · K.consoleLine 소독 그대로)로 그 시점 등록 목록 소독.
+//   예외 = 4xx · 5xx 는 받는 즉시 한 줄(경로 = 쿼리 뗀 pathname · 소독) — 프로세스가 죽어도 남게.
+function mxNew() {
+  return { t0: Date.now(), con: [], conCount: 0, firstConAt: null, perr: [], perrCount: 0, docs: [], fxCount: 0, fxPrinted: 0 };
+}
+function mxReset(kb) {
+  kb.mx = mxNew();
+}
+const mxMs = (kb) => Date.now() - kb.mx.t0;
+function mxText(t, cap = MX_LINE) {
+  const s = String(t ?? '')
+    // 쿼리 · 조각은 떼되 stack 의 「:줄:칸」 꼬리는 남긴다(흰 띠 부품 파일:줄이 이 측정의 산출 · 자체 대조에서 꼬리가 먹히던 꼴 고침)
+    .replace(/(https?:\/\/[^\s?#"'<>()]*)[?#][^\s"'<>()]*?((?::\d+){1,2})?(?=[\s"'<>()]|$)/gi, (_, a, lc) => `${a}?(쿼리 뗌)${lc || ''}`)
+    .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]*)?/g, '(출입증 꼴 가림)');
+  return K.consoleLine(s, cap);
+}
+function mxWatch(kb) {
+  kb.mx = mxNew();
+  const page = kb.page;
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const m = kb.mx;
+    m.conCount += 1;
+    if (m.firstConAt === null) {
+      m.firstConAt = mxMs(kb);
+      console.log(`K 닫힌문 dxfirst ${kb.who} 첫 콘솔 error +${m.firstConAt}ms`);
+    }
+    if (m.con.length < MX_CON_MAX) m.con.push({ at: mxMs(kb), text: String(msg.text()) });
+  });
+  page.on('pageerror', (e) => {
+    const m = kb.mx;
+    m.perrCount += 1;
+    if (m.perr.length < MX_CON_MAX) {
+      m.perr.push({ at: mxMs(kb), name: e && e.name ? String(e.name) : 'Error', message: String((e && e.message) || ''), stack: String((e && e.stack) || '') });
+    }
+  });
+  page.on('request', (req) => {
+    let mainDoc = false;
+    try {
+      mainDoc = req.isNavigationRequest() && req.frame() === page.mainFrame();
+    } catch (e) {
+      mainDoc = false;
+    }
+    if (mainDoc && kb.mx.docs.length < MX_DOC_MAX) kb.mx.docs.push({ req, path: pathOnly(req.url()), at: mxMs(kb), endAt: null, end: '대기' });
+  });
+  page.on('requestfinished', (req) => {
+    const x = kb.mx.docs.find((d) => d.req === req);
+    if (!x) return;
+    x.endAt = mxMs(kb);
+    req.response().then((r) => { x.end = r ? String(r.status()) : '응답 없음'; }, (e) => { x.end = `응답 읽기 실패 ${L.errorName(e)}`; });
+  });
+  page.on('requestfailed', (req) => {
+    const x = kb.mx.docs.find((d) => d.req === req);
+    if (!x) return;
+    x.endAt = mxMs(kb);
+    const f = req.failure();
+    x.end = `실패 ${L.sanitize(f && f.errorText ? f.errorText : '-', 40)}`;
+  });
+  page.on('response', (res) => {
+    const s = res.status();
+    if (s < 400) return;
+    const m = kb.mx;
+    m.fxCount += 1;
+    if (m.fxPrinted >= MX_FX_MAX) return;
+    m.fxPrinted += 1;
+    console.log(`K 닫힌문 dx4xx ${s} ${res.request().method()} ${L.sanitize(pathOnly(res.url()), 200)} · ${kb.who} · +${mxMs(kb)}ms`);
+  });
+}
+// 구간 끝에 쌓은 것을 찍고 비운다(같은 줄 두 번 안 찍음)
+function mxFlush(kb, label) {
+  const m = kb.mx;
+  if (!m) return;
+  const tag = `${kb.who}${label ? ` ${label}` : ''}`;
+  console.log(`K 닫힌문 dxsum ${tag} · 4xx·5xx ${m.fxCount}건(찍음 ${m.fxPrinted}) · 콘솔 error ${m.conCount}건(찍음 ${m.con.length}) · 화면 예외 ${m.perrCount}건(찍음 ${m.perr.length}) · 첫 콘솔 error ${m.firstConAt === null ? '없음' : `+${m.firstConAt}ms`}`);
+  for (const d of m.docs) console.log(`K 닫힌문 dxdoc ${tag} ${L.sanitize(d.path, 200)} 시작 +${d.at}ms 끝 ${d.endAt === null ? '-' : `+${d.endAt}ms`} ${d.end}`);
+  m.con.forEach((x, i) => console.log(`K 닫힌문 dxcon ${tag} #${i + 1} +${x.at}ms ${mxText(x.text)}`));
+  m.perr.forEach((x, i) => console.log(`K 닫힌문 dxperr ${tag} #${i + 1} +${x.at}ms 이름=${L.errorName({ name: x.name })} ${mxText(`글=${x.message} stack=${x.stack}`)}`));
+  m.con = []; m.perr = []; m.docs = [];
+}
+// 화면 한 번 보기 — 주소 · 흰 띠(보임 · 안 글) · 보이는 스낵바 글 전부(읽기만)
+async function mxSnap(kb, label) {
+  const v = await K.withTimeout(kb.page.evaluate(() => {
+    const flat = (e) => String((e && (e.innerText || e.textContent)) || '').replace(/\s+/g, ' ').trim();
+    const band = document.getElementById('blazor-error-ui');
+    const shown = !!band && getComputedStyle(band).display !== 'none';
+    const snacks = Array.from(document.querySelectorAll('.mud-snackbar')).map(flat).filter((x) => x.length > 0).slice(0, 10);
+    return { path: location.pathname, shown, bandText: band ? flat(band) : null, snacks };
+  }), 10000, `화면 보기 ${label}`).catch((e) => ({ err: e instanceof K.KitStepError ? L.sanitize(e.message, 80) : L.errorName(e) }));
+  if (v.err) {
+    console.log(`K 닫힌문 dxsnap ${kb.who} ${label} 읽기 실패 ${v.err}`);
+    return;
+  }
+  const snacks = v.snacks.length === 0 ? '없음' : v.snacks.map((x, i) => `[${i + 1}] ${mxText(x, 300)}`).join(' ');
+  console.log(`K 닫힌문 dxsnap ${kb.who} ${label} 주소=${L.sanitize(v.path, 120)} · 흰 띠 ${v.shown ? '보임' : '안 보임'} · 띠 글=${v.bandText === null ? '(띠 없음)' : mxText(v.bandText, 300)} · 스낵바 ${v.snacks.length}개 ${snacks}`);
+}
+// 착지 뒤 3초 · 10초 두 번(배경 · 절대 던지지 않음 — 부른 쪽이 다음 장면 전 await)
+function landSnaps(kb, landAt = Date.now()) {
+  return (async () => {
+    try {
+      await K.sleep(Math.max(0, landAt + 3000 - Date.now()));
+      await mxSnap(kb, '착지+3초');
+      await K.sleep(Math.max(0, landAt + 10000 - Date.now()));
+      await mxSnap(kb, '착지+10초');
+    } catch (e) {
+      console.log(`K 닫힌문 dxsnap ${kb.who} 섰음 ${L.errorName(e)}`);
+    }
+  })();
 }
 // 쿼리 · 조각을 뗀 경로(토큰 · 열쇠 꼴 값이 쿼리로 실려도 got 에 안 들어감)
 function pathOnly(u) {
@@ -333,6 +458,7 @@ async function closeKb(st, kb) {
   if (kb.closed) return;
   kb.closed = true;
   K.flushConsole(kb);
+  mxFlush(kb, '끝'); // 🔴 측정 M — 남은 진단 찍기(로그아웃 · 닫기 전)
   if (kb.tok.access) {
     const lo = await K.apiLogout({ who: kb.who, token: kb.tok.access, deviceId: kb.tok.deviceId });
     console.log(`K 닫힌문 ${kb.who} 로그아웃 ${lo.got}`);
@@ -369,9 +495,15 @@ async function loginScreen(kb, loginId, password, { update = false } = {}) {
   kb.navs.length = 0; // 로그인 누름 뒤 이동만 센다
   // 🔴 고침 2 — 진단도 로그인 누름 뒤만 센다
   kb.dx.docs.length = 0; kb.dx.fails.length = 0; kb.dx.failCount = 0; kb.dx.unhandled.length = 0;
+  mxFlush(kb, '로그인 누름 전'); // 🔴 측정 M — 누름 전 것은 따로 찍고 시각 0 = 누름 직전
+  mxReset(kb);
+  console.log(`K 닫힌문 dxclick ${kb.who} 로그인 누름 +0ms${update ? ' · [최신버젼업데이트] 고름' : ''}`);
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   const note = { closed: 0, errs: 0 };
   const s = await DC.settleScreen(page, 90000, note);
+  // 🔴 측정 M — 착지 시각(자리 잡기 끝) · 3초 · 10초 보기의 0점
+  kb.mx.landAt = Date.now();
+  console.log(`K 닫힌문 dxland ${kb.who} 착지 +${mxMs(kb)}ms ${s.where}@${L.sanitize(s.path, 120)} · 새 기기 창 닫음 ${note.closed}`);
   const end = Date.now() + 10000;
   while (kb.login.seen === 0 && Date.now() < end) await K.sleep(250);
   await K.waitMasked(kb.tok);
@@ -383,12 +515,14 @@ async function loginScreen(kb, loginId, password, { update = false } = {}) {
 async function sceneHome(st) {
   const step = { now: '첫 로그인 상태 재현' };
   let kb = null;
+  let snaps = null; // 🔴 측정 M — 착지 3초 · 10초 보기(배경 · 판정 줄 시각 손 0 · 장면 2 전에 기다림)
   try {
     if (!st.prepOk) throw new K.KitStepError(`준비 실패 — ${st.prepWhy}`);
     resetFirstLogin(st);
     step.now = '브라우저 열기 · 화면 로그인';
     kb = await openCtx(st, 'S3HOME');
     const s = await loginScreen(kb, ID.fresh, st.freshPw);
+    snaps = landSnaps(kb, kb.mx.landAt);
     if (kb.login.seen === 0 || kb.login.redirect !== true || kb.login.terms !== false) {
       throw new K.KitStepError(`첫 로그인 상태 아님(로그인 응답 ${kb.login.seen}회 · 첫 로그인=${kb.login.redirect} · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
     }
@@ -405,6 +539,9 @@ async function sceneHome(st) {
   } catch (e) {
     dev(st, 'home', step, e);
   }
+  // 🔴 측정 M — 첫 화면 구간 진단을 끊어 찍고 장면 2 부터 새로 센다
+  if (snaps) await snaps;
+  if (kb) { mxFlush(kb, 'first-home'); mxReset(kb); }
   // 장면 2 — 같은 세션 그대로 주소창에 /welcome
   const step2 = { now: '직접 /welcome' };
   try {
@@ -441,12 +578,14 @@ async function sceneHome(st) {
 async function sceneUpdate(st) {
   const step = { now: '첫 로그인 상태 재현' };
   let kb = null;
+  let snaps = null; // 🔴 측정 M
   try {
     if (!st.prepOk) throw new K.KitStepError(`준비 실패 — ${st.prepWhy}`);
     resetFirstLogin(st);
     step.now = '브라우저 열기 · [최신버젼업데이트] · 화면 로그인';
     kb = await openCtx(st, 'S3UPD');
     const s = await loginScreen(kb, ID.fresh, st.freshPw, { update: true });
+    snaps = landSnaps(kb, kb.mx.landAt); // 🔴 측정 M
     if (kb.login.seen === 0 || kb.login.redirect !== true || kb.login.terms !== false) {
       throw new K.KitStepError(`첫 로그인 상태 아님(로그인 응답 ${kb.login.seen}회 · 첫 로그인=${kb.login.redirect} · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
     }
@@ -462,7 +601,9 @@ async function sceneUpdate(st) {
   } catch (e) {
     dev(st, 'update', step, e);
   } finally {
-    if (kb) await closeKb(st, kb);
+    // ⬛ [낡은 줄 · 고침 3] if (kb) await closeKb(st, kb);
+    if (snaps) await snaps; // 🔴 측정 M — 절대 던지지 않는 약속
+    if (kb) { mxFlush(kb, 'first-update'); await closeKb(st, kb); }
   }
 }
 
@@ -589,6 +730,82 @@ async function probes(st) {
   }
 }
 
+// ── 🔴 측정 M 관찰 장면 O1 · T1 · D1 — 로그 줄만(recK 0 · 기대 키 0 · 판정 0 · 끝 코드는 로그아웃 실패만 종전대로 셈) ──
+//   판정 장면 · 닫힌 문 시험이 다 적힌 뒤에 돈다(시간 상한에 걸려도 판정 줄은 이미 있음 · fillDevice 가 채울 키 없음).
+//   하나당 OBS_SCENE_MS 상한 · 남은 시간이 모자라면 「못 잼」 한 줄. 장면 몸은 스스로 잡아 절대 던지지 않는다(처리 안 된 거절 0).
+async function obsScene(st, label, fn) {
+  const left = st.t0 + S3_TOTAL_MS - Date.now();
+  if (left < OBS_SCENE_MS + 60000) {
+    console.log(`K 닫힌문 관찰 ${label} 못 잼 — 남은 시간 ${Math.round(left / 1000)}초(장면 상한 ${OBS_SCENE_MS / 1000}초 + 정리 60초 모자람)`);
+    return;
+  }
+  console.log(`K 닫힌문 관찰 ${label} 시작`);
+  const run = fn().then(
+    () => console.log(`K 닫힌문 관찰 ${label} 끝`),
+    (e) => console.log(`K 닫힌문 관찰 ${label} 못 만듦/섰음 — ${e instanceof K.KitStepError ? L.sanitize(e.message, 200) : `예외 ${L.errorName(e)}`}`),
+  );
+  await K.withTimeout(run, OBS_SCENE_MS, `관찰 ${label}`).catch((e) => console.log(`K 닫힌문 관찰 ${label} 시간 상한 — ${L.sanitize(e.message, 120)}(창은 끝 정리가 로그아웃 · 닫음)`));
+}
+// 화면 로그인 한 번 관찰(이동 목록 · 로그인 응답 참거짓 · 착지 · 3초 · 10초 보기 · 진단 찍기)
+async function obsLogin(kb, label, loginId, password) {
+  const s = await loginScreen(kb, loginId, password);
+  const snaps = landSnaps(kb, kb.mx.landAt);
+  console.log(`K 닫힌문 관찰 ${label} 로그인 응답 ${kb.login.seen}회 · status=${kb.login.status} · 첫 로그인=${kb.login.redirect} · 약관 필요=${kb.login.terms} · 새 기기=${kb.login.deviceNew} · 새 기기 창 닫음 ${s.noticeClosed}(실패 ${s.noticeCloseErrs})`);
+  console.log(`K 닫힌문 관찰 ${label} 착지 ${s.where}@${L.sanitize(s.path, 120)} · 이동 ${L.sanitize(kb.navs.join(' > ') || '없음', 600)}`);
+  await snaps;
+  const band = await errBand(kb.page);
+  console.log(`K 닫힌문 관찰 ${label} 마지막 주소 ${L.sanitize(K.pathOf(kb.page.url()).split('?')[0], 120)} · 흰 띠 ${band}`);
+  mxFlush(kb, label);
+}
+// O1 — 대표 계정 화면 로그인 첫 화면(대조군 · 첫 로그인 아님 · 약관 동의됨 가정은 결과 줄로 확인)
+async function obsOwner(st) {
+  if (!PW.parent) throw new K.KitStepError('못 만듦 — 대표 비번 환경 칸 비어 있음');
+  const kb = await openCtx(st, 'S3O1');
+  try {
+    await obsLogin(kb, 'O1', ID.parent, PW.parent);
+  } finally {
+    await closeKb(st, kb);
+  }
+}
+// T1 — 약관 미동의 새 직원(준비 prep 과 같은 만들기 길 · 약관 동의만 건너뜀) → 화면 로그인 → 문서 이동 목록 · 약관 화면
+async function obsTerms(st) {
+  if (!st.prepOk) throw new K.KitStepError(`못 만듦 — 준비 실패(${st.prepWhy})`);
+  const pw = `Ui#${crypto.randomBytes(16).toString('hex')}`;
+  L.maskAndRegister('PW_S3_TERMS', pw);
+  const p = await apiOpen(st, 'PARENT', ID.parent, PW.parent);
+  try {
+    const res = await K.apiCall('POST', '/api/users', {
+      sess: p,
+      body: { email: OBS_ID.terms, password: pw, userName: OBS_TERMS_NAME, empName: OBS_TERMS_NAME, role: 'User', confirmDifferentPerson: true },
+    });
+    if (res.status !== 201 && res.status !== 200) {
+      const j = res.json || {};
+      throw new K.KitStepError(`못 만듦 — 약관 미동의 직원 만들기 status=${res.status} code=${L.sanitize(String(j.code || j.message || ''), 80)}`);
+    }
+  } finally {
+    await apiClose(st, p);
+  }
+  const kb = await openCtx(st, 'S3T1');
+  try {
+    await obsLogin(kb, 'T1', OBS_ID.terms, pw);
+    const termsShown = await K.withTimeout(kb.page.evaluate(() => location.pathname), 10000, 'T1 주소').catch(() => null);
+    console.log(`K 닫힌문 관찰 T1 약관 화면 주소=${L.sanitize(String(termsShown), 120)}(가설 확정 꼴 = 문서 이동 /terms=실패 → /=200)`);
+  } finally {
+    await closeKb(st, kb);
+  }
+}
+// D1 — 새 기기 꼴(지문 재료가 다른 창 · 첫 로그인 지난 새 직원) → 새 기기 알림 창 보임(장치가 닫음 수) → 이동 목록
+async function obsNewDevice(st) {
+  if (!st.prepOk) throw new K.KitStepError(`못 만듦 — 준비 실패(${st.prepWhy})`);
+  const kb = await openCtx(st, 'S3D1', { viewport: { width: 1366, height: 700 }, screen: { width: 1366, height: 768 }, userAgent: D1_UA, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  try {
+    await obsLogin(kb, 'D1', ID.fresh, st.freshPw);
+    if (kb.login.deviceNew !== true) console.log(`K 닫힌문 관찰 D1 못 만듦 — 새 기기 꼴 아님(로그인 응답 새 기기=${kb.login.deviceNew}) · 까닭은 AuthController 새 기기 칸 조건 [4] 코드 반증 몫`);
+  } finally {
+    await closeKb(st, kb);
+  }
+}
+
 // 끝 정리 — 연 브라우저 세션 · API 세션 모두 로그아웃 · 브라우저 닫기. 실패는 수만 센다(던지지 않음).
 async function cleanup(st) {
   if (st.cleaned) return;
@@ -599,12 +816,13 @@ async function cleanup(st) {
 }
 
 const st0 = {
-  r: null, br: null, kbs: [], apiSess: [], logoutFail: 0, cleaned: false,
+  r: null, br: null, kbs: [], apiSess: [], logoutFail: 0, cleaned: false, t0: null,
   tid: null, parentUid: null, freshUid: null, freshPw: null, prepOk: false, prepWhy: null,
 };
 
 async function main() {
   const st = st0;
+  st.t0 = Date.now(); // 🔴 측정 M — 관찰 장면 남은 시간 셈의 0점(전체 상한 타이머와 같은 시각)
   st.r = L.loadResult();
   L.bindAutosave(st.r);
   const allKeys = Object.values(KEY);
@@ -652,6 +870,14 @@ async function main() {
   }
   await probes(st); // 브라우저 없이도 돈다
   K.fillDevice(st.r, allKeys, '경우 끝 뒤 남은 키(있으면 장치 오류)');
+  // 🔴 측정 M — 관찰 장면(판정 키 다 적힌 뒤 · 로그 줄만)
+  if (pre) {
+    console.log(`K 닫힌문 관찰 O1 · T1 · D1 못 잼 — ${pre}`);
+  } else {
+    await obsScene(st, 'O1', () => obsOwner(st));
+    await obsScene(st, 'T1', () => obsTerms(st));
+    await obsScene(st, 'D1', () => obsNewDevice(st));
+  }
   await cleanup(st);
   // ⬛ [낡은 줄 · 고침 2] const mine = st.r.rows.filter((x) => x.scope === 'K' && String(x.id || '').startsWith('K35-S3'));
   // ⬛ [낡은 줄 · 고침 2] const bad = mine.filter((x) => x.pass !== true).length;
