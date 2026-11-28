@@ -38,11 +38,14 @@ public sealed class DocumentPrintPreview
     //   상자 · 스낵바 · JS 글자는 종전 DownloadPdfAsync 몸통 그대로(아래 「종전(#1)」 주석과 대조).
     private readonly PdfDownloadUi _ui;
 
-    public DocumentPrintPreview(IDialogService dialog, ISnackbar snackbar, HttpClient http, IJSRuntime js)
+    // ⬛ [낡은 줄 · 화면오류기록띠] public DocumentPrintPreview(IDialogService dialog, ISnackbar snackbar, HttpClient http, IJSRuntime js)
+    //   화면오류기록띠 갈래 S — RenderedPdfDownload 의 기록기(자기 범주)를 DI 에서 받아 넘김(작업지시서 E6 · 1-인자 생성자는 시험용으로 남음)
+    public DocumentPrintPreview(IDialogService dialog, ISnackbar snackbar, HttpClient http, IJSRuntime js, ILogger<RenderedPdfDownload> pdfLogger)
     {
         _dialog = dialog;
         _snackbar = snackbar;
-        _pdf = new RenderedPdfDownload(http);
+        // ⬛ [낡은 줄 · 화면오류기록띠] _pdf = new RenderedPdfDownload(http);
+        _pdf = new RenderedPdfDownload(http, pdfLogger);
         _js = js;
         _ui = new PdfDownloadUi
         {

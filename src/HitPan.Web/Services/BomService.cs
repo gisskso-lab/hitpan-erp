@@ -4,7 +4,8 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class BomService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class BomService(HttpClient http)
+public sealed class BomService(HttpClient http, ILogger<BomService> logger)
 {
     public async Task<List<BomListModel>?> GetListAsync(CancellationToken ct = default)
     {
@@ -163,7 +164,8 @@ public sealed class BomService(HttpClient http)
             // 봉합 (2026-08-25, 20260825작1 W2-4): 빈 catch 였다(#15 위반).
             //   조회가 실패해도 null → 화면은 "미달 0건" 으로 읽는다 ⇒ 실패가 정상으로 위장된다.
             //   최소한 왜 실패했는지는 남긴다.
-            Console.Error.WriteLine($"[WARN] 안전재고 알림 조회 실패 — {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[WARN] 안전재고 알림 조회 실패 — {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[WARN] 안전재고 알림 조회 실패");
             return null;
         }
     }
@@ -201,7 +203,8 @@ public sealed class BomService(HttpClient http)
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                Console.Error.WriteLine($"[WARN] 자동발주 실패 — {(int)res.StatusCode}: {body}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[WARN] 자동발주 실패 — {(int)res.StatusCode}: {body}");
+                logger.LogWarning("[WARN] 자동발주 실패 — 서버 거절 ({Status}): {Body}", (int)res.StatusCode, body);
                 return null;
             }
 
@@ -214,7 +217,8 @@ public sealed class BomService(HttpClient http)
             // 봉합 (2026-08-25, 20260825작1 W2-4): 빈 catch 였다(#15 위반).
             //   서버가 "자동발주 공급처가 설정되지 않았습니다" 라고 알려줘도 통째로 버려져,
             //   화면엔 "1건 실패" 라는 노란 알림만 떴다 — 사장님이 이유를 알 방법이 없었다.
-            Console.Error.WriteLine($"[WARN] 자동발주 호출 실패 — {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[WARN] 자동발주 호출 실패 — {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[WARN] 자동발주 호출 실패");
             return null;
         }
     }

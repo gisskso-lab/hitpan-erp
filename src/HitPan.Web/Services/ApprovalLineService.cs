@@ -3,7 +3,8 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class ApprovalLineService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class ApprovalLineService(HttpClient http)
+public sealed class ApprovalLineService(HttpClient http, ILogger<ApprovalLineService> logger)
 {
     public async Task<List<ApprovalLineListItemModel>> GetListAsync(CancellationToken ct = default)
     {
@@ -14,7 +15,8 @@ public sealed class ApprovalLineService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ApprovalLineService.GetListAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.GetListAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[ApprovalLineService.GetListAsync] 조회 실패");
             return new List<ApprovalLineListItemModel>();
         }
     }
@@ -27,7 +29,8 @@ public sealed class ApprovalLineService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ApprovalLineService.GetAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.GetAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[ApprovalLineService.GetAsync] 조회 실패");
             return null;
         }
     }
@@ -40,13 +43,15 @@ public sealed class ApprovalLineService(HttpClient http)
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                Console.Error.WriteLine($"[ApprovalLineService.CreateAsync] {(int)res.StatusCode}: {body}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.CreateAsync] {(int)res.StatusCode}: {body}");
+                logger.LogWarning("[ApprovalLineService.CreateAsync] 서버 거절 ({Status}): {Body}", (int)res.StatusCode, body);
             }
             return res.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ApprovalLineService.CreateAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.CreateAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[ApprovalLineService.CreateAsync] 저장 실패");
             return false;
         }
     }
@@ -60,7 +65,8 @@ public sealed class ApprovalLineService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ApprovalLineService.UpdateAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.UpdateAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[ApprovalLineService.UpdateAsync] 저장 실패");
             return false;
         }
     }
@@ -74,7 +80,8 @@ public sealed class ApprovalLineService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ApprovalLineService.DeleteAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ApprovalLineService.DeleteAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[ApprovalLineService.DeleteAsync] 삭제 실패");
             return false;
         }
     }

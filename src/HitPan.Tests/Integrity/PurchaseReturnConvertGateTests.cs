@@ -335,7 +335,9 @@ public class PurchaseReturnConvertGateTests
             "GetPurchaseReturnListAsync("));
 
         Assert.DoesNotContain("catch { return new(); }", body);
-        Assert.Contains("Console.Error.WriteLine", body);
+        // ⬛ [낡은 줄 · 화면오류기록띠] Assert.Contains("Console.Error.WriteLine", body);
+        //   화면오류기록띠 갈래 S(작업지시서 E6) — 흔적은 흰 띠 대신 경고 기록으로(#15 원문 꼴 「최소 LogWarning(ex, ...)」)
+        Assert.Contains("logger.LogWarning(ex,", body);
     }
 
     // ── 사원별 현황 ──

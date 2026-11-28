@@ -8,6 +8,7 @@
 @inject TenantProfileService TenantProfile
 @inject IAuthService AuthService
 @inject NavigationManager Navigation
+@inject ILogger<MultiTabBar> Logger
 
 <div class="hitpan-tabbar">
     <div class="hitpan-tabbar-tabs">
@@ -78,7 +79,8 @@
             catch (Exception ex)
             {
                 // 헌법 #15 — 빈 catch 금지.
-                Console.Error.WriteLine($"[MultiTabBar] 탭 표시 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MultiTabBar] 탭 표시 갱신 실패: {ex.GetType().Name}: {ex.Message}");
+                Logger.LogWarning(ex, "[MultiTabBar] 탭 표시 갱신 실패");
             }
         });
     }
@@ -104,7 +106,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 탭 표시 읽기 실패");
             _userName = null;
             TenantProfile.Clear();
         }

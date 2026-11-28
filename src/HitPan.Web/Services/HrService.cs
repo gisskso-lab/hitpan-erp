@@ -4,7 +4,8 @@ using HitPan.Web.Models;
 namespace HitPan.Web.Services;
 
 /// <summary>인사·근태 API 클라이언트</summary>
-public sealed class HrClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class HrClientService(HttpClient http)
+public sealed class HrClientService(HttpClient http, ILogger<HrClientService> logger)
 {
     // 출퇴근
     public async Task<List<AttendanceModel>> GetAttendanceAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
@@ -97,7 +98,8 @@ public sealed class HrClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[HrService.ApproveOvertimeAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrService.ApproveOvertimeAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[HrService.ApproveOvertimeAsync] 처리 실패");
             return false;
         }
     }
@@ -116,8 +118,10 @@ public sealed class HrClientService(HttpClient http)
     /// 삼킨 예외는 없는 일이 된다. 화면은 "0건" 이나 "실패" 만 보여주고
     /// <b>왜 그런지는 아무 데도 안 남아</b> 나중에 원인을 못 찾는다.
     /// </remarks>
-    private static void LogFailure(string where, Exception ex)
-        => Console.Error.WriteLine($"[HrService.{where}] {ex.GetType().Name}: {ex.Message}");
+    // ⬛ [낡은 줄 · 화면오류기록띠] private static void LogFailure(string where, Exception ex)   — 기록기(인스턴스)를 쓰려고 static 뗌
+    private void LogFailure(string where, Exception ex)
+        // ⬛ [낡은 줄 · 화면오류기록띠] => Console.Error.WriteLine($"[HrService.{where}] {ex.GetType().Name}: {ex.Message}");
+        => logger.LogWarning(ex, "[HrService.{Where}] 실패", where);
 
     public async Task<bool> CreateHrExpenseAsync(CreateHrExpenseModel m, CancellationToken ct = default)
     {
@@ -160,7 +164,8 @@ public sealed class HrClientService(HttpClient http)
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지. 종전엔 `catch { return false; }` 라 원인이 사라졌다.
-            Console.Error.WriteLine($"[HrService] 경비 신청 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrService] 경비 신청 실패: {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[HrService] 경비 신청 실패");
             return (false, null);
         }
     }
@@ -176,8 +181,9 @@ public sealed class HrClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"[HrService] 경비 오류 응답 해석 실패({(int)res.StatusCode}): {ex.GetType().Name}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine(
+            // ⬛ [낡은 줄 · 화면오류기록띠]     $"[HrService] 경비 오류 응답 해석 실패({(int)res.StatusCode}): {ex.GetType().Name}");
+            logger.LogWarning(ex, "[HrService] 경비 오류 응답 해석 실패({Status})", (int)res.StatusCode);
             return null;
         }
     }

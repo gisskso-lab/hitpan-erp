@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace HitPan.Web.Services;
 
-public sealed class LogService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class LogService(HttpClient http)
+public sealed class LogService(HttpClient http, ILogger<LogService> logger)
 {
     private static readonly JsonSerializerOptions _opts = new(JsonSerializerDefaults.Web);
 
@@ -23,7 +24,8 @@ public sealed class LogService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[LogService.GetAuditTrail] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[LogService.GetAuditTrail] {ex.Message}");
+            logger.LogWarning(ex, "[LogService.GetAuditTrail] 조회 실패");
             return new List<AuditTrailRow>();
         }
     }
@@ -42,7 +44,8 @@ public sealed class LogService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[LogService.GetApiRequests] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[LogService.GetApiRequests] {ex.Message}");
+            logger.LogWarning(ex, "[LogService.GetApiRequests] 조회 실패");
             return new List<ApiRequestRow>();
         }
     }
