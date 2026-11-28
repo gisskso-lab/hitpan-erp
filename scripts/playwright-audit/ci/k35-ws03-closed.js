@@ -56,7 +56,11 @@ const WHAT = {
   home: '새 직원 첫 로그인(로그인 응답 첫 로그인=참 · 약관 동의됨) → 첫 화면 / · 환영 화면(/welcome) 이동 0 · 본 화면 자리 잡음 · 흰 띠 0',
   update: '새 직원 첫 로그인 + [최신버젼업데이트] 누름 → 수동 업데이트 화면(/data/update)으로 이동 · 환영 화면 이동 0 · 흰 띠 0',
   welcome: '로그인한 채 주소창에 /welcome 직접 → 「이 화면은 정식 판에서 열립니다」 안내 · 옛 환영 글 0 · 주소 그대로 · 흰 띠 0',
-  phone: '휴대폰 화면 크기 · 로그인 없이 /m/device-register(옛 QR 주소) → 「등록 없이 로그인」 안내 · 옛 등록 물음 0 · 옛 등록 요청 0 · 흰 띠 0',
+  // ⬛ [낡은 줄 · 고침 1] phone: '휴대폰 화면 크기 · 로그인 없이 /m/device-register(옛 QR 주소) → 「등록 없이 로그인」 안내 · 옛 등록 물음 0 · 옛 등록 요청 0 · 흰 띠 0',
+  //   🔴 고침 2(런 46118135957 · 개발명세서 「고침 2」 ③) — 설계 §4 「안내 + [로그인]」 은 화면 손 0 이다. 그 화면은 기본 틀 MainLayout
+  //   (MainLayout.razor:2 [Authorize] · :106 ~ :108 NotAuthorized → RedirectToLogin)을 써서 로그인 없으면 /login 으로 간다(main 과 같음).
+  //   ⇒ 로그인 없음 = /login 착지 · 로그인한 휴대폰 = 안내 — 둘 다 잰다(키 그대로 · 약하게 하지 않음).
+  phone: '휴대폰 화면 크기 · /m/device-register(옛 QR 주소) — 로그인 없음 → /login 착지(MainLayout 문 · 화면 손 0) · 로그인한 휴대폰 → 「등록 없이 로그인」 안내 · 두 번 다 옛 등록 물음 0 · 옛 등록 요청 0 · 흰 띠 0',
   gate: '기기 관문 · 메인PC 확인 길 그대로 — 새 직원 브라우저 세션으로 GET api/devices/gate-status · is-main-pc 둘 다 200',
   token: '닫힌 문 POST api/devices/mobile-token(대표 세션) → 처리기 도달 0(등록 토큰 표 · 기기 표 행 변화 0 · 처리기 글 0) · 상태 숫자 · 본문 꼴은 기록만',
   register: '닫힌 문 POST api/devices/mobile-register(대표 세션 · 시험 DB 에 심은 쓸 수 있는 토큰) → 처리기 도달 0(심은 토큰 안 쓰임 · 기기 표 행 변화 0 · 처리기 글 0) · 로그인 없는 호출 숫자도 기록만',
@@ -204,7 +208,9 @@ async function openCtx(st, who, extra = {}) {
   const kb = {
     browser: BROWSER, who, context, page: null, tok, tally, closed: false,
     br: { seen: 0, closed: 0, errs: 0, lastErr: null }, consoleLines: 0, consoleBuf: [],
-    navs: [], login: { seen: 0, redirect: null, terms: null, status: null, err: null }, oldReq: 0,
+    navs: [], login: { seen: 0, redirect: null, terms: null, deviceNew: null, status: null, err: null }, oldReq: 0,
+    // 🔴 고침 2 — 실패 때 got 에 싣는 진단(값 · 토큰 · 그림 0 · 주소는 쿼리 뗀 경로만 · 글자는 싣는 그 시점 소독)
+    dx: { fails: [], failCount: 0, docs: [], unhandled: [] },
   };
   K.watchConsole(context, kb);
   st.kbs.push(kb);
@@ -223,6 +229,8 @@ async function openCtx(st, who, extra = {}) {
       kb.login.status = res.status();
       kb.login.redirect = !!(j && (j.redirectToWelcome ?? j.RedirectToWelcome));
       kb.login.terms = !!(j && (j.requiresTermsConsent ?? j.RequiresTermsConsent));
+      // 🔴 고침 2 ② — 새 기기 알림 창(Login.razor :427 ~ :445)이 뜨는 로그인인가(참거짓만)
+      kb.login.deviceNew = !!(j && (j.deviceNewlyRegistered ?? j.DeviceNewlyRegistered));
       kb.login.seen += 1;
     } catch (e) {
       kb.login.err = L.errorName(e);
@@ -230,8 +238,63 @@ async function openCtx(st, who, extra = {}) {
   });
   page.on('request', (req) => {
     if (/\/api\/devices\/mobile-(register|token)(\?|$)/i.test(req.url())) kb.oldReq += 1;
+    // 🔴 고침 2 ② — 주 프레임 문서 이동 요청(경로만 · 끝 = 완료 상태 / 실패 사유). 서비스 워커 요청은 frame() 이 던진다 → 센 것 아님.
+    let mainDoc = false;
+    try {
+      mainDoc = req.isNavigationRequest() && req.frame() === page.mainFrame();
+    } catch (e) {
+      mainDoc = false;
+    }
+    if (mainDoc && kb.dx.docs.length < 12) kb.dx.docs.push({ req, path: pathOnly(req.url()), end: '대기' });
+  });
+  page.on('requestfinished', (req) => {
+    const x = kb.dx.docs.find((d) => d.req === req);
+    if (!x) return;
+    req.response().then((r) => { x.end = r ? String(r.status()) : '응답 없음'; }, (e) => { x.end = `응답 읽기 실패 ${L.errorName(e)}`; });
+  });
+  page.on('requestfailed', (req) => {
+    const x = kb.dx.docs.find((d) => d.req === req);
+    if (!x) return;
+    const f = req.failure();
+    x.end = `실패 ${L.sanitize(f && f.errorText ? f.errorText : '-', 40)}`;
+  });
+  // 🔴 고침 2 ① — 4xx · 5xx 응답(방법 · 쿼리 뗀 경로 · 숫자). 외부 차단(ERR_BLOCKED_BY_CLIENT)은 응답이 아니라 여기 안 옴.
+  page.on('response', (res) => {
+    const s = res.status();
+    if (s < 400) return;
+    kb.dx.failCount += 1;
+    if (kb.dx.fails.length < 15) kb.dx.fails.push(`${s} ${res.request().method()} ${pathOnly(res.url())}`);
+  });
+  // 🔴 고침 2 ① — 흰 띠를 띄우는 Blazor 처리 안 된 예외 글(kit35.watchConsole 은 20줄 상한이라 런 46118135957 에서 잘렸다).
+  //   원문은 메모리에만 · got 에 실을 때 K.consoleLine(등록 목록 소독 + 제어문자)으로 다시 거른다.
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error' || kb.dx.unhandled.length >= 6) return;
+    const t = String(msg.text());
+    if (/unhandled|crit:|exception/i.test(t)) kb.dx.unhandled.push(t);
+  });
+  page.on('pageerror', (e) => {
+    if (kb.dx.unhandled.length < 6) kb.dx.unhandled.push(`화면 예외 ${L.errorName(e)}`);
   });
   return kb;
+}
+// 쿼리 · 조각을 뗀 경로(토큰 · 열쇠 꼴 값이 쿼리로 실려도 got 에 안 들어감)
+function pathOnly(u) {
+  try {
+    return new URL(u).pathname;
+  } catch (e) {
+    return `(주소 해석 실패 ${L.errorName(e)})`;
+  }
+}
+// 실패 때만 got 에 싣는 진단 묶음(그림 · 비번 · 토큰 0)
+function diag(kb, extra = {}) {
+  return {
+    deviceNew: kb.login.deviceNew,
+    docNavs: kb.dx.docs.map((d) => `${d.path}=${d.end}`),
+    fails4xx5xx: kb.dx.failCount,
+    fails: [...kb.dx.fails],
+    unhandled: kb.dx.unhandled.map((t) => K.consoleLine(t, 200)),
+    ...extra,
+  };
 }
 async function closeKb(st, kb) {
   if (kb.closed) return;
@@ -271,13 +334,16 @@ async function loginScreen(kb, loginId, password, { update = false } = {}) {
     if (!(await seen(page, UPDATE_NOTICE, 10000))) throw new K.KitStepError('[최신버젼업데이트] 누름 안내가 안 뜸(단추가 안 눌림)');
   }
   kb.navs.length = 0; // 로그인 누름 뒤 이동만 센다
+  // 🔴 고침 2 — 진단도 로그인 누름 뒤만 센다
+  kb.dx.docs.length = 0; kb.dx.fails.length = 0; kb.dx.failCount = 0; kb.dx.unhandled.length = 0;
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   const note = { closed: 0, errs: 0 };
   const s = await DC.settleScreen(page, 90000, note);
   const end = Date.now() + 10000;
   while (kb.login.seen === 0 && Date.now() < end) await K.sleep(250);
   await K.waitMasked(kb.tok);
-  return s;
+  // ⬛ [낡은 줄 · 고침 1] return s;  — 🔴 고침 2 ② 새 기기 알림 창을 장치가 닫은 횟수(note)를 같이 돌려준다(진단)
+  return { ...s, noticeClosed: note.closed, noticeCloseErrs: note.errs };
 }
 
 // ── 장면 1 · 2 · 3: 첫 로그인 → 첫 화면 · 직접 /welcome · 기기 관문 ──
@@ -297,7 +363,9 @@ async function sceneHome(st) {
     const band = await errBand(kb.page);
     const navs = [...kb.navs];
     const pass = s.where === 'main' && s.path === HOME_PATH && navs.includes(HOME_PATH) && !navs.some(isWelcome) && band === false;
-    rec(st, 'home', { pass, got: { where: s.where, path: s.path, navs, loginRedirectToWelcome: kb.login.redirect, loginTerms: kb.login.terms, errBand: band } });
+    const got = { where: s.where, path: s.path, navs, loginRedirectToWelcome: kb.login.redirect, loginTerms: kb.login.terms, errBand: band };
+    // ⬛ [낡은 줄 · 고침 1] rec(st, 'home', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
+    rec(st, 'home', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
   } catch (e) {
     dev(st, 'home', step, e);
   }
@@ -349,7 +417,9 @@ async function sceneUpdate(st) {
     const band = await errBand(kb.page);
     const navs = [...kb.navs];
     const pass = navs.includes(UPDATE_PATH) && !navs.some(isWelcome) && band === false;
-    rec(st, 'update', { pass, got: { navs, settled: `${s.where}@${s.path}`, loginRedirectToWelcome: kb.login.redirect, errBand: band } });
+    const got = { navs, settled: `${s.where}@${s.path}`, loginRedirectToWelcome: kb.login.redirect, errBand: band };
+    // ⬛ [낡은 줄 · 고침 1] rec(st, 'update', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
+    rec(st, 'update', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
   } catch (e) {
     dev(st, 'update', step, e);
   } finally {
@@ -364,13 +434,56 @@ async function scenePhone(st) {
   try {
     kb = await openCtx(st, 'S3PHONE', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: PHONE_UA });
     const t = crypto.randomBytes(32).toString('hex'); // 어디에도 없는 값(서버 표에 없음 · 비밀 아님)
+    // ⬛ [낡은 몸 · 고침 1] 로그인 없이 열고 안내 글을 기다렸다(notice 참이어야 통과) — 런 46118135957 got path=/login.
+    //   사유: 그 화면은 [AllowAnonymous] 지만 기본 틀 MainLayout(:2 [Authorize] · :106 ~ :108 RedirectToLogin)이 로그인 창으로 보낸다(main 같음 · 설계 화면 손 0).
+    // ⬛ await kb.page.goto(`${K.BASE}/m/device-register?t=${t}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // ⬛ const notice = await seen(kb.page, PHONE_NOTICE);
+    // ⬛ await K.sleep(2000);
+    // ⬛ const ask = await kb.page.getByText(PHONE_OLD_ASK, { exact: false }).count();
+    // ⬛ const band = await errBand(kb.page);
+    // ⬛ const at = K.pathOf(kb.page.url()).split('?')[0];
+    // ⬛ rec(st, 'phone', { pass: notice && ask === 0 && kb.oldReq === 0 && band === false, got: { notice, oldAsk: ask, oldRequests: kb.oldReq, path: at, errBand: band } });
+    // 🔴 고침 2 ③ — ㉮ 로그인 없음 → /login 착지(로그인 창 칸이 보임) ㉯ 같은 휴대폰으로 로그인 → 같은 옛 주소 → 안내. 둘 다 옛 물음 0 · 옛 요청 0 · 흰 띠 0.
+    await kb.page.goto(`${K.BASE}/m/device-register?t=${t}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const loginField = await kb.page.getByLabel('아이디', { exact: true }).first()
+      .waitFor({ state: 'visible', timeout: TEXT_MS }).then(() => true, () => false);
+    await K.sleep(2000); // 옛 화면이었다면 등록 요청이 나갈 몫
+    const anon = {
+      path: K.pathOf(kb.page.url()).split('?')[0],
+      loginField,
+      notice: (await kb.page.getByText(PHONE_NOTICE, { exact: false }).count()) > 0,
+      oldAsk: await kb.page.getByText(PHONE_OLD_ASK, { exact: false }).count(),
+      oldRequests: kb.oldReq,
+      errBand: await errBand(kb.page),
+    };
+    const anonPass = anon.path === '/login' && anon.loginField && anon.oldAsk === 0 && anon.oldRequests === 0 && anon.errBand === false;
+    // ㉯ 로그인한 휴대폰(새 직원 · 이미 첫 로그인 지남) — 갈 곳은 판정하지 않는다(새 기기 알림 경합은 장면 4 진단 몫)
+    step.now = '휴대폰 로그인';
+    if (!st.prepOk) throw new K.KitStepError(`준비 실패 — ${st.prepWhy}`);
+    await kb.page.getByLabel('아이디', { exact: true }).fill(ID.fresh, { timeout: 60000 });
+    await kb.page.getByLabel('비밀번호', { exact: true }).fill(st.freshPw);
+    await kb.page.getByLabel('비밀번호', { exact: true }).press('Tab');
+    await kb.page.getByRole('button', { name: '로그인', exact: true }).click();
+    const lend = Date.now() + 30000;
+    while (kb.login.seen === 0 && Date.now() < lend) await K.sleep(250);
+    await K.waitMasked(kb.tok);
+    if (kb.login.seen === 0 || !kb.tok.access) throw new K.KitStepError(`휴대폰 로그인 안 됨(로그인 응답 ${kb.login.seen}회 · status=${kb.login.status})`);
+    await K.sleep(3000); // 로그인 뒤 이동이 끝날 몫(갈 곳 무판정)
+    step.now = '로그인한 휴대폰 옛 주소';
+    const before = kb.oldReq;
     await kb.page.goto(`${K.BASE}/m/device-register?t=${t}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const notice = await seen(kb.page, PHONE_NOTICE);
-    await K.sleep(2000); // 옛 화면이었다면 등록 요청이 나갈 몫
-    const ask = await kb.page.getByText(PHONE_OLD_ASK, { exact: false }).count();
-    const band = await errBand(kb.page);
-    const at = K.pathOf(kb.page.url()).split('?')[0];
-    rec(st, 'phone', { pass: notice && ask === 0 && kb.oldReq === 0 && band === false, got: { notice, oldAsk: ask, oldRequests: kb.oldReq, path: at, errBand: band } });
+    await K.sleep(2000);
+    const signed = {
+      path: K.pathOf(kb.page.url()).split('?')[0],
+      notice,
+      oldAsk: await kb.page.getByText(PHONE_OLD_ASK, { exact: false }).count(),
+      oldRequests: kb.oldReq - before,
+      errBand: await errBand(kb.page),
+    };
+    const signedPass = signed.notice && signed.oldAsk === 0 && signed.oldRequests === 0 && signed.errBand === false;
+    const pass = anonPass && signedPass;
+    rec(st, 'phone', { pass, got: pass ? { anon, signed } : { anon, signed, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'phone', step, e);
   } finally {
