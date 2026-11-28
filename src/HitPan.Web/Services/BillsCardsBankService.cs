@@ -25,7 +25,7 @@ public sealed class BillsCardsBankService(HttpClient http, ILogger<BillsCardsBan
             return await http.GetFromJsonAsync<List<BillModel>>(url, ct).ConfigureAwait(false) ?? new();
         }
         // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Bills.List] {ex.Message}"); return new(); }
-        catch (Exception ex) { logger.LogWarning(ex, "[Bills.List] 어음 목록 조회 실패"); NotifyLoadFailed(ex); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Bills.List] 어음 목록 조회 실패"); return new(); }
     }
 
     public async Task<bool> CreateBillAsync(CreateBillModel req, CancellationToken ct = default)
