@@ -95,6 +95,13 @@ public sealed class ChatController : ControllerBase
         [FromQuery] int limit = 50, [FromQuery] DateTime? before = null,
         CancellationToken ct = default)
     {
+        // 🔴 W-S-04 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-3 · §3 · PM 결재 P1 (나) · P2 · 결재 기록 §309 · §310)
+        //   — 19·06-9 이전 대화 더 보기 서버 닫음. 따로 된 주소가 없어 이 공용 읽기(메신저 대화 읽기 전체)는 닫지 않는다(#20).
+        //   대신 before 가 오면 계정 확인 · 서비스보다 먼저 404 빈 본문으로 거절한다(처리기 · DB 에 닿지 않음).
+        //   웹은 before 를 넘기지 않는다(Services/ChatService.cs GetMessagesAsync · 게이트 G-S4-3) — before 없는 요청은 지금과 같은 길.
+        //   다시 열 때 = 아래 한 줄 뗌(정식 판 「더 보기」 착수 때).
+        if (before is not null) return NotFound();
+
         var me = await ResolveMeAsync(ct);
         if (me is null) return NoAccountResult();
 
@@ -152,6 +159,11 @@ public sealed class ChatController : ControllerBase
     }
 
     /// <summary>내 화면에서만 숨긴다. 🔴 상대 화면에는 그대로 있다.</summary>
+    // 🔴 W-S-04 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-1 · PM 결재 · 결재 기록 §309 · §310) — 19·06-21 내 메시지 숨기기 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(W-S-01 과 같은 꼴 · 실측(M-5a): DELETE 는 405 빈 본문 · 처리기에 닿지 않음).
+    //   부르는 화면 0(웹 함수만 있음 · 게이트 G-S4-3). 뜻(K38 · 위 설명 줄과 동작의 어긋남)은 정식 때 정한다(P3 손 0).
+    //   아래 속성·본문은 보존한다(#1 · 다시 열 때 = [NonAction] 한 줄 뗌 · 정식 판).
+    [NonAction]
     [HttpDelete("messages/{messageId}")]
     public async Task<IActionResult> HideMessage(string messageId, CancellationToken ct)
     {
@@ -254,6 +266,11 @@ public sealed class ChatController : ControllerBase
     }
 
     /// <summary>파일 사용량. 🔴 지우지 않고 보여주기만 한다.</summary>
+    // 🔴 W-S-04 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-2 · PM 결재 · 결재 기록 §309 · §310) — 19·06-22 파일 사용량 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(W-S-01 과 같은 꼴 · 실측(M-5a): GET 은 화면 첫 장 200 HTML · 처리기에 닿지 않음).
+    //   파일 보내기 한도 검사는 서비스 안에서 따로 하므로(이 함수를 부르지 않음) 파일 보내기는 그대로다. 부르는 화면 0(게이트 G-S4-3).
+    //   아래 속성·본문은 보존한다(#1 · 다시 열 때 = [NonAction] 한 줄 뗌 · 정식 판).
+    [NonAction]
     [HttpGet("storage")]
     public async Task<ActionResult<ChatStorageDto>> GetStorage(CancellationToken ct)
         => Ok(await _service.GetStorageAsync(_currentTenant.TenantId, ct));
