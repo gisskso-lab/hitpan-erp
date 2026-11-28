@@ -15,6 +15,10 @@ namespace HitPan.Web.Services;
 /// Blazor 의존 0 순수 C# — 시험 프로젝트가 소스를 링크해 직접 부른다(<see cref="DataResetMenuRule"/> 선례).
 /// 다시 열 때(정식 판) = 아래 목록에서 그 주소 한 줄을 빼고, 그 화면의 ⬛ 주석으로 남긴 <c>@page</c> 줄을 되살린다.
 /// </para>
+/// <para>
+/// 🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-2) — 17·S18 첫 방문 환영(<c>/welcome</c>)을 더했다(닫힌 주소 6).
+/// 메뉴 · 바로가기 0 · 로그인 분기 1(<see cref="AfterLoginPath"/>) · 직접 주소 1(안내 화면). 서버 손 0(<c>RedirectToWelcome</c> 칸은 계속 내려옴 · #37).
+/// </para>
 /// </remarks>
 public static class BetaClosedRoutes
 {
@@ -33,6 +37,9 @@ public static class BetaClosedRoutes
     /// <summary>01b-27 세무사 자료 보내기.</summary>
     public const string TaxExport = "/accounting/export";
 
+    /// <summary>17·S18 첫 방문 환영(W-S-03 · 로그인 분기는 <see cref="AfterLoginPath"/> 가 이 목록을 본다).</summary>
+    public const string Welcome = "/welcome";
+
     /// <summary>닫힌 주소 전부(순서 = 행 순서).</summary>
     public static IReadOnlyList<string> All { get; } = new[]
     {
@@ -41,7 +48,21 @@ public static class BetaClosedRoutes
         SalesProfitability,
         TaxInvoiceStats,
         TaxExport,
+        // 🔴 W-S-03 (2026-11-28 · 설계 §2-2 ①) — 다시 열 때 = 이 한 줄 뗌 + 안내 화면 @page "/welcome" 뗌 + Welcome.razor ⬛ 줄 되살림.
+        Welcome,
     };
+
+    /// <summary>
+    /// 🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-2 ②) — 로그인 뒤 갈 곳.
+    /// 환영 화면이 열려 있고(<see cref="Welcome"/> 가 목록에 없음) 서버가 첫 로그인이라 알릴 때만 <see cref="Welcome"/>,
+    /// 아니면 <paramref name="normalPath"/>(첫 화면 또는 [최신버젼업데이트] 뒤 수동 업데이트 화면)를 그대로 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// 바깥 값(주소창 <c>returnUrl</c> 등)을 받지 않는다 — <paramref name="normalPath"/> 는 호출자가 고정 경로 함수
+    /// (<c>LocalSwapUiText.PostLoginPath</c>)로 만든 값이다. 약관 강제(<c>/terms</c>) · 새 기기 알림은 <c>Login.razor</c> 에서 이보다 먼저 간다(#20).
+    /// </remarks>
+    public static string AfterLoginPath(bool redirectToWelcome, string normalPath)
+        => redirectToWelcome && IsOpen(Welcome) ? Welcome : normalPath;
 
     /// <summary>안내 화면 제목(고객 노출 · 개발 낱말 · 「베타」 0 · PM 결재 P2 초안).</summary>
     public const string NoticeTitle = "이 화면은 정식 판에서 열립니다";

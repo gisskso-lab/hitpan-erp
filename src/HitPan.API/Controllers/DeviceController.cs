@@ -288,6 +288,12 @@ public sealed class DeviceController : ControllerBase
     /// 모바일기기 등록 QR 발급 — 대표계정만 (20260811작1 (D)).
     /// 사장님 오더: "모바일 등록기기 버튼 클릭시 QR생성"
     /// </summary>
+    // 🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-1 · PM 결재 · 결재 기록 §323 · §325) — 1A·07-1 옛 휴대폰 QR 등록 입구 ① 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(W-S-01 · W-S-04 와 같은 꼴 · 처리기에 닿지 않음 · 응답 꼴은 개발명세서 실측).
+    //   부르는 화면 0(10/5 에 화면에서 걷음 · 발급 호출은 퇴역 파일 DeviceManagePage.retired-20261005.razor.txt 뿐 · K34).
+    //   D-3 = 폐기(대표 결정 §325) — 다시 열려면 새 오더 · 새 설계(아래 mobile-register · TenantMiddleware 면제 · 웹 옛 화면까지 함께 손봐야 함 · 한 줄로 안 열림).
+    //   아래 속성·본문 · 서비스 · 표는 보존한다(#1 · #36 · #37).
+    [NonAction]
     [HttpPost("mobile-token")]
     public async Task<IActionResult> IssueMobileToken(CancellationToken ct)
     {
@@ -320,6 +326,12 @@ public sealed class DeviceController : ControllerBase
     /// 로그인을 요구하면 그 자리에서 흐름이 끊긴다 — 현장 직원은 폰에 히트판 계정이 없을 수도 있다.
     /// 대신 **토큰 자체가 열쇠**다: 대표계정만 발급할 수 있고, 10분 만료·1회용이다.
     /// </summary>
+    // 🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-1 · PM 결재 · 결재 기록 §323 · §325) — 1A·07-1 옛 휴대폰 QR 등록 입구 ② 서버 닫음.
+    //   [NonAction] — 서버 라우트에 등록하지 않는다(W-S-01 · W-S-04 와 같은 꼴 · 처리기에 닿지 않음 · 응답 꼴은 개발명세서 실측).
+    //   ⚠️ 아래 [AllowAnonymous] 는 지금도 소용이 없다 — 로그인 없는 호출은 TenantMiddleware 가 먼저 401(면제 목록에 없음 · 설계 §0 사실 고침).
+    //   웹 안내 화면(Pages/Mobile/MobileDeviceRegisterPage.razor)의 옛 호출은 늘 false 블록 안이라 그려지지 않는다(화면 손 0).
+    //   D-3 = 폐기(대표 결정 §325) — 다시 열려면 새 오더 · 새 설계. 아래 속성·본문 · 서비스 · 표는 보존한다(#1 · #36 · #37).
+    [NonAction]
     [AllowAnonymous]
     [HttpPost("mobile-register")]
     public async Task<IActionResult> RegisterMobile([FromBody] MobileRegisterRequest body, CancellationToken ct)

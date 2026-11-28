@@ -444,17 +444,24 @@
                 catch { /* 통지 실패해도 로그인 진행 */ }
             }
 
-            if (result.Data?.RedirectToWelcome == true)
-            {
-                Navigation.NavigateTo("/welcome", forceLoad: true);
-            }
-            else
-            {
-                // ⬛ [낡은 줄] Navigation.NavigateTo("/", forceLoad: true);
-                // 🔴 20260930작1 갈래 F (L-1 (가)) — [최신버젼업데이트] 를 눌렀으면 수동 업데이트 화면으로.
-                //   약관·승인 대기·첫 설정(welcome) 은 위에서 먼저 간다(그 흐름을 끊지 않는다 #20).
-                Navigation.NavigateTo(LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin), forceLoad: true);
-            }
+            // ⬛ [낡은 분기 · 2026-11-28 W-S-03(작업지시서 20261128작 §2 · 설계 §2-2 ②)] 첫 로그인이면 환영 화면, 아니면 첫 화면(또는 수동 업데이트 화면).
+            //   사유: 17·S18 환영 화면을 지금 판에서 닫았다 — 갈 곳은 BetaClosedRoutes.AfterLoginPath 한 곳이 같은 닫힌 주소 목록을 보고 정한다.
+            // ⬛ if (result.Data?.RedirectToWelcome == true)
+            // ⬛ {
+            // ⬛     Navigation.NavigateTo(「"/welcome"」, forceLoad: true);
+            // ⬛ }
+            // ⬛ else
+            // ⬛ {
+            // ⬛     // ⬛ [낡은 줄] Navigation.NavigateTo("/", forceLoad: true);
+            // ⬛     // 🔴 20260930작1 갈래 F (L-1 (가)) — [최신버젼업데이트] 를 눌렀으면 수동 업데이트 화면으로.
+            // ⬛     //   약관·승인 대기·첫 설정(welcome) 은 위에서 먼저 간다(그 흐름을 끊지 않는다 #20).
+            // ⬛     Navigation.NavigateTo(LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin), forceLoad: true);
+            // ⬛ }
+            // 🔴 W-S-03 — 약관(/terms) · 새 기기 알림은 위에서 먼저 간다(#20). 수동 업데이트 갈래(PostLoginPath)는 그대로 넘긴다.
+            //   다시 열 때(정식 판) = BetaClosedRoutes 목록에서 Welcome 한 줄을 빼면 이 줄이 다시 환영 화면으로 보낸다(이 파일 손 0).
+            Navigation.NavigateTo(
+                BetaClosedRoutes.AfterLoginPath(result.Data?.RedirectToWelcome == true, LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin)),
+                forceLoad: true);
         }
         finally
         {
