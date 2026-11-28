@@ -120,6 +120,57 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
     }
 
     /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸을 읽는다(<c>GET api/settings/cooltime</c>).
+    /// 🔴 실패 시 <c>null</c> — 호출부는 기본값으로 대신하면 안 된다(켜 둔 자동 로그아웃이 「꺼짐」 으로 보였다가 저장되면 꺼진다).
+    /// </summary>
+    public async Task<CooltimeSettingsModel?> GetCooltimeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<CooltimeSettingsModel>("api/settings/cooltime", JsonOptions, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "자동 로그아웃 설정 조회 실패");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸만 저장한다(<c>PUT api/settings/cooltime</c>).
+    /// 서버가 400 으로 거절하면 그 문구를 함께 돌려준다(<see cref="SaveWithMessageAsync"/> 와 같은 꼴).
+    /// </summary>
+    public async Task<(bool Ok, string? Message)> SaveCooltimeAsync(CooltimeSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync("api/settings/cooltime", model, ct).ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            string? message = null;
+            if (res.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                try
+                {
+                    var body = await res.Content.ReadFromJsonAsync<SettingsErrorBody>(JsonOptions, ct).ConfigureAwait(false);
+                    message = body?.Message;
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    logger.LogWarning(ex, "자동 로그아웃 설정 저장 거절 문구를 읽지 못했다");
+                }
+            }
+            return (false, message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "자동 로그아웃 설정 저장 실패");
+            return (false, null);
+        }
+    }
+
+    /// <summary>
     /// 사업장 기본정보를 tenants 테이블에 반영한다.
     /// </summary>
     public async Task<bool> SaveCompanyAsync(TenantCompanyModel model, CancellationToken ct = default)

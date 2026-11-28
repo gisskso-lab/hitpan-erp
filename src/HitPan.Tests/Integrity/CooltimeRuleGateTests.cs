@@ -283,7 +283,7 @@ public sealed partial class CooltimeRuleGateTests
         Assert.NotEqual(CooltimeScreenRules.TriggerCountdown, CooltimeScreenRules.TriggerButton, StringComparer.OrdinalIgnoreCase);
     }
 
-    [Fact(DisplayName = "V4 내 정보 저장 — 자동 로그아웃 세 칸을 null(= 그대로)로 보낸다 · 서버 DTO 가 null 로 받는다 · 대조(안 지움) = false(끔) 가 실린다 · 배선")]
+    [Fact(DisplayName = "V4 내 정보 저장 — 자동 로그아웃 세 칸을 null(= 그대로)로 보낸다 · 서버 DTO 가 null 로 받는다 · 대조(안 지움) = false(끔) 가 실린다 · 배선(main 합류 뒤 = 이 화면은 루트 저장 호출 0)")]
     public void V4_내정보_저장은_자동로그아웃을_그대로_둔다()
     {
         var web = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
@@ -311,8 +311,13 @@ public sealed partial class CooltimeRuleGateTests
         static string Live(string path) => string.Join('\n', File.ReadAllText(path).Split('\n')
             .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
         var page = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Pages", "Settings", "UserInfoPage.razor.cs"));
-        Assert.Contains("SettingsSvc.SaveKeepCooltimeAsync(current)", page);
-        Assert.DoesNotContain("SettingsSvc.SaveAsync(current)", page);
+        // ⬛ [낡은 단언 · 11/28 main(W-S-01 A) 합류 이전] Assert.Contains("SettingsSvc.SaveKeepCooltimeAsync(current)", page);
+        // ⬛ [낡은 단언 · 11/28 main(W-S-01 A) 합류 이전] Assert.DoesNotContain("SettingsSvc.SaveAsync(current)", page);
+        // 🆕 11/28 쿨타임1b(설계 쿨타임_설정자리옮김 §4) — main 합류 뒤 이 화면은 루트 설정을 아예 안 쓴다(var okSettings = true)
+        //   ⇒ 「조용히 꺼짐」 길이 더 단단히 닫혔다: 루트 저장 호출 세 꼴 모두 살아 있는 줄에 0.
+        Assert.DoesNotContain("SettingsSvc.SaveKeepCooltimeAsync(", page);
+        Assert.DoesNotContain("SettingsSvc.SaveAsync(", page);
+        Assert.DoesNotContain("SettingsSvc.SaveWithMessageAsync(", page);
         var svc = Live(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Services", "SettingsService.cs"));
         Assert.Contains("CooltimeScreenRules.KeepCooltimeAsIs(body);", svc);
     }

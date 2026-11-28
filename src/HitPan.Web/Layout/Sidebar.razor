@@ -55,6 +55,9 @@
            둘 다 계정 축이 아니라 사람·조직 축이다. 결재라인이 직급·부서를 읽고,
            그 결재가 그룹웨어에서 돈다. 사원관리·HR직원현황과 한 묶음이어야 흐름이 안 끊긴다. *@
         <MudNavLink Href="/settings/devices" Icon="@Icons.Material.Filled.Devices">접속기기 확인</MudNavLink>@* ⬛ [옛 이름] 등록 기기 관리 — 2026-10-05 작4 B-4 사장님 「"접속기기 확인" 으로 메뉴정정」 *@
+        @* 🆕 2026-11-28 쿨타임1b(설계 쿨타임_설정자리옮김 §2 안 A · 대표 §313 ①) — 닫힌 「사용환경 설정」 의 자동 로그아웃 세 칸만 이 줄로 옮겼다.
+             이 블록(_isTenantAdmin) 안에만 둔다 — 대표만 본다(서버 TenantAdminOnly · 화면 역할과 세 겹). *@
+        <MudNavLink Href="/settings/auto-logout" Icon="@Icons.Material.Filled.TimerOff">자동 로그아웃 설정</MudNavLink>
         @* 🔴 W-S-01 갈래 A (2026-11-27 · 설계 §2-7) — 지금 판에서 닫은 화면은 메뉴에서 감춘다. 줄은 그대로 두고 규칙(BetaClosedRoutes)으로 감쌌다(#1).
              막는 본체는 서버다(메뉴 감춤 ≠ 차단). 다시 열 때 = 규칙 목록에서 주소를 빼면 저절로 보인다. *@
         @if (BetaClosedRoutes.IsOpen("/settings"))

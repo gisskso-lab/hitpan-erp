@@ -55,6 +55,8 @@ public sealed class BetaClosedServerGateTests
         "PUT api/settings/company",
         "GET api/settings/print-common",
         "PUT api/settings/print-common",
+        "GET api/settings/cooltime",                  // 🆕 11/28 쿨타임1b — 자동 로그아웃 세 칸만 연 좁은 주소(루트는 닫힌 채)
+        "PUT api/settings/cooltime",                  // 〃
         "POST api/settings/company-image",
         "GET api/settings/company-image-state",
         "DELETE api/settings/company-image",

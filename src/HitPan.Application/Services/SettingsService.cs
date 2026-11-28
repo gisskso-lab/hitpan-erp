@@ -379,6 +379,55 @@ public sealed class SettingsService : ISettingsService
     public const string CooltimeBadTimeMessage = "시각은 00:00 ~ 23:59 사이로 정해 주세요.";
 
     /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b(설계 쿨타임_설정자리옮김 §3) — 자동 로그아웃 설정 세 칸만 읽는다.
+    /// 문장 = <see cref="GetAsync"/> 의 세 칸 SELECT 그대로(새 SQL 0). 행 없음 = 끔 · <c>null</c> · <c>null</c>.
+    /// </summary>
+    public async Task<CooltimeSettingsDto> GetCooltimeAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var c = await _db.QueryFirstOrDefaultAsync<CooltimeSettingsRow>(new CommandDefinition(
+            """
+            SELECT cooltime_enabled AS CooltimeEnabled,
+                   cooltime_at AS CooltimeAt,
+                   regular_leave_time AS RegularLeaveTime
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        var dto = new CooltimeSettingsDto();
+        if (c is not null)
+        {
+            dto.CooltimeEnabled = c.CooltimeEnabled != 0;
+            dto.CooltimeAt = FormatHm(c.CooltimeAt);
+            dto.RegularLeaveTime = FormatHm(c.RegularLeaveTime);
+        }
+        return dto;
+    }
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b(설계 §3) — 자동 로그아웃 설정 세 칸만 저장한다.
+    /// 검사 = 기존 <see cref="ResolveCooltimeAsync"/> · 저장 = 기존 <see cref="SaveCooltimeAsync"/>(§E E-2 · E-3 한 트랜잭션) 그대로.
+    /// 🔴 루트 저장(<see cref="SaveAsync"/>)은 부르지 않는다 — 루트 UPSERT 가 다른 22칸을 DTO 기본값으로 덮는다(설계 F8 · 변이 M2).
+    /// </summary>
+    public async Task SaveCooltimeOnlyAsync(UpdateCooltimeSettingsDto dto, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // Resolve 는 세 칸만 읽는다 — 나머지 칸 기본값은 쓰이지 않는다.
+        var cooltime = await ResolveCooltimeAsync(new UpdateTenantSettingsDto
+        {
+            CooltimeEnabled = dto.CooltimeEnabled,
+            CooltimeAt = dto.CooltimeAt,
+            RegularLeaveTime = dto.RegularLeaveTime
+        }, tenantId, ct).ConfigureAwait(false);
+        if (cooltime is null) return;
+
+        await SaveCooltimeAsync(tenantId, cooltime, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// 🆕 20260928작4 — 요청 세 칸(<c>null</c> = 그대로)을 지금 값과 합쳐 저장할 값을 정한다.
     /// 세 칸 모두 <c>null</c> 이면 <c>null</c>(쓰지 않음). 켜짐인데 시각이 비거나 모양이 틀리면 <see cref="ArgumentException"/>.
     /// </summary>

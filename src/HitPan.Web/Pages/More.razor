@@ -3,6 +3,10 @@
 @inject NavigationManager Nav
 @inject WorkTabService TabService
 @inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<More> MoreLog
+@using HitPan.Web.Helpers
+@using Microsoft.Extensions.Logging
 @using HitPan.Web.Models
 @using HitPan.Web.Services
 
@@ -41,6 +45,11 @@
                         {
                             continue;
                         }
+                        @* 🆕 2026-11-28 쿨타임1b([3-V] 보안상무 🟡) — 「자동 로그아웃 설정」 줄은 부모계정(대표)만 그린다(Sidebar 와 같은 판정). *@
+                        if (item.Href == AutoLogoutHref && !_isTenantAdmin)
+                        {
+                            continue;
+                        }
                         <button type="button" class="hp-menu-item"
                                 @onclick:stopPropagation="true"
                                 @onclick="@(() => Navigate(item))">
@@ -59,6 +68,25 @@
 @code {
     private string? _openGroup;
     private bool _isMobile;
+
+    // 🆕 2026-11-28 쿨타임1b([3-V] 보안상무 🟡 · 설계 §2 안 A 「메뉴는 부모만」) — Sidebar 와 같은 부모 판정(AccountTypeHelper.IsTenantAdmin · account_type).
+    //   판정에 실패하면 안 보여 준다(못 읽었는데 열어 주면 막은 적이 없는 것과 같다). 서버(TenantAdminOnly) · 화면 역할이 본체다.
+    private const string AutoLogoutHref = "/settings/auto-logout";
+    private bool _isTenantAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            _isTenantAdmin = AccountTypeHelper.IsTenantAdmin(auth.User);
+        }
+        catch (Exception ex)
+        {
+            MoreLog.LogWarning(ex, "[More] 계정 유형 판정 실패 — 자동 로그아웃 설정 줄을 감춘다");
+            _isTenantAdmin = false;
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -212,6 +240,7 @@
                 new("결재라인",  Icons.Material.Filled.AccountTree,   "/settings/approval-lines"),
                 new("직급관리",  Icons.Material.Filled.Badge,         "/settings/positions"),
                 new("접속기기 확인",  Icons.Material.Filled.Devices,       "/settings/devices"),   // ⬛ [옛 이름] 「기기관리」 — 2026-10-05 작4 B-4
+                new("자동 로그아웃",  Icons.Material.Filled.TimerOff,      "/settings/auto-logout"),   // 🆕 2026-11-28 쿨타임1b(설계 §2 안 A)
                 new("사용환경",  Icons.Material.Filled.Tune,          "/settings"),
             }),
     };

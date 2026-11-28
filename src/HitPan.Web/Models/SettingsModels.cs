@@ -150,3 +150,20 @@ public class TenantSettingsModel
     /// <summary>정시 퇴근 시각 <c>"HH:mm"</c>.</summary>
     public string? RegularLeaveTime { get; set; }
 }
+
+/// <summary>
+/// 🆕 2026-11-28 쿨타임1b(설계 쿨타임_설정자리옮김 §2 안 A · §3) — 「자동 로그아웃 설정」 화면의 세 칸.
+/// 서버 <c>GET/PUT api/settings/cooltime</c> 와 같은 모양. 시각 = <c>"HH:mm"</c> · 조회 미설정 = <c>null</c> ·
+/// 저장 때 <c>null</c> = 그대로 · <c>""</c> = 비움(이 화면은 시각 두 칸을 늘 채워 보낸다).
+/// </summary>
+public sealed class CooltimeSettingsModel
+{
+    /// <summary>자동 로그아웃 켬/끔.</summary>
+    public bool CooltimeEnabled { get; set; }
+
+    /// <summary>자동 로그아웃 시각 <c>"HH:mm"</c>.</summary>
+    public string? CooltimeAt { get; set; }
+
+    /// <summary>정시 퇴근 시각 <c>"HH:mm"</c>.</summary>
+    public string? RegularLeaveTime { get; set; }
+}

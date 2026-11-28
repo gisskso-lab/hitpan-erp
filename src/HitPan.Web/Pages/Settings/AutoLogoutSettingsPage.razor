@@ -1,0 +1,173 @@
+@page "/settings/auto-logout"
+@namespace HitPan.Web.Pages.SettingsUi
+@* ══════════════════════════════════════════════════════════════════════
+   🆕 2026-11-28 쿨타임1b — 「자동 로그아웃 설정」 (작업지시서 20261128작 ③ · 설계 쿨타임_설정자리옮김 §2 안 A)
+   대표 §313 ①: 「쿨타임 칸만 따로 여기」 — /settings(사용환경 설정)는 닫힌 채 두고 자동 로그아웃 세 칸만 이 화면으로 연다.
+   · 묶음 모양 = Settings.razor 6번째 묶음 「퇴근 · 자동 로그아웃」 그대로 + 이 화면만의 [저장] 1.
+   · 서버 = GET/PUT api/settings/cooltime(세 칸만 오감 · 다른 회사 설정 칸 손 0).
+   · 🔴 설정관리는 부모계정(대표)만 — 화면 권한(아래 :5) · 메뉴(_isTenantAdmin) · 서버(TenantAdminOnly) 세 겹.
+══════════════════════════════════════════════════════════════════════ *@
+@attribute [Authorize(Roles = "system_admin,tenant_admin,TenantAdmin")]
+@inject SettingsService SettingsSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>자동 로그아웃 설정</PageTitle>
+
+<MudText Typo="Typo.h6"
+    Class="mb-4">자동 로그아웃 설정</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true"
+        Color="Color.Primary" />
+}
+else if (_loadFailed)
+{
+    @* 못 불러왔으면 그리지도 저장하지도 않는다 — 기본값(꺼짐)이 저장되면 켜 둔 자동 로그아웃이 꺼진다. *@
+    <LoadFailedState Title="설정을 불러오지 못했습니다"
+                     Subtitle="지금 저장하면 기존 설정이 잘못 바뀔 수 있어, 설정 화면을 열지 않았습니다. 연결이 회복된 뒤 다시 시도해주세요."
+                     Retrying="@_loading"
+                     OnRetry="LoadAsync" />
+}
+else
+{
+<MudGrid Spacing="3">
+
+  <MudItem xs="12" md="6">
+  <MudPaper Elevation="0" Class="pa-4"
+    Style="border:0.5px solid var(
+      --mud-palette-lines-default);
+      border-radius:12px">
+    <div style="display:flex;
+      align-items:center;gap:8px;
+      margin-bottom:16px">
+      <div style="width:8px;height:8px;
+        border-radius:50%;
+        background:var(--hitpan-dot-purple)"></div>
+      <MudText Typo="Typo.subtitle2">
+        퇴근 · 자동 로그아웃</MudText>
+    </div>
+
+    <MudTimePicker Label="정시 퇴근 시각"
+      @bind-Time="_regularLeave"
+      Clearable="true"
+      Variant="Variant.Outlined"
+      Margin="Margin.Dense"
+      HelperText="비워 둘 수 있습니다. 자동 로그아웃을 켜려면 꼭 정해 주세요." />
+
+    <SettingToggleRow
+      Label="자동 로그아웃"
+      Sub="정한 시각에 PC로 접속해 있는 직원에게 계속 일할지 묻습니다"
+      @bind-Value="_s.CooltimeEnabled" />
+
+    <MudTimePicker Label="자동 로그아웃 시각"
+      Class="mt-3"
+      @bind-Time="_cooltimeAt"
+      Clearable="true"
+      Variant="Variant.Outlined"
+      Margin="Margin.Dense"
+      HelperText="@(CooltimeScreenRules.DescribeAskTime(_cooltimeAt) ?? "자동 로그아웃을 켜려면 꼭 정해 주세요.")" />
+
+    @if (_s.CooltimeEnabled && (_regularLeave is null || _cooltimeAt is null))
+    {
+      <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+        @CooltimeScreenRules.SettingsNeedTimes
+      </MudAlert>
+    }
+
+    <MudText Style="font-size:12px;
+      color:var(--mud-palette-text-secondary);
+      margin-top:12px">@CooltimeScreenRules.SettingsGuide</MudText>
+
+  </MudPaper>
+  </MudItem>
+
+</MudGrid>
+
+@* 저장 버튼 *@
+<div style="display:flex;
+  justify-content:flex-end;
+  gap:8px;margin-top:20px">
+  <MudButton Variant="Variant.Filled"
+    Color="Color.Primary"
+    OnClick="Save"
+    Disabled="_saving">
+    @(_saving ? "저장 중..." : "저장")
+  </MudButton>
+</div>
+}
+
+@code {
+    private CooltimeSettingsModel _s = new();
+    private bool _loading = true;
+    private bool _loadFailed;
+    private bool _saving;
+
+    // 시각 두 칸(시각 선택은 TimeSpan? · 저장 때 "HH:mm" / "" 로 바꾼다).
+    private TimeSpan? _regularLeave;
+    private TimeSpan? _cooltimeAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync().ConfigureAwait(false);
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+        try
+        {
+            var result = await SettingsSvc.GetCooltimeAsync().ConfigureAwait(false);
+            if (result is null)
+            {
+                _loadFailed = true;
+                return;
+            }
+            _s = result;
+            _regularLeave = CooltimeScreenRules.ParseHhmm(_s.RegularLeaveTime);
+            _cooltimeAt = CooltimeScreenRules.ParseHhmm(_s.CooltimeAt);
+        }
+        catch (Exception ex)
+        {
+            _loadFailed = true;
+            Snackbar.Add($"설정을 불러오지 못했습니다: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        // 켰는데 시각이 비었으면 보내기 전에 알려 준다(서버도 같은 문구로 400).
+        if (_s.CooltimeEnabled && (_regularLeave is null || _cooltimeAt is null))
+        {
+            Snackbar.Add(CooltimeScreenRules.SettingsNeedTimes, Severity.Warning);
+            return;
+        }
+
+        // 이 화면은 시각 두 칸을 늘 채워 보낸다 — 비웠으면 ""(서버 약속: 빈 문자열 = 비움 · null = 그대로).
+        _s.RegularLeaveTime = CooltimeScreenRules.ToSaveText(_regularLeave);
+        _s.CooltimeAt = CooltimeScreenRules.ToSaveText(_cooltimeAt);
+
+        _saving = true;
+        var (ok, rejectMessage) = await SettingsSvc.SaveCooltimeAsync(_s).ConfigureAwait(false);
+        _saving = false;
+
+        if (ok)
+        {
+            Snackbar.Add("설정이 저장됐습니다.", Severity.Success);
+        }
+        else if (!string.IsNullOrWhiteSpace(rejectMessage))
+        {
+            // 서버가 까닭을 알려 준 거절(아무것도 저장 안 됨) — 화면 값을 그대로 두고 고칠 곳을 알려 준다.
+            Snackbar.Add(rejectMessage, Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("저장하지 못했습니다. 잠시 뒤 다시 시도해주세요.", Severity.Error);
+        }
+    }
+}

@@ -48,6 +48,7 @@ const FIXED_RUN_HEADS = ['scripts/playwright-audit/ci/', '.github/workflows/'];
 //   (판정기 기대 키가 필수라 몸만 골라 끄는 길 0 · 닫힌 쪽 = 도는 쪽). 이 수는 CI 줄에서 「이 PR 이 쿨타임을 건드렸나」 를 보이기만 한다.
 const COOLTIME_FILES = new Set([
   'src/HitPan.Web/Pages/Settings.razor',
+  'src/HitPan.Web/Pages/Settings/AutoLogoutSettingsPage.razor', // 🆕 11/28 쿨타임1b — 자동 로그아웃 설정 새 자리
   'src/HitPan.Web/Pages/HR/HrAttendancePage.razor',
   'src/HitPan.Web/Services/NotificationClient.cs',
   'src/HitPan.Web/Layout/MainLayout.razor',

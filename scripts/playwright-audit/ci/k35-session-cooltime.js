@@ -117,14 +117,18 @@ function cause(st, text) {
   if (!st.ct3Pre) st.ct3Pre = text;
 }
 
-// ── 관리자(부모) — 설정 화면이 쓰는 같은 API(GET → 세 칸만 바꿔 PUT) · 저장 직후 로그아웃 ──
+// ⬛ [옛 머리 주석 · 11/28 쿨타임1b 이전] ── 관리자(부모) — 설정 화면이 쓰는 같은 API(GET → 세 칸만 바꿔 PUT) · 저장 직후 로그아웃 ──
+// ── 관리자(부모) — 자동 로그아웃 설정 화면이 쓰는 같은 API(GET → 세 칸만 바꿔 PUT) · 저장 직후 로그아웃 ──
+//   🆕 11/28 쿨타임1b(설계 쿨타임_설정자리옮김 §5) — 루트 /api/settings 는 W-S-01 A 로 닫혔다 ⇒ 좁은 주소 /api/settings/cooltime.
 async function adminSave(st, patch, label) {
   const s = await K.apiLogin('PARENT', ID.parent, PW.parent);
   try {
-    const g = await K.apiCall('GET', '/api/settings', { sess: s });
+    // ⬛ [옛 줄] const g = await K.apiCall('GET', '/api/settings', { sess: s });
+    const g = await K.apiCall('GET', '/api/settings/cooltime', { sess: s });
     if (g.status !== 200 || !g.json) throw new K.KitStepError(`${label} 설정 읽기 status=${g.status}`);
     const body = { ...g.json, ...patch };
-    const p = await K.apiCall('PUT', '/api/settings', { sess: s, body });
+    // ⬛ [옛 줄] const p = await K.apiCall('PUT', '/api/settings', { sess: s, body });
+    const p = await K.apiCall('PUT', '/api/settings/cooltime', { sess: s, body });
     if (p.status !== 200) throw new K.KitStepError(`${label} 설정 저장 status=${p.status}`);
     st.saved.push(`${label} ${patch.cooltimeEnabled === false ? '끔' : `켬 ${patch.cooltimeAt || '-'}`}`);
   } finally {
