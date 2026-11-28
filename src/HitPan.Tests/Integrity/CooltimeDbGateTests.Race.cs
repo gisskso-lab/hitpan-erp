@@ -426,6 +426,94 @@ public sealed partial class CooltimeDbGateTests
             + $" · INNODB STATUS TRANSACTIONS(앞 2000자) = {trx}";
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // 🆕 11/28 진단 2(지시서 §9-2) — 판정 0. 진단 런 1(BT 46132829606 · 잡 140941563328)에서 엔진 연결이
+    // INNODB_TRX 에 없었다 → InnoDB 행 잠금 앞 단계(메타데이터 잠금 · 표 열기 · 첫 문장 전 지연 등)를 가리려고
+    // PROCESSLIST · METADATA_LOCK_INFO 를 상한 실패 글 뒤에 싣는다. 읽기 실패는 까닭 글로만 남긴다(본래 실패 글 불변).
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>PROCESSLIST 한 줄의 글 꼴 — ID · COMMAND · TIME · STATE · INFO 앞 300자.</summary>
+    private static string ProcRow((long Id, string Command, long Time, string? State, string? Info) r)
+        => $"{r.Id}:{r.Command}:{r.Time}s:{(string.IsNullOrEmpty(r.State) ? "-" : r.State)}:{r.Info ?? "-"}";
+
+    /// <summary>
+    /// 기다림 상한 실패 글의 덧 2 — ① 네 연결(관찰 · 엔진 · 저장 · L)의 <c>information_schema.PROCESSLIST</c> 줄(없으면 「없음」)
+    /// ② 같은 서버 전체에서 STATE 가 빈 글이 아닌 줄 최대 20줄 ③ <c>information_schema.METADATA_LOCK_INFO</c> 네 연결 줄(없으면 「못 읽음 + 까닭」).
+    /// 각 읽기는 따로 잡고, 실패하면 그 칸에 까닭을 적는다(던지지 않음).
+    /// </summary>
+    private async Task<string> ProcesslistDiagnosisAsync(MySqlConnection observer, RaceRig rig)
+    {
+        var conns = new (string Name, long Id)[]
+        {
+            ("관찰", rig.ObserverThread), ("엔진", rig.EngineThread), ("저장", rig.SaveThread), ("L", rig.HoldThread),
+        };
+        var ids = conns.Select(c => c.Id).ToArray();
+        const string procCols =
+            "CAST(ID AS SIGNED), COALESCE(COMMAND, ''), CAST(COALESCE(TIME, 0) AS SIGNED), STATE, LEFT(INFO, 300)";
+
+        // ① 네 연결
+        string mine;
+        try
+        {
+            var rows = (await observer.QueryAsync<(long Id, string Command, long Time, string? State, string? Info)>(
+                $"SELECT {procCols} FROM information_schema.PROCESSLIST WHERE ID IN @Ids", new { Ids = ids })).ToList();
+            mine = string.Join(" / ", conns.Select(c =>
+            {
+                var hit = rows.Where(r => r.Id == c.Id).ToList();
+                return $"{c.Name} {c.Id} = " + (hit.Count == 0 ? "없음" : ProcRow(hit[0]));
+            }));
+        }
+        catch (Exception ex)
+        {
+            mine = $"(못 읽음 — {ex.GetType().FullName}: {ex.Message})";
+            _out.WriteLine($"[G-C26] PROCESSLIST(네 연결) 못 읽음 — {ex.Message}");
+        }
+
+        // ② 같은 서버 전체 — STATE 가 빈 글 아닌 줄 20줄
+        string busy;
+        try
+        {
+            var rows = (await observer.QueryAsync<(long Id, string Command, long Time, string? State, string? Info)>(
+                $"SELECT {procCols} FROM information_schema.PROCESSLIST WHERE STATE IS NOT NULL AND STATE <> '' ORDER BY TIME DESC, ID LIMIT 20")).ToList();
+            busy = rows.Count == 0 ? "없음" : string.Join(" / ", rows.Select(ProcRow));
+        }
+        catch (Exception ex)
+        {
+            busy = $"(못 읽음 — {ex.GetType().FullName}: {ex.Message})";
+            _out.WriteLine($"[G-C26] PROCESSLIST(서버 전체) 못 읽음 — {ex.Message}");
+        }
+
+        // ③ METADATA_LOCK_INFO — 플러그인(metadata_lock_info) 없으면 표가 없다
+        string mdl;
+        try
+        {
+            var has = await observer.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'information_schema' AND TABLE_NAME = 'METADATA_LOCK_INFO'");
+            if (has == 0)
+            {
+                mdl = "못 읽음 — information_schema 에 METADATA_LOCK_INFO 표 없음(metadata_lock_info 플러그인 미설치)";
+            }
+            else
+            {
+                var rows = (await observer.QueryAsync<(long Thread, string? Mode, string? Duration, string? Type, string? Schema, string? Table)>(
+                    "SELECT CAST(THREAD_ID AS SIGNED), LOCK_MODE, LOCK_DURATION, LOCK_TYPE, TABLE_SCHEMA, TABLE_NAME FROM information_schema.METADATA_LOCK_INFO WHERE THREAD_ID IN @Ids",
+                    new { Ids = ids })).ToList();
+                mdl = rows.Count == 0
+                    ? "네 연결 줄 없음"
+                    : string.Join(" / ", rows.Select(r => $"{r.Thread}:{r.Mode}:{r.Duration}:{r.Type}:{r.Schema}.{r.Table}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            mdl = $"못 읽음 — {ex.GetType().FullName}: {ex.Message}";
+            _out.WriteLine($"[G-C26] METADATA_LOCK_INFO 못 읽음 — {ex.Message}");
+        }
+
+        return $" · PROCESSLIST(네 연결 · ID:COMMAND:TIME:STATE:INFO 앞 300자) = {mine}"
+            + $" · PROCESSLIST(서버 전체 · STATE 있음 · 최대 20줄) = {busy}"
+            + $" · METADATA_LOCK_INFO = {mdl}";
+    }
+
     /// <summary>
     /// 주어진 연결 번호들이 <b>전부</b> InnoDB 잠금 기다림(<c>trx_state = 'LOCK WAIT'</c>)에 들어갈 때까지 본다 — 시간이 아니라 조건.
     /// 10초 안에 안 되면 FAIL(건너뜀 아님 · 지시서 §7 W2) · 그때 INNODB_TRX 를 그대로 남긴다(원인 찾기).
@@ -455,7 +543,8 @@ public sealed partial class CooltimeDbGateTests
                 throw new Xunit.Sdk.XunitException(
                     $"[G-C26] {step} — 10초 안에 잠금 기다림 {threadIds.Length} 을 못 봤다(본 수 {waiting}). 건너뜀이 아니라 FAIL 이다. INNODB_TRX = "
                     + string.Join(" / ", rows.Select(x => $"{x.Thread}:{x.State}:{x.Query}"))
-                    + await LockWaitDiagnosisAsync(observer, rig));
+                    + await LockWaitDiagnosisAsync(observer, rig)
+                    + await ProcesslistDiagnosisAsync(observer, rig));   // 🆕 11/28 진단 2(지시서 §9-2): 같은 글 뒤에 PROCESSLIST · METADATA_LOCK_INFO 덧
             }
             await Task.Delay(50);
         }
