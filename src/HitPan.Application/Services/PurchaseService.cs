@@ -1085,6 +1085,17 @@ public class PurchaseService : IPurchaseService
         }
     }
 
+    /// <summary>
+    /// 🔴 후9 전결 2(PR #1058 고침 1 · 작업지시서 §15-2 #5) — 반품 줄 창고 id 가 <b>공백만</b>(<c>"   "</c> · <c>"\t"</c>)이면 거절한다.
+    /// 공용 가드는 공백만을 「서버가 채움」 으로 보고 빼는데, 반품 확정 · 취소는 <c>IsNullOrEmpty</c> 로만 채워 그 값이
+    /// <c>stock_ledger</c>(INSERT ONLY · 헌법 #3)에 유령 창고로 남는다 → 입구에서 막는다. <c>null</c> · <c>""</c> 은 통과(화면 빈 칸 = 서버 채움).
+    /// </summary>
+    private static void RejectWhitespaceOnlyWarehouseIds(IEnumerable<string?> ids)
+    {
+        if (ids.Any(id => !string.IsNullOrEmpty(id) && string.IsNullOrWhiteSpace(id)))
+            throw new InvalidOperationException(WarehouseTenantGuard.NotUsableWarehouseMessage);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // P0 #1 — 매입반품 신규 작성 (헌법 #20 흐름 끊김 봉합)
     // receipt_id 없이도 발행 가능. status='draft' 로 INSERT (헌법 #6 정합).
@@ -1108,8 +1119,12 @@ public class PurchaseService : IPurchaseService
         await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
         // 🔴 후9 W6a(작업지시서 20261129작 · 설계 §4-2) — 같은 자리에서 창고도 본다: 이 회사 · 활성 창고만(요청 원값 · 빈 칸 = 건너뜀).
-        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+        // 🔴 전결 2 — 회사만(PR #1058 고침 1 · 작업지시서 §15-2 #1 · ⬛ 위 줄 「활성 창고만」 은 낡음): 반품 화면엔 줄 창고 칸이 없어
+        //   쉬게 한 내 창고에서 나간 물건의 반품이 막히면 흐름이 끊긴다(#20) → 남의 · 없는 창고만 거절 · 쉬게 한 내 창고 통과.
+        await WarehouseTenantGuard.EnsureWarehousesBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        // 🔴 전결 2 — 공백만 창고 id 는 첫 쓰기 전 거절(확정 · 취소가 IsNullOrEmpty 로만 채워 원장에 유령 창고로 남던 길 · null · "" 은 통과).
+        RejectWhitespaceOnlyWarehouseIds(request.Items.Select(x => x.WarehouseId));
 
         // 🔴🔴 20260827작7 W2-1 (사장님 지시 "당장 봉합") — **중복 발행 차단 + 상태 가드.**
         //
@@ -1262,8 +1277,12 @@ public class PurchaseService : IPurchaseService
             _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
         // 🔴 후9 W6b(작업지시서 20261129작 · 설계 §4-2) — 같은 자리 · 머리 UPDATE 앞에서 창고도 본다: 이 회사 · 활성 창고만
         //   (쉬게 한 창고가 든 옛 초안 수정도 거절 = CTO 전결 K4 (가) · 확정 · 취소는 그대로 됨).
-        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+        // 🔴 전결 2 — 회사만(PR #1058 고침 1 · 작업지시서 §15-2 #2 · ⬛ 위 두 줄 「활성 · K4 (가)」 는 낡음): [반품전환] 초안의 수량만 고쳐
+        //   저장해도 고를 칸이 없어 막히던 길(#20) → 남의 · 없는 창고만 거절 · 쉬게 한 내 창고 통과.
+        await WarehouseTenantGuard.EnsureWarehousesBelongToTenantAsync(
             _db, tenantId, request.Items.Select(x => x.WarehouseId), null, ct);
+        // 🔴 전결 2 — 공백만 창고 id 는 머리 UPDATE 앞에서 거절(null · "" 은 통과).
+        RejectWhitespaceOnlyWarehouseIds(request.Items.Select(x => x.WarehouseId));
 
         var returnDate = request.ReturnDate == default ? BusinessDate.Today : request.ReturnDate.Date;   // 20260825작18 W4
         decimal totalAmount = 0, totalVat = 0;
