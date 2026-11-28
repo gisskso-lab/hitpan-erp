@@ -182,6 +182,8 @@ public static class SafeRestoreDenyCodes
     public const string MigrationRunning = "migration_running";
     /// <summary>업데이트 내려받기 · 교체가 도는 중 — 걸음 ④ 앞에서 멈춤(D13 · 읽기만 · #43 업데이트 로직 손 0).</summary>
     public const string UpdateRunning = "update_running";
+    /// <summary>🔴 A-2③ 고침 1 P3-2 — 되살리는 도중 프로그램이 다시 시작됨(기동 청소가 앞 프로세스의 <c>running</c> 기록을 닫을 때만 씀 · 자료 그대로).</summary>
+    public const string RestoreInterrupted = "restore_interrupted";
 }
 
 /// <summary>안전 경로 복원 결과(화면 4장 「진행 · 끝」).</summary>

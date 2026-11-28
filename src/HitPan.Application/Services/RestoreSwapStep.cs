@@ -134,27 +134,38 @@ public sealed class RestoreSwapStep
     /// <summary>도는 기록 1줄(<c>running</c>) — 복원 ID 를 돌려줌. 시각 = 서버 지역 시각(D3).</summary>
     public async Task<string> BeginHistoryAsync(string tenantId, string userId, string sourceLabel, CancellationToken ct = default)
     {
-        await EnsureOpenAsync(ct).ConfigureAwait(false);
         var restoreId = Guid.NewGuid().ToString();
-        await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.InsertHistoryRunning,
-            new { R = restoreId, t = tenantId, Now = LocalNow(), Src = sourceLabel, U = userId }, cancellationToken: ct)).ConfigureAwait(false);
+        // ⬛ A-2③ 첫 구현 옛 줄: await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.InsertHistoryRunning, …, cancellationToken: ct));
+        // 🔴 A-2③ 고침 1 P3-4 — 기록 쓰기는 명시 커밋(세션 autocommit 에 기대지 않음 · 전역 0 PC 에서 연결 반납과 함께 사라지지 않게)
+        await ExecCommittedAsync(RestoreSwapSql.InsertHistoryRunning,
+            new { R = restoreId, t = tenantId, Now = LocalNow(), Src = sourceLabel, U = userId }, ct).ConfigureAwait(false);
         return restoreId;
     }
 
     /// <summary>사전 백업 ID 기록(되돌릴 자리).</summary>
     public async Task RecordPreBackupAsync(string tenantId, string restoreId, string preBackupId, CancellationToken ct = default)
     {
-        await EnsureOpenAsync(ct).ConfigureAwait(false);
-        await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.MarkHistoryPreBackup,
-            new { Pre = preBackupId, R = restoreId, t = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        // ⬛ A-2③ 첫 구현 옛 줄: await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.MarkHistoryPreBackup, …, cancellationToken: ct));
+        await ExecCommittedAsync(RestoreSwapSql.MarkHistoryPreBackup,
+            new { Pre = preBackupId, R = restoreId, t = tenantId }, ct).ConfigureAwait(false);   // P3-4 명시 커밋
     }
 
     /// <summary>멈춤 기록 — <c>error_message</c> = DenyCode 글자만(P3-9).</summary>
     public async Task FailHistoryAsync(string tenantId, string restoreId, string denyCode, CancellationToken ct = default)
     {
+        // ⬛ A-2③ 첫 구현 옛 줄: await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.MarkHistoryFailed, …, cancellationToken: ct));
+        await ExecCommittedAsync(RestoreSwapSql.MarkHistoryFailed,
+            new { Now = LocalNow(), Code = denyCode, R = restoreId, t = tenantId }, ct).ConfigureAwait(false);   // P3-4 명시 커밋
+    }
+
+    /// <summary>A-2③ 고침 1 P3-4 — 거래 밖 기록 한 문장을 자기 거래로 감싸 <b>명시 커밋</b>(autocommit 0 · 1 어느 쪽이든 남음).</summary>
+    private async Task<int> ExecCommittedAsync(string sql, object p, CancellationToken ct)
+    {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
-        await _db.ExecuteAsync(new CommandDefinition(RestoreSwapSql.MarkHistoryFailed,
-            new { Now = LocalNow(), Code = denyCode, R = restoreId, t = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        await using var tx = await ((DbConnection)_db).BeginTransactionAsync(ct).ConfigureAwait(false);
+        var n = await _db.ExecuteAsync(new CommandDefinition(sql, p, tx, cancellationToken: ct)).ConfigureAwait(false);
+        await tx.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        return n;
     }
 
     // ═══ ④ → ④-끝 → ⑤ 한 줄로 ═══════════════════════════════════════
@@ -165,15 +176,39 @@ public sealed class RestoreSwapStep
     public async Task<RestoreSwapResult<RestoreSwapReport>> RunAsync(
         string tenantId, string userId, string restoreId, RestoreStaging staging, CancellationToken ct = default)
     {
-        var verify = await VerifyAsync(tenantId, staging, ct).ConfigureAwait(false);
-        if (!verify.Ok) return await StopAsync(tenantId, restoreId, Relay<RestoreSwapReport>(verify)).ConfigureAwait(false);
+        // ⬛ A-2③ 첫 구현 옛 몸(그물 없음 — 걸음 밖으로 샌 예외면 running 줄 · rs_new__ · 사본 임시 표가 남음 · [3-V] P3-1):
+        //   var verify = await VerifyAsync(...); if (!verify.Ok) return await StopAsync(...);
+        //   var overlay = await OverlayAsync(...); if (!overlay.Ok) return await StopAsync(...);
+        //   var swap = await SwapAsync(...); if (!swap.Ok && swap.DataUnchanged) return await StopAsync(...); return swap;
+        // 🔴 A-2③ 고침 1 P3-1 — 끝 그물: 어느 걸음에서 무슨 예외가 새도 실패 기록(running 줄만 · 이미 success 면 손 0) + 임시 표 지움.
+        //   점검 끔 순서는 A-2① 합류 지휘가 감쌈(이 클래스는 점검을 켜고 끄지 않음).
+        var inSwap = false;
+        try
+        {
+            var verify = await VerifyAsync(tenantId, staging, ct).ConfigureAwait(false);
+            if (!verify.Ok) return await StopAsync(tenantId, restoreId, Relay<RestoreSwapReport>(verify)).ConfigureAwait(false);
 
-        var overlay = await OverlayAsync(tenantId, LocalNow(), ct).ConfigureAwait(false);
-        if (!overlay.Ok) return await StopAsync(tenantId, restoreId, Relay<RestoreSwapReport>(overlay)).ConfigureAwait(false);
+            var overlay = await OverlayAsync(tenantId, LocalNow(), ct).ConfigureAwait(false);
+            if (!overlay.Ok) return await StopAsync(tenantId, restoreId, Relay<RestoreSwapReport>(overlay)).ConfigureAwait(false);
 
-        var swap = await SwapAsync(tenantId, userId, restoreId, verify.Value!, overlay.Value!, ct).ConfigureAwait(false);
-        if (!swap.Ok && swap.DataUnchanged) return await StopAsync(tenantId, restoreId, swap).ConfigureAwait(false);
-        return swap;
+            inSwap = true;
+            var swap = await SwapAsync(tenantId, userId, restoreId, verify.Value!, overlay.Value!, ct).ConfigureAwait(false);
+            if (!swap.Ok && swap.DataUnchanged) return await StopAsync(tenantId, restoreId, swap).ConfigureAwait(false);
+            return swap;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "안전 복원 끝 그물 — 걸음 밖으로 샌 예외 tenantId={TenantId} restoreId={RestoreId} 교체중={InSwap}", tenantId, restoreId, inSwap);
+            // ⑤ 안이면 커밋됐는지 모름 → 「확인 필요」(거짓 안심 0 · 성공이면 기록이 이미 success 라 아래 실패 기록은 0줄) · ⑤ 앞 = 라이브 손 0
+            var r = inSwap
+                ? new RestoreSwapResult<RestoreSwapReport>
+                {
+                    Step = SafeRestoreStep.Swap, DenyCode = SafeRestoreDenyCodes.CheckNeeded, DataUnchanged = false, LogDetail = "그물 교체 중 예외",
+                    Message = RestoreOverlayRules.MessageFor(SafeRestoreDenyCodes.CheckNeeded),
+                }
+                : Stop<RestoreSwapReport>(SafeRestoreStep.Verify, SafeRestoreDenyCodes.VerifyFailed, "그물 대조 중 예외");
+            return await StopAsync(tenantId, restoreId, r).ConfigureAwait(false);
+        }
     }
 
     // ═══ ④ 본 대조 ══════════════════════════════════════════════════
@@ -434,6 +469,13 @@ public sealed class RestoreSwapStep
         ArgumentNullException.ThrowIfNull(verify);
         ArgumentNullException.ThrowIfNull(counts);
 
+        // 🔴 A-2③ 고침 1 P3-3 — ⑤ 시작 뒤는 부르는 쪽 취소 토큰을 받지 않는다(브라우저를 닫는 순간 교체가 되돌려지거나
+        //   커밋 중 취소로 「결과 모름」 이 괜히 나는 길 0). 이미 취소된 요청이면 ⑤ 에 들어가지 않고 멈춤(DB 손 0).
+        //   ⬛ 옛: 아래 모든 문장 · tx.CommitAsync(ct) 가 부르는 쪽 ct 를 씀.
+        if (ct.IsCancellationRequested)
+            return Stop<RestoreSwapReport>(SafeRestoreStep.Swap, SafeRestoreDenyCodes.SwapFailed, "⑤ 앞 요청 취소");
+        ct = CancellationToken.None;
+
         try
         {
             await _audit.AppendAsync(new LocalAuditRecord(tenantId, userId, LocalAuditAction.SwapStarted, LocalAuditResult.Started, restoreId,
@@ -676,7 +718,8 @@ public sealed class RestoreSwapStep
         {
             await FailHistoryAsync(tenantId, restoreId, r.DenyCode ?? SafeRestoreDenyCodes.SwapFailed, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (DbException ex)
+        // ⬛ A-2③ 첫 구현 옛 줄: catch (DbException ex) — 고침 1 P3-4 명시 거래(열린 거래 겹침 = InvalidOperationException)도 기록만
+        catch (Exception ex) when (ex is DbException or InvalidOperationException)
         {
             _logger.LogWarning(ex, "안전 복원 멈춤 기록 실패 tenantId={TenantId} restoreId={RestoreId}", tenantId, restoreId);
         }

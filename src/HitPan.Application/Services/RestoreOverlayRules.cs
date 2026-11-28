@@ -101,6 +101,9 @@ public static class RestoreOverlayRules
     /// <summary>D5 — 닫힘(옛 <c>BackupService.RestoreClosedNotice</c> 와 같은 글).</summary>
     public const string ClosedMessage = "복원은 안전장치를 보강한 다음 업데이트에서 열립니다.";
 
+    /// <summary>A-2③ 고침 1 P3-2 — 되살리는 도중 프로그램이 다시 시작됨(기동 청소 · 자료 그대로 · 무엇을 하면 되는지 말함).</summary>
+    public const string InterruptedMessage = "되살리는 도중 프로그램이 다시 시작되어 멈췄습니다 — 자료는 바뀌지 않았습니다. 다시 되살려 주세요";
+
     /// <summary>표에 없는 글자가 왔을 때(받은 글자를 되풀이하지 않음).</summary>
     public const string UnknownMessage = "되살리지 못했습니다 — 자료는 바뀌지 않았습니다";
 
@@ -131,6 +134,7 @@ public static class RestoreOverlayRules
         [SafeRestoreDenyCodes.RestoreClosed] = ClosedMessage,
         [SafeRestoreDenyCodes.MigrationRunning] = BusyMigrationMessage,
         [SafeRestoreDenyCodes.UpdateRunning] = BusyUpdateMessage,
+        [SafeRestoreDenyCodes.RestoreInterrupted] = InterruptedMessage,   // A-2③ 고침 1 P3-2
     };
 
     /// <summary>

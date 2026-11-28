@@ -677,6 +677,17 @@ var app = builder.Build();
     {
         rsLogger.LogWarning(ex, "[Startup/RestoreStagingCleanup] 임시 표 청소 실패 — 기동은 계속합니다(다음 기동 때 다시).");
     }
+    // 🔴 W-G1-52 A-2③ 고침 1 P3-2 — 앞 프로세스가 남긴 복원 기록 running 줄 → failed(restore_interrupted) · 자료 손 0 · 실패해도 기동 계속(#15)
+    try
+    {
+        var closed = await RestoreHistoryRecovery.CloseInterruptedAsync(
+            rsScope.ServiceProvider.GetRequiredService<System.Data.IDbConnection>(), DateTime.Now).ConfigureAwait(false);
+        if (closed > 0) rsLogger.LogWarning("[Startup/RestoreStagingCleanup] 끝나지 않은 복원 기록 {Count}줄을 「도중 멈춤」 으로 닫았습니다(자료 손 0).", closed);
+    }
+    catch (Exception ex)
+    {
+        rsLogger.LogWarning(ex, "[Startup/RestoreStagingCleanup] 끝나지 않은 복원 기록 닫기 실패 — 기동은 계속합니다(다음 기동 때 다시).");
+    }
 }
 
 if (app.Environment.IsDevelopment())

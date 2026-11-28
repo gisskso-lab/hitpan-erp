@@ -259,6 +259,14 @@ public static class RestoreSwapSql
     public const string MarkHistoryFailed =
         "UPDATE restore_history SET status = 'failed', finished_at = @Now, error_message = @Code WHERE restore_id = @R AND tenant_id = @t AND status = 'running'";
 
+    /// <summary>
+    /// 🔴 A-2③ 고침 1 P3-2 — 기동 청소: 앞 프로세스가 남긴 <c>running</c> 줄을 닫음(⑤ 도중 프로세스가 죽으면 서버가 거래를 되돌려 라이브는 그대로 ·
+    /// 성공이면 같은 거래가 이미 success 로 바꿈 → 남은 running = 자료 그대로). <c>error_message</c> = 고정 글자(<c>restore_interrupted</c>).
+    /// 회사 거름 없음 = 기동 때(요청 0 · JWT 0) 이 PC 의 복원 기록 전부 · 기동 시각 이전에 시작한 줄만.
+    /// </summary>
+    public const string CloseInterruptedHistory =
+        "UPDATE restore_history SET status = 'failed', finished_at = @Now, error_message = @Code WHERE status = 'running' AND started_at <= @Now";
+
     public const string MarkHistoryPreBackup =
         "UPDATE restore_history SET pre_restore_backup = @Pre WHERE restore_id = @R AND tenant_id = @t";
 
