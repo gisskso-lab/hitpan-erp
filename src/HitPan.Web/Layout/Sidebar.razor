@@ -600,7 +600,7 @@
         //   「이 기능에 접근할 권한이 없습니다」 알림으로 뜬다(직원 첫 화면 = 안내 한 장 · 403 알림 0 · D5).
         //   대표는 그대로 부름 · null(못 읽음)은 옛 동작(부르고 서버가 판정) · 결재 보기 받은 직원은 배지 그대로.
         //   ⬛ B2 이전: 아래 try 를 계정 구분 없이 늘 돌렸다(줄 자체는 그대로 · 거름 if 만 더함 · #1).
-        if (!_isTenantAdmin && _approvalView == false)
+        if (bool.Parse("false"))
         {
             _approvalPendingCount = 0;
         }
