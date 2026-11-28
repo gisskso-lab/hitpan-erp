@@ -289,7 +289,7 @@ jobs:
         if: always()
         timeout-minutes: 10
         env:
-          UI_BAND_MODE: control
+          UI_BAND_MODE: fixed   # ⬛ 옛: control(대조군 런 46153902475 · 11/11 띠 1 확인)
         run: |
           set -uo pipefail
           rc=0
