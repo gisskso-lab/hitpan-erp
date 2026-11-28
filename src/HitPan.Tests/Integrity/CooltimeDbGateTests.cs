@@ -20,6 +20,21 @@ using Xunit.Abstractions;
 namespace HitPan.Tests.Integrity;
 
 /// <summary>
+/// 🆕 11/28 고침 3 ②(지시서 §9-3 · CTO 전결 범위 · 시험 장치만) — 쿨타임 DB 게이트 묶음의 <b>병렬 끔</b> 정의.
+/// </summary>
+/// <remarks>
+/// <para>근거: 진단 런 1(BT 46132829606) · 2(BT 46135153651) 모두 G-C26 기다림 상한 실패 때 같은 서버에서 다른 시험 묶음의
+/// DDL(<c>CREATE TABLE</c> · <c>DROP DATABASE</c>)이 겹쳐 돌았다 → 「기다림 = INNODB_TRX LOCK WAIT」 조건이 10초 안에 안 보임(PM 판단 · 가설 — 새 머리 CI 5런으로 확인).</para>
+/// <para>이름은 옛 <c>[Collection("CooltimeDbGate")]</c> 와 같다(이 클래스 혼자 쓰던 이름 · 고정물 0) — 바뀌는 것은 「다른 묶음과 함께 안 돈다」 하나뿐.
+/// 고정물(<c>ICollectionFixture</c>)은 두지 않는다. xUnit 2.9.3 <c>CollectionDefinitionAttribute.DisableParallelization</c>.</para>
+/// </remarks>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class CooltimeDbGateCollection
+{
+    public const string Name = "CooltimeDbGate";
+}
+
+/// <summary>
 /// 🔴 쿨타임(설정 시각 자동 로그아웃 · PC 만) — <b>실제 DB</b> 게이트 G-C1 ~ G-C21 (G-C14 는 <c>.Pipeline.cs</c>).
 /// </summary>
 /// <remarks>
@@ -38,7 +53,8 @@ namespace HitPan.Tests.Integrity;
 /// <para>음성 대조군: 같은 시험 안의 <b>짝(양성 대조)</b>으로 「준비가 실제로 그 길을 탄다」 를 보이고, 제품 문장 하나를 빼는 변이는
 /// 개발명세서 §3 의 변이 표대로 CI 변이 런(<c>scripts/gates/cooltime-mutation-run.sh</c>)이 FAIL 을 확인한다.</para>
 /// </remarks>
-[Collection("CooltimeDbGate")]
+// ⬛ [Collection("CooltimeDbGate")]   ← 11/28 고침 3 ②(지시서 §9-3): 같은 이름을 정의 묶음 상수로 — 정의에 병렬 끔
+[Collection(CooltimeDbGateCollection.Name)]
 public sealed partial class CooltimeDbGateTests : IDisposable
 {
     private readonly string _dbName = "hitpan_ctm_" + Guid.NewGuid().ToString("N")[..8];

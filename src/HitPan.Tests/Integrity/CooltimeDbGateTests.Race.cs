@@ -514,6 +514,38 @@ public sealed partial class CooltimeDbGateTests
             + $" · METADATA_LOCK_INFO = {mdl}";
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // 🆕 11/28 고침 3 ② 관찰(지시서 §9-3) — 판정 0. G-C26 ⓐ ⓑ 시작 때 같은 서버에서 DDL 을 돌리는 연결 수를 한 줄로 남긴다.
+    // 병렬 끔 묶음(CooltimeDbGateCollection)이 먹었으면 「DDL 중 0」 이어야 한다(확인은 CI 5런 기록 · 이 줄은 FAIL 을 만들지 않는다).
+    // 줄 꼴은 진단 2 의 ProcRow 를 그대로 쓴다.
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>information_schema.PROCESSLIST</c> 에서 INFO 가 <c>CREATE</c> · <c>DROP</c> · <c>ALTER</c> 로 시작하는 연결(자기 연결 빼고) 수를
+    /// 시험 출력(<c>_out</c>)과 콘솔에 한 줄로 쓴다. 읽기 실패는 까닭 줄로만 남긴다(던지지 않음 · 판정 아님).
+    /// </summary>
+    private async Task ObserveServerDdlAsync(MySqlConnection observer, string label)
+    {
+        string line;
+        try
+        {
+            var rows = (await observer.QueryAsync<(long Id, string Command, long Time, string? State, string? Info)>(
+                "SELECT CAST(ID AS SIGNED), COALESCE(COMMAND, ''), CAST(COALESCE(TIME, 0) AS SIGNED), STATE, LEFT(INFO, 300)"
+                + " FROM information_schema.PROCESSLIST"
+                + " WHERE ID <> CONNECTION_ID() AND INFO IS NOT NULL"
+                + " AND (UPPER(LTRIM(INFO)) LIKE 'CREATE%' OR UPPER(LTRIM(INFO)) LIKE 'DROP%' OR UPPER(LTRIM(INFO)) LIKE 'ALTER%')"
+                + " ORDER BY ID LIMIT 20")).ToList();
+            line = $"[G-C26] {label} 시작 관찰(판정 아님) — 같은 서버 DDL 중 연결 {rows.Count}"
+                + (rows.Count == 0 ? "" : " = " + string.Join(" / ", rows.Select(ProcRow)));
+        }
+        catch (Exception ex)
+        {
+            line = $"[G-C26] {label} 시작 관찰(판정 아님) — PROCESSLIST 못 읽음 — {ex.GetType().FullName}: {ex.Message}";
+        }
+        _out.WriteLine(line);
+        Console.WriteLine(line);
+    }
+
     /// <summary>
     /// 주어진 연결 번호들이 <b>전부</b> InnoDB 잠금 기다림(<c>trx_state = 'LOCK WAIT'</c>)에 들어갈 때까지 본다 — 시간이 아니라 조건.
     /// 10초 안에 안 되면 FAIL(건너뜀 아님 · 지시서 §7 W2) · 그때 INNODB_TRX 를 그대로 남긴다(원인 찾기).
@@ -555,6 +587,7 @@ public sealed partial class CooltimeDbGateTests
     {
         if (!Ready("G-C26 ⓐ")) return;
         await using var db = await OpenAsync();
+        await ObserveServerDdlAsync(db, "G-C26 ⓐ");   // 🆕 11/28 고침 3 ② 관찰 1줄(판정 아님)
         var pusher = new CountingPusher();
         var s = await MissedSetupAsync(db, _tenantA);
         // 남는 PC 세션 — 물음 10초 전 · C 뒤 로그인(①②③④ 아무것도 아님) ⇒ 저장(끔)이 물음 칸을 비우는지 본다
@@ -608,6 +641,7 @@ public sealed partial class CooltimeDbGateTests
     {
         if (!Ready("G-C26 ⓑ")) return;
         await using var db = await OpenAsync();
+        await ObserveServerDdlAsync(db, "G-C26 ⓑ");   // 🆕 11/28 고침 3 ② 관찰 1줄(판정 아님)
         var pusher = new CountingPusher();
         var s = await MissedSetupAsync(db, _tenantA);
 
