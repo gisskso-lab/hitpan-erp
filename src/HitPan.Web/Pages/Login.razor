@@ -498,7 +498,6 @@
             {
                 Navigation.NavigateTo("/terms", forceLoad: true);
                 navigated = true;   // 🔴 20261128작 갈래 A — 갈 곳 식 손 0 · 냈다는 표시만
-                s_inFlightSafetyNet.MarkNavigated();   // 🔴 고침 1 (§8-3 3V-P2) — 다시 만들어진 화면의 안전망이 이 이동을 덮어쓰지 않게
                 return;
             }
 
@@ -531,7 +530,6 @@
                 {
                     // 🔴 20261128작 갈래 A 고침 1 (§8-2 A-①) — 사용자가 알림을 닫을 때까지 다시 만들어진 화면의 안전망 시계를 멈춘다.
                     //   끝은 아래 finally(닫힘 · 실패 모두). 갈 곳 · 흐름 손 0.
-                    s_inFlightSafetyNet.BeginWaitingForInput();
                     var notice = string.IsNullOrWhiteSpace(result.Data?.DeviceNotice)
                         ? "이 기기가 새 기기로 등록되었습니다."
                         : result.Data!.DeviceNotice!;

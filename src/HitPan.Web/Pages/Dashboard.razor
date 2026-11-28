@@ -475,10 +475,7 @@ else if (_vizMode == "aging")
         await LoadUserNameAsync();
         // ⬛ await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
         //    ← 20261128 갈래 B3: 볼 역할일 때만 부른다. 아니면 두 주소를 부르지 않는다(403 0).
-        if (_canSeeSalesFinance == true)
-        {
-            await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
-        }
+        await Task.WhenAll(LoadDashboardAsync(), LoadAgingAsync());
     }
 
     private async Task LoadUserNameAsync()
