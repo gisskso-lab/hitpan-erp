@@ -70,7 +70,7 @@
                  못 불러온 화면의 칸은 빈 값이다. 그대로 저장하면 **실제 백업 설정을 빈 값으로 덮는다.** *@
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Check"
-                       OnClick="SaveSettingsAsync" FullWidth="true" Disabled="@_settingsLoadFailed">설정 저장</MudButton>
+                       OnClick="SaveSettingsAsync" FullWidth="true">설정 저장</MudButton>
         </MudItem>
     </MudGrid>
     @if (_settings.LastRunAt is not null)
