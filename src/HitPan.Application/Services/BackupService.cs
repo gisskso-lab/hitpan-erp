@@ -156,7 +156,11 @@ public sealed class BackupService : IBackupService
         var backupId = Guid.NewGuid().ToString();
         var startedAt = DateTime.Now;
         var stamp = startedAt.ToString("yyyyMMdd_HHmmss");
-        var fileName = $"hitpan_backup_{stamp}.sql";
+        // ⬛ W-G1-52 갈래 A-2② 이전: var fileName = $"hitpan_backup_{stamp}.sql";
+        // 🔴 A-2② G8 — 복원 전 자동 백업(pre_restore)은 보관정책(hitpan_backup_* 만 지움) 밖 이름 · 목록 등록은 같은 길.
+        var fileName = string.Equals(triggeredBy, RestoreSafePath.PreRestoreTrigger, StringComparison.Ordinal)
+            ? $"hitpan_pre_restore_{stamp}.sql"
+            : $"hitpan_backup_{stamp}.sql";
 
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
@@ -175,6 +179,9 @@ public sealed class BackupService : IBackupService
             //    20260911작5 C-8 — 코드가 정한 기본 폴더(%ProgramData%\HitPan\Backup)만 제한 권한으로 만들고 검사한다.
             EnsureBackupFolder(settings.PrimaryPath);
             var primaryFile = Path.Combine(settings.PrimaryPath, fileName);
+
+            // 🔴 A-2② — 판 표지(덤프 직전 · 같은 판 백업만 되살림 K5). 못 읽으면 null = 그 백업은 안전 복원에서 못 고름(백업 자체는 계속).
+            var schemaFingerprint = await TryComputeSchemaFingerprintAsync(tenantId, backupId, ct).ConfigureAwait(false);
 
             // 3) mysqldump 실행
             await RunMysqldumpAsync(primaryFile, ct).ConfigureAwait(false);
@@ -213,6 +220,10 @@ public sealed class BackupService : IBackupService
                 Size = fileInfo.Length,
                 BackupId = backupId
             }, cancellationToken: ct)).ConfigureAwait(false);
+
+            // 6-1) 🔴 A-2② K6 — 파일 지문(SHA-256) · 판 표지를 목록에 적는다. 따로 한 문장 — 칸이 없는 DB(DB-152 전)에서도
+            //   백업 성공은 그대로(#20) · 실패 = 그 백업만 안전 복원에서 못 고름(fail-closed).
+            await TryRecordFingerprintAsync(tenantId, backupId, primaryFile, schemaFingerprint, ct).ConfigureAwait(false);
 
             // 7) settings.last_* 갱신
             const string lastSql = """
@@ -400,6 +411,65 @@ public sealed class BackupService : IBackupService
         }
     }
 
+    // ─── 🔴 W-G1-52 갈래 A-2② 안전 경로 복원 입구 ──────────────
+    /// <inheritdoc />
+    /// <remarks>
+    /// 깃발 <see cref="RestoreTemporarilyClosed"/> 닫힌 채 — 맨 앞에서 막고 아무것도 시작하지 않는다(:639 손 0 · 옛 복원과 같은 깃발).
+    /// 걸음 ① ~ ③ 은 <see cref="IRestoreSafePath"/>(A-2②) · ④ · ⑤ 는 A-2③ · 깃발 여는 판 = B 합류 뒤 [5](작업지시서 §9 ②).
+    /// 외부 파일 경로 칸이 요청 모델에 없다(:332-335 외부 경로 거절 유지 · K9).
+    /// </remarks>
+    public Task<SafeRestoreResponse> SafeRestoreAsync(string tenantId, string? userId, SafeRestoreRequest req, CancellationToken ct = default)
+    {
+        if (RestoreTemporarilyClosed)
+        {
+            _logger.LogWarning("안전 복원 요청을 막았습니다(깃발 닫힘) tenantId={TenantId} userId={UserId}", tenantId, userId);
+            return Task.FromResult(new SafeRestoreResponse
+            {
+                Success = false, FailedStep = SafeRestoreStep.None, DenyCode = null,
+                Message = RestoreClosedNotice, DataUnchanged = true,
+            });
+        }
+        throw new NotSupportedException("안전 복원 몸(걸음 ④ · ⑤)은 갈래 A-2③ 이후 — 깃발을 열기 전에 연결한다.");
+    }
+
+    private async Task<string?> TryComputeSchemaFingerprintAsync(string tenantId, string backupId, CancellationToken ct)
+    {
+        try
+        {
+            return await RestoreSafePath.ComputeSchemaFingerprintAsync(_db, ct).ConfigureAwait(false);
+        }
+        catch (DbException ex)
+        {
+            _logger.LogWarning(ex, "판 표지를 읽지 못함 — 이 백업은 안전 복원에서 고를 수 없음 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+            return null;
+        }
+    }
+
+    private async Task TryRecordFingerprintAsync(string tenantId, string backupId, string file, string? schemaFingerprint, CancellationToken ct)
+    {
+        try
+        {
+            string sha;
+            await using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.SequentialScan))
+                sha = await RestoreSafePath.Sha256HexAsync(fs, ct).ConfigureAwait(false);
+            const string fpSql = """
+                UPDATE backup_history SET file_sha256 = @Sha, schema_fingerprint = @Schema
+                WHERE backup_id = @BackupId AND tenant_id = @TenantId
+                """;
+            await _db.ExecuteAsync(new CommandDefinition(fpSql,
+                new { Sha = sha, Schema = schemaFingerprint, BackupId = backupId, TenantId = tenantId },
+                cancellationToken: ct)).ConfigureAwait(false);
+        }
+        catch (DbException ex)
+        {
+            _logger.LogWarning(ex, "백업 지문 기록 실패 — 백업은 성공 · 안전 복원에서 못 고름 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "백업 지문 셈 실패 — 백업은 성공 · 안전 복원에서 못 고름 tenantId={TenantId} backupId={BackupId}", tenantId, backupId);
+        }
+    }
+
     // ─── 외부 프로세스 헬퍼 ─────────────────────────────
     private async Task RunMysqldumpAsync(string outFile, CancellationToken ct)
     {
@@ -411,7 +481,9 @@ public sealed class BackupService : IBackupService
         var (host, port, db, user, pass) = ResolveDbCredentialsFromConfig();
         var dumpExe = ResolveDumpBinary();
         _logger.LogInformation("백업 덤프 실행파일: {DumpExe}", dumpExe);
-        var args = $"-h {host} -P {port} -u {user} --single-transaction --routines --triggers --default-character-set=utf8mb4 {db}";
+        // ⬛ W-G1-52 갈래 A-2② 이전 인자: --single-transaction --routines --triggers --default-character-set=utf8mb4
+        // 🔴 A-2② R2 덧 벽 — --hex-blob: 바이너리 칸을 16진으로(안전 복원 변환기는 바이트 단위 · 올바른 UTF-8 만 붓는다 · G20).
+        var args = $"-h {host} -P {port} -u {user} --single-transaction --routines --triggers --hex-blob --default-character-set=utf8mb4 {db}";
         await RunProcessRedirectedAsync(dumpExe, args, pass, outFile, ct).ConfigureAwait(false);
     }
 

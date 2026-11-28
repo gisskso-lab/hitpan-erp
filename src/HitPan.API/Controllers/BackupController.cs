@@ -70,6 +70,18 @@ public sealed class BackupController : HitPanControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// 🔴 W-G1-52 A-2② — 안전 경로 복원(부모계정 · 메인PC 문은 이 클래스 그대로 · 요청 모델 = A-1 <see cref="SafeRestoreRequest"/> · 외부 경로 칸 없음).
+    /// Z3 — <c>[IdempotencyKey]</c> 붙이지 않음(비번 칸이 멱등 저장에 남는 길 0 · 보완1 §4 · G23).
+    /// </summary>
+    [HttpPost("safe-restore")]
+    public async Task<IActionResult> SafeRestore([FromBody] SafeRestoreRequest req, CancellationToken ct)
+    {
+        if (EnsureTenant() is { } err) return err;
+        var result = await _service.SafeRestoreAsync(TenantId!, UserId, req, ct).ConfigureAwait(false);
+        return Ok(result);
+    }
+
     [HttpGet("restore-history")]
     public async Task<IActionResult> GetRestoreHistory([FromQuery] int limit = 50, CancellationToken ct = default)
     {

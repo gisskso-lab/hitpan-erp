@@ -572,6 +572,15 @@ jobs:
           #    다른 회사 대표 안 셈 · 덮어쓰기 이관 길도 막힘 · 판정 직접) + 비DB N1~N4(메뉴 규칙 · 사이드바 감쌈 · 문 · 확인 문구).
           #    무력화 결과표(지시서 §6 B · M1~M11)와 근거: docs/개발/erp/20261125작_초기화진입_부모계정전용_개발명세서.md
           GATES="$GATES|DataResetParentOnlyGate"
+          # 🔴 20261128작 W-G1-52 갈래 A-1 RestoreTableClassificationGate(G13) — 복원 표 분류 전수(두 목록 · 기본값 0).
+          #    DB D1 ~ D5(출하 DDL 신규설치본의 information_schema 실제 표 · 외래키 · 트리거 · 이름 길이를 제품 판정 함수로 대조) ·
+          #    비DB S1 ~ S10(출하 DDL · 마이그 폴더 CREATE TABLE 전수). 새 표를 분류 안 하면 빨강.
+          #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A1_표분류계약_개발명세서.md
+          GATES="$GATES|RestoreTableClassificationGate"
+          # 🔴 20261128작 W-G1-52 갈래 A-2② SafeRestoreGate — 안전 복원 걸음 ① ~ ③(제한 계정 G0 · 문 G1 · G2 · 고르기 G3 · G19 ·
+          #    사전 백업 G8 · 출하 판 덤프 붓기 G14 · 256 바이트 왕복 G20) + 비DB SafeRestoreStagingGate(변환기 변이 덤프 · 2차 검사 · G23).
+          #    근거 · 변이: docs/개발/erp/20261128_W-G1-52_갈래A2-2_복원걸음_개발명세서.md
+          GATES="$GATES|SafeRestoreGate|SafeRestoreStagingGate"
           # 🔴 20260915작1 갈래 A MdbPostingClassifyGate (G1) — 자료이관 장부 반영 판정 · F3 잔액 · 기준일 · 재고 품목 키.
           #    순수 함수(DB 없음 · SKIP 없음). 무력화 시험 14종 전부 빨간불 · 원본 14/14 초록:
           #      종류 안 가림 · 판매/매입 집합 뒤바꿈 · 연결 키에 거래처 코드 · 머리O연결X→미반영 · DOCFE 없음→미반영 ·

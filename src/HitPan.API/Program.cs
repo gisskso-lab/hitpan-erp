@@ -115,6 +115,8 @@ builder.Services.AddScoped<IMainPcProofService>(sp => new MainPcProofService(
     sp.GetRequiredService<HitPan.Application.Services.Security.ITpmKeyService>(),
     sp.GetRequiredService<HitPan.Application.Services.Security.IMainPcSealService>(),
     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MainPcProofService>>()));
+// 🔴 W-G1-52 갈래 0 — DB 밖 로컬 감사 파일(%ProgramData%\HitPan\audit · 줄 더하기만 · 본사 전송 0). Singleton = 경로별 한 줄 서기. 기본 자리 생성자를 여기서 못박는다.
+builder.Services.AddSingleton<ILocalAuditFile>(sp => new HitPan.Infrastructure.Services.LocalAuditFileWriter(sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<HitPan.Infrastructure.Services.LocalAuditFileWriter>>()));
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
@@ -140,6 +142,7 @@ builder.Services.AddScoped<IApprovalLineService, ApprovalLineService>();
 builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
+builder.Services.AddScoped<IRestoreSafePath, RestoreSafePath>();   // W-G1-52 A-2② 안전 복원 걸음 ①~③ (깃발 닫힘 · 부르는 곳 = 시험 · A-2③)
 builder.Services.AddScoped<IDataResetService, DataResetService>();
 builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
 builder.Services.AddScoped<ITermsConsentService, TermsConsentService>();  // 헌법 #24 약관 4건 강제 동의
