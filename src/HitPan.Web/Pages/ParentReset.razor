@@ -1,0 +1,193 @@
+@page "/parent-reset"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout EmptyLayout
+@inject NavigationManager Navigation
+@inject HttpClient Http
+@using System.Net.Http.Json
+
+@* 🔴 W-G1-52 갈래 C — 대표 비밀번호 다시 정하기 화면(설계 §8-4 3 · §11 「재설정 1장」).
+   · 메인PC 의 「대표 비밀번호 다시 정하기」(윈도우 관리자 승인)가 이 주소를 엶 — 1회용 표는 주소 # 뒤(서버 기록 0).
+   · 보이는 것 = 대표 아이디(아이디도 잊은 경우) + 새 비밀번호 두 칸 + [바꾸기]. 스크롤 없이 한 장.
+   · 🔴 #2 — 회사 · 사용자 id 를 보내지 않는다(표만). 🔴 #40 — 비번 · 표를 화면 밖(저장소 · 로그)에 남기지 않는다. *@
+
+<div class="d-flex justify-center align-center" style="min-height: 100vh; padding: 16px;">
+    <MudPaper Elevation="3" Class="pa-6" Style="width: 100%; max-width: 420px;">
+        <MudText Typo="Typo.h6" Class="mb-4">대표 비밀번호 다시 정하기</MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_done)
+        {
+            <MudAlert Severity="Severity.Success" Class="mb-4">@_message</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Href="/login">로그인으로</MudButton>
+        }
+        else if (!_usable)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mb-4">@_message</MudAlert>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Href="/login">로그인 화면으로</MudButton>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-1">대표 아이디</MudText>
+            <MudText Typo="Typo.h6" Class="mb-4" Style="word-break: break-all;">@_loginId</MudText>
+
+            <MudTextField @bind-Value="_newPassword" Label="새 비밀번호" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Class="mb-3" Immediate="true"
+                          HelperText="8자 이상 · 대문자 · 숫자 · 특수문자 각 1개 이상" />
+            <MudTextField @bind-Value="_confirmPassword" Label="새 비밀번호 다시" InputType="InputType.Password"
+                          Variant="Variant.Outlined" Class="mb-3" Immediate="true" />
+
+            @if (!string.IsNullOrEmpty(_message))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_message</MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true"
+                       Disabled="_saving" OnClick="SubmitAsync">
+                @(_saving ? "바꾸는 중…" : "바꾸기")
+            </MudButton>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private const string GenericRejected =
+        "이 안내는 더 쓸 수 없습니다(10분이 지났거나 이미 쓰였습니다). 메인PC 에서 「대표 비밀번호 다시 정하기」 를 다시 눌러 주세요.";
+    private const string NetworkFailed = "히트판에 연결하지 못했습니다. 메인PC 에서 히트판이 켜져 있는지 확인해 주세요.";
+
+    private bool _loading = true;
+    private bool _usable;
+    private bool _done;
+    private bool _saving;
+    private string? _token;
+    private string? _loginId;
+    private string _newPassword = string.Empty;
+    private string _confirmPassword = string.Empty;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _token = ReadToken(Navigation.Uri);
+        if (string.IsNullOrEmpty(_token))
+        {
+            _message = GenericRejected;
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            using var res = await Http.PostAsJsonAsync("api/parent-reset/peek", new { token = _token });
+            if (res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadFromJsonAsync<PeekResponse>();
+                _loginId = body?.LoginId;
+                _usable = !string.IsNullOrEmpty(_loginId);
+            }
+            _message = _usable ? null : await ReadMessageAsync(res, GenericRejected);
+        }
+        catch (HttpRequestException)
+        {
+            _message = NetworkFailed;
+        }
+        _loading = false;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _message = null;
+        if (!string.Equals(_newPassword, _confirmPassword, StringComparison.Ordinal))
+        {
+            _message = "두 칸에 넣은 새 비밀번호가 서로 다릅니다.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            using var res = await Http.PostAsJsonAsync("api/parent-reset",
+                new { token = _token, newPassword = _newPassword, confirmPassword = _confirmPassword });
+            if (res.IsSuccessStatusCode)
+            {
+                _done = true;
+                _message = await ReadMessageAsync(res, "비밀번호가 바뀌었습니다. 새 비밀번호로 로그인해 주세요.");
+            }
+            else
+            {
+                // 몸은 한 번만 읽는다(두 번 읽기 0).
+                var body = await ReadBodyAsync(res);
+                if (body?.Error == "token_rejected") { _usable = false; }
+                _message = string.IsNullOrWhiteSpace(body?.Message) ? GenericRejected : body!.Message!;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            _message = NetworkFailed;
+        }
+        finally
+        {
+            // 화면 안에서도 비번을 오래 들고 있지 않는다(#40).
+            _newPassword = string.Empty;
+            _confirmPassword = string.Empty;
+            _saving = false;
+        }
+    }
+
+    /// <summary>주소 <c>#t=</c> 뒤의 표만 꺼낸다(다른 칸 무시).</summary>
+    private static string? ReadToken(string uri)
+    {
+        var hash = uri.IndexOf('#');
+        if (hash < 0) return null;
+        foreach (var part in uri[(hash + 1)..].Split('&'))
+        {
+            if (part.StartsWith("t=", StringComparison.Ordinal)) return part[2..];
+        }
+        return null;
+    }
+
+    private static async Task<string> ReadMessageAsync(HttpResponseMessage res, string fallback)
+    {
+        try
+        {
+            var body = await res.Content.ReadFromJsonAsync<MessageResponse>();
+            return string.IsNullOrWhiteSpace(body?.Message) ? fallback : body!.Message!;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return fallback;
+        }
+        catch (NotSupportedException)
+        {
+            return fallback;
+        }
+    }
+
+    private static async Task<MessageResponse?> ReadBodyAsync(HttpResponseMessage res)
+    {
+        try
+        {
+            return await res.Content.ReadFromJsonAsync<MessageResponse>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null; // 몸이 JSON 이 아니면 한 문구(GenericRejected)로 보인다.
+        }
+        catch (NotSupportedException)
+        {
+            return null; // 내용 꼴이 JSON 이 아님 — 위와 같음.
+        }
+    }
+
+    private sealed class PeekResponse
+    {
+        public string? LoginId { get; set; }
+    }
+
+    private sealed class MessageResponse
+    {
+        public string? Error { get; set; }
+        public string? Message { get; set; }
+    }
+}
