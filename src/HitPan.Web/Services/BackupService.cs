@@ -3,7 +3,8 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class BackupService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class BackupService(HttpClient http)
+public sealed class BackupService(HttpClient http, ILogger<BackupService> logger)
 {
     public async Task<BackupSettingsModel> GetSettingsAsync(CancellationToken ct = default)
     {
@@ -14,7 +15,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetSettingsAsync] 조회 실패");
             return new BackupSettingsModel();
         }
     }
@@ -28,7 +30,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.UpdateSettingsAsync] 저장 실패");
             return false;
         }
     }
@@ -42,7 +45,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetHistoryAsync] 조회 실패");
             return new();
         }
     }
@@ -59,7 +63,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.RunBackupAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.RunBackupAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.RunBackupAsync] 실행 실패");
             return new RunBackupResultModel { Success = false, Error = ex.Message };
         }
     }
@@ -76,7 +81,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.RestoreAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.RestoreAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.RestoreAsync] 복원 실패");
             return new RestoreResultModel { Success = false, Error = ex.Message };
         }
     }
@@ -90,7 +96,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetRestoreHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetRestoreHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetRestoreHistoryAsync] 조회 실패");
             return new();
         }
     }

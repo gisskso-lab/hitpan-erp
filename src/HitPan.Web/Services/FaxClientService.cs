@@ -4,18 +4,21 @@ using HitPan.Web.Models;
 namespace HitPan.Web.Services;
 
 /// <summary>팩스 API 클라이언트 (20260821작1 W3). EmailClientService 와 동일 골격.</summary>
-public sealed class FaxClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class FaxClientService(HttpClient http)
+public sealed class FaxClientService(HttpClient http, ILogger<FaxClientService> logger)
 {
     public async Task<FaxSettingsModel> GetSettingsAsync(CancellationToken ct = default)
     {
         try { return await http.GetFromJsonAsync<FaxSettingsModel>("api/fax/settings", ct).ConfigureAwait(false) ?? new(); }
-        catch (Exception ex) { Console.Error.WriteLine($"[Fax.GetSettings] {ex.Message}"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Fax.GetSettings] {ex.Message}"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Fax.GetSettings] 조회 실패"); return new(); }
     }
 
     public async Task<bool> UpdateSettingsAsync(UpdateFaxSettingsModel req, CancellationToken ct = default)
     {
         try { using var res = await http.PutAsJsonAsync("api/fax/settings", req, ct).ConfigureAwait(false); return res.IsSuccessStatusCode; }
-        catch (Exception ex) { Console.Error.WriteLine($"[Fax.UpdateSettings] {ex.Message}"); return false; }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Fax.UpdateSettings] {ex.Message}"); return false; }
+        catch (Exception ex) { logger.LogWarning(ex, "[Fax.UpdateSettings] 저장 실패"); return false; }
     }
 
     public async Task<TestFaxResultModel> TestConnectionAsync(CancellationToken ct = default)
@@ -48,6 +51,7 @@ public sealed class FaxClientService(HttpClient http)
             if (!string.IsNullOrWhiteSpace(documentType)) url += $"&documentType={Uri.EscapeDataString(documentType)}";
             return await http.GetFromJsonAsync<List<FaxHistoryModel>>(url, ct).ConfigureAwait(false) ?? new();
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[Fax.GetHistory] {ex.Message}"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Fax.GetHistory] {ex.Message}"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Fax.GetHistory] 조회 실패"); return new(); }
     }
 }

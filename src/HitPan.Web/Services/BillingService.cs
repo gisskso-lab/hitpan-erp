@@ -3,7 +3,8 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class BillingService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class BillingService(HttpClient http)
+public sealed class BillingService(HttpClient http, ILogger<BillingService> logger)
 {
     public async Task<BillingSettingsModel> GetSettingsAsync(CancellationToken ct = default)
     {
@@ -14,7 +15,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.GetSettingsAsync] 조회 실패");
             return new BillingSettingsModel();
         }
     }
@@ -28,7 +30,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.UpdateSettingsAsync] 저장 실패");
             return false;
         }
     }
@@ -42,7 +45,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.GetPaymentMethodsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetPaymentMethodsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.GetPaymentMethodsAsync] 조회 실패");
             return new List<PaymentMethodModel>();
         }
     }
@@ -55,13 +59,15 @@ public sealed class BillingService(HttpClient http)
             if (!res.IsSuccessStatusCode)
             {
                 var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                Console.Error.WriteLine($"[BillingService.RegisterPaymentMethodAsync] {(int)res.StatusCode}: {body}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.RegisterPaymentMethodAsync] {(int)res.StatusCode}: {body}");
+                logger.LogWarning("[BillingService.RegisterPaymentMethodAsync] 서버 거절 ({Status}): {Body}", (int)res.StatusCode, body);
             }
             return res.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.RegisterPaymentMethodAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.RegisterPaymentMethodAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.RegisterPaymentMethodAsync] 등록 실패");
             return false;
         }
     }
@@ -75,7 +81,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.SetDefaultAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.SetDefaultAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.SetDefaultAsync] 저장 실패");
             return false;
         }
     }
@@ -89,7 +96,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.DeletePaymentMethodAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.DeletePaymentMethodAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.DeletePaymentMethodAsync] 삭제 실패");
             return false;
         }
     }
@@ -104,7 +112,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.GetSubscriptionAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetSubscriptionAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.GetSubscriptionAsync] 조회 실패");
             return null;
         }
     }
@@ -118,7 +127,8 @@ public sealed class BillingService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BillingService.GetInvoicesAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetInvoicesAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BillingService.GetInvoicesAsync] 조회 실패");
             return new List<InvoiceListItemModel>();
         }
     }

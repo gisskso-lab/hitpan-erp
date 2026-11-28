@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HitPan.Web.Services;
 
@@ -32,9 +33,22 @@ public sealed class RenderedPdfDownload
     /// <summary>잠긴 동안 다시 누르면 띄우는 글자 — 조용히 아무 일도 안 일어나면 고객은 고장으로 읽는다.</summary>
     private const string BusyText = "PDF 를 만드는 중입니다. 잠시만 기다려 주십시오.";
 
+    // 화면오류기록띠 갈래 S — 흰 띠 대신 경고 흔적(#15). DI 미등록(DocumentPrintPreview 와 시험이 직접 new) → 생성자 두 벌.
+    private readonly ILogger<RenderedPdfDownload> _logger;
+
+    /// <summary>
+    /// 옛 1-인자 생성자 — <b>남김</b>(작업지시서 E6 · 시험 22곳이 직접 <c>new</c>). 기록은 버림(<see cref="NullLogger{T}"/>).
+    /// </summary>
     public RenderedPdfDownload(HttpClient http)
+        : this(http, NullLogger<RenderedPdfDownload>.Instance)
+    {
+    }
+
+    /// <summary>기록기를 받는 생성자 — 앱 안(<c>DocumentPrintPreview</c>)은 이쪽.</summary>
+    public RenderedPdfDownload(HttpClient http, ILogger<RenderedPdfDownload> logger)
     {
         _http = http;
+        _logger = logger;
     }
 
     /// <summary>
@@ -94,7 +108,8 @@ public sealed class RenderedPdfDownload
             catch (Exception ex)
             {
                 ui.Error("PDF 를 저장하지 못했습니다.");
-                Console.Error.WriteLine($"[DocPdf] 내려받기 실패 — type={docType}: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPdf] 내려받기 실패 — type={docType}: {ex.Message}");
+                _logger.LogWarning(ex, "[DocPdf] 내려받기 실패 — type={DocType}", docType);
             }
         }
         finally
@@ -132,7 +147,8 @@ public sealed class RenderedPdfDownload
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[RenderedPdf] PDF 를 받지 못했습니다 — type={docType}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[RenderedPdf] PDF 를 받지 못했습니다 — type={docType}: {ex.Message}");
+            _logger.LogWarning(ex, "[RenderedPdf] PDF 를 받지 못했습니다 — type={DocType}", docType);
             return new RenderedPdfResult(false, Array.Empty<byte>(), null, null, 0);
         }
     }
@@ -148,7 +164,8 @@ public sealed class RenderedPdfDownload
             using var resp = await _http.GetAsync($"api/documents/{docType}/print-notice", ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                Console.Error.WriteLine($"[RenderedPdf.Notice] 안내를 묻지 못했습니다({(int)resp.StatusCode}) — 안내 없이 받습니다. type={docType}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[RenderedPdf.Notice] 안내를 묻지 못했습니다({(int)resp.StatusCode}) — 안내 없이 받습니다. type={docType}");
+                _logger.LogWarning("[RenderedPdf.Notice] 안내를 묻지 못했습니다({Status}) — 안내 없이 받습니다. type={DocType}", (int)resp.StatusCode, docType);
                 return false;
             }
 
@@ -157,7 +174,8 @@ public sealed class RenderedPdfDownload
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[RenderedPdf.Notice] 안내를 묻지 못했습니다 — 안내 없이 받습니다. type={docType}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[RenderedPdf.Notice] 안내를 묻지 못했습니다 — 안내 없이 받습니다. type={docType}: {ex.Message}");
+            _logger.LogWarning(ex, "[RenderedPdf.Notice] 안내를 묻지 못했습니다 — 안내 없이 받습니다. type={DocType}", docType);
             return false;
         }
     }
@@ -173,7 +191,8 @@ public sealed class RenderedPdfDownload
     }
 
     /// <summary>서버가 사람 말(<c>{ message }</c>)을 보냈으면 그 말 · 아니면 null.</summary>
-    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp, CancellationToken ct)
+    // ⬛ [낡은 줄 · 화면오류기록띠] private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp, CancellationToken ct)   — 기록기(인스턴스)를 쓰려고 static 뗌
+    private async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp, CancellationToken ct)
     {
         try
         {
@@ -194,7 +213,8 @@ public sealed class RenderedPdfDownload
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[RenderedPdf] 서버 안내문을 읽지 못했습니다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[RenderedPdf] 서버 안내문을 읽지 못했습니다: {ex.Message}");
+            _logger.LogWarning(ex, "[RenderedPdf] 서버 안내문을 읽지 못했습니다");
             return null;
         }
     }

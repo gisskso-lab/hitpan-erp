@@ -3,18 +3,21 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class EmailClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class EmailClientService(HttpClient http)
+public sealed class EmailClientService(HttpClient http, ILogger<EmailClientService> logger)
 {
     public async Task<EmailSettingsModel> GetSettingsAsync(CancellationToken ct = default)
     {
         try { return await http.GetFromJsonAsync<EmailSettingsModel>("api/email/settings", ct).ConfigureAwait(false) ?? new(); }
-        catch (Exception ex) { Console.Error.WriteLine($"[Email.GetSettings] {ex.Message}"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Email.GetSettings] {ex.Message}"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Email.GetSettings] 조회 실패"); return new(); }
     }
 
     public async Task<bool> UpdateSettingsAsync(UpdateEmailSettingsModel req, CancellationToken ct = default)
     {
         try { using var res = await http.PutAsJsonAsync("api/email/settings", req, ct).ConfigureAwait(false); return res.IsSuccessStatusCode; }
-        catch (Exception ex) { Console.Error.WriteLine($"[Email.UpdateSettings] {ex.Message}"); return false; }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Email.UpdateSettings] {ex.Message}"); return false; }
+        catch (Exception ex) { logger.LogWarning(ex, "[Email.UpdateSettings] 저장 실패"); return false; }
     }
 
     public async Task<TestSmtpResultModel> TestSmtpAsync(CancellationToken ct = default)
@@ -48,7 +51,8 @@ public sealed class EmailClientService(HttpClient http)
             var url = "api/email/history?" + string.Join("&", qs);
             return await http.GetFromJsonAsync<List<EmailHistoryRowModel>>(url, ct).ConfigureAwait(false) ?? new();
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[Email.GetHistory] {ex.Message}"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Email.GetHistory] {ex.Message}"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Email.GetHistory] 조회 실패"); return new(); }
     }
 
     /// <summary>거래처 이메일 lookup (Dialog 자동채움).</summary>
@@ -74,6 +78,7 @@ public sealed class EmailClientService(HttpClient http)
             if (!res.IsSuccessStatusCode) return null;
             return await res.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[Email.DownloadPdf] {ex.Message}"); return null; }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Email.DownloadPdf] {ex.Message}"); return null; }
+        catch (Exception ex) { logger.LogWarning(ex, "[Email.DownloadPdf] 내려받기 실패"); return null; }
     }
 }

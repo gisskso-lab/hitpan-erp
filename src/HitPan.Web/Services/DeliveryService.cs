@@ -4,11 +4,17 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using HitPan.Web.Models;
+using MudBlazor;
 
 namespace HitPan.Web.Services;
 
-public sealed class DeliveryService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class DeliveryService(HttpClient http)
+public sealed class DeliveryService(HttpClient http, ILogger<DeliveryService> logger, ISnackbar snackbar)
 {
+    // 화면오류기록띠 대표 ③ — 매입 반품 목록(반품현황 전표별 · 반품 목록 부품 · 모바일 반품)은 실패를 빈 목록으로 돌려
+    //   부르는 화면이 실패를 모른다(띠가 유일한 신호였다) → 그 조회 실패만 쉬운 알림 한 번.
+    private void NotifyLoadFailed(Exception ex) => LoadFailedNotice.Show(snackbar, ex);
+
     private static readonly Dictionary<string, int> DailyCounter = new();
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -590,7 +596,8 @@ public sealed class DeliveryService(HttpClient http)
             // 🔴 20260825작18 (헌법 #15) — 종전 `catch { return new(); }` 는 예외 변수조차 없었다.
             //   401·500·역직렬화 실패가 전부 "조회 0건" 과 구별되지 않아, 고장이 빈 화면으로
             //   위장됐다. 오류를 오류로 보이게 하지 않으면 원인 규명 자체가 불가능하다.
-            Console.Error.WriteLine("[작18] 매입반품 목록 조회 실패: " + ex.GetType().Name + ": " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[작18] 매입반품 목록 조회 실패: " + ex.GetType().Name + ": " + ex.Message);
+            logger.LogWarning(ex, "[작18] 매입반품 목록 조회 실패"); NotifyLoadFailed(ex);
             return new();
         }
     }

@@ -6,7 +6,8 @@ namespace HitPan.Web.Services;
 /// <summary>
 /// 전자세금계산서 인증서 등록·관리 API 클라이언트 — 작B v3.0 방식 A
 /// </summary>
-public sealed class TaxInvoiceCertClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class TaxInvoiceCertClientService(HttpClient http)
+public sealed class TaxInvoiceCertClientService(HttpClient http, ILogger<TaxInvoiceCertClientService> logger)
 {
     public async Task<CertInfoDto?> GetCertInfoAsync(CancellationToken ct = default)
     {
@@ -16,7 +17,8 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.GetInfo] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.GetInfo] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.GetInfo] 조회 실패");
             return null;
         }
     }
@@ -30,7 +32,8 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.GetSecurityStatus] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.GetSecurityStatus] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.GetSecurityStatus] 조회 실패");
             return new();
         }
     }
@@ -66,7 +69,8 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.Watchdog] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.Watchdog] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.Watchdog] 조회 실패");
             return null;
         }
     }
