@@ -372,6 +372,68 @@ public sealed class RestoreMaintenanceGateTests
         At("AddSingleton<HitPan.Application.Interfaces.IRestoreMaintenance, HitPan.API.Middleware.RestoreMaintenanceState>()");
     }
 
+    // ── 고침 1([3-V] P2-1) — /hubs 표지 판정 ──────────────────────────────────
+
+    /// <summary>
+    /// 실제 파이프라인의 /hubs 모양 — <c>TenantMiddleware</c> 가 /api 밖이라 <c>Items["TenantId"]</c> 를 <b>안 채운</b> 상태.
+    /// 쿼리에 다른 회사 값(<c>tenant_id</c>)을 실어, 표지 미들웨어가 쿼리를 읽으면 빨강이 되게 한다(#2).
+    /// </summary>
+    private static async Task<(int Status, bool Reached)> RunHub(RestoreMaintenanceState s, ClaimsPrincipal user,
+        string path = "/hubs/notify/negotiate")
+    {
+        var reached = false;
+        var mw = new RestoreStampMiddleware(_ => { reached = true; return Task.CompletedTask; }, s, NullLogger<RestoreStampMiddleware>.Instance);
+        var ctx = Ctx(path, "POST");
+        ctx.Request.QueryString = new QueryString("?negotiateVersion=1&tenant_id=t-other");
+        ctx.User = user;
+        await mw.InvokeAsync(ctx, DbMustNotBeUsed().Object);
+        return (ctx.Response.StatusCode, reached);
+    }
+
+    [Fact(DisplayName = "G17-H1 🔴 고침 1 — 복원 전 토큰(클레임 = 재시드 L)으로 복원 뒤 /hubs 연결 → 401 · 다음 단계 안 감 (회사 번호 = User 클레임 · Items 비어도)")]
+    public async Task H1_허브_표지_앞_401()
+    {
+        var (s, _) = NewState();
+        var oldToken = Token(DateTime.UtcNow.AddMinutes(-30));
+        Assert.True((await s.BeginAsync(TimeSpan.FromSeconds(1), CancellationToken.None)).Started);
+        await s.EndAsync(Tenant, CancellationToken.None);
+
+        var (status, reached) = await RunHub(s, oldToken);
+        Assert.Equal(401, status);
+        Assert.False(reached);                              // 허브까지 못 감
+
+        var (status2, reached2) = await RunHub(s, oldToken, "/hubs/migration");
+        Assert.Equal(401, status2);
+        Assert.False(reached2);
+    }
+
+    [Fact(DisplayName = "G17-H2 고침 1 — 복원 뒤 토큰으로 /hubs 통과 · 회사 클레임 없는 /hubs 와 Items 없는 /api 는 전과 같이 통과(fail-open 그대로)")]
+    public async Task H2_허브_통과_그대로()
+    {
+        var (s, _) = NewState();
+        Assert.True((await s.BeginAsync(TimeSpan.FromSeconds(1), CancellationToken.None)).Started);
+        await s.EndAsync(Tenant, CancellationToken.None);
+
+        var (status, reached) = await RunHub(s, Token(DateTime.UtcNow.AddSeconds(1)));
+        Assert.Equal(200, status);
+        Assert.True(reached);
+
+        // 회사 클레임 없는 인증 토큰 = 회사 번호 못 얻음 → 통과(/api 와 같은 꼴 · 쿼리의 tenant_id 는 안 읽음)
+        var noTenant = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("user_id", "u1"),
+            new Claim("exp", new DateTimeOffset(DateTime.UtcNow.AddHours(1)).ToUnixTimeSeconds().ToString()),
+        }, "Bearer"));
+        Assert.Equal(200, (await RunHub(s, noTenant)).Status);
+
+        // /api 는 Items 만 본다 — 고침 1 은 /api 동작을 안 바꿈(Items 비면 통과 그대로)
+        var mw = new RestoreStampMiddleware(_ => Task.CompletedTask, s, NullLogger<RestoreStampMiddleware>.Instance);
+        var ctx = Ctx("/api/approval/documents/a/process", "POST");
+        ctx.User = Token(DateTime.UtcNow.AddMinutes(-30));
+        await mw.InvokeAsync(ctx, DbMustNotBeUsed().Object);
+        Assert.Equal(200, ctx.Response.StatusCode);
+    }
+
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

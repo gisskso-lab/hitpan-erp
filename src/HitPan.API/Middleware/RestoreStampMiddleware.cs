@@ -21,6 +21,7 @@ namespace HitPan.API.Middleware;
 /// <para><b>토큰 발급 시각</b> = <c>iat</c> → <c>nbf</c> → <c>exp − 8시간</c>(<c>AuthService.GenerateTokens</c> 는 <c>iat</c> 를 안 싣는다 ·
 /// 수명 상수가 <see cref="AccessTokenLifetime"/> 와 같아야 한다 — 게이트가 반사로 맞댄다).</para>
 /// <para>자리 = <c>SessionValidityMiddleware</c> 바로 뒤(회사 번호 = JWT 를 푼 <c>Items["TenantId"]</c> 만 · #2).
+/// <c>/hubs</c> 는 <c>TenantMiddleware</c> 가 Items 를 안 채우므로 인증된 <c>User</c> 의 <c>tenant_id</c> 클레임을 읽는다(고침 1 · [3-V] P2-1 · 역시 JWT 만).
 /// 점검 중에는 건너뛴다 — 대표의 복원 진행 요청이 옛 토큰으로 돌고, 다른 요청은 점검 미들웨어가 이미 503 으로 돌렸다.</para>
 /// <para>조회 실패 = 통과 + 오류 기록(<c>SessionValidityMiddleware</c> 와 같은 가용성 우선 · 실패는 기억하지 않아 다음 요청이 다시 읽음).</para>
 /// </remarks>
@@ -56,6 +57,11 @@ public sealed class RestoreStampMiddleware
 
         // #2 — 회사 번호는 JWT 를 푼 Items 값만(요청 파라미터 0)
         var tenantId = context.Items["TenantId"]?.ToString();
+        // 🔴 고침 1([3-V] P2-1) — TenantMiddleware 는 /api 밖에서 Items 를 안 채운다 → /hubs 는 판정이 한 번도 안 일어났다.
+        //   /hubs 만 인증된 User 의 tenant_id 클레임에서 읽는다(#2 — JwtBearer 가 서명 · 수명 검증 뒤 채운 값만 ·
+        //   SignalR ?access_token= 도 AuthExtensions OnMessageReceived 가 같은 검증으로 넘김 · 쿼리 · 본문 · 주소의 회사 값 0).
+        if (string.IsNullOrEmpty(tenantId) && path.StartsWithSegments("/hubs"))
+            tenantId = context.User.FindFirstValue("tenant_id");
         if (string.IsNullOrEmpty(tenantId)) { await _next(context); return; }
 
         var stamp = _maintenance.GetStampUtc(tenantId);
