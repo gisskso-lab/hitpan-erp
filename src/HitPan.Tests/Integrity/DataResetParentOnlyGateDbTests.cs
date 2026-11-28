@@ -30,7 +30,9 @@ namespace HitPan.Tests.Integrity;
 /// </para>
 /// </remarks>
 [Collection("DeviceAndKeyGate")]
-public sealed class DataResetParentOnlyGateDbTests : IDisposable
+// ⬛ 20261127작 W-S-01 갈래 B 이전: public sealed class DataResetParentOnlyGateDbTests : IDisposable
+//   partial 더함 — 닫힘 시험 D-B1 을 짝 파일(DataResetParentOnlyGateDbTests.BetaClosed.cs)에 두고 이 파일의 준비 · 대역을 그대로 쓴다(이 파일 시험 손 0).
+public sealed partial class DataResetParentOnlyGateDbTests : IDisposable
 {
     private readonly string _dbName = "hitpan_reset_parent_" + Guid.NewGuid().ToString("N")[..8];
     private bool _created;
@@ -172,8 +174,10 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
         return c;
     }
 
+    // ⬛ 20261127작 W-S-01 갈래 B 이전: new(db, backup, new NoOpAudit(), NullLogger<DataResetService>.Instance);
+    // 열린 가짜(OpenForTest)를 넘긴다 — 「다시 열면 대표만」 뜻을 그대로 잰다(D-B3 · 닫힘 시험은 .BetaClosed.cs).
     private DataResetService NewService(MySqlConnection db, CountingBackup backup) =>
-        new(db, backup, new NoOpAudit(), NullLogger<DataResetService>.Instance);
+        new(db, backup, new NoOpAudit(), NullLogger<DataResetService>.Instance, DataResetAvailabilityForTest.OpenForTest);
 
     private async Task AssertDeniedAsync(string tenantId, string userId, string password, string code, string message, string what)
     {
@@ -446,9 +450,10 @@ public sealed class DataResetParentOnlyGateDbTests : IDisposable
 
     /// <summary>진짜 AuditService(같은 연결 · 고정 회사 문맥)로 만든 서비스 — 「롤백 → 감사」 순서를 감사 행으로 잰다(12d-3).</summary>
     private static DataResetService NewServiceWithRealAudit(MySqlConnection db, CountingBackup backup, string userId) =>
+        // ⬛ 20261127작 W-S-01 갈래 B 이전 끝 인자: NullLogger<DataResetService>.Instance); — 열린 가짜를 더함(D-B3)
         new(db, backup,
             new AuditService(db, new FixedTenant(TenantId, userId), NullLogger<AuditService>.Instance),
-            NullLogger<DataResetService>.Instance);
+            NullLogger<DataResetService>.Instance, DataResetAvailabilityForTest.OpenForTest);
 
     /// <summary>audit_trail 의 회사 · action_type 행 reason 목록(행 수 = 목록 길이).</summary>
     private static async Task<List<string?>> AuditReasonsAsync(MySqlConnection db, string tenantId, string actionType) =>

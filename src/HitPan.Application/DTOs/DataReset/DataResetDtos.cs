@@ -20,6 +20,9 @@ public enum DataResetGate
     NotParent,
     NoParent,
     MultipleParents,
+
+    /// <summary>20261127작 W-S-01 갈래 B — 이 판에서 초기화가 닫혀 있다(<c>IDataResetAvailability.IsOpen == false</c> · 대표 판정보다 앞 · 설계 §3-2 의 5).</summary>
+    Closed,
 }
 
 /// <summary>20261125작 — <see cref="DataResetGate"/> 를 화면 · 시험이 함께 쓰는 글자로 바꾼다(화면 ↔ 서버 계약 · 화면 쪽 짝 = HitPan.Web DataResetMenuRule).</summary>
@@ -30,11 +33,16 @@ public static class DataResetGateCodes
     public const string NoParent = "no_parent";
     public const string MultipleParents = "multiple_parents";
 
+    /// <summary>20261127작 W-S-01 갈래 B — 이 판에서 초기화 닫힘(화면 짝 = HitPan.Web DataResetMenuRule.Closed · 메뉴 감춤).</summary>
+    public const string Closed = "closed";
+
     public static string ToCode(DataResetGate gate) => gate switch
     {
         DataResetGate.Allowed => Allowed,
         DataResetGate.NoParent => NoParent,
         DataResetGate.MultipleParents => MultipleParents,
+        // 20261127작 W-S-01 갈래 B [반증 S-2] — 드러내 적는다. 빠뜨려도 아래 기본 칸(NotParent)으로 떨어져 빌드는 초록이다(시험 G-B3 ⓐ 가 잡음).
+        DataResetGate.Closed => Closed,
         _ => NotParent,
     };
 }

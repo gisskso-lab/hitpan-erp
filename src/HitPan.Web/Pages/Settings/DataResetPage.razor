@@ -8,11 +8,31 @@
 @inject DataResetService ResetService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@* 20261127작 W-S-01 갈래 B — my-level 의 dataResetGate 를 한 번 읽어 「closed」 면 입력칸 대신 안내(설계 §3-4 · 사이드바와 같은 길 · DI 등록 없이) *@
+@inject HttpClient Http
+@inject ILogger<AccountLinkApi> LinkLog
 
 <PageTitle>모든데이터 초기화</PageTitle>
 @* 용어 정정 (사장님 오더 2026-08-10, 20260810작4) — 부모계정 → 대표계정 *@
 <PageHeader Title="모든데이터 초기화" Subtitle="히트판 자료 포맷 — 대표계정·회사정보·로그만 남기고 모든 업무 데이터를 비웁니다" />
 
+@* 20261127작 W-S-01 갈래 B — 화면은 보조다. 막는 것은 서버(DataResetService.ResetAllAsync 첫 문장)다.
+     라우트(/data/reset)는 그대로 둔다 — 다시 열 때 화면 손 0. 「closed」 를 못 읽으면(null) 지금 화면 그대로 · 서버가 막는다. *@
+@if (!_gateChecked)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" Style="max-width:720px" />
+}
+else if (_resetClosed)
+{
+    <MudPaper Elevation="0" Class="pa-6" Style="border:1px solid var(--mud-palette-lines-default);border-radius:12px;max-width:720px">
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            모든데이터 초기화는 지금 쓰시는 히트판에서 잠시 닫아 두었습니다. 회사 자료는 그대로 있습니다.
+            꼭 필요하시면 고객지원센터에 말씀해 주세요.
+        </MudAlert>
+    </MudPaper>
+}
+else
+{
 @* 🔴 자료가 든 그 컴퓨터에서만 연다 (사장님 지시 2026-08-11).
      원격에서 남의 회사 자료를 비우는 경로를 만들지 않는다. *@
 <MainPcOnly>
@@ -69,12 +89,25 @@
 </MudPaper>
 
 </MainPcOnly>
+}
 
 @code {
     private string _password = "";
     private string _confirmText = "";
     private bool _busy;
     private DataResetService.DataResetResultModel? _result;
+
+    // 20261127작 W-S-01 갈래 B — 서버 글자 「closed」 를 따른다(DataResetMenuRule.Closed · 다시 열 때 고칠 곳 = 서버 한 줄뿐).
+    private bool _gateChecked;
+    private bool _resetClosed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // AccountLinkApi.GetMyLevelAsync 는 실패하면 경고를 남기고 null 을 돌려준다(#15) — null 이면 지금 화면 그대로(새 규칙 0 · #33).
+        var me = await new AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
+        _resetClosed = me?.DataResetGate == DataResetMenuRule.Closed;
+        _gateChecked = true;
+    }
 
     private bool CanRun =>
         !string.IsNullOrWhiteSpace(_password) && _confirmText.Trim() == "초기화";
