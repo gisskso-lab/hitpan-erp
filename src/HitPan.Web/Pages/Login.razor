@@ -226,6 +226,9 @@
     private static bool s_loginInFlight;
     private const int LoginInFlightSafetyNetMs = 15000;
     private bool _waitingForInFlightLogin;
+    // 🔴 20261128작 갈래 A 고침 1 (§8-2 A-①) — 안전망 시계. 로그인을 부른 화면이 사용자 입력(새 기기 알림 등 대화 창)을
+    //   기다리는 동안 멈추고, 입력이 끝나면 다시 15초. 판정은 LoginInFlightSafetyNet 한 곳(시험이 불러서 잰다).
+    private static readonly LoginInFlightSafetyNet s_inFlightSafetyNet = new(LoginInFlightSafetyNetMs);
 
     protected override async Task OnInitializedAsync()
     {
@@ -255,7 +258,27 @@
     /// </summary>
     private async Task WaitForInFlightLoginAsync()
     {
-        await Task.Delay(LoginInFlightSafetyNetMs);
+        // ⬛ [낡은 줄 · 갈래 A 고침 1 전] await Task.Delay(LoginInFlightSafetyNetMs);
+        //   사유: 앞 화면이 새 기기 알림을 띄워 사용자를 기다리는 동안에도 시계가 흘러, 15초 뒤 알림이 사라졌다(§8-2 A-①).
+        // 🔴 고침 1 — 판정은 LoginInFlightSafetyNet.Next 한 곳.
+        //   앞 화면이 이동을 이미 냈으면(§8-3 3V-P2) 아무것도 하지 않고 끝난다 — 새 문서가 늦게 와도 `/` 로 덮어쓰지 않는다.
+        //   멈춤 아님 상태로 15초가 지났을 때만 아래로 내려간다(§8-2 A-① · 입력이 끝나면 그때부터 다시 15초).
+        var waitStartedAtMs = Environment.TickCount64;
+        while (true)
+        {
+            var step = s_inFlightSafetyNet.Next(waitStartedAtMs, Environment.TickCount64);
+            if (step == LoginInFlightSafetyNet.Step.StandDown)
+            {
+                return;
+            }
+
+            if (step == LoginInFlightSafetyNet.Step.GoHome)
+            {
+                break;
+            }
+
+            await Task.Delay(LoginInFlightSafetyNet.PollMs);
+        }
 
         // 그사이 화면이 다른 곳으로 바뀌었으면(이 화면이 더는 보이지 않으면) 아무것도 하지 않는다.
         var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
@@ -442,6 +465,8 @@
             //   방송(AuthService 안)으로 이 화면이 다시 만들어져도 새 화면은 이 표시를 보고 `/` 로 가지 않는다.
             //   실패 · 예외면 finally 가 끈다. 성공이면 끄지 않는다(이동이 문서를 새로 읽어 지운다).
             s_loginInFlight = true;
+            // 🔴 고침 1 (§8-3 3V-P3-1) — 앞 시도의 멈춤 · 이동 냄 칸이 남아 이번 안전망을 막지 않게 비운다.
+            s_inFlightSafetyNet.Reset();
 
             // ⬛ [낡은 줄] `AuthService.LoginAsync(_email.Trim(), _password, _forceSignOutOtherPc);` + 사용 후 `false` 로 내림.
             //   🔴 절G — 끊는 요청은 보내지 않는다(서비스의 force 매개변수는 무접촉 · 기본 false).
@@ -467,6 +492,7 @@
             {
                 Navigation.NavigateTo("/terms", forceLoad: true);
                 navigated = true;   // 🔴 20261128작 갈래 A — 갈 곳 식 손 0 · 냈다는 표시만
+                s_inFlightSafetyNet.MarkNavigated();   // 🔴 고침 1 (§8-3 3V-P2) — 다시 만들어진 화면의 안전망이 이 이동을 덮어쓰지 않게
                 return;
             }
 
@@ -497,6 +523,9 @@
             {
                 try
                 {
+                    // 🔴 20261128작 갈래 A 고침 1 (§8-2 A-①) — 사용자가 알림을 닫을 때까지 다시 만들어진 화면의 안전망 시계를 멈춘다.
+                    //   끝은 아래 finally(닫힘 · 실패 모두). 갈 곳 · 흐름 손 0.
+                    s_inFlightSafetyNet.BeginWaitingForInput();
                     var notice = string.IsNullOrWhiteSpace(result.Data?.DeviceNotice)
                         ? "이 기기가 새 기기로 등록되었습니다."
                         : result.Data!.DeviceNotice!;
@@ -510,7 +539,17 @@
                         cancelText: "닫기",
                         severity: Severity.Info);
                 }
-                catch { /* 통지 실패해도 로그인 진행 */ }
+                // ⬛ [낡은 줄 · 갈래 A 고침 1 전 · #15 빈 catch] catch { /* 통지 실패해도 로그인 진행 */ }
+                // 🔴 고침 1 (§8-2 A-③) — 통지 실패해도 로그인 진행(그대로) · 흔적 1줄만 남긴다(이 화면의 기록 방식 그대로).
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("[Login] 새 기기 안내 창 띄우기 실패: " + ex.Message);
+                }
+                finally
+                {
+                    // 🔴 고침 1 (§8-2 A-①) — 알림이 끝났다. 이 시각부터 안전망 시계가 다시 15초.
+                    s_inFlightSafetyNet.EndWaitingForInput(Environment.TickCount64);
+                }
             }
 
             // ⬛ [낡은 분기 · 2026-11-28 W-S-03(작업지시서 20261128작 §2 · 설계 §2-2 ②)] 첫 로그인이면 환영 화면, 아니면 첫 화면(또는 수동 업데이트 화면).
@@ -532,20 +571,25 @@
                 BetaClosedRoutes.AfterLoginPath(result.Data?.RedirectToWelcome == true, LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin)),
                 forceLoad: true);
             navigated = true;   // 🔴 20261128작 갈래 A — 갈 곳 식 손 0 · 냈다는 표시만
+            s_inFlightSafetyNet.MarkNavigated();   // 🔴 고침 1 (§8-3 3V-P2) — `/data/update` 등 이 이동을 안전망이 덮어쓰지 않게
         }
         finally
         {
             // 🔴 20261128작 갈래 A (설계 §2-2 2 · 3)
             //   실패 결과 · 예외 = 진행 중 표시를 끈다(다시 로그인할 수 있어야 한다).
             //   성공인데 이동을 못 냈다(중간 예외) = `/` 로 한 번 보낸다 — 이 화면이 이동을 맡았으니 끊긴 채 두지 않는다.
+            //   🔴 고침 1 (§8-3 3V-P3-1) — 칸 정리 차례(개발명세서 「고침 1」 표): 멈춤은 알림 블록 자기 finally 가 이미 풀었다.
+            //     실패 = 진행 중 끔 + 안전망 칸 비움 · 성공+이동 냄 = 그대로(문서 다시 읽기가 지움) · 성공+이동 못 냄 = `/` 1회 + 이동 냄.
             if (!loginSucceeded)
             {
                 s_loginInFlight = false;
+                s_inFlightSafetyNet.Reset();
             }
             else if (!navigated)
             {
                 Console.Error.WriteLine("[Login] 로그인은 됐는데 이동을 내지 못해 첫 화면으로 보낸다.");
                 Navigation.NavigateTo("/", forceLoad: true);
+                s_inFlightSafetyNet.MarkNavigated();
             }
 
             _busy = false;
