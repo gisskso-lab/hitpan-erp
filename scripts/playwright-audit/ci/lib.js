@@ -12,7 +12,9 @@ const path = require('path');
 const crypto = require('crypto');
 
 const SECRET_PREFIX = 'UI_SECRET_';
-// S0 이 만드는 값의 이름 — S10 은 이 일곱 개가 전부 있어야 검사를 시작한다(보안상무 ⑩: 비면 빨강).
+// ⬛ [낡은 줄 · 11/28 이전] S0 이 만드는 값의 이름 — S10 은 이 일곱 개가 전부 있어야 검사를 시작한다(보안상무 ⑩: 비면 빨강).
+// S0 이 만드는 값의 이름 — S10 은 이 여덟 개가 전부 있어야 검사를 시작한다(보안상무 ⑩: 비면 빨강).
+//   🆕 11/28 UI_PW_DA — 쿨타임 몸 전용 자식 다(seed-children.js · 가 · 나와 같은 길).
 const S0_NAMES = [
   'UI_DB_PASSWORD',
   'UI_JWT_SECRET',
@@ -21,6 +23,7 @@ const S0_NAMES = [
   'UI_PW_PARENT',
   'UI_PW_GA',
   'UI_PW_NA',
+  'UI_PW_DA',
 ];
 
 let registerCounter = 0;

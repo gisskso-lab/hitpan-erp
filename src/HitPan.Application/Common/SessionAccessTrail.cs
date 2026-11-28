@@ -41,6 +41,9 @@ public static class SessionAccessTrail
     /// <summary><c>user_agent</c> 최대 길이 — <c>user_sessions.user_agent varchar(500)</c> 와 같게 둔다.</summary>
     private const int UserAgentMax = 500;
 
+    /// <summary><c>reason</c> 최대 길이 — <c>audit_trail.reason varchar(500)</c> 와 같게 둔다(20260928작4 §D-4).</summary>
+    private const int ReasonMax = 500;
+
     /// <summary>
     /// 접속기록 한 줄을 남긴다. <b>예외를 던지지 않는다</b> — 실패는 경고 로그만 남기고 <c>false</c>.
     /// </summary>
@@ -51,6 +54,12 @@ public static class SessionAccessTrail
     /// <param name="sessionId">이 로그인의 <c>sid</c>(없으면 <c>null</c>) — <c>audit_trail.entity_id</c>.</param>
     /// <param name="deviceKind"><c>DeviceTypeResolver.ToSessionDeviceKind</c> 결과(<c>pc</c>/<c>mobile</c>).</param>
     /// <param name="userAgent">서버가 헤더에서 읽은 값. 500자에서 자른다.</param>
+    /// <param name="reason">
+    /// 🆕 20260928작4 쿨타임 · 설계 §D-4 (가) — <c>audit_trail.reason</c>(varchar 500)에 그대로 적는다.
+    /// 기본 <c>null</c> = 종전과 같은 값(NULL) ⇒ 기존 호출 2곳(로그인 · 손 로그아웃)은 무접촉이다.
+    /// ⚠️ 앞으로 이 함수를 반사(<c>GetMethod</c>)로 부르는 게이트를 만들면 인자 목록까지 지정할 것
+    /// (10/25 「선택 인자가 반사 게이트를 깬다」 전례 · 지금 반사 호출 0건).
+    /// </param>
     /// <returns>행을 실제로 남겼는가.</returns>
     public static async Task<bool> WriteAsync(
         IDbConnection db,
@@ -59,7 +68,8 @@ public static class SessionAccessTrail
         string actionType,
         string? sessionId,
         string deviceKind,
-        string? userAgent)
+        string? userAgent,
+        string? reason = null)
     {
         try
         {
@@ -76,7 +86,9 @@ public static class SessionAccessTrail
             await db.ExecuteAsync(
                 @"INSERT INTO audit_trail
                       (log_id, tenant_id, user_id, action_type, entity_type, entity_id, before_value, after_value, reason)
-                  VALUES (@LogId, @TenantId, @UserId, @ActionType, @EntityType, @EntityId, NULL, @AfterValue, NULL)",
+                  VALUES (@LogId, @TenantId, @UserId, @ActionType, @EntityType, @EntityId, NULL, @AfterValue, @Reason)",
+                // ⬛ [낡은 줄 · 20260928작4 §D-4 이전] VALUES 끝 칸이 상수 NULL 이었다 — 사유를 적을 길이 없었다.
+                //   지금은 @Reason(기본 null) ⇒ 기존 호출은 같은 값(NULL)이 들어간다.
                 new
                 {
                     LogId = Guid.NewGuid().ToString(),
@@ -85,7 +97,10 @@ public static class SessionAccessTrail
                     ActionType = actionType,
                     EntityType,
                     EntityId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId,
-                    AfterValue = afterValue
+                    AfterValue = afterValue,
+                    Reason = string.IsNullOrWhiteSpace(reason)
+                        ? null
+                        : (reason.Length > ReasonMax ? reason[..ReasonMax] : reason)
                 });
             return true;
         }

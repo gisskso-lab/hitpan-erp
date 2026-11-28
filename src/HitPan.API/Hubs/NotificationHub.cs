@@ -51,12 +51,30 @@ public sealed class NotificationHub : Hub
         => $"n:{tenantId}:{employeeId}";
 
     /// <summary>
+    /// 🆕 20260928작4 쿨타임 §5-3 — <b>로그인 한 건(sid)</b> 에게 보낼 그룹 이름. 테넌트를 포함한다(#2 · 격리는 구조로).
+    /// 자동 로그아웃 물음(<c>CooltimePrompt</c>)·끝남(<c>CooltimeEnded</c>)은 이 그룹으로만 간다 —
+    /// 같은 계정의 다른 기기(휴대폰 · 다른 PC)에는 가지 않는다.
+    /// </summary>
+    public static string SessionGroupFor(string tenantId, string sessionId)
+        => $"s:{tenantId}:{sessionId}";
+
+    /// <summary>
     /// 연결되는 순간 서버가 그룹에 넣는다. 클라이언트는 관여하지 않는다.
     /// </summary>
     public override async Task OnConnectedAsync()
     {
         var tenantId = Context.User?.FindFirstValue("tenant_id");
         var employeeId = Context.User?.FindFirstValue("employee_id");
+
+        // 🆕 20260928작4 쿨타임 §5-3 — JWT `sid` 가 있으면 로그인 한 건 그룹에도 넣는다(추가 · #1).
+        //   사원 연결이 없는 계정도 이 그룹은 들어간다(아래 사원 그룹 갈래보다 앞에 둔 이유).
+        //   `tenant_id`·`sid` 는 JWT 에서만 — 클라이언트가 그룹을 고를 수단은 여전히 없다(#2).
+        var sessionId = Context.User?.FindFirstValue("sid");
+        if (!string.IsNullOrWhiteSpace(tenantId) && !string.IsNullOrWhiteSpace(sessionId))
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, SessionGroupFor(tenantId, sessionId))
+                .ConfigureAwait(false);
+        }
 
         if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(employeeId))
         {

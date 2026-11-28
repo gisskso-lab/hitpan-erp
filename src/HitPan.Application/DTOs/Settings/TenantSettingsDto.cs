@@ -57,4 +57,14 @@ public sealed class TenantSettingsDto
     public bool UsePersonalInfoProtect { get; set; } = true;
 
     public string IndustryType { get; set; } = "retail";
+
+    // ── 20260928작4 쿨타임 §5-1 · DB-132 (추가 · #1) ─────────────────────────────
+    /// <summary>설정 시각 자동 로그아웃(PC 만) 켬. 행 없음 = 끔(Q4).</summary>
+    public bool CooltimeEnabled { get; set; }
+
+    /// <summary>자동 로그아웃 시각 <c>"HH:mm"</c>(서버 PC 시각) · 미설정 = <c>null</c>.</summary>
+    public string? CooltimeAt { get; set; }
+
+    /// <summary>정시 퇴근 시각 <c>"HH:mm"</c> · 미설정 = <c>null</c>.</summary>
+    public string? RegularLeaveTime { get; set; }
 }

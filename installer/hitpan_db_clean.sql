@@ -310,6 +310,7 @@ CREATE TABLE `attendance` (
   `memo` varchar(200) DEFAULT NULL,
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   `updated_at` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  `check_out_source` varchar(20) DEFAULT NULL COMMENT '퇴근 기록 출처. NULL=사람 · cooltime=자동 로그아웃(정시 퇴근) · cooltime_blank=자동 로그아웃·퇴근 빈칸 · edited=인사담당 고침 (DB-134)',
   PRIMARY KEY (`attendance_id`),
   UNIQUE KEY `uq_att_date` (`tenant_id`,`employee_id`,`work_date`),
   KEY `idx_att_tenant_emp` (`tenant_id`,`employee_id`)
@@ -3673,7 +3674,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1),('DB-150','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-132','clean-ddl',1),('DB-133','clean-ddl',1),('DB-134','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1),('DB-150','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`
@@ -4229,6 +4230,10 @@ CREATE TABLE `tenant_settings` (
   `enforce_single_pc_login` tinyint(1) NOT NULL DEFAULT 0 COMMENT '축B 같은 계정 PC 동시로그인 차단 사용 여부. 0=끔(기본 · DB-128). 켜는 것은 별도 결재. 모바일은 대상 아님 (DB-127 신설 · DB-128 기본 OFF)',
   `enforce_session_validity` tinyint(1) NOT NULL DEFAULT 1 COMMENT '세션 생존 확인(로그아웃·밀어내기 즉시 반영). 0=비상 끔. 축B(enforce_single_pc_login)와 별개 스위치 (DB-129)',
   `enforce_one_pc_login` tinyint(1) NOT NULL DEFAULT 1 COMMENT '같은 계정 PC 동시로그인 차단(PC 1대 · 모바일 FREE · 먼저 들어온 PC 가 이긴다). 1=켬(기본) · 0=비상 끔. 행 없음도 켬으로 읽는다 (DB-131)',
+  `cooltime_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '설정 시각 자동 로그아웃(PC 만). 0=끔(기본) · 1=켬. 행 없음도 끔 (DB-132)',
+  `cooltime_at` time DEFAULT NULL COMMENT '자동 로그아웃 시각(서버 PC 로컬 시각 · 00:00~23:59). NULL=미설정 — 켜려면 필수 (DB-132)',
+  `regular_leave_time` time DEFAULT NULL COMMENT '정시 퇴근 시각(로컬). 자동 로그아웃으로 끝난 사람의 퇴근을 이 시각으로 적는다. NULL=미설정 (DB-132)',
+  `cooltime_changed_at` datetime(6) DEFAULT NULL COMMENT '자동 로그아웃을 켜거나 시각을 바꾼 저장 순간(UTC). 이 순간 이전의 설정 시각에서는 묻지도 끝내지도 않는다(저장 뒤 첫 설정 시각부터). NULL=기록 없음 (DB-132)',
   PRIMARY KEY (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -4336,6 +4341,8 @@ CREATE TABLE `user_sessions` (
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `expires_at` datetime(6) DEFAULT NULL COMMENT '세션 만료일시',
   `device_kind` enum('pc','mobile') NOT NULL DEFAULT 'mobile' COMMENT '세션을 만든 기기 종류. pc=축B 동시로그인 차단 대상, mobile=대상 아님(FREE). 서버 판정값(UA 추론 아님). 기본 mobile=모르는 것은 싼 칸으로 (DB-127)',
+  `cooltime_asked_at` datetime(6) DEFAULT NULL COMMENT '자동 로그아웃 물은 순간(UTC). NULL=안 물음. 65초 안에 [계속]이 없으면 서버가 끝낸다 (DB-133)',
+  `cooltime_snooze_until` datetime(6) DEFAULT NULL COMMENT '이 순간(UTC) 전에는 다시 묻지 않는다([계속] = 지금 + 1시간). NULL=없음 (DB-133)',
   PRIMARY KEY (`session_id`),
   KEY `idx_user` (`user_id`),
   KEY `idx_tenant` (`tenant_id`),

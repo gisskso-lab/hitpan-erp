@@ -51,6 +51,126 @@ public sealed class SettingsService(HttpClient http, ILogger<SettingsService> lo
     }
 
     /// <summary>
+    /// 🆕 11/27 쿨타임 고침 차례(§273 V4) — 저장하되 자동 로그아웃 세 칸은 <c>null</c>(= 서버 「그대로 둠」)로 보낸다(추가 · #1).
+    /// </summary>
+    /// <remarks>
+    /// 자동 로그아웃을 고치지 않는 화면(내 정보 등)이 쓴다. 웹 모델의 켬/끔 칸은 null 못 되는 bool 이라 GET 없이 만든 모델을
+    /// <see cref="SaveAsync"/> 로 보내면 「끔」 이 실려 자동 로그아웃이 조용히 꺼진다(리뷰서 V4). 규칙 = <see cref="CooltimeScreenRules.KeepCooltimeAsIs"/>.
+    /// </remarks>
+    public async Task<bool> SaveKeepCooltimeAsync(TenantSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = JsonSerializer.SerializeToNode(model, new JsonSerializerOptions(JsonSerializerDefaults.Web)) as System.Text.Json.Nodes.JsonObject;
+            if (body is null)
+            {
+                logger.LogWarning("사용환경 설정 저장 본문을 만들지 못했다");
+                return false;
+            }
+            CooltimeScreenRules.KeepCooltimeAsIs(body);
+            using var res = await http.PutAsJsonAsync("api/settings", body, ct).ConfigureAwait(false);
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "사용환경 설정 저장 실패");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 🆕 20260928작4 쿨타임 §5-1 — 저장하고, 거절(400)이면 <b>서버가 준 문구</b>를 함께 돌려준다(추가 · #1).
+    /// </summary>
+    /// <remarks>
+    /// 위 <see cref="SaveAsync"/> 는 성공/실패만 돌려줘 「자동 로그아웃을 켜려면 … 정해 주세요」 같은 까닭이 사라진다.
+    /// 무엇을 고쳐야 하는지 알려 줘야 처음 보는 사람도 혼자 고친다. 기존 함수는 그대로 둔다([초기화]가 쓴다).
+    /// </remarks>
+    public async Task<(bool Ok, string? Message)> SaveWithMessageAsync(TenantSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync("api/settings", model, ct).ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            string? message = null;
+            if (res.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                try
+                {
+                    var body = await res.Content.ReadFromJsonAsync<SettingsErrorBody>(JsonOptions, ct).ConfigureAwait(false);
+                    message = body?.Message;
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    logger.LogWarning(ex, "사용환경 설정 저장 거절 문구를 읽지 못했다");
+                }
+            }
+            return (false, message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "사용환경 설정 저장 실패");
+            return (false, null);
+        }
+    }
+
+    private sealed class SettingsErrorBody
+    {
+        public string? Message { get; set; }
+    }
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸을 읽는다(<c>GET api/settings/cooltime</c>).
+    /// 🔴 실패 시 <c>null</c> — 호출부는 기본값으로 대신하면 안 된다(켜 둔 자동 로그아웃이 「꺼짐」 으로 보였다가 저장되면 꺼진다).
+    /// </summary>
+    public async Task<CooltimeSettingsModel?> GetCooltimeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<CooltimeSettingsModel>("api/settings/cooltime", JsonOptions, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "자동 로그아웃 설정 조회 실패");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b — 자동 로그아웃 설정 세 칸만 저장한다(<c>PUT api/settings/cooltime</c>).
+    /// 서버가 400 으로 거절하면 그 문구를 함께 돌려준다(<see cref="SaveWithMessageAsync"/> 와 같은 꼴).
+    /// </summary>
+    public async Task<(bool Ok, string? Message)> SaveCooltimeAsync(CooltimeSettingsModel model, CancellationToken ct = default)
+    {
+        try
+        {
+            using var res = await http.PutAsJsonAsync("api/settings/cooltime", model, ct).ConfigureAwait(false);
+            if (res.IsSuccessStatusCode) return (true, null);
+
+            string? message = null;
+            if (res.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                try
+                {
+                    var body = await res.Content.ReadFromJsonAsync<SettingsErrorBody>(JsonOptions, ct).ConfigureAwait(false);
+                    message = body?.Message;
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    logger.LogWarning(ex, "자동 로그아웃 설정 저장 거절 문구를 읽지 못했다");
+                }
+            }
+            return (false, message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "자동 로그아웃 설정 저장 실패");
+            return (false, null);
+        }
+    }
+
+    /// <summary>
     /// 사업장 기본정보를 tenants 테이블에 반영한다.
     /// </summary>
     public async Task<bool> SaveCompanyAsync(TenantCompanyModel model, CancellationToken ct = default)

@@ -16,7 +16,33 @@ public sealed class SettingsService : ISettingsService
         _db = db;
     }
 
+    /// <summary>
+    /// 회사 설정 조회 — 🆕 20260928작4 쿨타임 §5-1: 기존 조회(<see cref="GetBaseAsync"/>) 뒤에 DB-132 세 칸을 채운다(추가 · #1).
+    /// </summary>
     public async Task<TenantSettingsDto> GetAsync(string tenantId, CancellationToken ct = default)
+    {
+        var dto = await GetBaseAsync(tenantId, ct).ConfigureAwait(false);
+
+        var c = await _db.QueryFirstOrDefaultAsync<CooltimeSettingsRow>(new CommandDefinition(
+            """
+            SELECT cooltime_enabled AS CooltimeEnabled,
+                   cooltime_at AS CooltimeAt,
+                   regular_leave_time AS RegularLeaveTime
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+        if (c is not null)
+        {
+            dto.CooltimeEnabled = c.CooltimeEnabled != 0;
+            dto.CooltimeAt = FormatHm(c.CooltimeAt);
+            dto.RegularLeaveTime = FormatHm(c.RegularLeaveTime);
+        }
+        return dto;
+    }
+
+    // ⬛ [낡은 이름 · 20260928작4 이전] 이 본문이 곧 public GetAsync 였다 — 이름만 바꾸고 본문은 한 글자도 안 바꿨다.
+    private async Task<TenantSettingsDto> GetBaseAsync(string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
@@ -99,6 +125,10 @@ public sealed class SettingsService : ISettingsService
     public async Task SaveAsync(UpdateTenantSettingsDto dto, string tenantId, CancellationToken ct = default)
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // 🆕 20260928작4 쿨타임 §5-1 — 켜짐인데 시각이 비면 **아무것도 저장하지 않고** 거절한다(호출자가 400).
+        //   먼저 검사하는 이유: 아래 기존 저장이 끝난 뒤 거절하면 「반만 저장」 이 된다.
+        var cooltime = await ResolveCooltimeAsync(dto, tenantId, ct).ConfigureAwait(false);
 
         var limit = Math.Clamp(dto.PriceDeviationLimit, 0, 1000);
 
@@ -267,6 +297,193 @@ public sealed class SettingsService : ISettingsService
                 IndustryType = industryType
             },
             cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🆕 20260928작4 쿨타임 §5-1 — 세 칸은 따로 한 문장(기존 UPSERT 무접촉 · #1). 바뀐 칸이 없으면 안 쓴다.
+        if (cooltime is not null)
+        {
+            await SaveCooltimeAsync(tenantId, cooltime, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 쿨타임 세 칸 저장 — 🆕 11/27 설계 §E E-2 · E-3(PM 결재 §271) 로 한 트랜잭션이 되었다.
+    /// <list type="number">
+    /// <item>그 회사 설정 행을 잠그고(<c>FOR UPDATE</c>) 저장 전 켬/끔을 읽는다.</item>
+    /// <item>세 칸 UPSERT + <c>cooltime_changed_at</c> — 켬(0→1) 또는 <c>cooltime_at</c> 이 바뀐 저장일 때만 <c>UTC_TIMESTAMP(6)</c>(E-2 · 저장 뒤 첫 C 부터 적용).</item>
+    /// <item>켬/끔이 바뀌었으면(0→1 · 1→0) 그 회사 PC 세션의 물음·미룸 칸을 비운다(E-3 (다)).</item>
+    /// </list>
+    /// 잠금 순서 = <c>tenant_settings</c> → <c>user_sessions</c>.
+    /// ⬛ [낡은 줄 · 11/28 HQA 반려 P1 이전] 끝내기 함수는 <c>user_sessions</c> 를 잠근 뒤
+    /// <c>tenant_settings</c> 를 잠그지 않고(일반 SELECT) 읽기만 하므로 순환이 없다.
+    /// 🆕 11/28(설계 <c>docs/설계/erp/쿨타임_설정끄기경주_고침_설계_20261128.md</c> §4) — 쿨타임 엔진의 서버 작업 쓰기 거래
+    /// (끝내기 ①② · 묻기 ③④)도 첫 문장에서 <c>tenant_settings</c> 를 먼저(공유 잠금) 잡은 뒤 <c>user_sessions</c> 를 잠그므로 순서가 같다 — 순환 없음.
+    /// 이 저장이 먼저 이 행을 잡으면 엔진은 커밋을 기다렸다가 바뀐 값을 보고 물러난다(끈 뒤 오래된 바퀴가 묻기 · 끝내기를 못 함).
+    /// </summary>
+    private async Task SaveCooltimeAsync(string tenantId, CooltimeSave cooltime, CancellationToken ct)
+    {
+        using var tx = _db.BeginTransaction();
+
+        // 저장 전 켬/끔 — 행 없음 = 끔. tinyint(1) 은 연결 설정에 따라 bool 로 오므로 정수로 바꿔 읽는다.
+        var before = await _db.QueryFirstOrDefaultAsync<long?>(new CommandDefinition(
+            """
+            SELECT CAST(cooltime_enabled AS SIGNED)
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            FOR UPDATE
+            """,
+            new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        var wasEnabled = before is long b && b != 0;
+
+        // ⬛ [낡은 문장 · 11/27 §E 이전 — 이 가지에서 처음 쓴 문장]
+        //   INSERT INTO tenant_settings (tenant_id, cooltime_enabled, cooltime_at, regular_leave_time)
+        //   VALUES (@TenantId, @Enabled, @At, @Leave)
+        //   ON DUPLICATE KEY UPDATE cooltime_enabled = @Enabled, cooltime_at = @At, regular_leave_time = @Leave
+        // 🆕 E-2 — cooltime_changed_at 을 **맨 앞**에 둔다: UPDATE 절은 왼쪽부터 차례로 값을 바꾸므로
+        //   cooltime_enabled · cooltime_at 을 바꾸기 전의 값과 비교해야 한다. 같은 판정을 한 문장 안에서 한다.
+        //   ⚠️ 이 칸 기록을 빼면 G-C19 가 FAIL 한다(14:00 에 「13:00」 으로 켬 → 첫 바퀴에 끝냄).
+        await _db.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO tenant_settings (tenant_id, cooltime_enabled, cooltime_at, regular_leave_time, cooltime_changed_at)
+            VALUES (@TenantId, @Enabled, @At, @Leave,
+                    CASE WHEN @Enabled = 1 OR @At IS NOT NULL THEN UTC_TIMESTAMP(6) ELSE NULL END)
+            ON DUPLICATE KEY UPDATE
+              cooltime_changed_at = CASE
+                  WHEN (cooltime_enabled = 0 AND @Enabled = 1) OR NOT (cooltime_at <=> @At) THEN UTC_TIMESTAMP(6)
+                  ELSE cooltime_changed_at END,
+              cooltime_enabled = @Enabled,
+              cooltime_at = @At,
+              regular_leave_time = @Leave
+            """,
+            new { TenantId = tenantId, Enabled = cooltime.Enabled ? 1 : 0, At = cooltime.At, Leave = cooltime.Leave },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        // 🆕 E-3 (다) — 켤 때·끌 때 같은 문장. 휴대폰 세션 무접촉(device_kind='pc').
+        //   켤 때도 비우는 이유: 비상 끔(UPDATE tenant_settings 직접 · DB-132 머리)은 이 함수를 안 지나므로
+        //   남은 물음 칸이 「다시 켜는 순간 묻지 않고 끝내기」(규칙 ①) 가 되지 않게 한 번 더 비운다.
+        //   ⚠️ 끌 때 비우기를 빼면 G-C20 ⓐ · 켤 때 비우기를 빼면 G-C20 ⓑ 가 FAIL 한다(음성 대조군 ⓖ · ⓗ).
+        if (wasEnabled != cooltime.Enabled)
+        {
+            await _db.ExecuteAsync(new CommandDefinition(
+                """
+                UPDATE user_sessions
+                   SET cooltime_asked_at = NULL,
+                       cooltime_snooze_until = NULL
+                 WHERE tenant_id = @TenantId AND device_kind = 'pc'
+                """,
+                new { TenantId = tenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>쿨타임 설정 저장 거절 문구 — 고객이 그대로 본다(#25 · 개발용어 금지).</summary>
+    public const string CooltimeNeedsTimesMessage = "자동 로그아웃을 켜려면 정시 퇴근 시각과 자동 로그아웃 시각을 모두 정해 주세요.";
+
+    /// <inheritdoc cref="CooltimeNeedsTimesMessage"/>
+    public const string CooltimeBadTimeMessage = "시각은 00:00 ~ 23:59 사이로 정해 주세요.";
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b(설계 쿨타임_설정자리옮김 §3) — 자동 로그아웃 설정 세 칸만 읽는다.
+    /// 문장 = <see cref="GetAsync"/> 의 세 칸 SELECT 그대로(새 SQL 0). 행 없음 = 끔 · <c>null</c> · <c>null</c>.
+    /// </summary>
+    public async Task<CooltimeSettingsDto> GetCooltimeAsync(string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        var c = await _db.QueryFirstOrDefaultAsync<CooltimeSettingsRow>(new CommandDefinition(
+            """
+            SELECT cooltime_enabled AS CooltimeEnabled,
+                   cooltime_at AS CooltimeAt,
+                   regular_leave_time AS RegularLeaveTime
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        var dto = new CooltimeSettingsDto();
+        if (c is not null)
+        {
+            dto.CooltimeEnabled = c.CooltimeEnabled != 0;
+            dto.CooltimeAt = FormatHm(c.CooltimeAt);
+            dto.RegularLeaveTime = FormatHm(c.RegularLeaveTime);
+        }
+        return dto;
+    }
+
+    /// <summary>
+    /// 🆕 2026-11-28 쿨타임1b(설계 §3) — 자동 로그아웃 설정 세 칸만 저장한다.
+    /// 검사 = 기존 <see cref="ResolveCooltimeAsync"/> · 저장 = 기존 <see cref="SaveCooltimeAsync"/>(§E E-2 · E-3 한 트랜잭션) 그대로.
+    /// 🔴 루트 저장(<see cref="SaveAsync"/>)은 부르지 않는다 — 루트 UPSERT 가 다른 22칸을 DTO 기본값으로 덮는다(설계 F8 · 변이 M2).
+    /// </summary>
+    public async Task SaveCooltimeOnlyAsync(UpdateCooltimeSettingsDto dto, string tenantId, CancellationToken ct = default)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        // Resolve 는 세 칸만 읽는다 — 나머지 칸 기본값은 쓰이지 않는다.
+        var cooltime = await ResolveCooltimeAsync(new UpdateTenantSettingsDto
+        {
+            CooltimeEnabled = dto.CooltimeEnabled,
+            CooltimeAt = dto.CooltimeAt,
+            RegularLeaveTime = dto.RegularLeaveTime
+        }, tenantId, ct).ConfigureAwait(false);
+        if (cooltime is null) return;
+
+        await SaveCooltimeAsync(tenantId, cooltime, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 🆕 20260928작4 — 요청 세 칸(<c>null</c> = 그대로)을 지금 값과 합쳐 저장할 값을 정한다.
+    /// 세 칸 모두 <c>null</c> 이면 <c>null</c>(쓰지 않음). 켜짐인데 시각이 비거나 모양이 틀리면 <see cref="ArgumentException"/>.
+    /// </summary>
+    private async Task<CooltimeSave?> ResolveCooltimeAsync(UpdateTenantSettingsDto dto, string tenantId, CancellationToken ct)
+    {
+        if (dto.CooltimeEnabled is null && dto.CooltimeAt is null && dto.RegularLeaveTime is null) return null;
+
+        var current = await _db.QueryFirstOrDefaultAsync<CooltimeSettingsRow>(new CommandDefinition(
+            """
+            SELECT cooltime_enabled AS CooltimeEnabled,
+                   cooltime_at AS CooltimeAt,
+                   regular_leave_time AS RegularLeaveTime
+            FROM tenant_settings
+            WHERE tenant_id = @TenantId
+            """,
+            new { TenantId = tenantId }, cancellationToken: ct)).ConfigureAwait(false);
+
+        var enabled = dto.CooltimeEnabled ?? (current is not null && current.CooltimeEnabled != 0);
+        var at = dto.CooltimeAt is null ? current?.CooltimeAt : ParseHm(dto.CooltimeAt);
+        var leave = dto.RegularLeaveTime is null ? current?.RegularLeaveTime : ParseHm(dto.RegularLeaveTime);
+
+        if (enabled && (at is null || leave is null))
+        {
+            throw new ArgumentException(CooltimeNeedsTimesMessage);
+        }
+        return new CooltimeSave(enabled, at, leave);
+    }
+
+    /// <summary><c>"HH:mm"</c>(또는 <c>"HH:mm:ss"</c>) → 시각. 빈 문자열 = 비움(<c>null</c>). 모양이 틀리면 거절.</summary>
+    private static TimeSpan? ParseHm(string value)
+    {
+        if (value.Length == 0) return null;
+        var formats = new[] { @"hh\:mm", @"h\:mm", @"hh\:mm\:ss" };
+        if (TimeSpan.TryParseExact(value.Trim(), formats, System.Globalization.CultureInfo.InvariantCulture, out var t)
+            && t >= TimeSpan.Zero && t < TimeSpan.FromDays(1))
+        {
+            return new TimeSpan(t.Hours, t.Minutes, 0);
+        }
+        throw new ArgumentException(CooltimeBadTimeMessage);
+    }
+
+    private static string? FormatHm(TimeSpan? t)
+        => t is TimeSpan v ? $"{v.Hours:D2}:{v.Minutes:D2}" : null;
+
+    private sealed record CooltimeSave(bool Enabled, TimeSpan? At, TimeSpan? Leave);
+
+    private sealed class CooltimeSettingsRow
+    {
+        // tinyint(1) — 이 파일의 TenantSettingsRow 와 같이 정수로 받는다(연결 설정과 무관하게 같은 값).
+        public long CooltimeEnabled { get; set; }
+        public TimeSpan? CooltimeAt { get; set; }
+        public TimeSpan? RegularLeaveTime { get; set; }
     }
 
     private static string NormalizeEnum(string? value, string[] allowed, string fallback)
