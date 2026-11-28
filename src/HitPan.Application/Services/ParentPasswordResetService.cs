@@ -150,6 +150,14 @@ public sealed class ParentPasswordResetService : IParentPasswordResetService
         return new ParentResetResult(ParentResetStatus.Succeeded, SucceededMessage, Reasons.Ok) { AuditTailMissing = !tailOk };
     }
 
+    /// <inheritdoc />
+    public Task<DateTime?> TakeResetNoticeAsync(string tenantId, string userId, CancellationToken ct = default)
+    {
+        // 🔴 고침 1 X2 — id 가 비면 묻지 않는다(회사 · 사용자 id = JWT 값만 · #2). 감사 손 0(알림은 바뀐 것 0).
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(userId)) return Task.FromResult<DateTime?>(null);
+        return _store.TakeResetNoticeAsync(tenantId, userId, ct);
+    }
+
     private static ParentResetResult Rejected(string reason) =>
         new(ParentResetStatus.TokenRejected, TokenRejectedMessage, reason);
 

@@ -21,6 +21,11 @@ public interface IParentPasswordResetService
     /// <param name="request">화면 입력(표 · 새 비번 두 칸).</param>
     /// <param name="ipAddress">요청 주소(DB 감사 줄용 · 서버가 소켓에서 꺼낸 값).</param>
     Task<ParentResetResult> ResetAsync(ParentResetRequest request, string? ipAddress, CancellationToken ct = default);
+
+    /// <summary>
+    /// 🔴 고침 1 X2(설계 R16 ⑤) — 로그인한 사람(JWT 회사 · 사용자 id)에게 아직 안 알린 대표 비번 다시 정함이 있으면 그 시각(UTC) · 없으면 null. 한 번만 값.
+    /// </summary>
+    Task<DateTime?> TakeResetNoticeAsync(string tenantId, string userId, CancellationToken ct = default);
 }
 
 /// <summary>재설정 요청(화면 → API). 회사 · 사용자 id 칸은 일부러 없다(#2).</summary>

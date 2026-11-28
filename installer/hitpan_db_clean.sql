@@ -2688,6 +2688,7 @@ CREATE TABLE `parent_reset_tokens` (
   `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
   `expires_at` datetime(6) NOT NULL COMMENT '만든 때 + 10분 (UTC)',
   `used_at` datetime(6) DEFAULT NULL COMMENT '쓴 때 (UTC) — NULL 일 때만 한 번 소비',
+  `notified_at` datetime(6) DEFAULT NULL COMMENT '대표 다음 로그인 때 「다시 정해졌습니다」 를 알린 때 (UTC) — NULL = 아직 안 알림 (DB-151 · 설계 R16 ⑤)',
   PRIMARY KEY (`token_id`),
   UNIQUE KEY `uq_parent_reset_token_hash` (`token_hash`),
   KEY `idx_parent_reset_user` (`user_id`),

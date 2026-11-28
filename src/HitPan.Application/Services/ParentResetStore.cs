@@ -21,6 +21,12 @@ public interface IParentResetStore
     /// ③ 갱신 토큰 폐기 ④ 세션 행 지움 ⑤ DB 감사 줄(<c>audit_logs</c>) → 커밋. ① · ② 가 1 이 아니면 되돌림.
     /// </summary>
     Task<ParentResetCommitOutcome> ConsumeAndResetAsync(ParentResetCommit commit, CancellationToken ct);
+
+    /// <summary>
+    /// 🔴 고침 1 X2(설계 R16 ⑤) — 이 대표의 <b>아직 안 알린</b> 다시 정함(표 소비 = 비번 바뀜)이 있으면 그 시각(UTC)을 돌려주고 「알림」 표시를 남긴다.
+    /// 한 번만 값 — 두 번째 부름 · 다른 사용자 · 회사 다름 = null. 회사 · 사용자 id 는 JWT 에서 온 값만(#2).
+    /// </summary>
+    Task<DateTime?> TakeResetNoticeAsync(string tenantId, string userId, CancellationToken ct);
 }
 
 /// <summary>표 행 + 대상 판정(DB 시계).</summary>
@@ -72,9 +78,11 @@ public sealed class DapperParentResetStore : IParentResetStore
                   AND u.tenant_id = t.tenant_id
                   AND u.is_parent = 1
                   AND u.is_deleted = 0
+                  AND u.is_active = 1
             WHERE t.token_hash = @Hash
             LIMIT 1",
             new { Hash = tokenHash }, cancellationToken: ct)).ConfigureAwait(false);
+        // 🔴 고침 1 X6([3-V] P3-5) — 위 조인에 `u.is_active = 1` 덧: 멈춘(is_active = 0) 대표는 대상 아님(바꿔도 로그인 못 함 = 헷갈림).
         if (raw is null) return null;
         var parent = raw.ParentFlag == 1;
         return new ParentResetTokenRow(raw.TenantId, raw.UserId, raw.ExpiredFlag == 1, raw.UsedFlag == 1, parent, parent ? raw.LoginId : null);
@@ -113,8 +121,10 @@ public sealed class DapperParentResetStore : IParentResetStore
              WHERE user_id = @UserId
                AND tenant_id = @TenantId
                AND is_parent = 1
-               AND is_deleted = 0",
+               AND is_deleted = 0
+               AND is_active = 1",
             new { Hash = commit.NewPasswordHash, commit.UserId, commit.TenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        // 🔴 고침 1 X6 — 위 조건에 `is_active = 1` 덧: 표를 읽은 뒤 멈춰진 대표도 0줄 → 되돌림.
         if (changed != 1)
         {
             tx.Rollback();
@@ -122,12 +132,22 @@ public sealed class DapperParentResetStore : IParentResetStore
         }
 
         // ③ ④ 출입증 끊기 — UserService.CutAccessAsync 와 같은 두 줄(로그아웃 선례 순서 · 그 계정 전부).
-        await _db.ExecuteAsync(new CommandDefinition(
-            "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND is_revoked = 0",
-            new { commit.UserId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
-        await _db.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM user_sessions WHERE user_id = @UserId",
-            new { commit.UserId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        // ⬛ [옛 줄 · 고침 1 X6 로 보강 — user_id 만 조건 · [3-V] P3-7]
+        // ⬛ "UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = @UserId AND is_revoked = 0"
+        // ⬛ "DELETE FROM user_sessions WHERE user_id = @UserId"
+        // 🔴 고침 1 X6([3-V] P3-7) — 끊는 대상을 「이 회사의 그 사용자 행」 으로 묶는다(refresh_tokens 엔 tenant_id 칸이 없어 users 와 잇는다 · 출하 DDL `refresh_tokens`).
+        //   전제 = 한 DB 한 회사 · user_id 는 GUID 라 지금 결과는 같다 — 한 DB 여러 회사가 되어도 남의 회사 행을 못 건드리게.
+        await _db.ExecuteAsync(new CommandDefinition(@"
+            UPDATE refresh_tokens rt
+              JOIN users u ON u.user_id = rt.user_id AND u.tenant_id = @TenantId
+               SET rt.is_revoked = 1
+             WHERE rt.user_id = @UserId AND rt.is_revoked = 0",
+            new { commit.UserId, commit.TenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        await _db.ExecuteAsync(new CommandDefinition(@"
+            DELETE s FROM user_sessions s
+              JOIN users u ON u.user_id = s.user_id AND u.tenant_id = @TenantId
+             WHERE s.user_id = @UserId",
+            new { commit.UserId, commit.TenantId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
 
         // ⑤ 감사 둘째 벌(DB 보조 · 설계 §6) — 같은 트랜잭션이라 「바뀜」 과 한 몸. 비번 · 표 값 0.
         await _db.ExecuteAsync(new CommandDefinition(@"
@@ -144,6 +164,27 @@ public sealed class DapperParentResetStore : IParentResetStore
 
         tx.Commit();
         return ParentResetCommitOutcome.Committed;
+    }
+
+    /// <inheritdoc />
+    public async Task<DateTime?> TakeResetNoticeAsync(string tenantId, string userId, CancellationToken ct)
+    {
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+        // 🔴 고침 1 X2 — used_at 이 찬 행 = 실제로 비번이 바뀐 표(소비는 비번 교체와 같은 트랜잭션 · 실패면 되돌려 used_at 비움).
+        //   앞선 표 무효화(X6)는 used_at 이 아니라 expires_at 을 당기므로 여기 안 잡힌다.
+        var at = await _db.ExecuteScalarAsync<DateTime?>(new CommandDefinition(@"
+            SELECT MAX(used_at) FROM parent_reset_tokens
+             WHERE tenant_id = @TenantId AND user_id = @UserId
+               AND used_at IS NOT NULL AND notified_at IS NULL",
+            new { TenantId = tenantId, UserId = userId }, cancellationToken: ct)).ConfigureAwait(false);
+        if (at is null) return null;
+        // 동시 두 로그인이면 줄을 바꾼 쪽만 알림(다른 쪽 0줄 → null).
+        var marked = await _db.ExecuteAsync(new CommandDefinition(@"
+            UPDATE parent_reset_tokens SET notified_at = UTC_TIMESTAMP(6)
+             WHERE tenant_id = @TenantId AND user_id = @UserId
+               AND used_at IS NOT NULL AND notified_at IS NULL",
+            new { TenantId = tenantId, UserId = userId }, cancellationToken: ct)).ConfigureAwait(false);
+        return marked > 0 ? DateTime.SpecifyKind(at.Value, DateTimeKind.Utc) : null;
     }
 
     /// <summary>DB 감사 줄의 endpoint 칸 값(고정 낱말 · 시험이 이 값으로 셈).</summary>
@@ -200,13 +241,24 @@ public static class ParentResetTokenIssuer
         }
 
         // 한 DB = 한 회사(슬롯마다 db.conf · DB) — 회사 조건 없이 이 DB 전체에서 센다(2 회사 대표가 섞여 있어도 멈춤).
+        // ⬛ [옛 조건 · 고침 1 X6] WHERE is_parent = 1 AND is_deleted = 0
+        // 🔴 고침 1 X6([3-V] P3-5) — 멈춘(is_active = 0) 대표는 세지 않는다: 멈춘 옛 대표 + 새 대표 1 = 새 대표에게 표 · 멈춘 대표만 = 「대표 없음」 멈춤.
+        // 🔴 X5 — 「정확히 1개」 의 몸 = LIMIT 2 + 아래 두 판정(LIMIT 1 로 줄이면 2개를 못 봄 — DB 게이트 변이 대상).
         var parents = (await db.QueryAsync<ParentRow>(new CommandDefinition(@"
             SELECT user_id AS UserId, tenant_id AS TenantId
             FROM users
-            WHERE is_parent = 1 AND is_deleted = 0
+            WHERE is_parent = 1 AND is_deleted = 0 AND is_active = 1
             LIMIT 2", cancellationToken: ct)).ConfigureAwait(false)).ToList();
         if (parents.Count == 0) return (Outcome.NoParent, null);
         if (parents.Count > 1) return (Outcome.MultipleParents, null);
+
+        // 🔴 고침 1 X6([3-V] P3-4) — 새 표를 만들면 이 대표의 앞선 안 쓴 표는 바로 못 쓰게(만료를 지금으로 당김 · used_at 손 0 =
+        //   「실제로 바뀜」 표시(X2 알림)와 섞이지 않게). 10분 안 여러 장이 동시에 사는 길 0.
+        await db.ExecuteAsync(new CommandDefinition(@"
+            UPDATE parent_reset_tokens SET expires_at = UTC_TIMESTAMP(6)
+             WHERE user_id = @UserId AND tenant_id = @TenantId
+               AND used_at IS NULL AND expires_at > UTC_TIMESTAMP(6)",
+            new { parents[0].UserId, parents[0].TenantId }, cancellationToken: ct)).ConfigureAwait(false);
 
         var token = ParentResetToken.NewToken();
         await db.ExecuteAsync(new CommandDefinition(@"

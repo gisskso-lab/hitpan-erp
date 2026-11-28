@@ -3,6 +3,8 @@
 @layout EmptyLayout
 @inject NavigationManager Navigation
 @inject HttpClient Http
+@inject IJSRuntime JS
+@inject ILogger<ParentReset> Logger
 @using System.Net.Http.Json
 
 @* 🔴 W-G1-52 갈래 C — 대표 비밀번호 다시 정하기 화면(설계 §8-4 3 · §11 「재설정 1장」).
@@ -69,7 +71,17 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _token = ReadToken(Navigation.Uri);
+        // ⬛ [옛 줄 · 고침 1 X6] _token = ReadToken(Navigation.Uri);
+        _token = ParentResetGuideText.ReadToken(Navigation.Uri);
+        // 🔴 고침 1 X6([3-V] P3-2) — 표를 읽자마자 주소 칸 · 방문 기록에서 # 뒤를 지운다(뒤로 가기 · 주소 칸 복사로 표가 남지 않게).
+        try
+        {
+            await JS.InvokeVoidAsync("history.replaceState", null, "", ParentResetGuideText.PathWithoutFragment(Navigation.Uri));
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "[ParentReset] 주소 칸에서 표를 지우지 못함 — 표는 10분 · 1회라 그대로 진행");
+        }
         if (string.IsNullOrEmpty(_token))
         {
             _message = GenericRejected;
@@ -135,17 +147,17 @@
         }
     }
 
-    /// <summary>주소 <c>#t=</c> 뒤의 표만 꺼낸다(다른 칸 무시).</summary>
-    private static string? ReadToken(string uri)
-    {
-        var hash = uri.IndexOf('#');
-        if (hash < 0) return null;
-        foreach (var part in uri[(hash + 1)..].Split('&'))
-        {
-            if (part.StartsWith("t=", StringComparison.Ordinal)) return part[2..];
-        }
-        return null;
-    }
+    // ⬛ [옛 함수 · 고침 1 X6 — 시험이 불러 잴 수 있게 Services/ParentResetGuideText.ReadToken 으로 옮김(본문 같음)]
+    // ⬛ private static string? ReadToken(string uri)
+    // ⬛ {
+    // ⬛     var hash = uri.IndexOf('#');
+    // ⬛     if (hash < 0) return null;
+    // ⬛     foreach (var part in uri[(hash + 1)..].Split('&'))
+    // ⬛     {
+    // ⬛         if (part.StartsWith("t=", StringComparison.Ordinal)) return part[2..];
+    // ⬛     }
+    // ⬛     return null;
+    // ⬛ }
 
     private static async Task<string> ReadMessageAsync(HttpResponseMessage res, string fallback)
     {

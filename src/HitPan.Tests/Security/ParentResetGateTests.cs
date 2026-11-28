@@ -1,11 +1,17 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using HitPan.API.Controllers;
 using HitPan.API.Security;
 using HitPan.API.Services;
 using HitPan.Application.Interfaces;
 using HitPan.Application.Services;
+using HitPan.Web.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -42,6 +48,16 @@ public sealed class ParentResetGateTests
         {
             Commits.Add(commit);
             return Task.FromResult(Outcome);
+        }
+
+        // 🔴 고침 1 X2 — 알림 1줄(넘어간 id 를 셈).
+        public DateTime? NoticeAt { get; set; }
+        public List<(string Tenant, string User)> NoticeCalls { get; } = new();
+
+        public Task<DateTime?> TakeResetNoticeAsync(string tenantId, string userId, CancellationToken ct)
+        {
+            NoticeCalls.Add((tenantId, userId));
+            return Task.FromResult(NoticeAt);
         }
     }
 
@@ -290,6 +306,7 @@ public sealed class ParentResetGateTests
 
         await h.Service.PeekAsync(ParentResetToken.NewToken());
         var r = await h.Service.ResetAsync(Req(ParentResetToken.NewToken()), null);
+        await h.Service.TakeResetNoticeAsync(Tenant, Parent);   // 🔴 고침 1 X2 — 알림 길도 나가는 HTTP 0
 
         Assert.Equal(ParentResetStatus.Succeeded, r.Status);
         Assert.Empty(seen);
@@ -318,6 +335,146 @@ public sealed class ParentResetGateTests
         var t = typeof(ParentResetController);
         Assert.NotNull(t.GetCustomAttribute<AllowAnonymousAttribute>());
         Assert.NotNull(t.GetCustomAttribute<MainPcOnlyAttribute>());
+    }
+
+    // ══ 고침 1(2026-11-28 · 지시서 20261128작_W-G1-52_갈래C_고침1) ═══════════════════════════════
+
+    private static string RepoRoot()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "installer", "HitPan-Universal.iss"))) d = d.Parent;
+        Assert.NotNull(d);
+        return d!.FullName;
+    }
+
+    // ── X1 — 안내 글 ↔ 설치기 · 실행 글 실제 이름 글자 대조([4] P1-1 · P1-2 · P2-2) ─────────
+
+    [Fact]
+    public void X1_Guide_Names_Match_Installer_And_Command_File()
+    {
+        var root = RepoRoot();
+        var iss = File.ReadAllText(Path.Combine(root, "installer", "HitPan-Universal.iss"));
+        var group = Regex.Match(iss, @"^DefaultGroupName=(.+?)\s*$", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal(ParentResetGuideText.StartMenuGroup, group);
+        var dir = Regex.Match(iss, @"^DefaultDirName=\{autopf\}\\(.+?)\s*$", RegexOptions.Multiline).Groups[1].Value;
+        Assert.Equal(ParentResetGuideText.UsualInstallFolder, @"C:\Program Files\" + dir);
+
+        var cmdFile = ParentResetGuideText.CommandFileStem + ".cmd";
+        Assert.Contains($"Name: \"{{group}}\\{ParentResetGuideText.ShortcutName}\"; Filename: \"{{app}}\\{ParentResetGuideText.ApiFolderName}\\{cmdFile}\"", iss, StringComparison.Ordinal);
+        Assert.Contains($"Name: \"{{commondesktop}}\\{ParentResetGuideText.DesktopIconName}\"; Filename: \"{{app}}\\hitpan-start.bat\"", iss, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(root, "src", "HitPan.API", cmdFile)), "실행 글 파일 이름이 안내와 다름");
+        var csproj = File.ReadAllText(Path.Combine(root, "src", "HitPan.API", "HitPan.API.csproj"));
+        Assert.Contains($"<None Update=\"{cmdFile}\" CopyToOutputDirectory=\"PreserveNewest\" CopyToPublishDirectory=\"PreserveNewest\" />", csproj, StringComparison.Ordinal);
+
+        // 화면이 이 글을 그대로 쓴다(손으로 쓴 안내로 돌아가면 빨강).
+        var login = File.ReadAllText(Path.Combine(root, "src", "HitPan.Web", "Pages", "Login.razor"));
+        Assert.Contains("@foreach (var step in ParentResetGuideText.NumberedSteps())", login, StringComparison.Ordinal);
+        Assert.Contains("@ParentResetGuideText.FallbackLine", login, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void X1_Guide_Has_No_Screen_Position_Words_And_Has_Fallback_Path()
+    {
+        var all = string.Join("\n", ParentResetGuideText.NumberedSteps()) + "\n" + ParentResetGuideText.FallbackLine;
+        Assert.DoesNotContain("왼쪽 아래", all, StringComparison.Ordinal);
+        Assert.Contains("작업 표시줄", all, StringComparison.Ordinal);
+        Assert.StartsWith("1. ", ParentResetGuideText.NumberedSteps().First(), StringComparison.Ordinal);
+        Assert.Contains($"「{ParentResetGuideText.StartMenuGroup}」 → 「{ParentResetGuideText.ShortcutName}」", ParentResetGuideText.Steps[0], StringComparison.Ordinal);
+        Assert.Contains("파일 위치 열기", ParentResetGuideText.FallbackLine, StringComparison.Ordinal);
+        Assert.Contains($"「{ParentResetGuideText.CommandFileStem}」 를 두 번 누릅니다", ParentResetGuideText.FallbackLine, StringComparison.Ordinal);
+        Assert.Contains(ParentResetGuideText.UsualInstallFolder + "\\" + ParentResetGuideText.ApiFolderName, ParentResetGuideText.FallbackLine, StringComparison.Ordinal);
+    }
+
+    // ── X2 — 다음 로그인 1줄(설계 R16 ⑤ · [3-V] P2-1) ─────────────────────────────
+
+    [Fact]
+    public void X2_Notice_Line_Has_Date_And_Time()
+        => Assert.Equal("대표 비밀번호가 11월 28일 14시 05분에 메인PC 에서 다시 정해졌습니다.",
+            ParentResetGuideText.NoticeLine(new DateTime(2026, 11, 28, 14, 5, 0, DateTimeKind.Local)));
+
+    [Fact]
+    public async Task X2_Notice_Uses_Given_Ids_And_Blank_Ids_Ask_Nothing()
+    {
+        var h = new Harness();
+        h.Store.NoticeAt = new DateTime(2026, 11, 28, 5, 5, 0, DateTimeKind.Utc);
+        Assert.Equal(h.Store.NoticeAt, await h.Service.TakeResetNoticeAsync(Tenant, Parent));
+        Assert.Equal((Tenant, Parent), Assert.Single(h.Store.NoticeCalls));
+        Assert.Null(await h.Service.TakeResetNoticeAsync("", Parent));
+        Assert.Null(await h.Service.TakeResetNoticeAsync(Tenant, " "));
+        Assert.Single(h.Store.NoticeCalls);   // 빈 id 는 저장소에 묻지 않음
+        Assert.Empty(h.Lines);                // 알림 = 감사 손 0
+        Assert.Empty(h.Store.Commits);        // 알림 = 비번 손 0
+    }
+
+    [Fact]
+    public void X2_Notice_Endpoint_Is_Logged_In_Only_And_Not_On_The_Anonymous_Path()
+    {
+        var t = typeof(ParentResetNoticeController);
+        Assert.Null(t.GetCustomAttribute<AllowAnonymousAttribute>());
+        Assert.Null(t.GetCustomAttribute<MainPcOnlyAttribute>());
+        Assert.Equal("TenantOnly", t.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
+        var route = t.GetCustomAttribute<RouteAttribute>()!.Template;
+        // TenantMiddleware 토큰 없는 길 비교(StartsWithSegments)에 걸리지 않아야 JWT 대조를 지난다 — 같은 함수로 잼.
+        Assert.False(new PathString("/" + route + "/take").StartsWithSegments("/api/parent-reset"));
+        Assert.True(new PathString("/api/parent-reset/peek").StartsWithSegments("/api/parent-reset"));
+    }
+
+    // ── X4 — MainPcOnly 동작 시험(특성 붙음이 아니라 재설정 끝점의 필터를 실제로 돌림 · [3-V] P2-2) ─────
+
+    public static TheoryData<string, string?, string?, bool> MainPcCases => new()
+    {
+        { "127.0.0.1", null, null, true },
+        { "::1", null, null, true },
+        { "127.0.0.1", "CF-Connecting-IP", "203.0.113.5", false },
+        { "127.0.0.1", "X-Forwarded-For", "192.168.0.20", false },
+        { "192.168.0.20", null, null, false },
+        { "192.168.0.20", MainPcOnlyAttribute.PassHeader, "pass-from-elsewhere", false }, // 출입증 서비스 없음 = 막음(열어 두는 쪽 실패 0)
+    };
+
+    [Theory]
+    [MemberData(nameof(MainPcCases))]
+    public void X4_MainPcOnly_On_Reset_Endpoint_Rejects_Tunnel_Forwarded_And_Remote(string remote, string? header, string? value, bool allowed)
+    {
+        var filter = typeof(ParentResetController).GetCustomAttribute<MainPcOnlyAttribute>();
+        Assert.NotNull(filter);
+        var http = new DefaultHttpContext { RequestServices = new ServiceCollection().BuildServiceProvider() };
+        http.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(remote);
+        http.Request.Method = "POST";
+        http.Request.Path = "/api/parent-reset";
+        if (header is not null) http.Request.Headers[header] = value;
+        var ctx = new ActionExecutingContext(
+            new ActionContext(http, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor()),
+            new List<IFilterMetadata>(), new Dictionary<string, object?>(), new object());
+
+        filter!.OnActionExecuting(ctx);
+
+        if (allowed) Assert.Null(ctx.Result);
+        else Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(ctx.Result).StatusCode);
+    }
+
+    // ── X6 — 화면이 표를 읽은 뒤 주소에서 지움([3-V] P3-2) ─────────────────────────
+
+    [Theory]
+    [InlineData("http://localhost:5234/parent-reset#t=AAAA", "/parent-reset")]
+    [InlineData("http://localhost:5234/parent-reset?x=1#t=AAAA&y=2", "/parent-reset?x=1")]
+    [InlineData("http://localhost:5234/parent-reset", "/parent-reset")]
+    public void X6_Address_After_Reading_Has_No_Token(string uri, string expected)
+    {
+        var cleaned = ParentResetGuideText.PathWithoutFragment(uri);
+        Assert.Equal(expected, cleaned);
+        Assert.DoesNotContain("AAAA", cleaned, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void X6_Screen_Reads_Token_Then_Clears_Address()
+    {
+        var token = ParentResetToken.NewToken();
+        Assert.Equal(token, ParentResetGuideText.ReadToken(ParentResetCommand.BuildResetUrl(5234, token)));
+        // 화면 실행은 브라우저 몫(화면 실측) — 여기서는 「읽은 뒤에 지운다」 순서를 화면 소스에서 잰다.
+        var razor = File.ReadAllText(Path.Combine(RepoRoot(), "src", "HitPan.Web", "Pages", "ParentReset.razor"));
+        var read = razor.IndexOf("_token = ParentResetGuideText.ReadToken(Navigation.Uri);", StringComparison.Ordinal);
+        var clear = razor.IndexOf("JS.InvokeVoidAsync(\"history.replaceState\", null, \"\", ParentResetGuideText.PathWithoutFragment(Navigation.Uri))", StringComparison.Ordinal);
+        Assert.True(read >= 0 && clear > read, "화면이 표를 읽은 뒤 주소에서 지워야 함");
     }
 
     private static readonly AsyncLocal<bool> InThisTest = new();
