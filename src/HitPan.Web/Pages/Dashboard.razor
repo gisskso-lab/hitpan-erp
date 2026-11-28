@@ -445,7 +445,7 @@ else if (_vizMode == "aging")
     //      화면이 넓으면 403 이 돌아오고(G7 · G10 빨강) · 좁으면 판매 직원 카드가 숨는다(G12 빨강).
     //   역할 = 화면 출입증의 ClaimTypes.Role(HitPanAuthStateProvider.CreatePrincipal 이 JWT role 을 옮김) — 새 부름 0.
     private static readonly string[] SalesFinanceRoles =
-        { "system_admin", "sales_manager", "sales_user", "TenantAdmin", "tenant_admin" };
+        { "system_admin", "sales_manager", "TenantAdmin", "tenant_admin" };
 
     // null = 아직 못 읽음(판매·재무 자리 비움) · true = 카드 그림 · false = 안내 한 장.
     private bool? _canSeeSalesFinance;
@@ -626,7 +626,7 @@ else if (_vizMode == "aging")
             Snackbar.Add("대시보드 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
             // ⬛ Console.Error.WriteLine($"[Dashboard.LoadDashboardAsync] {ex.GetType().Name}: {ex.Message}");
             //    ← 20261128 갈래 B2: 첫 화면 흰 띠의 그 줄(측정 M §3 · :551). 띠를 안 켜는 기록으로 — 흔적은 남음(#15).
-            Logger.LogWarning(ex, "[Dashboard.LoadDashboardAsync] 대시보드 조회 실패");
+            Console.Error.WriteLine($"[Dashboard.LoadDashboardAsync] {ex.GetType().Name}: {ex.Message}");
             _data = new DashboardData();
         }
         catch (Exception ex)

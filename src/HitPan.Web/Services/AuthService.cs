@@ -175,8 +175,8 @@ public sealed class AuthService : IAuthService
             await PersistSessionAsync(data);
             // 🔴 20260929작3 절F4 — 로그인하면 업데이트 안내를 **다시 묻는다**(#43 「다음 로그인에 다시」 · Q-2).
             //   ⚠️ 방송(Notify) **앞**에서 지운다 — 방송이 ERP 메인을 그리고, 그 첫 그림에서 게이트가 이 칸을 읽는다.
-            await ForgetUpdatePromptShownAsync();
             await _authState.NotifySessionChangedAsync();
+            await ForgetUpdatePromptShownAsync();
             return new AuthLoginResult { Success = true, Data = data };
         }
         catch (HttpRequestException)
