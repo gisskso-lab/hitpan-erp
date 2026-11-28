@@ -8,7 +8,8 @@
 //   ② 모드 스위치 = 환경 칸 UI_BAND_MODE — `control`(대조군 · 고치기 전 판 · 장면마다 흰 띠 1 + 그 줄 표지의 표준오류 1 이상 = 장면이 그 줄에 닿는다)
 //      · `fixed`(고친 뒤 · 흰 띠 0(+3초 · +10초) · 그 줄 표지의 console.warn 1 이상 · 앱 표준오류 꼴 0). 그 밖 글자 · 빈 칸 = 아무것도 안 돌리고 실패.
 //      두 모드 공통 = 실패 주입이 실제로 걸림(가로챔 1 이상 · 진짜 403 은 서버 403 응답 1 이상) · 원래 있던 알림 글 1 이상(있는 장면만).
-//   ③ 실패 주입은 시험 장치의 가로채기(page.route)로만 — 앱 손 0. 진짜 403 장면(G-S1)은 가로채기 0 · 서버 판정 그대로.
+//   ③ 실패 주입은 시험 장치의 가로채기(page.route)로만 — 앱 손 0. ⬛ 옛 줄(대조군 1회째 c3b5240b): 「진짜 403 장면(G-S1)은 가로채기 0 · 서버 판정 그대로.」
+//      → 고침1(지시서 §8-2 · 런 46151366436 G-S1 = 서버 200 · 403 0): G-S1 도 가로채기 403 으로 바꿈 · 진짜 403 주입 꼴(real403)은 틀만 남김(쓰는 장면 0).
 //      `api/auth/update-status` 는 가로채지 않는다(R 과 U(#43) 가 같이 부름 · U 는 PR-2 몫 · 설계 §5-2 ⚠ 줄) — 장면 목록 꼴 검사가 막는다.
 //   ④ 연 세션은 끝에 반드시 놓는다(로그아웃 · 11/27 계정 잠김 사고 선례) — 정상 · 예외 · 시간 상한 · 신호 모든 길에서 cleanup.
 //   ⑤ 그림을 찍지 않는다 · 콘솔 원문은 메모리에서 수만 센다(표지 낱말 포함 여부) · 찍는 글자는 소독 뒤(K.consoleLine · L.sanitize).
@@ -53,9 +54,13 @@ const SCENES = Object.freeze([
   Object.freeze({ key: 'G-R2', branch: 'R', who: 'owner', page: '/', match: { path: '/api/auth/terms/status' }, inject: '403',
     tags: ['[HP15]'], snack: FORBID_TEXT,
     lines: 'TermsConsentBanner.razor:69', what: '상주 · 약관 상태 403(처리기 알림 그대로)' }),
-  Object.freeze({ key: 'G-S1', branch: 'S', who: 'staff', page: '/accounting/bills', match: { path: '/api/finance/bills' }, inject: 'real403',
+  // ⬛ 옛 줄(대조군 1회째 c3b5240b · 런 46151366436 = 서버 200 · 403 0 · 시험 직원 기본 역할 sales_user 라 SalesOnly 에 안 걸림):
+  //   inject: 'real403' · what: '공용 서비스 · 직원 창 어음 목록 서버 403(SalesOnly · 가로채기 0)'
+  // 고침1(지시서 §8-2 PM 결재): 서버 403 에 기대지 않고 시험 장치가 어음 목록 조회를 403 으로 가로챔(앱 손 0)
+  //   → 처리기 평소 403 갈래 알림 그대로 + GetFromJsonAsync 예외 → [Bills.List] 줄에 닿음(역할과 무관).
+  Object.freeze({ key: 'G-S1', branch: 'S', who: 'staff', page: '/accounting/bills', match: { path: '/api/finance/bills' }, inject: '403',
     tags: ['[Bills.List]'], snack: FORBID_TEXT,
-    lines: 'BillsCardsBankService.cs:21', what: '공용 서비스 · 직원 창 어음 목록 서버 403(SalesOnly · 가로채기 0)' }),
+    lines: 'BillsCardsBankService.cs:21', what: '공용 서비스 · 직원 창 어음 목록 403(시험 장치 가로채기 · 처리기 알림 그대로)' }),
   Object.freeze({ key: 'G-S2', branch: 'S', who: 'owner', page: '/', match: { path: '/api/dashboard/unified-calendar' }, inject: 'abort',
     tags: ['[UnifiedCalendarService.'], snack: null,
     lines: 'UnifiedCalendarService.cs:55', what: '공용 서비스 · 달력 월 조회 끊김(404 · 503 은 조용히 null — 줄에 안 닿음)' }),

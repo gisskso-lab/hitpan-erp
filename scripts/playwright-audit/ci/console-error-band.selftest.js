@@ -12,6 +12,7 @@
 //   B8 끝 코드 — 다 통과 0 · 키 빠짐 · 중복 · 장치 줄 · 거짓 · 모르는 키 · 로그아웃 실패 = 1
 //   B9 판정기와 따로 — 이름이 K 본문 머리 아님(judge.classifyKNames 실행 목록 밖) · 결과표 경로 ≠ K 결과표 · 판정기 G 기대 키에 띠 키 0
 //   B10 워크플로 글자 — S9b 단계가 S9 판정 뒤 · API 멈춤 앞 · always() · 모드 칸 · 자체시험 + 장면 두 줄 · S8 ~ S9 사이 글자 무접촉(K-C25g 자르기)
+//   B11 (고침1) G-S1 = 시험 장치 가로채기 403 · 어음 목록 주소만 · 실물 목록 real403 장면 0 · 가로챔 0 = 무효(B1 · B2 의 진짜 403 반례는 만든 장면으로)
 'use strict';
 
 const fs = require('fs');
@@ -41,7 +42,9 @@ const S = (k) => B.SCENES.find((s) => s.key === k);
     ['로그아웃 주소 정규식', (l) => { l[0].match = { re: '^/api/auth/log[a-z]+$' }; }],
     ['표지 꼴', (l) => { l[0].tags = ['CS 안 읽은']; }],
     ['주소 맞춤 둘 다', (l) => { l[0].match = { path: '/api/x', re: '^/api/x$' }; }],
-    ['진짜 403 을 대표 창', (l) => { const s = l.find((x) => x.inject === 'real403'); s.who = 'owner'; }],
+    // ⬛ 옛 줄: ['진짜 403 을 대표 창', (l) => { const s = l.find((x) => x.inject === 'real403'); s.who = 'owner'; }],
+    //   고침1 — 실물 목록에 real403 장면 0 → 첫 장면을 real403 · 대표 창으로 바꿔 규칙만 잰다
+    ['진짜 403 을 대표 창', (l) => { l[0].inject = 'real403'; l[0].who = 'owner'; }],
     ['갈래 어긋남', (l) => { l[0].branch = 'S'; }],
   ];
   const miss = [];
@@ -63,7 +66,10 @@ const mat = (scene, { band3, band10, err = 1, warn = 0, appErr = 0, routeHits = 
 };
 const R1 = S('G-R1a'); // 표지 둘 · 알림 없음
 const P2 = S('G-P2'); // 알림 있음
-const S1 = S('G-S1'); // 진짜 403
+// ⬛ 옛 줄: const S1 = S('G-S1'); // 진짜 403
+//   고침1 — G-S1 = 가로채기 403 으로 바뀜 → 진짜 403 판정 틀은 만든 장면(REAL)으로 잰다
+const S1 = S('G-S1'); // 가로채기 403 · 직원 창 · 처리기 알림
+const REAL = Object.freeze({ ...S1, key: 'G-S9', inject: 'real403' }); // 진짜 403 틀(실물 목록 밖)
 const CTRL_OK = mat(R1, { band3: true, band10: true, err: 1, appErr: 2 });
 const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0 });
 
@@ -78,9 +84,11 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
     ['표지 하나 빠짐', B.judgeScene('control', R1, oneTag)],
     ['가로챔 0', B.judgeScene('control', R1, mat(R1, { band3: true, band10: true, routeHits: 0 }))],
     ['원래 알림 0', B.judgeScene('control', P2, mat(P2, { band3: true, band10: true, snackHit: 0 }))],
-    ['진짜 403 0', B.judgeScene('control', S1, mat(S1, { band3: true, band10: true, routeHits: 5, real403: 0 }))],
+    // ⬛ 옛 줄: ['진짜 403 0', B.judgeScene('control', S1, mat(S1, { band3: true, band10: true, routeHits: 5, real403: 0 }))],
+    ['진짜 403 0', B.judgeScene('control', REAL, mat(REAL, { band3: true, band10: true, routeHits: 5, real403: 0 }))],
   ].filter(([, v]) => v.pass !== false || v.why.length === 0).map(([n]) => n);
-  const s1ok = B.judgeScene('control', S1, mat(S1, { band3: false, band10: true, routeHits: 0, real403: 1 })).pass;
+  // ⬛ 옛 줄: const s1ok = B.judgeScene('control', S1, mat(S1, { band3: false, band10: true, routeHits: 0, real403: 1 })).pass;
+  const s1ok = B.judgeScene('control', REAL, mat(REAL, { band3: false, band10: true, routeHits: 0, real403: 1 })).pass;
   check('B2 대조군 판정 — 참 2(띠 +10초만이어도 참 · 진짜 403 장면) · 거짓 6', pass === true && s1ok === true && bad.length === 0,
     `참 ${pass} · 진짜 403 참 ${s1ok} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'}`);
 }
@@ -208,6 +216,23 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
   const once = (yml.match(/console-error-band\.js \|\| rc=1/g) || []).length === 1;
   check('B10 워크플로 글자 — S9b = S9 판정 뒤 · API 멈춤 앞 · 칸 5 · S8 ~ S9 사이 무접촉 · 장면 줄 한 번', order && miss.length === 0 && s8Clean && once,
     `순서 ${order} · 빠진 칸 ${miss.length ? miss.join(' · ') : '0'} · S8~S9 무접촉 ${s8Clean} · 한 번 ${once}`);
+}
+
+// ── B11 (고침1 · 지시서 §8-2) — G-S1 = 시험 장치 가로채기 403 · 어음 목록 주소 · 서버 403 에 기대지 않음 ──
+{
+  const ok1 = S1 && S1.inject === '403' && S1.match && S1.match.path === '/api/finance/bills' && S1.page === '/accounting/bills'
+    && S1.tags.length === 1 && S1.tags[0] === '[Bills.List]' && S1.snack === B.FORBID_TEXT;
+  const realUsed = B.SCENES.filter((s) => s.inject === 'real403').map((s) => s.key);
+  const hitQs = B.routeMatch(S1, 'http://127.0.0.1:18080/api/finance/bills?from=2026-11-01&to=2026-11-28') === true
+    && B.routeMatch(S1, 'http://127.0.0.1:18080/api/finance/card-payments') === false
+    && B.routeMatch(S1, 'http://127.0.0.1:18080/api/finance/bills/abc/status') === false;
+  // 가로챔이 걸렸으면 서버 403 0 이어도 참 · 가로챔 0 이면 서버 403 이 있어도 거짓(장면 무효)
+  const passIntercept = B.judgeScene('control', S1, mat(S1, { band3: true, band10: true, routeHits: 1, real403: 0 })).pass;
+  const noHit = B.judgeScene('control', S1, mat(S1, { band3: true, band10: true, routeHits: 0, real403: 3 }));
+  const fixedOk = B.judgeScene('fixed', S1, mat(S1, { band3: false, band10: false, err: 0, warn: 1 })).pass;
+  check('B11 G-S1 고침1 — 가로채기 403 · 어음 목록 주소만(쿼리 무시 · 카드 · 상태 바꿈 아님) · real403 쓰는 장면 0 · 가로챔 0 = 무효',
+    ok1 && realUsed.length === 0 && hitQs && passIntercept === true && noHit.pass === false && fixedOk === true,
+    `꼴 ${ok1} · real403 장면 ${realUsed.length ? realUsed.join(',') : '0'} · 주소 ${hitQs} · 가로챔 참 ${passIntercept} · 가로챔 0 거짓 ${noHit.pass === false} · 고친 뒤 참 ${fixedOk}`);
 }
 
 const bad = results.filter((x) => !x.ok).length;
