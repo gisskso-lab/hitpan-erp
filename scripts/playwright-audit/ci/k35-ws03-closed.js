@@ -418,6 +418,30 @@ async function prepTerms(st) {
     await apiClose(st, p);
   }
 }
+// 🔴 main 합침 뒤 계정 자리(작업지시서 §8-12 (가) 「만든 몸이 치운다」) — 준비 직원(prep)을 쓰는 장면이 다 끝난 뒤,
+//   사원·계정 관리 화면 [사용 안 함](Users.razor → AccountSeatApi.SuspendAsync)과 같은 POST /api/users/{id}/suspend 로 그 계정을 끈다
+//   (UserService.SuspendAsync = is_active 0 · 출입증 끊기 ⇒ 계정 한도 셈 `is_active = 1 AND is_deleted = 0` 에서 빠짐 · AccountSeatGuard).
+//   까닭: 한도 바닥 5 · 쿨타임 시드가 자식 「다」 를 더해 활성 4 → prep 5번째 → 약관 미동의 직원 6번째 = 409 account_seat_full.
+//   실패(2xx 아님 · 예외)는 조용히 넘기지 않는다 — K.KitStepError 를 던져 부르는 자리가 약관 두 장면을 장치 거짓(치우기 실패)으로 적는다.
+//   prep 이 계정을 만들기 전에 섰으면(번호 없음) 치울 것이 없다 — 한 줄 남기고 넘어간다(자리가 정말 모자라면 prepTerms 의 409 가 장치 거짓으로 드러남).
+async function releasePrep(st) {
+  if (!st.freshUid) {
+    console.log(`K 닫힌문 준비 직원 치우기 건너뜀 — 만든 계정 번호 없음(준비 ${st.prepOk ? '통과' : `실패 · ${st.prepWhy}`})`);
+    return;
+  }
+  const uid = idOk(st.freshUid, '새 직원 번호');
+  const p = await apiOpen(st, 'PARENT', ID.parent, PW.parent);
+  try {
+    const res = await K.apiCall('POST', `/api/users/${encodeURIComponent(uid)}/suspend`, { sess: p });
+    if (res.status < 200 || res.status >= 300) {
+      const j = res.json || {};
+      throw new K.KitStepError(`치우기 실패 — 준비 직원 사용 안 함 status=${res.status} code=${L.sanitize(String(j.code || j.message || ''), 80)}`);
+    }
+    console.log(`K 닫힌문 준비 직원 사용 안 함(자리 돌려줌) status=${res.status}`);
+  } finally {
+    await apiClose(st, p);
+  }
+}
 // 🔴 갈래 T — G12 판매 역할 직원: 새 직원의 사원 역할 칸만 sales_user 로(시험 DB · CI 컨테이너 · 실물 0).
 //   출입증 역할 = 사원 역할 칸(Application AuthService 출입증 만들기 · employees.role) · 칸은 출하 DDL employees `role` varchar(30)(#13).
 //   제품이 만드는 꼴과 같은 값(EmployeeService 사원 등록 기본 역할 sales_user). /api/users 는 역할을 User · Manager 등 enum 으로만 받아 이 값을 못 만든다.
@@ -1560,14 +1584,15 @@ async function main() {
     st.prepWhy = e instanceof K.KitStepError ? L.sanitize(e.message, 160) : `예외 ${L.errorName(e)}`;
     console.log(`K 닫힌문 준비 실패 — ${st.prepWhy}`);
   }
-  // 🔴 갈래 T — 약관 미동의 직원(실패는 약관 두 장면만 장치 거짓)
-  try {
-    await prepTerms(st);
-    st.termsOk = true;
-  } catch (e) {
-    st.termsWhy = e instanceof K.KitStepError ? L.sanitize(e.message, 160) : `예외 ${L.errorName(e)}`;
-    console.log(`K 닫힌문 약관 미동의 직원 준비 실패 — ${st.termsWhy}`);
-  }
+  // ⬛ [낡은 줄 · §8-12 main 합침 뒤 계정 자리 — 약관 미동의 직원을 prep 바로 뒤(활성 6번째)에 만들어 409. 아래 장면 묶음 끝(prep 치운 뒤)으로 옮김]
+  // ⬛ // 🔴 갈래 T — 약관 미동의 직원(실패는 약관 두 장면만 장치 거짓)
+  // ⬛ try {
+  // ⬛   await prepTerms(st);
+  // ⬛   st.termsOk = true;
+  // ⬛ } catch (e) {
+  // ⬛   st.termsWhy = e instanceof K.KitStepError ? L.sanitize(e.message, 160) : `예외 ${L.errorName(e)}`;
+  // ⬛   console.log(`K 닫힌문 약관 미동의 직원 준비 실패 — ${st.termsWhy}`);
+  // ⬛ }
   if (pre) {
     console.log(`K 닫힌문 시작 전 실패 — ${pre}`);
     // ⬛ [낡은 줄 · 고침 3] K.fillDevice(st.r, [KEY.home, KEY.update, KEY.welcome, KEY.phone, KEY.gate], `단언 전 실패 — ${pre}`);
@@ -1579,12 +1604,24 @@ async function main() {
     await sceneUpdate(st);
     await scenePhone(st);
     // 🔴 갈래 T — 판정 장면 7(새 직원 장면은 판매 역할 바꿈 전에 · 판매 역할은 맨 끝)
-    await sceneTerms(st);
+    // ⬛ [낡은 줄 · §8-12 — 약관 두 장면은 prep 직원을 쓰는 장면이 다 끝나고 prep 을 치운 뒤로 옮김] await sceneTerms(st);
     await sceneRelogin(st);
     await sceneDialog(st);
     await sceneOwner(st);
     await sceneSales(st);
     await sceneApprovalView(st); // 🔴 B2 고침 1 ⑦ — 기록만(키 아님) · 맨 끝(권한 행 넣고 지움)
+    // 🔴 §8-12 (가) 만든 몸이 치운다 — 여기서부터 prep 직원을 쓰는 장면 0(장면 끝마다 화면 세션 로그아웃 · API 세션도 닫힘).
+    //   prep 계정 사용 안 함(자리 돌려줌) → 약관 미동의 직원 만들기 → 약관 두 장면. 치우기 · 만들기 실패 = 약관 두 장면만 장치 거짓(종전 꼴 그대로).
+    //   약관 두 장면은 다른 직원 · 새 창이라 앞 장면에 기대는 것 없음(기기 한도 판정은 10/5 슬롯 폐기로 없음 · 판매 역할 · 결재 권한 행은 prep 직원 것).
+    try {
+      await releasePrep(st);
+      await prepTerms(st);
+      st.termsOk = true;
+    } catch (e) {
+      st.termsWhy = e instanceof K.KitStepError ? L.sanitize(e.message, 160) : `예외 ${L.errorName(e)}`;
+      console.log(`K 닫힌문 약관 미동의 직원 준비 실패 — ${st.termsWhy}`);
+    }
+    await sceneTerms(st);
   }
   await probes(st); // 브라우저 없이도 돈다
   K.fillDevice(st.r, allKeys, '경우 끝 뒤 남은 키(있으면 장치 오류)');
