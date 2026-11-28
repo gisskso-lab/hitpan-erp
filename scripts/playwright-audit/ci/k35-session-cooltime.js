@@ -510,6 +510,7 @@ async function pickTimeInDialog(page, target, step = { now: '' }) {
 //   하위 단계를 step 에 적고, 고치기 칸 대신 「권한을 요청」 안내가 뜨면 기다림 상한을 다 쓰지 않고 그 사실을 바로 남긴다
 //   (개발명세서 「못 한 것 7 — 부모의 HR_PROXY 수정 권한 미측정」 가설을 이 런에서 잰다 · 제품 0줄).
 class EditFieldsHidden extends Error {}
+class SaveRejected extends Error {} // 🆕 11/28 F2 손질 — 창 그대로 + 서버 까닭 안내 = 시험 대상의 동작(TEST)
 const EDIT_DENY_TEXT = '권한을 요청'; // HrAttendancePage 「고치려면 관리자에게 [근태 대리입력] 권한을 요청해 주세요.」
 // ⬛ [낡은 머리 · 11/28 CT3 장치 고침 이전] async function editOnce(page, rowSel, chip, reason, target) {
 async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) {
@@ -535,7 +536,14 @@ async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) 
   // 🆕 11/28 장치 고침 F2 — 런 46080568966 시도 4: 둘째 저장이 서버에서 거절됐는데(창 그대로 · 오류 안내) 장치가 **첫 고침 때 뜬**
   //   「퇴근 시각을 고쳤습니다.」 안내에 걸려 지나쳤다. 제품은 성공일 때만 창을 닫는다(SaveCheckOutAsync `_editOpen = false`).
   //   → 성공 = 창 닫힘 + 성공 안내 보임 · 실패 = 누른 뒤 새로 뜬 다른 안내(서버 까닭) → 그 글을 담아 바로 멈춤 · 상한 20초.
+  // 🆕 11/28 F2 손질(짧은 재확인 🟡 조건 · P3 ① ② ③) —
+  //   ① 지시서대로 누르기 **전** 앞 성공 안내가 사라질 때까지 기다림(상한 12초 · 넘으면 로그만) → 누른 뒤 성공 안내는 새것.
+  //   ③ 창이 열린 동안 뜬 딴 안내(전역 알림 등)를 바로 「거절」 로 읽지 않는다 — 거절은 20초 다 기다려도 창이 그대로일 때만 판정.
+  //   ② 창이 그대로 + 새 안내(서버 까닭) = 시험 대상의 동작 → SaveRejected(시험 실패 TEST) · 새 안내도 없으면 장치 실패.
   const snackTexts = async () => (await page.locator('.mud-snackbar').allInnerTexts().catch(() => [])).map((s) => s.trim()).filter(Boolean);
+  step.now = `${base} > 앞 성공 안내 사라짐`;
+  await page.locator('.mud-snackbar', { hasText: EDIT_OK }).first().waitFor({ state: 'hidden', timeout: 12000 })
+    .catch((e) => console.log(`K 쿨타임 앞 성공 안내 사라짐 기다림 끝 (${L.errorName(e)}) — 창 닫힘으로 판정`));
   const before = new Set(await snackTexts());
   step.now = `${base} > 저장 누름`;
   await dlg.getByRole('button', { name: '저장', exact: true }).click({ timeout: 10000 });
@@ -544,16 +552,19 @@ async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) 
   // ⬛ [낡은 줄 · 11/28 F2 이전] await dlg.waitFor({ state: 'hidden', timeout: 15000 }).catch((e) => console.log(`K 쿨타임 고침 창 닫힘 기다림 끝 (${L.errorName(e)})`));
   const saveUntil = Date.now() + 20000;
   let saved = false;
+  let fresh = [];
   while (Date.now() < saveUntil) {
     const now = await snackTexts();
     const open = await dlg.isVisible().catch(() => true);
     if (!open && now.some((t) => t.includes(EDIT_OK))) { saved = true; break; }
-    // 거절 판정은 창이 그대로일 때만(성공 뒤 목록 다시 읽기 등 딴 안내를 거절로 읽지 않게)
-    const fresh = now.filter((t) => !before.has(t) && !t.includes(EDIT_OK));
-    if (open && fresh.length > 0) throw new K.KitStepError(`저장 거절 — 안내 「${L.sanitize(fresh[0], 80)}」(창 그대로)`);
+    for (const t of now) if (!before.has(t) && !t.includes(EDIT_OK) && !fresh.includes(t)) fresh.push(t);
     await K.sleep(300);
   }
-  if (!saved) throw new K.KitStepError(`저장 결과 못 봄 — 20초 안에 창 닫힘 + 성공 안내 없음(창 ${(await dlg.isVisible().catch(() => false)) ? '그대로' : '닫힘'})`);
+  if (!saved) {
+    const open = await dlg.isVisible().catch(() => false);
+    if (open && fresh.length > 0) throw new SaveRejected(`저장 거절 — 20초 동안 창 그대로 · 새 안내 「${fresh.map((t) => L.sanitize(t, 80)).join(' / ')}」`);
+    throw new K.KitStepError(`저장 결과 못 봄 — 20초 안에 창 닫힘 + 성공 안내 없음(창 ${open ? '그대로' : '닫힘'} · 새 안내 ${fresh.length})`);
+  }
   await K.sleep(1500);
 }
 async function ct3(st) {
@@ -642,6 +653,10 @@ async function ct3(st) {
     if (e instanceof EditFieldsHidden) {
       console.log(`K 쿨타임 reedit 시험 실패 — 단계=${step.now} · ${e.message}`);
       rec(st, 'reedit', { pass: false, got: { step: step.now, editFieldsHidden: true, why: e.message } });
+    } else if (e instanceof SaveRejected) {
+      // 🆕 11/28 F2 손질 ② — 장치가 고른 값을 서버가 거절 = 시험 대상의 동작 → 시험 실패(TEST) · 까닭 글은 소독된 것만.
+      console.log(`K 쿨타임 reedit 시험 실패 — 단계=${step.now} · ${e.message}`);
+      rec(st, 'reedit', { pass: false, got: { step: step.now, saveRejected: true, why: e.message } });
     } else {
       dev(st, 'reedit', step, e);
     }
