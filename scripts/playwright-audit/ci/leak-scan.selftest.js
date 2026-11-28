@@ -109,6 +109,8 @@
 // 🔴 20261128작 B2 고침 1(작업지시서 §8-9 · [4] 고침 1 ① ~ ⑧ · 3V P2-1 ~ 3) — 138 → 143(새 5 · 바뀐 칸 K-C28a · K-C29c · K-C29d 재료 · 반례)
 //   K-C29f 대표 왕복 양성 게이트 mcReq(대표 ≥ 1 · 직원 4장면 = 0) · K-C29g 뜬 알림 50 상한 넘침 = 보기 실패(초기 스크립트 실제로 돌림)
 //   K-C29h 재로그인 · /login 직접 「403 알림 0」 세 겹 · K-C29i 진행 그림 콘솔 꼴(초기 스크립트 실제로 돌림 · 해석 · 요약) · K-C29j G13 기록 기대 꼴
+// 🔴 HQA 보류 고침 · 물러남(11/29 · 작업지시서 20261128작_로그인경합_첫화면403띠 §8-13 · PM 결재 E4 + 덧) — 합계 144 → 145(로컬 실측 145/145 · 새 1 · 바뀐 칸 K-C22k 41 → 44)
+//   K-C30a 새 판정 셋(terms-slow-prog · stop-after-login · back-restore) 양성 · 반례 · 표본기(STALL_INIT) 실제로 돌림 · 해석
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -1407,6 +1409,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-S3-9', 'S3', 'sales-home', 'chromium'),
       // 🔴 20261128작 갈래 B2 — owner-json 1(설계 §7-2-4 R-③ · D17 양성 대조 · 개발명세서 갈래 B2 절에서 따로 적는다)
       fG('K35-S3-8', 'S3', 'owner-json', 'chromium'),
+      // 🔴 HQA 보류 고침 · 물러남(작업지시서 §8-13 · 고침2 설계 §7-2 · PM 결재 E4 + 덧 · 개발명세서 갈래 A 「고침 2」 절에서 따로 적는다)
+      fG('K35-S3-5', 'S3', 'terms-slow-prog', 'chromium'),
+      fG('K35-S3-10', 'S3', 'stop-after-login', 'chromium'), fG('K35-S3-10', 'S3', 'back-restore', 'chromium'),
     ];
     const F_G_N = fGRows().length;
     // 🔴 K 연결 1차 — 판정기를 부르는 칸은 사본 폴더(K 본문 꼴 1개 기본)에서 돈다 · 실물 폴더의 K 본문 수에 묶이지 않게(§5-1).
@@ -1934,8 +1939,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] const ok = theirs.length === 32 && mine.length === 32 && new Set(theirs).size === 32 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] check('K-C22k G 기대 키 수 32 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — 앞 18 + 쿨타임 7 + W-S-03 7 + 갈래 T 8 + 갈래 B2 1 = 41(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 41 && mine.length === 41 && new Set(theirs).size === 41 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 41 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · HQA 보류 고침 전] const ok = theirs.length === 41 && mine.length === 41 && new Set(theirs).size === 41 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · HQA 보류 고침 전] check('K-C22k G 기대 키 수 41 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 HQA 보류 고침 · 물러남(11/29 · 작업지시서 §8-13) — terms-slow-prog · stop-after-login · back-restore 3 더해 44(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 44 && mine.length === 44 && new Set(theirs).size === 44 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 44 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1 · HQA 보류 고침 시험 3) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
@@ -3128,6 +3136,82 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         why = `양성 ${W.g13Ok(pos)} · 반례 참 ${bad.join(',') || '0'}(반례 ${neg.length})`;
       }
       check('K-C29j G13 기록 기대 꼴 · 양성 1 · 반례 7 전부 거짓', ok, why);
+    }
+    // ── 🔴 HQA 보류 고침 · 물러남(작업지시서 §8-13 · 고침2 설계 §7-2 · PM 결재 E4 + 덧) — 새 판정 셋 · 표본기 ──
+    //   기대 글자(경로 · 표본 하한 60)는 K 본문 상수를 읽지 않고 여기 따로 적는다. 반례 = 고친 몸 머묾 꼴(실측 40/40) · 덮어쓰기 · 복원 불성립 · 변이 Y2 꼴.
+    { // K-C30a 판정 셋(terms-slow-prog · stop-after-login · back-restore) 양성 · 반례 · 표본기 실제로 돌림 · 해석 꼴 밖 null
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'JUDGE 셋 · STALL_INIT 없음';
+      const J = W.JUDGE;
+      if (J && ['termsSlowProg', 'stopAfterLogin', 'backRestore'].every((n) => typeof J[n] === 'function') && typeof W.STALL_INIT === 'string'
+        && typeof W.stallParse === 'function' && typeof W.formBack === 'function') {
+        try {
+          const form = { path: '/login', bar: false, id: 1, btn: false };
+          const stuck = { path: '/login', bar: true, id: 0, btn: true };
+          const pos = {
+            termsSlowProg: { slowHits: 1, progArm: 'ok', prog: { at5: { t: 5000, bar: true, id: 0, btn: true } } },
+            stopAfterLogin: { valid: true, firstHeld: '/terms', samples: 88, last: form, btnOn: true, docsAfter: 0, dclAfter: 0 },
+            backRestore: { persisted: true, loginDocAfter: false, samples: 88, last: form, btnOn: true, docsAfter: 0 },
+          };
+          const neg = [
+            ['termsSlowProg', { prog: { at5: { t: 5000, bar: false, id: 1, btn: false } } }, 'Y2 꼴(+5초에 입력 칸)'], ['termsSlowProg', { prog: { at5: null } }, '+5초 표본 없음'],
+            ['termsSlowProg', { slowHits: 0 }, '늦춤 안 걸림'], ['termsSlowProg', { progArm: '시간 상한 10초' }, '진행 그림 못 걸음'],
+            ['termsSlowProg', { prog: { at5: { t: 5000, err: 'TypeError' } } }, '+5초 보기 실패'],
+            ['stopAfterLogin', { last: stuck }, '진행 그림에 머묾(고치기 전 결함 꼴)'], ['stopAfterLogin', { btnOn: false }, '단추 안 켜짐'],
+            ['stopAfterLogin', { docsAfter: 1 }, '중지 뒤 `/` 문서(덮어쓰기)'], ['stopAfterLogin', { dclAfter: 1 }, '중지 뒤 새 문서 적재'],
+            ['stopAfterLogin', { firstHeld: '/' }, '첫 문서 갈 곳 바뀜'], ['stopAfterLogin', { samples: 59 }, '표본 모자람'], ['stopAfterLogin', { valid: false }, '불성립'],
+            ['stopAfterLogin', { last: null }, '끝 표본 없음'], ['stopAfterLogin', { last: { path: '/terms', bar: false, id: 0, btn: null } }, '다른 화면'],
+            ['backRestore', { last: stuck }, '복원 뒤 진행 그림에 머묾'], ['backRestore', { persisted: false }, '복원 안 됨'], ['backRestore', { persisted: null }, 'pageshow 못 봄'],
+            ['backRestore', { loginDocAfter: true }, '새 /login 문서'], ['backRestore', { docsAfter: 1 }, '복원 뒤 문서'], ['backRestore', { btnOn: false }, '단추 안 켜짐'],
+            ['backRestore', { last: { err: 'TypeError', t: 1 } }, '끝 보기 실패'],
+          ];
+          const posBad = Object.keys(pos).filter((n) => J[n](pos[n]) !== true);
+          const negBad = neg.filter(([n, patch]) => J[n]({ ...pos[n], ...patch }) !== false).map((x) => x[2]);
+          // 표본기 — 가짜 문서 · 가짜 타이머 · 가짜 콘솔 · 가짜 sessionStorage 로 실제로 돌림(pageshow 표지 → 스스로 켬)
+          const vm = require('vm');
+          const out = [];
+          const timers = [];
+          const ls = {};
+          let shown = null;
+          const el = (text, extra = {}) => ({ innerText: text, getClientRects: () => [1], ...extra });
+          let page = { bar: [el('')], label: [], button: [el('로그인', { disabled: true })] };
+          const win = {
+            top: null,
+            location: { pathname: '/login' },
+            console: { log: (s) => out.push(String(s)) },
+            setInterval: (fn) => { timers.push(fn); return 9; },
+            clearInterval: () => {},
+            getComputedStyle: () => ({ visibility: 'visible' }),
+            sessionStorage: { getItem: (k) => (k in ls ? ls[k] : null) },
+            addEventListener: (ev, fn) => { if (ev === 'pageshow') shown = fn; },
+            document: { querySelectorAll: (sel) => (sel === '.mud-progress-linear' ? page.bar : sel === 'label' ? page.label : sel === 'button' ? page.button : []) },
+          };
+          win.window = win;
+          win.top = win;
+          vm.runInNewContext(W.STALL_INIT, win);
+          vm.runInNewContext(W.STALL_INIT, win); // 두 번 걸어도 듣기 1
+          ls.__hpStall_sample = 'B';
+          shown({ persisted: true });
+          timers[0]();
+          page = { bar: [], label: [el('아이디')], button: [el('로그인', { disabled: false })] }; // 물러남 뒤
+          timers[0]();
+          const lines = out.filter((s) => s.startsWith('[hp-stall] s '));
+          const p = lines.map(W.stallParse);
+          const showLine = out.find((s) => s.startsWith('[hp-stall] pageshow')) || '';
+          const parseNeg = ['[hp-stall] s tag=A2 t=1 path=/login bar=yes id=1 btn=true', '[hp-stall] s tag=A2 t=1 path=/login bar=true id=1', 'x [hp-stall] s tag=A2 t=1 path=/login bar=true id=0 btn=true',
+            '[hp-stall] s tag=A-2 t=1 err=TypeError', ''].map(W.stallParse);
+          const run = timers.length === 1 && p.length === 2 && p.every((x) => x !== null) && p[0].tag === 'B' && p[0].bar === true && p[0].id === 0 && p[0].btn === true
+            && p[1].bar === false && p[1].id === 1 && p[1].btn === false && W.formBack(p[1]) === true && W.formBack(p[0]) === false
+            && /persisted=true path=\/login$/.test(showLine) && parseNeg.every((x) => x === null) && W.STALL_MIN_SAMPLES === 60;
+          ok = posBad.length === 0 && negBad.length === 0 && run;
+          why = `양성 거짓 ${posBad.join(',') || '0'} · 반례 참 ${negBad.join(',') || '0'}(반례 ${neg.length}) · 표본기 타이머 ${timers.length} · 줄 ${lines.length}`
+            + ` · 처음 ${JSON.stringify(p[0])} · 끝 ${JSON.stringify(p[1])} · pageshow ${showLine.length > 0} · 꼴 밖 null ${parseNeg.filter((x) => x === null).length}/${parseNeg.length}`;
+        } catch (e) {
+          why = `판정 셋 · 표본기 돌리기 실패 ${L.errorName(e)}`;
+        }
+      }
+      check('K-C30a HQA 보류 고침 판정 셋 · 양성 3 · 반례 21 전부 거짓(머묾 · 덮어쓰기 · 불성립 · Y2 꼴) · 표본기 pageshow 표지로 스스로 켬 · 해석 꼴 밖 5 null', ok, why);
     }
     { // 🔴 고침 3-2(작업지시서 §9 P2-2) K-C27i 알려진 꼴 두 식 — homeKnown · updateKnown 를 직접 부름(참 · 거짓 반례 · U7 · U8 포함)
       //   입력은 리뷰서(짧은 재확인 §2) 반례 표 꼴을 여기 따로 적는다. 한 줄이라도 기대와 다르면 빨강(변이 M7 · M8 이 여기서 잡힘).

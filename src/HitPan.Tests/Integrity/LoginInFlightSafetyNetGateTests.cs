@@ -157,4 +157,105 @@ public sealed class LoginInFlightSafetyNetGateTests
         Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 14_999));
         Assert.Equal(Step.GoHome, net.Next(waitStartedAtMs: 0, nowMs: 15_000));
     }
+
+    // ── 🔴 HQA 보류 고침 · 물러남(작업지시서 §8-13 · 설계 로그인경합_고침2_정적칸남음 §7-1 F1 ~ F6) ──
+    //   이동 냄 뒤 기다리는 화면이 ShouldFallBackToForm 을 처음 부른 때부터 30초에 참(진행 그림 끔 → 기존 입력 칸 · 이동 0).
+    //   기대 시간(30 000ms)은 제품 상수를 읽지 않고 여기 따로 적는다(상수가 바뀌면 빨강 · 변이 Y2).
+    private const long FallBackMs = 30_000;
+
+    [Fact(DisplayName = "F1 HQA 보류 고침 — 이동 냄 · 처음 부른 때 1초 → 30 999ms 까지 거짓 · 31 000ms 참 · Next 는 내내 StandDown(`/` 0)")]
+    public void Navigated_FallBackToFormAfterThirtySeconds()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+        net.MarkNavigated();
+
+        Assert.False(net.ShouldFallBackToForm(nowMs: 1_000));                    // 처음 부른 때 = 1초
+        Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: 1_000));
+        Assert.False(net.ShouldFallBackToForm(nowMs: 15_000));
+        Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: 15_000));
+        Assert.False(net.ShouldFallBackToForm(nowMs: 1_000 + FallBackMs - 1));   // 30 999ms
+        Assert.True(net.ShouldFallBackToForm(nowMs: 1_000 + FallBackMs));        // 31 000ms — 고치기 전 꼴이면 판정 자체가 없어 진행 그림에 머묾
+        Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: 31_000)); // 물러남이 `/` 를 내지 않는다
+    }
+
+    [Fact(DisplayName = "F2 HQA 보류 고침 — 이동 냄 아님(멈춤 · 15초 길) → 어느 시각에도 거짓(그 길은 Next 가 맡음)")]
+    public void NotNavigated_NeverFallsBack()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+
+        Assert.False(net.ShouldFallBackToForm(nowMs: 0));
+        Assert.False(net.ShouldFallBackToForm(nowMs: 40_000));
+        Assert.False(net.ShouldFallBackToForm(nowMs: 600_000));
+
+        // 멈춤(새 기기 알림) 중에도 거짓 — 멈춤 상한 10분 · 15초 칸과 섞이지 않는다.
+        net.BeginWaitingForInput();
+        Assert.False(net.ShouldFallBackToForm(nowMs: 700_000));
+        Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 700_000));
+        net.EndWaitingForInput(nowMs: 710_000);
+        Assert.False(net.ShouldFallBackToForm(nowMs: 800_000));
+        Assert.Equal(Step.GoHome, net.Next(waitStartedAtMs: 0, nowMs: 800_000));   // 15초 길 그대로
+    }
+
+    [Fact(DisplayName = "F3 HQA 보류 고침 — Reset 뒤 다시 이동 냄 → 물러남 시계가 새로(새로 처음 부른 때부터 30초)")]
+    public void Reset_RestartsFallBackClock()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+        net.MarkNavigated();
+        Assert.False(net.ShouldFallBackToForm(nowMs: 0));        // 앞 시도의 처음 부른 때 = 0
+        Assert.True(net.ShouldFallBackToForm(nowMs: 30_000));
+
+        net.Reset();                                               // 입력 칸에서 다시 로그인(HandleLogin)
+        Assert.False(net.ShouldFallBackToForm(nowMs: 100_000));  // 이동 냄 아님 → 거짓(시계도 안 적힘)
+        net.MarkNavigated();
+        Assert.False(net.ShouldFallBackToForm(nowMs: 200_000));  // 새로 처음 부른 때 = 200초(앞 시계를 물려받았으면 참)
+        Assert.False(net.ShouldFallBackToForm(nowMs: 229_999));
+        Assert.True(net.ShouldFallBackToForm(nowMs: 230_000));
+    }
+
+    [Fact(DisplayName = "F4 HQA 보류 고침 — 문서 20초 늦음(3V-P2a 꼴) → 0 ~ 29 999ms 거짓(느린 문서 중 입력 칸 0)")]
+    public void SlowDocumentTwentySeconds_NoFormWhileWaiting()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+        net.MarkNavigated();   // 앞 화면 `/terms` 이동 직후 — 새 문서가 20초 늦게 온다(CI terms-slow-doc 과 같은 꼴)
+
+        for (long t = 0; t < FallBackMs; t += LoginInFlightSafetyNet.PollMs)
+        {
+            Assert.False(net.ShouldFallBackToForm(nowMs: t));
+            Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: t));
+        }
+
+        Assert.False(net.ShouldFallBackToForm(nowMs: 20_000));
+        Assert.False(net.ShouldFallBackToForm(nowMs: FallBackMs - 1));
+    }
+
+    [Fact(DisplayName = "F5 HQA 보류 고침 — 알림 멈춤 → 닫힘 → 이동 냄 → 물러남 시계는 이동 냄 뒤 처음 부른 때부터(멈춤 · 15초 칸과 섞이지 않음)")]
+    public void DialogThenNavigated_FallBackClockStartsAfterNavigated()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+
+        net.BeginWaitingForInput();
+        Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 5_000));       // 멈춤 상한 시계 = 5초부터
+        Assert.False(net.ShouldFallBackToForm(nowMs: 5_000));                        // 이동 냄 아님 — 시계 안 적힘
+        Assert.False(net.ShouldFallBackToForm(nowMs: 40_000));
+        net.EndWaitingForInput(nowMs: 50_000);
+        net.MarkNavigated();
+
+        Assert.False(net.ShouldFallBackToForm(nowMs: 60_000));   // 이동 냄 뒤 처음 부른 때 = 60초
+        Assert.False(net.ShouldFallBackToForm(nowMs: 89_999));   // 멈춤 시작(5초) · 닫힘(50초) 기준이면 이미 참
+        Assert.True(net.ShouldFallBackToForm(nowMs: 90_000));
+        Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: 90_000));
+    }
+
+    [Fact(DisplayName = "F6 HQA 보류 고침 — 참 뒤 다시 부름 → 계속 참(한 번 물러난 화면이 되돌아가지 않음)")]
+    public void FallBack_StaysTrue()
+    {
+        var net = new LoginInFlightSafetyNet(WaitMs);
+        net.MarkNavigated();
+
+        Assert.False(net.ShouldFallBackToForm(nowMs: 10_000));
+        Assert.True(net.ShouldFallBackToForm(nowMs: 40_000));
+        Assert.True(net.ShouldFallBackToForm(nowMs: 40_250));
+        Assert.True(net.ShouldFallBackToForm(nowMs: 600_000));
+        Assert.Equal(30_000, LoginInFlightSafetyNet.FallBackToFormMs);
+    }
 }

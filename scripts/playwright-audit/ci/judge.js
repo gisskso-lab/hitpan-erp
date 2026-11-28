@@ -166,6 +166,11 @@ const EXPECT_S3_ROWS = [
   // 🔴 20261128작 갈래 B2(설계 §7-2-3 · §7-2-4 · 작업지시서 §8-8 D17 · D18) — 같은 K 본문에 1 더함(15 → 16 · 판정기 33 → 34) · 선택 키 0 · N4 0.
   //   자체시험 따로 적은 목록(fGRows) · K-C22k 수(33 → 34) 같은 커밋에서.
   ['K35-S3-8', 'S3', 'owner-json', 'chromium'], // D6 일반 catch(200 + JSON 아닌 본문) · 같은 런 양성 대조(결재 대기 403 → 처리기 경고 · 알림 1 이상) · 뜬 알림 허용 목록 안
+  // 🔴 HQA 보류 고침 · 물러남(작업지시서 docs/운영기록/20261128작_로그인경합_첫화면403띠_작업지시서.md §8-13 · 설계 로그인경합_고침2_정적칸남음 §7-2 ·
+  //   PM 결재 E4 + 덧) — 같은 K 본문에 3 더함(16 → 19 · 판정기 41 → 44) · 선택 키 0 · N4 0. 자체시험 따로 적은 목록(fGRows) · K-C22k 수(41 → 44) 같은 커밋에서.
+  ['K35-S3-5', 'S3', 'terms-slow-prog', 'chromium'], // PM 덧 — terms-slow-doc 의 「늦춤 중 +5초 진행 그림」 기록을 판정으로(막대 보임 · 아이디 칸 0) · 변이 Y2 CI 빨강
+  ['K35-S3-10', 'S3', 'stop-after-login', 'chromium'], // 길 A2 — 첫 문서 붙잡음 → 중지(CDP Page.stopLoading) → 45초 → 빈 로그인 입력 화면 · 새 문서 0
+  ['K35-S3-10', 'S3', 'back-restore', 'chromium'], // 길 B — 복원 캐시 켠 브라우저 · / 착지 → 뒤로 가기 → 45초 → 빈 로그인 입력 화면 · 복원 뒤 문서 0
 ];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 // ⬛ [낡은 줄 · 쿨타임 화면 실측 3] const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));

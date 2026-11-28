@@ -22,6 +22,13 @@
 //      ⓒ 뜬 적 있는 알림 글 전부(초기 스크립트 MutationObserver · 찍기 사이에 사라진 것까지) 중 처리기 글 forbidSeen.
 //      직원 4장면(first-home · first-update · device-dialog-20s · sales-home) 판정에 셋 다 0 · 같은 런 양성 대조 = 새 키 owner-json(대표 창 ·
 //      결재 대기 주소만 403 가로챔 → h403 ≥ 1 · forbidSeen ≥ 1). 기대 키 15 → 16(판정기 33 → 34). 기록만(판정 아님) = 빈 시간 · Login 진행 그림.
+//   ⑪ 🔴 HQA 보류 고침 · 물러남(작업지시서 §8-13 · 설계 docs/설계/erp/로그인경합_고침2_정적칸남음_설계_20261129.md §7-2 · PM 결재 E4 + 덧)
+//      — 시험 3 더함(기대 키 16 → 19 · 판정기 41 → 44): K35-S3-10 stop-after-login(길 A2 · CDP Page.stopLoading) · back-restore(길 B · 복원 캐시 켠
+//      브라우저 + 뒤로 가기) · K35-S3-5 terms-slow-prog(기존 terms-slow-doc 의 「늦춤 중 +5초 진행 그림」 기록을 판정으로 올림 — 변이 Y2 가 CI 에서도 빨강).
+//      두 새 장면의 꼴 = 측정 가지 meas/20261129-1032-정적칸남음 의 m1032-measure.js(holdDocs · sceneStop · sceneBack)를 정규 K 장면으로.
+//      끝 = 고치기 전 꼴(빈 로그인 입력 화면 · 막대 0 · 아이디 칸 있음 · 아이디 · 비밀번호 넣으면 「로그인」 단추 켜짐 — 누르지 않음) · 새 문서 0(덮어쓰기 0).
+//      장치 불성립(중지 응답 실패 · 붙잡은 문서 취소 안 됨 · 복원 안 됨 · pageshow 못 봄) = 그 키 DEVICE 거짓(통과로 안 셈).
+//      계정 자리: 새 계정 0 — stop-after-login = 약관 미동의 직원(TERMS_ID) · back-restore = 준비 직원(prep · relogin-home 과 같은 직원 · 치우기 전에 돈다).
 'use strict';
 
 const crypto = require('crypto');
@@ -131,6 +138,73 @@ function progSum(lines) {
 const progSumShow = (p) => (p.n === 0 ? '못 봄(진행 그림 글 0줄)'
   : `표본 ${p.n} · 막대 보임 ${p.bar} · 단추 꺼짐 ${p.btnOff} · 아이디 칸 없음 ${p.idGone} · 실패 ${p.errs}`
     + ` · +5초 표본 ${p.at5 ? `t=${p.at5.t} 막대 ${p.at5.bar} 아이디 칸 ${p.at5.id} 단추 꺼짐 ${p.at5.btn}` : '없음'}`);
+// ── 🔴 HQA 보류 고침 · 물러남 장면 둘(⑪) — 측정 m1032-measure.js 의 표본기 꼴(값 · 토큰 0 · 경로 · 막대 · 아이디 칸 수 · 단추 꺼짐만) ──
+//   window.__hpStallStart(tag, ticks) = 0.5초 간격 console.log · pageshow / pagehide 한 줄씩(persisted · 경로만) ·
+//   sessionStorage 표지(__hpStall_sample)가 있으면 pageshow 때 표본기를 스스로 켠다(뒤로 가기 뒤 복원 문서).
+//   글 꼴 = 「[hp-stall] s tag=A2 t=ms path=/login bar=참거짓 id=수 btn=참거짓|null」 · 「[hp-stall] s tag=… t=ms err=이름」 · 「[hp-stall] pageshow persisted=참거짓 path=…」
+const STALL_TAG = '[hp-stall]';
+const STALL_FLAG = '__hpStall_sample';
+const STALL_OBS_MS = 45000; // 중지 · 복원 뒤 관찰(물러남 30초보다 길게 · 설계 §7-2)
+const STALL_MIN_SAMPLES = 60; // 0.5초 × 90 중 최소(표본기가 실제로 돌았나)
+const STALL_TICKS = 160; // 0.5초 × 160 = 80초(누름 ~ 관찰 끝)
+const STOP_SETTLE_MS = 3000; // 첫 붙잡음 뒤 다시 만들어진 화면이 대기 그림에 들어설 때까지
+const STOP_RELEASE_MS = 1000; // 중지 뒤 붙잡은 처리기를 풀어 주는 때(취소됐으면 넘김이 실패한다)
+const BACK_LAND_MS = 4000; // 착지 뒤 뒤로 가기 전 기다림
+const TOKEN_KEY = 'hitpan_access_token'; // AuthStorageKeys.AccessToken(있을 때만 읽어 가림 등록 · 출력 0)
+const STALL_INIT = `(() => {
+  try {
+    if (window.top !== window) return;
+    if (window.__hpStallInit) return;
+    window.__hpStallInit = true;
+    const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+    const flat = (e) => String((e && (e.innerText || e.textContent)) || '').replace(/\\s+/g, ' ').trim();
+    window.__hpStallStart = (tag, ticks) => {
+      if (window.__hpStallOn) return 'already';
+      window.__hpStallOn = true;
+      const t0 = Date.now();
+      let n = 0;
+      let h = null;
+      const tick = () => {
+        n += 1;
+        try {
+          const bar = Array.from(document.querySelectorAll('.mud-progress-linear')).some(vis);
+          const id = Array.from(document.querySelectorAll('label')).filter((e) => vis(e) && flat(e) === '아이디').length;
+          const btn = Array.from(document.querySelectorAll('button')).find((e) => vis(e) && flat(e) === '로그인');
+          console.log('${STALL_TAG} s tag=' + tag + ' t=' + (Date.now() - t0) + ' path=' + location.pathname
+            + ' bar=' + bar + ' id=' + id + ' btn=' + (btn ? btn.disabled === true : 'null'));
+        } catch (e) {
+          console.log('${STALL_TAG} s tag=' + tag + ' t=' + (Date.now() - t0) + ' err=' + String((e && e.name) || 'Error').slice(0, 40));
+        }
+        if (n >= ticks && h !== null) clearInterval(h);
+      };
+      h = setInterval(tick, 500);
+      return 'ok';
+    };
+    window.addEventListener('pageshow', (e) => {
+      console.log('${STALL_TAG} pageshow persisted=' + (e.persisted === true) + ' path=' + location.pathname);
+      let flag = null;
+      try { flag = sessionStorage.getItem('${STALL_FLAG}'); } catch (err) { flag = null; }
+      if (flag && /^[A-Za-z0-9]{1,8}$/.test(flag)) window.__hpStallStart(flag, ${STALL_TICKS});
+    });
+    window.addEventListener('pagehide', (e) => {
+      console.log('${STALL_TAG} pagehide persisted=' + (e.persisted === true) + ' path=' + location.pathname);
+    });
+  } catch (e) {
+    console.log('${STALL_TAG} init-err ' + String((e && e.name) || 'Error').slice(0, 40));
+  }
+})();`;
+// 표본 줄 해석(순수 · 자체시험 K-C30a) — 꼴 밖이면 null
+function stallParse(line) {
+  const m = /^\[hp-stall\] s tag=([A-Za-z0-9]{1,8}) t=(\d+) (?:path=(\S{0,80}) bar=(true|false) id=(\d+) btn=(true|false|null)|err=([A-Za-z]{1,40}))$/.exec(String(line || ''));
+  if (!m) return null;
+  if (m[7]) return { tag: m[1], t: Number(m[2]), err: m[7] };
+  return { tag: m[1], t: Number(m[2]), path: m[3], bar: m[4] === 'true', id: Number(m[5]), btn: m[6] === 'null' ? null : m[6] === 'true' };
+}
+// 고치기 전 끝 꼴(순수 · 자체시험 K-C30a) — /login · 막대 0 · 아이디 칸 있음(빈 로그인 입력 화면)
+const formBack = (x) => !!x && !x.err && x.path === '/login' && x.bar === false && x.id >= 1;
+// 머묾 꼴(순수 · 기록) — /login · 막대 보임 · 아이디 칸 없음(진행 그림)
+const stallShape = (x) => !!x && !x.err && x.path === '/login' && x.bar === true && x.id === 0;
+const stallShow = (x) => (x ? (x.err ? `t=${x.t} 실패 ${x.err}` : `t=${x.t} 경로=${x.path} 막대=${x.bar} 아이디칸=${x.id} 단추꺼짐=${x.btn}`) : '없음');
 // ⓒ 뜬 적 있는 알림 글 — 문서마다 새로 돎(로그인 누름 · 다시 열기 = 새 문서 = 빈 목록). 글자 · 요소 클래스(색 가름) 둘만 · 50 상한.
 //   보기 실패는 셈(window.__hpSnackSeenErr)으로 남김 — 조용히 삼키지 않는다.
 const SNACK_SEEN_INIT = `(() => {
@@ -184,6 +258,10 @@ const KEY = {
   sales: key('K35-S3-9', 'S3', 'sales-home'),
   // 🔴 갈래 B2(D18 R-③ · D17 양성 대조) — judge.js EXPECT_S3_ROWS 와 같은 줄
   ownerJson: key('K35-S3-8', 'S3', 'owner-json'),
+  // 🔴 HQA 보류 고침 · 물러남(⑪ · 작업지시서 §8-13 · PM 결재 E4 + 덧) — judge.js EXPECT_S3_ROWS 와 같은 줄
+  termsSlowProg: key('K35-S3-5', 'S3', 'terms-slow-prog'),
+  stopAfterLogin: key('K35-S3-10', 'S3', 'stop-after-login'),
+  backRestore: key('K35-S3-10', 'S3', 'back-restore'),
 };
 const WHAT = {
   // ⬛ [낡은 줄 · 고침 3] home: '새 직원 첫 로그인(로그인 응답 첫 로그인=참 · 약관 동의됨) → 첫 화면 / · 환영 화면(/welcome) 이동 0 · 본 화면 자리 잡음 · 흰 띠 0',
@@ -202,6 +280,10 @@ const WHAT = {
   // 🔴 갈래 B2(D17) — 직원 4장면(home · update · dialog · sales) 판정에 「403 알림 0」 세 겹(ⓐ 403 응답 0 · ⓑ 처리기 경고 줄 0 · ⓒ 뜬 처리기 알림 0)을 더함 ·
   //   update 는 G2 고유 글(본문 h6 「최신 버전 확인/업데이트」 · 직원 경고 알림 1)도 더함(D18 R-④). 위 글은 그대로 두고 여기 덧붙여 적음(#1).
   ownerJson: '대표 첫 화면 다시 열기 · 대시보드 조회만 200 + JSON 아닌 본문(일반 catch) · 결재 대기만 403(양성 대조 · 시험 장치 가로챔 · 앱 손 0) → 쉬운 알림 보임 · 뜬 알림 전부 허용 목록 안 · 날 글 0 · 흰 띠 0 · 경고 기록 [Dashboard.LoadDashboardAsync] 1 이상 · 처리기 경고 줄 1 이상 · 처리기 알림 1 이상',
+  // 🔴 HQA 보류 고침 · 물러남(⑪) — 고침2 설계 §7-2 · PM 결재 덧(terms-slow-doc 기록 → 판정)
+  termsSlowProg: '약관 미동의 직원 로그인 · 문서 요청만 20초 늦춤(terms-slow-doc 과 같은 창) → 누름 +5초 표본에 진행 막대 보임 · 아이디 칸 0(다시 만들어진 화면이 30초 전엔 입력 칸으로 물러나지 않음)',
+  stopAfterLogin: '약관 미동의 직원 로그인 · 첫 문서(/terms) 붙잡음 → 브라우저 중지(CDP Page.stopLoading = 중지 단추 · Esc) → 45초 → 끝 = /login 빈 로그인 입력 화면(막대 0 · 아이디 칸 있음 · 아이디 · 비밀번호 넣으면 「로그인」 단추 켜짐 · 누르지 않음) · 중지 뒤 새 문서 0(덮어쓰기 0)',
+  backRestore: '기존 직원 로그인 → / 착지 → 뒤로 가기(복원 캐시 켠 브라우저 · 마지막 pageshow persisted=참 · 복원 뒤 문서 요청 0) → 45초 → 끝 = /login 빈 로그인 입력 화면(막대 0 · 아이디 칸 있음 · 아이디 · 비밀번호 넣으면 「로그인」 단추 켜짐 · 누르지 않음)',
   welcome: '로그인한 채 주소창에 /welcome 직접 → 「이 화면은 정식 판에서 열립니다」 안내 · 옛 환영 글 0 · 주소 그대로 · 흰 띠 0',
   // ⬛ [낡은 줄 · 고침 1] phone: '휴대폰 화면 크기 · 로그인 없이 /m/device-register(옛 QR 주소) → 「등록 없이 로그인」 안내 · 옛 등록 물음 0 · 옛 등록 요청 0 · 흰 띠 0',
   //   🔴 고침 2(런 46118135957 · 개발명세서 「고침 2」 ③) — 설계 §4 「안내 + [로그인]」 은 화면 손 0 이다. 그 화면은 기본 틀 MainLayout
@@ -714,6 +796,18 @@ const JUDGE = Object.freeze({
   ownerJson: (o) => o.routeHits >= 1 && o.ctlHits >= 1 && o.failSnack >= 1 && (o.warnJson >= 1 || o.failSnackErr >= 1)
     && o.f403n >= 1 && o.h403 >= 1 && o.forbidSeen >= 1 && o.outsideAllow === 0 && snackBadCount(o.snacks) === 0 && snackBadCount(o.seenSnacks) === 0
     && bandsOff(o) && o.warnDash >= 1 && o.appErr === 0,
+  // 🔴 HQA 보류 고침 · 물러남(⑪ · PM 결재 덧) — 늦춤이 걸렸고 · 진행 그림을 걸었고 · 누름 +5초 표본 = 막대 보임 · 아이디 칸 0
+  //   (변이 Y2 「물러남 30초 → 0」 이면 +5초에 이미 입력 칸 = 거짓). terms-slow-doc 판정(문서 정확히 1건)은 손 0.
+  termsSlowProg: (o) => o.slowHits >= 1 && o.progArm === 'ok' && !!o.prog && !!o.prog.at5 && !o.prog.at5.err
+    && o.prog.at5.bar === true && o.prog.at5.id === 0,
+  // 🔴 HQA 보류 고침 · 길 A2(⑪ · 고침2 설계 §7-2) — 첫 붙잡은 문서 = /terms · 표본기가 돌았고 · 끝 표본 = 고치기 전 꼴(빈 로그인 입력 화면) ·
+  //   아이디 · 비밀번호 넣으면 단추 켜짐 · 중지 뒤 새 문서 요청 0 · 새 문서 적재 0(`/` 덮어쓰기 0). 성립(중지 돎 · 취소됨)은 장면이 먼저 거른다(불성립 = DEVICE).
+  stopAfterLogin: (o) => o.valid === true && o.firstHeld === TERMS_PATH && o.samples >= STALL_MIN_SAMPLES && formBack(o.last) && o.btnOn === true
+    && o.docsAfter === 0 && o.dclAfter === 0,
+  // 🔴 HQA 보류 고침 · 길 B(⑪) — 복원 성립(마지막 pageshow persisted=참 · 복원 뒤 /login 문서 요청 0) · 표본기가 돌았고 · 끝 표본 = 고치기 전 꼴 ·
+  //   단추 켜짐 · 복원 뒤 새 문서 요청 0. 복원 불성립은 장면이 먼저 거른다(DEVICE).
+  backRestore: (o) => o.persisted === true && o.loginDocAfter === false && o.samples >= STALL_MIN_SAMPLES && formBack(o.last) && o.btnOn === true
+    && o.docsAfter === 0,
 });
 
 // 문서 이동 기록(끝이 「대기」 인 것은 5초까지 기다림 — requestfinished 뒤 응답 읽기가 비동기)
@@ -1071,10 +1165,321 @@ async function sceneTerms(st) {
     console.log(`K 닫힌문 장면 terms-slow-doc 진행 그림(기록 · 콘솔 꼴) 걸기 ${progArm} · ${progSumShow(prog)}`);
     console.log(`K 닫힌문 장면 terms-slow-doc 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)} · 늦춘 문서 ${o.slowHits} · 넘김 실패 ${o.slowPassErrs}`);
     rec(st, 'termsSlow', { pass, got: pass ? o : { ...o, dx: diag(kb2) } });
+    // 🔴 HQA 보류 고침 · PM 결재 덧(⑪) — 위 「진행 그림(기록)」 을 판정 키로 올림(같은 창 · 같은 표본 · terms-slow-doc 판정 손 0)
+    const passProg = JUDGE.termsSlowProg(o);
+    console.log(`K 닫힌문 장면 terms-slow-prog 판정=${passProg} · 걸기 ${progArm} · 늦춘 문서 ${o.slowHits} · ${progSumShow(prog)}`);
+    rec(st, 'termsSlowProg', { pass: passProg, got: { slowHits: o.slowHits, progArm, at5: prog.at5, n: prog.n, bar: prog.bar, idGone: prog.idGone, errs: prog.errs } });
   } catch (e) {
     dev(st, 'termsSlow', step2, e);
+    dev(st, 'termsSlowProg', step2, e); // 🔴 HQA 보류 고침 — 같은 창이라 같이 장치 거짓
   } finally {
     if (kb2) await closeKb(st, kb2);
+  }
+}
+
+// ── 🔴 HQA 보류 고침 · 물러남 장면 둘(⑪ · 고침2 설계 §7-2 · 작업지시서 §8-13 · PM 결재 E4) ──
+//   꼴 = 측정 가지 meas/20261129-1032-정적칸남음 의 m1032-measure.js(holdDocs :286 · sceneStop :315 · sceneBack :402 · closeKb 저장소 출입증 :196).
+// 새 기기 안내 창이 떠 있으면 사람처럼 [확인](붙잡음 전 · 착지 전이라 문서 이동 대기 없음)
+async function closeDeviceNotice(page) {
+  try {
+    const dlg = page.locator('.mud-dialog', { hasText: DEVICE_NOTICE_TITLE });
+    if ((await dlg.count()) === 0) return false;
+    await dlg.first().getByRole('button', { name: '확인', exact: true }).click({ timeout: 5000 });
+    return true;
+  } catch (e) {
+    console.log(`K 닫힌문 기기 등록 안내 닫기 실패 ${L.errorName(e)}`);
+    return false;
+  }
+}
+// 표본 줄 모으기(그 창 콘솔 · 꼴 맞는 줄만 · 값 · 토큰 0)
+function stallWatch(kb) {
+  const lines = [];
+  kb.page.on('console', (msg) => {
+    const t = String(msg.text());
+    if (t.startsWith(STALL_TAG) && lines.length < 400) lines.push({ at: Date.now(), t: t.slice(0, 200) });
+  });
+  return lines;
+}
+const stallSamples = (lines, tag, fromAt) => lines.filter((x) => x.at >= fromAt).map((x) => ({ at: x.at, ...(stallParse(x.t) || {}) }))
+  .filter((x) => x.tag === tag);
+// 주 프레임 문서 요청 붙잡음(시험 몫 · 앱 손 0) — mode 가 'free' 가 되면 새 요청은 바로 넘긴다
+async function holdDocs(kb) {
+  const page = kb.page;
+  const h = { mode: 'hold', held: [], hits: 0, handler: null, releaseAll: null };
+  let open = null;
+  const gate = new Promise((ok) => { open = ok; });
+  h.releaseAll = () => open();
+  h.handler = async (route) => {
+    let main = false;
+    try {
+      main = route.request().isNavigationRequest() && route.request().frame() === page.mainFrame();
+    } catch (e) {
+      main = false; // 서비스 워커 요청 등 frame() 이 던지는 꼴 — 문서 아님
+    }
+    if (main && h.mode === 'hold') {
+      h.hits += 1;
+      const x = { path: pathOnly(route.request().url()), req: route.request(), pass: '붙잡힘' };
+      h.held.push(x);
+      await gate;
+      await route.fallback().then(() => { x.pass = '넘김 성공'; }, (e) => { x.pass = `넘김 실패 ${L.errorName(e)}`; });
+      return;
+    }
+    await route.fallback().catch((e) => console.log(`K 닫힌문 붙잡음 밖 넘김 실패 ${L.errorName(e)}`));
+  };
+  await page.route('**/*', h.handler);
+  return h;
+}
+// 쓸 수 있나 — 아이디 · 비밀번호 칸에 넣고(Tab) 「로그인」 단추가 켜지는지만 본다. **누르지 않는다**(두 번째 로그인 0).
+//   칸이 없으면(진행 그림에 머묾) 거짓 · 까닭 한 줄.
+async function formUsable(page, loginId, password) {
+  try {
+    await page.getByLabel('아이디', { exact: true }).fill(loginId, { timeout: 5000 });
+    await page.getByLabel('비밀번호', { exact: true }).fill(password, { timeout: 5000 });
+    await page.getByLabel('비밀번호', { exact: true }).press('Tab', { timeout: 5000 });
+    const btn = page.getByRole('button', { name: '로그인', exact: true }).first();
+    const end = Date.now() + 5000;
+    while (Date.now() < end) {
+      if (await btn.isEnabled({ timeout: 1000 }).catch(() => false)) return { on: true, why: '켜짐' };
+      await K.sleep(250);
+    }
+    return { on: false, why: '5초 안에 안 켜짐' };
+  } catch (e) {
+    return { on: false, why: `칸 넣기 실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 60) : L.errorName(e)}` };
+  }
+}
+// 로그인 응답 본문을 못 읽은 창 — 화면 저장소의 출입증으로 로그아웃(값은 가림 등록 · 출력 0 · 측정 m1032 2회째 고침 꼴)
+async function tokFromStore(kb) {
+  if (kb.closed || kb.tok.access) return;
+  const t = await K.withTimeout(kb.page.evaluate((k) => localStorage.getItem(k), TOKEN_KEY), 5000, '저장소 출입증')
+    .then((v) => v, (e) => {
+      console.log(`K 닫힌문 ${kb.who} 저장소 출입증 읽기 실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 60) : L.errorName(e)}`);
+      return null;
+    });
+  if (t) {
+    L.maskAndRegister(`TOKEN_ACCESS_K_STORE_${kb.who}`, t);
+    kb.tok.access = t;
+    console.log(`K 닫힌문 ${kb.who} 출입증 = 화면 저장소에서(응답 본문 못 읽음)`);
+  }
+}
+// 불성립 = DEVICE 거짓(통과로 안 셈 · 설계 §7-2 「불성립 = ⚫ 장치」)
+function recDevice(st, name, got) {
+  K.recK(st.r, { key: KEY[name], what: WHAT[name], got: `장치 불성립 — ${typeof got === 'string' ? got : JSON.stringify(got)}`, pass: false, kind: 'DEVICE' });
+}
+
+// 길 A2 — 약관 미동의 직원 · 첫 문서(/terms) 붙잡음 → CDP Page.stopLoading(중지 단추 · Esc 와 같은 길) → 45초 관찰
+async function sceneStopAfterLogin(st) {
+  const step = { now: '약관 미동의 직원 확인' };
+  let kb = null;
+  let hold = null;
+  try {
+    if (!st.termsOk) throw new K.KitStepError(`준비 실패 — ${st.termsWhy}`);
+    step.now = '브라우저 열기 · 로그인 칸 채우기';
+    kb = await openCtx(st, 'S3STOP');
+    await kb.context.addInitScript(STALL_INIT);
+    const lines = stallWatch(kb);
+    const page = kb.page;
+    const cdp = await kb.context.newCDPSession(page);
+    await page.goto(`${K.BASE}${LOGIN_PATH}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.getByLabel('아이디', { exact: true }).fill(TERMS_ID, { timeout: 60000 });
+    await page.getByLabel('비밀번호', { exact: true }).fill(st.termsPw);
+    await page.getByLabel('비밀번호', { exact: true }).press('Tab');
+    kb.navs.length = 0;
+    kb.dx.docs.length = 0; kb.dx.fails.length = 0; kb.dx.failCount = 0; kb.dx.unhandled.length = 0;
+    gtReset(kb);
+    step.now = '문서 붙잡음 · 표본기 걸기 · 로그인 누름';
+    hold = await holdDocs(kb);
+    const arm = await K.withTimeout(page.evaluate(`window.__hpStallStart ? window.__hpStallStart('A2', ${STALL_TICKS}) : 'no-init'`), K.EVAL_MS, '표본기 걸기')
+      .then((v) => String(v), (e) => (e instanceof K.KitStepError ? L.sanitize(e.message, 80) : L.errorName(e)));
+    const clickAt = Date.now();
+    await page.getByRole('button', { name: '로그인', exact: true }).click();
+    let notices = 0;
+    const end = Date.now() + 45000;
+    while (hold.hits === 0 && Date.now() < end) {
+      if (await closeDeviceNotice(page)) notices += 1;
+      await K.sleep(300);
+    }
+    if (hold.hits === 0) throw new K.KitStepError(`붙잡음 적중 0(45초) · 로그인 응답 ${kb.login.seen}회 status=${kb.login.status} · 안내 닫음 ${notices}`);
+    const firstHitMs = Date.now() - clickAt;
+    const endL = Date.now() + 10000;
+    while (kb.login.seen === 0 && Date.now() < endL) await K.sleep(250);
+    if (kb.login.seen === 0 || kb.login.terms !== true) {
+      throw new K.KitStepError(`약관 필요 상태 아님(로그인 응답 ${kb.login.seen}회 · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
+    }
+    await K.sleep(STOP_SETTLE_MS);
+    const pendAtStop = hold.held.filter((x) => {
+      const d = kb.dx.docs.find((z) => z.req === x.req);
+      return d && d.end === '대기';
+    }).map((x) => x.req);
+    const docsAtStop = kb.dx.docs.length;
+    let dclAfter = 0;
+    const onDcl = () => { dclAfter += 1; };
+    page.on('domcontentloaded', onDcl);
+    hold.mode = 'free'; // 중지 뒤 새 문서 요청은 붙잡지 않는다(제품이 `/` 를 내면 그대로 보이게)
+    step.now = '중지(CDP Page.stopLoading) · 45초 관찰';
+    const stopAt = Date.now();
+    const stopRes = await K.withTimeout(cdp.send('Page.stopLoading'), 5000, 'CDP Page.stopLoading')
+      .then(() => '보냄', (e) => `실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 60) : L.errorName(e)}`);
+    await K.sleep(STOP_RELEASE_MS);
+    hold.releaseAll();
+    await K.sleep(Math.max(0, stopAt + STALL_OBS_MS - Date.now()));
+    page.off('domcontentloaded', onDcl);
+    const docs = await docsNow(kb, 3000);
+    const pend = pendAtStop.map((r) => kb.dx.docs.find((z) => z.req === r)).filter(Boolean);
+    const cancelled = pend.length >= 1 && pend.every((d) => /^실패/.test(d.end));
+    const samples = stallSamples(lines, 'A2', stopAt);
+    const last = samples[samples.length - 1] || null;
+    const fb = samples.find(formBack) || null;
+    step.now = '아이디 · 비밀번호 넣기(누르지 않음)';
+    const usable = await formUsable(page, TERMS_ID, st.termsPw);
+    const o = {
+      valid: stopRes === '보냄' && cancelled, firstHeld: hold.held[0] ? hold.held[0].path : null, samples: samples.length, last,
+      btnOn: usable.on, docsAfter: docs.length - docsAtStop, dclAfter,
+      // 기록(판정 아님) — 물러남 시각(누름부터) · 중지 뒤 20초 안 진행 그림 표본 수(물러남이 일찍 오지 않음 · 설계 §7-2)
+      fallBackMs: fb ? fb.at - clickAt : null, early: samples.filter((x) => x.at - stopAt < 20000 && stallShape(x)).length,
+    };
+    console.log(`K 닫힌문 장면 stop-after-login 표본기 ${arm} · 첫 붙잡음 +${firstHitMs}ms ${o.firstHeld} · 안내 닫음 ${notices} · 중지 ${L.sanitize(stopRes, 80)}`
+      + ` · 붙잡은 요청 ${L.sanitize(hold.held.map((x) => `${x.path} ${x.pass}`).join(' | ') || '없음', 200)} · 취소됨 ${cancelled} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 200)}`);
+    console.log(`K 닫힌문 장면 stop-after-login 표본 ${o.samples} · 중지 뒤 20초 안 진행 그림 ${o.early} · 물러남 누름 +${o.fallBackMs}ms · 끝 ${stallShow(last)} · 단추 ${usable.why}`
+      + ` · 새 문서 요청 ${o.docsAfter} · 새 문서 적재 ${o.dclAfter}`);
+    const got = { firstHeld: o.firstHeld, samples: o.samples, last: stallShow(last), btnOn: o.btnOn, docsAfter: o.docsAfter, dclAfter, fallBackMs: o.fallBackMs, early: o.early };
+    if (!o.valid) {
+      recDevice(st, 'stopAfterLogin', { stopRes, pend: pend.length, cancelled });
+    } else {
+      const pass = JUDGE.stopAfterLogin(o);
+      console.log(`K 닫힌문 장면 stop-after-login 판정=${pass}`);
+      rec(st, 'stopAfterLogin', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
+    }
+  } catch (e) {
+    dev(st, 'stopAfterLogin', step, e);
+  } finally {
+    if (kb && hold) await kb.page.unroute('**/*', hold.handler).catch((e) => console.log(`K 닫힌문 붙잡음 풀기 실패 ${L.errorName(e)}`));
+    if (kb) {
+      await tokFromStore(kb);
+      await closeKb(st, kb);
+    }
+  }
+}
+
+// 길 B — 복원 캐시(bfcache) 켠 브라우저 · 기존 직원 로그인 → / 착지 → 뒤로 가기 → 45초 관찰
+//   경로 가로채기(Fetch)를 켜지 않는다 — 가로채기가 복원을 막을 수 있다(측정 m1032 :146). 외부는 기동 인자 이름 풀이 규칙으로 끊는다(127.0.0.1 만 남김).
+//   K 초기 스크립트(막기 · 녹음기)도 걸지 않는다(측정과 같은 꼴 · 표본기 하나만).
+async function openBfCtx(st, who) {
+  if (!st.brB) {
+    const pw = require('playwright');
+    const optB = { ignoreDefaultArgs: ['--disable-back-forward-cache'], args: ['--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1'] };
+    try {
+      st.brB = await pw.chromium.launch({ channel: 'chromium', ...optB });
+      st.brBNote = 'channel=chromium';
+    } catch (e) {
+      console.log(`K 닫힌문 복원 캐시 브라우저 channel=chromium 기동 실패 ${L.errorName(e)} — 기본 실행 파일로`);
+      st.brB = await pw.chromium.launch(optB);
+      st.brBNote = '기본 실행 파일';
+    }
+  }
+  const context = await st.brB.newContext({ baseURL: K.BASE, viewport: { width: 1366, height: 768 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+  const tok = { access: null, deviceId: null, masked: 0 };
+  K.watchTokens(context, tok);
+  await context.addInitScript(STALL_INIT);
+  const kb = {
+    browser: BROWSER, who, context, page: null, tok, closed: false, consoleBuf: [],
+    login: { seen: 0, status: null }, docs: [],
+  };
+  st.kbs.push(kb);
+  kb.page = await context.newPage();
+  kb.page.on('response', (res) => {
+    if (/\/api\/auth\/login(\?|$)/i.test(res.url()) && res.request().method() === 'POST') {
+      kb.login.status = res.status();
+      kb.login.seen += 1;
+    }
+  });
+  kb.page.on('request', (req) => {
+    let main = false;
+    try {
+      main = req.isNavigationRequest() && req.frame() === kb.page.mainFrame();
+    } catch (e) {
+      main = false;
+    }
+    if (main && kb.docs.length < 20) kb.docs.push({ req, path: pathOnly(req.url()), end: '대기' });
+  });
+  kb.page.on('requestfinished', (req) => {
+    const x = kb.docs.find((d) => d.req === req);
+    if (x) req.response().then((r) => { x.end = r ? String(r.status()) : '응답 없음'; }, (e) => { x.end = `응답 읽기 실패 ${L.errorName(e)}`; });
+  });
+  kb.page.on('requestfailed', (req) => {
+    const x = kb.docs.find((d) => d.req === req);
+    if (x) x.end = `실패 ${L.sanitize((req.failure() || {}).errorText || '-', 40)}`;
+  });
+  return kb;
+}
+async function sceneBackRestore(st) {
+  const step = { now: '준비 확인' };
+  let kb = null;
+  try {
+    if (!st.prepOk) throw new K.KitStepError(`준비 실패 — ${st.prepWhy}`);
+    step.now = '복원 캐시 브라우저 열기 · 로그인 칸 채우기';
+    kb = await openBfCtx(st, 'S3BACK');
+    const lines = stallWatch(kb);
+    const page = kb.page;
+    await page.goto(`${K.BASE}${LOGIN_PATH}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.getByLabel('아이디', { exact: true }).fill(ID.fresh, { timeout: 60000 });
+    await page.getByLabel('비밀번호', { exact: true }).fill(st.freshPw);
+    await page.getByLabel('비밀번호', { exact: true }).press('Tab');
+    step.now = '로그인 누름 · 착지';
+    const clickAt = Date.now();
+    await page.getByRole('button', { name: '로그인', exact: true }).click();
+    let notices = 0;
+    let landed = null;
+    const end = Date.now() + 60000;
+    while (Date.now() < end) {
+      if (await closeDeviceNotice(page)) notices += 1;
+      const p = pathOnly(page.url());
+      if (p !== LOGIN_PATH && kb.docs.some((d) => d.path === p && d.end === '200')) { landed = p; break; }
+      await K.sleep(500);
+    }
+    if (!landed) throw new K.KitStepError(`착지 못 함(60초) · 지금 ${pathOnly(page.url())} · 로그인 응답 ${kb.login.seen}회 status=${kb.login.status}`);
+    const landMs = Date.now() - clickAt;
+    await K.sleep(BACK_LAND_MS);
+    const docsBefore = kb.docs.length;
+    step.now = '표지 두기 · 뒤로 가기 · 45초 관찰';
+    const flag = await K.withTimeout(page.evaluate((k) => { sessionStorage.setItem(k, 'B'); return 'ok'; }, STALL_FLAG), 5000, '표지 두기')
+      .then((v) => v, (e) => (e instanceof K.KitStepError ? L.sanitize(e.message, 60) : L.errorName(e)));
+    const backAt = Date.now();
+    const back = await page.goBack({ waitUntil: 'commit', timeout: 20000 })
+      .then((r) => (r ? `응답 ${r.status()}` : '응답 null(복원 또는 같은 문서)'), (e) => `실패 ${L.errorName(e)}`);
+    await K.sleep(Math.max(0, backAt + STALL_OBS_MS - Date.now()));
+    const newDocs = kb.docs.slice(docsBefore);
+    // 복원 때 앞 문서의 첫 pageshow(persisted=거짓) 줄이 뒤늦게 같이 들어올 수 있어 마지막 pageshow 를 본다(측정 m1032 1회째 고침 꼴)
+    const showAfter = lines.filter((x) => x.at >= backAt - 50 && x.t.startsWith(`${STALL_TAG} pageshow`)).pop();
+    const persisted = showAfter ? /persisted=true/.test(showAfter.t) : null;
+    const loginDocAfter = newDocs.some((d) => d.path === LOGIN_PATH);
+    const samples = stallSamples(lines, 'B', backAt);
+    const last = samples[samples.length - 1] || null;
+    const fb = samples.find(formBack) || null;
+    step.now = '아이디 · 비밀번호 넣기(누르지 않음)';
+    const usable = persisted === true ? await formUsable(page, ID.fresh, st.freshPw) : { on: false, why: '복원 안 됨 — 안 넣음' };
+    const o = {
+      persisted, loginDocAfter, samples: samples.length, last, btnOn: usable.on, docsAfter: newDocs.length,
+      fallBackMs: fb ? fb.at - backAt : null, // 기록 — 뒤로 가기부터 물러남까지
+    };
+    console.log(`K 닫힌문 장면 back-restore 브라우저 ${st.brBNote} · 착지 ${landed} +${landMs}ms · 안내 닫음 ${notices} · 표지 ${flag} · goBack ${L.sanitize(back, 60)}`
+      + ` · 뒤 문서 ${L.sanitize(newDocs.map((d) => `${d.path}=${d.end}`).join(' > ') || '없음', 200)}`
+      + ` · 마지막 pageshow ${showAfter ? L.sanitize(showAfter.t.replace(STALL_TAG, '').trim(), 80) : '못 봄'}`);
+    console.log(`K 닫힌문 장면 back-restore 표본 ${o.samples} · 물러남 뒤로 가기 +${o.fallBackMs}ms · 끝 ${stallShow(last)} · 단추 ${usable.why} · 복원 뒤 문서 요청 ${o.docsAfter}`);
+    const got = { persisted, loginDocAfter, samples: o.samples, last: stallShow(last), btnOn: o.btnOn, docsAfter: o.docsAfter, fallBackMs: o.fallBackMs };
+    if (persisted !== true || loginDocAfter) {
+      recDevice(st, 'backRestore', { persisted, loginDocAfter, browser: st.brBNote });
+    } else {
+      const pass = JUDGE.backRestore(o);
+      console.log(`K 닫힌문 장면 back-restore 판정=${pass}`);
+      rec(st, 'backRestore', { pass, got });
+    }
+  } catch (e) {
+    dev(st, 'backRestore', step, e);
+  } finally {
+    if (kb) {
+      await tokFromStore(kb);
+      await closeKb(st, kb);
+    }
   }
 }
 
@@ -1537,12 +1942,15 @@ async function cleanup(st) {
   for (const kb of st.kbs) await closeKb(st, kb);
   for (const s of [...st.apiSess]) await apiClose(st, s);
   if (st.br) await st.br.close().catch((e) => console.log(`K 닫힌문 브라우저 닫기 실패 ${L.errorName(e)}`));
+  // 🔴 HQA 보류 고침 · 길 B — 복원 캐시 켠 브라우저(장면이 처음 열 때만 생김)
+  if (st.brB) await st.brB.close().catch((e) => console.log(`K 닫힌문 복원 캐시 브라우저 닫기 실패 ${L.errorName(e)}`));
 }
 
 const st0 = {
   r: null, br: null, kbs: [], apiSess: [], logoutFail: 0, cleaned: false,
   tid: null, parentUid: null, freshUid: null, freshPw: null, prepOk: false, prepWhy: null,
   termsPw: null, termsOk: false, termsWhy: null, // 🔴 갈래 T — 약관 미동의 직원
+  brB: null, brBNote: '-', // 🔴 HQA 보류 고침 · 길 B — 복원 캐시 켠 브라우저
 };
 
 async function main() {
@@ -1598,7 +2006,8 @@ async function main() {
     // ⬛ [낡은 줄 · 고침 3] K.fillDevice(st.r, [KEY.home, KEY.update, KEY.welcome, KEY.phone, KEY.gate], `단언 전 실패 — ${pre}`);
     K.fillDevice(st.r, [KEY.home, KEY.update, KEY.welcome, KEY.phone, KEY.gate,
       KEY.termsFirst, KEY.termsSlow, KEY.relogin, KEY.loginDirect, KEY.dialog, KEY.owner, KEY.owner503, KEY.sales,
-      KEY.ownerJson], `단언 전 실패 — ${pre}`); // 🔴 갈래 B2 — 새 키 owner-json
+      // ⬛ [낡은 줄 · HQA 보류 고침 전]   KEY.ownerJson], `단언 전 실패 — ${pre}`); // 🔴 갈래 B2 — 새 키 owner-json
+      KEY.ownerJson, KEY.termsSlowProg, KEY.stopAfterLogin, KEY.backRestore], `단언 전 실패 — ${pre}`); // 🔴 갈래 B2 — 새 키 owner-json · 🔴 HQA 보류 고침 — 새 키 셋
   } else {
     await sceneHome(st);
     await sceneUpdate(st);
@@ -1610,6 +2019,8 @@ async function main() {
     await sceneOwner(st);
     await sceneSales(st);
     await sceneApprovalView(st); // 🔴 B2 고침 1 ⑦ — 기록만(키 아님) · 맨 끝(권한 행 넣고 지움)
+    // 🔴 HQA 보류 고침 · 길 B(⑪) — prep 직원(relogin-home 과 같은 직원)을 쓰는 마지막 장면 · 치우기 전 · 새 계정 0(계정 자리 5 한도 · §8-12)
+    await sceneBackRestore(st);
     // 🔴 §8-12 (가) 만든 몸이 치운다 — 여기서부터 prep 직원을 쓰는 장면 0(장면 끝마다 화면 세션 로그아웃 · API 세션도 닫힘).
     //   prep 계정 사용 안 함(자리 돌려줌) → 약관 미동의 직원 만들기 → 약관 두 장면. 치우기 · 만들기 실패 = 약관 두 장면만 장치 거짓(종전 꼴 그대로).
     //   약관 두 장면은 다른 직원 · 새 창이라 앞 장면에 기대는 것 없음(기기 한도 판정은 10/5 슬롯 폐기로 없음 · 판매 역할 · 결재 권한 행은 prep 직원 것).
@@ -1622,6 +2033,8 @@ async function main() {
       console.log(`K 닫힌문 약관 미동의 직원 준비 실패 — ${st.termsWhy}`);
     }
     await sceneTerms(st);
+    // 🔴 HQA 보류 고침 · 길 A2(⑪) — 약관 미동의 직원 그대로(약관 두 장면 뒤 · 새 계정 0)
+    await sceneStopAfterLogin(st);
   }
   await probes(st); // 브라우저 없이도 돈다
   K.fillDevice(st.r, allKeys, '경우 끝 뒤 남은 키(있으면 장치 오류)');
@@ -1660,4 +2073,7 @@ if (require.main === module) main();
 // 🔴 B2 고침 1 — 진행 그림 콘솔 꼴(⑥ K-C29i) · G13 기대 꼴(⑦ K-C29j)
 module.exports = { KEY, HANDLER_WORDS, isWelcome, endCode, homeKnown, updateKnown, JUDGE, oneDoc, snackBadCount, HOLD_MS, OWNER_LABELS,
   snackTally, SNACK_SEEN_INIT, FORBID_TEXT, H403_TAG, DASH_FAIL_TEXT,
-  PROG_WATCH, PROG_TAG, PROG_TICKS, progParse, progSum, g13Ok };
+  // ⬛ [낡은 줄 · HQA 보류 고침 전]   PROG_WATCH, PROG_TAG, PROG_TICKS, progParse, progSum, g13Ok };
+  PROG_WATCH, PROG_TAG, PROG_TICKS, progParse, progSum, g13Ok,
+  // 🔴 HQA 보류 고침 · 물러남(⑪ · 자체시험 K-C30a) — 표본기 · 해석 · 끝 꼴
+  STALL_INIT, STALL_TAG, STALL_MIN_SAMPLES, stallParse, formBack, stallShape };

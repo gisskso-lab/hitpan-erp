@@ -13,6 +13,11 @@ namespace HitPan.Web.Services;
 ///   ⬛ 고치기 전엔 「주소가 아직 login 인가」 만 봐서 「냈지만 새 문서가 아직 안 왔다」(터널 재연결 · Windows Update 직후 · 콜드 스타트)와
 ///   「안 냈다」 를 못 갈랐다 ⇒ 15초 넘게 늦으면 뒤에 낸 `/` 가 앞의 `/terms` · `/data/update` 이동을 취소했다(보안상무 병렬이슈).<br/>
 /// ③ 마지막 입력이 끝난 시각 — ① 의 다시 15초 기준.<br/>
+/// ④ 🔴 <b>HQA 보류 고침 · 물러남</b> (작업지시서 §8-13 · 설계 로그인경합_고침2_정적칸남음 §3 · PM 결재 E1 ~ E7) — 「이동을 냈다」 ≠ 「목적 문서가 열렸다」.
+///   중지 단추 · Esc(문서가 끝내 안 열림)나 뒤로 가기(복원 캐시)로 같은 런타임에 남은 로그인 화면이 진행 그림에 F5 전까지 머물렀다(②가 손만 뗐다).
+///   이동 냄 뒤에도 기다리는 화면이 이 판정을 처음 부른 때부터 30초(<see cref="FallBackToFormMs"/>)가 지나면 <see cref="ShouldFallBackToForm"/> 이 참 —
+///   화면은 진행 그림을 끄고 기존 로그인 입력 칸을 그린다(= 고치기 전 끝 상태 · 빈 로그인 화면). <b>이동은 하나도 새로 내지 않는다</b>(앞 이동 덮어쓰기 길 0).
+///   ⬛ 고치기 전(②만)엔 이동 냄이면 늘 <see cref="Step.StandDown"/> 으로 끝나 진행 그림이 꺼지지 않았다.<br/>
 /// 로그인 시작 때 <see cref="Reset"/> 으로 셋 다 비운다(앞 시도의 칸이 남아 안전망을 막지 않게 · 3V-P3-1).<br/>
 /// Blazor 비의존 순수 C# — 시험 프로젝트가 소스를 링크해 <b>실제로 불러</b> 잰다(RollbackWatch.cs 와 같은 방식).
 /// 시간은 부르는 쪽이 밀리초 숫자로 넘긴다(화면 = <c>Environment.TickCount64</c> · 시험 = 가짜 시계).
@@ -30,6 +35,13 @@ public sealed class LoginInFlightSafetyNet
     /// </summary>
     public const int MaxInputPauseMs = 10 * 60 * 1000;
 
+    /// <summary>
+    /// 🔴 HQA 보류 고침 (작업지시서 §8-13 · PM 결재 E2) — 물러남 시간 30초(밀리초).
+    /// 안전망 15초 칸은 다시 쓰지 않는다 — 실세계 느린 문서(터널 재연결 등 15초 넘게 늦음) 중간에 입력 칸이 튀어나오는 일을 줄이고,
+    /// CI 문서 20초 늦춤 장면(terms-slow-doc)의 진행 그림과도 겹치지 않게 20초보다 길게.
+    /// </summary>
+    public const int FallBackToFormMs = 30000;
+
     private readonly int _waitMs;
     private int _inputWaitDepth;
     private long? _lastInputEndedAtMs;
@@ -39,6 +51,9 @@ public sealed class LoginInFlightSafetyNet
     //   처음 보는 시각 ≤ 멈춘 시각 + PollMs(250ms) — 상한이 그만큼 늦을 뿐(빨라지지 않음).
     private readonly int _maxPauseMs;
     private long? _pauseSeenAtMs;
+    // 🔴 HQA 보류 고침 — 이동 냄 뒤 기다리는 화면이 ShouldFallBackToForm 을 처음 부른 시각(멈춤 상한과 같은 「기다리는 쪽 시계 하나」 꼴).
+    //   앞 화면(MarkNavigated)은 시각을 넘기지 않는다 ⇒ 앞 화면 이동 3곳 손 0. Reset 이면 비운다.
+    private long? _navigatedSeenAtMs;
 
     // ⬛ [낡은 몸 · 고침 2 전] public LoginInFlightSafetyNet(int waitMs) { _waitMs = waitMs; }
     //   사유: 멈춤 상한 칸이 더해졌다 — 화면이 부르는 한 인자 꼴은 그대로 두고 상한 = MaxInputPauseMs(10분).
@@ -81,6 +96,7 @@ public sealed class LoginInFlightSafetyNet
         _lastInputEndedAtMs = null;
         _navigated = false;
         _pauseSeenAtMs = null;   // 🔴 고침 2
+        _navigatedSeenAtMs = null;   // 🔴 HQA 보류 고침 — 다음 로그인 시도가 앞 시도의 물러남 시계를 안 물려받게
     }
 
     /// <summary>로그인을 부른 화면이 대화 창을 띄우기 직전에 부른다. 시계가 멈춘다.</summary>
@@ -110,6 +126,23 @@ public sealed class LoginInFlightSafetyNet
     public void MarkNavigated()
     {
         _navigated = true;
+    }
+
+    /// <summary>
+    /// 🔴 HQA 보류 고침 (작업지시서 §8-13 · 설계 로그인경합_고침2_정적칸남음 §3-3) — 물러남 판정.
+    /// 이동 냄 아님 ⇒ 늘 거짓(그 길은 <see cref="Next"/> 가 맡는다). 이동 냄 ⇒ 이 판정을 처음 부른 시각을 적고(<c>??=</c>),
+    /// 그때부터 <see cref="FallBackToFormMs"/>(30초)가 지나면 참 — 참이면 기다리는 화면이 진행 그림을 끄고 기존 로그인 입력 칸을 그린다.
+    /// 이동은 내지 않는다(<see cref="Next"/> 의 <see cref="Step.StandDown"/> 뜻 「안전망 `/` 영구 해제」 그대로).
+    /// </summary>
+    public bool ShouldFallBackToForm(long nowMs)
+    {
+        if (!_navigated)
+        {
+            return false;
+        }
+
+        _navigatedSeenAtMs ??= nowMs;
+        return nowMs - _navigatedSeenAtMs.Value >= FallBackToFormMs;
     }
 
     /// <summary>
