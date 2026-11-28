@@ -23,14 +23,35 @@ public sealed class LoginInFlightSafetyNet
     /// <summary>기다리는 화면이 판정을 다시 묻는 간격(밀리초).</summary>
     public const int PollMs = 250;
 
+    /// <summary>
+    /// 🔴 20261128작 갈래 A 고침 2 (작업지시서 §8-5 A1-① · PM 결재) — 멈춤 상한 10분(밀리초).
+    /// 알림 결과가 영영 안 오면(생길 길은 코드 읽기로 못 찾음 · 가설) 다시 만들어진 화면이 진행 막대에 머문다.
+    /// 멈춤이 이만큼 이어지면 멈춤을 무시하고 종전대로 `/` 1회(<see cref="Step.GoHome"/>) — 최악 = 고치기 전과 같음.
+    /// </summary>
+    public const int MaxInputPauseMs = 10 * 60 * 1000;
+
     private readonly int _waitMs;
     private int _inputWaitDepth;
     private long? _lastInputEndedAtMs;
     private bool _navigated;
+    // 🔴 고침 2 — 이번 멈춤(깊이 0 → 1 이상)을 기다리는 화면이 처음 본 시각. 시계는 기다리는 화면의 것(Next 의 nowMs) 하나만 쓴다
+    //   — 알림을 띄우는 화면(BeginWaitingForInput)은 시각을 넘기지 않으므로 Login.razor 손 0. 깊이가 0 으로 돌아오거나 Reset 이면 비운다.
+    //   처음 보는 시각 ≤ 멈춘 시각 + PollMs(250ms) — 상한이 그만큼 늦을 뿐(빨라지지 않음).
+    private readonly int _maxPauseMs;
+    private long? _pauseSeenAtMs;
 
+    // ⬛ [낡은 몸 · 고침 2 전] public LoginInFlightSafetyNet(int waitMs) { _waitMs = waitMs; }
+    //   사유: 멈춤 상한 칸이 더해졌다 — 화면이 부르는 한 인자 꼴은 그대로 두고 상한 = MaxInputPauseMs(10분).
     public LoginInFlightSafetyNet(int waitMs)
+        : this(waitMs, MaxInputPauseMs)
+    {
+    }
+
+    /// <summary>🔴 고침 2 — 멈춤 상한을 따로 받는 꼴(화면은 쓰지 않는다 · 한 인자 꼴이 10분을 넘긴다).</summary>
+    public LoginInFlightSafetyNet(int waitMs, int maxPauseMs)
     {
         _waitMs = waitMs;
+        _maxPauseMs = maxPauseMs;
     }
 
     /// <summary>안전망이 할 일.</summary>
@@ -39,7 +60,8 @@ public sealed class LoginInFlightSafetyNet
         /// <summary>아직 기다린다(멈춤이거나 15초 전).</summary>
         Wait,
 
-        /// <summary>멈춤 아님 상태로 15초가 지났고 이동도 아직 없다 ⇒ `/` 1회(부르는 쪽이 주소가 아직 login 인지 한 번 더 본다).</summary>
+        /// <summary>멈춤 아님 상태로 15초가 지났고 이동도 아직 없다 ⇒ `/` 1회(부르는 쪽이 주소가 아직 login 인지 한 번 더 본다).
+        /// 🔴 고침 2 — 멈춤이 <see cref="MaxInputPauseMs"/>(10분) 넘게 이어져도 같다.</summary>
         GoHome,
 
         /// <summary>앞 화면이 이미 이동을 냈다 ⇒ 안전망은 아무것도 하지 않고 끝난다.</summary>
@@ -58,6 +80,7 @@ public sealed class LoginInFlightSafetyNet
         _inputWaitDepth = 0;
         _lastInputEndedAtMs = null;
         _navigated = false;
+        _pauseSeenAtMs = null;   // 🔴 고침 2
     }
 
     /// <summary>로그인을 부른 화면이 대화 창을 띄우기 직전에 부른다. 시계가 멈춘다.</summary>
@@ -75,6 +98,12 @@ public sealed class LoginInFlightSafetyNet
         }
 
         _lastInputEndedAtMs = nowMs;
+
+        // 🔴 고침 2 — 멈춤이 다 풀렸으면 이번 멈춤의 상한 시계도 비운다(다음 멈춤은 처음부터 10분).
+        if (_inputWaitDepth == 0)
+        {
+            _pauseSeenAtMs = null;
+        }
     }
 
     /// <summary>로그인을 부른 화면이 이동을 낸 순간 부른다(갈 곳 식 손 0 — 냈다는 표시만).</summary>
@@ -94,9 +123,13 @@ public sealed class LoginInFlightSafetyNet
             return Step.StandDown;
         }
 
+        // ⬛ [낡은 줄 · 고침 2 전] if (IsWaitingForInput) { return Step.Wait; }
+        //   사유: 멈춤에 상한이 없어 알림 결과가 안 오면 진행 막대에 머물렀다(§8-5 A1-①).
+        // 🔴 고침 2 — 멈춤이면 기다리되, 이번 멈춤을 처음 본 때부터 10분이 지나면 종전대로 `/` 1회.
         if (IsWaitingForInput)
         {
-            return Step.Wait;
+            _pauseSeenAtMs ??= nowMs;
+            return nowMs - _pauseSeenAtMs.Value >= _maxPauseMs ? Step.GoHome : Step.Wait;
         }
 
         var anchor = _lastInputEndedAtMs is long ended && ended > waitStartedAtMs ? ended : waitStartedAtMs;

@@ -84,6 +84,35 @@ public sealed class LoginInFlightSafetyNetGateTests
         Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 10_000, nowMs: 90_000));
     }
 
+    [Fact(DisplayName = "A1-① 고침 2 멈춤 상한 10분 — 알림 결과가 안 와도 처음 본 때부터 10분에 종전대로 `/` 1회 · 그 전엔 기다림")]
+    public void PauseNeverEnds_GoHomeAfterTenMinutes()
+    {
+        // 화면과 같은 한 인자 꼴 — 상한은 제품 기본값(MaxInputPauseMs)을 그대로 잰다.
+        var net = new LoginInFlightSafetyNet(WaitMs);
+        Assert.Equal(10 * 60 * 1000, LoginInFlightSafetyNet.MaxInputPauseMs);
+
+        net.BeginWaitingForInput();   // 알림을 띄웠는데 결과가 영영 안 온다(EndWaitingForInput 0)
+
+        Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 1_000));       // 처음 본 때 = 1초
+        Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 300_000));     // 5분 — 아직 멈춤
+        Assert.Equal(Step.Wait, net.Next(waitStartedAtMs: 0, nowMs: 600_999));     // 10분 − 1ms
+        Assert.Equal(Step.GoHome, net.Next(waitStartedAtMs: 0, nowMs: 601_000));   // 10분 — 고치기 전엔 여기서도 Wait(진행 막대에 머묾)
+
+        // 이동을 냈으면 상한보다 해제가 먼저(§8-3 3V-P2 그대로).
+        net.MarkNavigated();
+        Assert.Equal(Step.StandDown, net.Next(waitStartedAtMs: 0, nowMs: 700_000));
+
+        // 멈춤이 다 풀리면 상한 시계도 비워진다 — 다음 멈춤은 처음부터 10분.
+        var net2 = new LoginInFlightSafetyNet(WaitMs);
+        net2.BeginWaitingForInput();
+        Assert.Equal(Step.Wait, net2.Next(waitStartedAtMs: 0, nowMs: 0));
+        net2.EndWaitingForInput(nowMs: 500_000);
+        net2.BeginWaitingForInput();
+        Assert.Equal(Step.Wait, net2.Next(waitStartedAtMs: 0, nowMs: 700_000));    // 새 멈춤을 처음 본 때 = 700초
+        Assert.Equal(Step.Wait, net2.Next(waitStartedAtMs: 0, nowMs: 1_299_999));
+        Assert.Equal(Step.GoHome, net2.Next(waitStartedAtMs: 0, nowMs: 1_300_000));
+    }
+
     [Fact(DisplayName = "3V-P2a 앞 화면이 `/terms` 이동을 냈다 → 새 문서가 20초 늦어도 안전망 `/` 0(해제)")]
     public void Navigated_SlowDocument_NeverGoesHome()
     {

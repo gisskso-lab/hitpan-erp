@@ -91,7 +91,9 @@ jobs:
     runs-on: ubuntu-24.04
     # ⬛ [낡은 줄 · K 연결 1~3차] timeout-minutes: 30
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
-    timeout-minutes: 37
+    # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
+    # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
+    timeout-minutes: 46
 
     steps:
       - name: Checkout
@@ -260,7 +262,9 @@ jobs:
         #   S11 은 누출 검사 통과 + 표지 없음일 때만 — 표지가 없어도 업로드 자리엔 대조 지난 그림만 있다(K 가 임시 자리에서 찍고 옮김).
         # ⬛ [낡은 줄 · K 연결 3차] timeout-minutes: 20
         # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
-        timeout-minutes: 27
+        # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 27
+        # 🔴 20261128작 로그인 경합 갈래 T — k35-popup 12분 + k35-ws03-closed 16분 + 장치 점검 몫 8분(잡 46분 안).
+        timeout-minutes: 36
         run: |
           set -uo pipefail
           rc=0
