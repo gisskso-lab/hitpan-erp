@@ -4,14 +4,18 @@ using System.Text.Json.Serialization;
 
 namespace HitPan.Web.Services;
 
-public sealed class LogService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class LogService(HttpClient http)
+public sealed class LogService(HttpClient http, ILogger<LogService> logger)
 {
     private static readonly JsonSerializerOptions _opts = new(JsonSerializerDefaults.Web);
 
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 로그 화면 조회 2자리에 onLoadFailed 를 더했다.
+    //   빈 표 · 오류 수 0 만 남아 「로그가 없다」 로 오해하지 않게 화면이 쉬운 알림을 띄운다 · 돌려주는 값은 그대로.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1]     int limit = 200, CancellationToken ct = default)
     public async Task<List<AuditTrailRow>> GetAuditTrailAsync(
         DateTime? from = null, DateTime? to = null,
         string? entityType = null, string? actionType = null,
-        int limit = 200, CancellationToken ct = default)
+        int limit = 200, CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -23,7 +27,9 @@ public sealed class LogService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[LogService.GetAuditTrail] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[LogService.GetAuditTrail] {ex.Message}");
+            logger.LogWarning(ex, "[LogService.GetAuditTrail] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new List<AuditTrailRow>();
         }
     }
@@ -31,7 +37,8 @@ public sealed class LogService(HttpClient http)
     public async Task<List<ApiRequestRow>> GetApiRequestsAsync(
         DateTime? from = null, DateTime? to = null,
         int? statusCode = null,
-        int limit = 200, CancellationToken ct = default)
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] int limit = 200, CancellationToken ct = default)
+        int limit = 200, CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -42,7 +49,9 @@ public sealed class LogService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[LogService.GetApiRequests] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[LogService.GetApiRequests] {ex.Message}");
+            logger.LogWarning(ex, "[LogService.GetApiRequests] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new List<ApiRequestRow>();
         }
     }

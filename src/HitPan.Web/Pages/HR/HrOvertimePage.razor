@@ -8,6 +8,7 @@
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<HrOvertimePage> Logger
 
 <PageTitle>초과근무</PageTitle>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -83,11 +84,22 @@
         {
             // 판정에 실패하면 관리자로 보지 않는다 — 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
             // (휴직 화면과 같은 원칙. 게이트: OvertimeApproverGateGuardTests)
-            Console.Error.WriteLine($"[HrOvertimePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrOvertimePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[HrOvertimePage] 계정 유형 판정 실패");
             _isAdmin = false;
         }
 
-        _items = await HrSvc.GetOvertimeAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 고침 1 §8-5 #1] _items = await HrSvc.GetOvertimeAsync();   — 실패를 빈 목록으로 받아 「0건」 과 못 갈랐다
+        await LoadItemsAsync();
+    }
+
+    // 대표 ④(지시서 §8-3 · 고침 1 §8-5 #1) — 못 불러오면 쉬운 알림 한 번(기록은 서비스가 남김) · 빈 목록이 「자료 없음」 으로만 보이지 않게.
+    //   화면 열 때 · 신청 · 승인/반려 뒤 다시 읽기 셋이 같은 자리(근태 화면 LoadAsync 와 같은 꼴).
+    private async Task LoadItemsAsync()
+    {
+        var rows = await HrSvc.GetOvertimeOrNullAsync();
+        if (rows is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+        _items = rows ?? new();
     }
 
     private async Task SaveAsync()
@@ -96,7 +108,8 @@
         _edit.StartTime = _startTime ?? new(18, 0, 0);
         _edit.EndTime = _endTime ?? new(21, 0, 0);
         var ok = await HrSvc.CreateOvertimeAsync(_edit);
-        if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _items = await HrSvc.GetOvertimeAsync(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠 고침 1] if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); _items = await HrSvc.GetOvertimeAsync(); }
+        if (ok) { Snackbar.Add("신청 완료", Severity.Success); _edit = new(); await LoadItemsAsync(); }
         else Snackbar.Add("신청 실패", Severity.Error);
     }
 
@@ -107,7 +120,8 @@
         if (ok)
         {
             Snackbar.Add(action == "approved" ? "승인되었습니다." : "반려되었습니다.", Severity.Success);
-            _items = await HrSvc.GetOvertimeAsync();
+            // ⬛ [낡은 줄 · 화면오류기록띠 고침 1] _items = await HrSvc.GetOvertimeAsync();
+            await LoadItemsAsync();
         }
         else
         {

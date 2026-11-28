@@ -3,7 +3,8 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class AccountService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class AccountService(HttpClient http)
+public sealed class AccountService(HttpClient http, ILogger<AccountService> logger)
 {
     public async Task<List<AccountModel>> GetListAsync(CancellationToken ct = default)
     {
@@ -42,7 +43,8 @@ public sealed class AccountService(HttpClient http)
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지.
-            Console.Error.WriteLine("[작4] 시산표 조회 실패: " + ex.GetType().Name + ": " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[작4] 시산표 조회 실패: " + ex.GetType().Name + ": " + ex.Message);
+            logger.LogWarning(ex, "[작4] 시산표 조회 실패");
             return null;
         }
     }

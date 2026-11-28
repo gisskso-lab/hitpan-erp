@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using HitPan.Web.Models;
+using MudBlazor;
 
 namespace HitPan.Web.Services;
 
@@ -7,7 +8,8 @@ namespace HitPan.Web.Services;
 /// 통합 캘린더 API 클라이언트 서비스.
 /// 사장님 결재 2026-05-26 (통합 캘린더 + 카드 모달 가도).
 /// </summary>
-public sealed class UnifiedCalendarService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class UnifiedCalendarService(HttpClient http)
+public sealed class UnifiedCalendarService(HttpClient http, ILogger<UnifiedCalendarService> logger, ISnackbar snackbar)
 {
     /// <summary>월간 4축 통합 데이터 조회.</summary>
     public async Task<UnifiedCalendarModel?> GetMonthlyAsync(int year, int month, CancellationToken ct = default)
@@ -52,7 +54,11 @@ public sealed class UnifiedCalendarService(HttpClient http)
         catch (Exception ex)
         {
             // §#15 빈 catch 금지 — 단, '<' 파싱예외는 위에서 차단되므로 여기엔 실제 네트워크 오류만 도달.
-            Console.Error.WriteLine($"[UnifiedCalendarService.{caller}] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.{caller}] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[UnifiedCalendarService.{Caller}] 조회 실패", caller);
+            // 화면오류기록띠 대표 ③ — 대시보드 달력(월 조회)은 실패를 빈 달력으로만 보여 띠가 유일한 신호였다 → 쉬운 알림 한 번.
+            //   날짜 상세(카드 모달 · 아침 브리핑)는 부르는 부품이 다른 갈래(C) 몫이라 여기서 안 띄움(기록만) · Dashboard.razor 손 0.
+            if (caller == nameof(GetMonthlyAsync)) LoadFailedNotice.Show(snackbar, ex);
             return default;
         }
     }
@@ -68,7 +74,8 @@ public sealed class UnifiedCalendarService(HttpClient http)
             var res = await http.PostAsJsonAsync("api/dashboard/schedules", model, ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
-                Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] HTTP {(int)res.StatusCode}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] HTTP {(int)res.StatusCode}");
+                logger.LogWarning("[UnifiedCalendarService.CreateScheduleAsync] HTTP {Status}", (int)res.StatusCode);
                 return null;
             }
             var payload = await res.Content.ReadFromJsonAsync<ScheduleIdResponse>(cancellationToken: ct).ConfigureAwait(false);
@@ -76,7 +83,8 @@ public sealed class UnifiedCalendarService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.CreateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[UnifiedCalendarService.CreateScheduleAsync] 저장 실패");
             return null;
         }
     }
@@ -89,14 +97,16 @@ public sealed class UnifiedCalendarService(HttpClient http)
             var res = await http.PutAsJsonAsync($"api/dashboard/schedules/{id}", model, ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
-                Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] HTTP {(int)res.StatusCode}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] HTTP {(int)res.StatusCode}");
+                logger.LogWarning("[UnifiedCalendarService.UpdateScheduleAsync] HTTP {Status}", (int)res.StatusCode);
                 return false;
             }
             return true;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.UpdateScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[UnifiedCalendarService.UpdateScheduleAsync] 저장 실패");
             return false;
         }
     }
@@ -109,14 +119,16 @@ public sealed class UnifiedCalendarService(HttpClient http)
             var res = await http.DeleteAsync($"api/dashboard/schedules/{id}", ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
-                Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] HTTP {(int)res.StatusCode}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] HTTP {(int)res.StatusCode}");
+                logger.LogWarning("[UnifiedCalendarService.DeleteScheduleAsync] HTTP {Status}", (int)res.StatusCode);
                 return false;
             }
             return true;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.DeleteScheduleAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[UnifiedCalendarService.DeleteScheduleAsync] 삭제 실패");
             return false;
         }
     }
@@ -134,14 +146,16 @@ public sealed class UnifiedCalendarService(HttpClient http)
             var res = await http.SendAsync(req, ct).ConfigureAwait(false);
             if (!res.IsSuccessStatusCode)
             {
-                Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] HTTP {(int)res.StatusCode}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] HTTP {(int)res.StatusCode}");
+                logger.LogWarning("[UnifiedCalendarService.ToggleCompleteAsync] HTTP {Status}", (int)res.StatusCode);
                 return false;
             }
             return true;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedCalendarService.ToggleCompleteAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[UnifiedCalendarService.ToggleCompleteAsync] 저장 실패");
             return false;
         }
     }

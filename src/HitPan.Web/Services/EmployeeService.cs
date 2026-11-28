@@ -105,6 +105,28 @@ public sealed class EmployeeService(HttpClient http, ILogger<EmployeeService> lo
         }
     }
 
+    /// <summary>
+    /// 부서 목록을 조회한다. 실패 시 <c>null</c> 을 돌려준다.
+    /// </summary>
+    /// <remarks>
+    /// 20261129 화면오류기록띠 대표 ④(넓힘 X2 · 지시서 §8-3) — 위 <see cref="GetDepartmentsAsync"/> 는 실패를 빈 목록으로 뭉개
+    /// 계정 관리 화면이 "부서 0개" 와 "못 불러옴" 을 못 가른다. 가를 곳만 이쪽을 쓴다(<see cref="GetListOrNullAsync"/> 와 같은 꼴).
+    /// 기존 메서드는 사원관리 화면이 그대로 부르므로 손대지 않는다(헌법 #1).
+    /// </remarks>
+    public async Task<List<DepartmentModel>?> GetDepartmentsOrNullAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await http.GetFromJsonAsync<List<DepartmentModel>>("api/employees/departments", ct).ConfigureAwait(false)
+                   ?? new List<DepartmentModel>();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "부서 목록 조회 실패");
+            return null;
+        }
+    }
+
     public async Task<EmployeeDetailModel?> GetAsync(string id, CancellationToken ct = default)
     {
         try

@@ -999,7 +999,9 @@ public sealed class LegacyPdfButtonRenderRouteGateTests
         Assert.Equal(UiHandleNames.OrderBy(n => n, StringComparer.Ordinal).ToList(), names);
 
         var folded = Fold(ctor);
-        foreach (var stmt in new[] { "_dialog = dialog;", "_snackbar = snackbar;", "_js = js;", "_pdf = new RenderedPdfDownload(http);" })
+        // ⬛ [낡은 줄 · 화면오류기록띠] foreach (var stmt in new[] { "_dialog = dialog;", "_snackbar = snackbar;", "_js = js;", "_pdf = new RenderedPdfDownload(http);" })
+        //   화면오류기록띠 갈래 S(작업지시서 E6) — 생성자가 기록기를 넘기는 2-인자 꼴로 바뀜 · 글자 1개만 맞춤
+        foreach (var stmt in new[] { "_dialog = dialog;", "_snackbar = snackbar;", "_js = js;", "_pdf = new RenderedPdfDownload(http, pdfLogger);" })
         {
             Assert.True(Regex.Matches(folded, @"(?<![\w])" + Regex.Escape(stmt)).Count == 1, $"생성자에 「{stmt}」 가 정확히 1이 아니다");
         }

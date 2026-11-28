@@ -285,7 +285,9 @@ private List<StockAlertModel> _chainedAlerts = new();
 
 private async Task LoadAlerts()
 {
-    var all = await BomApi.GetAlertsAsync() ?? new();
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var all = await BomApi.GetAlertsAsync() ?? new();
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 조회 실패면 안전재고 부족 띠가 조용히 사라지지 않게 쉬운 알림 한 번.
+    var all = await BomApi.GetAlertsAsync(onLoadFailed: ex => LoadFailedNotice.Show(Snackbar, ex)) ?? new();
 
     _alerts = all.Where(a => string.Equals(a.Status, "pending", StringComparison.OrdinalIgnoreCase)).ToList();
     _orderedAlerts = all.Where(a => string.Equals(a.Status, "ordered", StringComparison.OrdinalIgnoreCase)).ToList();

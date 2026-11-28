@@ -6,22 +6,36 @@ namespace HitPan.Web.Services;
 /// <summary>
 /// 전자세금계산서 인증서 등록·관리 API 클라이언트 — 작B v3.0 방식 A
 /// </summary>
-public sealed class TaxInvoiceCertClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class TaxInvoiceCertClientService(HttpClient http)
+public sealed class TaxInvoiceCertClientService(HttpClient http, ILogger<TaxInvoiceCertClientService> logger)
 {
-    public async Task<CertInfoDto?> GetCertInfoAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 인증서 화면 조회 3자리에 onLoadFailed 를 더했다.
+    //   돌려주는 값은 그대로 · 화면이 실패를 알아 「신규 등록」 꼴 · 거짓 초록 보안 상태 대신 쉬운 알림을 띄우게 예외만 넘긴다.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<CertInfoDto?> GetCertInfoAsync(CancellationToken ct = default)
+    public async Task<CertInfoDto?> GetCertInfoAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
-            return await http.GetFromJsonAsync<CertInfoDto>("api/settings/tax-invoice-cert", ct).ConfigureAwait(false);
+            // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] return await http.GetFromJsonAsync<CertInfoDto>("api/settings/tax-invoice-cert", ct).ConfigureAwait(false);
+            // 인증서가 없으면 서버가 Ok(null) = 204(빈 본문)를 준다(TaxInvoiceCertController.GetInfo). 그건 실패가 아니라 「없음」 이다 —
+            //   종전 꼴(GetFromJsonAsync)은 빈 본문을 못 읽어 예외 → catch 로 갔으므로, 실패 알림이 「없음」 에 뜨지 않게 204 를 먼저 가른다.
+            //   200 · 그 밖 실패는 종전과 같은 결과(200 = 읽은 값 · 실패 = 예외 → catch).
+            using var res = await http.GetAsync("api/settings/tax-invoice-cert", ct).ConfigureAwait(false);
+            if (res.StatusCode == System.Net.HttpStatusCode.NoContent) return null;
+            res.EnsureSuccessStatusCode();
+            return await res.Content.ReadFromJsonAsync<CertInfoDto>(cancellationToken: ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.GetInfo] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.GetInfo] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.GetInfo] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return null;
         }
     }
 
-    public async Task<SecurityStatusDto> GetSecurityStatusAsync(CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<SecurityStatusDto> GetSecurityStatusAsync(CancellationToken ct = default)
+    public async Task<SecurityStatusDto> GetSecurityStatusAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -30,7 +44,9 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.GetSecurityStatus] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.GetSecurityStatus] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.GetSecurityStatus] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new();
         }
     }
@@ -57,7 +73,8 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
     }
 
-    public async Task<WatchdogReportDto?> GetWatchdogReportAsync(CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<WatchdogReportDto?> GetWatchdogReportAsync(CancellationToken ct = default)
+    public async Task<WatchdogReportDto?> GetWatchdogReportAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -66,7 +83,9 @@ public sealed class TaxInvoiceCertClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[TaxInvoiceCert.Watchdog] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TaxInvoiceCert.Watchdog] {ex.Message}");
+            logger.LogWarning(ex, "[TaxInvoiceCert.Watchdog] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return null;
         }
     }

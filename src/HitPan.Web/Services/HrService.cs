@@ -4,7 +4,8 @@ using HitPan.Web.Models;
 namespace HitPan.Web.Services;
 
 /// <summary>인사·근태 API 클라이언트</summary>
-public sealed class HrClientService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class HrClientService(HttpClient http)
+public sealed class HrClientService(HttpClient http, ILogger<HrClientService> logger)
 {
     // 출퇴근
     public async Task<List<AttendanceModel>> GetAttendanceAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
@@ -139,7 +140,8 @@ public sealed class HrClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[HrService.ApproveOvertimeAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrService.ApproveOvertimeAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[HrService.ApproveOvertimeAsync] 처리 실패");
             return false;
         }
     }
@@ -151,6 +153,39 @@ public sealed class HrClientService(HttpClient http)
         catch (Exception ex) { LogFailure(nameof(GetHrExpensesAsync), ex); return new(); }
     }
 
+    // ── 🆕 20261129 화면오류기록띠 PR-1 고침 1(지시서 §8-5 #1 · 대표 ④ 「같은 원칙 넓힘」) — 「못 불러옴」 을 「0건」 과 가르는 조회 3개 ──
+    //    위 Get…Async 3개는 실패를 빈 목록으로 뭉갠다 → 기록을 경고로 옮긴 뒤(띠 0) 화면의 실패 신호가 0 이 됐다([4] P1-1).
+    //    기존 메서드는 그대로 두고(헌법 #1) 가를 곳(근태 · 초과근무 · 경비 화면)만 이쪽을 부른다(EmployeeService.GetDepartmentsOrNullAsync 와 같은 꼴).
+    //    null = 화면이 쉬운 알림을 띄울 실패. 화면을 떠나 취소된 조회 · 401 · 403 은 빈 목록(공통 처리기가 이미 알리거나 볼 사람이 없음 —
+    //    LoadFailedNotice.ShouldNotify 와 같은 거름 · 알림 겹침 0).
+
+    /// <summary>출퇴근 목록. 알림을 띄울 실패면 <c>null</c>(기록은 여기서 남김).</summary>
+    public async Task<List<AttendanceModel>?> GetAttendanceOrNullAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        var q = "api/hr/attendance?";
+        if (from.HasValue) q += $"from={from:yyyy-MM-dd}&";
+        if (to.HasValue) q += $"to={to:yyyy-MM-dd}&";
+        try { return await http.GetFromJsonAsync<List<AttendanceModel>>(q.TrimEnd('&', '?'), ct) ?? new(); }
+        catch (Exception ex) { LogFailure(nameof(GetAttendanceOrNullAsync), ex); return LoadFailedNotice.ShouldNotify(ex) ? null : new(); }
+    }
+
+    /// <summary>초과근무 목록. 알림을 띄울 실패면 <c>null</c>(기록은 여기서 남김).</summary>
+    public async Task<List<OvertimeModel>?> GetOvertimeOrNullAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
+    {
+        var q = "api/hr/overtime?";
+        if (from.HasValue) q += $"from={from:yyyy-MM-dd}&";
+        if (to.HasValue) q += $"to={to:yyyy-MM-dd}&";
+        try { return await http.GetFromJsonAsync<List<OvertimeModel>>(q.TrimEnd('&', '?'), ct) ?? new(); }
+        catch (Exception ex) { LogFailure(nameof(GetOvertimeOrNullAsync), ex); return LoadFailedNotice.ShouldNotify(ex) ? null : new(); }
+    }
+
+    /// <summary>HR 경비 목록. 알림을 띄울 실패면 <c>null</c>(기록은 여기서 남김).</summary>
+    public async Task<List<HrExpenseModel>?> GetHrExpensesOrNullAsync(CancellationToken ct = default)
+    {
+        try { return await http.GetFromJsonAsync<List<HrExpenseModel>>("api/hr/expense-requests", ct) ?? new(); }
+        catch (Exception ex) { LogFailure(nameof(GetHrExpensesOrNullAsync), ex); return LoadFailedNotice.ShouldNotify(ex) ? null : new(); }
+    }
+
     /// <summary>
     /// 실패한 이유를 남긴다(헌법 #15 — 빈 catch 금지).
     /// </summary>
@@ -158,8 +193,10 @@ public sealed class HrClientService(HttpClient http)
     /// 삼킨 예외는 없는 일이 된다. 화면은 "0건" 이나 "실패" 만 보여주고
     /// <b>왜 그런지는 아무 데도 안 남아</b> 나중에 원인을 못 찾는다.
     /// </remarks>
-    private static void LogFailure(string where, Exception ex)
-        => Console.Error.WriteLine($"[HrService.{where}] {ex.GetType().Name}: {ex.Message}");
+    // ⬛ [낡은 줄 · 화면오류기록띠] private static void LogFailure(string where, Exception ex)   — 기록기(인스턴스)를 쓰려고 static 뗌
+    private void LogFailure(string where, Exception ex)
+        // ⬛ [낡은 줄 · 화면오류기록띠] => Console.Error.WriteLine($"[HrService.{where}] {ex.GetType().Name}: {ex.Message}");
+        => logger.LogWarning(ex, "[HrService.{Where}] 실패", where);
 
     public async Task<bool> CreateHrExpenseAsync(CreateHrExpenseModel m, CancellationToken ct = default)
     {
@@ -202,7 +239,8 @@ public sealed class HrClientService(HttpClient http)
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지. 종전엔 `catch { return false; }` 라 원인이 사라졌다.
-            Console.Error.WriteLine($"[HrService] 경비 신청 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrService] 경비 신청 실패: {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[HrService] 경비 신청 실패");
             return (false, null);
         }
     }
@@ -218,8 +256,9 @@ public sealed class HrClientService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(
-                $"[HrService] 경비 오류 응답 해석 실패({(int)res.StatusCode}): {ex.GetType().Name}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine(
+            // ⬛ [낡은 줄 · 화면오류기록띠]     $"[HrService] 경비 오류 응답 해석 실패({(int)res.StatusCode}): {ex.GetType().Name}");
+            logger.LogWarning(ex, "[HrService] 경비 오류 응답 해석 실패({Status})", (int)res.StatusCode);
             return null;
         }
     }

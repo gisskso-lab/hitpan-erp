@@ -1,5 +1,6 @@
 @namespace HitPan.Web.Pages.SettingsUi
 @inject HttpClient Http
+@inject ILogger<MdbFolderBrowseDialog> Logger
 
 @* 작22 (2026-09-09) B2 · 별지 §2 — 「찾아보기」 폴더 고르기.
 
@@ -186,7 +187,7 @@
     }
 
     /// <summary>서버가 준 안내 문구를 꺼낸다(개발용어 없는 문장). 못 꺼내면 상태코드만 알린다.</summary>
-    private static async Task<string> ReadMessageAsync(HttpResponseMessage resp)
+    private async Task<string> ReadMessageAsync(HttpResponseMessage resp)
     {
         try
         {
@@ -199,7 +200,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[MdbFolderBrowseDialog] 응답 해석 실패: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbFolderBrowseDialog] 응답 해석 실패: {ex.Message}");
+            Logger.LogWarning(ex, "[MdbFolderBrowseDialog] 응답 해석 실패");
         }
         return $"폴더를 열지 못했습니다. ({(int)resp.StatusCode})";
     }

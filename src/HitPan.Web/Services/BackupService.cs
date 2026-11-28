@@ -3,9 +3,14 @@ using HitPan.Web.Models;
 
 namespace HitPan.Web.Services;
 
-public sealed class BackupService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class BackupService(HttpClient http)
+public sealed class BackupService(HttpClient http, ILogger<BackupService> logger)
 {
-    public async Task<BackupSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 조회 3자리에 onLoadFailed 를 더했다.
+    //   실패를 빈 값으로 돌려주는 것은 그대로 · 화면이 「실패」 와 「0건」 을 가를 수 있게 예외만 넘긴다(알림은 화면 몫 · LoadFailedNotice).
+    //   백업 화면은 설정 조회가 실패하면 [설정 저장] 을 막는다(빈 값으로 실제 설정 덮어쓰기 방지).
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<BackupSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    public async Task<BackupSettingsModel> GetSettingsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -14,7 +19,9 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetSettingsAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new BackupSettingsModel();
         }
     }
@@ -28,12 +35,14 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.UpdateSettingsAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.UpdateSettingsAsync] 저장 실패");
             return false;
         }
     }
 
-    public async Task<List<BackupHistoryModel>> GetHistoryAsync(int limit = 50, CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<BackupHistoryModel>> GetHistoryAsync(int limit = 50, CancellationToken ct = default)
+    public async Task<List<BackupHistoryModel>> GetHistoryAsync(int limit = 50, CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -42,7 +51,9 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetHistoryAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new();
         }
     }
@@ -59,7 +70,8 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.RunBackupAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.RunBackupAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.RunBackupAsync] 실행 실패");
             return new RunBackupResultModel { Success = false, Error = ex.Message };
         }
     }
@@ -76,12 +88,14 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.RestoreAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.RestoreAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.RestoreAsync] 복원 실패");
             return new RestoreResultModel { Success = false, Error = ex.Message };
         }
     }
 
-    public async Task<List<RestoreHistoryModel>> GetRestoreHistoryAsync(int limit = 50, CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<RestoreHistoryModel>> GetRestoreHistoryAsync(int limit = 50, CancellationToken ct = default)
+    public async Task<List<RestoreHistoryModel>> GetRestoreHistoryAsync(int limit = 50, CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -90,7 +104,9 @@ public sealed class BackupService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BackupService.GetRestoreHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BackupService.GetRestoreHistoryAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[BackupService.GetRestoreHistoryAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new();
         }
     }

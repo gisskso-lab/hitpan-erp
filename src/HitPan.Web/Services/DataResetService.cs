@@ -6,7 +6,8 @@ namespace HitPan.Web.Services;
 /// 모든데이터 초기화(히트판 자료 포맷) 프론트 서비스 (사장님 결재 2026-06-23).
 /// 부모계정 패스워드 재입력 + 강제 백업 후 실행. §#22 본사 미수신.
 /// </summary>
-public sealed class DataResetService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class DataResetService(HttpClient http)
+public sealed class DataResetService(HttpClient http, ILogger<DataResetService> logger)
 {
     public sealed class DataResetRequestModel
     {
@@ -39,7 +40,8 @@ public sealed class DataResetService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[DataResetService.ResetAllAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DataResetService.ResetAllAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[DataResetService.ResetAllAsync] 초기화 실패");
             return new DataResetResultModel { Success = false, Error = "초기화 요청 중 통신 오류가 발생했습니다." };
         }
     }

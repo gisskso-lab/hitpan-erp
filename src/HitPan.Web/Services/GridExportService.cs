@@ -28,12 +28,15 @@ public sealed class GridExportService
     private readonly HttpClient _http;
     private readonly IJSRuntime _js;
     private readonly ISnackbar _snackbar;
+    private readonly ILogger<GridExportService> _logger; // 화면오류기록띠 갈래 S — 흰 띠 대신 경고 흔적(#15)
 
-    public GridExportService(HttpClient http, IJSRuntime js, ISnackbar snackbar)
+    // ⬛ [낡은 줄 · 화면오류기록띠] public GridExportService(HttpClient http, IJSRuntime js, ISnackbar snackbar)
+    public GridExportService(HttpClient http, IJSRuntime js, ISnackbar snackbar, ILogger<GridExportService> logger)
     {
         _http = http;
         _js = js;
         _snackbar = snackbar;
+        _logger = logger;
     }
 
     /// <summary>
@@ -88,7 +91,8 @@ public sealed class GridExportService
         catch (Exception ex)
         {
             // 헌법 #15 — 침묵하지 않는다. 화면에는 개발용어를 보이지 않는다.
-            Console.Error.WriteLine("[GridExport] 엑셀 내보내기 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[GridExport] 엑셀 내보내기 실패: " + ex.Message);
+            _logger.LogWarning(ex, "[GridExport] 엑셀 내보내기 실패");
             _snackbar.Add("엑셀 파일을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
         }
     }
@@ -117,7 +121,8 @@ public sealed class GridExportService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[GridExport] 인쇄 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[GridExport] 인쇄 실패: " + ex.Message);
+            _logger.LogWarning(ex, "[GridExport] 인쇄 실패");
             _snackbar.Add("인쇄 창을 열지 못했습니다.", Severity.Warning);
         }
     }

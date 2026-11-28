@@ -1,10 +1,11 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using HitPan.Web.Models;
+using Microsoft.Extensions.Logging;
 
 namespace HitPan.Web.Services;
 
-public sealed class PartnerMasterService(HttpClient http)
+public sealed class PartnerMasterService(HttpClient http, ILogger<PartnerMasterService> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -180,8 +181,11 @@ public sealed class PartnerMasterService(HttpClient http)
             var rows = await http.GetFromJsonAsync<List<PartnerAgingRow>>("api/partners/aging", JsonOptions, ct);
             return rows ?? new();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // 20261128 화면오류기록띠 갈래 C(지시서 §8-1 새 발견 ② · D19) — 종전엔 기록 없는 빈 catch(#15).
+            //   동작(빈 목록으로 떨어짐)은 그대로 두고 흔적만 남긴다 · 경고 기록은 흰 띠를 안 켠다.
+            logger.LogWarning(ex, "[PartnerMaster.Aging] 연체 현황 조회 실패");
             return new();
         }
     }

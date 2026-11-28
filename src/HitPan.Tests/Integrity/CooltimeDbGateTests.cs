@@ -460,7 +460,9 @@ public sealed partial class CooltimeDbGateTests : IDisposable
         var (user, password) = NewLoginUser(_tenantA);
         await SettingsAsync(db, _tenantA, true, new TimeSpan(22, 0, 0), new TimeSpan(18, 0, 0));   // 한 PC 규칙 = 출하 기본 켬
 
-        var svc = new AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
+        // ⬛ [낡은 줄 · #1032 main 합침(11/29)] var svc = new AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
+        // 🔴 #1032 가 시험 프로젝트에 화면 쪽 AuthService 소스를 링크해 이름이 겹침(CS0104) — 서버 쪽 이름을 다 적음 · 동작 같음
+        var svc = new HitPan.Application.Services.AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
         var pc1 = await svc.LoginAsync(LoginOf(user, password));
         var sid1 = SidOf(pc1);
         Assert.NotNull(sid1);
@@ -1223,7 +1225,9 @@ public sealed partial class CooltimeDbGateTests : IDisposable
         var settings = new SettingsService(db);
         await settings.SaveAsync(new UpdateTenantSettingsDto { CooltimeEnabled = true, CooltimeAt = "22:00", RegularLeaveTime = "18:00" }, _tenantA);
 
-        var svc = new AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
+        // ⬛ [낡은 줄 · #1032 main 합침(11/29)] var svc = new AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
+        // 🔴 #1032 가 시험 프로젝트에 화면 쪽 AuthService 소스를 링크해 이름이 겹침(CS0104) — 서버 쪽 이름을 다 적음 · 동작 같음
+        var svc = new HitPan.Application.Services.AuthService(new GateUnitOfWork(db), new GateUserLookup(user));
         var sid1 = SidOf(await svc.LoginAsync(LoginOf(user, password)));
         await db.ExecuteAsync("UPDATE user_sessions SET cooltime_asked_at = UTC_TIMESTAMP(6) - INTERVAL 10 SECOND WHERE session_id = @S", new { S = sid1 });
         await settings.SaveAsync(new UpdateTenantSettingsDto { CooltimeEnabled = false, CooltimeAt = "22:00", RegularLeaveTime = "18:00" }, _tenantA);

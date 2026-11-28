@@ -18,6 +18,8 @@ public partial class EmployeePage : ComponentBase
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
     // 작(2026-08-12) 단계0: 퇴사 처리 확인 대화상자용.
     [Inject] private IDialogService DialogService { get; set; } = default!;
+    // 20261128 화면오류기록띠 갈래 C — 처리한 오류 기록(Console.Error 는 WASM 흰 띠를 켠다 · 경고 기록은 안 켠다 · 설계 §2-1).
+    [Inject] private ILogger<EmployeePage> Logger { get; set; } = default!;
 
     private bool _loading = true;
 
@@ -230,7 +232,8 @@ public partial class EmployeePage : ComponentBase
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지. 목록을 못 받으면 종전 목록을 그대로 둔다.
-            Console.Error.WriteLine($"[EmployeePage] 사원 목록 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[EmployeePage] 사원 목록 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[EmployeePage] 사원 목록 조회 실패");
             Snackbar.Add("사원 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
         }
 

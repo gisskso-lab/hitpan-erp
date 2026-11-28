@@ -93,9 +93,16 @@ jobs:
     # 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — S8 에 쿨타임 K 본문(자체 상한 14분 · 설정 시각 기다림 2바퀴)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 45
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
+    # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 46
     # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 37
     # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — S8 단계 상한 41분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 54분(판정 규칙 무접촉).
-    timeout-minutes: 54
+    # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 54
+    # 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — S8 단계 상한 50분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 63분(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · 화면오류기록띠 PR-1 고침 1 전] timeout-minutes: 63
+    # 🔴 화면오류기록띠 PR-1 고침 1(11/29 · 지시서 §8-5 #2 ~ #4) — S9b 띠 장면 13 → 16 · 단계 상한 10 → 12분(+2) → 잡 63 → 65분(판정 규칙 무접촉).
+    timeout-minutes: 65
 
     steps:
       - name: Checkout
@@ -270,11 +277,17 @@ jobs:
         #   쿨타임 몸은 ui-k35 가 돌면 늘 돈다(실행기 = 판정기와 같은 고르기 · 이름 알파벳 순 = 앞 몸 뒤) · 기대 키 5 는 judge.js EXPECT_CT_ROWS.
         # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 32
         # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
+        # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 27
+        # 🔴 20261128작 로그인 경합 갈래 T — k35-popup 12분 + k35-ws03-closed 16분 + 장치 점검 몫 8분(잡 46분 안).
+        # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 36
         # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 27
         # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다
         #   = 33분 + 장치 점검 여유 8분(두 갈래 중 큰 여유 = W-S-03 27 − 19) → 단계 상한 41분(잡 54분 안).
         #   기대 키 = judge.js EXPECT_CT_ROWS 7 · EXPECT_S3_ROWS 7(앞 몸 EXPECT_G_ROWS 18 과 합쳐 32).
-        timeout-minutes: 41
+        # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 41
+        # 🔴 #1032 main 합침(11/29 · f744af38 · PM) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 16분 자체 상한)이 차례로 돈다
+        #   = 42분 + 장치 점검 여유 8분 → 단계 상한 50분(잡 63분 안). 기대 키 = EXPECT_G_ROWS 18 + EXPECT_CT_ROWS 7 + EXPECT_S3_ROWS 16 = 41.
+        timeout-minutes: 50
         run: |
           set -uo pipefail
           rc=0
@@ -290,6 +303,25 @@ jobs:
       - name: "[시험] S9 판정"
         if: always()
         run: node scripts/playwright-audit/ci/judge.js
+
+      # 🔴 20261128작 화면 오류 기록 띠 갈래 T(설계 docs/설계/erp/화면오류기록띠_설계_20261128.md §5 · 작업지시서 §2 · §4 · 개발명세서 …_갈래T_개발명세서.md)
+      #   새 단계 1개만 더함 — 위 · 아래 기존 단계 손 0. 장면 · 판정 · 결과표가 따로(ui-out/main/console-error-band-result.json) → judge.js 키 틀 무접촉.
+      #   모드 칸 UI_BAND_MODE: control = 대조군 런(고치기 전 판 · 장면마다 흰 띠 1 + 그 줄 표지 표준오류 1 이상이어야 초록) · fixed = 고친 뒤(흰 띠 0 · 경고 흔적 1 이상).
+      #   API 멈춤 · 누출 검사 · 업로드 앞(결과표가 누출 검사를 지나 함께 올라간다). 앞 단계가 빨강이어도 돈다(대조군 재료를 남김).
+      - name: "[시험] S9b 화면 오류 기록 띠 장면 (갈래 T · 모드 칸 UI_BAND_MODE)"
+        if: always()
+        # ⬛ [낡은 줄 · 고침 1 전 · 장면 13 · 몸 상한 8분] timeout-minutes: 10
+        # 🔴 고침 1(지시서 §8-5) — 장면 16(G-S1b · G-P5 · G-X1o 더함) · 몸 상한 BAND_TOTAL_MS 8 → 10분 + 자체시험 · 세션 놓기 여유 2분 → 12분
+        timeout-minutes: 12
+        env:
+          # ⬛ 옛: UI_BAND_MODE control(대조군 런 46153902475 · 11/11 띠 1 확인)
+          UI_BAND_MODE: fixed
+        run: |
+          set -uo pipefail
+          rc=0
+          node scripts/playwright-audit/ci/console-error-band.selftest.js || rc=1
+          node scripts/playwright-audit/ci/console-error-band.js || rc=1
+          exit $rc
 
       - name: "[장치] API 멈춤 (로그 마무리)"
         if: always()
