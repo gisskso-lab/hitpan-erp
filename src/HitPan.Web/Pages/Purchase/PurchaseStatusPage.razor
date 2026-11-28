@@ -11,6 +11,7 @@
 @inject ItemMasterService ItemsApi
 @* 🔴 20260827작3 — 전표별 매입장부가 쓰는 전표 목록 서비스 *@
 @inject DeliveryService DeliverySvc
+@inject ILogger<PurchaseStatusPage> Logger
 
 <PageTitle>매입현황</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">매입현황</MudText>
@@ -216,7 +217,8 @@ else
         catch (Exception _hp15Ex)
         {
             // 봉합 (2026-06-22, 10차 P1-3): 로드 실패를 사용자에게 알림. 빈 결과(200 [])는 정상이라 여기 catch에서만 알림한다.
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 매입현황 조회 실패");
             Snackbar.Add("매입현황 조회에 실패했습니다. 잠시 후 다시 시도해주세요.", Severity.Error);
             _reportData = new();
         }

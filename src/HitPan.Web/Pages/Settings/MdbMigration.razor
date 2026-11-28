@@ -9,6 +9,7 @@
 @inject IDialogService DialogService
 @inject HitPanProtectedLocalStorage Storage
 @inject HitPan.Web.Services.IAuthService Auth
+@inject ILogger<MdbMigration> Logger
 @implements IAsyncDisposable
 
 <PageTitle>데이터 이관</PageTitle>
@@ -655,7 +656,8 @@
         catch (Exception ex)
         {
             // 못 물어봤으면 잠근 채로 둔다(헌법 #15 — 삼키지 않는다).
-            Console.Error.WriteLine($"[MdbMigration] 자료보관 컴퓨터 여부 확인 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration] 자료보관 컴퓨터 여부 확인 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[MdbMigration] 자료보관 컴퓨터 여부 확인 실패");
             _isMainPc = false;
         }
 
@@ -694,7 +696,10 @@
         catch (Exception ex)
         {
             // 헌법 #15: 삼키지 않는다. 다만 이 조회가 실패해도 화면은 평소처럼 쓸 수 있어야 하므로 막지 않는다.
-            Console.Error.WriteLine($"[MdbMigration] 진행 중 작업 조회 실패: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration] 진행 중 작업 조회 실패: {ex.Message}");
+            Logger.LogWarning(ex, "[MdbMigration] 진행 중 작업 조회 실패");
+            // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
+            LoadFailedNotice.Show(Snackbar, ex);
         }
     }
 
@@ -862,7 +867,8 @@
         {
             // 🔴 응답을 못 받았다고 서버가 멈춘 것이 아니다 — 지우기·가져오기는 계속 돌고 있을 수 있다.
             //   그러니 "다시 누르세요" 라고 하지 않는다. 화면을 새로 열어 상태를 다시 붙으라고 안내한다.
-            Console.Error.WriteLine($"[MdbMigration.StartMigrationAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration.StartMigrationAsync] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[MdbMigration.StartMigrationAsync] 시작 응답을 받지 못했다");
             Snackbar.Add("응답을 받지 못했습니다. 작업은 계속 진행 중일 수 있으니, 이 화면을 다시 열어 진행 상태를 확인해 주세요. 다시 누르지 마세요.", Severity.Error);
             _loading = false;
             return;
@@ -960,7 +966,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 삼키지 않는다. 다만 이 실패가 사장님 작업을 막지는 않는다.
-            Console.Error.WriteLine($"[MdbMigration.OnModeChangedAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration.OnModeChangedAsync] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[MdbMigration.OnModeChangedAsync] 덮어쓰기 영향 조회 실패");
             _overwriteImpactTotal = null;
             _overwriteImpactDetail = "";
         }
@@ -1194,7 +1201,8 @@
                 catch (Exception ex)
                 {
                     // 헌법 #15 빈 catch 금지 — dispose 실패는 사용자에게 무영향, 디버그 로그만.
-                    Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                    // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                    Logger.LogWarning(ex, "[MdbMigration] Hub dispose 실패");
                 }
                 _hub = null;
             }
@@ -1406,7 +1414,8 @@
             try { await _hub.DisposeAsync(); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[MdbMigration] Hub dispose 실패: {ex.Message}");
+                Logger.LogWarning(ex, "[MdbMigration] Hub dispose 실패");
             }
         }
     }

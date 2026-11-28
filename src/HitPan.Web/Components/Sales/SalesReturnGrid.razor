@@ -4,6 +4,8 @@
 @namespace HitPan.Web.Components.Sales
 @inject PriceHintService HintService
 @inject HttpClient Http
+@inject ILogger<SalesReturnGrid> Logger
+@inject ISnackbar Snackbar
 @using System.Net.Http.Json
 
 @* 매출반품(반품확인서) 전용 그리드 (20260825작6)
@@ -104,7 +106,10 @@
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[SalesReturnGrid] 반품사유 목록 조회 실패: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[SalesReturnGrid] 반품사유 목록 조회 실패: {ex.Message}");
+                Logger.LogWarning(ex, "[SalesReturnGrid] 반품사유 목록 조회 실패");
+                // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
+                LoadFailedNotice.Show(Snackbar, ex);
                 _reasonCache = new();
             }
         }

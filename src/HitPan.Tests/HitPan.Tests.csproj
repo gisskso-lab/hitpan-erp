@@ -124,6 +124,18 @@
              Link="Linked\RenderedPdfDownload.cs" />
     <!-- 🔴 20261120 W-G1-51 갈래 E⑷ — 양식 편집창 「인쇄 모양」 판정(순수 C#)을 **실제로 불러** 서버 스타일 판정과 대조한다(RollbackWatch 와 같은 방식 · CS0436 위험 0). -->
     <Compile Include="..\HitPan.Web\Services\FormStyleChoice.cs" Link="Linked\FormStyleChoice.cs" />
+    <!-- 🔴 20261128작 로그인 경합 갈래 A 고침 1 (§8-2 A-①) — 안전망 시계(순수 C#)를 가짜 시계로 **실제로 불러** 잰다
+         (「알림 20초 열어 둠 → 닫기 → 15초 안 가고 그 뒤에만 `/`」). RollbackWatch 와 같은 방식 · CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Web\Services\LoginInFlightSafetyNet.cs" Link="Linked\LoginInFlightSafetyNet.cs" />
+    <!-- 🔴 20261128작 갈래 A 고침 1 (§8-2 A-②) — #43 「다음 로그인에 다시 묻는다」 순서(업데이트 기억 지움 → 방송)를
+         **제품 AuthService 를 불러** 잰다. 가짜 JS · 가짜 응답 · 방송 대역(시험 파일 안 HitPanAuthStateProvider)이 부른 차례를 적는다.
+         AuthService.cs 는 손 0 — 소스만 링크. 진짜 HitPanAuthStateProvider 는 MudBlazor · HitPanApiAuthHandler 를 끌어와 링크하지 않는다.
+         HitPan.Tests 는 HitPan.Web 을 ProjectReference 하지 않는다 ⇒ CS0436 위험 0. -->
+    <Compile Include="..\HitPan.Web\Services\AuthService.cs" Link="Linked\AuthService.cs" />
+    <Compile Include="..\HitPan.Web\Services\IAuthService.cs" Link="Linked\IAuthService.cs" />
+    <Compile Include="..\HitPan.Web\Services\IAuthTokenRefresher.cs" Link="Linked\IAuthTokenRefresher.cs" />
+    <Compile Include="..\HitPan.Web\Services\HitPanProtectedLocalStorage.cs" Link="Linked\HitPanProtectedLocalStorage.cs" />
+    <Compile Include="..\HitPan.Web\Models\AuthModels.cs" Link="Linked\AuthModels.cs" />
 
     <!-- 🔴 20261013작1 갈래③ (G-W7-6) — 「히트판공지 전송」 화면이 읽는 **그 형**을 게이트가 본다.
          베낀 모양으로 재면 화면이 바뀌어도 게이트는 초록이다(2026-10-12 사고: 게이트는 사전으로 읽어

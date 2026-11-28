@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject IJSRuntime Js
+@inject ILogger<WarehouseManagePage> Logger
 
 <PageTitle>창고 관리</PageTitle>
 
@@ -128,7 +129,8 @@ else
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 창고 목록 조회 실패");
             Snackbar.Add("창고 목록을 불러오지 못했습니다.", Severity.Error);
         }
         _loading = false;
@@ -200,7 +202,8 @@ else
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 창고 저장 실패");
             Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
         }
         _saving = false;
@@ -230,7 +233,8 @@ else
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 창고 삭제 실패");
             Snackbar.Add("서버 오류가 발생했습니다.", Severity.Error);
         }
     }

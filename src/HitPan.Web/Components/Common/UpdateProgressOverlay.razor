@@ -18,6 +18,7 @@
 @implements IDisposable
 @inject HttpClient Http
 @inject NavigationManager Nav
+@inject ILogger<UpdateProgressOverlay> Logger
 
 @if (_visible)
 {
@@ -256,7 +257,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 침묵 금지. 다만 화면은 유지한다(F5 안내가 남아 고객이 빠져나갈 수 있다).
-            Console.Error.WriteLine("[UpdateProgressOverlay] " + ex.GetType().Name + ": " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[UpdateProgressOverlay] " + ex.GetType().Name + ": " + ex.Message);
+            Logger.LogWarning(ex, "[UpdateProgressOverlay] 새 버전 확인 실패 — F5 안내로 넘김");
             _showManualHint = true;
             StateHasChanged();
         }

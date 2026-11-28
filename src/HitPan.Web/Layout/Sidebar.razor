@@ -15,6 +15,7 @@
 @inject UpdatePromptBus PromptBus
 @* 20261005작5 §5-4 — 「직원 계정 관리」 단계 읽기(AccountLinkApi · DI 등록 없이) *@
 @inject ILogger<AccountLinkApi> LinkLog
+@inject ILogger<Sidebar> Logger
 @implements IDisposable
 
 @*
@@ -514,7 +515,8 @@
         {
             // 헌법 #15 — 빈 catch 금지. 여기서 터져도 메신저는 열어 준다.
             // (JS 가 아직 안 올라온 순간에 누르면 날 수 있다 — 일을 막을 이유가 아니다.)
-            Console.Error.WriteLine($"[Sidebar] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[Sidebar] 메신저 창 열기 실패");
         }
 
         Nav.NavigateTo("/chat");
@@ -551,6 +553,12 @@
     /// <summary>20261005작5 — 「직원 계정 관리」 단계(대표·관리자 아닌 직원만 읽는다). 1 이상이면 설정관리에 그 한 줄.</summary>
     private int _usersLevel;
 
+    /// <summary>
+    /// 20261128작 로그인경합 갈래 B2 (D16) — 직원의 「결재 보기」(my-level approvalView · 서버 판정 그대로).
+    /// <c>false</c> 일 때만 결재 대기 수를 안 부른다 · <c>null</c>(못 읽음) = 옛 동작 · 대표는 늘 부른다.
+    /// </summary>
+    private bool? _approvalView;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -561,7 +569,8 @@
         catch (Exception ex)
         {
             // 판정에 실패하면 **안 보여준다.** 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
-            Console.Error.WriteLine($"[Sidebar] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[Sidebar] 계정 유형 판정 실패");
             _isTenantAdmin = false;
         }
 
@@ -571,6 +580,8 @@
         {
             var me = await new AccountLinkApi(Http, LinkLog).GetMyLevelAsync();
             _usersLevel = me?.Level ?? 0;
+            // 20261128작 B2 (D16) — 같은 응답(새 부름 0)에서 결재 보기 칸을 읽는다. 못 읽으면 null = 옛 동작.
+            _approvalView = me?.ApprovalView;
         }
 
         // 20261125작 K4 (가) — 관리자면 my-level 을 한 번 읽어 「모든데이터 초기화」 한 줄을 가른다(대표만 · 못 읽으면 안 보임).
@@ -587,17 +598,30 @@
         await LoadCsUnreadAsync();
 
         // 결재 대기 건수 로딩
-        try
+        // 20261128작 로그인경합 갈래 B2 (D16 · 설계 §7-2-2 P1) — 서버가 「결재 보기 없음」 이라고 답한 직원(approvalView == false)은
+        //   부르지 않는다. 불러도 서버 문(RequirePermission APPROVAL view)이 403 을 돌려주고, 그 403 이 첫 화면에
+        //   「이 기능에 접근할 권한이 없습니다」 알림으로 뜬다(직원 첫 화면 = 안내 한 장 · 403 알림 0 · D5).
+        //   대표는 그대로 부름 · null(못 읽음)은 옛 동작(부르고 서버가 판정) · 결재 보기 받은 직원은 배지 그대로.
+        //   ⬛ B2 이전: 아래 try 를 계정 구분 없이 늘 돌렸다(줄 자체는 그대로 · 거름 if 만 더함 · #1).
+        if (!_isTenantAdmin && _approvalView == false)
         {
-            var pending = await ApprovalSvc.GetPendingAsync();
-            _approvalPendingCount = pending.Count;
-        }
-        catch (Exception _hp15Ex)
-        {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
-            // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
-            // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
             _approvalPendingCount = 0;
+        }
+        else
+        {
+            try
+            {
+                var pending = await ApprovalSvc.GetPendingAsync();
+                _approvalPendingCount = pending.Count;
+            }
+            catch (Exception _hp15Ex)
+            {
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+                Logger.LogWarning(_hp15Ex, "[HP15] 결재 대기 수 조회 실패");
+                // §원칙 #15 빈 catch 금지 적용 대상 — 사이드바 카운트는 베타 단계 silent OK.
+                // 본 진단 로그는 ApprovalService 내부에서 처리하므로 여기선 안전 대체값.
+                _approvalPendingCount = 0;
+            }
         }
     }
 
@@ -637,7 +661,8 @@
         {
             _csHqUnread = 0;
             _csReplyUnread = 0;
-            Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[Sidebar] CS 안읽음 수 조회 실패: {ex.GetType().Name}: {ex.Message}");   // #15
+            Logger.LogWarning(ex, "[Sidebar] CS 안읽음 수 조회 실패");   // #15
         }
     }
 
@@ -683,7 +708,8 @@
         catch (Exception _hp15Ex)
         {
             // §원칙 #15 빈 catch 금지 — 흔적은 남기되 화면은 막지 않는다.
-            Console.Error.WriteLine("[HP15][Sidebar/Version] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[HP15][Sidebar/Version] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15][Sidebar/Version] 버전 · 업데이트 상태 조회 실패");
         }
     }
 
@@ -721,12 +747,16 @@
             if (!handled)
             {
                 // 게이트가 없다(ERP 메인 밖) — 흔적만 남긴다(#15). 화면은 막지 않는다(#20).
-                Console.Error.WriteLine("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                Logger.LogWarning("[Sidebar/UpdateIssue] 업데이트 팝업을 받을 곳이 없습니다.");
+                Snackbar.Add("{자리표 — 업데이트 창 못 엶 안내}", Severity.Warning); // E8 대표 확정 전 자리표(화면 실측 때 확정 · 대표 §330 ①)
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[Sidebar/UpdateIssue] " + ex.GetType().Name + ": " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[Sidebar/UpdateIssue] " + ex.GetType().Name + ": " + ex.Message);
+            Logger.LogWarning(ex, "[Sidebar/UpdateIssue] 업데이트 팝업 열기 실패");
+            Snackbar.Add("{자리표 — 업데이트 창 못 엶 안내}", Severity.Warning); // E8 대표 확정 전 자리표(화면 실측 때 확정 · 대표 §330 ①)
         }
         finally
         {

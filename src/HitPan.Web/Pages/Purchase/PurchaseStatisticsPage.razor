@@ -9,6 +9,7 @@
 @inject GridExportService GridExport
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
+@inject ILogger<PurchaseStatisticsPage> Logger
 
 <PageTitle>매입통계</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">매입통계</MudText>
@@ -152,7 +153,10 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 매입통계 조회 실패");
+            // 20261128 화면오류기록띠 대표 ③ — 이 화면은 흰 띠가 실패의 유일한 신호였다 → 띠 대신 쉬운 알림 한 번(지시서 §8-2).
+            Snackbar.Add("정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
             _reportData = new();
         }
         StateHasChanged();

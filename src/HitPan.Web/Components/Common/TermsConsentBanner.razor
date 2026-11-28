@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject HttpClient Http
 @inject AuthenticationStateProvider AuthProvider
+@inject ILogger<TermsConsentBanner> Logger
 @implements IDisposable
 
 @if (_requiresConsent && !_onTermsPage)
@@ -66,7 +67,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 약관 동의 상태 조회 실패");
             // 401·테이블 부재 등은 강제 안내 보류 (헌법 #15 silent swallow 회피 위해 false 유지)
             _requiresConsent = false;
         }

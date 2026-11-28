@@ -140,6 +140,19 @@ else
             var auth = await AuthProvider.GetAuthenticationStateAsync();
             if (auth.User?.Identity?.IsAuthenticated != true) return;
 
+            // 20261128작 로그인경합 갈래 B2 (D15 · 설계 §7-2-2 M1) — 대표가 아니면 왕복을 **돌지 않는다.**
+            //   서버 표(DeviceController mainpc-challenge · verify)는 account_type tenant_admin 만 받는다 ⇒ 직원은 늘 403 →
+            //   NotProven → 팝업 0 이었다. 바뀌는 것 = 직원의 헛부름 1 · 첫 화면 403 알림 1 이 없어짐(보안 뜻 불변).
+            //   판정 = JWT account_type(서버와 같은 칸) · 같은 꼴 = UpdateConsentGate(대표만 왕복 기다림).
+            //   옛 대문자 TenantAdmin 토큰은 대표로 보고 그대로 부른다(서버 403 = 고치기 전과 같음 · 회귀 0).
+            //   대표 길(아래 isOwner · switch · Register · Change · Reissue 팝업 · 출입증 보관)은 손 0.
+            //   ⬛ B2 이전: 이 거름 없이 로그인한 누구나 바로 아래 왕복(RunProofAsync)을 돈 뒤에 isOwner 를 봤다(줄 자체는 그대로 · #1).
+            if (!HitPan.Web.Helpers.AccountTypeHelper.IsTenantAdmin(auth.User))
+            {
+                _logger.LogDebug("메인PC 확인 생략 — 대표 계정이 아닙니다(메인PC 표는 대표만 받습니다).");
+                return;
+            }
+
             var outcome = await RunProofAsync();
 
             // ⚠️ 등록·변경을 권하는 것은 **대표에게만** 한다(설계 D-8).

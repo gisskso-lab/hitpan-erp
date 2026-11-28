@@ -6,7 +6,8 @@ namespace HitPan.Web.Services;
 /// <summary>
 /// 연차 신청/승인/반려 API 클라이언트 서비스이다.
 /// </summary>
-public sealed class LeaveRequestService(HttpClient http)
+// ⬛ [낡은 줄 · 화면오류기록띠] public sealed class LeaveRequestService(HttpClient http)
+public sealed class LeaveRequestService(HttpClient http, ILogger<LeaveRequestService> logger)
 {
     public async Task<List<LeaveRequestModel>> GetListAsync(string? employeeId = null, CancellationToken ct = default)
     {
@@ -36,7 +37,8 @@ public sealed class LeaveRequestService(HttpClient http)
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[LeaveRequestService.GetCalendarAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[LeaveRequestService.GetCalendarAsync] {ex.GetType().Name}: {ex.Message}");
+            logger.LogWarning(ex, "[LeaveRequestService.GetCalendarAsync] 조회 실패");
             return null;
         }
     }

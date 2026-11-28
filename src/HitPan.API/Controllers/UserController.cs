@@ -388,7 +388,24 @@ public sealed class UserController : ControllerBase
                 dataResetGate = HitPan.Application.DTOs.DataReset.DataResetGateCodes.NotParent;
             }
         }
-        return Ok(new { level, isAdmin, dataResetGate });
+
+        // 20261128작 로그인경합 갈래 B2 (D16 · 설계 §7-2-2 P1) — 사이드바 결재 대기 수(GET api/approval/pending) 를
+        //   「결재 보기」 가 없는 직원에게는 부르지 않게 할 재료 칸 1개(기존 level · isAdmin · dataResetGate 손 0).
+        //   판정 = 서버 문(ApprovalController GetPending 의 [RequirePermission("APPROVAL","view")] → PermissionFilter)이 쓰는
+        //   그 함수 그대로 — 화면 · 서버 판정이 어긋나지 않는다. 권한 판정 자체는 손 0(읽기만).
+        //   판정이 던지면 null(화면은 옛 동작 = 부르고 서버가 판정) · my-level 은 200 그대로(#15 · S-1 과 같은 꼴).
+        bool? approvalView;
+        try
+        {
+            approvalView = await permission.HasPermissionAsync(userId, tenantId, "APPROVAL", "view", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "[my-level] 결재 보기 판정 실패 — 칸을 비워 둔다(화면은 옛 동작)");
+            approvalView = null;
+        }
+        // ⬛ 20261128작 B2 이전 응답: return Ok(new { level, isAdmin, dataResetGate });
+        return Ok(new { level, isAdmin, dataResetGate, approvalView });
     }
 
     /// <summary>계정을 만들 수 있는 사원(재직 · 계정 없음 · 2단계 직원이면 일반 직무만). 「기존 사원 고르기」(§4).</summary>

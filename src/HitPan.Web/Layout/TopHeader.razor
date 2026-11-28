@@ -2,6 +2,7 @@
 @* 작(2026-08-14) 메신저 팝업창 — hitpanChat.open 을 부르고, 차단되면 안내한다. *@
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
+@inject ILogger<TopHeader> Logger
 
 <header class="hitpan-top-header">
     @* 좌측: AI 챗봇 바 (로고는 사이드바 상단으로 복귀 — 사장님 결재 2026-04-29 재변경) *@
@@ -66,7 +67,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 빈 catch 금지. 못 열었다고 화면 전체를 죽이지 않는다.
-            Console.Error.WriteLine($"[TopHeader] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[TopHeader] 메신저 창 열기 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[TopHeader] 메신저 창 열기 실패");
             Snackbar.Add("메신저 창을 열지 못했습니다. 메뉴 → 메신저 로 열어 주세요.", Severity.Warning);
         }
 

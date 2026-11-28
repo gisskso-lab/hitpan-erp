@@ -138,6 +138,20 @@ const EXPECT_S3_ROWS = [
   ['K35-S3-3', 'S3', 'gate-mainpc', 'chromium'],
   ['K35-S3-4', 'S3', 'mobile-token', 'chromium'],
   ['K35-S3-4', 'S3', 'mobile-register', 'chromium'],
+  // 🔴 20261128작 로그인 경합 · 첫 화면 403 띠 갈래 T(설계 docs/설계/erp/로그인경합_첫화면403띠_설계_20261128.md §10 · §7-1-7 ·
+  //   작업지시서 §8-2 A-① · §8-3 3V-P2 · §8-4 B-④) — 같은 K 본문(k35-ws03-closed.js)에 시험 8 더함(7 → 15) · 선택 키 0 · N4 0.
+  //   판정기 · 자체시험 따로 적은 목록(fGRows) · K-C22k 수(25 → 33) 세 곳을 같은 커밋에서.
+  ['K35-S3-5', 'S3', 'terms-first', 'chromium'], // G3 · G10 — 약관 미동의 직원 → 문서 이동 1건 /terms=200 · 약관 화면 · 흰 띠 0
+  ['K35-S3-5', 'S3', 'terms-slow-doc', 'chromium'], // §8-3 3V-P2 장면 G 줄 — 문서 요청만 20초 늦춤 → 끝 주소 /terms · 문서 이동 1건
+  ['K35-S3-6', 'S3', 'relogin-home', 'chromium'], // G4 — 기존 직원 재로그인 → 문서 이동 1건 /=200
+  ['K35-S3-6', 'S3', 'login-direct', 'chromium'], // G5 — 로그인 상태로 /login 직접 → / (기존 동작 보존)
+  ['K35-S3-7', 'S3', 'device-dialog-20s', 'chromium'], // §8-2 A-① 장면 G 줄 — 새 기기 알림 20초 열어 둠 → 닫기 → 갈 곳 그대로 · 문서 이동 1건
+  ['K35-S3-8', 'S3', 'owner-home', 'chromium'], // G8 · G8+ — 대표 첫 화면 카드 전부 · 안내 한 장 0 · 흰 띠 0 · 표준오류 꼴 0
+  ['K35-S3-8', 'S3', 'owner-503', 'chromium'], // G11 — 대시보드 조회 503(시험 장치 가로챔) → 쉬운 알림 · 흰 띠 0 · 경고 기록 흔적
+  ['K35-S3-9', 'S3', 'sales-home', 'chromium'], // G12 — 판매 역할 직원 → 카드 보임 · 판매·재무 403 0 · 안내 한 장 0
+  // 🔴 20261128작 갈래 B2(설계 §7-2-3 · §7-2-4 · 작업지시서 §8-8 D17 · D18) — 같은 K 본문에 1 더함(15 → 16 · 판정기 33 → 34) · 선택 키 0 · N4 0.
+  //   자체시험 따로 적은 목록(fGRows) · K-C22k 수(33 → 34) 같은 커밋에서.
+  ['K35-S3-8', 'S3', 'owner-json', 'chromium'], // D6 일반 catch(200 + JSON 아닌 본문) · 같은 런 양성 대조(결재 대기 403 → 처리기 경고 · 알림 1 이상) · 뜬 알림 허용 목록 안
 ];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
@@ -147,9 +161,12 @@ const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser])
 //   면제 = 알려진 꼴일 때만(knownDefectFail 넷 다 참) · 결과 줄이 없으면 누락 빨강 그대로 · 초록이면 🔵 알림(빨강 아님).
 //   닫을 때(새 작업 「로그인 경합 · 첫 화면 403 띠」 고침 PR · 같은 커밋) = 닫힌 줄만 ⬛ 주석으로 내림 + 자체시험 K-C27g 고정 수 · 따로 적은 목록 같이 줄임(작업지시서 §8).
 //   목록이 0 이 돼도 상수 · 함수 · 칸은 남긴다(다음 알려진 결함 자리).
+// 🔴 20261128작 로그인 경합 · 첫 화면 403 띠 갈래 T — 대장 닫음(W-S-03 고침 3 작업지시서 §8 · §9 덧 P3-2 = **키(path)로 찾아** 내림).
+//   first-home = ② 첫 화면 403 띠 닫힘(갈래 B) · first-update = ① 로그인 경합(갈래 A) + ② 둘 다 닫힘. 목록 0 · 상수 · 함수 · 칸은 남김(§8-4).
+//   그 두 키는 이제 면제 없이 판정(🟢 PASS 이어야 함 · 표지가 붙어도 면제 0) — 자체시험 K-C27g 고정 수 2 → 0 같은 커밋.
 const KNOWN_DEFECT_ROWS = Object.freeze([
-  Object.freeze(['K35-S3-1', 'S3', 'first-home', 'chromium', '첫 화면 403 띠', '권한 0 직원 첫 화면 / 흰 띠 0(선행검증서 §2)']),
-  Object.freeze(['K35-S3-1', 'S3', 'first-update', 'chromium', '로그인 경합 · 첫 화면 403 띠', '[최신버젼업데이트] 뒤 /data/update 도착 · 흰 띠 0(선행검증서 §1 · §2 둘 다)']),
+  // ⬛ [닫음 · 20261128 갈래 T · 키 first-home] Object.freeze(['K35-S3-1', 'S3', 'first-home', 'chromium', '첫 화면 403 띠', '권한 0 직원 첫 화면 / 흰 띠 0(선행검증서 §2)']),
+  // ⬛ [닫음 · 20261128 갈래 T · 키 first-update] Object.freeze(['K35-S3-1', 'S3', 'first-update', 'chromium', '로그인 경합 · 첫 화면 403 띠', '[최신버젼업데이트] 뒤 /data/update 도착 · 흰 띠 0(선행검증서 §1 · §2 둘 다)']),
 ]);
 // 결과 칸 머리 글자(N4_WHY 선례) — K 본문이 알려진 꼴일 때만 붙인다. 머리가 없으면 면제 0(닫힌 쪽).
 const KNOWN_WHY = '알려진 결함 꼴=';

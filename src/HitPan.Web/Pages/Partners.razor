@@ -7,6 +7,7 @@
 @inject ISnackbar Snackbar
 @inject IJSRuntime Js
 @inject IDialogService DialogService
+@inject ILogger<Partners> Logger
 
 <PageTitle>업체 마스터</PageTitle>
 
@@ -225,7 +226,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 침묵하지 않는다.
-            Console.Error.WriteLine("[Partners] 엑셀 내보내기 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[Partners] 엑셀 내보내기 실패: " + ex.Message);
+            Logger.LogWarning(ex, "[Partners] 엑셀 내보내기 실패");
             Snackbar.Add("엑셀 파일을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.", Severity.Warning);
         }
         finally

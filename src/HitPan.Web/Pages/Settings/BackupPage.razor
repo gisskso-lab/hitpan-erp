@@ -65,9 +65,12 @@
                              HelperText="이 개수 초과 시 오래된 백업부터 자동 삭제. (복원 직전 자동백업은 제외)" />
         </MudItem>
         <MudItem xs="12" md="4" Class="d-flex align-end">
+            @* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] OnClick="SaveSettingsAsync" FullWidth="true">설정 저장</MudButton>
+                 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 설정을 못 불러왔으면 [설정 저장] 을 막는다.
+                 못 불러온 화면의 칸은 빈 값이다. 그대로 저장하면 **실제 백업 설정을 빈 값으로 덮는다.** *@
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Check"
-                       OnClick="SaveSettingsAsync" FullWidth="true">설정 저장</MudButton>
+                       OnClick="SaveSettingsAsync" FullWidth="true" Disabled="@_settingsLoadFailed">설정 저장</MudButton>
         </MudItem>
     </MudGrid>
     @if (_settings.LastRunAt is not null)
@@ -158,19 +161,38 @@
     private List<RestoreHistoryModel> _restoreHistory = new();
     private bool _busy;
 
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 설정 조회가 실패했나. 참이면 [설정 저장] 을 막는다(빈 값 덮어쓰기 방지).
+    //   다음 LoadAsync 가 성공하면 저절로 풀린다(백업 · 복원 뒤 다시 읽을 때 포함).
+    private bool _settingsLoadFailed;
+
     // 🔴 20260924작1 절D — 여기서 조회하지 않는다. <MainPcOnly OnAllowed="LoadAsync"> 가
     //   **통과한 뒤에** 부른다. LoadAsync 본문·저장 동작·마크업은 한 줄도 안 바꿨다(#1).
 
     private async Task LoadAsync()
     {
-        _settings = await BackupApi.GetSettingsAsync();
-        _history = await BackupApi.GetHistoryAsync(50);
-        _restoreHistory = await BackupApi.GetRestoreHistoryAsync(20);
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _settings = await BackupApi.GetSettingsAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _history = await BackupApi.GetHistoryAsync(50);
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] _restoreHistory = await BackupApi.GetRestoreHistoryAsync(20);
+        //   종전엔 조회 실패가 빈 값으로 돌아와 화면이 「실패」 와 「0건」 을 못 갈랐다(흰 띠가 유일한 신호).
+        //   이제 실패를 받아 쉬운 알림을 **한 번만** 띄우고(세 조회가 다 실패해도 한 번), 설정 실패면 저장을 막는다.
+        Exception? loadFailed = null;
+        var settingsFailed = false;
+        _settings = await BackupApi.GetSettingsAsync(onLoadFailed: ex => { loadFailed ??= ex; settingsFailed = true; });
+        _history = await BackupApi.GetHistoryAsync(50, onLoadFailed: ex => loadFailed ??= ex);
+        _restoreHistory = await BackupApi.GetRestoreHistoryAsync(20, onLoadFailed: ex => loadFailed ??= ex);
+        _settingsLoadFailed = settingsFailed;
+        if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
         StateHasChanged();
     }
 
     private async Task SaveSettingsAsync()
     {
+        // 화면오류기록띠 넓힘X1 — 단추가 막혀 있어도 한 번 더 막는다(빈 값으로 실제 설정을 덮지 않게).
+        if (_settingsLoadFailed)
+        {
+            Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(_settings.PrimaryPath))
         {
             Snackbar.Add("1차 백업 폴더는 필수입니다.", Severity.Warning);
