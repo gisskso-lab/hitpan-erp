@@ -9,6 +9,7 @@
 @inject GridExportService GridExport
 @inject PartnerMasterService PartnersApi
 @inject ItemMasterService ItemsApi
+@inject ILogger<PurchaseRankingPage> Logger
 
 <PageTitle>매입순위표</PageTitle>
 <MudText Typo="Typo.h6" Class="mb-3">매입순위표</MudText>
@@ -123,7 +124,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 매입순위표 조회 실패");
             _reportData = new();
         }
         StateHasChanged();

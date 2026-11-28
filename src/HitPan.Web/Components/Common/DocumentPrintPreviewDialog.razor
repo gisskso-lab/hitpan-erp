@@ -9,6 +9,7 @@
 @inject HttpClient Http
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject ILogger<DocumentPrintPreviewDialog> Logger
 
 <MudDialog>
     <DialogContent>
@@ -122,7 +123,8 @@
         catch (Exception ex)
         {
             _noCoordsNotice = false;
-            Console.Error.WriteLine($"[DocPreview.Notice] 인쇄 전 안내를 묻지 못했습니다 — 안내 없이 둡니다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPreview.Notice] 인쇄 전 안내를 묻지 못했습니다 — 안내 없이 둡니다: {ex.Message}");
+            Logger.LogWarning(ex, "[DocPreview.Notice] 인쇄 전 안내를 묻지 못했습니다 — 안내 없이 둡니다");
         }
         if (_noCoordsNotice) StateHasChanged();
     }
@@ -178,7 +180,8 @@
         catch (Exception ex)
         {
             Snackbar.Add("미리보기 중 오류가 났습니다.", Severity.Error);
-            Console.Error.WriteLine($"[DocPreview] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPreview] {ex.Message}");
+            Logger.LogWarning(ex, "[DocPreview] 미리보기 중 오류");
         }
         finally
         {
@@ -246,7 +249,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[DocPreview.Print] 모듈 경로 실패 — 옛 전역으로 떨어진다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPreview.Print] 모듈 경로 실패 — 옛 전역으로 떨어진다: {ex.Message}");
+            Logger.LogWarning(ex, "[DocPreview.Print] 모듈 경로 실패 — 옛 전역으로 떨어진다");
             try
             {
                 // 🔴 묵은 index.html 에서도 한 번은 더 해본다(옛 전역 함수는 bool 을 돌려준다).
@@ -255,7 +259,8 @@
             }
             catch (Exception ex2)
             {
-                Console.Error.WriteLine($"[DocPreview.Print] 전역도 없다: {ex2.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPreview.Print] 전역도 없다: {ex2.Message}");
+                Logger.LogWarning(ex2, "[DocPreview.Print] 전역도 없다");
                 reason = "no-script";
             }
         }
@@ -293,7 +298,7 @@
     /// 🔴 못 읽어도 <b>터지지 않는다</b> — 읽기에 실패하면 숫자 안내로 떨어진다.
     ///   안내문을 꺼내다가 예외가 나면 「미리보기가 안 된다」가 「화면이 죽는다」가 된다.
     /// </remarks>
-    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
+    private async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
     {
         try
         {
@@ -302,7 +307,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[DocPreview] 서버 안내문을 읽지 못했습니다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DocPreview] 서버 안내문을 읽지 못했습니다: {ex.Message}");
+            Logger.LogWarning(ex, "[DocPreview] 서버 안내문을 읽지 못했습니다");
             return null;
         }
     }
@@ -324,6 +330,7 @@
         var old = _previewUrl;
         _previewUrl = null;
         try { await JS.InvokeVoidAsync("hitpanRevokeBlobUrl", old); }
-        catch (Exception ex) { Console.Error.WriteLine($"[DocPreview] 주소 거두기 실패: {ex.Message}"); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[DocPreview] 주소 거두기 실패: {ex.Message}"); }
+        catch (Exception ex) { Logger.LogWarning(ex, "[DocPreview] 주소 거두기 실패"); }
     }
 }

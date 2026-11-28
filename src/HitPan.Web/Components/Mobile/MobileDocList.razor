@@ -3,6 +3,7 @@
 @using MudBlazor
 @inject DocumentService DocSvc
 @inject ISnackbar Snackbar
+@inject ILogger<MobileDocList<TItem>> Logger
 
 <div class="hpm-sales">
 
@@ -192,7 +193,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 모바일 PDF 준비 실패");
             Snackbar.Add("PDF 준비 중입니다. 잠시 후 다시 시도해주세요.", Severity.Info);
         }
     }

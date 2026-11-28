@@ -10,6 +10,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject ILogger<AbsencePage> Logger
 
 <PageTitle>휴직 관리</PageTitle>
 <PageHeader Title="휴직 관리" Subtitle="장기간 쉬는 직원의 상태를 관리합니다" />
@@ -252,7 +253,8 @@ else
         catch (Exception ex)
         {
             // 판정에 실패하면 관리자로 보지 않는다 — 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
-            Console.Error.WriteLine($"[AbsencePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[AbsencePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[AbsencePage] 계정 유형 판정 실패");
             _isAdmin = false;
         }
 
@@ -274,7 +276,8 @@ else
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[AbsencePage] 사원 목록 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[AbsencePage] 사원 목록 조회 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[AbsencePage] 사원 목록 조회 실패");
             _employees = new List<EmployeeListItemModel>();
         }
     }

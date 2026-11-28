@@ -14,6 +14,7 @@
 @inject PermissionService PermSvc
 @inject EmployeeService EmpSvc
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<HrAttendancePage> Logger
 
 <PageTitle>근태 관리</PageTitle>
 <PageHeader Title="근태 관리" Subtitle="출근·퇴근 기록 · 기간별 조회">
@@ -186,7 +187,8 @@
         catch (Exception ex)
         {
             _canProxy = false;
-            Console.Error.WriteLine($"[HrAttendancePage] 대리입력 권한 확인 실패: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrAttendancePage] 대리입력 권한 확인 실패: {ex.Message}");
+            Logger.LogWarning(ex, "[HrAttendancePage] 대리입력 권한 확인 실패");
         }
     }
 

@@ -11,6 +11,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime Js
 @inject HitPan.Web.Services.DocumentPrintPreview PrintPreview
+@inject ILogger<TaxInvoicePage> Logger
 
 <PageTitle>세금계산서</PageTitle>
 
@@ -275,7 +276,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 계산서 상세 품목 조회 실패");
             _detailLines = new();
         }
         _detailOpen = true;
