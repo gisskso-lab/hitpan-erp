@@ -574,7 +574,9 @@ public sealed class LocalAuditFileWriter : ILocalAuditFile
             if (garbage.TornId is not null)
             {
                 res.Bad(garbage.LineNo, "tail_garbage");
-                foreach (var p in pending.Where(p => !p.TornShaped)) res.Untrusted("tail_garbage");
+                // 고침(CodeQL #4400 · 안 읽는 foreach 변수) — 쓰레기 조각 수만큼 「믿지 못함」 셈 · 뜻 그대로
+                var garbageCount = pending.Count(x => !x.TornShaped);
+                for (var i = 0; i < garbageCount; i++) res.Untrusted("tail_garbage");
             }
             else
             {
