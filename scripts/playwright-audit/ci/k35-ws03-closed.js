@@ -80,6 +80,57 @@ const FORBID_TEXT = '이 기능에 접근할 권한이 없습니다'; // HitPanA
 const H403_TAG = '403 Forbidden on'; // 같은 갈래 ILogger 경고 글 머리(알림 바로 앞 줄 · console.warn)
 const APPROVAL_PENDING_PATH = '/api/approval/pending'; // 사이드바 결재 대기 수(양성 대조 가로챔 자리)
 const UPD_TITLE = '최신 버전 확인/업데이트'; // LocalSwapUiText.MenuUpdate — 수동 업데이트 화면 본문 h6(G2 고유 글)
+// 🔴 B2 고침 1 ①(N1 · 3V P3-1) — 메인PC 확인 표 요청(MainPcProofRunner 첫 부름). 대표 = 1 이상 · 직원 = 0 을 직접 셈(서버 403 과 독립)
+const MAINPC_CHALLENGE_PATH = '/api/devices/mainpc-challenge';
+// 🔴 B2 고침 1 ⑥(N6) — Login 진행 그림을 평가(page.evaluate) 없이 보기: 누름 직전 그 문서에 0.5초 간격 console.log 를 건다.
+//   문서 요청이 붙잡힌 동안 평가는 10초 상한에 걸렸다(CI 사본 :2174 셋 다 null). 옛 문서의 타이머 · 콘솔은 새 문서가 들어설 때까지 돈다(가설 · 기록만).
+//   글 꼴 = 「[hp-prog] t=ms bar=참거짓 id=수 btn=참거짓|null」 또는 「[hp-prog] t=ms err=이름」 — 값 · 토큰 0.
+const PROG_TAG = '[hp-prog]';
+const PROG_TICKS = 24; // 0.5초 × 24 = 12초(늦춤 20초 안)
+const PROG_WATCH = `(() => {
+  try {
+    if (window.__hpProgOn) return;
+    window.__hpProgOn = true;
+    const t0 = Date.now();
+    let n = 0;
+    let h = null;
+    const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+    const flat = (e) => String((e && (e.innerText || e.textContent)) || '').replace(/\\s+/g, ' ').trim();
+    const tick = () => {
+      n += 1;
+      try {
+        const bar = Array.from(document.querySelectorAll('.mud-progress-linear')).some(vis);
+        const id = Array.from(document.querySelectorAll('label')).filter((e) => vis(e) && flat(e) === '아이디').length;
+        const btn = Array.from(document.querySelectorAll('button')).find((e) => vis(e) && flat(e) === '로그인');
+        console.log('${PROG_TAG} t=' + (Date.now() - t0) + ' bar=' + bar + ' id=' + id + ' btn=' + (btn ? btn.disabled === true : 'null'));
+      } catch (e) {
+        console.log('${PROG_TAG} t=' + (Date.now() - t0) + ' err=' + String((e && e.name) || 'Error').slice(0, 40));
+      }
+      if (n >= ${PROG_TICKS} && h !== null) clearInterval(h);
+    };
+    h = setInterval(tick, 500);
+  } catch (e) {
+    console.log('${PROG_TAG} t=0 err=' + String((e && e.name) || 'Error').slice(0, 40));
+  }
+})();`;
+// 진행 그림 글 한 줄 해석(순수 · 자체시험 K-C29i) — 꼴 밖이면 null
+function progParse(line) {
+  const m = /^\[hp-prog\] t=(\d+) (?:bar=(true|false) id=(\d+) btn=(true|false|null)|err=([A-Za-z]{1,40}))$/.exec(String(line || ''));
+  if (!m) return null;
+  if (m[5]) return { t: Number(m[1]), err: m[5] };
+  return { t: Number(m[1]), bar: m[2] === 'true', id: Number(m[3]), btn: m[4] === 'null' ? null : m[4] === 'true' };
+}
+// 진행 그림 요약(순수 · 자체시험 K-C29i) — 표본 수 · 막대 보인 수 · 단추 꺼진 수 · 아이디 칸 0 인 수 · +5초 이후 첫 표본 · 실패 수
+function progSum(lines) {
+  const xs = (Array.isArray(lines) ? lines : []).map(progParse).filter((x) => x !== null);
+  const ok = xs.filter((x) => !x.err);
+  const at5 = ok.find((x) => x.t >= 5000) || null;
+  return { n: xs.length, bar: ok.filter((x) => x.bar).length, btnOff: ok.filter((x) => x.btn === true).length,
+    idGone: ok.filter((x) => x.id === 0).length, errs: xs.length - ok.length, at5 };
+}
+const progSumShow = (p) => (p.n === 0 ? '못 봄(진행 그림 글 0줄)'
+  : `표본 ${p.n} · 막대 보임 ${p.bar} · 단추 꺼짐 ${p.btnOff} · 아이디 칸 없음 ${p.idGone} · 실패 ${p.errs}`
+    + ` · +5초 표본 ${p.at5 ? `t=${p.at5.t} 막대 ${p.at5.bar} 아이디 칸 ${p.at5.id} 단추 꺼짐 ${p.at5.btn}` : '없음'}`);
 // ⓒ 뜬 적 있는 알림 글 — 문서마다 새로 돎(로그인 누름 · 다시 열기 = 새 문서 = 빈 목록). 글자 · 요소 클래스(색 가름) 둘만 · 50 상한.
 //   보기 실패는 셈(window.__hpSnackSeenErr)으로 남김 — 조용히 삼키지 않는다.
 const SNACK_SEEN_INIT = `(() => {
@@ -98,7 +149,10 @@ const SNACK_SEEN_INIT = `(() => {
           const t = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
           if (!t) continue;
           done.add(el);
+          // ⬛ [낡은 줄 · B2 고침 1 이전] if (seen.length < 50) seen.push({ t: t.slice(0, 300), c: String(el.className || '').slice(0, 200) });
+          // 🔴 B2 고침 1 ②(3V P2-1) — 50 상한 넘침도 「못 봄」 으로 셈(넘친 알림을 0 으로 세지 않음 · no403 의 seenErr === 0 이 받음)
           if (seen.length < 50) seen.push({ t: t.slice(0, 300), c: String(el.className || '').slice(0, 200) });
+          else window.__hpSnackSeenErr += 1;
         }
       } catch (e) {
         window.__hpSnackSeenErr += 1;
@@ -469,6 +523,9 @@ async function openCtx(st, who, extra = {}) {
   });
   page.on('request', (req) => {
     if (SALES_FIN_PATHS.includes(pathOnly(req.url()))) kb.gt.sfReq += 1;
+    // 🔴 B2 고침 1 ①(N1) — 메인PC 확인 표 요청 수(대표 왕복이 실제로 도는지 · 직원은 0) · ⑦(N7) 결재 대기 부름 수(G13 기록)
+    if (req.method() === 'POST' && pathOnly(req.url()) === MAINPC_CHALLENGE_PATH) kb.gt.mcReq += 1;
+    if (req.method() === 'GET' && pathOnly(req.url()) === APPROVAL_PENDING_PATH) kb.gt.pendReq += 1;
   });
   page.on('response', (res) => {
     if (res.status() !== 403) return;
@@ -476,13 +533,16 @@ async function openCtx(st, who, extra = {}) {
     if (SALES_FIN_PATHS.includes(p)) kb.gt.sf403 += 1;
     if (kb.gt.f403.length < 20) kb.gt.f403.push(`${res.request().method()} ${p}`);
     kb.gt.f403n += 1; // 🔴 갈래 B2(D17 ⓐ) — 수 전체(목록 20 상한과 별개)
+    if (p === APPROVAL_PENDING_PATH) kb.gt.pend403 += 1; // 🔴 B2 고침 1 ⑦(G13 기록)
   });
   return kb;
 }
 // 🔴 갈래 T — 판정 재료 비우기
 function gtReset(kb) {
   // ⬛ [낡은 줄 · 갈래 B2 이전] kb.gt = { appErr: 0, warnDash: 0, sfReq: 0, sf403: 0, f403: [] };
-  kb.gt = { appErr: 0, warnDash: 0, sfReq: 0, sf403: 0, f403: [], f403n: 0, h403: 0, warnJson: 0 };
+  // ⬛ [낡은 줄 · B2 고침 1 이전] kb.gt = { appErr: 0, warnDash: 0, sfReq: 0, sf403: 0, f403: [], f403n: 0, h403: 0, warnJson: 0 };
+  // 🔴 B2 고침 1 ①(mcReq · 메인PC 확인 표 요청) · ⑦(pendReq · pend403 · 결재 대기 부름 · 그 403)
+  kb.gt = { appErr: 0, warnDash: 0, sfReq: 0, sf403: 0, f403: [], f403n: 0, h403: 0, warnJson: 0, mcReq: 0, pendReq: 0, pend403: 0 };
 }
 // 🔴 갈래 B2(D17 ⓒ) — 이 문서에서 뜬 적 있는 알림 글(초기 스크립트가 모은 것 · 원문은 메모리에만 · 찍을 때 snackShow 로 소독)
 async function seenSnacks(page) {
@@ -562,45 +622,73 @@ const bandsOff = (o) => o.band3 === false && o.band10 === false;
 const cleanScreen = (o) => bandsOff(o) && o.appErr === 0 && snackBadCount(o.snacks) === 0;
 const navsOk = (o) => Array.isArray(o.navs) && !o.navs.some(isWelcome);
 // 🔴 갈래 B2(D17 · 설계 §7-2-3) — 「보이는 403 알림 0」 세 겹: ⓐ 403 응답 0 · ⓑ 처리기 경고 줄 0 · ⓒ 뜬 처리기 알림 0(못 읽으면 null = 거짓)
-const no403 = (o) => o.f403n === 0 && o.h403 === 0 && o.forbidSeen === 0;
+// ⬛ [낡은 줄 · B2 고침 1 이전] const no403 = (o) => o.f403n === 0 && o.h403 === 0 && o.forbidSeen === 0;
+// 🔴 B2 고침 1 ②(3V P2-1 · N2) — 뜬 알림 보기 실패(관찰자 던짐 · 50 상한 넘침)가 1 이라도 있으면 「못 봄」 = 거짓(0 봄으로 세지 않음)
+const no403 = (o) => o.f403n === 0 && o.h403 === 0 && o.forbidSeen === 0 && o.seenErr === 0;
+// 🔴 B2 고침 1 ①(N1) — 직원은 메인PC 확인 표 요청 0(서버 403 과 독립인 직접 셈) · 대표는 1 이상(owner 판정)
+const noMc = (o) => o.mcReq === 0;
 const JUDGE = Object.freeze({
   // G1 · G7 · G10
   // ⬛ [낡은 줄 · 갈래 B2 이전] home: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH) && navsOk(o) && cleanScreen(o)
   // ⬛ [낡은 줄 · 갈래 B2 이전]   && o.sf403 === 0 && o.notice === true && o.hero === 0,
+  // ⬛ [낡은 줄 · B2 고침 1 이전] home: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH) && navsOk(o) && cleanScreen(o)
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && o.sf403 === 0 && o.notice === true && o.hero === 0 && no403(o),
+  //   🔴 B2 고침 1 ①(N1) — 직원 메인PC 확인 표 요청 0
   home: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH) && navsOk(o) && cleanScreen(o)
-    && o.sf403 === 0 && o.notice === true && o.hero === 0 && no403(o),
+    && o.sf403 === 0 && o.notice === true && o.hero === 0 && no403(o) && noMc(o),
   // G2 · G10
   // ⬛ [낡은 줄 · 갈래 B2 이전] update: (o) => o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && navsOk(o) && cleanScreen(o),
   //   🔴 갈래 B2(D18 R-④) — G2 화면 고유 글(본문 h6 · 직원 경고 알림 1) · (D17) 403 알림 0
+  // ⬛ [낡은 줄 · B2 고침 1 이전] update: (o) => o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && navsOk(o) && cleanScreen(o)
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && o.updTitle === true && o.updWarn >= 1 && no403(o),
+  //   🔴 B2 고침 1 ①(N1) — 직원 메인PC 확인 표 요청 0
   update: (o) => o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && navsOk(o) && cleanScreen(o)
-    && o.updTitle === true && o.updWarn >= 1 && no403(o),
+    && o.updTitle === true && o.updWarn >= 1 && no403(o) && noMc(o),
   // G3 · G10(§7-1-6 약관 화면 흰 띠 0)
   termsFirst: (o) => o.where === 'terms' && o.path === TERMS_PATH && oneDoc(o.docs, TERMS_PATH) && cleanScreen(o),
   // §8-3 3V-P2 장면 G 줄 — 늦춤이 실제로 걸렸고(1 이상) 끝 = /terms · 문서 이동 1건
   termsSlow: (o) => o.slowHits >= 1 && o.where === 'terms' && o.path === TERMS_PATH && oneDoc(o.docs, TERMS_PATH),
   // G4
-  relogin: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH),
+  // ⬛ [낡은 줄 · B2 고침 1 이전] relogin: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH),
+  //   🔴 B2 고침 1 ④(3V P2-3 · N4) — 매일 쓰는 재로그인 첫 화면도 「403 알림 0」 세 겹(+3초 뒤 잼 · 키 수 그대로)
+  relogin: (o) => o.where === 'main' && o.path === HOME_PATH && oneDoc(o.docs, HOME_PATH) && no403(o),
   // G5 — /login 을 연 문서 + 그 화면이 낸 / (기존 동작). 마지막 문서 /=200 · 끊긴 문서 0
+  // ⬛ [낡은 줄 · B2 고침 1 이전] loginDirect: (o) => o.where === 'main' && o.path === HOME_PATH && Array.isArray(o.docs) && o.docs.length >= 1
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && o.docs[o.docs.length - 1] === `${HOME_PATH}=200` && o.docs.every((d) => /=200$/.test(d)),
+  //   🔴 B2 고침 1 ④(N4 「loginDirect 검토」) — 로그인한 채 /login → / 도 새 문서 = 사이드바 다시 돎 ⇒ 같은 세 겹(+3초 뒤 잼)
   loginDirect: (o) => o.where === 'main' && o.path === HOME_PATH && Array.isArray(o.docs) && o.docs.length >= 1
-    && o.docs[o.docs.length - 1] === `${HOME_PATH}=200` && o.docs.every((d) => /=200$/.test(d)),
+    && o.docs[o.docs.length - 1] === `${HOME_PATH}=200` && o.docs.every((d) => /=200$/.test(d)) && no403(o),
   // §8-2 A-① 장면 G 줄 — 알림 20초 내내 보임 · 그동안 문서 이동 0 · [확인] 뒤 갈 곳 그대로 1건 · G10(D1 꼴 창)
   // ⬛ [낡은 줄 · 갈래 B2 이전] dialog: (o) => o.dialogShown === true && o.lostAtMs === null && o.heldMs >= HOLD_MS && o.docsDuringHold === 0 && o.clicked === true
   // ⬛ [낡은 줄 · 갈래 B2 이전]   && o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && cleanScreen(o),
+  // ⬛ [낡은 줄 · B2 고침 1 이전] dialog: (o) => o.dialogShown === true && o.lostAtMs === null && o.heldMs >= HOLD_MS && o.docsDuringHold === 0 && o.clicked === true
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && cleanScreen(o) && no403(o),
+  //   🔴 B2 고침 1 ①(N1) — 직원 메인PC 확인 표 요청 0
   dialog: (o) => o.dialogShown === true && o.lostAtMs === null && o.heldMs >= HOLD_MS && o.docsDuringHold === 0 && o.clicked === true
-    && o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && cleanScreen(o) && no403(o),
+    && o.where === 'main' && o.path === UPDATE_PATH && oneDoc(o.docs, UPDATE_PATH) && cleanScreen(o) && no403(o) && noMc(o),
   // G8 · G8+ — 카드 전부(큰 카드 1 이상 · 보조 3) · 안내 한 장 0 · 흰 띠 0 · 앱 표준오류 꼴 0(「권한 설정 필요」 는 기록만)
+  // ⬛ [낡은 줄 · B2 고침 1 이전] owner: (o) => o.where === 'main' && o.path === HOME_PATH && o.hero >= 1 && o.labels === OWNER_LABELS.length && o.notice === false
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && bandsOff(o) && o.appErr === 0,
+  //   🔴 B2 고침 1 ①(N1 · 3V P3-1) — 대표 왕복이 실제로 돎(메인PC 확인 표 요청 1 이상). 거름이 넓어져 대표도 생략하면 빨강(변이 V16)
   owner: (o) => o.where === 'main' && o.path === HOME_PATH && o.hero >= 1 && o.labels === OWNER_LABELS.length && o.notice === false
-    && bandsOff(o) && o.appErr === 0,
+    && bandsOff(o) && o.appErr === 0 && o.mcReq >= 1,
   // G11 — 가로챔이 걸렸고 · 쉬운 알림 1 이상 · 흰 띠 0 · 경고 흔적 1 이상 · 앱 표준오류 꼴 0 · 알림 글 예외 꼴 0
   owner503: (o) => o.routeHits >= 1 && o.failSnack >= 1 && bandsOff(o) && o.warnDash >= 1 && o.appErr === 0 && snackBadCount(o.snacks) === 0,
   // G12 — 카드 보임 · 판매·재무 403 0 · 안내 한 장 0
   // ⬛ [낡은 줄 · 갈래 B2 이전] sales: (o) => o.where === 'main' && o.path === HOME_PATH && o.hero >= 1 && o.labels === OWNER_LABELS.length && o.notice === false && o.sf403 === 0,
+  // ⬛ [낡은 줄 · B2 고침 1 이전] sales: (o) => o.where === 'main' && o.path === HOME_PATH && o.hero >= 1 && o.labels === OWNER_LABELS.length && o.notice === false && o.sf403 === 0
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && no403(o),
+  //   🔴 B2 고침 1 ①(N1) — 직원 메인PC 확인 표 요청 0
   sales: (o) => o.where === 'main' && o.path === HOME_PATH && o.hero >= 1 && o.labels === OWNER_LABELS.length && o.notice === false && o.sf403 === 0
-    && no403(o),
+    && no403(o) && noMc(o),
   // 🔴 갈래 B2(D18 R-③ · D17 양성 대조) — 두 가로챔이 다 걸림 · 쉬운 알림 1 이상 · 일반 catch 를 지난 표(경고 글 안 JsonException 또는 알림 색 Error) ·
   //   셈의 눈이 살아 있음(처리기 경고 줄 · 처리기 알림 1 이상) · 뜬 알림 전부 허용 목록 안 · 날 글 0 · 흰 띠 0 · 경고 흔적 1 이상 · 앱 표준오류 꼴 0
+  // ⬛ [낡은 줄 · B2 고침 1 이전] ownerJson: (o) => o.routeHits >= 1 && o.ctlHits >= 1 && o.failSnack >= 1 && (o.warnJson >= 1 || o.failSnackErr >= 1)
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && o.h403 >= 1 && o.forbidSeen >= 1 && o.outsideAllow === 0 && snackBadCount(o.snacks) === 0 && snackBadCount(o.seenSnacks) === 0
+  // ⬛ [낡은 줄 · B2 고침 1 이전]   && bandsOff(o) && o.warnDash >= 1 && o.appErr === 0,
+  //   🔴 B2 고침 1 ③(3V P2-2 · N3) — 세 겹 모두의 같은 런 대조: ⓐ 403 응답 셈(page.on response)도 1 이상이어야 함
   ownerJson: (o) => o.routeHits >= 1 && o.ctlHits >= 1 && o.failSnack >= 1 && (o.warnJson >= 1 || o.failSnackErr >= 1)
-    && o.h403 >= 1 && o.forbidSeen >= 1 && o.outsideAllow === 0 && snackBadCount(o.snacks) === 0 && snackBadCount(o.seenSnacks) === 0
+    && o.f403n >= 1 && o.h403 >= 1 && o.forbidSeen >= 1 && o.outsideAllow === 0 && snackBadCount(o.snacks) === 0 && snackBadCount(o.seenSnacks) === 0
     && bandsOff(o) && o.warnDash >= 1 && o.appErr === 0,
 });
 
@@ -654,7 +742,10 @@ function sceneLog(kb, label, o) {
     + ` · 흰 띠 +3초 ${o.band3} +10초 ${o.band10} · 앱 표준오류 ${o.appErr} · 판매·재무 부름 ${kb.gt.sfReq} 403 ${kb.gt.sf403}`
     + ` · 403 ${kb.gt.f403.length}건 ${L.sanitize(kb.gt.f403.join(', ') || '없음', 400)} · 알림 글 ${snackShow(o.snacks || [])}`
     // 🔴 갈래 B2(D17) — 세 겹 셈 · 뜬 알림 글(찍기 사이에 사라진 것까지)
-    + ` · 403 수 ${kb.gt.f403n} · 처리기 경고 ${kb.gt.h403} · 처리기 알림 ${o.forbidSeen} · 뜬 알림 ${snackShow(o.seenSnacks || [])}`);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] + ` · 403 수 ${kb.gt.f403n} · 처리기 경고 ${kb.gt.h403} · 처리기 알림 ${o.forbidSeen} · 뜬 알림 ${snackShow(o.seenSnacks || [])}`);
+    + ` · 403 수 ${kb.gt.f403n} · 처리기 경고 ${kb.gt.h403} · 처리기 알림 ${o.forbidSeen} · 뜬 알림 ${snackShow(o.seenSnacks || [])}`
+    // 🔴 B2 고침 1 ①(메인PC 확인 표 요청) · ②(뜬 알림 보기 실패)
+    + ` · 메인PC 표 요청 ${kb.gt.mcReq} · 뜬 알림 보기 실패 ${o.seenErr}`);
 }
 // 장면 공통 재료 묶기(판정 함수 입력 · got 앞부분)
 function gather(kb, s, lk, docs, extra = {}) {
@@ -662,7 +753,9 @@ function gather(kb, s, lk, docs, extra = {}) {
     where: s.where, path: s.path, docs, navs: [...kb.navs], band3: lk.band3, band10: lk.band10, snacks: lk.snacks,
     appErr: kb.gt.appErr, sf403: kb.gt.sf403, sfReq: kb.gt.sfReq, warnDash: kb.gt.warnDash,
     // 🔴 갈래 B2(D17 ⓐ ⓑ) — 403 응답 수 · 처리기 경고 줄 · 일반 catch 경고 표(ⓒ 는 장면이 snackTally 로 extra 에 넣음)
-    f403n: kb.gt.f403n, h403: kb.gt.h403, warnJson: kb.gt.warnJson, f403list: [...kb.gt.f403], ...extra,
+    // ⬛ [낡은 줄 · B2 고침 1 이전] f403n: kb.gt.f403n, h403: kb.gt.h403, warnJson: kb.gt.warnJson, f403list: [...kb.gt.f403], ...extra,
+    // 🔴 B2 고침 1 ①(mcReq) · ⑦(pendReq · pend403)
+    f403n: kb.gt.f403n, h403: kb.gt.h403, warnJson: kb.gt.warnJson, f403list: [...kb.gt.f403], mcReq: kb.gt.mcReq, pendReq: kb.gt.pendReq, pend403: kb.gt.pend403, ...extra,
   };
 }
 // 🔴 갈래 B2(D18 R-④) — 수동 업데이트 화면 고유 글(본문 h6) · 직원 경고 알림(MudAlert 경고 색) 수 · 기록 겸 G2 판정 재료
@@ -718,6 +811,9 @@ async function loginScreen(kb, loginId, password, { update = false, beforeClick 
   gtReset(kb); // 🔴 갈래 T — 판정 재료도 로그인 누름 뒤만
   // 🔴 갈래 T — 누름 직전 끼울 자리(문서 요청 늦춤 장치 · 장면 G 줄 「문서 요청만 20초 늦춤」). 제품 손 0.
   if (typeof beforeClick === 'function') await beforeClick(kb);
+  // ⬛ [낡은 줄 · B2 고침 1 이전] await page.getByRole('button', { name: '로그인', exact: true }).click();
+  // 🔴 B2 고침 1 ⑤(N5) — 누름 직전 시각(빈 시간 기록의 0점 · 판정 아님)
+  const clickAt = Date.now();
   await page.getByRole('button', { name: '로그인', exact: true }).click();
   const note = { closed: 0, errs: 0 };
   const s = await DC.settleScreen(page, 90000, note);
@@ -727,7 +823,8 @@ async function loginScreen(kb, loginId, password, { update = false, beforeClick 
   await K.waitMasked(kb.tok);
   // ⬛ [낡은 줄 · 고침 1] return s;  — 🔴 고침 2 ② 새 기기 알림 창을 장치가 닫은 횟수(note)를 같이 돌려준다(진단)
   // ⬛ [낡은 줄 · 고침 3] return { ...s, noticeClosed: note.closed, noticeCloseErrs: note.errs };
-  return { ...s, noticeClosed: note.closed, noticeCloseErrs: note.errs, landAt };
+  // ⬛ [낡은 줄 · B2 고침 1 이전] return { ...s, noticeClosed: note.closed, noticeCloseErrs: note.errs, landAt };
+  return { ...s, noticeClosed: note.closed, noticeCloseErrs: note.errs, landAt, clickAt };
 }
 
 // ── 장면 1 · 2 · 3: 첫 로그인 → 첫 화면 · 직접 /welcome · 기기 관문 ──
@@ -761,7 +858,8 @@ async function sceneHome(st) {
     const pass = JUDGE.home(o);
     sceneLog(kb, 'first-home', { ...o, pass });
     // ⬛ [낡은 줄 · 갈래 B2 이전] const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'sf403', 'notice', 'hero', 'snacks']), loginRedirectToWelcome: kb.login.redirect };
-    const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'sf403', 'notice', 'hero', 'f403n', 'h403', 'forbidSeen', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'sf403', 'notice', 'hero', 'f403n', 'h403', 'forbidSeen', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
+    const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'sf403', 'notice', 'hero', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'mcReq', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
     // ⬛ [낡은 줄 · 고침 1] rec(st, 'home', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
     // ⬛ [낡은 줄 · 고침 2] rec(st, 'home', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
     // 🔴 고침 3 — 판정 식 그대로 · 거짓일 때만 알려진 꼴 계산(머리 글자는 rec 가 붙임)
@@ -833,7 +931,8 @@ async function sceneUpdate(st) {
     const pass = JUDGE.update(o);
     sceneLog(kb, 'first-update', { ...o, pass });
     // ⬛ [낡은 줄 · 갈래 B2 이전] const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'snacks']), loginRedirectToWelcome: kb.login.redirect };
-    const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'updTitle', 'updWarn', 'f403n', 'h403', 'forbidSeen', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'updTitle', 'updWarn', 'f403n', 'h403', 'forbidSeen', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
+    const got = { ...gotOf(o, ['where', 'path', 'docs', 'band3', 'band10', 'appErr', 'updTitle', 'updWarn', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'mcReq', 'snacks', 'f403list']), loginRedirectToWelcome: kb.login.redirect };
     // ⬛ [낡은 줄 · 고침 1] rec(st, 'update', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
     // ⬛ [낡은 줄 · 고침 2] rec(st, 'update', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
     // 🔴 고침 3 — 판정 식 그대로 · 거짓일 때만 알려진 꼴 계산(문서 이동 기록 = diag 와 같은 글자 꼴)
@@ -909,23 +1008,43 @@ async function sceneTerms(st) {
     let slow = null;
     // ⬛ [낡은 줄 · 갈래 B2 이전] const s = await loginScreen(kb2, TERMS_ID, st.termsPw, { beforeClick: async (k) => { slow = await slowDocs(k, HOLD_MS); } });
     // 🔴 갈래 B2(D18 R-④ · 기록만 · 판정 아님) — 늦춤 중 1회(누름 + 5초) Login 진행 그림 보기(가설 ⓐ 직접 관찰 재료)
-    let progP = null;
+    // ⬛ [낡은 몸 · B2 고침 1 이전] 누름 + 5초에 page.evaluate(progLook) 1회 — CI 사본 :2174 셋 다 null(평가 10초 상한).
+    // ⬛ let progP = null;
+    // ⬛ const s = await loginScreen(kb2, TERMS_ID, st.termsPw, {
+    // ⬛   beforeClick: async (k) => {
+    // ⬛     slow = await slowDocs(k, HOLD_MS);
+    // ⬛     progP = K.sleep(PROG_LOOK_MS).then(() => progLook(k.page));
+    // ⬛   },
+    // ⬛ });
+    // ⬛ const prog = progP ? await progP : null;
+    // 🔴 B2 고침 1 ⑥(N6) — 누름 직전 그 문서에 진행 그림 console.log 를 걸고(평가는 누름 전 1번뿐) 콘솔로 받는다. 기록만 · 판정 아님.
+    const progLines = [];
+    const onProg = (msg) => {
+      const t = String(msg.text());
+      if (t.startsWith(PROG_TAG) && progLines.length < PROG_TICKS + 6) progLines.push(t);
+    };
+    kb2.page.on('console', onProg);
+    let progArm = null;
     const s = await loginScreen(kb2, TERMS_ID, st.termsPw, {
       beforeClick: async (k) => {
         slow = await slowDocs(k, HOLD_MS);
-        progP = K.sleep(PROG_LOOK_MS).then(() => progLook(k.page));
+        progArm = await K.withTimeout(k.page.evaluate(PROG_WATCH), K.EVAL_MS, '진행 그림 걸기').then(() => 'ok',
+          (e) => (e instanceof K.KitStepError ? L.sanitize(e.message, 80) : L.errorName(e)));
       },
     });
-    const prog = progP ? await progP : null;
+    kb2.page.off('console', onProg);
+    const prog = progSum(progLines);
     if (slow) await kb2.page.unroute('**/*', slow.handler).catch((e) => console.log(`K 닫힌문 문서 늦춤 풀기 실패 ${L.errorName(e)}`));
     if (kb2.login.seen === 0 || kb2.login.terms !== true) {
       throw new K.KitStepError(`약관 필요 상태 아님(로그인 응답 ${kb2.login.seen}회 · 약관 필요=${kb2.login.terms} · status=${kb2.login.status})`);
     }
     const docs = await docsNow(kb2);
     // ⬛ [낡은 줄 · 갈래 B2 이전] const o = { where: s.where, path: s.path, docs, slowHits: slow ? slow.hits : 0, slowPassErrs: slow ? slow.passErrs : null };
-    const o = { where: s.where, path: s.path, docs, slowHits: slow ? slow.hits : 0, slowPassErrs: slow ? slow.passErrs : null, prog };
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const o = { where: s.where, path: s.path, docs, slowHits: slow ? slow.hits : 0, slowPassErrs: slow ? slow.passErrs : null, prog };
+    const o = { where: s.where, path: s.path, docs, slowHits: slow ? slow.hits : 0, slowPassErrs: slow ? slow.passErrs : null, prog, progArm };
     const pass = JUDGE.termsSlow(o);
-    console.log(`K 닫힌문 장면 terms-slow-doc 진행 그림(기록) ${progShow(prog)}`);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] console.log(`K 닫힌문 장면 terms-slow-doc 진행 그림(기록) ${progShow(prog)}`);
+    console.log(`K 닫힌문 장면 terms-slow-doc 진행 그림(기록 · 콘솔 꼴) 걸기 ${progArm} · ${progSumShow(prog)}`);
     console.log(`K 닫힌문 장면 terms-slow-doc 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)} · 늦춘 문서 ${o.slowHits} · 넘김 실패 ${o.slowPassErrs}`);
     rec(st, 'termsSlow', { pass, got: pass ? o : { ...o, dx: diag(kb2) } });
   } catch (e) {
@@ -948,10 +1067,20 @@ async function sceneRelogin(st) {
       throw new K.KitStepError(`재로그인 상태 아님(로그인 응답 ${kb.login.seen}회 · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
     }
     const docs = await docsNow(kb);
-    const o = { where: s.where, path: s.path, docs, loginRedirectToWelcome: kb.login.redirect, deviceNew: kb.login.deviceNew };
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const o = { where: s.where, path: s.path, docs, loginRedirectToWelcome: kb.login.redirect, deviceNew: kb.login.deviceNew };
+    // 🔴 B2 고침 1 ④(N4) — 착지 +3초 기다린 뒤 세 겹을 잰다(사이드바 부름보다 먼저 재면 공짜 초록)
+    await K.sleep(Math.max(0, s.landAt + 3000 - Date.now()));
+    const sn = snackTally(await seenSnacks(kb.page));
+    const o = { where: s.where, path: s.path, docs, loginRedirectToWelcome: kb.login.redirect, deviceNew: kb.login.deviceNew,
+      f403n: kb.gt.f403n, h403: kb.gt.h403, f403list: [...kb.gt.f403], mcReq: kb.gt.mcReq, ...sn };
     const pass = JUDGE.relogin(o);
-    console.log(`K 닫힌문 장면 relogin-home 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)} · 첫 로그인=${o.loginRedirectToWelcome} · 새 기기=${o.deviceNew}`);
-    rec(st, 'relogin', { pass, got: pass ? o : { ...o, dx: diag(kb, { noticeClosed: s.noticeClosed }) } });
+    // ⬛ [낡은 줄 · B2 고침 1 이전] console.log(`K 닫힌문 장면 relogin-home 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)} · 첫 로그인=${o.loginRedirectToWelcome} · 새 기기=${o.deviceNew}`);
+    console.log(`K 닫힌문 장면 relogin-home 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)} · 첫 로그인=${o.loginRedirectToWelcome} · 새 기기=${o.deviceNew}`
+      + ` · 403 수 ${o.f403n} · 처리기 경고 ${o.h403} · 처리기 알림 ${o.forbidSeen} · 뜬 알림 보기 실패 ${o.seenErr} · 메인PC 표 요청 ${o.mcReq} · 403 ${L.sanitize(o.f403list.join(', ') || '없음', 200)}`);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] rec(st, 'relogin', { pass, got: pass ? o : { ...o, dx: diag(kb, { noticeClosed: s.noticeClosed }) } });
+    //   🔴 B2 고침 1 ④ — got 은 판정 칸 먼저 · 알림 글은 소독 글자로(gotOf)
+    const got = gotOf(o, ['where', 'path', 'docs', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'mcReq', 'loginRedirectToWelcome', 'deviceNew', 'seenSnacks', 'f403list']);
+    rec(st, 'relogin', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed }) } });
   } catch (e) {
     dev(st, 'relogin', step, e);
   }
@@ -964,11 +1093,20 @@ async function sceneRelogin(st) {
     gtReset(kb);
     await kb.page.goto(`${K.BASE}${LOGIN_PATH}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const s = await DC.settleScreen(kb.page, 60000);
+    // 🔴 B2 고침 1 ④(N4 「loginDirect 검토」) — 착지 +3초 뒤 세 겹
+    const landAt = Date.now();
     const docs = await docsNow(kb);
-    const o = { where: s.where, path: s.path, docs };
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const o = { where: s.where, path: s.path, docs };
+    await K.sleep(Math.max(0, landAt + 3000 - Date.now()));
+    const sn = snackTally(await seenSnacks(kb.page));
+    const o = { where: s.where, path: s.path, docs, f403n: kb.gt.f403n, h403: kb.gt.h403, f403list: [...kb.gt.f403], ...sn };
     const pass = JUDGE.loginDirect(o);
-    console.log(`K 닫힌문 장면 login-direct 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)}`);
-    rec(st, 'loginDirect', { pass, got: pass ? o : { ...o, dx: diag(kb) } });
+    // ⬛ [낡은 줄 · B2 고침 1 이전] console.log(`K 닫힌문 장면 login-direct 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)}`);
+    console.log(`K 닫힌문 장면 login-direct 판정=${pass} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)} · 문서 ${L.sanitize(docs.join(' > ') || '없음', 300)}`
+      + ` · 403 수 ${o.f403n} · 처리기 경고 ${o.h403} · 처리기 알림 ${o.forbidSeen} · 뜬 알림 보기 실패 ${o.seenErr}`);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] rec(st, 'loginDirect', { pass, got: pass ? o : { ...o, dx: diag(kb) } });
+    const got = gotOf(o, ['where', 'path', 'docs', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'seenSnacks', 'f403list']);
+    rec(st, 'loginDirect', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'loginDirect', step2, e);
   } finally {
@@ -1033,7 +1171,8 @@ async function sceneDialog(st) {
     sceneLog(kb, 'device-dialog-20s', { ...o, pass });
     console.log(`K 닫힌문 장면 device-dialog-20s 알림 보임=${shown} · 사라짐 ${lostAtMs === null ? '없음' : `+${lostAtMs}ms`} · 열어 둔 ${heldMs}ms · 그동안 문서 ${docsDuringHold} · [확인] ${clicked}`);
     // ⬛ [낡은 줄 · 갈래 B2 이전] const got = gotOf(o, ['dialogShown', 'lostAtMs', 'heldMs', 'docsDuringHold', 'clicked', 'where', 'path', 'docs', 'band3', 'band10', 'appErr']);
-    const got = gotOf(o, ['dialogShown', 'lostAtMs', 'heldMs', 'docsDuringHold', 'clicked', 'where', 'path', 'docs', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'f403list']);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = gotOf(o, ['dialogShown', 'lostAtMs', 'heldMs', 'docsDuringHold', 'clicked', 'where', 'path', 'docs', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'f403list']);
+    const got = gotOf(o, ['dialogShown', 'lostAtMs', 'heldMs', 'docsDuringHold', 'clicked', 'where', 'path', 'docs', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'mcReq', 'f403list']);
     rec(st, 'dialog', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'dialog', step, e);
@@ -1054,24 +1193,37 @@ async function sceneOwner(st) {
     if (!PW.parent) throw new K.KitStepError('못 만듦 — 대표 비번 환경 칸 비어 있음');
     step.now = '브라우저 열기 · 대표 화면 로그인';
     kb = await openCtx(st, 'S3O1');
-    const s = await loginScreen(kb, ID.parent, PW.parent);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const s = await loginScreen(kb, ID.parent, PW.parent);
+    // 🔴 B2 고침 1 ⑤(N5) — 큰 카드 기다림을 누름 전부터 걸어 둠(locator 기다림은 문서 이동을 건너 이어짐) · 보인 시각만 받음
+    let heroP = null;
+    const s = await loginScreen(kb, ID.parent, PW.parent, {
+      beforeClick: async (k) => {
+        heroP = k.page.locator('.hp-kpi-hero').first().waitFor({ state: 'visible', timeout: 60000 })
+          .then(() => Date.now(), (e) => { console.log(`K 닫힌문 큰 카드 안 보임(누름 + 60초) ${L.errorName(e)}`); return null; });
+      },
+    });
     if (kb.login.seen === 0 || kb.login.terms !== false) {
       throw new K.KitStepError(`대표 로그인 상태 이상(로그인 응답 ${kb.login.seen}회 · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
     }
     // 🔴 갈래 B2(D18 R-④ B-① 빈 시간 · 기록만 · 판정 아님) — 착지 → 큰 카드 보임 ms. 흰 띠 보기(+3 · +10초) 시각을 밀지 않게 같이 돌린다.
-    const heroP = kb.page.locator('.hp-kpi-hero').first().waitFor({ state: 'visible', timeout: 15000 })
-      .then(() => Date.now() - s.landAt, (e) => { console.log(`K 닫힌문 큰 카드 안 보임(15초) ${L.errorName(e)}`); return null; });
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const heroP = kb.page.locator('.hp-kpi-hero').first().waitFor({ state: 'visible', timeout: 15000 })
+    // ⬛ [낡은 줄 · B2 고침 1 이전]   .then(() => Date.now() - s.landAt, (e) => { console.log(`K 닫힌문 큰 카드 안 보임(15초) ${L.errorName(e)}`); return null; });
+    //   🔴 B2 고침 1 ⑤ — 0점 = 착지(자리 잡기 끝) → 로그인 누름(위 beforeClick). CI 3ms = 잴 것이 없던 0점이었다.
     await DC.closeBriefing(kb.page, kb.br, 3000);
     const lk = await landLook(kb, s.landAt);
     const cd = await cards(kb.page);
     const docs = await docsNow(kb);
-    const heroMs = await heroP;
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const heroMs = await heroP;
+    const heroAt = heroP ? await heroP : null;
+    const heroMs = heroAt === null ? null : heroAt - s.clickAt; // 누름 → 큰 카드 보임(ms · 기록만)
+    console.log(`K 닫힌문 장면 owner-home 빈 시간(기록) 누름 → 큰 카드 ${heroMs === null ? '못 봄' : `${heroMs}ms`} · 누름 → 착지 ${s.landAt - s.clickAt}ms`);
     // ⬛ [낡은 줄 · 갈래 B2 이전] const o = gather(kb, s, lk, docs, { hero: cd.hero, labels: cd.labels, notice: cd.notice, permAlert: cd.permAlert });
     const o = gather(kb, s, lk, docs, { hero: cd.hero, labels: cd.labels, notice: cd.notice, permAlert: cd.permAlert, heroMs, ...snackTally(await seenSnacks(kb.page)) });
     const pass = JUDGE.owner(o);
     sceneLog(kb, 'owner-home', { ...o, pass });
     // ⬛ [낡은 줄 · 갈래 B2 이전] const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'band3', 'band10', 'appErr', 'permAlert', 'docs']);
-    const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'band3', 'band10', 'appErr', 'permAlert', 'heroMs', 'docs']);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'band3', 'band10', 'appErr', 'permAlert', 'heroMs', 'docs']);
+    const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'band3', 'band10', 'appErr', 'mcReq', 'permAlert', 'heroMs', 'docs']);
     rec(st, 'owner', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'owner', step, e);
@@ -1136,7 +1288,9 @@ async function sceneOwner(st) {
     const o = gather(kb, s, lk, await docsNow(kb), { routeHits: hit.dash, ctlHits: hit.ctl, failSnack: Math.max(failSnack, sn.seenSnacks.filter((t) => t.includes(DASH_FAIL_TEXT)).length), ...sn });
     const pass = JUDGE.ownerJson(o);
     sceneLog(kb, 'owner-json', { ...o, pass });
-    const got = gotOf(o, ['routeHits', 'ctlHits', 'failSnack', 'failSnackErr', 'warnJson', 'h403', 'forbidSeen', 'outsideAllow', 'band3', 'band10', 'warnDash', 'appErr', 'seenSnacks', 'where', 'path']);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = gotOf(o, ['routeHits', 'ctlHits', 'failSnack', 'failSnackErr', 'warnJson', 'h403', 'forbidSeen', 'outsideAllow', 'band3', 'band10', 'warnDash', 'appErr', 'seenSnacks', 'where', 'path']);
+    //   🔴 B2 고침 1 ③(N3) — 판정에 든 f403n 을 got 에도
+    const got = gotOf(o, ['routeHits', 'ctlHits', 'failSnack', 'failSnackErr', 'warnJson', 'f403n', 'h403', 'forbidSeen', 'outsideAllow', 'band3', 'band10', 'warnDash', 'appErr', 'seenSnacks', 'where', 'path']);
     rec(st, 'ownerJson', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'ownerJson', step3, e);
@@ -1172,12 +1326,60 @@ async function sceneSales(st) {
     const pass = JUDGE.sales(o);
     sceneLog(kb, 'sales-home', { ...o, pass });
     // ⬛ [낡은 줄 · 갈래 B2 이전] const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'sf403', 'sfReq', 'band3', 'band10', 'appErr']);
-    const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'sf403', 'sfReq', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'f403list']);
+    // ⬛ [낡은 줄 · B2 고침 1 이전] const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'sf403', 'sfReq', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'f403list']);
+    const got = gotOf(o, ['where', 'path', 'hero', 'labels', 'notice', 'sf403', 'sfReq', 'band3', 'band10', 'appErr', 'f403n', 'h403', 'forbidSeen', 'seenErr', 'mcReq', 'f403list']);
     rec(st, 'sales', { pass, got: pass ? got : { ...got, dx: diag(kb) } });
   } catch (e) {
     dev(st, 'sales', step, e);
   } finally {
     if (kb) await closeKb(st, kb);
+  }
+}
+
+// ── 🔴 B2 고침 1 ⑦(N7 · 설계 7-2-8 가설 G13) — 「결재 보기」 받은 직원 첫 화면(기록만 · 키 아님 · 판정기 기대 키 틀 그대로) ──
+//   시험 DB 에 권한 1행(user_permissions APPROVAL can_view=1 · 출하 DDL installer/hitpan_db_clean.sql :4302 칸 확인 #13)을 넣고
+//   같은 새 직원으로 로그인 → 사이드바가 결재 대기를 부르는지(GET /api/approval/pending 1 이상) · 그 403 0 · 「403 알림 0」 세 겹 · 메인PC 표 요청 0.
+//   끝에 그 행을 지운다(뒤 장면 영향 0 · 이 장면은 판매 역할 장면 뒤 맨 끝). 실패해도 다른 키 판정 손 0 — 기록 줄만 남김.
+const G13_MENU = 'APPROVAL';
+// G13 기대 꼴(순수 · 자체시험 K-C29j) — 기록 줄의 「기대대로」 칸
+const g13Ok = (o) => o.pendReq >= 1 && o.pend403 === 0 && no403(o) && noMc(o);
+async function sceneApprovalView(st) {
+  let kb = null;
+  let granted = false;
+  let uid = null;
+  let t = null;
+  try {
+    if (!st.prepOk) throw new K.KitStepError(`준비 실패 — ${st.prepWhy}`);
+    uid = idOk(st.freshUid, '새 직원 번호');
+    t = idOk(st.tid, '회사 번호');
+    const before = dbCount(`SELECT COUNT(*) FROM user_permissions WHERE tenant_id = '${t}' AND user_id = '${uid}' AND menu_code = '${G13_MENU}';`);
+    if (before !== 0) throw new K.KitStepError(`못 만듦 — 결재 권한 행이 이미 ${before}개(0 이어야 함)`);
+    dbq(`INSERT INTO user_permissions (perm_id, tenant_id, user_id, menu_code, can_view) VALUES (UUID(), '${t}', '${uid}', '${G13_MENU}', 1);`);
+    granted = true;
+    kb = await openCtx(st, 'S3APPR');
+    const s = await loginScreen(kb, ID.fresh, st.freshPw);
+    if (kb.login.seen === 0 || kb.login.terms !== false) {
+      throw new K.KitStepError(`로그인 상태 이상(로그인 응답 ${kb.login.seen}회 · 약관 필요=${kb.login.terms} · status=${kb.login.status})`);
+    }
+    await DC.closeBriefing(kb.page, kb.br, 3000);
+    await K.sleep(Math.max(0, s.landAt + 10000 - Date.now())); // 사이드바 my-level → 결재 대기 부름 몫(+10초 · 첫 화면 장면과 같은 끝 시각)
+    const sn = snackTally(await seenSnacks(kb.page));
+    const o = { where: s.where, path: s.path, pendReq: kb.gt.pendReq, pend403: kb.gt.pend403, f403n: kb.gt.f403n, h403: kb.gt.h403, mcReq: kb.gt.mcReq, ...sn };
+    console.log(`K 닫힌문 장면 approval-view-home(기록 · 키 아님) 기대대로=${g13Ok(o)} · 착지 ${o.where}@${L.sanitize(String(o.path), 80)}`
+      + ` · 결재 대기 부름 ${o.pendReq} · 그중 403 ${o.pend403} · 403 수 ${o.f403n} · 처리기 경고 ${o.h403} · 처리기 알림 ${o.forbidSeen}`
+      + ` · 뜬 알림 보기 실패 ${o.seenErr} · 메인PC 표 요청 ${o.mcReq} · 403 ${L.sanitize(kb.gt.f403.join(', ') || '없음', 200)}`);
+  } catch (e) {
+    console.log(`K 닫힌문 장면 approval-view-home(기록 · 키 아님) 못 봄 — ${e instanceof K.KitStepError ? L.sanitize(e.message, 160) : `예외 ${L.errorName(e)}`}`);
+  } finally {
+    if (kb) await closeKb(st, kb);
+    if (granted) {
+      try {
+        const n = dbCount(`DELETE FROM user_permissions WHERE tenant_id = '${t}' AND user_id = '${uid}' AND menu_code = '${G13_MENU}'; SELECT ROW_COUNT();`);
+        console.log(`K 닫힌문 장면 approval-view-home 결재 권한 행 지움 ${n}`);
+      } catch (e) {
+        console.log(`K 닫힌문 결재 권한 행 지우기 실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 120) : L.errorName(e)}`);
+      }
+    }
   }
 }
 
@@ -1382,6 +1584,7 @@ async function main() {
     await sceneDialog(st);
     await sceneOwner(st);
     await sceneSales(st);
+    await sceneApprovalView(st); // 🔴 B2 고침 1 ⑦ — 기록만(키 아님) · 맨 끝(권한 행 넣고 지움)
   }
   await probes(st); // 브라우저 없이도 돈다
   K.fillDevice(st.r, allKeys, '경우 끝 뒤 남은 키(있으면 장치 오류)');
@@ -1415,5 +1618,9 @@ if (require.main === module) main();
 // 🔴 갈래 T — 판정 함수 JUDGE · 문서 이동 1건 · 알림 글 예외 꼴(자체시험 K-C28a)
 // ⬛ [낡은 줄 · 갈래 B2 이전] module.exports = { KEY, HANDLER_WORDS, isWelcome, endCode, homeKnown, updateKnown, JUDGE, oneDoc, snackBadCount, HOLD_MS, OWNER_LABELS };
 // 🔴 갈래 B2 — 뜬 알림 셈 · 초기 스크립트 · 처리기 글 머리(자체시험 K-C29a ~ e)
+// ⬛ [낡은 줄 · B2 고침 1 이전] module.exports = { KEY, HANDLER_WORDS, isWelcome, endCode, homeKnown, updateKnown, JUDGE, oneDoc, snackBadCount, HOLD_MS, OWNER_LABELS,
+// ⬛ [낡은 줄 · B2 고침 1 이전]   snackTally, SNACK_SEEN_INIT, FORBID_TEXT, H403_TAG, DASH_FAIL_TEXT };
+// 🔴 B2 고침 1 — 진행 그림 콘솔 꼴(⑥ K-C29i) · G13 기대 꼴(⑦ K-C29j)
 module.exports = { KEY, HANDLER_WORDS, isWelcome, endCode, homeKnown, updateKnown, JUDGE, oneDoc, snackBadCount, HOLD_MS, OWNER_LABELS,
-  snackTally, SNACK_SEEN_INIT, FORBID_TEXT, H403_TAG, DASH_FAIL_TEXT };
+  snackTally, SNACK_SEEN_INIT, FORBID_TEXT, H403_TAG, DASH_FAIL_TEXT,
+  PROG_WATCH, PROG_TAG, PROG_TICKS, progParse, progSum, g13Ok };
