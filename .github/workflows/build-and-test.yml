@@ -358,8 +358,8 @@ jobs:
   db-gate:
     name: DB 게이트 (Integrity — 실제 DB 실행)
     runs-on: ubuntu-latest
-    # 측정 전용(머지 금지 · §285 · §302) — 쿨타임 변이 런 29건(a~ac · ⓙ ⓧ ⓨ ⓩ aa ab ac 새로 · v · w 독립 재현) × 재빌드 때문에 늘림
-    timeout-minutes: 240
+    # 측정 전용(머지 금지 · §285 · §302) — 쿨타임 변이 런 3 = 11건(M1a M1c M1-26b M2b M2d M3c M3d M4-26b M5-26a M6 T3) × 재빌드 때문에 늘림
+    timeout-minutes: 150
     services:
       mariadb:
         image: mariadb:11.4
@@ -1468,7 +1468,7 @@ jobs:
           HITPAN_TEST_DB: 'hitpan_e2e'
         run: |
           set -o pipefail
-          bash scripts/gates/cooltime-mutation-run.sh 2>&1 | tee "$RUNNER_TEMP/cooltime-mut.log"
+          bash scripts/gates/cooltime-mutation-run.sh M1a M1c M1-26b M2b M2d M3c M3d M4-26b M5-26a M6 T3 2>&1 | tee "$RUNNER_TEMP/cooltime-mut.log"
 
       - name: Upload gate results
         if: always()
