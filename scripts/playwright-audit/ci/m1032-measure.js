@@ -510,12 +510,13 @@ async function main() {
     brBNote = '기본 실행 파일 · 기본 인자 --disable-back-forward-cache 뺌 · 외부 = 이름 풀이 끊음';
   }
   brs.push(brB);
-  await sceneBack(st, brB, brBNote);
-  // 길 A · A2 — 기존 장면(terms-slow-doc)과 같은 기본 기동
+  // 🔴 측정 4회째(대조 가지만) — 길A2 를 맨 앞으로: 대조 몸은 로그인 응답 본문을 못 읽어 길B 세션을 놓지 못하고(401) 뒤 길이 409 로 섰다(런 46179249455).
+  //   길 순서만 바꿈 · 각 길의 몸 · 판정 식 손 0. 길A(window.stop)는 고친 몸에서도 「측정 불성립」 이라 맨 뒤.
   const brA = await pw.chromium.launch();
   brs.push(brA);
-  await sceneStop(st, brA, 'window.stop');
   await sceneStop(st, brA, 'Page.stopLoading');
+  await sceneBack(st, brB, brBNote);
+  await sceneStop(st, brA, 'window.stop');
   await cleanup();
   log(`본문 끝 · 로그아웃 실패 ${st.logoutFail}`);
   process.exit(st.logoutFail === 0 ? 0 : 1);
