@@ -128,4 +128,11 @@
     <None Include="..\HitPan.Application\Resources\Fonts\NotoSerifKR-OFL.txt" Link="licenses\NotoSerifKR-OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 🔴 2026-11-28 W-G1-52 갈래 C (설계 §15-6 R16 ① · 대표 §287 Q3 (가)): 대표 비번 되찾기 실행 글 1개를 api 출력 · 게시 폴더 맨 위에 싣는다.
+         · 내용 = "%~dp0HitPan.API.exe" parent-reset 한 줄(고정 인자만) — 업데이트 판 = api 폴더 통째라 이미 깐 PC 에도 같이 감(설치기 손 0).
+         · 새 설치의 시작 메뉴 바로가기(.iss [Icons] 1줄)도 이 파일을 가리킨다 → 새 PC · 이미 깐 PC 한 길. 선례 = 위 local-swap.ps1 줄. -->
+    <None Update="대표비밀번호다시정하기.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

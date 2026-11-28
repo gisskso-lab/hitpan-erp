@@ -2671,6 +2671,31 @@ CREATE TABLE `overtime` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `parent_reset_tokens`
+--
+-- 🔴 DB-151 (W-G1-52 갈래 C · 2026-11-28) — 대표 비밀번호 되찾기 1회용 표. 표 값 저장 0 · 지문만(#40).
+--   오프라인 명령 parent-reset(윈도우 관리자 승인 뒤)이 1행 · 재설정 API 가 조건 갱신 줄 수 1 로 한 번만 소비(K7 · G10).
+--   복원 분류 = 「지금 값」(설계 §8-4 5). 모양 = DB-151 마이그와 같음(G-W13-2).
+
+DROP TABLE IF EXISTS `parent_reset_tokens`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `parent_reset_tokens` (
+  `token_id` varchar(36) NOT NULL,
+  `tenant_id` varchar(36) NOT NULL,
+  `user_id` varchar(36) NOT NULL COMMENT '대표(is_parent=1) user_id — 만들 때 이 DB 의 대표 행이 정확히 1개일 때만',
+  `token_hash` char(64) NOT NULL COMMENT '1회용 표의 SHA-256 소문자 16진 — 표 값은 저장 안 함 (DB-151)',
+  `created_at` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `expires_at` datetime(6) NOT NULL COMMENT '만든 때 + 10분 (UTC)',
+  `used_at` datetime(6) DEFAULT NULL COMMENT '쓴 때 (UTC) — NULL 일 때만 한 번 소비',
+  PRIMARY KEY (`token_id`),
+  UNIQUE KEY `uq_parent_reset_token_hash` (`token_hash`),
+  KEY `idx_parent_reset_user` (`user_id`),
+  KEY `idx_parent_reset_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `partner_balance`
 --
 
@@ -3673,7 +3698,7 @@ INSERT INTO `schema_migrations` (`migration_id`, `app_version`, `success`) VALUE
 ('DB-74','clean-ddl',1),('DB-75','clean-ddl',1),('DB-76','clean-ddl',1),('DB-77','clean-ddl',1),
 ('DB-78','clean-ddl',1),('DB-79','clean-ddl',1),('DB-80','clean-ddl',1),('DB-81','clean-ddl',1),
 ('DB-82','clean-ddl',1),('DB-83','clean-ddl',1),('DB-84','clean-ddl',1),('DB-85','clean-ddl',1),
-('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1),('DB-150','clean-ddl',1);
+('DB-86','clean-ddl',1),('DB-87','clean-ddl',1),('DB-88','clean-ddl',1),('DB-89','clean-ddl',1),('DB-90','clean-ddl',1),('DB-91','clean-ddl',1),('DB-92','clean-ddl',1),('DB-93','clean-ddl',1),('DB-94','clean-ddl',1),('DB-95','clean-ddl',1),('DB-96','clean-ddl',1),('DB-97','clean-ddl',1),('DB-98','clean-ddl',1),('DB-99','clean-ddl',1),('DB-100','clean-ddl',1),('DB-101','clean-ddl',1),('DB-102','clean-ddl',1),('DB-103','clean-ddl',1),('DB-104','clean-ddl',1),('DB-105','clean-ddl',1),('DB-106','clean-ddl',1),('DB-107','clean-ddl',1),('DB-108','clean-ddl',1),('DB-109','clean-ddl',1),('DB-110','clean-ddl',1),('DB-111','clean-ddl',1),('DB-112','clean-ddl',1),('DB-113','clean-ddl',1),('DB-114','clean-ddl',1),('DB-115','clean-ddl',1),('DB-116','clean-ddl',1),('DB-117','clean-ddl',1),('DB-118','clean-ddl',1),('DB-119','clean-ddl',1),('DB-120','clean-ddl',1),('DB-123','clean-ddl',1),('DB-126','clean-ddl',1),('DB-127','clean-ddl',1),('DB-128','clean-ddl',1),('DB-129','clean-ddl',1),('DB-130','clean-ddl',1),('DB-131','clean-ddl',1),('DB-135','clean-ddl',1),('DB-136','clean-ddl',1),('DB-137','clean-ddl',1),('DB-138','clean-ddl',1),('DB-139','clean-ddl',1),('DB-140','clean-ddl',1),('DB-141','clean-ddl',1),('DB-142','clean-ddl',1),('DB-143','clean-ddl',1),('DB-144','clean-ddl',1),('DB-145','clean-ddl',1),('DB-146','clean-ddl',1),('DB-147','clean-ddl',1),('DB-148','clean-ddl',1),('DB-149','clean-ddl',1),('DB-150','clean-ddl',1),('DB-151','clean-ddl',1);
 
 --
 -- Table structure for table `service_tickets`

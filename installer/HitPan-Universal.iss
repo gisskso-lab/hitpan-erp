@@ -149,6 +149,7 @@ Source: "scripts\force-update.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversi
 [Icons]
 Name: "{group}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 21; Comment: "히트판 ERP 시작"
 Name: "{commondesktop}\HitPan ERP"; Filename: "{app}\hitpan-start.bat"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 21
+Name: "{group}\대표 비밀번호 다시 정하기"; Filename: "{app}\api\대표비밀번호다시정하기.cmd"; WorkingDir: "{app}\api"; Comment: "대표 비밀번호를 잊었을 때 다시 정합니다"
 
 [Run]
 ; 봉합 2026-06-16: log 영역 박음 — Sandbox 영역 멈춤 사고 영역 진단 가능 박음

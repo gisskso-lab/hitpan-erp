@@ -55,6 +55,15 @@ if (args.Length > 0 && string.Equals(args[0], HitPan.API.Services.SeedParentComm
     return seedExit;
 }
 
+// 🔴 W-G1-52 갈래 C — parent-reset 오프라인 서브커맨드(대표 비번 되찾기 · 윈도우 관리자 승인 C안 · 대표 §287 Q3 (가)):
+//   seed-parent 와 같은 꼴 — 웹 호스트를 띄우지 않고 1회용 표 행만 만들고 종료한다. 모르는 인자도 여기서 종료(R16 ④).
+//   🔴 H3 — 감사 파일 손 0(감사는 API 가 재설정 때 씀).
+if (args.Length > 0 && string.Equals(args[0], HitPan.API.Services.ParentResetCommand.CommandName, StringComparison.OrdinalIgnoreCase))
+{
+    var resetExit = await HitPan.API.Services.ParentResetCommand.RunAsync(builder, args);
+    return resetExit;
+}
+
 // EXE 옆 wwwroot가 있으면 WebRoot로 설정 (installer 모드)
 var exeDir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 var exeWebRoot = Path.Combine(exeDir, "wwwroot");
@@ -117,6 +126,9 @@ builder.Services.AddScoped<IMainPcProofService>(sp => new MainPcProofService(
     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MainPcProofService>>()));
 // 🔴 W-G1-52 갈래 0 — DB 밖 로컬 감사 파일(%ProgramData%\HitPan\audit · 줄 더하기만 · 본사 전송 0). Singleton = 경로별 한 줄 서기. 기본 자리 생성자를 여기서 못박는다.
 builder.Services.AddSingleton<ILocalAuditFile>(sp => new HitPan.Infrastructure.Services.LocalAuditFileWriter(sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<HitPan.Infrastructure.Services.LocalAuditFileWriter>>()));
+// 🔴 W-G1-52 갈래 C — 대표 비번 되찾기(재설정 API 몫 · 감사 2벌 = 위 감사 파일 + DB audit_logs). Scoped = 요청 범위 IDbConnection.
+builder.Services.AddScoped<HitPan.Application.Services.IParentResetStore, HitPan.Application.Services.DapperParentResetStore>();
+builder.Services.AddScoped<IParentPasswordResetService, HitPan.Application.Services.ParentPasswordResetService>();
 builder.Services.AddScoped<IEmployeeService, EmployeeService>();
 builder.Services.AddScoped<IPositionService, PositionService>();
 // 작(2026-08-13) 단계4 토대: 부서 마스터 CRUD. 종전엔 조회만 있어 부서를 만들 방법이 없었다.
