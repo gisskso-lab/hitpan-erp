@@ -837,15 +837,21 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
             INSERT INTO tax_invoices (invoice_id, tenant_id, invoice_no, issued_at, issued_by, amount_total, vat_total, status)
             VALUES ('sr3-ti-1', @T, 'SR3-0001', UTC_TIMESTAMP(6), @U, 10000.00, 1000.00, 'etax_confirmed')
             """, new { T = Tenant, U = ParentId });
+        // 🔴 고침 1-2(PM 결재) — psp id = UUID 꼴(제품이 넣는 꼴 = PartnerService Guid.NewGuid().ToString()).
+        //    출하 트리거 trg_psp_ratio_insert 의 IF(…, UUID(), NEW.id) 가 UUID 꼴 아닌 id 를 NULL 로 바꾸는지는
+        //    아래 PSP_관찰_트리거_UUID형변환 이 따로 찍는다(덮지 않음 · 트리거 고침은 별건).
+        // ⬛ 옛 줄: VALUES ('sr3-psp-1', @T, 'p-1', 'i-1', 8000.00, 10000.00) · VALUES ('sr3-psp-2', @T, 'p-1', 'i-2', 5000.00, NULL, 55.55)
         await c.Admin.ExecuteAsync(
-            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price) VALUES ('sr3-psp-1', @T, 'p-1', 'i-1', 8000.00, 10000.00)", new { T = Tenant });
+            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price) VALUES (@Id, @T, 'p-1', 'i-1', 8000.00, 10000.00)", new { Id = Psp1, T = Tenant });
         await c.Admin.ExecuteAsync(
-            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price, vs_ratio) VALUES ('sr3-psp-2', @T, 'p-1', 'i-2', 5000.00, NULL, 55.55)", new { T = Tenant });
+            "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price, vs_ratio) VALUES (@Id, @T, 'p-1', 'i-2', 5000.00, NULL, 55.55)", new { Id = Psp2, T = Tenant });
         const string PspSql = "SELECT id, special_price, std_price, vs_ratio FROM partner_special_prices WHERE tenant_id = @T ORDER BY id";
         var pspBefore = (await c.Admin.QueryAsync<(string Id, decimal Special, decimal? Std, decimal? Ratio)>(PspSql, new { T = Tenant })).ToList();
         Assert.Equal(2, pspBefore.Count);
+        Assert.Equal(new[] { Psp1, Psp2 }, pspBefore.Select(p => p.Id));   // 트리거가 넣은 id 그대로 둠(양성 대조)
         var id = await BackupAsync(c);
-        await c.Admin.ExecuteAsync("UPDATE partner_special_prices SET special_price = 9000.00 WHERE id = 'sr3-psp-1'");   // 백업 뒤 바꿈(복원 = 백업 값)
+        // ⬛ 옛 줄: "UPDATE partner_special_prices SET special_price = 9000.00 WHERE id = 'sr3-psp-1'"
+        await c.Admin.ExecuteAsync("UPDATE partner_special_prices SET special_price = 9000.00 WHERE id = @Id", new { Id = Psp1 });   // 백업 뒤 바꿈(복원 = 백업 값)
 
         await using var other = await _db.OpenAsync();
         await other.ExecuteAsync("SET SESSION innodb_lock_wait_timeout = 1");
@@ -864,6 +870,56 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.Null(await c.Admin.ExecuteScalarAsync<string?>("SELECT remark1 FROM tax_invoices WHERE invoice_id = 'sr3-ti-1'"));
         var pspAfter = (await c.Admin.QueryAsync<(string Id, decimal Special, decimal? Std, decimal? Ratio)>(PspSql, new { T = Tenant })).ToList();
         Assert.Equal(pspBefore, pspAfter);
+    }
+
+    // 고침 1-2 — G15 psp id(UUID 꼴 · 소문자 대시 = Guid.ToString() 꼴)
+    private const string Psp1 = "5a3e0c1e-0f15-4000-8000-000000000001";
+    private const string Psp2 = "5a3e0c1e-0f15-4000-8000-000000000002";
+
+    [Fact(DisplayName = "관찰(판정 아님) 🔵 PSP 트리거 — IF(0, UUID(), 글자) 값 · 경고 · UUID 꼴 아닌 id 로 partner_special_prices INSERT 결과를 한 줄씩 찍음(결과가 어느 쪽이든 초록)")]
+    public async Task PSP_관찰_트리거_UUID형변환()
+    {
+        const string Gate = "SR3-PSP-관찰";
+        if (!await _db.ReadyAsync(Gate)) return;
+        await using var db = await _db.OpenAsync();
+        Console.WriteLine($"[SR3-PSP-관찰] 서버 판 = {await db.ExecuteScalarAsync<string>("SELECT VERSION()")}");
+
+        // ⓐ 트리거 식과 같은 꼴 — IF(거짓, UUID(), 글자) 의 값과 바로 뒤 경고
+        var a = await db.ExecuteScalarAsync<object?>("SELECT IF(0, UUID(), 'sr3-psp-x')");
+        var aText = a is null or DBNull ? "NULL" : $"'{a}'({a.GetType().Name})";
+        var aWarn = await WarningsAsync(db);
+        Console.WriteLine($"[SR3-PSP-관찰] ⓐ IF(0, UUID(), 'sr3-psp-x') = {aText} · 경고 {aWarn.Count}건"
+            + string.Concat(aWarn.Select(w => " | " + w)));
+
+        // ⓑ UUID 꼴 아닌 id 로 실제 INSERT(출하 트리거를 지남) — 오류 번호 또는 들어간 id
+        const string ObsTenant = "sr3-psp-obs-tenant";
+        try
+        {
+            await db.ExecuteAsync(
+                "INSERT INTO partner_special_prices (id, tenant_id, partner_id, item_id, special_price, std_price) VALUES ('sr3-psp-x', @T, 'p-obs', 'i-obs', 8000.00, 10000.00)",
+                new { T = ObsTenant });
+            var bWarn = await WarningsAsync(db);
+            var ids = (await db.QueryAsync<string>("SELECT id FROM partner_special_prices WHERE tenant_id = @T", new { T = ObsTenant })).ToList();
+            Console.WriteLine($"[SR3-PSP-관찰] ⓑ UUID 꼴 아닌 id INSERT = 성공 · 들어간 id {string.Join(", ", ids.Select(i => $"'{i}'"))} · 경고 {bWarn.Count}건"
+                + string.Concat(bWarn.Select(w => " | " + w)));
+        }
+        catch (MySqlException ex)
+        {
+            Console.WriteLine($"[SR3-PSP-관찰] ⓑ UUID 꼴 아닌 id INSERT = 오류 {ex.Number} {ex.SqlState} · {ex.Message}");   // #15 — 관찰 줄로 남김
+        }
+        finally
+        {
+            await db.ExecuteAsync("DELETE FROM partner_special_prices WHERE tenant_id = @T", new { T = ObsTenant });   // 시험 데이터 정리
+        }
+    }
+
+    /// <summary>바로 앞 문장의 경고 — 칸 형(Code = 부호 없는 정수)에 기대지 않게 글자로 이어 붙임.</summary>
+    private static async Task<List<string>> WarningsAsync(MySqlConnection db)
+    {
+        var rows = await db.QueryAsync("SHOW WARNINGS");
+        return rows.Cast<IDictionary<string, object?>>()
+            .Select(r => string.Join(" ", r.Values.Select(v => v?.ToString() ?? "NULL")))
+            .ToList();
     }
 
     [Fact(DisplayName = "G5 🔴 백업 뒤 토큰 폐기 · 기기 차단 · 대표 비번 바꿈 → 복원 = 셋 다 지금 값 그대로 · 대표 「지금 비번」 실제 로그인 성공")]
