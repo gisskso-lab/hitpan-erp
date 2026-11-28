@@ -26,7 +26,7 @@ internal static class LoadFailedNotice
     public static bool ShouldNotify(Exception ex) => ex switch
     {
         OperationCanceledException oce when oce.InnerException is not TimeoutException => false,
-        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } => false,
+        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized } => false,
         _ => true,
     };
 
