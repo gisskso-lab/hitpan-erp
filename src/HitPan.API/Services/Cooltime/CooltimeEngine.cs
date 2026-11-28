@@ -172,7 +172,7 @@ public sealed class CooltimeEngine
                 new { t.TenantId }, cancellationToken: ct)).ConfigureAwait(false);
             foreach (var sid in noAnswer.ToList())
             {
-                var r = await EndQuietlyAsync(t.TenantId, sid, nowLocal, CooltimeEndCause.NoAnswer, null, ct).ConfigureAwait(false);
+                var r = await EndQuietlyAsync(t.TenantId, sid, nowLocal, CooltimeEndCause.NoAnswer, null, t, ct).ConfigureAwait(false);
                 if (r == CooltimeEndOutcome.Ended) endedNoAnswer++;
                 else if (r == CooltimeEndOutcome.Deadlock) deadlocks++;
             }
@@ -195,7 +195,7 @@ public sealed class CooltimeEngine
                 new { t.TenantId, CUtc = cUtc }, cancellationToken: ct)).ConfigureAwait(false);
             foreach (var sid in missed.ToList())
             {
-                var r = await EndQuietlyAsync(t.TenantId, sid, nowLocal, CooltimeEndCause.Missed, cUtc, ct).ConfigureAwait(false);
+                var r = await EndQuietlyAsync(t.TenantId, sid, nowLocal, CooltimeEndCause.Missed, cUtc, t, ct).ConfigureAwait(false);
                 if (r == CooltimeEndOutcome.Ended) endedMissed++;
                 else if (r == CooltimeEndOutcome.Deadlock) deadlocks++;
             }
@@ -228,11 +228,30 @@ public sealed class CooltimeEngine
                 new { t.TenantId, CUtc = cUtc, W = CooltimeWire.RuleFourWindowHours }, cancellationToken: ct)).ConfigureAwait(false);
             foreach (var sid in toAsk.ToList())
             {
+                // 🆕 11/28 HQA 반려 P1(설계 쿨타임_설정끄기경주_고침 §2 · §3 (가) · §4) — 묻기도 한 거래.
+                //   ⬛ [낡은 줄 · 11/28 이전] 아래 UPDATE 는 거래 밖 자동 커밋 한 문장이었다(WHERE 에 설정 칸 없음 ⇒ 끈 뒤 오래된 바퀴가 물음을 씀).
+                //   첫 문장 = 그 회사 설정 행 공유 잠금 재확인 → 다르면 되돌리고 이 로그인은 묻지 않음 → 같으면 UPDATE → 커밋 → 밀어 보내기(1행일 때만).
+                //   잠금 순서 = tenant_settings(공유) → user_sessions(X) = 설정 저장과 같은 순서.
+                //   ⚠️ 이 재확인을 빼면 G-C25 ⓑ · ⓓ 가 FAIL 한다(변이 M2).
+                IDbTransaction? askTx = null;
+                var askTxDone = false;   // 커밋 또는 되돌림을 마쳤다 — 잡기에서 다시 되돌리지 않는다
                 try
                 {
+                    askTx = _db.BeginTransaction();
+                    if (!await StillSameSettingAsync(t, askTx, ct).ConfigureAwait(false))
+                    {
+                        askTx.Rollback();
+                        askTxDone = true;
+                        _logger.LogInformation("[쿨타임] 설정이 바뀌어 묻기 물러남 — tenant={TenantId} sid={Sid}", t.TenantId, sid);
+                        continue;
+                    }
+                    // ⬛ [낡은 줄 · 11/28 이전] new { t.TenantId, CUtc = cUtc, Sid = sid, W = CooltimeWire.RuleFourWindowHours }, cancellationToken: ct)).ConfigureAwait(false);
                     var n = await _db.ExecuteAsync(new CommandDefinition(
                         "UPDATE user_sessions SET cooltime_asked_at = UTC_TIMESTAMP(6) WHERE session_id = @Sid AND " + askWhere,
-                        new { t.TenantId, CUtc = cUtc, Sid = sid, W = CooltimeWire.RuleFourWindowHours }, cancellationToken: ct)).ConfigureAwait(false);
+                        new { t.TenantId, CUtc = cUtc, Sid = sid, W = CooltimeWire.RuleFourWindowHours },
+                        transaction: askTx, cancellationToken: ct)).ConfigureAwait(false);
+                    askTx.Commit();
+                    askTxDone = true;
                     if (n == 1)
                     {
                         asked++;
@@ -241,8 +260,14 @@ public sealed class CooltimeEngine
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    // 🆕 11/28 — 교착(1213) · 잠금 기다림 초과 등으로 거래가 남았으면 되돌린다(설계 §4 · 지금 이 잡기 안에 되돌림 추가).
+                    if (askTx is not null && !askTxDone) TryRollback(askTx, t.TenantId, sid);
                     // #15 — 한 로그인의 실패가 다른 로그인 판정을 막지 않는다. 다음 바퀴가 다시 판정한다.
                     _logger.LogWarning(ex, "[쿨타임] 묻기 실패 — tenant={TenantId} sid={Sid}", t.TenantId, sid);
+                }
+                finally
+                {
+                    askTx?.Dispose();   // 취소(OperationCanceledException)로 빠져도 거래가 남지 않는다(커밋 안 된 거래 = 되돌림)
                 }
             }
         }
@@ -250,12 +275,16 @@ public sealed class CooltimeEngine
         return Tally();
     }
 
+    // ⬛ [낡은 줄 · 11/28 HQA 반려 P1 이전] 서명 = (tenantId, sid, nowLocal, cause, cUtc, ct) · 본문 = 공개 CooltimeLogoutAsync 호출
+    // 🆕 11/28 — 바퀴가 읽은 그 회사 값(expected)을 끝내기 본체에 넘긴다 ⇒ 끝내기 거래 첫 문장이 설정을 다시 확인한다.
+    //   서버 작업(① NoAnswer · ② Missed)만 이 길을 탄다. API 끝내기는 공개 CooltimeLogoutAsync(재확인 없음 · 설계 §2 P2).
     private async Task<CooltimeEndOutcome> EndQuietlyAsync(
-        string tenantId, string sid, DateTime nowLocal, CooltimeEndCause cause, DateTime? cUtc, CancellationToken ct)
+        string tenantId, string sid, DateTime nowLocal, CooltimeEndCause cause, DateTime? cUtc,
+        CooltimeTenantSnapshot expected, CancellationToken ct)
     {
         try
         {
-            var r = await CooltimeLogoutAsync(tenantId, sid, nowLocal, cause, jwtUserId: null, cooltimeUtc: cUtc, ct: ct)
+            var r = await CooltimeLogoutCoreAsync(tenantId, sid, nowLocal, cause, jwtUserId: null, cooltimeUtc: cUtc, expected: expected, ct: ct)
                 .ConfigureAwait(false);
             return r.Outcome;
         }
@@ -282,7 +311,7 @@ public sealed class CooltimeEngine
     /// <param name="jwtUserId">API 경로(<see cref="CooltimeEndCause.UserChoice"/>·<see cref="CooltimeEndCause.Countdown"/>)만 — JWT 사용자. 남의 행을 지울 길을 조건으로도 닫는다.</param>
     /// <param name="cooltimeUtc"><see cref="CooltimeEndCause.Missed"/> 만 — 그 회사의 설정 시각 순간 <c>C</c>(UTC). 🆕 11/27 §E E-4: 놓침의 퇴근 기준 순간 <c>A</c> 로도 쓴다.</param>
     /// <param name="ct">취소.</param>
-    public async Task<CooltimeEndResult> CooltimeLogoutAsync(
+    public Task<CooltimeEndResult> CooltimeLogoutAsync(
         string tenantId,
         string sessionId,
         DateTime nowLocal,
@@ -290,6 +319,24 @@ public sealed class CooltimeEngine
         string? jwtUserId = null,
         DateTime? cooltimeUtc = null,
         CancellationToken ct = default)
+        // ⬛ [낡은 줄 · 11/28 HQA 반려 P1 이전] public async Task<CooltimeEndResult> CooltimeLogoutAsync(...) { 본문 }
+        // 🆕 11/28 — 공개 서명 그대로(이름 · 인자 · 기본값 · 결과 · 반사 게이트 함정 회피). 본문은 아래 비공개 본체로 옮겼다(글자 그대로).
+        //   공개 길(API · 시험 직접 호출) = expected 없음 = 설정 재확인 없음 = 지금 동작 그대로(설계 §6 · P2).
+        => CooltimeLogoutCoreAsync(tenantId, sessionId, nowLocal, cause, jwtUserId, cooltimeUtc, expected: null, ct);
+
+    /// <summary>
+    /// 끝내기 본체 — <see cref="CooltimeLogoutAsync"/> 의 본문을 그대로 옮겼다. 🆕 11/28 <paramref name="expected"/> 가 있으면(서버 작업 ①② 만)
+    /// 거래 첫 문장에서 그 회사 설정을 공유 잠금으로 다시 확인한다(설계 쿨타임_설정끄기경주_고침 §3 (가) · §4).
+    /// </summary>
+    private async Task<CooltimeEndResult> CooltimeLogoutCoreAsync(
+        string tenantId,
+        string sessionId,
+        DateTime nowLocal,
+        CooltimeEndCause cause,
+        string? jwtUserId,
+        DateTime? cooltimeUtc,
+        CooltimeTenantSnapshot? expected,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(tenantId)) throw new ArgumentException("tenantId 필수", nameof(tenantId));
         if (string.IsNullOrWhiteSpace(sessionId)) throw new ArgumentException("sessionId 필수", nameof(sessionId));
@@ -328,7 +375,23 @@ public sealed class CooltimeEngine
         {
             try
             {
+                // 🆕 11/28 HQA 반려 P1(설계 쿨타임_설정끄기경주_고침 §3 (가) · §4) — 서버 작업(①②)이면 거래 「첫 문장」 =
+                //   그 회사 tenant_settings 행 공유 잠금 재확인(켬 · cooltime_at · cooltime_changed_at 세 값이 바퀴가 읽은 값과 같은가).
+                //   다르면(끔 · 시각 바꿈 · 끄고 다시 켬) 아무것도 안 하고 물러난다 = 세션 유지 · 토큰 미폐기 · 근태 무변경.
+                //   잠금 순서 = tenant_settings(공유) → user_sessions(X) → refresh_tokens → attendance
+                //     = 설정 저장(SettingsService.SaveCooltimeAsync: tenant_settings X → user_sessions X)과 같은 순서 ⇒ 새 순환 0.
+                //   🔴 세션 행을 잠근 「뒤」에 설정 행을 잠그면 저장과 반대 순서다(교착) — 반드시 이 자리(첫 문장).
+                //   ⚠️ 이 재확인을 빼면 G-C25 ⓐ · ⓒ · G-C26 ⓑ 가 FAIL 한다(변이 M1). 세션 행 잠금 뒤로 옮기면 G-C26 ⓐ 가 FAIL 한다(변이 M5).
+                if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))
+                {
+                    tx.Rollback();
+                    _logger.LogInformation(
+                        "[쿨타임] 설정이 바뀌어 끝내기 물러남 — tenant={TenantId} sid={Sid} cause={Cause}", tenantId, sessionId, cause);
+                    return NotEnded();
+                }
+
                 // 행을 먼저 잠그고(같은 표 · 같은 순서 · 교착 순서는 §D-6 그대로) 사용자 번호·물은 순간을 읽는다.
+                //   🆕 11/28 — 서버 작업이면 그 앞에 위 설정 행 공유 잠금이 먼저 있다(설정 저장과 같은 순서).
                 row = await _db.QueryFirstOrDefaultAsync<SessionRow>(new CommandDefinition(
                     @"SELECT user_id AS UserId, user_agent AS UserAgent, cooltime_asked_at AS AskedAtUtc
                         FROM user_sessions
@@ -506,6 +569,30 @@ public sealed class CooltimeEngine
     }
 
     // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// 🆕 11/28 HQA 반려 P1(설계 <c>docs/설계/erp/쿨타임_설정끄기경주_고침_설계_20261128.md</c> §3 (가)) — 서버 작업 쓰기 거래의 첫 문장.
+    /// 그 회사 <c>tenant_settings</c> 행을 공유 잠금으로 다시 읽어 켬 = 1 · <c>cooltime_at</c> · <c>cooltime_changed_at</c> 이
+    /// 바퀴가 읽은 값과 같으면(<c>&lt;=&gt;</c> · NULL 안전 · 비교는 SQL 안) <c>true</c>. 행 없음 · 하나라도 다름 = <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>공유 잠금인 까닭(설계 §1 꼴 B): 설정 저장 거래가 그 행을 <c>FOR UPDATE</c> 로 쥐고 있으면 여기서 기다렸다가
+    /// 커밋된 새 값을 본다. 잠그지 않는 읽기는 저장 커밋 전 옛 값을 보고 지나간다 ⇒ ⚠️ 잠금을 빼면 G-C26 ⓑ 가 FAIL 한다(변이 M4).</para>
+    /// <para>비교 칸 세 값 = 판 번호 몫: 끔 → 켬 값 · 시각 바꿈 → <c>cooltime_at</c> · <c>cooltime_changed_at</c> · 끄고 다시 켬 → <c>cooltime_changed_at</c>.
+    /// 같은 값 다시 저장은 <c>cooltime_changed_at</c> 이 그대로라 <c>true</c>(헛물러남 0 · G-C25 ⓕ).
+    /// ⚠️ 비교를 켬 하나로 줄이면 G-C25 ⓒ · ⓓ 가 FAIL 한다(변이 M3).</para>
+    /// <para>칸 형(출하 DDL <c>installer/hitpan_db_clean.sql</c> <c>tenant_settings</c> · #13): <c>tenant_id</c> varchar(36) 기본 키 ·
+    /// <c>cooltime_enabled</c> tinyint(1) · <c>cooltime_at</c> time · <c>cooltime_changed_at</c> datetime(6).</para>
+    /// </remarks>
+    private async Task<bool> StillSameSettingAsync(CooltimeTenantSnapshot expected, IDbTransaction tx, CancellationToken ct)
+    {
+        var hit = await _db.ExecuteScalarAsync<int?>(new CommandDefinition(
+            "SELECT 1 FROM tenant_settings WHERE tenant_id = @TenantId AND cooltime_enabled = 1" +
+            " AND cooltime_at <=> @At AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE",
+            new { expected.TenantId, At = expected.CooltimeAt, Changed = expected.ChangedAtUtc },
+            transaction: tx, cancellationToken: ct)).ConfigureAwait(false);
+        return hit == 1;
+    }
 
     private void TryRollback(IDbTransaction tx, string tenantId, string sessionId)
     {

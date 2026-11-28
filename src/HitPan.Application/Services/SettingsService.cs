@@ -312,8 +312,12 @@ public sealed class SettingsService : ISettingsService
     /// <item>세 칸 UPSERT + <c>cooltime_changed_at</c> — 켬(0→1) 또는 <c>cooltime_at</c> 이 바뀐 저장일 때만 <c>UTC_TIMESTAMP(6)</c>(E-2 · 저장 뒤 첫 C 부터 적용).</item>
     /// <item>켬/끔이 바뀌었으면(0→1 · 1→0) 그 회사 PC 세션의 물음·미룸 칸을 비운다(E-3 (다)).</item>
     /// </list>
-    /// 잠금 순서 = <c>tenant_settings</c> → <c>user_sessions</c>. 끝내기 함수는 <c>user_sessions</c> 를 잠근 뒤
+    /// 잠금 순서 = <c>tenant_settings</c> → <c>user_sessions</c>.
+    /// ⬛ [낡은 줄 · 11/28 HQA 반려 P1 이전] 끝내기 함수는 <c>user_sessions</c> 를 잠근 뒤
     /// <c>tenant_settings</c> 를 잠그지 않고(일반 SELECT) 읽기만 하므로 순환이 없다.
+    /// 🆕 11/28(설계 <c>docs/설계/erp/쿨타임_설정끄기경주_고침_설계_20261128.md</c> §4) — 쿨타임 엔진의 서버 작업 쓰기 거래
+    /// (끝내기 ①② · 묻기 ③④)도 첫 문장에서 <c>tenant_settings</c> 를 먼저(공유 잠금) 잡은 뒤 <c>user_sessions</c> 를 잠그므로 순서가 같다 — 순환 없음.
+    /// 이 저장이 먼저 이 행을 잡으면 엔진은 커밋을 기다렸다가 바뀐 값을 보고 물러난다(끈 뒤 오래된 바퀴가 묻기 · 끝내기를 못 함).
     /// </summary>
     private async Task SaveCooltimeAsync(string tenantId, CooltimeSave cooltime, CancellationToken ct)
     {

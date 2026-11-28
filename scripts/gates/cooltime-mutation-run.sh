@@ -68,6 +68,19 @@ MUTATIONS=(
   # ── 🆕 11/28 PM §290 S-4 — ④ 로그인도 E-2(저장 직후 C 건너뜀)를 따르는지: ⓕ 와 같은 바늘 · 대상 = G-C22 「④+저장 C 뒤」 줄 ──
   # ⬛ [낡은 줄 · 11/28 나누기 이전] ac = f 와 같은 바늘(continue;) · G_C22_ — 🆕 11/28 위 f 와 같은 까닭으로 return Tally()
   "ac|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) return Tally();|if (IsBeforeSettingChange(cUtc, null)) return Tally();|$DB.G_C22_|1"
+  # ── 🆕 11/28 HQA 반려 P1 설정 끄기 경주(설계 docs/설계/erp/쿨타임_설정끄기경주_고침_설계_20261128.md §6 변이 표 · 고침 커밋 뒤에만) ──
+  #   M1 끝내기 거래 재확인 뺌 → G-C25 ⓐ · ⓒ · G-C26 ⓑ / M2 묻기 거래 재확인 뺌 → G-C25 ⓑ · ⓓ / M3 비교 칸을 켬만으로 → G-C25 ⓒ · ⓓ
+  #   M4 공유 잠금 → 일반 SELECT → G-C26 ⓑ / M5 재확인을 세션 행 FOR UPDATE 뒤로(반대 순서) → G-C26 ⓐ
+  #   한 줄 = 시험 하나(이 표는 필터 하나만 받는다) ⇒ 같은 변이를 대상 시험마다 한 줄씩 둔다.
+  "M1a|$ENGINE|if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|if (expected is not null && !await Task.FromResult(true).ConfigureAwait(false))|$DB.G_C25a_|1"
+  "M1c|$ENGINE|if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|if (expected is not null && !await Task.FromResult(true).ConfigureAwait(false))|$DB.G_C25c_|1"
+  "M1-26b|$ENGINE|if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|if (expected is not null && !await Task.FromResult(true).ConfigureAwait(false))|$DB.G_C26b_|1"
+  "M2b|$ENGINE|if (!await StillSameSettingAsync(t, askTx, ct).ConfigureAwait(false))|if (!await Task.FromResult(true).ConfigureAwait(false))|$DB.G_C25b_|1"
+  "M2d|$ENGINE|if (!await StillSameSettingAsync(t, askTx, ct).ConfigureAwait(false))|if (!await Task.FromResult(true).ConfigureAwait(false))|$DB.G_C25d_|1"
+  "M3c|$ENGINE| AND cooltime_at <=> @At AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE\"| LOCK IN SHARE MODE\"|$DB.G_C25c_|1"
+  "M3d|$ENGINE| AND cooltime_at <=> @At AND cooltime_changed_at <=> @Changed LOCK IN SHARE MODE\"| LOCK IN SHARE MODE\"|$DB.G_C25d_|1"
+  "M4-26b|$ENGINE|<=> @Changed LOCK IN SHARE MODE\"|<=> @Changed\"|$DB.G_C26b_|1"
+  "M5-26a|$ENGINE|if (expected is not null && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|if (expected is not null && await _db.ExecuteAsync(new CommandDefinition(\"SELECT session_id FROM user_sessions WHERE session_id = @Sid FOR UPDATE\", new { Sid = sessionId }, transaction: tx, cancellationToken: ct)).ConfigureAwait(false) > int.MinValue && !await StillSameSettingAsync(expected, tx, ct).ConfigureAwait(false))|$DB.G_C26a_|1"
 )
 
 want=" $* "
