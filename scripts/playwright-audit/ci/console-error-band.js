@@ -27,9 +27,17 @@ const env = process.env;
 const BROWSER = 'chromium';
 const SCOPE = 'BAND';
 const MODES = Object.freeze(['control', 'fixed']);
-const BAND_TOTAL_MS = 8 * 60 * 1000; // 이 몸 전체 상한(워크플로 S9b 단계 상한 10분 안)
+// ⬛ 옛 줄(고침1 §8-5 전 · 장면 13): const BAND_TOTAL_MS = 8 * 60 * 1000; // 이 몸 전체 상한(워크플로 S9b 단계 상한 10분 안)
+// 고침1(지시서 §8-5 #2 · #3 · #4) — 장면 13 → 16(G-S1b · G-P5 · G-X1o) · 8분 × 16/13 ≈ 9.9 → 10분(워크플로 S9b 단계 상한 12분 안)
+const BAND_TOTAL_MS = 10 * 60 * 1000;
 const PAGE_MS = 60000;
 const FORBID_TEXT = '이 기능에 접근할 권한이 없습니다'; // HitPanApiAuthHandler 평소 403 갈래 알림 글 머리(k35-ws03-closed.js 와 같은 글자 · 따로 둠)
+// 고침1(지시서 §8-5 #2 · 대표 ③ · ④) — 쉬운 알림 글 전문(앱 LoadFailedNotice.Text 와 글자까지 같음 · 자체시험 B14 가 원문과 맞춤).
+//   알림 맞춤은 앞머리 고정(startsWith) — 「대시보드 정보를 불러오지 못했습니다」 같은 남의 알림은 안 맞는다([3-V] P3-3).
+const NOTICE_TEXT = '정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+// 알림 칸(고침1 · 고친 뒤 모드에서만 잼) — once = 사람이 연 화면(그 알림 글 정확히 1 · 원래 알림이 쉬운 알림이 아니면 쉬운 알림 0 = 같은 실패에 두 번 아님)
+//   · quiet = 상주 부품 · 정상 짝(그 장면 알림 글 밖의 알림 0 — 쉬운 알림 포함)
+const NOTICES = Object.freeze(['once', 'quiet']);
 // 닫힌 주소(BetaClosedRoutes.All · 2026-11-28 판) — 장면이 닫힌 화면을 고르면 안내 화면만 떠 그 줄에 안 닿는다(꼴 검사)
 const CLOSED_PATHS = Object.freeze(['/settings', '/settings/ai-assistant', '/sales/profitability', '/tax-invoice-stats', '/accounting/export', '/welcome']);
 // 가로채면 안 되는 주소 — U(#43) 공유 줄(설계 §5-2 ⚠) · 로그인 · 갱신 · 로그아웃(세션 놓기 길)
@@ -40,61 +48,79 @@ const INJECTS = Object.freeze({
   403: { status: 403 },
   abort: { abort: 'failed' }, // 네트워크 끊김
   real403: { real: true }, // 가로채기 0 · 서버가 진짜 403
+  // 고침1(§8-5 #3) — 가로채기 0 · 정상 짝 장면(그 주소 2xx 응답 1 이상이어야 · 단추 열림 · 경고 흔적 0)
+  none: { none: true },
 });
 
 // ── 장면 표(설계 §5-2 · 키 = 결과표 path 칸 · 줄 = 고치기 전 판 dc49c2d0 기준) ──
 //   tags = 그 줄의 표지(옛 줄 글자 앞머리 · 설계 §2-2 「표지 그대로」) — 대조군은 console.error 에서 · 고친 뒤는 console.warn 에서 센다.
 //   snack = 그 자리에 원래 있던 알림 글(없으면 null) — 두 모드 다 1 이상이어야 함(사라지면 빨강 · 설계 §5-1 알림 칸).
+//   고침1(지시서 §8-5 #2) — 칸 둘 더함: notice = 'once'(연 화면) · 'quiet'(상주 · 정상 짝) · newSnack = 그 알림이 고친 뒤 판에서 새로 붙은 쉬운 알림
+//   (대조군 판엔 없음 → 대조군 모드에선 알림 칸을 안 잼). ⬛ 옛 칸: G-S2 · S3 · P1 · C1 snack: null(알림을 안 잼 = [4] P1-2) · G-X1 · G-P4 snack: '정보를 불러오지 못했습니다'(앞머리 부분 일치).
 const SCENES = Object.freeze([
   Object.freeze({ key: 'G-R1a', branch: 'R', who: 'owner', page: '/', match: { path: '/api/cs/replies/unread-count' }, inject: '503',
-    tags: ['[CS] 안 읽은 답 수 조회 실패', '[Sidebar] CS 안읽음 수 조회 실패'], snack: null,
-    lines: 'CsReplyBadge.razor:88 · Sidebar.razor:660', what: '상주 · CS 안 읽은 수 503(배너 · 사이드바 둘 다)' }),
+    tags: ['[CS] 안 읽은 답 수 조회 실패', '[Sidebar] CS 안읽음 수 조회 실패'], snack: null, notice: 'quiet',
+    lines: 'CsReplyBadge.razor:88 · Sidebar.razor:660', what: '상주 · CS 안 읽은 수 503(배너 · 사이드바 둘 다 · 알림 0)' }),
   Object.freeze({ key: 'G-R1b', branch: 'R', who: 'owner', page: '/', match: { path: '/api/cs/replies/unread-count' }, inject: 'abort',
-    tags: ['[CS] 안 읽은 답 수 조회 실패', '[Sidebar] CS 안읽음 수 조회 실패'], snack: null,
-    lines: 'CsReplyBadge.razor:88 · Sidebar.razor:660', what: '상주 · CS 안 읽은 수 끊김(배너 · 사이드바 둘 다)' }),
+    tags: ['[CS] 안 읽은 답 수 조회 실패', '[Sidebar] CS 안읽음 수 조회 실패'], snack: null, notice: 'quiet',
+    lines: 'CsReplyBadge.razor:88 · Sidebar.razor:660', what: '상주 · CS 안 읽은 수 끊김(배너 · 사이드바 둘 다 · 알림 0)' }),
   Object.freeze({ key: 'G-R2', branch: 'R', who: 'owner', page: '/', match: { path: '/api/auth/terms/status' }, inject: '403',
-    tags: ['[HP15]'], snack: FORBID_TEXT,
-    lines: 'TermsConsentBanner.razor:69', what: '상주 · 약관 상태 403(처리기 알림 그대로)' }),
+    tags: ['[HP15]'], snack: FORBID_TEXT, notice: 'quiet',
+    lines: 'TermsConsentBanner.razor:69', what: '상주 · 약관 상태 403(처리기 알림 그대로 · 그 밖 알림 0)' }),
   // ⬛ 옛 줄(대조군 1회째 c3b5240b · 런 46151366436 = 서버 200 · 403 0 · 시험 직원 기본 역할 sales_user 라 SalesOnly 에 안 걸림):
   //   inject: 'real403' · what: '공용 서비스 · 직원 창 어음 목록 서버 403(SalesOnly · 가로채기 0)'
   // 고침1(지시서 §8-2 PM 결재): 서버 403 에 기대지 않고 시험 장치가 어음 목록 조회를 403 으로 가로챔(앱 손 0)
   //   → 처리기 평소 403 갈래 알림 그대로 + GetFromJsonAsync 예외 → [Bills.List] 줄에 닿음(역할과 무관).
   Object.freeze({ key: 'G-S1', branch: 'S', who: 'staff', page: '/accounting/bills', match: { path: '/api/finance/bills' }, inject: '403',
-    tags: ['[Bills.List]'], snack: FORBID_TEXT,
-    lines: 'BillsCardsBankService.cs:21', what: '공용 서비스 · 직원 창 어음 목록 403(시험 장치 가로채기 · 처리기 알림 그대로)' }),
+    tags: ['[Bills.List]'], snack: FORBID_TEXT, notice: 'once',
+    lines: 'BillsCardsBankService.cs:21', what: '공용 서비스 · 직원 창 어음 목록 403(시험 장치 가로채기 · 처리기 알림 한 번 · 쉬운 알림 0 = 403 거름)' }),
+  // 고침1(지시서 §8-5 #2 · [4] P1-2) — 대표 ③ 첫 항목(어음 · 카드 · 통장 503 = 쉬운 알림 한 번)을 재는 장면.
+  //   카드 · 통장 목록은 같은 부품(BillsCardsBankService · 같은 NotifyLoadFailed 한 자리)이라 어음 하나로 둔다(개발명세서 고침1 §2).
+  Object.freeze({ key: 'G-S1b', branch: 'S', who: 'owner', page: '/accounting/bills', match: { path: '/api/finance/bills' }, inject: '503',
+    tags: ['[Bills.List] 어음 목록 조회 실패'], snack: NOTICE_TEXT, notice: 'once', newSnack: true, fixedOnly: true,
+    lines: 'BillsCardsBankService.cs:28', what: '공용 서비스 · 어음 목록 503(쉬운 알림 한 번)' }),
   Object.freeze({ key: 'G-S2', branch: 'S', who: 'owner', page: '/', match: { path: '/api/dashboard/unified-calendar' }, inject: 'abort',
-    tags: ['[UnifiedCalendarService.'], snack: null,
-    lines: 'UnifiedCalendarService.cs:55', what: '공용 서비스 · 달력 월 조회 끊김(404 · 503 은 조용히 null — 줄에 안 닿음)' }),
+    tags: ['[UnifiedCalendarService.'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
+    lines: 'UnifiedCalendarService.cs:55', what: '공용 서비스 · 달력 월 조회 끊김(404 · 503 은 조용히 null — 줄에 안 닿음 · 쉬운 알림 한 번)' }),
   Object.freeze({ key: 'G-S3', branch: 'S', who: 'owner', page: '/return-status', match: { path: '/api/purchase/returns' }, inject: '503',
-    tags: ['[작18] 매입반품 목록 조회 실패'], snack: null,
-    lines: 'DeliveryService.cs:593', what: '공용 서비스 · 매입 반품 목록 503(반품현황 전표별 기본 보기)' }),
+    tags: ['[작18] 매입반품 목록 조회 실패'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
+    lines: 'DeliveryService.cs:593', what: '공용 서비스 · 매입 반품 목록 503(반품현황 전표별 기본 보기 · 쉬운 알림 한 번)' }),
   Object.freeze({ key: 'G-P1', branch: 'P', who: 'owner', page: '/purchase/statistics', match: { path: '/api/reports/purchase-statistics' }, inject: '503',
-    tags: ['[HP15]'], snack: null,
-    lines: 'PurchaseStatisticsPage.razor:155', what: '업무 현황 · 매입 통계 503' }),
+    tags: ['[HP15]'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
+    lines: 'PurchaseStatisticsPage.razor:155', what: '업무 현황 · 매입 통계 503(쉬운 알림 한 번)' }),
   Object.freeze({ key: 'G-P2', branch: 'P', who: 'owner', page: '/sales/statistics', match: { path: '/api/reports/sales-statistics' }, inject: '503',
-    tags: ['[HP15]'], snack: '판매현황 조회에 실패했습니다',
-    lines: 'SalesStatisticsPage.razor:155', what: '업무 현황 · 판매 통계 503(알림 그대로)' }),
+    tags: ['[HP15]'], snack: '판매현황 조회에 실패했습니다', notice: 'once',
+    lines: 'SalesStatisticsPage.razor:155', what: '업무 현황 · 판매 통계 503(알림 그대로 한 번)' }),
   Object.freeze({ key: 'G-P3', branch: 'P', who: 'owner', page: '/stock', match: { path: '/api/reports/stock-status' }, inject: '503',
-    tags: ['[HP15]'], snack: '재고현황 조회에 실패했습니다',
-    lines: 'Stock.razor:132', what: '업무 현황 · 재고현황 503(알림 그대로)' }),
+    tags: ['[HP15]'], snack: '재고현황 조회에 실패했습니다', notice: 'once',
+    lines: 'Stock.razor:132', what: '업무 현황 · 재고현황 503(알림 그대로 한 번)' }),
   Object.freeze({ key: 'G-C1', branch: 'C', who: 'owner', page: '/support/cs/ci-band-none', match: { re: '^/api/cs/requests/[^/]+/replies$' }, inject: '503',
-    tags: ['[CS] 답 목록 조회 실패'], snack: null,
-    lines: 'CsInboxPage.razor:179', what: '그 밖 · CS 상세 답 목록 503' }),
+    tags: ['[CS] 답 목록 조회 실패'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
+    lines: 'CsInboxPage.razor:179', what: '그 밖 · CS 상세 답 목록 503(쉬운 알림 한 번)' }),
   Object.freeze({ key: 'G-C2', branch: 'C', who: 'owner', page: '/print-settings', match: { path: '/api/settings/print-common' }, inject: '404',
-    tags: ['[PrintSettings] 공통 설정을 못 읽었다'], snack: '워터마크 설정을 불러오지 못했습니다',
-    lines: 'PrintSettingsPage.razor:395', what: '설정 · 인쇄 공통 설정 404(알림 그대로)' }),
+    tags: ['[PrintSettings] 공통 설정을 못 읽었다'], snack: '워터마크 설정을 불러오지 못했습니다', notice: 'once',
+    lines: 'PrintSettingsPage.razor:395', what: '설정 · 인쇄 공통 설정 404(알림 그대로 한 번)' }),
   // 넓힘X1(지시서 §8-3 대표 ④ · 개발명세서 docs/개발/erp/20261128_화면오류기록띠_넓힘X1_개발명세서.md §5) — 고친 뒤에만 도는 장면(fixedOnly).
   //   대조군 판(고치기 전)엔 쉬운 알림 · 저장 막음이 없으므로 대조군 모드에선 목록에서 빠진다(scenesFor).
   //   snack = LoadFailedNotice.Text 앞머리(자체시험 B12 가 원문 글자와 맞춤) · block = 막혀야 할 단추 이름(빈 값 덮어쓰기 방지).
   Object.freeze({ key: 'G-X1', branch: 'X', who: 'owner', page: '/data/backup', match: { path: '/api/backup/settings' }, inject: '503',
-    tags: ['[BackupService.GetSettingsAsync]'], snack: '정보를 불러오지 못했습니다', block: '설정 저장', fixedOnly: true,
-    lines: 'BackupService.cs:13 · BackupPage.razor:171', what: '넓힘X1 · 백업 설정 조회 503(쉬운 알림 · [설정 저장] 막힘)' }),
+    tags: ['[BackupService.GetSettingsAsync]'], snack: NOTICE_TEXT, notice: 'once', newSnack: true, block: '설정 저장', fixedOnly: true,
+    lines: 'BackupService.cs:13 · BackupPage.razor:171', what: '넓힘X1 · 백업 설정 조회 503(쉬운 알림 한 번 · [설정 저장] 막힘)' }),
+  // 고침1(지시서 §8-5 #3 · [3-V] P2-1) — G-X1 의 정상 짝: 가로채기 없는 같은 화면 = [설정 저장] 열림 · 그 조회 2xx 1 이상 · 경고 흔적 0 · 알림 0.
+  //   「성공 갈래에서 막힘 표지를 안 끔」 회귀(백업 설정을 영영 저장 못 함)를 잡는다.
+  Object.freeze({ key: 'G-X1o', branch: 'X', who: 'owner', page: '/data/backup', match: { path: '/api/backup/settings' }, inject: 'none',
+    tags: ['[BackupService.GetSettingsAsync]'], snack: null, notice: 'quiet', open: '설정 저장', fixedOnly: true,
+    lines: 'BackupPage.razor:73 · :171', what: '넓힘X1 짝 · 백업 설정 조회 정상([설정 저장] 열림 · 알림 0)' }),
   // 넓힘 X2(지시서 §8-3 대표 ④ · 개발명세서 docs/개발/erp/20261128_화면오류기록띠_넓힘X2_개발명세서.md) — 무음 화면 넓힘 대표 1(발주 현황).
   //   snack = 이번에 새로 붙인 쉬운 알림 글(LoadFailedNotice.Text 앞머리) — 고친 뒤 판(fixed) 장면이다. 대조군(control)으로 돌리면 이 글이 없어 거짓이 맞다
   //   (대조군 런은 §8-3 에서 끝남 · 판정 함수 손 0 — X1 장면과 겹침 줄임). 키 꼴 검사(G-[RSPC]n)에 맞춰 P 갈래 다음 번호.
   Object.freeze({ key: 'G-P4', branch: 'P', who: 'owner', page: '/purchase-order-status', match: { path: '/api/reports/purchase-orders' }, inject: '503',
-    tags: ['[HP15] 발주현황 조회 실패'], snack: '정보를 불러오지 못했습니다',
-    lines: 'PurchaseOrderStatusPage.razor:130', what: '넓힘 X2 · 발주 현황 503(띠 0 · 경고 흔적 · 쉬운 알림)' }),
+    tags: ['[HP15] 발주현황 조회 실패'], snack: NOTICE_TEXT, notice: 'once', newSnack: true,
+    lines: 'PurchaseOrderStatusPage.razor:130', what: '넓힘 X2 · 발주 현황 503(띠 0 · 경고 흔적 · 쉬운 알림 한 번)' }),
+  // 고침1(지시서 §8-5 #4 · [4] P2-1) — 설계 §6 VP 자리(PurchaseStatusPage :221 「[HP15] 매입현황 조회 실패」)를 여는 장면. 원래 알림(Error) 한 번 · 쉬운 알림 0.
+  Object.freeze({ key: 'G-P5', branch: 'P', who: 'owner', page: '/purchase-status', match: { path: '/api/reports/purchases' }, inject: '503',
+    tags: ['[HP15] 매입현황 조회 실패'], snack: '매입현황 조회에 실패했습니다', notice: 'once', fixedOnly: true,
+    lines: 'PurchaseStatusPage.razor:221', what: '업무 현황 · 매입현황 503(알림 그대로 한 번)' }),
 ]);
 
 // 모드에 도는 장면 — 대조군은 고치기 전 판에 있던 자리만(fixedOnly 뺌) · 고친 뒤는 전부
@@ -155,6 +181,17 @@ function sceneListProblems(list = SCENES) {
     if (!Array.isArray(s.tags) || s.tags.length === 0 || s.tags.some((t) => typeof t !== 'string' || !t.startsWith('[') || t.length < 3)) out.push(`${n} 표지 꼴`);
     if (!(s.snack === null || (typeof s.snack === 'string' && s.snack.length > 0))) out.push(`${n} 알림 글 꼴`);
     if (s.inject === 'real403' && s.who !== 'staff') out.push(`${n} 진짜 403 은 직원 창만`);
+    // 고침1(§8-5 #2 · #3) — 알림 칸 · 새 알림 · 정상 짝 꼴
+    if (!NOTICES.includes(s.notice)) out.push(`${n} 알림 칸 꼴(once · quiet 만)`);
+    if (s.notice === 'once' && s.snack === null) out.push(`${n} 연 화면 장면인데 알림 글 없음`);
+    if (s.notice === 'quiet' && s.snack === NOTICE_TEXT) out.push(`${n} 조용한 장면에 쉬운 알림 글`);
+    if (!(s.newSnack === undefined || s.newSnack === true)) out.push(`${n} newSnack 꼴`);
+    if (s.newSnack === true && !(s.snack === NOTICE_TEXT && s.notice === 'once')) out.push(`${n} 새 알림은 쉬운 알림 글 · once 만`);
+    if (!(s.open === undefined || (typeof s.open === 'string' && s.open.trim().length > 0))) out.push(`${n} 열릴 단추 꼴`);
+    if (s.open !== undefined && s.block !== undefined) out.push(`${n} 막힘 · 열림 칸 같이`);
+    const isNone = s.inject === 'none';
+    if (isNone && !(typeof s.open === 'string' && s.fixedOnly === true && s.notice === 'quiet' && s.snack === null)) out.push(`${n} 정상 짝은 열릴 단추 · 고친 뒤에만 · quiet · 알림 글 없음`);
+    if (!isNone && s.open !== undefined) out.push(`${n} 열릴 단추는 정상 짝(가로채기 없음)만`);
   });
   return out;
 }
@@ -176,23 +213,62 @@ function tallyLine(cur, type, text, tags) {
   return cur;
 }
 const cnt = (m, k) => (m && Object.prototype.hasOwnProperty.call(m, k) && Number.isInteger(m[k]) ? m[k] : 0);
-// 장면 판정 — o = { routeHits, real403, band3, band10, err, warn, appErr, snackHit }
+// 알림 글 맞춤 — 앞머리 고정(고침1 · [3-V] P3-3 「부분 일치」 → 남의 알림 「대시보드 정보를 …」 이 안 맞게)
+function snackMatch(t, want) {
+  return typeof t === 'string' && typeof want === 'string' && want.length > 0 && t.startsWith(want);
+}
+// 알림 셈(고침1 · [4] P1-2) — 원목록 그대로 셈(⬛ 옛: Set 으로 모아 같은 글 2번을 1로 셈) · 원목록 못 읽음(null) = 셋 다 null(판정 거짓)
+//   snackHit = 그 장면 알림 글 수 · other = 그 밖 알림 수 · easy = 쉬운 알림 글 수
+function countSnacks(scene, raw) {
+  if (!Array.isArray(raw)) return { snackHit: null, other: null, easy: null };
+  const mine = (t) => scene.snack !== null && snackMatch(t, scene.snack);
+  return {
+    snackHit: scene.snack === null ? 0 : raw.filter(mine).length,
+    other: raw.filter((t) => !mine(t)).length,
+    easy: raw.filter((t) => snackMatch(t, NOTICE_TEXT)).length,
+  };
+}
+// ⬛ 옛 줄(고침1 전): // 장면 판정 — o = { routeHits, real403, band3, band10, err, warn, appErr, snackHit }
+// 장면 판정 — o = { routeHits, real403, ok2xx, band3, band10, err, warn, appErr, snackHit, other, easy, blocked, opened }
 function judgeScene(mode, scene, o) {
   const why = [];
   if (!scene || !o) return { pass: false, why: ['재료 없음'] };
   const real = scene.inject === 'real403';
-  const hits = real ? o.real403 : o.routeHits;
-  if (!(Number.isInteger(hits) && hits >= 1)) why.push(real ? '서버 403 응답 0(직원 역할 · 장면 무효)' : '가로챔 0(화면이 그 주소를 안 부름 · 장면 무효)');
-  if (scene.snack !== null && !(Number.isInteger(o.snackHit) && o.snackHit >= 1)) why.push('원래 알림 글 0');
+  // 고침1(§8-5 #3) — 정상 짝(none) = 가로챔 0 이어야 · 그 주소 2xx 응답 1 이상(화면이 그 주소를 실제로 부르고 성공)
+  const none = scene.inject === 'none';
+  if (none) {
+    if (o.routeHits !== 0) why.push(`정상 짝인데 가로챔 ${o.routeHits}`);
+    if (!(Number.isInteger(o.ok2xx) && o.ok2xx >= 1)) why.push(`그 주소 2xx 응답 0(${o.ok2xx} · 화면이 안 부르거나 실패 · 장면 무효)`);
+  } else {
+    const hits = real ? o.real403 : o.routeHits;
+    if (!(Number.isInteger(hits) && hits >= 1)) why.push(real ? '서버 403 응답 0(직원 역할 · 장면 무효)' : '가로챔 0(화면이 그 주소를 안 부름 · 장면 무효)');
+  }
+  // ⬛ 옛 줄(고침1 전): if (scene.snack !== null && !(Number.isInteger(o.snackHit) && o.snackHit >= 1)) why.push('원래 알림 글 0');
+  //   고침1 — 새 알림(newSnack)은 대조군 판엔 없으므로 대조군에선 안 잼 · 고친 뒤 once 는 아래에서 「정확히 1」 로 잼
+  if (scene.snack !== null && !(mode === 'control' && scene.newSnack === true) && !(Number.isInteger(o.snackHit) && o.snackHit >= 1)) why.push('원래 알림 글 0');
   // 넓힘X1 — 막혀야 할 단추가 있는 장면은 그 단추가 막혀 있어야(못 읽음 · 못 찾음 = 거짓)
   if (typeof scene.block === 'string' && o.blocked !== true) why.push(`단추 안 막힘(${scene.block} · ${o.blocked})`);
+  // 고침1(§8-5 #3) — 열려 있어야 할 단추(정상 짝) — 못 읽음 · 못 찾음 = 거짓
+  if (typeof scene.open === 'string' && o.opened !== true) why.push(`단추 안 열림(${scene.open} · ${o.opened})`);
   if (mode === 'control') {
     if (!(o.band3 === true || o.band10 === true)) why.push('흰 띠 0(대조군은 1 이어야 — 장면이 그 줄에 안 닿음)');
     for (const t of scene.tags) if (cnt(o.err, t) < 1) why.push(`표준오류 표지 0 ${t}`);
   } else if (mode === 'fixed') {
     if (o.band3 !== false || o.band10 !== false) why.push(`흰 띠 +3초 ${o.band3} · +10초 ${o.band10}(둘 다 거짓이어야)`);
-    for (const t of scene.tags) if (cnt(o.warn, t) < 1) why.push(`경고 흔적 0 ${t}`);
+    // ⬛ 옛 줄(고침1 전): for (const t of scene.tags) if (cnt(o.warn, t) < 1) why.push(`경고 흔적 0 ${t}`);
+    //   고침1 — 정상 짝은 실패 길을 안 지나야(경고 흔적 0) · 그 밖은 그대로 1 이상
+    if (none) { for (const t of scene.tags) if (cnt(o.warn, t) !== 0) why.push(`정상 짝인데 경고 흔적 ${cnt(o.warn, t)} ${t}`); }
+    else { for (const t of scene.tags) if (cnt(o.warn, t) < 1) why.push(`경고 흔적 0 ${t}`); }
     if (o.appErr !== 0) why.push(`앱 표준오류 꼴 ${o.appErr}`);
+    // 고침1(§8-5 #2 · 대표 ③ · ④) — 알림 칸: 연 화면 = 그 알림 정확히 1(쉬운 알림이 아니면 쉬운 알림 0 · 같은 실패에 두 번 아님) · 상주 · 짝 = 그 밖 알림 0
+    if (scene.notice === 'once') {
+      if (o.snackHit !== 1) why.push(`연 화면 알림 ${o.snackHit}(정확히 1 이어야)`);
+      if (scene.snack !== NOTICE_TEXT && o.easy !== 0) why.push(`쉬운 알림 ${o.easy}(원래 알림과 겹침 · 0 이어야)`);
+    } else if (scene.notice === 'quiet') {
+      if (o.other !== 0) why.push(`조용해야 할 장면 알림 ${o.other}(0 이어야)`);
+    } else {
+      why.push('알림 칸 꼴 이상');
+    }
   } else {
     why.push('모드 꼴 이상');
   }
@@ -332,15 +408,18 @@ async function runScene(st, kb, scene) {
   try {
     page = await kb.context.newPage();
     const cur = newTally(scene.tags);
-    const hit = { route: 0, real403: 0, statuses: [] };
+    // ⬛ 옛 줄(고침1 전): const hit = { route: 0, real403: 0, statuses: [] };
+    const hit = { route: 0, real403: 0, ok2xx: 0, statuses: [] };
     page.on('console', (msg) => tallyLine(cur, msg.type(), msg.text(), scene.tags));
     page.on('response', (res) => {
       if (!routeMatch(scene, res.url())) return;
       if (res.status() === 403) hit.real403 += 1;
+      if (res.status() >= 200 && res.status() < 300) hit.ok2xx += 1; // 고침1 — 정상 짝(none)용
       if (hit.statuses.length < 6) hit.statuses.push(res.status());
     });
     const inj = INJECTS[scene.inject];
-    if (!inj.real) {
+    // ⬛ 옛 줄(고침1 전): if (!inj.real) {
+    if (!inj.real && !inj.none) {
       step.now = '가로채기 걸기';
       await page.route((u) => routeMatch(scene, u), (route) => {
         hit.route += 1;
@@ -369,11 +448,29 @@ async function runScene(st, kb, scene) {
           return null;
         });
     }
-    const snacks = [...new Set([...(a.snacks || []), ...(b.snacks || [])])];
-    const snackHit = b.snacks === null && a.snacks === null ? null : (scene.snack === null ? 0 : snacks.filter((t) => t.includes(scene.snack)).length);
-    const other = snacks.filter((t) => scene.snack === null || !t.includes(scene.snack));
+    // 고침1(§8-5 #3) — 열려 있어야 할 단추(정상 짝만 · +10초 뒤 · 못 찾음 · 못 읽음 = null → 판정 거짓)
+    let opened = null;
+    if (typeof scene.open === 'string') {
+      step.now = '단추 열림 보기';
+      opened = await K.withTimeout(page.getByRole('button', { name: scene.open, exact: true }).first().isEnabled({ timeout: 5000 }), K.EVAL_MS, '단추 열림 보기')
+        .catch((e) => {
+          console.log(`띠 장면 ${scene.key} 단추 열림 보기 실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 80) : L.errorName(e)}`);
+          return null;
+        });
+    }
+    // ⬛ 옛 줄(고침1 전 · Set 으로 같은 글 2번을 1로 셈 · 부분 일치 = [4] P1-2 · [3-V] P3-3):
+    //   const snacks = [...new Set([...(a.snacks || []), ...(b.snacks || [])])];
+    //   const snackHit = b.snacks === null && a.snacks === null ? null : (scene.snack === null ? 0 : snacks.filter((t) => t.includes(scene.snack)).length);
+    //   const other = snacks.filter((t) => scene.snack === null || !t.includes(scene.snack));
+    // 고침1 — 원목록 그대로: 창의 기록(window.__bandSnack)은 문서 안에서 쌓이기만 하므로 +10초 목록이 +3초 목록을 품는다 → +10초 것(못 읽으면 +3초 것)
+    const raw = Array.isArray(b.snacks) ? b.snacks : (Array.isArray(a.snacks) ? a.snacks : null);
+    const sc = countSnacks(scene, raw);
+    const snackHit = sc.snackHit;
+    const other = (raw || []).filter((t) => !(scene.snack !== null && snackMatch(t, scene.snack)));
     // ⬛ 옛 줄(넓힘X1 전): const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit };
-    const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit, blocked };
+    // ⬛ 옛 줄(고침1 전): const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit, blocked };
+    const o = { routeHits: hit.route, real403: hit.real403, ok2xx: hit.ok2xx, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr,
+      snackHit, other: sc.other, easy: sc.easy, blocked, opened };
     const v = judgeScene(st.mode, scene, o);
     const showMap = (m) => scene.tags.map((t) => cnt(m, t)).join('/');
     // 기록만(판정 아님) — 다른 알림 글 수 · 첫 셋(소독) · 착지 · 응답 숫자
@@ -381,10 +478,12 @@ async function runScene(st, kb, scene) {
       + ` · 응답 ${hit.statuses.join(',') || '없음'} · 흰 띠 +3초 ${a.band} +10초 ${b.band} · 표준오류 표지 ${showMap(cur.err)} · 경고 표지 ${showMap(cur.warn)}`
       + ` · 앱 표준오류 ${cur.appErr} · 원래 알림 ${snackHit} · 다른 알림 ${other.length} ${other.slice(0, 3).map((t) => K.consoleLine(t, 50)).join(' | ') || '-'}`
       + `${typeof scene.block === 'string' ? ` · 단추 막힘 ${blocked}` : ''}`
+      + `${typeof scene.open === 'string' ? ` · 단추 열림 ${opened} · 2xx ${hit.ok2xx}` : ''} · 쉬운 알림 ${sc.easy} · 알림 칸 ${scene.notice}`
       + `${v.pass ? '' : ` · 이유 ${v.why.join(' · ')}`}`);
     // ⬛ 옛 줄(넓힘X1 전): const got = { m: st.mode, hit: …, sn: snackHit, other: other.length, at: `${s.where}@${s.path}` };
     const got = { m: st.mode, hit: scene.inject === 'real403' ? hit.real403 : hit.route, b3: a.band, b10: b.band, e: showMap(cur.err), w: showMap(cur.warn), app: cur.appErr, sn: snackHit, other: other.length, at: `${s.where}@${s.path}`,
-      ...(typeof scene.block === 'string' ? { blk: blocked } : {}) };
+      ...(typeof scene.block === 'string' ? { blk: blocked } : {}),
+      ...(typeof scene.open === 'string' ? { opn: opened, ok: hit.ok2xx } : {}), easy: sc.easy }; // 고침1 — 열림 · 2xx · 쉬운 알림 수
     recScene(st, scene, { pass: v.pass, got: v.pass ? got : { ...got, why: v.why } });
   } catch (e) {
     devScene(st, scene, step.now, e);
@@ -492,4 +591,5 @@ module.exports = {
   SCENES, MODES, SCOPE, INJECTS, CLOSED_PATHS, NO_INTERCEPT, FORBID_TEXT,
   modeOf, routeMatch, sceneListProblems, newTally, tallyLine, judgeScene, endCode, bandResultPath,
   scenesFor, // 넓힘X1
+  NOTICE_TEXT, NOTICES, snackMatch, countSnacks, // 고침1
 };

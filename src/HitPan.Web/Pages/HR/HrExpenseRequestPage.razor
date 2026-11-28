@@ -107,7 +107,11 @@
     {
         try
         {
-            _items = await HrSvc.GetHrExpensesAsync();
+            // ⬛ [낡은 줄 · 화면오류기록띠 고침 1 §8-5 #1] _items = await HrSvc.GetHrExpensesAsync();   — 서비스가 실패를 빈 목록으로 삼켜 아래 catch 가 돌지 않았다(실패 신호 0)
+            // 대표 ④(지시서 §8-3) — 못 불러오면 쉬운 알림 한 번(기록은 서비스가 남김) · 빈 목록이 「자료 없음」 으로만 보이지 않게.
+            var rows = await HrSvc.GetHrExpensesOrNullAsync();
+            if (rows is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+            _items = rows ?? new();
         }
         catch (Exception ex)
         {

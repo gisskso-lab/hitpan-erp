@@ -102,6 +102,9 @@
 
     // --- 데이터 ---
     private List<WarehouseOption> _warehouses = new();
+    // 화면오류기록띠 고침 1(지시서 §8-5 #5 · [4] P2-2) — 화면을 열 때 창고 목록 실패가 이미 알렸으면 바로 뒤 최근 이송 조회 실패는 기록만(같은 실패에 알림 한 번).
+    //   창고 catch 가 켜고 최근 이송 조회 finally 가 끔(한 번만 · 이송 뒤 다시 읽을 땐 그대로 알림).
+    private bool _quietLoadNoticeOnce;
     private List<TransferRow> _recentTransfers = new();
     private List<ItemListModel>? _itemCache;
 
@@ -126,6 +129,7 @@
             // 봉합 (2026-06-23, 18차 P2): 종전엔 창고 로드 실패 시 빈 드롭다운만 남아 사용자가 원인을
             //   알 수 없었다(처음 쓰는 사람이 혼자 못 푼다 — 히트판 정신 위배). 통신 장애를 명시 안내한다.
             Snackbar.Add("창고 정보를 불러오지 못했습니다. 네트워크를 확인하고 새로고침 해주세요.", Severity.Error);
+            _quietLoadNoticeOnce = true; // 고침 1 §8-5 #5 — 바로 뒤 최근 이송 조회가 같은 실패로 또 알리지 않게
         }
     }
 
@@ -319,11 +323,13 @@
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Logger.LogWarning(_hp15Ex, "[HP15] 재고이송 최근 이력 조회 실패");
             // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
-            LoadFailedNotice.Show(Snackbar, _hp15Ex);
+            // ⬛ [낡은 줄 · 화면오류기록띠 고침 1 §8-5 #5] LoadFailedNotice.Show(Snackbar, _hp15Ex);   — 창고 실패 알림과 겹쳐 같은 실패에 두 번 떴다
+            if (!_quietLoadNoticeOnce) LoadFailedNotice.Show(Snackbar, _hp15Ex);
             _recentTransfers = new();
         }
         finally
         {
+            _quietLoadNoticeOnce = false;
             _isLoading = false;
             StateHasChanged();
         }

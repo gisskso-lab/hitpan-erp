@@ -279,7 +279,9 @@
         catch (Exception ex)
         {
             // #15 — 안내를 못 읽어도 로그인 화면은 그대로 뜬다.
-            Console.Error.WriteLine("[Login] 자동 로그아웃 안내 표시 읽기 실패: " + ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠 고침 1 §8-5 #7] Console.Error.WriteLine("[Login] 자동 로그아웃 안내 표시 읽기 실패: " + ex.Message);
+            //    — 쿨타임(#1011)이 더한 줄 · WASM 에서 흰 오류 띠를 켠다(§8-1 ① 대로 PR-1 이 맡음) · 이 화면 기록 방식(ILogger 경고)으로.
+            Logger.LogWarning(ex, "[Login] 자동 로그아웃 안내 표시 읽기 실패");
         }
     }
 

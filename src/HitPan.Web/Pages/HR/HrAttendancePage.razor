@@ -225,7 +225,15 @@
         await LoadAsync();
     }
 
-    private async Task LoadAsync() { _items = await HrSvc.GetAttendanceAsync(_from, _to); }
+    // ⬛ [낡은 줄 · 화면오류기록띠 고침 1 §8-5 #1] private async Task LoadAsync() { _items = await HrSvc.GetAttendanceAsync(_from, _to); }
+    //    — 실패를 빈 목록으로 받아 「0건」 과 못 갈랐다(띠가 사라진 뒤 실패 신호 0).
+    // 대표 ④(지시서 §8-3) — 못 불러오면 쉬운 알림 한 번(기록은 서비스가 남김) · 빈 목록이 「자료 없음」 으로만 보이지 않게.
+    private async Task LoadAsync()
+    {
+        var rows = await HrSvc.GetAttendanceOrNullAsync(_from, _to);
+        if (rows is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
+        _items = rows ?? new();
+    }
 
     // ── 🔴 대리 근태 (작10 A) ──────────────────────────────────────────────
     //

@@ -100,7 +100,9 @@ jobs:
     # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — S8 단계 상한 41분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 54분(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 54
     # 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — S8 단계 상한 50분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 63분(판정 규칙 무접촉).
-    timeout-minutes: 63
+    # ⬛ [낡은 줄 · 화면오류기록띠 PR-1 고침 1 전] timeout-minutes: 63
+    # 🔴 화면오류기록띠 PR-1 고침 1(11/29 · 지시서 §8-5 #2 ~ #4) — S9b 띠 장면 13 → 16 · 단계 상한 10 → 12분(+2) → 잡 63 → 65분(판정 규칙 무접촉).
+    timeout-minutes: 65
 
     steps:
       - name: Checkout
@@ -308,7 +310,9 @@ jobs:
       #   API 멈춤 · 누출 검사 · 업로드 앞(결과표가 누출 검사를 지나 함께 올라간다). 앞 단계가 빨강이어도 돈다(대조군 재료를 남김).
       - name: "[시험] S9b 화면 오류 기록 띠 장면 (갈래 T · 모드 칸 UI_BAND_MODE)"
         if: always()
-        timeout-minutes: 10
+        # ⬛ [낡은 줄 · 고침 1 전 · 장면 13 · 몸 상한 8분] timeout-minutes: 10
+        # 🔴 고침 1(지시서 §8-5) — 장면 16(G-S1b · G-P5 · G-X1o 더함) · 몸 상한 BAND_TOTAL_MS 8 → 10분 + 자체시험 · 세션 놓기 여유 2분 → 12분
+        timeout-minutes: 12
         env:
           # ⬛ 옛: UI_BAND_MODE control(대조군 런 46153902475 · 11/11 띠 1 확인)
           UI_BAND_MODE: fixed
