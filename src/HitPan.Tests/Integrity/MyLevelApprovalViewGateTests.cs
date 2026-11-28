@@ -115,7 +115,9 @@ public sealed class MyLevelApprovalViewGateTests
         internal static HitPan.Application.Interfaces.IPermissionService Create(List<Call> calls, Func<Task<bool>> approval)
         {
             var p = Create<HitPan.Application.Interfaces.IPermissionService, ArgsProxy>();
-            var me = (ArgsProxy)(object)p;
+            // ⬛ [낡은 줄 · B2 고침 1 이전] var me = (ArgsProxy)(object)p;
+            // B2 고침 1 ⑧(CodeQL 군더더기 형변환) — 봉인 안 된 클래스라 인터페이스에서 바로 형변환된다(동작 같음)
+            var me = (ArgsProxy)p;
             me._calls = calls;
             me._approval = approval;
             return p;

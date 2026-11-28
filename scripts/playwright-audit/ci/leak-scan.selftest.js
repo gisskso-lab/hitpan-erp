@@ -106,6 +106,9 @@
 // 🔴 20261128작 갈래 B2 · 시험 고침(설계 §7-2-3 · §7-2-4 · 작업지시서 §8-8 D17 · D18) — 133 → 138(새 5 · 바뀐 칸 K-C22k 33 → 34 · K-C28a 양성 재료에 B2 칸)
 //   K-C29a 날 글 꼴 넓힘(양성 3 · 음성 4) · K-C29b 뜬 알림 셈 snackTally · K-C29c 직원 4장면 「403 알림 0」 세 겹 반례 · K-C29d owner-json 판정(양성 1 · 반례)
 //   K-C29e 뜬 알림 초기 스크립트(가짜 문서 · MutationObserver 대역 — 찍기 사이에 사라진 알림까지 · 같은 요소 두 번 0)
+// 🔴 20261128작 B2 고침 1(작업지시서 §8-9 · [4] 고침 1 ① ~ ⑧ · 3V P2-1 ~ 3) — 138 → 143(새 5 · 바뀐 칸 K-C28a · K-C29c · K-C29d 재료 · 반례)
+//   K-C29f 대표 왕복 양성 게이트 mcReq(대표 ≥ 1 · 직원 4장면 = 0) · K-C29g 뜬 알림 50 상한 넘침 = 보기 실패(초기 스크립트 실제로 돌림)
+//   K-C29h 재로그인 · /login 직접 「403 알림 0」 세 겹 · K-C29i 진행 그림 콘솔 꼴(초기 스크립트 실제로 돌림 · 해석 · 요약) · K-C29j G13 기록 기대 꼴
 // 가짜 값은 SELFTEST_ 머리 + 16진(+ 비번 꼴 기호)만 — 자격증명 모양 0.
 'use strict';
 
@@ -120,8 +123,11 @@ const work = process.argv[2];
 if (!work) { console.log('사용: node leak-scan.selftest.js <빈 작업 폴더>'); process.exit(2); }
 const SCAN = path.join(__dirname, 'leak-scan.js');
 
+// 🆕 11/28 쿨타임 몸 전용 자식 다 — S0 여덟째 이름. 가짜 값도 실행 때 만든다(파일에 고정 값 글자 0).
+const FAKE_PW_DA = `SELFTEST_PWDA_${crypto.randomBytes(4).toString('hex')}`;
 function fakeEnv() {
   return {
+    UI_PW_DA: FAKE_PW_DA,
     UI_DB_PASSWORD: 'SELFTEST_DBPW_7f3a9c2e',
     UI_JWT_SECRET: 'SELFTEST_JWT_1b8d4e6f',
     UI_ENC_KEY: 'SELFTEST_ENC_9e2c7a1d',
@@ -1380,6 +1386,13 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'),
       fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
       fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
+      // 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — 개발명세서 표에서 따로 적는다(판정기 EXPECT_CT_ROWS 를 읽지 않음)
+      fG('K35-CT1', 'CT1', 'tab2-continue', 'chromium'),
+      fG('K35-CT2', 'CT2', 'off-logout', 'chromium'), fG('K35-CT2', 'CT2', 'off-continue', 'chromium'),
+      fG('K35-CT3', 'CT3', 'reedit', 'chromium'),
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2(작업지시서 고침 1 표에서 따로 적음)
+      fG('K35-CT4', 'CT4', 'child-put-403', 'chromium'), fG('K35-CT4', 'CT4', 'root-put-405', 'chromium'),
+      fG('K35-CT-N4', 'N4', null, 'chromium', 'DEVICE'),
       // 🔴 W-S-03 고침 1(11/28 · [4] P2-1) — 화면 회귀 · 닫힌 서버 문 탐침 7(개발명세서 「고침 1」 표에서 따로 적는다 · 판정기 EXPECT_S3_ROWS 를 읽지 않음)
       fG('K35-S3-1', 'S3', 'first-home', 'chromium'), fG('K35-S3-1', 'S3', 'first-update', 'chromium'),
       fG('K35-S3-2', 'S3', 'direct-welcome', 'chromium'), fG('K35-S3-2', 'S3', 'phone-register', 'chromium'),
@@ -1900,6 +1913,12 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // 🔴 2차(A7) — G4 토스트 길 2 추가로 18(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
       // ⬛ [낡은 줄 · 2차] const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 2차] check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 쿨타임 화면 실측 3(11/28) — 쿨타임 키 5(시험 4 · N4 1) 추가로 23(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] const ok = theirs.length === 23 && mine.length === 23 && new Set(theirs).size === 23 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 고침 1 F2 이전] check('K-C22k G 기대 키 수 23 고정(G 16 · N4 2 · 쿨타임 시험 4 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🆕 11/28 쿨타임1b 고침 1 F2 — HTTP 거절 탐침 2 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 쿨타임 고침 1 F2 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 W-S-03 고침 1(11/28) — 화면 회귀 · 닫힌 문 탐침 7 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
       // ⬛ [낡은 줄 · W-S-03 고침 1] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · W-S-03 고침 1] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
@@ -1907,8 +1926,16 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 갈래 T] const ok = theirs.length === 33 && mine.length === 33 && new Set(theirs).size === 33 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 갈래 T] check('K-C22k G 기대 키 수 33 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 20261128작 갈래 B2 — owner-json 1 추가로 34(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 34 && mine.length === 34 && new Set(theirs).size === 34 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 34 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 갈래 B2 · #1011 합침 전] const ok = theirs.length === 34 && mine.length === 34 && new Set(theirs).size === 34 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 갈래 B2 · #1011 합침 전] check('K-C22k G 기대 키 수 34 고정(G 16 · N4 2 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — 쿨타임 7 + W-S-03 7 을 함께 합쳐 32(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] const ok = theirs.length === 32 && mine.length === 32 && new Set(theirs).size === 32 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] check('K-C22k G 기대 키 수 32 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — 앞 18 + 쿨타임 7 + W-S-03 7 + 갈래 T 8 + 갈래 B2 1 = 41(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 41 && mine.length === 41 && new Set(theirs).size === 41 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 41 고정(G 16 · N4 2 · 쿨타임 시험 6 · 쿨타임 N4 1 · W-S-03 시험 7 · 로그인 경합 갈래 T 시험 8 · 갈래 B2 시험 1) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음
@@ -2229,7 +2256,9 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
     { // K-C25c 판정기 끝 줄 둘 — 대조 못 함만 → 장치 이유 끝 줄 / 섞이면 누출 신호 먼저 / 다른 [장치] 와 섞여도 재실행 1회 아님
       const DEV = 'N4 이유=대조 못 함(장치)'; // 판정기 상수와 따로 적는다(글자 잠금)
       const LEAK = 'N4 이유=누출 신호';
-      const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // ⬛ [낡은 줄 · 3차] const n4 = (b, got) => (w) => (w.g === 'N4' && w.browser === b ? { ...w, pass: false, got } : w);
+      // 🔴 쿨타임 화면 실측 3(11/28) — chromium N4 키가 둘(앞 몸 K35-N4 · 쿨타임 K35-CT-N4)이 되어 앞 몸 N4 만 고른다(칸 뜻 · 기대 수 그대로)
+      const n4 = (b, got) => (w) => (w.g === 'N4' && w.id === 'K35-N4' && w.browser === b ? { ...w, pass: false, got } : w);
       const devOff = (w) => (w.id === 'K35-G1' && w.path === 'bell' && w.browser === 'webkit' ? { ...w, kind: 'DEVICE', pass: false } : w);
       const a = kJ('k25c-1', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · 가린 K 토큰 0`))]);
       const b = kJ('k25c-2', [...fHRows(), ...fGRows().map(n4('webkit', `${DEV} · x`)).map(n4('chromium', `${LEAK} · 걸림 1`))]);
@@ -2749,16 +2778,22 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       if (J28 && names.every((n) => typeof J28[n] === 'function')) {
         // ⬛ [낡은 줄 · 갈래 B2 이전] const clean = { band3: false, band10: false, appErr: 0, snacks: ['아직 볼 수 있는 업무가 없습니다'], navs: ['/'], sf403: 0 };
         // 🔴 갈래 B2 — 판정에 「403 알림 0」 세 겹 · G2 고유 글이 더해져 양성 재료에 그 칸(0 · 보임)을 둔다. 반례는 그대로(K-C29c 가 새 칸 반례)
-        const clean = { band3: false, band10: false, appErr: 0, snacks: ['아직 볼 수 있는 업무가 없습니다'], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, updTitle: true, updWarn: 1 };
+        // ⬛ [낡은 줄 · B2 고침 1 이전] const clean = { band3: false, band10: false, appErr: 0, snacks: ['아직 볼 수 있는 업무가 없습니다'], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, updTitle: true, updWarn: 1 };
+        // 🔴 B2 고침 1 — 판정에 seenErr === 0(②) · 직원 mcReq === 0 / 대표 mcReq ≥ 1(①) · 재로그인 · /login 직접 「403 알림 0」(④)이 더해져 양성 재료에 그 칸
+        const clean = { band3: false, band10: false, appErr: 0, snacks: ['아직 볼 수 있는 업무가 없습니다'], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0, mcReq: 0, updTitle: true, updWarn: 1 };
+        const q403 = { f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0 };
         const pos = {
           home: { ...clean, where: 'main', path: '/', docs: ['/=200'], notice: true, hero: 0 },
           update: { ...clean, where: 'main', path: '/data/update', docs: ['/data/update=200'], navs: ['/data/update'] },
           termsFirst: { ...clean, where: 'terms', path: '/terms', docs: ['/terms=200'] },
           termsSlow: { where: 'terms', path: '/terms', docs: ['/terms=200'], slowHits: 1 },
-          relogin: { where: 'main', path: '/', docs: ['/=200'] },
-          loginDirect: { where: 'main', path: '/', docs: ['/login=200', '/=200'] },
+          // ⬛ [낡은 줄 · B2 고침 1 이전] relogin: { where: 'main', path: '/', docs: ['/=200'] },
+          // ⬛ [낡은 줄 · B2 고침 1 이전] loginDirect: { where: 'main', path: '/', docs: ['/login=200', '/=200'] },
+          relogin: { where: 'main', path: '/', docs: ['/=200'], ...q403 },
+          loginDirect: { where: 'main', path: '/', docs: ['/login=200', '/=200'], ...q403 },
           dialog: { ...clean, dialogShown: true, lostAtMs: null, heldMs: 20000, docsDuringHold: 0, clicked: true, where: 'main', path: '/data/update', docs: ['/data/update=200'] },
-          owner: { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false },
+          // ⬛ [낡은 줄 · B2 고침 1 이전] owner: { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false },
+          owner: { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false, mcReq: 1 },
           owner503: { ...clean, routeHits: 1, failSnack: 1, warnDash: 1, snacks: ['대시보드 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'] },
           sales: { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false },
         };
@@ -2845,7 +2880,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'JUDGE 없음';
       const J29 = W.JUDGE;
       if (J29 && ['home', 'update', 'dialog', 'sales', 'termsFirst'].every((n) => typeof J29[n] === 'function')) {
-        const clean = { band3: false, band10: false, appErr: 0, snacks: [], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, updTitle: true, updWarn: 1 };
+        // ⬛ [낡은 줄 · B2 고침 1 이전] const clean = { band3: false, band10: false, appErr: 0, snacks: [], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, updTitle: true, updWarn: 1 };
+        const clean = { band3: false, band10: false, appErr: 0, snacks: [], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0, mcReq: 0, updTitle: true, updWarn: 1 };
         const pos = {
           home: { ...clean, where: 'main', path: '/', docs: ['/=200'], notice: true, hero: 0 },
           update: { ...clean, where: 'main', path: '/data/update', docs: ['/data/update=200'], navs: ['/data/update'] },
@@ -2855,6 +2891,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         const patches = [ // [바꾼 칸, 이름] — 고치기 전 CI 꼴(R-① 직원 창 4곳 · mainpc-challenge · approval/pending 403 알림 1장)
           [{ f403n: 1 }, '403 응답 1'], [{ h403: 1 }, '처리기 경고 1'], [{ forbidSeen: 1 }, '처리기 알림 1'], [{ forbidSeen: null }, '뜬 알림 못 읽음'],
           [{ f403n: 2, h403: 2, forbidSeen: 1 }, '고치기 전 꼴(두 부름 403 · 알림 합쳐 1)'],
+          // 🔴 B2 고침 1 ②(3V P2-1) — 뜬 알림 부분 실패(관찰자 던짐 · 50 상한 넘침) = 「못 봄」 · 못 읽음 null
+          [{ seenErr: 1 }, '뜬 알림 보기 실패 1'], [{ seenErr: null }, '보기 실패 수 못 읽음'],
         ];
         const posBad = Object.keys(pos).filter((n) => J29[n](pos[n]) !== true);
         const negBad = [];
@@ -2878,7 +2916,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       const J29 = W.JUDGE;
       if (J29 && typeof J29.ownerJson === 'function') {
         const pos = {
-          routeHits: 1, ctlHits: 1, failSnack: 1, warnJson: 1, failSnackErr: 1, h403: 1, forbidSeen: 1, outsideAllow: 0,
+          // ⬛ [낡은 줄 · B2 고침 1 이전] routeHits: 1, ctlHits: 1, failSnack: 1, warnJson: 1, failSnackErr: 1, h403: 1, forbidSeen: 1, outsideAllow: 0,
+          routeHits: 1, ctlHits: 1, failSnack: 1, warnJson: 1, failSnackErr: 1, f403n: 1, h403: 1, forbidSeen: 1, outsideAllow: 0,
           snacks: [B2_DASH, B2_FORBID], seenSnacks: [B2_DASH, B2_FORBID], band3: false, band10: false, warnDash: 1, appErr: 0,
         };
         const neg = [
@@ -2888,6 +2927,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
           [{ seenSnacks: ['대시보드 로드 실패: \'<\' is an invalid start of a value. Path: $ | LineNumber: 0'] }, '옛 글(V15 꼴) 뜸'],
           [{ snacks: ['Response status code does not indicate success: 503'] }, '영문 상태 글'],
           [{ band10: true }, '흰 띠'], [{ warnDash: 0 }, '경고 흔적 없음'], [{ appErr: 1 }, '표준오류 꼴'],
+          // 🔴 B2 고침 1 ③(3V P2-2) — ⓐ 403 응답 셈 죽음(page.on response 가 늘 0)도 같은 런 대조에서 빨강
+          [{ f403n: 0 }, '403 응답 셈 죽음'], [{ f403n: undefined }, '403 응답 셈 칸 없음'],
         ];
         const posOk = J29.ownerJson(pos) === true;
         const alt = J29.ownerJson({ ...pos, warnJson: 0 }) === true && J29.ownerJson({ ...pos, failSnackErr: 0 }) === true; // 둘 중 하나면 일반 catch 표
@@ -2895,7 +2936,8 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         ok = posOk && alt && negBad.length === 0;
         why = `양성 ${posOk} · 표 하나만 ${alt} · 반례 참 ${negBad.join(',') || '0'}(반례 ${neg.length})`;
       }
-      check('K-C29d owner-json 판정 · 양성 1 · 일반 catch 표(경고 JsonException 또는 색 Error) 하나면 참 · 반례 14 전부 거짓', ok, why);
+      // ⬛ [낡은 줄 · B2 고침 1 이전] check('K-C29d owner-json 판정 · 양성 1 · 일반 catch 표(경고 JsonException 또는 색 Error) 하나면 참 · 반례 14 전부 거짓', ok, why);
+      check('K-C29d owner-json 판정 · 양성 1 · 일반 catch 표(경고 JsonException 또는 색 Error) 하나면 참 · 반례 16(+ 403 응답 셈 죽음 · 칸 없음) 전부 거짓', ok, why);
     }
     { // K-C29e 뜬 알림 초기 스크립트 — 가짜 문서 · MutationObserver 대역으로 실제로 돌림(찍기 사이에 사라진 알림까지 · 같은 요소 두 번 0 · 두 번 걸어도 1벌)
       const W = b2Kit();
@@ -2934,6 +2976,158 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
         }
       }
       check('K-C29e 뜬 알림 초기 스크립트 · 관찰자 1벌 · 사라진 알림도 남음 · 같은 요소 두 번 0 · 늦게 찬 글 잡음 · 보기 실패 0', ok, why);
+    }
+    // ── 🔴 20261128작 B2 고침 1(작업지시서 §8-9 · [4] 고침 1 ① ~ ⑦) — 대표 왕복 양성 · 보기 실패 · 재로그인 세 겹 · 진행 그림 콘솔 꼴 · G13 기록 ──
+    { // K-C29f 대표 왕복 양성 게이트(①) — 대표 mcReq ≥ 1 참 · 0 / 칸 없음 거짓(V16 「거름 넓힘」 꼴) · 직원 4장면 mcReq 1 / 칸 없음 거짓
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'JUDGE 없음';
+      const J = W.JUDGE;
+      if (J && ['owner', 'home', 'update', 'dialog', 'sales'].every((n) => typeof J[n] === 'function')) {
+        const clean = { band3: false, band10: false, appErr: 0, snacks: [], navs: ['/'], sf403: 0, f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0, mcReq: 0, updTitle: true, updWarn: 1 };
+        const owner = { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false, mcReq: 1 };
+        const staff = {
+          home: { ...clean, where: 'main', path: '/', docs: ['/=200'], notice: true, hero: 0 },
+          update: { ...clean, where: 'main', path: '/data/update', docs: ['/data/update=200'], navs: ['/data/update'] },
+          dialog: { ...clean, dialogShown: true, lostAtMs: null, heldMs: 20000, docsDuringHold: 0, clicked: true, where: 'main', path: '/data/update', docs: ['/data/update=200'] },
+          sales: { ...clean, where: 'main', path: '/', hero: 1, labels: 3, notice: false },
+        };
+        const bad = [];
+        if (J.owner(owner) !== true) bad.push('대표 양성');
+        if (J.owner({ ...owner, mcReq: 2 }) !== true) bad.push('대표 2');
+        if (J.owner({ ...owner, mcReq: 0 }) !== false) bad.push('대표 0(거름 넓힘)');
+        if (J.owner({ ...owner, mcReq: undefined }) !== false) bad.push('대표 칸 없음');
+        for (const n of Object.keys(staff)) {
+          if (J[n](staff[n]) !== true) bad.push(`${n} 양성`);
+          if (J[n]({ ...staff[n], mcReq: 1 }) !== false) bad.push(`${n} 1(거름 지움)`);
+          if (J[n]({ ...staff[n], mcReq: undefined }) !== false) bad.push(`${n} 칸 없음`);
+        }
+        ok = bad.length === 0;
+        why = ok ? '대표 4 · 직원 4장면 × 3 기대대로' : `기대와 다름 ${bad.join(' · ')}`;
+      }
+      check('K-C29f 대표 왕복 양성 게이트 mcReq — 대표 ≥ 1 참 · 0 · 칸 없음 거짓 · 직원 4장면 0 참 · 1 · 칸 없음 거짓', ok, why);
+    }
+    { // K-C29g 뜬 알림 50 상한 넘침 = 보기 실패(②) — 초기 스크립트를 가짜 문서로 실제로 돌림 · 셈 → 직원 판정 거짓
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'SNACK_SEEN_INIT 없음';
+      if (typeof W.SNACK_SEEN_INIT === 'string' && typeof W.snackTally === 'function' && W.JUDGE) {
+        try {
+          const vm = require('vm');
+          const cbs = [];
+          let els = [];
+          const win = {
+            WeakSet,
+            MutationObserver: class { constructor(cb) { cbs.push(cb); } observe() { return undefined; } },
+            document: { querySelectorAll: (sel) => (sel === '.mud-snackbar' ? els : []) },
+          };
+          win.window = win;
+          vm.runInNewContext(W.SNACK_SEEN_INIT, win);
+          els = Array.from({ length: 50 }, (_, i) => ({ innerText: `알림 ${i}`, className: 'mud-snackbar' }));
+          cbs.forEach((cb) => cb([]));
+          const at50 = { n: win.__hpSnackSeen.length, err: win.__hpSnackSeenErr };
+          els = [...els, { innerText: '넘친 알림', className: 'mud-snackbar' }];
+          cbs.forEach((cb) => cb([]));
+          const tally = W.snackTally({ list: win.__hpSnackSeen, err: win.__hpSnackSeenErr });
+          const home = { band3: false, band10: false, appErr: 0, snacks: [], navs: ['/'], sf403: 0, f403n: 0, h403: 0, mcReq: 0, where: 'main', path: '/', docs: ['/=200'], notice: true, hero: 0 };
+          const judged = W.JUDGE.home({ ...home, ...tally });
+          const judged0 = W.JUDGE.home({ ...home, ...W.snackTally({ list: [], err: 0 }) });
+          ok = at50.n === 50 && at50.err === 0 && win.__hpSnackSeen.length === 50 && win.__hpSnackSeenErr === 1 && tally.seenErr === 1
+            && tally.forbidSeen === 0 && judged === false && judged0 === true;
+          why = `50 개 ${at50.n} · 보기 실패 ${at50.err} → 넘침 뒤 ${win.__hpSnackSeen.length} · 보기 실패 ${win.__hpSnackSeenErr} · 첫 화면 판정 넘침 ${judged} · 빈 ${judged0}`;
+        } catch (e) {
+          why = `초기 스크립트 돌리기 실패 ${L.errorName(e)}`;
+        }
+      }
+      check('K-C29g 뜬 알림 50 상한 넘침 = 보기 실패 1 · 처리기 알림 0 이어도 직원 첫 화면 판정 거짓(「못 봄」 ≠ 「0 봄」) · 빈 목록은 참', ok, why);
+    }
+    { // K-C29h 재로그인 · /login 직접 「403 알림 0」 세 겹(④) — 양성 참 · 칸 하나씩 반례 거짓 · 옛 재료 꼴(세 겹 칸 없음) 거짓
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'JUDGE 없음';
+      const J = W.JUDGE;
+      if (J && typeof J.relogin === 'function' && typeof J.loginDirect === 'function') {
+        const q = { f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0 };
+        const pos = { relogin: { where: 'main', path: '/', docs: ['/=200'], ...q }, loginDirect: { where: 'main', path: '/', docs: ['/login=200', '/=200'], ...q } };
+        const patches = [
+          [{ f403n: 1 }, '403 응답 1'], [{ h403: 1 }, '처리기 경고 1'], [{ forbidSeen: 1 }, '처리기 알림 1'], [{ forbidSeen: null }, '뜬 알림 못 읽음'],
+          [{ seenErr: 1 }, '뜬 알림 보기 실패 1'], [{ f403n: 2, h403: 2, forbidSeen: 1 }, '고치기 전 꼴'],
+        ];
+        const bad = [];
+        for (const n of Object.keys(pos)) {
+          if (J[n](pos[n]) !== true) bad.push(`${n} 양성`);
+          for (const [p, name] of patches) if (J[n]({ ...pos[n], ...p }) !== false) bad.push(`${n}:${name}`);
+        }
+        // 옛 재료 꼴(B2 고침 1 이전 장면이 세 겹 칸 없이 넘기던 o) — 이제 거짓(세 겹을 안 재면 초록 0)
+        if (J.relogin({ where: 'main', path: '/', docs: ['/=200'] }) !== false) bad.push('relogin 옛 꼴');
+        if (J.loginDirect({ where: 'main', path: '/', docs: ['/login=200', '/=200'] }) !== false) bad.push('loginDirect 옛 꼴');
+        ok = bad.length === 0;
+        why = ok ? `양성 2 · 반례 ${patches.length * 2 + 2} 기대대로` : `기대와 다름 ${bad.join(' · ')}`;
+      }
+      check('K-C29h 재로그인 · /login 직접 「403 알림 0」 세 겹 · 양성 2 · 반례 14(칸 하나씩 · 고치기 전 꼴 · 옛 재료 꼴) 전부 거짓', ok, why);
+    }
+    { // K-C29i 진행 그림 콘솔 꼴(⑥) — 스크립트를 가짜 문서 · 가짜 타이머 · 가짜 콘솔로 실제로 돌림 · 해석 · 요약 · 꼴 밖 null
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'PROG_WATCH 없음';
+      if (typeof W.PROG_WATCH === 'string' && typeof W.progParse === 'function' && typeof W.progSum === 'function') {
+        try {
+          const vm = require('vm');
+          const out = [];
+          const timers = [];
+          let cleared = 0;
+          const el = (text, extra = {}) => ({ innerText: text, getClientRects: () => [1], ...extra });
+          let page = { bar: [el('')], label: [el('아이디')], button: [el('로그인', { disabled: true })] };
+          const win = {
+            console: { log: (s) => out.push(String(s)) },
+            setInterval: (fn) => { timers.push(fn); return 7; },
+            clearInterval: (h) => { if (h === 7) cleared += 1; },
+            getComputedStyle: () => ({ visibility: 'visible' }),
+            document: { querySelectorAll: (sel) => (sel === '.mud-progress-linear' ? page.bar : sel === 'label' ? page.label : sel === 'button' ? page.button : []) },
+          };
+          win.window = win;
+          vm.runInNewContext(W.PROG_WATCH, win);
+          vm.runInNewContext(W.PROG_WATCH, win); // 두 번 걸어도 타이머 1
+          for (let i = 0; i < 3; i += 1) timers[0]();
+          page = { bar: [], label: [], button: [] }; // 문서 바뀌는 중(그림 없음)
+          for (let i = 3; i < W.PROG_TICKS; i += 1) timers[0]();
+          const clearedAtEnd = cleared;
+          page = { bar: [], label: [], button: null }; // 보기 던짐(null.find)
+          timers[0]();
+          const parsed = out.map(W.progParse);
+          const first = parsed[0];
+          const last = parsed[W.PROG_TICKS - 1];
+          const errLine = parsed[W.PROG_TICKS];
+          const sum = W.progSum(out);
+          const syn = W.progSum(['[hp-prog] t=4500 bar=true id=1 btn=true', '[hp-prog] t=5100 bar=false id=0 btn=null', '다른 글', '[hp-prog] t=5600 err=TypeError']);
+          const neg = ['[hp-prog] t=1 bar=yes id=1 btn=true', '[hp-prog] t=1 bar=true id=1', 'x [hp-prog] t=1 bar=true id=1 btn=true', '[hp-prog] t=1 err=a b', ''].map(W.progParse);
+          ok = timers.length === 1 && out.length === W.PROG_TICKS + 1 && parsed.every((x) => x !== null) && out.every((s) => s.startsWith(W.PROG_TAG))
+            && first.bar === true && first.id === 1 && first.btn === true && last.bar === false && last.id === 0 && last.btn === null
+            && errLine.err === 'TypeError' && clearedAtEnd === 1
+            && sum.n === W.PROG_TICKS + 1 && sum.bar === 3 && sum.btnOff === 3 && sum.idGone === W.PROG_TICKS - 3 && sum.errs === 1
+            && syn.n === 3 && syn.errs === 1 && syn.at5 && syn.at5.t === 5100 && syn.at5.btn === null && W.progSum([]).n === 0
+            && neg.every((x) => x === null);
+          why = `타이머 ${timers.length} · 줄 ${out.length} · 해석 실패 ${parsed.filter((x) => x === null).length} · 처음 ${JSON.stringify(first)} · 끝 ${JSON.stringify(last)} · 실패 줄 ${errLine && errLine.err}`
+            + ` · 멈춤 ${clearedAtEnd} · 요약 ${JSON.stringify(sum)} · 합성 +5초 ${syn.at5 && syn.at5.t} · 꼴 밖 null ${neg.filter((x) => x === null).length}/${neg.length}`;
+        } catch (e) {
+          why = `진행 그림 스크립트 돌리기 실패 ${L.errorName(e)}`;
+        }
+      }
+      check('K-C29i 진행 그림 콘솔 꼴 · 타이머 1벌 · 24 표본 뒤 멈춤 · 보기 실패 줄 · 해석 · 요약(+5초 표본) · 꼴 밖 5 null', ok, why);
+    }
+    { // K-C29j G13 기록 기대 꼴(⑦ · 키 아님) — 결재 대기 부름 ≥ 1 · 그 403 0 · 세 겹 0 · 메인PC 표 요청 0
+      const W = b2Kit();
+      let ok = false;
+      let why = W.loadErr ? `K 본문 불러오기 실패 ${W.loadErr}` : 'g13Ok 없음';
+      if (typeof W.g13Ok === 'function') {
+        const pos = { pendReq: 1, pend403: 0, f403n: 0, h403: 0, forbidSeen: 0, seenErr: 0, mcReq: 0 };
+        const neg = [[{ pendReq: 0 }, '부름 0(배지 끊김)'], [{ pend403: 1, f403n: 1 }, '부름 403'], [{ h403: 1 }, '처리기 경고'], [{ forbidSeen: 1 }, '처리기 알림'],
+          [{ forbidSeen: null }, '못 읽음'], [{ seenErr: 1 }, '보기 실패'], [{ mcReq: 1 }, '메인PC 표 요청']];
+        const bad = neg.filter(([p]) => W.g13Ok({ ...pos, ...p }) !== false).map((x) => x[1]);
+        ok = W.g13Ok(pos) === true && bad.length === 0;
+        why = `양성 ${W.g13Ok(pos)} · 반례 참 ${bad.join(',') || '0'}(반례 ${neg.length})`;
+      }
+      check('K-C29j G13 기록 기대 꼴 · 양성 1 · 반례 7 전부 거짓', ok, why);
     }
     { // 🔴 고침 3-2(작업지시서 §9 P2-2) K-C27i 알려진 꼴 두 식 — homeKnown · updateKnown 를 직접 부름(참 · 거짓 반례 · U7 · U8 포함)
       //   입력은 리뷰서(짧은 재확인 §2) 반례 표 꼴을 여기 따로 적는다. 한 줄이라도 기대와 다르면 빨강(변이 M7 · M8 이 여기서 잡힘).
@@ -2990,6 +3184,31 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       }
       check('K-C27i 알려진 꼴 두 식 · homeKnown 참 1 · 거짓 7 · updateKnown 참 3 · 거짓 11(U7 · U8 최종 착지 = 꼴 아님)', ok, why);
     }
+  }
+  // 🆕 11/28 쿨타임 CT3 장치 고침 F3(지시서 20261128작_쿨타임1b_CT3자정넘김_장치고침) — 둘째 값 눈금 pickGrid 순수 함수 3꼴.
+  //   런 46080568966 시도 4 꼴(출근 23:53 D · 자동 퇴근 00:01 D+1 · 지금 00:04 D+1)이 CI 에서 저절로 나오기 어려워 여기서 잰다.
+  //   대조 = 옛 동작(outDay 없음 = 출근 날짜) 은 같은 꼴에서 23:55(D) 를 골랐다 — 그 값도 함께 확인(고침이 실제로 달라졌나).
+  {
+    const CT = require('./k35-session-cooltime');
+    const d = (day, h, mi) => new Date(2026, 10, day, h, mi, 0, 0); // 로컬 생성 = 러너 시간대 무관
+    const hmOf = (x) => (x ? `${String(x.getDate()).padStart(2, '0')} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}` : 'null');
+    // ① 자정 넘김 — 퇴근 날짜(D+1 = 11/28)에서 골라야 함 → 28일 00:00
+    const a1 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01', '2026-11-28');
+    const a0 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01'); // 옛 동작 대조
+    // ② 같은 날 — 출근 23:10 · 퇴근 23:16 · 지금 23:22 → 23:20
+    const b1 = CT.pickGrid(d(27, 23, 10), d(27, 23, 22).getTime(), '23:16', '2026-11-27');
+    // ③ 눈금 없음 — 출근 23:58(D) · 지금 23:59(D) · 퇴근 날짜 D → (출근, 지금] 안 눈금 0 → null
+    const c1 = CT.pickGrid(d(27, 23, 58), d(27, 23, 59).getTime(), '23:59', '2026-11-27');
+    // ④ 퇴근 글자에서 날짜 읽기(시간대 바꿈 0)
+    const y1 = CT.ymdOfText('2026-11-28T00:01:00');
+    const y2 = CT.ymdOfText('00:01');
+    // ⑤ 🆕 짧은 재확인 P3 ④ — 퇴근은 D(23:46) 인데 시험이 늦어 지금이 D+1 00:02 → 날짜 조건이 없으면 D+1 00:00 을 골라 틀림 · 맞음 = D 23:55
+    const e1 = CT.pickGrid(d(27, 23, 40), d(28, 0, 2).getTime(), '23:46', '2026-11-27');
+    // ⬛ [낡은 줄 · 11/28 P3 ④ 이전] check('K-CT3-F 둘째 값 눈금 = 고침 창 날짜(자동 퇴근 날짜) — 자정 넘김 28 00:00(옛 동작 대조 27 23:55) · 같은 날 27 23:20 · 눈금 없음 null · 날짜 읽기',
+    check('K-CT3-F 둘째 값 눈금 = 고침 창 날짜(자동 퇴근 날짜) — 자정 넘김 28 00:00(옛 동작 대조 27 23:55) · 같은 날 27 23:20 · 눈금 없음 null · 날짜 읽기 · 퇴근 D 지금 D+1 = 27 23:55',
+      // ⬛ [낡은 줄 · 11/28 P3 ④ 이전] hmOf(a1) === '28 00:00' && hmOf(a0) === '27 23:55' && hmOf(b1) === '27 23:20' && c1 === null && y1 === '2026-11-28' && y2 === null,
+      hmOf(a1) === '28 00:00' && hmOf(a0) === '27 23:55' && hmOf(b1) === '27 23:20' && c1 === null && y1 === '2026-11-28' && y2 === null && hmOf(e1) === '27 23:55',
+      `자정 넘김 ${hmOf(a1)} · 옛 동작 ${hmOf(a0)} · 같은 날 ${hmOf(b1)} · 없음 ${hmOf(c1)} · 날짜 ${y1} / ${y2} · 퇴근 D 지금 D+1 ${hmOf(e1)}`);
   }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);

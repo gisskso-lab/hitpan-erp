@@ -102,6 +102,13 @@
                     로그아웃이 완료되지 않았습니다. 다른 PC에서 바로 들어오지 못할 수 있습니다.
                 </MudAlert>
             }
+            else if (_cooltimeEnded)
+            {
+                @* 🆕 20260928작4 쿨타임 §5-2 끝 — 설정 시각 자동 로그아웃으로 끝났다(CooltimePrompt 가 남긴 표 한 칸). *@
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4" Style="font-family: 'Noto Sans KR', sans-serif;">
+                    @HitPan.Web.Services.CooltimeScreenRules.LoginNotice
+                </MudAlert>
+            }
             else if (!string.IsNullOrEmpty(_errorMessage))
             {
                 <MudAlert Severity="Severity.Error" Dense="true" Class="mb-4" Style="font-family: 'Noto Sans KR', sans-serif;">
@@ -251,7 +258,29 @@
         }
 
         await ReadLogoutIncompleteAsync();
+        await ReadCooltimeEndedAsync();
         await LoadUpdateNoticeAsync();
+    }
+
+    // 🆕 20260928작4 쿨타임 — 설정 시각 자동 로그아웃으로 끝났다(한 번 읽고 지운다).
+    private bool _cooltimeEnded;
+
+    private async Task ReadCooltimeEndedAsync()
+    {
+        try
+        {
+            var mark = await JS.InvokeAsync<string?>("localStorage.getItem", HitPan.Web.Services.CooltimeScreenRules.EndedNoticeKey);
+            if (!string.IsNullOrEmpty(mark))
+            {
+                _cooltimeEnded = true;
+                await JS.InvokeVoidAsync("localStorage.removeItem", HitPan.Web.Services.CooltimeScreenRules.EndedNoticeKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            // #15 — 안내를 못 읽어도 로그인 화면은 그대로 뜬다.
+            Console.Error.WriteLine("[Login] 자동 로그아웃 안내 표시 읽기 실패: " + ex.Message);
+        }
     }
 
     /// <summary>

@@ -126,6 +126,20 @@ const EXPECT_G_ROWS = [
   ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
   ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
 ];
+// 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④ · 개발명세서 docs/개발/erp/20261128_쿨타임1b_화면실측3_개발명세서.md)
+//   K 본문 k35-session-cooltime.js 의 기대 키 5 = 시험 4(CT1 · CT2 둘 · CT3) + 쿨타임 N4 1(DEVICE). 선택 키 0 — 빠지면 누락 빨강.
+//   🔴 EXPECT_G_ROWS(앞 몸 · kit35.expectKeys 가 읽는 목록)와 **따로** 둔다 — 앞 몸이 브라우저 끝에 남은 키를 DEVICE 로 채울 때
+//   쿨타임 키를 건드리지 않게. 판정(필수 · 중복 · 모르는 · 통과 꼴 · N4 끝 줄)은 둘을 합친 EXPECT_G 로 같은 규칙.
+const EXPECT_CT_ROWS = [
+  ['K35-CT1', 'CT1', 'tab2-continue', 'chromium'],
+  ['K35-CT2', 'CT2', 'off-logout', 'chromium'],
+  ['K35-CT2', 'CT2', 'off-continue', 'chromium'],
+  ['K35-CT3', 'CT3', 'reedit', 'chromium'],
+  // 🆕 11/28 쿨타임1b 고침 1 F2([4] P2-1) — HTTP 거절 탐침 2 · 기대 키 5 → 7(시험 6 · N4 1) · 자체시험 K-C22k 23 → 25 같은 커밋
+  ['K35-CT4', 'CT4', 'child-put-403', 'chromium'],
+  ['K35-CT4', 'CT4', 'root-put-405', 'chromium'],
+  ['K35-CT-N4', 'N4', null, 'chromium'],
+];
 // 🔴 W-S-03 고침 1(11/28 · [4] P2-1 화면 회귀 · 개발명세서 docs/개발/erp/20261128_W-S-03_서버문닫기_온보딩모바일_개발명세서.md 「고침 1」)
 //   K 본문 k35-ws03-closed.js 의 기대 키 7 = 시험 7(첫 로그인 2 · 닫힌 주소 2 · 기기 관문 1 · 닫힌 서버 문 2) · N4 0(그림 안 찍음). 선택 키 0 — 빠지면 누락 빨강.
 //   EXPECT_G_ROWS(앞 몸 · kit35.expectKeys 가 읽는 목록)와 따로 둔다 — 앞 몸이 브라우저 끝에 남은 키를 DEVICE 로 채울 때 이 키를 건드리지 않게.
@@ -154,7 +168,10 @@ const EXPECT_S3_ROWS = [
   ['K35-S3-8', 'S3', 'owner-json', 'chromium'], // D6 일반 catch(200 + JSON 아닌 본문) · 같은 런 양성 대조(결재 대기 403 → 처리기 경고 · 알림 1 이상) · 뜬 알림 허용 목록 안
 ];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
-const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// ⬛ [낡은 줄 · 쿨타임 화면 실측 3] const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// ⬛ [낡은 줄 · W-S-03 고침 1] const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// 🔴 main 합침(11/28 · c50ca6cf · PM 결재 「뒤에 머지하는 쪽이 앞 쪽 main 위로 올리고 맞춘다」) — 쿨타임 7 + W-S-03 7 을 함께 합친다(앞 몸 18 + 7 + 7 = 32).
+const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_CT_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 // 🔴 W-S-03 고침 3(11/28 · 작업지시서 docs/운영기록/20261128작_W-S-03_고침3_알려진결함대장_작업지시서.md §4 ① · PM 결재 Q1 (가) · Q2 (가) · Q3)
 //   알려진 결함 대장 — 목록은 **이 한 곳**. 줄 = [id, g, 길, 브라우저, 대장 이름, 닫는 조건]. 결함 근거 = 선행검증서
 //   docs/검증/선행/20261128_선행검증서_로그인경합_첫화면403띠_1V.md §1(로그인 경합) · §2(첫 화면 403 흰 띠).
@@ -201,7 +218,9 @@ function knownDefectFail(row) {
 }
 // N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
-const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · 쿨타임 화면 실측 3] const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS].filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · W-S-03 고침 1] const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
+const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_CT_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
   .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
 // 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
 //   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
@@ -455,6 +474,7 @@ module.exports = {
   K_BODY_STRICT, classifyKNames, kBodyScan, // F-PR ⑧
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
+  EXPECT_CT_ROWS, // 쿨타임 화면 실측 3(11/28)
   EXPECT_S3_ROWS, // W-S-03 고침 1(11/28)
   N4_WHY, n4Why, // K 연결 3차 ⑭
   KNOWN_DEFECT_ROWS, KNOWN_WHY, knownDefectFail, knownDefectRow, knownDefectListProblems, // W-S-03 고침 3(11/28)

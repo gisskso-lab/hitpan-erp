@@ -51,7 +51,19 @@ public sealed class SettingsController : ControllerBase
             return Forbid();
         }
 
-        await _settingsService.SaveAsync(dto, tenantId, ct).ConfigureAwait(false);
+        // ⬛ [낡은 줄 · 20260928작4 이전] `await _settingsService.SaveAsync(dto, tenantId, ct)` 를 감싸지 않았다.
+        // 🆕 20260928작4 쿨타임 §5-1 — 켜짐인데 시각이 비거나 시각 모양이 틀리면 서비스가 아무것도 저장하지 않고
+        //   ArgumentException 을 던진다 ⇒ 400 + 고객 언어 문구(서비스 상수 그대로).
+        try
+        {
+            await _settingsService.SaveAsync(dto, tenantId, ct).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex) when (
+            ex.Message == HitPan.Application.Services.SettingsService.CooltimeNeedsTimesMessage
+            || ex.Message == HitPan.Application.Services.SettingsService.CooltimeBadTimeMessage)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         return Ok();
     }
 
@@ -196,6 +208,50 @@ public sealed class SettingsController : ControllerBase
         await _settingsService.SavePrintCommonAsync(tenantId, dto, ct).ConfigureAwait(false);
         _logger.LogInformation("인쇄 공통 설정 저장: tenant={Tenant}", tenantId);
         return NoContent();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 🆕 2026-11-28 쿨타임1b(작업지시서 20261128작 · 설계 쿨타임_설정자리옮김 §3 · 대표 §313 ①)
+    //   자동 로그아웃 세 칸(켬/끔 · 자동 로그아웃 시각 · 정시 퇴근 시각)만 오가는 좁은 주소 둘.
+    //   루트 GET/PUT(위 [NonAction])은 **닫힌 채** 둔다 — 이 두 액션은 덧붙임(#1)이다.
+    //   권한 = 부모계정(TenantAdminOnly) · tenant = HttpContext.Items["TenantId"] 만(#2 · 본문·주소에 tenant 칸 0).
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>자동 로그아웃 설정 세 칸을 읽는다(행 없음 = 끔 · 빈 시각).</summary>
+    [HttpGet("cooltime")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> GetCooltime(CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        var dto = await _settingsService.GetCooltimeAsync(tenantId, ct).ConfigureAwait(false);
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// 자동 로그아웃 설정 세 칸만 저장한다(<c>null</c> = 그대로). 다른 회사 설정 칸은 손대지 않는다.
+    /// 켜짐인데 시각이 비거나 시각 모양이 틀리면 아무것도 저장하지 않고 400 + 고객 문구(루트 PUT 의 잡는 꼴과 같음).
+    /// </summary>
+    [HttpPut("cooltime")]
+    [Authorize(Policy = "TenantAdminOnly")]
+    public async Task<IActionResult> SaveCooltime([FromBody] UpdateCooltimeSettingsDto dto, CancellationToken ct)
+    {
+        var tenantId = HttpContext.Items["TenantId"]?.ToString();
+        if (string.IsNullOrEmpty(tenantId)) return Forbid();
+
+        try
+        {
+            await _settingsService.SaveCooltimeOnlyAsync(dto, tenantId, ct).ConfigureAwait(false);
+        }
+        catch (ArgumentException ex) when (
+            ex.Message == HitPan.Application.Services.SettingsService.CooltimeNeedsTimesMessage
+            || ex.Message == HitPan.Application.Services.SettingsService.CooltimeBadTimeMessage)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        _logger.LogInformation("자동 로그아웃 설정 저장: tenant={Tenant}", tenantId);
+        return Ok();
     }
 
     // ═══════════════════════════════════════════════════════════════════

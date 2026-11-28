@@ -43,6 +43,21 @@ function isDoc(name) {
 // 워크플로가 스크립트 전에 고정으로 「돈다」 로 정하는 머리(자체시험 · 워크플로 읽기 확인용으로 함께 둔다)
 const FIXED_RUN_HEADS = ['scripts/playwright-audit/ci/', '.github/workflows/'];
 
+// 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — 쿨타임 관련 바뀐 파일 수(이유 줄 표시만 · 돈다/안 돈다 판정에 안 씀 = 기존 판정 그대로).
+//   쿨타임 파일은 docs/ 밖이라 바뀌면 이미 ui-k35 가 돈다 → 그 잡의 S8 에서 K 본문 k35-session-cooltime.js 가 **늘** 돈다
+//   (판정기 기대 키가 필수라 몸만 골라 끄는 길 0 · 닫힌 쪽 = 도는 쪽). 이 수는 CI 줄에서 「이 PR 이 쿨타임을 건드렸나」 를 보이기만 한다.
+const COOLTIME_FILES = new Set([
+  'src/HitPan.Web/Pages/Settings.razor',
+  'src/HitPan.Web/Pages/Settings/AutoLogoutSettingsPage.razor', // 🆕 11/28 쿨타임1b — 자동 로그아웃 설정 새 자리
+  'src/HitPan.Web/Pages/HR/HrAttendancePage.razor',
+  'src/HitPan.Web/Services/NotificationClient.cs',
+  'src/HitPan.Web/Layout/MainLayout.razor',
+]);
+const COOLTIME_HINTS = [/cooltime/i, { test: (n) => COOLTIME_FILES.has(n) }];
+function cooltimeCount(list) {
+  return list.filter((n) => COOLTIME_HINTS.some((re) => re.test(n))).length;
+}
+
 // 순수 함수 — 파일 시스템 0. 자체시험이 직접 부른다.
 function decideRun(names) {
   if (!Array.isArray(names)) return { run: true, why: '돈다 — 바뀐 파일 목록 꼴 이상(목록 못 구함)' };
@@ -53,7 +68,8 @@ function decideRun(names) {
   const fixed = list.filter((n) => FIXED_RUN_HEADS.some((h) => n.startsWith(h))).length;
   const other = list.length - docs;
   const run = other > 0;
-  return { run, why: `${run ? '돈다' : '안 돈다'} — 바뀐 파일 ${list.length} · 문서 ${docs} · 문서 밖 ${other}(장치·워크플로 ${fixed})` };
+  // ⬛ [낡은 줄 · 4V-1] return { run, why: `${run ? '돈다' : '안 돈다'} — 바뀐 파일 ${list.length} · 문서 ${docs} · 문서 밖 ${other}(장치·워크플로 ${fixed})` };
+  return { run, why: `${run ? '돈다' : '안 돈다'} — 바뀐 파일 ${list.length} · 문서 ${docs} · 문서 밖 ${other}(장치·워크플로 ${fixed}) · 쿨타임 관련 ${cooltimeCount(list)}` };
 }
 
 // ⬛ [낡은 줄 · 3V-1] NUL 구분이 기본. 줄바꿈도 끊는다 — 이름이 쪼개지면 조각이 문서 꼴이 아닐 수 있어 「돈다」 쪽만 늘어난다.
@@ -80,4 +96,5 @@ function main() {
 if (require.main === module) main();
 // ⬛ [낡은 줄 · 갈래 A 첫 꼴] module.exports = { RUN_HEADS, decideRun, parseList };
 // ⬛ [낡은 줄 · 3V-1] module.exports = { DOC_DIR, DOC_EXT, FIXED_RUN_HEADS, isDoc, decideRun, parseList };
-module.exports = { DOC_DIR, DOC_EXT, CTL_CHARS, FIXED_RUN_HEADS, isDoc, decideRun, parseList };
+// ⬛ [낡은 줄 · 4V-1] module.exports = { DOC_DIR, DOC_EXT, CTL_CHARS, FIXED_RUN_HEADS, isDoc, decideRun, parseList };
+module.exports = { DOC_DIR, DOC_EXT, CTL_CHARS, FIXED_RUN_HEADS, COOLTIME_HINTS, cooltimeCount, isDoc, decideRun, parseList };

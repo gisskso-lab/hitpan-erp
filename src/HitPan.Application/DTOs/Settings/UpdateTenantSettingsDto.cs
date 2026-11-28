@@ -56,4 +56,17 @@ public sealed class UpdateTenantSettingsDto
     public bool UsePersonalInfoProtect { get; set; } = true;
 
     public string IndustryType { get; set; } = "retail";
+
+    // ── 20260928작4 쿨타임 §5-1 · DB-132 (추가 · #1) ─────────────────────────────
+    // 🔴 세 칸 모두 「null = 그대로 둔다」 — 이 칸을 모르는 화면(옛 판)이 저장해도 켜 둔 쿨타임이 꺼지지 않는다.
+    //    시각 두 칸은 빈 문자열 = 비운다(과거수정 비밀번호 칸과 같은 약속).
+
+    /// <summary>자동 로그아웃 켬/끔. <c>null</c> = 그대로.</summary>
+    public bool? CooltimeEnabled { get; set; }
+
+    /// <summary>자동 로그아웃 시각 <c>"HH:mm"</c>. <c>null</c> = 그대로 · <c>""</c> = 비움.</summary>
+    public string? CooltimeAt { get; set; }
+
+    /// <summary>정시 퇴근 시각 <c>"HH:mm"</c>. <c>null</c> = 그대로 · <c>""</c> = 비움.</summary>
+    public string? RegularLeaveTime { get; set; }
 }

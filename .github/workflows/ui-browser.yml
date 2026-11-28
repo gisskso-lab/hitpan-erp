@@ -90,10 +90,17 @@ jobs:
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-') || needs.ui-changes.outputs.run != 'false') }}
     runs-on: ubuntu-24.04
     # ⬛ [낡은 줄 · K 연결 1~3차] timeout-minutes: 30
+    # 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — S8 에 쿨타임 K 본문(자체 상한 14분 · 설정 시각 기다림 2바퀴)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 45
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
     # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
-    timeout-minutes: 46
+    # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 46
+    # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 37
+    # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — S8 단계 상한 41분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 54분(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 54
+    # 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — S8 단계 상한 50분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 63분(판정 규칙 무접촉).
+    timeout-minutes: 63
 
     steps:
       - name: Checkout
@@ -112,6 +119,8 @@ jobs:
           put UI_PW_PARENT   "Ui#$(openssl rand -hex 16)"
           put UI_PW_GA       "Ui#$(openssl rand -hex 16)"
           put UI_PW_NA       "Ui#$(openssl rand -hex 16)"
+          # 🆕 11/28 쿨타임 1-b 실측 3 첫 CI 런 고침(PM 결정 (가)) — 쿨타임 몸 전용 자식 다 · 가 · 나와 같은 길(실행 때 난수 · 가림)
+          put UI_PW_DA       "Ui#$(openssl rand -hex 16)"
           {
             echo "UI_OUT=$RUNNER_TEMP/ui-out"
             echo "UI_API_DIR=$RUNNER_TEMP/ui-api"
@@ -120,6 +129,7 @@ jobs:
             echo "UI_LOGIN_PARENT=ci-parent"
             echo "UI_LOGIN_GA=ci-ga"
             echo "UI_LOGIN_NA=ci-na"
+            echo "UI_LOGIN_DA=ci-da"
             echo "HITPAN_LOG_DIR=$RUNNER_TEMP/ui-out/main/api-logs"
           } >> "$GITHUB_ENV"
           # 2차(10/29) ①: trace 는 기록·업로드 안 함 → trace 폴더를 만들지 않는다.
@@ -261,10 +271,21 @@ jobs:
         #   이 상한에 걸리면 단계 결론 = 실패(취소 아님 · 공개 문서 기준 · 실물 미측정) → 아래 S9·S10 은 `always()` 라 돈다 ·
         #   S11 은 누출 검사 통과 + 표지 없음일 때만 — 표지가 없어도 업로드 자리엔 대조 지난 그림만 있다(K 가 임시 자리에서 찍고 옮김).
         # ⬛ [낡은 줄 · K 연결 3차] timeout-minutes: 20
+        # 🔴 쿨타임 화면 실측 3(11/28) — K 본문 둘(k35-popup 12분 · k35-session-cooltime 14분 자체 상한)이 차례로 돈다 → 단계 상한 32분(잡 45분 안).
+        #   쿨타임 몸은 ui-k35 가 돌면 늘 돈다(실행기 = 판정기와 같은 고르기 · 이름 알파벳 순 = 앞 몸 뒤) · 기대 키 5 는 judge.js EXPECT_CT_ROWS.
+        # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 32
         # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
         # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 27
         # 🔴 20261128작 로그인 경합 갈래 T — k35-popup 12분 + k35-ws03-closed 16분 + 장치 점검 몫 8분(잡 46분 안).
-        timeout-minutes: 36
+        # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 36
+        # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 27
+        # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다
+        #   = 33분 + 장치 점검 여유 8분(두 갈래 중 큰 여유 = W-S-03 27 − 19) → 단계 상한 41분(잡 54분 안).
+        #   기대 키 = judge.js EXPECT_CT_ROWS 7 · EXPECT_S3_ROWS 7(앞 몸 EXPECT_G_ROWS 18 과 합쳐 32).
+        # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 41
+        # 🔴 #1032 main 합침(11/29 · f744af38 · PM) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 16분 자체 상한)이 차례로 돈다
+        #   = 42분 + 장치 점검 여유 8분 → 단계 상한 50분(잡 63분 안). 기대 키 = EXPECT_G_ROWS 18 + EXPECT_CT_ROWS 7 + EXPECT_S3_ROWS 16 = 41.
+        timeout-minutes: 50
         run: |
           set -uo pipefail
           rc=0
