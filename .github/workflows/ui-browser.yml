@@ -245,8 +245,7 @@ jobs:
           echo "::error::[장치] API 기동 90초 시간초과 · 마지막 index.html 응답=$code"; exit 1
 
       - name: "[장치] S5 시드 ② 자식 2 · 대화방 2 (API 기동 뒤)"
-        # 🧪 측정 가지(m1032 · 머지 금지) — 이 측정은 자식 계정을 쓰지 않는다(계정 자리 아낌)
-        if: false
+        # 🧪 측정 가지 — ⬛ [낡은 줄 · 측정 1회째] if: false(자식 시드 끔) · 사유: 이 시드가 부모 약관 동의도 해서 끄면 직원 만들기 403(런 46176147173)
         run: node scripts/playwright-audit/ci/seed-children.js
 
       - name: "[장치] S7 브라우저 설치 (playwright 판 고정 1.60.0 · 3회 제한)"
