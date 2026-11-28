@@ -231,6 +231,7 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         await c.Admin.ExecuteAsync("UPDATE users SET is_active = 0, password_hash = 'changed' WHERE user_id = @U", new { U = ChildId });   // G5 — 지금 값
 
         await c.App.ExecuteAsync("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");   // D2 — 세션이 RC 여도 거래는 RR
+        // ⚠ 고침 1-4 S15 — 위 RC 는 ⑤ 까지 못 간다(④-끝 끝에서 세션 격리를 전역 값으로 되돌림 · CI 전역 = RR) → ⑤ 격리 명시는 D2_세션RC_교체_격리명시 가 잼
         var before = DateTime.UtcNow;
         // D9 — 시험이 시간대를 UTC 아닌 값(+9)으로 고정(주입 시계 · 러너가 UTC 여도 어긋남이 보임)
         var kst = TimeSpan.FromHours(9);
@@ -346,6 +347,23 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         await c.Admin.ExecuteAsync(
             "INSERT INTO warehouses (warehouse_id, tenant_id, wh_code, wh_name, wh_type, is_active, created_at, updated_at) VALUES ('sr3-wh-1', @T, 'W1', '끝표', 'normal', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
             new { T = Tenant });
+        // 🔴 A-2③ 고침 1-4 M10 — 위 warehouses 는 「끝 표」 가 아니었다(측정 런 46154225643 M10 살아남음): 덤프 차례(이름 차례)에서 그 뒤에
+        //   「백업 값」 표 work_in_process 가 하나 더 있어 변환기가 낸 DROP · CREATE(DDL = 암묵 커밋)가 warehouses INSERT 를 커밋해 버림.
+        //   진짜 끝 표 = work_in_process(그 뒤 workflow_settings 는 「지금 값」 = 건너뜀 · 실행 문장 0) → 여기 씨앗 1줄(외래키 items 1줄 같이).
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO items (item_id, tenant_id, item_code, item_name, item_type, unit, is_active, created_at, updated_at) VALUES ('sr3-item-1', @T, 'I1', '끝표품목', 'product', 'EA', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+            new { T = Tenant });
+        await c.Admin.ExecuteAsync(
+            "INSERT INTO work_in_process (wip_id, tenant_id, item_id, stage, qty) VALUES ('sr3-wip-1', @T, 'sr3-item-1', 'cut', 1.000)",
+            new { T = Tenant });
+        // 고침 1-4 M10 지킴 — 씨앗 표가 붓기 차례 끝(「백업 값」 표 중 이름 차례 마지막)인지 단언. 새 표가 더 뒤에 생기면 여기 빨강 → 씨앗을 그 표로 옮김
+        var lastStagedTable = (await c.Admin.QueryAsync<string>(
+                "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'"))
+            .Where(n => RestoreTableClassification.Classify(n) == RestoreTableClass.FromBackup
+                     || RestoreSafePath.VersionCompareTables.Contains(n, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .Last();
+        Assert.Equal("work_in_process", lastStagedTable);
         var id = await BackupAsync(c);
         var appConnId = await c.App.ExecuteScalarAsync<long>("SELECT CONNECTION_ID()");
         await c.App.ExecuteAsync("SET SESSION autocommit = 0");
@@ -358,6 +376,9 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         Assert.Equal(0, await UncommittedWritesAsync(c.Admin, appConnId));
         Assert.Equal(1, await c.Admin.ExecuteScalarAsync<long>(
             $"SELECT COUNT(*) FROM `{st.Value!.StagedTables["warehouses"]}` WHERE warehouse_id = 'sr3-wh-1'"));
+        // 고침 1-4 M10 — 끝 표 줄도 다른 연결이 봄(붓기 세션 autocommit = 1 명시를 빼면 이 INSERT 가 열린 채 → 위 INNODB_TRX 셈 1 · 여기 0)
+        Assert.Equal(1, await c.Admin.ExecuteScalarAsync<long>(
+            $"SELECT COUNT(*) FROM `{st.Value!.StagedTables["work_in_process"]}` WHERE wip_id = 'sr3-wip-1'"));
         Assert.Equal(0, await c.App.ExecuteScalarAsync<long>("SELECT @@SESSION.autocommit"));   // D15 ② — 붓기 전 값(0)으로 되돌림
         foreach (var (src, staged) in st.Value!.StagedTables)
         {
@@ -369,6 +390,44 @@ public sealed class SafeRestoreSwapGateDbTests : IDisposable
         var rid = await step.BeginHistoryAsync(Tenant, ParentId, id);
         var r = await step.RunAsync(Tenant, ParentId, rid, st.Value);
         Assert.True(r.Ok, $"{r.DenyCode} {r.LogDetail}");
+        Assert.Equal("success", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = rid }));
+    }
+
+    // ══ D2 — ⑤ 격리 명시(고침 1-4 S15) ══
+
+    /// <remarks>
+    /// 고침 1-4 S15 — G4 의 「세션 RC」 는 ④-끝 끝(세션 격리 = 전역 값 되돌림)에서 지워져 ⑤ 는 늘 전역(CI = RR)으로 들어갔다 → ⑤ 격리 명시를 빼도 초록(측정 런 46154225643).
+    /// 여기서는 ④ · ④-끝을 따로 부른 뒤 <b>⑤ 바로 앞</b> 앱 연결 세션을 READ COMMITTED 로 둔다(전역 RC 고객 PC 에서 ④-끝 되돌림 뒤 ⑤ 가 받는 세션과 같은 꼴).
+    /// ⑤ 가 세션 · 거래 격리를 RR 로 명시하지 않으면 격리 확인이 멈춤(SwapFailed) → 빨강.
+    /// </remarks>
+    [Fact(DisplayName = "D2 🔴 ⑤ 에 READ COMMITTED 세션으로 들어와도(전역 RC 고객 PC 꼴) ⑤ 가 격리 RR 명시 → 격리 확인 통과 · 교체 성공 · 기록 success")]
+    public async Task D2_세션RC_교체_격리명시()
+    {
+        var c = await SetupAsync("SR3-D2");
+        if (c is null) return;
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-a', @T, '전')", new { T = Tenant });
+        var id = await BackupAsync(c);
+        await c.Admin.ExecuteAsync("INSERT INTO partner_contacts (contact_id, tenant_id, contact_name) VALUES ('pc-b', @T, '뒤')", new { T = Tenant });
+
+        var sel = await c.Path.SelectAsync(Tenant, id);
+        Assert.True(sel.Ok, $"① {sel.DenyCode} {sel.LogDetail}");
+        using var selection = sel.Value!;
+        var st = await c.Path.StageAsync(Tenant, selection);
+        Assert.True(st.Ok, $"③ {st.DenyCode} {st.LogDetail}");
+        var step = Step(c);
+        var rid = await step.BeginHistoryAsync(Tenant, ParentId, id);
+        var verify = await step.VerifyAsync(Tenant, st.Value!);
+        Assert.True(verify.Ok, $"④ {verify.DenyCode} {verify.LogDetail}");
+        var overlay = await step.OverlayAsync(Tenant, DateTime.Now);
+        Assert.True(overlay.Ok, $"④-끝 {overlay.DenyCode} {overlay.LogDetail}");
+
+        await c.App.ExecuteAsync("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED");
+        Assert.Equal("READ-COMMITTED", await c.App.ExecuteScalarAsync<string>("SELECT @@SESSION.transaction_isolation"));   // 전제 확인(⑤ 바로 앞 세션 = RC)
+        var r = await step.SwapAsync(Tenant, ParentId, rid, verify.Value!, overlay.Value!);
+        Assert.True(r.Ok, $"⑤ {r.DenyCode} {r.LogDetail}");
+        Assert.Equal(RestoreSwapStep.ExpectedIsolation, r.Value!.Isolation);
+        Assert.Equal(1, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-a'"));
+        Assert.Equal(0, await CountAsync(c.Admin, "SELECT COUNT(*) FROM partner_contacts WHERE contact_id = 'pc-b'"));
         Assert.Equal("success", await c.Admin.ExecuteScalarAsync<string>("SELECT status FROM restore_history WHERE restore_id = @R", new { R = rid }));
     }
 

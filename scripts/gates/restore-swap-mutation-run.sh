@@ -80,7 +80,9 @@ S10 ║ STEP ║ await Exec(RestoreSwapSql.LinkBackupOnly, p, tx, ct).ConfigureA
 S12 ║ RULES ║  AND n2.user_id = {l}.user_id)"; ║ )"; ║ G21_10neg_
 S13 ║ RULES ║ LiveOnlyActiveLinkedWhere(l) + " AND " + BPrimeExemption(l); ║ LiveOnlyActiveLinkedWhere(l); ║ G21_10_
 S14 ║ SQL ║ RestoreOverlayRules.LiveOnlyActiveLinkedAfterBPrime("l") + " FOR UPDATE" ║ RestoreOverlayRules.LiveOnlyActiveLinkedWhere("l") + " FOR UPDATE" ║ G21_10_
-S15 ║ STEP ║ "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(SwapIsolation, ct) ║ "SELECT 1", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(ct) ║ G4_G5_G7_
+# ⬛ 고침 1-4 옛 줄(기대 시험 G4_G5_G7_ — 측정 런 46154225643 살아남음 · G4 의 세션 RC 는 ④-끝 되돌림에 지워져 ⑤ 에 못 감 · 명세서 §10-1-4) → 기대 시험만 D2_ 로 · 바늘 · 바꿀 값 그대로
+# S15 ║ STEP ║ "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(SwapIsolation, ct) ║ "SELECT 1", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(ct) ║ G4_G5_G7_
+S15 ║ STEP ║ "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(SwapIsolation, ct) ║ "SELECT 1", cancellationToken: ct)).ConfigureAwait(false);⏎⏎            tx = await ((DbConnection)_db).BeginTransactionAsync(ct) ║ D2_
 S16 ║ STEP ║ Now = LocalNow(), Src = sourceLabel ║ Now = DateTime.UtcNow, Src = sourceLabel ║ G4_G5_G7_
 S17 ║ STEP ║ MigrationJobStore.AnyRunning(tenantId) ║ MigrationJobStore.AnyRunning(tenantId + "-변이") ║ D4_D13_
 # ── 넘김(표에 줄 없음 · 까닭 = 명세서 §10-1-3) — S11 조각 셋 뺌(기대 시험 없음) · N1-a 표지 · 깃발 · 셈 순서(합류 뒤 · A-2① 코드) · G15(변이 없음 · 설계 §15-9) ──
