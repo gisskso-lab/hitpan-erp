@@ -89,7 +89,9 @@ jobs:
     needs: ui-changes
     if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'feat/20261029-G1-3-H-') || needs.ui-changes.outputs.run != 'false') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # ⬛ [낡은 줄 · K 연결 1~3차] timeout-minutes: 30
+    # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
+    timeout-minutes: 37
 
     steps:
       - name: Checkout
@@ -256,7 +258,9 @@ jobs:
         # 🔴 K 연결 3차(PM 결정 4V-2 P2-a) — 단계 시간 상한(잡 30분 안). K 본문 자체 상한(전체 12분 · 경우 150초 · 화면 평가 10초)이 먼저 걸리게 둔다.
         #   이 상한에 걸리면 단계 결론 = 실패(취소 아님 · 공개 문서 기준 · 실물 미측정) → 아래 S9·S10 은 `always()` 라 돈다 ·
         #   S11 은 누출 검사 통과 + 표지 없음일 때만 — 표지가 없어도 업로드 자리엔 대조 지난 그림만 있다(K 가 임시 자리에서 찍고 옮김).
-        timeout-minutes: 20
+        # ⬛ [낡은 줄 · K 연결 3차] timeout-minutes: 20
+        # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
+        timeout-minutes: 27
         run: |
           set -uo pipefail
           rc=0

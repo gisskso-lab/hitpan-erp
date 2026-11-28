@@ -1370,6 +1370,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       fG('K35-G4-CHATAPPR', 'G4', 'toast', 'chromium'),
       fG('K35-G5', 'G5', 'bell', 'chromium'), fG('K35-G5', 'G5', 'toast', 'chromium'),
       fG('K35-N4', 'N4', null, 'chromium', 'DEVICE'), fG('K35-N4', 'N4', null, 'webkit', 'DEVICE'),
+      // 🔴 W-S-03 고침 1(11/28 · [4] P2-1) — 화면 회귀 · 닫힌 서버 문 탐침 7(개발명세서 「고침 1」 표에서 따로 적는다 · 판정기 EXPECT_S3_ROWS 를 읽지 않음)
+      fG('K35-S3-1', 'S3', 'first-home', 'chromium'), fG('K35-S3-1', 'S3', 'first-update', 'chromium'),
+      fG('K35-S3-2', 'S3', 'direct-welcome', 'chromium'), fG('K35-S3-2', 'S3', 'phone-register', 'chromium'),
+      fG('K35-S3-3', 'S3', 'gate-mainpc', 'chromium'),
+      fG('K35-S3-4', 'S3', 'mobile-token', 'chromium'), fG('K35-S3-4', 'S3', 'mobile-register', 'chromium'),
     ];
     const F_G_N = fGRows().length;
     // 🔴 K 연결 1차 — 판정기를 부르는 칸은 사본 폴더(K 본문 꼴 1개 기본)에서 돈다 · 실물 폴더의 K 본문 수에 묶이지 않게(§5-1).
@@ -1874,8 +1879,11 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       // ⬛ [낡은 줄 · 1차] const ok = theirs.length === 16 && mine.length === 16 && new Set(theirs).size === 16 && mine.every((k, i) => k === theirs[i]);
       // ⬛ [낡은 줄 · 1차] check('K-C22k G 기대 키 수 16 고정(G 14 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
       // 🔴 2차(A7) — G4 토스트 길 2 추가로 18(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
-      const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
-      check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // ⬛ [낡은 줄 · 2차] const ok = theirs.length === 18 && mine.length === 18 && new Set(theirs).size === 18 && mine.every((k, i) => k === theirs[i]);
+      // ⬛ [낡은 줄 · 2차] check('K-C22k G 기대 키 수 18 고정(G 16 · N4 2) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
+      // 🔴 W-S-03 고침 1(11/28) — 화면 회귀 · 닫힌 문 탐침 7 추가로 25(판정기 · 이 목록 · 이 숫자 세 곳을 같은 커밋에서)
+      const ok = theirs.length === 25 && mine.length === 25 && new Set(theirs).size === 25 && mine.every((k, i) => k === theirs[i]);
+      check('K-C22k G 기대 키 수 25 고정(G 16 · N4 2 · W-S-03 시험 7) · 판정기 목록 = 따로 적은 목록', ok, `판정기 ${theirs.length} · 따로 ${mine.length}`);
     }
     // ── 🔴 K 연결 2차(PM 결정 4V-1 ②③④) ──
     { // K-C24g 줄바꿈 든 이름(NUL 로만 나눔) → 문서 아님 = 돈다 · 껍데기도 같음

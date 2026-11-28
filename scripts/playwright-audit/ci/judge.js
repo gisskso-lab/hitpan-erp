@@ -126,9 +126,24 @@ const EXPECT_G_ROWS = [
   ['K35-G5', 'G5', 'bell', 'chromium'], ['K35-G5', 'G5', 'toast', 'chromium'],
   ['K35-N4', 'N4', null, 'chromium'], ['K35-N4', 'N4', null, 'webkit'],
 ];
-const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+// 🔴 W-S-03 고침 1(11/28 · [4] P2-1 화면 회귀 · 개발명세서 docs/개발/erp/20261128_W-S-03_서버문닫기_온보딩모바일_개발명세서.md 「고침 1」)
+//   K 본문 k35-ws03-closed.js 의 기대 키 7 = 시험 7(첫 로그인 2 · 닫힌 주소 2 · 기기 관문 1 · 닫힌 서버 문 2) · N4 0(그림 안 찍음). 선택 키 0 — 빠지면 누락 빨강.
+//   EXPECT_G_ROWS(앞 몸 · kit35.expectKeys 가 읽는 목록)와 따로 둔다 — 앞 몸이 브라우저 끝에 남은 키를 DEVICE 로 채울 때 이 키를 건드리지 않게.
+//   판정(필수 · 중복 · 모르는 · 통과 꼴)은 합친 EXPECT_G 로 같은 규칙.
+const EXPECT_S3_ROWS = [
+  ['K35-S3-1', 'S3', 'first-home', 'chromium'],
+  ['K35-S3-1', 'S3', 'first-update', 'chromium'],
+  ['K35-S3-2', 'S3', 'direct-welcome', 'chromium'],
+  ['K35-S3-2', 'S3', 'phone-register', 'chromium'],
+  ['K35-S3-3', 'S3', 'gate-mainpc', 'chromium'],
+  ['K35-S3-4', 'S3', 'mobile-token', 'chromium'],
+  ['K35-S3-4', 'S3', 'mobile-register', 'chromium'],
+];
+// ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
+const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 // N4 키(화면 글자 대조 · DEVICE 줄) — 나머지 G 키 줄 통과는 TEST 만(§4-2 ②)
-const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
+// ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G_DEVICE = new Set(EXPECT_G_ROWS.filter(([, g]) => g === 'N4')
+const EXPECT_G_DEVICE = new Set([...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].filter(([, g]) => g === 'N4')
   .map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser })));
 // 🔴 K 연결 3차(PM 결정 3V-2 · 4V-2 P2-b) — N4 거짓 이유 둘. K 도우미(kit35)가 결과 칸 머리에 이 글자를 붙인다.
 //   「대조 못 함」 머리로 시작하는 거짓 줄만 장치 이유로 읽고, 머리가 없거나 다른 글자면 누출 신호로 읽는다(닫힌 쪽).
@@ -353,5 +368,6 @@ module.exports = {
   K_BODY_STRICT, classifyKNames, kBodyScan, // F-PR ⑧
   rowKey, EXPECT_BROWSERS, EXPECT_H, EXPECT_G, checkExpectKeys, // F-PR ⑨
   EXPECT_G_ROWS, EXPECT_G_DEVICE, // K 연결 ⑪⑫
+  EXPECT_S3_ROWS, // W-S-03 고침 1(11/28)
   N4_WHY, n4Why, // K 연결 3차 ⑭
 };
