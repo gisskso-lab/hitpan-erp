@@ -263,6 +263,9 @@ public sealed class ManualUpdateService
         lock (_gate) return _job is { IsRunning: true };
     }
 
+    /// <summary>🔴 W-G1-52 갈래 A-2③ D13 — 수동 업데이트 일감이 도는 중인가(읽기만 · 복원 걸음 ④ 앞 멈춤용 · 판정 로직 손 0 · #43).</summary>
+    public bool IsRunning => IsBusy();
+
     private ManualUpdateStartOutcome RefuseBeforeStart(string from, string entry, string userId, string reason)
     {
         _logger.LogWarning("[ManualUpdate] 수동 업데이트 거부(시작 전) — 사유 {Reason}", reason);

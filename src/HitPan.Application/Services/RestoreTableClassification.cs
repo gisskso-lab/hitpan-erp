@@ -151,6 +151,80 @@ public static class RestoreTableClassification
         "reseller_promotions", "reseller_revenues", "reseller_payouts",
     ];
 
+    // ══ 🔴 W-G1-52 갈래 A-2③ — G22 무른 참조 두 목록(보1 §3 · §3-1 · D5 「그대로」 · Z2) ══
+    //   「지금 값」 표(출하 DDL)의 칸 가운데 이름이 _id · _code · _no · _by · _key 로 끝나는 칸(tenant_id 뺌) 전부가 두 목록 중 정확히 하나.
+    //   새 칸이 생기면 G22 ① 빨강 → 「백업 값」 행을 가리키는지 보고 한 목록에 더한다. 복원은 이 칸들을 고치지 않는다(지금 값 표 손 0).
+
+    /// <summary>
+    /// 무른 참조 C1 ~ C6(지금 값 칸 → 백업 값 행 · 처리 = 그대로). 「표.칸」.
+    /// C1 권한(주인 없는 줄은 문을 안 엶) · C2 · C3 읽는 코드 0(G22 ②) · C4 백오피스 Pull 사본(#37) · C5 사용 기록 · C6 감사 기록.
+    /// </summary>
+    public static readonly string[] SoftReferences =
+    [
+        "user_permissions.user_id",               // C1
+        "users.dept_id",                          // C2 — 읽는 코드 0
+        "tenant_etax_settings.notify_manager_id", // C3 — 읽는 코드 0
+        "tenant_employees_snapshot.employee_id",  // C4 — #37 수신 캐시 결
+        "ai_usage_logs.conv_id",                  // C5
+        "audit_trail.entity_id",                  // C6
+        "force_edit_logs.record_id",              // C6
+    ];
+
+    /// <summary>무른 참조 아님(지금 값 표끼리 · 바깥 식별자 · 기록 번호 · 설정 키 등) — 출하 DDL 실측 124칸(11/28 · 바닥 475774d0).</summary>
+    public static readonly string[] NotReferences =
+    [
+        "ai_export_consents.agreed_by",
+        "ai_usage_logs.usage_id",
+        "approval_settings.setting_id", "approval_settings.created_by", "approval_settings.updated_by",
+        "audit_logs.log_id", "audit_logs.user_id", "audit_logs.status_code",
+        "audit_trail.log_id", "audit_trail.user_id",
+        "backup_history.backup_id", "backup_history.triggered_by",
+        "billing_invoices.invoice_id", "billing_invoices.invoice_no", "billing_invoices.subscription_id", "billing_invoices.plan_code", "billing_invoices.payment_method_id", "billing_invoices.provider_payment_key", "billing_invoices.tax_invoice_no", "billing_invoices.created_by", "billing_invoices.updated_by",
+        "billing_payment_attempts.attempt_id", "billing_payment_attempts.invoice_id", "billing_payment_attempts.payment_method_id", "billing_payment_attempts.error_code",
+        "billing_payment_methods.payment_method_id", "billing_payment_methods.provider_billing_key", "billing_payment_methods.customer_key", "billing_payment_methods.created_by", "billing_payment_methods.updated_by",
+        "billing_settings.setting_id", "billing_settings.updated_by",
+        "billing_subscriptions.subscription_id", "billing_subscriptions.plan_code", "billing_subscriptions.payment_method_id",
+        "common_codes.code_id",
+        "device_login_logs.log_id", "device_login_logs.device_id", "device_login_logs.user_id",
+        "fax_settings.sender_fax_no",
+        "force_edit_logs.log_id", "force_edit_logs.user_id",
+        "form_templates.template_id", "form_templates.style_key", "form_templates.default_key",
+        "hitpan_knowledge.article_id", "hitpan_knowledge.created_by",
+        "labor_policy_settings.policy_id", "labor_policy_settings.policy_key", "labor_policy_settings.updated_by",
+        "local_company.tenant_code", "local_company.biz_no", "local_company.zip_code", "local_company.corp_no", "local_company.subsidiary_no", "local_company.e_invoice_id",
+        "local_subscription.reseller_id",
+        "local_update_consents.user_id",
+        "local_update_attempts.consent_id",
+        "login_attempts.attempt_id",
+        "refresh_tokens.token_id", "refresh_tokens.user_id", "refresh_tokens.session_id",
+        "restore_history.restore_id",
+        "security_alerts.alert_id", "security_alerts.user_id",
+        "schema_migrations.migration_id",
+        "subscriptions.subscription_id", "subscriptions.reseller_id", "subscriptions.platform_id",
+        "sync_tokens.token_id",
+        "device_register_tokens.token_id", "device_register_tokens.issued_by", "device_register_tokens.used_device_id",
+        "tenant_certificates.cert_id", "tenant_certificates.serial_no", "tenant_certificates.uploaded_by",
+        "tenant_devices.device_id", "tenant_devices.user_id", "tenant_devices.hardware_id", "tenant_devices.approved_by", "tenant_devices.mainpc_sealed_key", "tenant_devices.main_pc_key",
+        "device_slot_policy_settings.policy_id", "device_slot_policy_settings.policy_key", "device_slot_policy_settings.updated_by",
+        "tenant_devices_snapshot.snapshot_id", "tenant_devices_snapshot.device_id",
+        "tenant_employees_snapshot.snapshot_id",
+        "tenant_etax_settings.updated_by",
+        "tenants.platform_id", "tenants.tenant_code", "tenants.biz_no", "tenants.reseller_id", "tenants.zip_code", "tenants.corp_no", "tenants.subsidiary_no", "tenants.e_invoice_id",
+        "user_permissions.perm_id", "user_permissions.menu_code",
+        "user_sessions.session_id", "user_sessions.user_id",
+        "user_terms_consent.consent_id", "user_terms_consent.user_id",
+        "users.user_id", "users.reseller_id", "users.platform_id", "users.created_by", "users.updated_by",
+        "workflow_settings.setting_id", "workflow_settings.setting_key",
+        "cs_requests.cs_request_id", "cs_requests.created_by", "cs_requests.screen_code",
+        "cs_outbox.outbox_id", "cs_outbox.cs_request_id", "cs_outbox.last_status_code",
+        "cs_replies.reply_id", "cs_replies.cs_request_id",
+        "cs_forbidden_rejects.reject_id", "cs_forbidden_rejects.rule_code",
+        "cs_rating_outbox.outbox_id", "cs_rating_outbox.cs_request_id", "cs_rating_outbox.last_status_code",
+    ];
+
+    /// <summary>G22 ② — 읽는 코드가 0 이어야 하는 무른 참조(칸 이름 · 속성 이름). 읽기 시작하면 끊김 처리를 다시 본다.</summary>
+    public static readonly string[] UnreadSoftReferenceNames = ["dept_id", "DeptId", "notify_manager_id", "NotifyManagerId"];
+
     private static readonly HashSet<string> KeepSet = new(KeepCurrentNames, StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> BackupSet = new(FromBackupNames, StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> TriggerSet = new(KnownTriggerTableNames, StringComparer.OrdinalIgnoreCase);

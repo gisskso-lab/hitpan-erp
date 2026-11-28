@@ -143,6 +143,10 @@ builder.Services.AddScoped<IBillingProvider, ManualBillingProvider>();
 builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddScoped<IBackupService, BackupService>();
 builder.Services.AddScoped<IRestoreSafePath, RestoreSafePath>();   // W-G1-52 A-2② 안전 복원 걸음 ①~③ (깃발 닫힘 · 부르는 곳 = 시험 · A-2③)
+builder.Services.AddSingleton<IRestoreBusyProbe, HitPan.API.Services.RestoreBusyProbe>();   // W-G1-52 A-2③ D13 업데이트 도는 중 읽기만
+builder.Services.AddScoped(sp => new RestoreSwapStep(   // W-G1-52 A-2③ 걸음 ④ · ④-끝 · ⑤ (깃발 닫힘 · 시험 걸이 0 = 제품 길)
+    sp.GetRequiredService<System.Data.IDbConnection>(), sp.GetRequiredService<IRestoreSafePath>(), sp.GetRequiredService<ILocalAuditFile>(),
+    sp.GetRequiredService<ILogger<RestoreSwapStep>>(), sp.GetRequiredService<IRestoreBusyProbe>()));
 builder.Services.AddScoped<IDataResetService, DataResetService>();
 builder.Services.AddScoped<IBillsCardsBankService, BillsCardsBankService>();
 builder.Services.AddScoped<ITermsConsentService, TermsConsentService>();  // 헌법 #24 약관 4건 강제 동의
@@ -654,6 +658,24 @@ var app = builder.Build();
     {
         syncLogger.LogWarning(ex,
             "[Startup/EmployeeLoginIdSync] 사원계정 재맞춤 실패 — 기동은 계속합니다. 사원관리 「사원계정」 칸이 옛 값일 수 있습니다.");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔴 W-G1-52 갈래 A-2③ — 끊긴 안전 복원이 남긴 임시 표(rs_new__*) 기동 1회 청소(본 §7 · #30 고객 손 0).
+//   지우기 = RestoreSafePath.DropStagingTablesAsync 한 곳(G9) · 라이브 표 손 0 · 실패해도 기동은 계속(#15 로그).
+// ─────────────────────────────────────────────────────────────────────────────
+{
+    using var rsScope = app.Services.CreateScope();
+    var rsLogger = rsScope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("HitPan.Startup.RestoreStagingCleanup");
+    try
+    {
+        var dropped = await rsScope.ServiceProvider.GetRequiredService<IRestoreSafePath>().DropStagingTablesAsync().ConfigureAwait(false);
+        if (dropped > 0) rsLogger.LogWarning("[Startup/RestoreStagingCleanup] 끊긴 복원의 임시 표 {Count}개를 지웠습니다(라이브 자료 손 0).", dropped);
+    }
+    catch (Exception ex)
+    {
+        rsLogger.LogWarning(ex, "[Startup/RestoreStagingCleanup] 임시 표 청소 실패 — 기동은 계속합니다(다음 기동 때 다시).");
     }
 }
 
