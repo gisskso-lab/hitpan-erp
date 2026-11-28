@@ -8,6 +8,7 @@
 @* 🔴 [W-G1-51 갈래 B · P3 · 출처 583e1cbb D-2] 저장 안 한 그림이 있는 채로 닫으려 하면 **되묻는다**.
      스낵바는 지나가 버리므로 「닫으면 전표에 안 나온다」를 멈춰 세워 말할 자리가 필요하다. *@
 @inject IDialogService Dialogs
+@inject ILogger<FormTemplateEditorDialog> Logger
 
 <MudDialog>
     <DialogContent>
@@ -847,7 +848,8 @@
         catch (Exception ex)
         {
             // 🔴 빈 catch 금지(#15). 못 읽었으면 라디오 옆 글자를 **비운 채** 둔다.
-            Console.Error.WriteLine($"[FormWatermark] 공통 설정을 읽지 못했다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormWatermark] 공통 설정을 읽지 못했다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormWatermark] 공통 설정을 읽지 못했다");
         }
 
         try
@@ -865,7 +867,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[FormWatermark] 로고 상태를 읽지 못했다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormWatermark] 로고 상태를 읽지 못했다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormWatermark] 로고 상태를 읽지 못했다");
         }
     }
 
@@ -1291,7 +1294,8 @@
         catch (Exception ex)
         {
             Snackbar.Add("그림을 올리는 중 오류가 났습니다.", Severity.Error);
-            Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormBackground] {ex.Message}");
+            Logger.LogWarning(ex, "[FormBackground] 그림 올리기 중 오류");
             return;
         }
         finally
@@ -1421,13 +1425,15 @@
                 if (!resp.IsSuccessStatusCode)
                 {
                     failed++;
-                    Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 거절 ({(int)resp.StatusCode})");
+                    // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 거절 ({(int)resp.StatusCode})");
+                    Logger.LogWarning("[FormBackground] 저장 뒤 그림 파일 지우기 거절 ({Status})", (int)resp.StatusCode);
                 }
             }
             catch (Exception ex)
             {
                 failed++;
-                Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 실패: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormBackground] 저장 뒤 그림 파일 지우기 실패: {ex.Message}");
+                Logger.LogWarning(ex, "[FormBackground] 저장 뒤 그림 파일 지우기 실패");
             }
         }
         _bgRemovePending.Clear();
@@ -1440,7 +1446,7 @@
     }
 
     /// <summary>서버가 돌려준 까닭 한 줄을 꺼낸다. 🔴 못 꺼내면 null — 억지로 만들지 않는다.</summary>
-    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
+    private async Task<string?> ReadServerMessageAsync(HttpResponseMessage resp)
     {
         try
         {
@@ -1450,7 +1456,8 @@
         catch (Exception ex)
         {
             // 🔴 빈 catch 금지 — 까닭을 적고 null 로 떨어진다(#15).
-            Console.Error.WriteLine($"[FormBackground] 응답을 읽지 못했다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormBackground] 응답을 읽지 못했다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormBackground] 응답을 읽지 못했다");
             return null;
         }
     }
@@ -1573,7 +1580,8 @@
         catch (Exception ex)
         {
             Snackbar.Add("미리보기 중 오류가 났습니다.", Severity.Error);
-            Console.Error.WriteLine($"[FormPreview] {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormPreview] {ex.Message}");
+            Logger.LogWarning(ex, "[FormPreview] 미리보기 중 오류");
         }
         finally
         {
@@ -1588,7 +1596,8 @@
         var old = _previewUrl;
         _previewUrl = null;
         try { await JS.InvokeVoidAsync("hitpanRevokeBlobUrl", old); }
-        catch (Exception ex) { Console.Error.WriteLine($"[FormPreview] 주소 거두기 실패: {ex.Message}"); }
+        // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[FormPreview] 주소 거두기 실패: {ex.Message}"); }
+        catch (Exception ex) { Logger.LogWarning(ex, "[FormPreview] 주소 거두기 실패"); }
     }
 
     private async Task SaveAsync()
@@ -1659,7 +1668,8 @@
                     }
                     else
                     {
-                        Console.Error.WriteLine("[FormYTemplate] 저장 응답에서 양식 번호를 못 읽어 확인창을 띄우지 않았다");
+                        // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine("[FormYTemplate] 저장 응답에서 양식 번호를 못 읽어 확인창을 띄우지 않았다");
+                        Logger.LogWarning("[FormYTemplate] 저장 응답에서 양식 번호를 못 읽어 확인창을 띄우지 않았다");
                     }
                 }
                 // 🔴🔴 [W-G1-51 갈래 F-1 · 편집창 고침 1 · §60 멈춤 (다) · PM 판단] 「양식 그림 포함」(빈 A4) 양식에서 그림을 바꿔 저장 —
@@ -1789,7 +1799,8 @@
         catch (Exception ex)
         {
             // 🔴 빈 catch 금지(#15) — 저장은 끝났으니 「저장 실패」가 아니라 이 한 줄.
-            Console.Error.WriteLine($"[FormYTemplate] 빈 A4 양식 만들기 실패: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormYTemplate] 빈 A4 양식 만들기 실패: {ex.Message}");
+            Logger.LogWarning(ex, "[FormYTemplate] 빈 A4 양식 만들기 실패");
             Snackbar.Add("빈 A4 양식을 만들지 못했습니다. 양식은 저장되었습니다.", Severity.Warning);
         }
     }
@@ -1811,13 +1822,14 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[FormYTemplate] 기본 양식을 묻지 못해 이어받기 알림을 뺐다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormYTemplate] 기본 양식을 묻지 못해 이어받기 알림을 뺐다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormYTemplate] 기본 양식을 묻지 못해 이어받기 알림을 뺐다");
             return false;
         }
     }
 
     /// <summary>저장 응답(만든 · 고친 양식)에서 양식 번호를 꺼낸다. 못 꺼내면 null.</summary>
-    private static async Task<string?> ReadSavedTemplateIdAsync(HttpResponseMessage resp)
+    private async Task<string?> ReadSavedTemplateIdAsync(HttpResponseMessage resp)
     {
         try
         {
@@ -1826,17 +1838,18 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[FormYTemplate] 저장 응답을 읽지 못했다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormYTemplate] 저장 응답을 읽지 못했다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormYTemplate] 저장 응답을 읽지 못했다");
             return null;
         }
     }
 
     /// <summary>서버 거절 본문의 사람 말(<c>error</c> 또는 <c>message</c>)을 꺼낸다. 못 꺼내면 null — 억지로 만들지 않는다.</summary>
-    private static string? ReadServerError(string? body)
+    private string? ReadServerError(string? body)
         => ReadJsonText(body, "error") ?? ReadJsonText(body, "message");
 
     /// <summary>JSON 본문의 글자 칸 하나를 꺼낸다(이름 대소문자 무시). 못 꺼내면 null.</summary>
-    private static string? ReadJsonText(string? body, string name)
+    private string? ReadJsonText(string? body, string name)
     {
         if (string.IsNullOrWhiteSpace(body)) return null;
         try
@@ -1857,7 +1870,8 @@
         catch (System.Text.Json.JsonException ex)
         {
             // 🔴 빈 catch 금지(#15) — JSON 이 아닌 본문(예: 서버 오류 쪽)은 null 로 떨어져 종전 줄을 쓴다.
-            Console.Error.WriteLine($"[FormTemplate] 응답 본문이 JSON 이 아니다: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[FormTemplate] 응답 본문이 JSON 이 아니다: {ex.Message}");
+            Logger.LogWarning(ex, "[FormTemplate] 응답 본문이 JSON 이 아니다");
             return null;
         }
     }

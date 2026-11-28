@@ -6,6 +6,7 @@
 @inject DocumentService DocSvc
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject ILogger<MobileSalesPage> Logger
 
 <PageTitle>판매 현황</PageTitle>
 
@@ -165,7 +166,8 @@
         }
         catch (Exception _hp15Ex)
         {
-            Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
+            Logger.LogWarning(_hp15Ex, "[HP15] 모바일 판매 PDF 준비 실패");
             Snackbar.Add("PDF 준비 중입니다.", Severity.Info);
         }
     }

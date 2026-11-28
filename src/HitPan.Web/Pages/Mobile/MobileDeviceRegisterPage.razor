@@ -8,6 +8,7 @@
 @inject HttpClient Http
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ILogger<MobileDeviceRegisterPage> Logger
 
 @* ⬛ 2026-10-05 슬롯 폐기(작4 A-7 · 9/28 설계 §6-2) — 휴대폰 QR 등록 입구를 걷었다. 옛 QR 주소로 오면 안내문 + [로그인] 만 보인다.
      휴대폰은 등록 없이 로그인만 하면 된다. 아래 옛 화면은 지우지 않고(#1) `_showRetiredQrScreen`(늘 false) 안에 남긴다. *@
@@ -257,7 +258,8 @@
         catch (Exception ex)
         {
             // 헌법 #15 — 흔적은 남기되 등록 자체를 막지 않는다.
-            Console.Error.WriteLine($"[HP15][MobileRegister] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15][MobileRegister] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[HP15][MobileRegister] 기기 종류 확인 실패");
         }
     }
 
@@ -299,7 +301,8 @@
             catch (Exception ex)
             {
                 // 헌법 #15 — 흔적은 남기되 등록 자체를 막지 않는다.
-                Console.Error.WriteLine($"[HP15][MobileRegister/getDeviceId] {ex.GetType().Name}: {ex.Message}");
+                // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15][MobileRegister/getDeviceId] {ex.GetType().Name}: {ex.Message}");
+                Logger.LogWarning(ex, "[HP15][MobileRegister/getDeviceId] 기기 번호 읽기 실패");
             }
 
             var resp = await Http.PostAsJsonAsync("api/devices/mobile-register", new
@@ -333,7 +336,8 @@
                 catch (Exception ex)
                 {
                     // 보관에 실패해도 등록 자체는 끝났다 — 다음번에 지문으로 찾는다(종전 동작).
-                    Console.Error.WriteLine($"[HP15][MobileRegister/setDeviceId] {ex.GetType().Name}: {ex.Message}");
+                    // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15][MobileRegister/setDeviceId] {ex.GetType().Name}: {ex.Message}");
+                    Logger.LogWarning(ex, "[HP15][MobileRegister/setDeviceId] 기기 번호 보관 실패");
                 }
 
                 _state = State.Done;
@@ -351,7 +355,8 @@
         catch (Exception ex)
         {
             _error = "연결이 되지 않았습니다. 회사 인터넷에 연결되어 있는지 확인해 주세요.";
-            Console.Error.WriteLine($"[HP15][MobileRegister] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15][MobileRegister] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[HP15][MobileRegister] 등록 연결 실패");
             _state = State.Failed;
         }
         finally
@@ -372,7 +377,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[HP15][MobileRegister/Install] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15][MobileRegister/Install] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[HP15][MobileRegister/Install] 홈화면 추가 실패");
         }
     }
 

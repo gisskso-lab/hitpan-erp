@@ -11,6 +11,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthProvider
+@inject ILogger<UnifiedDayDetailModal> Logger
 
 @if (IsOpen)
 {
@@ -333,7 +334,8 @@
         catch (Exception ex)
         {
             // §원칙 #15 — silent swallow 금지.
-            Console.Error.WriteLine($"[UnifiedDayDetailModal.DeleteIssue.confirm] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[UnifiedDayDetailModal.DeleteIssue.confirm] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[UnifiedDayDetailModal.DeleteIssue.confirm] 삭제 확인창 실패");
             return;
         }
 

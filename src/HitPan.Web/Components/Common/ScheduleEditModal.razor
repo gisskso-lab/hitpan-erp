@@ -8,6 +8,7 @@
 @inject UnifiedCalendarService UnifiedSvc
 @inject IJSRuntime JS
 @inject PartnerMasterService PartnersApi
+@inject ILogger<ScheduleEditModal> Logger
 
 @if (IsOpen)
 {
@@ -348,7 +349,8 @@
         catch (Exception ex)
         {
             // §원칙 #15 — silent swallow 금지.
-            Console.Error.WriteLine($"[ScheduleEditModal.OnSave] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ScheduleEditModal.OnSave] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[ScheduleEditModal.OnSave] 일정 저장 실패");
             _error = "저장 중 오류가 발생했습니다.";
         }
         finally
@@ -368,7 +370,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ScheduleEditModal.OnDelete.confirm] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ScheduleEditModal.OnDelete.confirm] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[ScheduleEditModal.OnDelete.confirm] 삭제 확인창 실패");
             return;
         }
 
@@ -382,7 +385,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[ScheduleEditModal.OnDelete] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[ScheduleEditModal.OnDelete] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[ScheduleEditModal.OnDelete] 일정 삭제 실패");
             _error = "삭제 중 오류가 발생했습니다.";
         }
         finally

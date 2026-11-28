@@ -8,6 +8,7 @@
 @inject HrClientService HrSvc
 @inject ISnackbar Snackbar
 @inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<HrOvertimePage> Logger
 
 <PageTitle>초과근무</PageTitle>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -83,7 +84,8 @@
         {
             // 판정에 실패하면 관리자로 보지 않는다 — 못 읽었는데 열어주면 막은 적이 없는 것과 같다.
             // (휴직 화면과 같은 원칙. 게이트: OvertimeApproverGateGuardTests)
-            Console.Error.WriteLine($"[HrOvertimePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HrOvertimePage] 계정 유형 판정 실패: {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[HrOvertimePage] 계정 유형 판정 실패");
             _isAdmin = false;
         }
 

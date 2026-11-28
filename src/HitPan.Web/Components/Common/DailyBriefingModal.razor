@@ -21,6 +21,7 @@
 @inject UnifiedCalendarService UnifiedSvc
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthProvider
+@inject ILogger<DailyBriefingModal> Logger
 
 @if (IsOpen)
 {
@@ -328,7 +329,8 @@
         catch (Exception ex)
         {
             // §원칙 #15 — silent swallow 금지.
-            Console.Error.WriteLine($"[DailyBriefingModal.LoadAsync] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DailyBriefingModal.LoadAsync] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[DailyBriefingModal.LoadAsync] 아침 알림 조회 실패");
             _data = null;
             _totalCount = 0;
         }
@@ -359,7 +361,8 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[DailyBriefingModal.DismissForToday] {ex.GetType().Name}: {ex.Message}");
+            // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[DailyBriefingModal.DismissForToday] {ex.GetType().Name}: {ex.Message}");
+            Logger.LogWarning(ex, "[DailyBriefingModal.DismissForToday] 오늘 그만 보기 저장 실패");
         }
         await Close();
     }
