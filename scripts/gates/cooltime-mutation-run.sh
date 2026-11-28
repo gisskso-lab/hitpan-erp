@@ -36,7 +36,9 @@ MUTATIONS=(
   "c|$ENGINE|                 AND cooltime_asked_at > UTC_TIMESTAMP(6) - INTERVAL 65 SECOND\",|                 \",|$DB.G_C6_|1"
   "d|$HR|check_out_source = CASE WHEN check_out_source = 'cooltime_blank' THEN NULL ELSE check_out_source END|check_out_source = check_out_source|$DB.G_C16_|1"
   "e|$NOTIFY|options.AccessTokenProvider = GetHubTokenAsync;|options.AccessTokenProvider = () => Task.FromResult<string?>(token);|$RULE.G_C18a_배선|0"
-  "f|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;|if (IsBeforeSettingChange(cUtc, null)) continue;|$DB.G_C19_|1"
+  # ⬛ [낡은 줄 · 11/28 나누기 이전] f = 「…t.ChangedAtUtc)) continue;」 → 「…null)) continue;」 · G_C19_
+  #   🆕 11/28 HQA 반려 P1 — 회사 한 곳 함수(RunTenantAsync)로 옮겨 continue 가 return Tally() 가 되었다(같은 뜻)
+  "f|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) return Tally();|if (IsBeforeSettingChange(cUtc, null)) return Tally();|$DB.G_C19_|1"
   "g|$SETTINGS|if (wasEnabled != cooltime.Enabled)|if (!wasEnabled && cooltime.Enabled)|$DB.G_C20_|1"
   "h|$SETTINGS|if (wasEnabled != cooltime.Enabled)|if (wasEnabled && !cooltime.Enabled)|$DB.G_C20_|1"
   "i|$ENGINE|? UtcToServerLocal(missedCUtc)|? nowLocal|$DB.G_C21_|1"
@@ -64,7 +66,8 @@ MUTATIONS=(
   "aa|$ENGINE|login_at >= @CUtc|login_at > @CUtc|$DB.G_C22_|1"
   "ab|$ENGINE|login_at < @CUtc + INTERVAL @W HOUR|login_at <= @CUtc + INTERVAL @W HOUR|$DB.G_C22_|1"
   # ── 🆕 11/28 PM §290 S-4 — ④ 로그인도 E-2(저장 직후 C 건너뜀)를 따르는지: ⓕ 와 같은 바늘 · 대상 = G-C22 「④+저장 C 뒤」 줄 ──
-  "ac|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;|if (IsBeforeSettingChange(cUtc, null)) continue;|$DB.G_C22_|1"
+  # ⬛ [낡은 줄 · 11/28 나누기 이전] ac = f 와 같은 바늘(continue;) · G_C22_ — 🆕 11/28 위 f 와 같은 까닭으로 return Tally()
+  "ac|$ENGINE|if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) return Tally();|if (IsBeforeSettingChange(cUtc, null)) return Tally();|$DB.G_C22_|1"
 )
 
 want=" $* "

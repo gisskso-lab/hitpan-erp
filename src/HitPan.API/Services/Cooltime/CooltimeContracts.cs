@@ -70,6 +70,17 @@ public sealed record CooltimeEndResult(
 /// <summary><see cref="CooltimeEngine.RunOnceAsync"/> 한 바퀴 결과(게이트·로그용).</summary>
 public sealed record CooltimeTickResult(int EnabledTenants, int Asked, int EndedNoAnswer, int EndedMissed, int Deadlocks);
 
+/// <summary>
+/// 🆕 11/28 HQA 반려 P1(설계 <c>docs/설계/erp/쿨타임_설정끄기경주_고침_설계_20261128.md</c> §6) — 한 바퀴가 읽은 켜진 회사 한 곳의 설정 값.
+/// <see cref="CooltimeEngine.ReadTenantsAsync"/> 가 만들고 <see cref="CooltimeEngine.RunTenantAsync"/> 가 받는다.
+/// 서버 작업의 쓰기(묻기 · 끝내기)는 거래 첫 문장에서 이 세 값(켬 · <c>cooltime_at</c> · <c>cooltime_changed_at</c>)이
+/// 그 회사 <c>tenant_settings</c> 행과 아직 같은지 다시 확인한다 — 다르면 물러난다(설정 끄기 · 시각 바꿈 경주).
+/// </summary>
+/// <param name="TenantId">그 회사 — <c>tenant_settings</c> 행에서만 온다(#2).</param>
+/// <param name="CooltimeAt">읽은 순간의 자동 로그아웃 시각(<c>cooltime_at</c>).</param>
+/// <param name="ChangedAtUtc">읽은 순간의 마지막 켬·시각 바꿈 순간(<c>cooltime_changed_at</c> · UTC · 없으면 <c>null</c>).</param>
+public sealed record CooltimeTenantSnapshot(string TenantId, TimeSpan CooltimeAt, DateTime? ChangedAtUtc);
+
 /// <summary><c>GET /api/auth/cooltime/state</c> 응답 본문.</summary>
 /// <remarks>
 /// 🆕 11/27 고침 차례(§275 E-5 · 설계 §E-5 (나) 「state 에 칸을 더해야 함」) — <c>Active</c> = 그 로그인의 세션 행이 아직 있나.

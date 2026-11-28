@@ -100,6 +100,36 @@ public sealed class CooltimeEngine
     /// <param name="nowLocal">서버 PC 벽시계(운영 = <c>DateTime.Now</c>) — <c>C</c> 계산 · 퇴근 기록에만 쓴다. 시험이 주입한다.</param>
     public async Task<CooltimeTickResult> RunOnceAsync(DateTime nowLocal, CancellationToken ct = default)
     {
+        // ⬛ [낡은 줄 · 11/28 HQA 반려 P1 이전 · 커밋 ce77209f 의 이 파일 :103–202]
+        //   이 자리에 「켜진 회사 읽기」(:105–111) 와 「회사마다 ① → E-2 건너뛰기 → ② → ③④」(:113–202) 본문이 있었다.
+        //   문장 · 순서를 그대로 아래 두 공개 메서드로 옮겼다(지우지 않고 이동 · #1). 옮기며 바뀐 글자는 둘뿐:
+        //   foreach 안의 `continue;`(E-2 건너뛰기) → 회사 한 곳 함수의 `return Tally();` · 합계 → 회사마다 더함.
+        //   옛 본문을 여기 주석으로 다시 적지 않는 이유 = 변이 런(scripts/gates/cooltime-mutation-run.sh)이
+        //   제품 파일에서 바꿀 글자를 「정확히 1번」 으로 센다 — 주석 사본이 그 셈을 깨뜨린다.
+        // 🆕 11/28 설계 쿨타임_설정끄기경주_고침 §6 — 같은 문장 · 같은 순서. 제품 길 = 이 함수 하나(CooltimeService 그대로).
+        var tenants = await ReadTenantsAsync(ct).ConfigureAwait(false);
+
+        int asked = 0, endedNoAnswer = 0, endedMissed = 0, deadlocks = 0;
+
+        foreach (var t in tenants)
+        {
+            var one = await RunTenantAsync(t, nowLocal, ct).ConfigureAwait(false);
+            asked += one.Asked;
+            endedNoAnswer += one.EndedNoAnswer;
+            endedMissed += one.EndedMissed;
+            deadlocks += one.Deadlocks;
+        }
+
+        return new CooltimeTickResult(tenants.Count, asked, endedNoAnswer, endedMissed, deadlocks);
+    }
+
+    /// <summary>
+    /// 🆕 11/28 — 켜진 회사 목록 읽기(<see cref="RunOnceAsync"/> 의 첫 문장을 그대로 옮김). 잠금 없는 읽기 한 번이다 ⇒
+    /// 이 값으로 쓰기 전에 <see cref="RunTenantAsync"/> 의 쓰기 거래가 첫 문장에서 다시 확인한다.
+    /// 시험(G-C25 · G-C26)이 「읽기 → 설정 저장 → 회사 한 곳 돌기」 순서를 시간 기다림 없이 세우려고 공개한다.
+    /// </summary>
+    public async Task<IReadOnlyList<CooltimeTenantSnapshot>> ReadTenantsAsync(CancellationToken ct = default)
+    {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
         // 켜진 회사가 없으면 한 바퀴 = 이 가벼운 조회 1회(설계 §2). 행 없는 회사 = 꺼짐.
@@ -110,9 +140,25 @@ public sealed class CooltimeEngine
                WHERE cooltime_enabled = 1 AND cooltime_at IS NOT NULL",
             cancellationToken: ct)).ConfigureAwait(false)).ToList();
 
-        int asked = 0, endedNoAnswer = 0, endedMissed = 0, deadlocks = 0;
+        return tenants.Select(r => new CooltimeTenantSnapshot(r.TenantId, r.CooltimeAt, r.ChangedAtUtc)).ToList();
+    }
 
-        foreach (var t in tenants)
+    /// <summary>
+    /// 🆕 11/28 — 켜진 회사 한 곳의 ① 무응답 끝내기 → ② 놓친 끝내기 → ③④ 묻기(<see cref="RunOnceAsync"/> 의 회사마다 본문을 그대로 옮김).
+    /// </summary>
+    /// <param name="t"><see cref="ReadTenantsAsync"/> 가 읽은 그 회사 값.</param>
+    /// <param name="nowLocal">서버 PC 벽시계 — <c>C</c> 계산 · 퇴근 기록에만 쓴다.</param>
+    /// <param name="ct">취소.</param>
+    /// <returns>그 회사 한 곳의 결과(<see cref="CooltimeTickResult.EnabledTenants"/> = 1).</returns>
+    public async Task<CooltimeTickResult> RunTenantAsync(CooltimeTenantSnapshot t, DateTime nowLocal, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        await EnsureOpenAsync(ct).ConfigureAwait(false);
+
+        int asked = 0, endedNoAnswer = 0, endedMissed = 0, deadlocks = 0;
+        CooltimeTickResult Tally() => new(1, asked, endedNoAnswer, endedMissed, deadlocks);
+
+        // 옛 foreach 몸통 — 들여쓰기 · 글자를 그대로 두려고 블록 하나로 남겼다([4] 문장 대조 · 설계 §7 R4).
         {
             var cLocal = MostRecentCooltimeLocal(nowLocal, t.CooltimeAt);
             var cUtc = ServerLocalToUtc(cLocal);
@@ -135,7 +181,9 @@ public sealed class CooltimeEngine
             //   이 회사는 이번 C 에서 ②③ 을 건너뛴다(① 은 위에서 이미 돌았다 — 떠 있던 물음의 무응답은 끝낸다).
             //   ⚠️ 이 건너뛰기를 빼면 G-C19 가 FAIL 한다(음성 대조군 ⓕ — 14:00 에 「13:00」 저장 → 첫 바퀴 끝냄 2).
             //   🆕 11/28 — ④(E-6)도 아래 묻기 문장 안에 있으므로 같이 건너뛴다(설계 §3 ② 칸 「②③④ 공통」).
-            if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;
+            //   ⬛ [낡은 줄 · 11/28 나누기 이전 — foreach 안] if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) continue;
+            //   🆕 11/28 — 회사 한 곳 함수로 옮겨 `continue` 가 `return Tally()` 가 되었다(같은 뜻 · 이 회사의 ②③④ 를 건너뜀).
+            if (IsBeforeSettingChange(cUtc, t.ChangedAtUtc)) return Tally();
 
             // ② 한 번도 안 물었는데 설정 시각 + 5분이 지났다(서버가 꺼져 있다 켜진 경우 등) — 묻지 않고 끝낸다(Q5)
             var missed = await _db.QueryAsync<string>(new CommandDefinition(
@@ -199,7 +247,7 @@ public sealed class CooltimeEngine
             }
         }
 
-        return new CooltimeTickResult(tenants.Count, asked, endedNoAnswer, endedMissed, deadlocks);
+        return Tally();
     }
 
     private async Task<CooltimeEndOutcome> EndQuietlyAsync(
