@@ -63,6 +63,12 @@ public sealed class TenantMiddleware
             //     세션 대조와 대표 확인이 걸리는 자리다. 게이트가 이 비대칭을 지킨다
             //     (`MainPcProofRoundTripGateTests` G-1c · 대조군 C-16: 이 줄을 빼면 G-1c 가 FAIL 한다).
             || path.StartsWithSegments("/api/devices/mainpc-proof")
+            // 🔴 W-G1-52 갈래 C(2026-11-28) — 대표 비번 되찾기 재설정. 비번을 잊은 대표는 **토큰이 없다**(로그인 전 길).
+            //   [열어도 안전한 근거] 위 mainpc-proof 와 같은 논리 — 컨트롤러가 `[MainPcOnly]` 로 먼저 자르고,
+            //   본인 확인은 **1회용 표**(윈도우 관리자 승인을 지난 오프라인 명령만 만듦 · 10분 · 1회 · DB 엔 지문만)다.
+            //   회사 · 대표 id 도 **표 행 안에서** 나온다(#2). 표를 맞히지 못하면 아무것도 안 바뀐다.
+            //   🔴 이 주소 하나만 연다(`/api/parent-reset` 아래 peek · 재설정 둘 — 둘 다 표가 몸).
+            || path.StartsWithSegments("/api/parent-reset")
             || path.StartsWithSegments("/api/backoffice/auth")
             // 사장님 결재 저장 2026-06-02 모두결재 — 랜딩 가입·결제·설치 저장 = 인증 면제 (AllowAnonymous 저장 정합)
             || path.StartsWithSegments("/api/landing")
