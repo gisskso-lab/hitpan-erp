@@ -149,6 +149,9 @@ const EXPECT_S3_ROWS = [
   ['K35-S3-8', 'S3', 'owner-home', 'chromium'], // G8 · G8+ — 대표 첫 화면 카드 전부 · 안내 한 장 0 · 흰 띠 0 · 표준오류 꼴 0
   ['K35-S3-8', 'S3', 'owner-503', 'chromium'], // G11 — 대시보드 조회 503(시험 장치 가로챔) → 쉬운 알림 · 흰 띠 0 · 경고 기록 흔적
   ['K35-S3-9', 'S3', 'sales-home', 'chromium'], // G12 — 판매 역할 직원 → 카드 보임 · 판매·재무 403 0 · 안내 한 장 0
+  // 🔴 20261128작 갈래 B2(설계 §7-2-3 · §7-2-4 · 작업지시서 §8-8 D17 · D18) — 같은 K 본문에 1 더함(15 → 16 · 판정기 33 → 34) · 선택 키 0 · N4 0.
+  //   자체시험 따로 적은 목록(fGRows) · K-C22k 수(33 → 34) 같은 커밋에서.
+  ['K35-S3-8', 'S3', 'owner-json', 'chromium'], // D6 일반 catch(200 + JSON 아닌 본문) · 같은 런 양성 대조(결재 대기 403 → 처리기 경고 · 알림 1 이상) · 뜬 알림 허용 목록 안
 ];
 // ⬛ [낡은 줄 · K 연결 1~3차] const EXPECT_G = EXPECT_G_ROWS.map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
 const EXPECT_G = [...EXPECT_G_ROWS, ...EXPECT_S3_ROWS].map(([id, g, p, browser]) => rowKey({ scope: 'K', id, g, path: p, browser }));
