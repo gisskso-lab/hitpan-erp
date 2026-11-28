@@ -148,12 +148,45 @@ public sealed class RestoreTableClassificationGateTests
         {
             if (m.Groups["tmp"].Success) { temporary++; continue; }
             var raw = m.Groups["n"].Value;
+            if (IsStagingTemplate(raw)) continue;   // 🔴 A-2③ D6 — 변환기 임시 표 틀(동작으로 확인한 것만)
             var name = raw.Trim('`', '"', '\'', ',');
             if (PlainNameRx.IsMatch(name)) names.Add(name.ToLowerInvariant());
             else unreadable.Add(raw);
         }
         return (names, unreadable, temporary);
     }
+
+    /// <summary>
+    /// 🔴 W-G1-52 갈래 A-2③ D6 — 「변환기의 임시 표 틀(<c>rs_new__</c>) = 영구 표 아님」 을 <b>동작으로</b> 뺀다(글자 나눔에 기대지 않음).
+    /// 이름 자리가 <c>rs_new__</c> 또는 그 상수 자리표(<c>{Prefix}</c> · <c>{RestoreDumpConverter.Prefix}</c> · <c>{RestoreTableClassification.StagingPrefix}</c>)로
+    /// 시작하고, <see cref="StagingTemplateProven"/>(작은 덤프를 변환기로 실제로 바꿔 나온 CREATE TABLE 이 전부 <c>rs_new__</c> 로 시작)이 참일 때만.
+    /// </summary>
+    internal static bool IsStagingTemplate(string raw)
+    {
+        var name = raw.Trim('`', '"', '\'', ',', '$');
+        string[] holders = ["{Prefix}", "{RestoreDumpConverter.Prefix}", "{RestoreTableClassification.StagingPrefix}"];
+        var looks = name.StartsWith(RestoreTableClassification.StagingPrefix, StringComparison.Ordinal)
+                    || holders.Any(h => name.StartsWith(h, StringComparison.Ordinal));
+        return looks && StagingTemplateProven.Value;
+    }
+
+    /// <summary>D6 동작 확인 — 변환기 상수 = 분류 접두 · 작은 덤프의 「백업 값」 표 2개가 모두 <c>rs_new__</c> 이름으로만 나옴.</summary>
+    internal static readonly Lazy<bool> StagingTemplateProven = new(() =>
+    {
+        if (!string.Equals(RestoreDumpConverter.Prefix, RestoreTableClassification.StagingPrefix, StringComparison.Ordinal)) return false;
+        const string dump =
+            "DROP TABLE IF EXISTS `partner_contacts`;\n"
+            + "CREATE TABLE `partner_contacts` (\n  `contact_id` varchar(36) NOT NULL,\n  `tenant_id` varchar(36) NOT NULL,\n  PRIMARY KEY (`contact_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n"
+            + "DROP TABLE IF EXISTS `items`;\n"
+            + "CREATE TABLE `items` (\n  `item_id` varchar(36) NOT NULL,\n  PRIMARY KEY (`item_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n";
+        using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dump));
+        var created = RestoreDumpConverter.Convert(ms, n => RestoreTableClassification.Classify(n) == RestoreTableClass.FromBackup
+                ? RestoreStageDecision.Stage : RestoreStageDecision.Skip)
+            .Select(x => System.Text.Encoding.UTF8.GetString(x.Sql))
+            .SelectMany(t => Regex.Matches(t, @"\bCREATE\s+TABLE\s+`(?<n>[^`]+)`").Select(m => m.Groups["n"].Value))
+            .ToList();
+        return created.Count == 2 && created.All(n => n.StartsWith(RestoreTableClassification.StagingPrefix, StringComparison.Ordinal));
+    });
 
     /// <summary>
     /// 고침 1 Y3 — ERP 고객 DB 에 닿는 제품 C# 파일(<c>src/</c> 아래). 시험 프로젝트(이름에 <c>Tests</c>) ·

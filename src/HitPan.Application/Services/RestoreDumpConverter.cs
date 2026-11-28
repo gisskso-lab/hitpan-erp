@@ -247,7 +247,9 @@ public static class RestoreDumpConverter
         if (kept.Count == 0) throw new RestoreDumpRejectedException($"표 구조 `{name}` 칸 0");
 
         using var ms = new MemoryStream();
-        ms.Write(A(Kw.Create + $" TABLE `{Prefix}{name}` (\n"));
+        // ⬛ A-2② 옛 줄: ms.Write(A(Kw.Create + $" TABLE `{Prefix}{name}` (\n"));   (낱말 나눔 = G13-S11 이 글자로 못 읽게 숨김)
+        // 🔴 A-2③ D6 — 임시 표 틀을 글 그대로 둔다. G13-S11 은 이 틀을 「동작으로」 뺀다(작은 덤프를 실제로 바꿔 나온 이름이 전부 rs_new__ 임을 확인한 뒤).
+        ms.Write(A($"CREATE TABLE `{Prefix}{name}` (\n"));
         for (var i = 0; i < kept.Count; i++)
         {
             ms.Write(kept[i]);
