@@ -93,9 +93,14 @@ jobs:
     # 🔴 쿨타임 화면 실측 3(11/28 · PM 결정 §288 ④) — S8 에 쿨타임 K 본문(자체 상한 14분 · 설정 시각 기다림 2바퀴)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 45
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
+    # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
+    # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 46
     # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 37
     # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — S8 단계 상한 41분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 54분(판정 규칙 무접촉).
-    timeout-minutes: 54
+    # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 54
+    # 🔴 #1032 main 합침(11/29 · f744af38 = #1011 머지 · PM) — S8 단계 상한 50분 + 앞뒤 단계 여유 13분(두 갈래 중 큰 여유 = 쿨타임 45 − 32) → 잡 63분(판정 규칙 무접촉).
+    timeout-minutes: 63
 
     steps:
       - name: Checkout
@@ -270,11 +275,17 @@ jobs:
         #   쿨타임 몸은 ui-k35 가 돌면 늘 돈다(실행기 = 판정기와 같은 고르기 · 이름 알파벳 순 = 앞 몸 뒤) · 기대 키 5 는 judge.js EXPECT_CT_ROWS.
         # ⬛ [낡은 줄 · 쿨타임 화면 실측 3 · main 합침 전] timeout-minutes: 32
         # 🔴 W-S-03 고침 1(11/28) — K 본문 둘(k35-popup 12분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다 → 단계 상한 27분(잡 37분 안).
+        # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 27
+        # 🔴 20261128작 로그인 경합 갈래 T — k35-popup 12분 + k35-ws03-closed 16분 + 장치 점검 몫 8분(잡 46분 안).
+        # ⬛ [낡은 줄 · 갈래 T · #1011 합침 전] timeout-minutes: 36
         # ⬛ [낡은 줄 · W-S-03 고침 1 · main 합침 전] timeout-minutes: 27
         # 🔴 main 합침(11/28 · c50ca6cf · PM 결재) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 7분 자체 상한)이 차례로 돈다
         #   = 33분 + 장치 점검 여유 8분(두 갈래 중 큰 여유 = W-S-03 27 − 19) → 단계 상한 41분(잡 54분 안).
         #   기대 키 = judge.js EXPECT_CT_ROWS 7 · EXPECT_S3_ROWS 7(앞 몸 EXPECT_G_ROWS 18 과 합쳐 32).
-        timeout-minutes: 41
+        # ⬛ [낡은 줄 · main c50ca6cf · #1032 합침 전] timeout-minutes: 41
+        # 🔴 #1032 main 합침(11/29 · f744af38 · PM) — K 본문 셋(k35-popup 12분 · k35-session-cooltime 14분 · k35-ws03-closed 16분 자체 상한)이 차례로 돈다
+        #   = 42분 + 장치 점검 여유 8분 → 단계 상한 50분(잡 63분 안). 기대 키 = EXPECT_G_ROWS 18 + EXPECT_CT_ROWS 7 + EXPECT_S3_ROWS 16 = 41.
+        timeout-minutes: 50
         run: |
           set -uo pipefail
           rc=0
