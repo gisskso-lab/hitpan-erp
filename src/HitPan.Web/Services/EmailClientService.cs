@@ -6,11 +6,15 @@ namespace HitPan.Web.Services;
 // ⬛ [낡은 줄 · 화면오류기록띠] public sealed class EmailClientService(HttpClient http)
 public sealed class EmailClientService(HttpClient http, ILogger<EmailClientService> logger)
 {
-    public async Task<EmailSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — onLoadFailed 를 더했다. 메일 설정 화면이 실패를 알아
+    //   빈 SMTP(설정 안 된 것처럼) 만 남기지 않고 쉬운 알림을 띄우게 예외만 넘긴다 · 돌려주는 값은 그대로.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<EmailSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    public async Task<EmailSettingsModel> GetSettingsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try { return await http.GetFromJsonAsync<EmailSettingsModel>("api/email/settings", ct).ConfigureAwait(false) ?? new(); }
         // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Email.GetSettings] {ex.Message}"); return new(); }
-        catch (Exception ex) { logger.LogWarning(ex, "[Email.GetSettings] 조회 실패"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] catch (Exception ex) { logger.LogWarning(ex, "[Email.GetSettings] 조회 실패"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Email.GetSettings] 조회 실패"); onLoadFailed?.Invoke(ex); return new(); }
     }
 
     public async Task<bool> UpdateSettingsAsync(UpdateEmailSettingsModel req, CancellationToken ct = default)

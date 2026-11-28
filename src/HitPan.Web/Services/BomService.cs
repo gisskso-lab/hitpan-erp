@@ -153,7 +153,10 @@ public sealed class BomService(HttpClient http, ILogger<BomService> logger)
 
     private class BomCreateResult { public string Id { get; set; } = ""; }
 
-    public async Task<List<StockAlertModel>?> GetAlertsAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — onLoadFailed 를 더했다. BOM · 품목 화면이 실패를 알아
+    //   안전재고 부족 띠가 조용히 사라지지 않게 쉬운 알림을 띄운다 · 돌려주는 값(실패 = null)은 그대로.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<StockAlertModel>?> GetAlertsAsync(CancellationToken ct = default)
+    public async Task<List<StockAlertModel>?> GetAlertsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -166,6 +169,7 @@ public sealed class BomService(HttpClient http, ILogger<BomService> logger)
             //   최소한 왜 실패했는지는 남긴다.
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[WARN] 안전재고 알림 조회 실패 — {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[WARN] 안전재고 알림 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return null;
         }
     }

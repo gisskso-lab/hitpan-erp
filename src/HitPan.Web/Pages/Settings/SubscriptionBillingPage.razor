@@ -28,7 +28,13 @@ else
             @* 현재 구독 상태 *@
             <MudPaper Elevation="0" Class="pa-4 mb-3" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle2" Class="mb-3">현재 구독 상태</MudText>
-                @if (_subscription is null)
+                @* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] @if (_subscription is null)
+                     화면오류기록띠 넓힘X1 — 못 불러온 것을 「활성 구독이 없습니다」 로 말하지 않는다(쉬운 알림이 대신 알린다 · 칸엔 「—」). *@
+                @if (_subscription is null && _subLoadFailed)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">—</MudText>
+                }
+                else if (_subscription is null)
                 {
                     <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">활성 구독이 없습니다.</MudText>
                 }
@@ -72,7 +78,13 @@ else
                     </MudButton>
                 </div>
 
-                @if (_paymentMethods.Count == 0)
+                @* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] @if (_paymentMethods.Count == 0)
+                     화면오류기록띠 넓힘X1 — 못 불러온 것을 「등록된 결제수단이 없습니다」 로 말하지 않는다. *@
+                @if (_paymentMethods.Count == 0 && _pmLoadFailed)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">—</MudText>
+                }
+                else if (_paymentMethods.Count == 0)
                 {
                     <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">
                         등록된 결제수단이 없습니다. [결제수단 등록] 버튼으로 토스 카드 또는 무통장입금을 등록하세요.
@@ -132,7 +144,13 @@ else
         <MudItem xs="12" md="5">
             <MudPaper Elevation="0" Class="pa-4" Style="border:0.5px solid var(--mud-palette-lines-default);border-radius:12px">
                 <MudText Typo="Typo.subtitle2" Class="mb-3">결제 이력</MudText>
-                @if (_invoices.Count == 0)
+                @* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] @if (_invoices.Count == 0)
+                     화면오류기록띠 넓힘X1 — 못 불러온 것을 「결제 이력이 없습니다」 로 말하지 않는다. *@
+                @if (_invoices.Count == 0 && _invLoadFailed)
+                {
+                    <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">—</MudText>
+                }
+                else if (_invoices.Count == 0)
                 {
                     <MudText Style="font-size:13px;color:var(--mud-palette-text-secondary)">결제 이력이 없습니다.</MudText>
                 }
@@ -240,6 +258,12 @@ else
     private List<PaymentMethodModel> _paymentMethods = new();
     private List<InvoiceListItemModel> _invoices = new();
 
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 조회가 실패했나(칸마다). 참이면 그 칸의 「없습니다」 안내를 띄우지 않는다
+    //   (못 불러온 것을 「없다」 고 말하면 거짓 안내다) · 대신 쉬운 알림 한 번(LoadFailedNotice).
+    private bool _subLoadFailed;
+    private bool _pmLoadFailed;
+    private bool _invLoadFailed;
+
     private bool _dialogOpen;
     private RegisterPaymentMethodModel _form = new();
     private bool _saving;
@@ -252,15 +276,26 @@ else
     private async Task ReloadAsync()
     {
         _loading = true;
-        var settingsTask = BillingSvc.GetSettingsAsync();
-        var subTask = BillingSvc.GetSubscriptionAsync();
-        var pmTask = BillingSvc.GetPaymentMethodsAsync();
-        var invTask = BillingSvc.GetInvoicesAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var settingsTask = BillingSvc.GetSettingsAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var subTask = BillingSvc.GetSubscriptionAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var pmTask = BillingSvc.GetPaymentMethodsAsync();
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var invTask = BillingSvc.GetInvoicesAsync();
+        //   네 조회 중 몇이 실패해도 쉬운 알림은 한 번 · 실패한 칸만 「없습니다」 를 감춘다.
+        Exception? loadFailed = null;
+        bool subFailed = false, pmFailed = false, invFailed = false;
+        var settingsTask = BillingSvc.GetSettingsAsync(onLoadFailed: ex => loadFailed ??= ex);
+        var subTask = BillingSvc.GetSubscriptionAsync(onLoadFailed: ex => { loadFailed ??= ex; subFailed = true; });
+        var pmTask = BillingSvc.GetPaymentMethodsAsync(onLoadFailed: ex => { loadFailed ??= ex; pmFailed = true; });
+        var invTask = BillingSvc.GetInvoicesAsync(onLoadFailed: ex => { loadFailed ??= ex; invFailed = true; });
         await Task.WhenAll(settingsTask, subTask, pmTask, invTask);
         _settings = settingsTask.Result;
         _subscription = subTask.Result;
         _paymentMethods = pmTask.Result;
         _invoices = invTask.Result;
+        _subLoadFailed = subFailed;
+        _pmLoadFailed = pmFailed;
+        _invLoadFailed = invFailed;
+        if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
         _loading = false;
     }
 

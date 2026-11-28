@@ -7,11 +7,15 @@ namespace HitPan.Web.Services;
 // ⬛ [낡은 줄 · 화면오류기록띠] public sealed class FaxClientService(HttpClient http)
 public sealed class FaxClientService(HttpClient http, ILogger<FaxClientService> logger)
 {
-    public async Task<FaxSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — onLoadFailed 를 더했다. 팩스 보내기 상자가 실패를 알아
+    //   「팩스 공급자가 설정되지 않았습니다」(틀린 까닭) 대신 쉬운 알림을 띄우게 예외만 넘긴다 · 돌려주는 값은 그대로.
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<FaxSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    public async Task<FaxSettingsModel> GetSettingsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try { return await http.GetFromJsonAsync<FaxSettingsModel>("api/fax/settings", ct).ConfigureAwait(false) ?? new(); }
         // ⬛ [낡은 줄 · 화면오류기록띠] catch (Exception ex) { Console.Error.WriteLine($"[Fax.GetSettings] {ex.Message}"); return new(); }
-        catch (Exception ex) { logger.LogWarning(ex, "[Fax.GetSettings] 조회 실패"); return new(); }
+        // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] catch (Exception ex) { logger.LogWarning(ex, "[Fax.GetSettings] 조회 실패"); return new(); }
+        catch (Exception ex) { logger.LogWarning(ex, "[Fax.GetSettings] 조회 실패"); onLoadFailed?.Invoke(ex); return new(); }
     }
 
     public async Task<bool> UpdateSettingsAsync(UpdateFaxSettingsModel req, CancellationToken ct = default)

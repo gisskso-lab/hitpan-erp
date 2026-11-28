@@ -8,6 +8,7 @@
 //   ② 모드 스위치 = 환경 칸 UI_BAND_MODE — `control`(대조군 · 고치기 전 판 · 장면마다 흰 띠 1 + 그 줄 표지의 표준오류 1 이상 = 장면이 그 줄에 닿는다)
 //      · `fixed`(고친 뒤 · 흰 띠 0(+3초 · +10초) · 그 줄 표지의 console.warn 1 이상 · 앱 표준오류 꼴 0). 그 밖 글자 · 빈 칸 = 아무것도 안 돌리고 실패.
 //      두 모드 공통 = 실패 주입이 실제로 걸림(가로챔 1 이상 · 진짜 403 은 서버 403 응답 1 이상) · 원래 있던 알림 글 1 이상(있는 장면만).
+//      넓힘(갈래 X · 지시서 §8-3 대표 ④) 장면 = fixedOnly(고친 뒤 모드에서만 돎) · block 칸이 있으면 그 단추가 막혀 있어야 통과.
 //   ③ 실패 주입은 시험 장치의 가로채기(page.route)로만 — 앱 손 0. ⬛ 옛 줄(대조군 1회째 c3b5240b): 「진짜 403 장면(G-S1)은 가로채기 0 · 서버 판정 그대로.」
 //      → 고침1(지시서 §8-2 · 런 46151366436 G-S1 = 서버 200 · 403 0): G-S1 도 가로채기 403 으로 바꿈 · 진짜 403 주입 꼴(real403)은 틀만 남김(쓰는 장면 0).
 //      `api/auth/update-status` 는 가로채지 않는다(R 과 U(#43) 가 같이 부름 · U 는 PR-2 몫 · 설계 §5-2 ⚠ 줄) — 장면 목록 꼴 검사가 막는다.
@@ -82,7 +83,18 @@ const SCENES = Object.freeze([
   Object.freeze({ key: 'G-C2', branch: 'C', who: 'owner', page: '/print-settings', match: { path: '/api/settings/print-common' }, inject: '404',
     tags: ['[PrintSettings] 공통 설정을 못 읽었다'], snack: '워터마크 설정을 불러오지 못했습니다',
     lines: 'PrintSettingsPage.razor:395', what: '설정 · 인쇄 공통 설정 404(알림 그대로)' }),
+  // 넓힘X1(지시서 §8-3 대표 ④ · 개발명세서 docs/개발/erp/20261128_화면오류기록띠_넓힘X1_개발명세서.md §5) — 고친 뒤에만 도는 장면(fixedOnly).
+  //   대조군 판(고치기 전)엔 쉬운 알림 · 저장 막음이 없으므로 대조군 모드에선 목록에서 빠진다(scenesFor).
+  //   snack = LoadFailedNotice.Text 앞머리(자체시험 B12 가 원문 글자와 맞춤) · block = 막혀야 할 단추 이름(빈 값 덮어쓰기 방지).
+  Object.freeze({ key: 'G-X1', branch: 'X', who: 'owner', page: '/data/backup', match: { path: '/api/backup/settings' }, inject: '503',
+    tags: ['[BackupService.GetSettingsAsync]'], snack: '정보를 불러오지 못했습니다', block: '설정 저장', fixedOnly: true,
+    lines: 'BackupService.cs:13 · BackupPage.razor:171', what: '넓힘X1 · 백업 설정 조회 503(쉬운 알림 · [설정 저장] 막힘)' }),
 ]);
+
+// 모드에 도는 장면 — 대조군은 고치기 전 판에 있던 자리만(fixedOnly 뺌) · 고친 뒤는 전부
+function scenesFor(mode, list = SCENES) {
+  return (Array.isArray(list) ? list : []).filter((s) => mode === 'fixed' || !(s && s.fixedOnly === true));
+}
 
 // ── 순수 함수(자체시험 대상 · 화면 · 브라우저 0) ──
 function modeOf(v) {
@@ -112,11 +124,17 @@ function sceneListProblems(list = SCENES) {
   list.forEach((s, i) => {
     const n = `${i + 1}번`;
     if (!s || typeof s !== 'object') { out.push(`${n} 꼴 아님`); return; }
-    if (!/^G-[RSPC][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
+    // ⬛ 옛 줄(넓힘X1 전): if (!/^G-[RSPC][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
+    if (!/^G-[RSPCX][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
     else if (s.key.charAt(2) !== s.branch) out.push(`${n} 갈래 어긋남`);
     if (seen.has(s.key)) out.push(`${n} 키 중복`);
     seen.add(s.key);
-    if (!['R', 'S', 'P', 'C'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C 만 — U 는 PR-2)`);
+    // ⬛ 옛 줄(넓힘X1 전): if (!['R', 'S', 'P', 'C'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C 만 — U 는 PR-2)`);
+    if (!['R', 'S', 'P', 'C', 'X'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C · X(넓힘) 만 — U 는 PR-2)`);
+    // 넓힘(X) 장면 = 고친 뒤에만(대조군 판엔 그 알림 · 막음이 없다) · 막을 단추 이름은 비지 않은 글자
+    if (s.branch === 'X' && s.fixedOnly !== true) out.push(`${n} 넓힘 장면은 고친 뒤에만(fixedOnly)`);
+    if (!(s.fixedOnly === undefined || typeof s.fixedOnly === 'boolean')) out.push(`${n} fixedOnly 꼴`);
+    if (!(s.block === undefined || (typeof s.block === 'string' && s.block.trim().length > 0))) out.push(`${n} 막을 단추 꼴`);
     if (!['owner', 'staff'].includes(s.who)) out.push(`${n} 창 주인 꼴`);
     if (!Object.prototype.hasOwnProperty.call(INJECTS, s.inject)) out.push(`${n} 주입 꼴`);
     if (typeof s.page !== 'string' || !s.page.startsWith('/')) out.push(`${n} 화면 주소 꼴`);
@@ -160,6 +178,8 @@ function judgeScene(mode, scene, o) {
   const hits = real ? o.real403 : o.routeHits;
   if (!(Number.isInteger(hits) && hits >= 1)) why.push(real ? '서버 403 응답 0(직원 역할 · 장면 무효)' : '가로챔 0(화면이 그 주소를 안 부름 · 장면 무효)');
   if (scene.snack !== null && !(Number.isInteger(o.snackHit) && o.snackHit >= 1)) why.push('원래 알림 글 0');
+  // 넓힘X1 — 막혀야 할 단추가 있는 장면은 그 단추가 막혀 있어야(못 읽음 · 못 찾음 = 거짓)
+  if (typeof scene.block === 'string' && o.blocked !== true) why.push(`단추 안 막힘(${scene.block} · ${o.blocked})`);
   if (mode === 'control') {
     if (!(o.band3 === true || o.band10 === true)) why.push('흰 띠 0(대조군은 1 이어야 — 장면이 그 줄에 안 닿음)');
     for (const t of scene.tags) if (cnt(o.err, t) < 1) why.push(`표준오류 표지 0 ${t}`);
@@ -333,18 +353,32 @@ async function runScene(st, kb, scene) {
     const a = await look(page);
     await K.sleep(Math.max(0, landAt + 10000 - Date.now()));
     const b = await look(page);
+    // 넓힘X1 — 막혀야 할 단추(있는 장면만 · +10초 뒤 · 못 찾음 · 못 읽음 = null → 판정 거짓)
+    let blocked = null;
+    if (typeof scene.block === 'string') {
+      step.now = '단추 막힘 보기';
+      blocked = await K.withTimeout(page.getByRole('button', { name: scene.block, exact: true }).first().isDisabled({ timeout: 5000 }), K.EVAL_MS, '단추 막힘 보기')
+        .catch((e) => {
+          console.log(`띠 장면 ${scene.key} 단추 막힘 보기 실패 ${e instanceof K.KitStepError ? L.sanitize(e.message, 80) : L.errorName(e)}`);
+          return null;
+        });
+    }
     const snacks = [...new Set([...(a.snacks || []), ...(b.snacks || [])])];
     const snackHit = b.snacks === null && a.snacks === null ? null : (scene.snack === null ? 0 : snacks.filter((t) => t.includes(scene.snack)).length);
     const other = snacks.filter((t) => scene.snack === null || !t.includes(scene.snack));
-    const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit };
+    // ⬛ 옛 줄(넓힘X1 전): const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit };
+    const o = { routeHits: hit.route, real403: hit.real403, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit, blocked };
     const v = judgeScene(st.mode, scene, o);
     const showMap = (m) => scene.tags.map((t) => cnt(m, t)).join('/');
     // 기록만(판정 아님) — 다른 알림 글 수 · 첫 셋(소독) · 착지 · 응답 숫자
     console.log(`띠 장면 ${scene.key} 판정=${v.pass} · 모드 ${st.mode} · 착지 ${s.where}@${L.sanitize(String(s.path), 60)} · 가로챔 ${hit.route} · 서버403 ${hit.real403}`
       + ` · 응답 ${hit.statuses.join(',') || '없음'} · 흰 띠 +3초 ${a.band} +10초 ${b.band} · 표준오류 표지 ${showMap(cur.err)} · 경고 표지 ${showMap(cur.warn)}`
       + ` · 앱 표준오류 ${cur.appErr} · 원래 알림 ${snackHit} · 다른 알림 ${other.length} ${other.slice(0, 3).map((t) => K.consoleLine(t, 50)).join(' | ') || '-'}`
+      + `${typeof scene.block === 'string' ? ` · 단추 막힘 ${blocked}` : ''}`
       + `${v.pass ? '' : ` · 이유 ${v.why.join(' · ')}`}`);
-    const got = { m: st.mode, hit: scene.inject === 'real403' ? hit.real403 : hit.route, b3: a.band, b10: b.band, e: showMap(cur.err), w: showMap(cur.warn), app: cur.appErr, sn: snackHit, other: other.length, at: `${s.where}@${s.path}` };
+    // ⬛ 옛 줄(넓힘X1 전): const got = { m: st.mode, hit: …, sn: snackHit, other: other.length, at: `${s.where}@${s.path}` };
+    const got = { m: st.mode, hit: scene.inject === 'real403' ? hit.real403 : hit.route, b3: a.band, b10: b.band, e: showMap(cur.err), w: showMap(cur.warn), app: cur.appErr, sn: snackHit, other: other.length, at: `${s.where}@${s.path}`,
+      ...(typeof scene.block === 'string' ? { blk: blocked } : {}) };
     recScene(st, scene, { pass: v.pass, got: v.pass ? got : { ...got, why: v.why } });
   } catch (e) {
     devScene(st, scene, step.now, e);
@@ -357,7 +391,8 @@ async function runScene(st, kb, scene) {
 }
 
 async function runWho(st, who, loginId, password) {
-  const list = SCENES.filter((s) => s.who === who);
+  // ⬛ 옛 줄(넓힘X1 전): const list = SCENES.filter((s) => s.who === who);
+  const list = st.scenes.filter((s) => s.who === who);
   if (list.length === 0) return;
   let kb = null;
   try {
@@ -383,12 +418,14 @@ async function cleanup(st) {
   if (st.br) await st.br.close().catch((e) => console.log(`띠 장면 브라우저 닫기 실패 ${L.errorName(e)}`));
 }
 function fillLeft(st, why) {
-  for (const s of SCENES) recScene(st, s, { pass: false, got: why, kind: 'DEVICE' });
+  // ⬛ 옛 줄(넓힘X1 전): for (const s of SCENES) recScene(st, s, { pass: false, got: why, kind: 'DEVICE' });
+  for (const s of st.scenes) recScene(st, s, { pass: false, got: why, kind: 'DEVICE' });
 }
 
 async function main() {
   const mode = modeOf(env.UI_BAND_MODE);
-  const st = { mode, r: { schema: 'console-error-band/1', mode, external_blocked: 0, external_hosts: [], rows: [] }, br: null, kbs: [], logoutFail: 0, cleaned: false };
+  // ⬛ 옛 줄(넓힘X1 전): const st = { mode, r: { … }, br: null, kbs: [], logoutFail: 0, cleaned: false };
+  const st = { mode, scenes: scenesFor(mode), r: { schema: 'console-error-band/1', mode, external_blocked: 0, external_hosts: [], rows: [] }, br: null, kbs: [], logoutFail: 0, cleaned: false };
   if (!mode) {
     console.log(`⚫ FAIL [장치] 띠 장면 — 모드 칸 UI_BAND_MODE 꼴 이상(${MODES.join(' · ')} 만) · 아무것도 안 돌린다`);
     process.exit(1);
@@ -399,7 +436,8 @@ async function main() {
     process.exit(1);
   }
   saveBand(st.r);
-  console.log(`띠 장면 시작: 모드 ${mode} · 장면 ${SCENES.length}(${SCENES.map((s) => s.key).join(' ')}) · 결과표 따로(판정기 judge.js 무접촉)`);
+  // ⬛ 옛 줄(넓힘X1 전): console.log(`띠 장면 시작: 모드 ${mode} · 장면 ${SCENES.length}(${SCENES.map((s) => s.key).join(' ')}) · …`);
+  console.log(`띠 장면 시작: 모드 ${mode} · 장면 ${st.scenes.length}(${st.scenes.map((s) => s.key).join(' ')}) · 결과표 따로(판정기 judge.js 무접촉)`);
   let fatalOnce = false;
   const fatal = (where) => (e) => {
     if (fatalOnce) return;
@@ -435,8 +473,9 @@ async function main() {
   fillLeft(st, '장면 끝 뒤 남은 키(있으면 장치 오류)');
   await cleanup(st);
   const mine = st.r.rows.filter((x) => x.scope === SCOPE);
-  const code = endCode(st.r.rows, SCENES.map((s) => s.key), st.logoutFail);
-  console.log(`띠 장면 끝: 모드 ${mode} · 줄 ${mine.length}/${SCENES.length} · 통과 ${mine.filter((x) => x.pass === true).length} · 거짓 ${mine.filter((x) => x.pass !== true).length}`
+  // ⬛ 옛 줄(넓힘X1 전): const code = endCode(st.r.rows, SCENES.map((s) => s.key), st.logoutFail); · 줄 ${mine.length}/${SCENES.length}
+  const code = endCode(st.r.rows, st.scenes.map((s) => s.key), st.logoutFail);
+  console.log(`띠 장면 끝: 모드 ${mode} · 줄 ${mine.length}/${st.scenes.length} · 통과 ${mine.filter((x) => x.pass === true).length} · 거짓 ${mine.filter((x) => x.pass !== true).length}`
     + ` · 로그아웃 실패 ${st.logoutFail} · 외부 차단 ${st.r.external_blocked} · 끝 코드 ${code}`);
   saveBand(st.r);
   process.exit(code);
@@ -446,4 +485,5 @@ if (require.main === module) main();
 module.exports = {
   SCENES, MODES, SCOPE, INJECTS, CLOSED_PATHS, NO_INTERCEPT, FORBID_TEXT,
   modeOf, routeMatch, sceneListProblems, newTally, tallyLine, judgeScene, endCode, bandResultPath,
+  scenesFor, // 넓힘X1
 };

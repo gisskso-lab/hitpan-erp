@@ -6,7 +6,11 @@ namespace HitPan.Web.Services;
 // ⬛ [낡은 줄 · 화면오류기록띠] public sealed class BillingService(HttpClient http)
 public sealed class BillingService(HttpClient http, ILogger<BillingService> logger)
 {
-    public async Task<BillingSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    // 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 구독 결제 화면 조회 4자리에 onLoadFailed 를 더했다.
+    //   돌려주는 값은 그대로 · 화면이 실패를 알아 「활성 구독이 없습니다」 같은 거짓 안내 대신 쉬운 알림을 띄우게 예외만 넘긴다.
+    //   (사용자정보 화면의 구독 조회는 넘기지 않음 — 그 화면은 null 을 「확인할 수 없습니다」 로 이미 보여 준다)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<BillingSettingsModel> GetSettingsAsync(CancellationToken ct = default)
+    public async Task<BillingSettingsModel> GetSettingsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -17,6 +21,7 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetSettingsAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[BillingService.GetSettingsAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new BillingSettingsModel();
         }
     }
@@ -36,7 +41,8 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         }
     }
 
-    public async Task<List<PaymentMethodModel>> GetPaymentMethodsAsync(CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<PaymentMethodModel>> GetPaymentMethodsAsync(CancellationToken ct = default)
+    public async Task<List<PaymentMethodModel>> GetPaymentMethodsAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -47,6 +53,7 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetPaymentMethodsAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[BillingService.GetPaymentMethodsAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new List<PaymentMethodModel>();
         }
     }
@@ -102,7 +109,8 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         }
     }
 
-    public async Task<SubscriptionModel?> GetSubscriptionAsync(CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<SubscriptionModel?> GetSubscriptionAsync(CancellationToken ct = default)
+    public async Task<SubscriptionModel?> GetSubscriptionAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -114,11 +122,13 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetSubscriptionAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[BillingService.GetSubscriptionAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return null;
         }
     }
 
-    public async Task<List<InvoiceListItemModel>> GetInvoicesAsync(CancellationToken ct = default)
+    // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] public async Task<List<InvoiceListItemModel>> GetInvoicesAsync(CancellationToken ct = default)
+    public async Task<List<InvoiceListItemModel>> GetInvoicesAsync(CancellationToken ct = default, Action<Exception>? onLoadFailed = null)
     {
         try
         {
@@ -129,6 +139,7 @@ public sealed class BillingService(HttpClient http, ILogger<BillingService> logg
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[BillingService.GetInvoicesAsync] {ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "[BillingService.GetInvoicesAsync] 조회 실패");
+            onLoadFailed?.Invoke(ex);
             return new List<InvoiceListItemModel>();
         }
     }

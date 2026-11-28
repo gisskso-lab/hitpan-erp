@@ -17,7 +17,10 @@
 
             @* 🔴 공급자 미설정 경고 — 보내기 전에 알린다.
                  누른 뒤에 "안 갔습니다" 라고 하면 이미 갔다고 믿은 뒤다. *@
-            @if (_settingsLoaded && !_canSendReal)
+            @* ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] @if (_settingsLoaded && !_canSendReal)
+                 화면오류기록띠 넓힘X1(작업지시서 §8-3 대표 ④) — 설정을 못 불러왔으면 「공급자가 설정되지 않았습니다」(틀린 까닭)를 띄우지 않는다.
+                 쉬운 알림이 대신 알린다 · 실제로 안 갔으면 보낸 뒤 결과 알림(서버 Notice)이 그대로 알린다. *@
+            @if (_settingsLoaded && !_settingsLoadFailed && !_canSendReal)
             {
                 <MudAlert Severity="Severity.Warning" Dense="true">
                     <MudText Typo="Typo.body2">
@@ -93,6 +96,8 @@
     private bool _busy;
     private bool _canSendReal;
     private bool _settingsLoaded;
+    // 화면오류기록띠 넓힘X1 — 팩스 설정 조회가 실패했나(참이면 공급자 미설정 경고를 감추고 쉬운 알림 한 번).
+    private bool _settingsLoadFailed;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -103,9 +108,13 @@
 
         if (!_settingsLoaded)
         {
-            var cfg = await FaxApi.GetSettingsAsync();
+            // ⬛ [낡은 줄 · 화면오류기록띠 넓힘X1] var cfg = await FaxApi.GetSettingsAsync();
+            Exception? loadFailed = null;
+            var cfg = await FaxApi.GetSettingsAsync(onLoadFailed: ex => loadFailed ??= ex);
             _canSendReal = cfg.CanSendReal && cfg.IsActive;
+            _settingsLoadFailed = loadFailed is not null;
             _settingsLoaded = true;
+            if (loadFailed is not null) LoadFailedNotice.Show(Snackbar, loadFailed);
         }
     }
 
