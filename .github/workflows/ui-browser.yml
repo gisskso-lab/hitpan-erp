@@ -93,7 +93,9 @@ jobs:
     # 🔴 W-S-03 고침 1(11/28) — S8 에 W-S-03 K 본문(자체 상한 7분)이 더해져 잡 상한을 늘린다(판정 규칙 무접촉).
     # ⬛ [낡은 줄 · W-S-03 고침 1] timeout-minutes: 37
     # 🔴 20261128작 로그인 경합 갈래 T — W-S-03 K 본문 자체 상한 7 → 16분(판정 장면 7 더함) · S8 27 → 36 · 잡 37 → 46(판정 규칙 무접촉).
-    timeout-minutes: 46
+    # ⬛ [낡은 줄 · 화면오류기록띠 PR-2] timeout-minutes: 46
+    # 🔴 화면오류기록띠 PR-2(지시서 §8-4 · 장면 G-U2 · G-U4) — S9b 10 → 12분 · 잡 = 준비 6(실측 런 46162003560 = 3분 16초) + S8 36 + S9b 12 = 54(띠 자체시험 B16 이 잠금).
+    timeout-minutes: 54
 
     steps:
       - name: Checkout
@@ -287,7 +289,9 @@ jobs:
       #   API 멈춤 · 누출 검사 · 업로드 앞(결과표가 누출 검사를 지나 함께 올라간다). 앞 단계가 빨강이어도 돈다(대조군 재료를 남김).
       - name: "[시험] S9b 화면 오류 기록 띠 장면 (갈래 T · 모드 칸 UI_BAND_MODE)"
         if: always()
-        timeout-minutes: 10
+        # ⬛ [낡은 줄 · 화면오류기록띠 PR-2] timeout-minutes: 10
+        # 🔴 PR-2(지시서 §8-4) — 장면 G-U2 · G-U4 와 따로 로그인 1 더함 → 띠 몸 전체 상한 8 → 10분 · 이 단계 10 → 12분(띠 자체시험 B16).
+        timeout-minutes: 12
         env:
           # ⬛ 옛: UI_BAND_MODE control(대조군 런 46153902475 · 11/11 띠 1 확인)
           UI_BAND_MODE: fixed

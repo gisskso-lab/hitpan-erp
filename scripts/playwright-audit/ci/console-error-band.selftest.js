@@ -15,6 +15,11 @@
 //   B11 (고침1) G-S1 = 시험 장치 가로채기 403 · 어음 목록 주소만 · 실물 목록 real403 장면 0 · 가로챔 0 = 무효(B1 · B2 의 진짜 403 반례는 만든 장면으로)
 //   B12 (넓힘X1 · 지시서 §8-3 대표 ④) G-X1 = 백업 설정 조회 503 · 알림 글 = LoadFailedNotice.Text 앞머리 · [설정 저장] 막힘 · 고친 뒤에만(대조군 목록 밖)
 //   (B10 모드 칸 정규식 — 넓힘X1 에서 값 뒤 꼬리 주석 허용으로 고침 · 둘째 푸시 d54b6e9f 의 꼬리 주석 때문에 거짓이었음)
+//   B13 (넓힘 X2) G-P4 발주 현황 503 · 화면 원문 대조
+//   B14 (PR-2 · 지시서 §8-4) G-U2 = 로그인 뒤 update-status 만 503 · 띠 0 · [HP15][UpdateConsentGate] 경고 · 가로챔 0 = 무효 · 제품 원문 대조 · 목록 반례
+//   B15 (PR-2 · 지시서 §8-4) G-U4 = 따로 창(ga) · 화면 로그아웃 POST 만 503 · /login 착지 · [Auth] 경고 · 고친 뒤만 · 세션 놓기 길 · 목록 반례
+//   B16 (PR-2) 상한 시간 셋 — 띠 몸 전체 < S9b 단계 < 잡 · 잡 ≥ S8 + S9b + 준비 4분
+//   (B1 「갈래 U」 반례 — PR-2 에서 갈래 U 가 열려 「정해진 둘 밖 키(G-U1)」 반례로 뜻이 바뀜 · 잡히는 건 그대로)
 'use strict';
 
 const fs = require('fs');
@@ -37,7 +42,8 @@ const S = (k) => B.SCENES.find((s) => s.key === k);
   const base = clone(B.SCENES);
   const cases = [
     ['키 중복', (l) => { l[1].key = l[0].key; }],
-    ['갈래 U', (l) => { l[0].key = 'G-U1'; l[0].branch = 'U'; }],
+    // ⬛ 옛 줄(PR-2 장면 전): ['갈래 U', (l) => { l[0].key = 'G-U1'; l[0].branch = 'U'; }],
+    ['갈래 U 정해진 둘 밖(G-U1)', (l) => { l[0].key = 'G-U1'; l[0].branch = 'U'; }],
     ['주입 꼴', (l) => { l[0].inject = '500'; }],
     ['닫힌 화면', (l) => { l[0].page = '/sales/profitability'; }],
     ['update-status 가로챔', (l) => { l[0].match = { path: '/api/auth/update-status' }; }],
@@ -318,6 +324,154 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
   check('B13 G-P4 넓힘 X2 — 꼴 · 화면 원문 대조(표지 · 주소 · 알림 줄) · 알림 글 = 앱 글 앞머리 · G-C2 뒤 · 고친 뒤 참 1 · 거짓 5 · 주소 맞춤',
     shape && snackOk && last && ok && bad.length === 0 && hit,
     `꼴 ${shape} · 알림 글 ${snackOk} · 순서 ${last} · 참 ${ok} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 주소 ${hit}`);
+}
+
+// ── B14 (PR-2 · 지시서 §8-4) — G-U2 업데이트 안내 조회 503 · 실패 절반만 · 가짜 Major 0 ──
+const ROOT = path.join(__dirname, '..', '..', '..');
+const readSrc = (...p) => {
+  const f = path.join(ROOT, ...p);
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+};
+const listMiss = (cases) => {
+  const miss = [];
+  for (const [n, f] of cases) {
+    const l = clone(B.SCENES);
+    f(l);
+    if (B.sceneListProblems(l).length === 0) miss.push(n);
+  }
+  return miss;
+};
+{
+  const U2 = S('G-U2');
+  const ix = B.SCENES.indexOf(U2);
+  const shape = !!U2 && U2.branch === 'U' && U2.who === 'owner' && U2.page === '/' && U2.inject === '503'
+    && U2.match && U2.match.path === '/api/auth/update-status' && U2.match.re === undefined && U2.match.method === undefined
+    && U2.tags.length === 1 && U2.tags[0] === '[HP15][UpdateConsentGate]' && U2.snack === null && U2.fixedOnly !== true
+    && U2.flow === undefined && U2.land === undefined;
+  // 제품 원문 대조 — 조회 줄 · catch 안 경고 줄(표지 글자 그대로) · 그 catch 안 표준오류 코드 줄 0
+  const gate = readSrc('src', 'HitPan.Web', 'Components', 'Common', 'UpdateConsentGate.razor');
+  const codeLines = gate.split(/\r?\n/).filter((x) => !/^\s*(\/\/|@\*|\*)/.test(x));
+  const srcOk = gate.includes('Http.GetFromJsonAsync<UpdateStatusResponse>("api/auth/update-status")')
+    && !!U2 && gate.includes(`Logger.LogWarning(_hp15Ex, "${U2.tags[0]}`)
+    && !codeLines.some((x) => x.includes('Console.Error'));
+  // 주소 — update-status 만(쿼리 무시 · 비슷한 경로 · 로그아웃 아님)
+  const hit = !!U2 && B.routeMatch(U2, 'http://127.0.0.1:18080/api/auth/update-status') === true
+    && B.routeMatch(U2, 'http://127.0.0.1:18080/api/auth/update-status?x=1') === true
+    && B.routeMatch(U2, 'http://127.0.0.1:18080/api/auth/update-statusx') === false
+    && B.routeMatch(U2, 'http://127.0.0.1:18080/api/auth/logout') === false
+    && B.reqMatch(U2, 'http://127.0.0.1:18080/api/auth/update-status', 'GET') === true;
+  // 모드 목록 — 대조군 · 고친 뒤 둘 다 돎(고치기 전 판이면 표준오류 → 띠 1 · 변이 VU1 빨강 자리)
+  const modeOk = B.scenesFor('control').includes(U2) && B.scenesFor('fixed').includes(U2);
+  // 판정 — 고친 뒤 참 1 · 대조군 참 1 · 거짓 5
+  const fx = (o) => mat(U2, { band3: false, band10: false, err: 0, warn: 1, ...o });
+  const passFix = !!U2 && B.judgeScene('fixed', U2, fx({})).pass === true;
+  const passCtrl = !!U2 && B.judgeScene('control', U2, mat(U2, { band3: true, band10: true, err: 1 })).pass === true;
+  const bad = U2 ? [
+    ['가로챔 0', B.judgeScene('fixed', U2, fx({ routeHits: 0 }))],
+    ['띠 +3초', B.judgeScene('fixed', U2, fx({ band3: true }))],
+    ['띠 +10초', B.judgeScene('fixed', U2, fx({ band10: true }))],
+    ['경고 흔적 0', B.judgeScene('fixed', U2, fx({ warn: 0 }))],
+    ['앱 표준오류 1', B.judgeScene('fixed', U2, fx({ appErr: 1 }))],
+  ].filter(([, v]) => v.pass !== false || v.why.length === 0).map(([n]) => n) : ['장면 없음'];
+  // 목록 반례 — U2 를 정규식으로 · 로그아웃 주소로 · 로그인 주소로 · 직원 창 · 고친 뒤만 · 방식 칸 · 비 U 장면이 update-status(B1 과 별개로 U 열린 뒤 다시)
+  const miss = listMiss([
+    ['U2 정규식', (l) => { l[ix].match = { re: '^/api/auth/update-status$' }; }],
+    ['U2 로그아웃 주소', (l) => { l[ix].match = { path: '/api/auth/logout' }; }],
+    ['U2 로그인 주소', (l) => { l[ix].match = { path: '/api/auth/login' }; }],
+    ['U2 직원 창', (l) => { l[ix].who = 'staff'; }],
+    ['U2 고친 뒤만', (l) => { l[ix].fixedOnly = true; }],
+    ['U2 방식 칸', (l) => { l[ix].match = { path: '/api/auth/update-status', method: 'GET' }; }],
+    ['비 U 장면 update-status', (l) => { l[0].match = { path: '/api/auth/update-status' }; }],
+  ]);
+  check('B14 G-U2 — 꼴 · 제품 원문(조회 줄 · 경고 줄 · 표준오류 코드 줄 0) · 주소 update-status 만 · 두 모드 · 고친 뒤 참 · 대조군 참 · 거짓 5 · 목록 반례 7',
+    shape && srcOk && hit && modeOk && passFix && passCtrl && bad.length === 0 && miss.length === 0,
+    `꼴 ${shape} · 원문 ${srcOk} · 주소 ${hit} · 모드 ${modeOk} · 고친 뒤 참 ${passFix} · 대조군 참 ${passCtrl}`
+    + ` · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 못 잡은 목록 반례 ${miss.length ? miss.join(' · ') : '0'}`);
+}
+
+// ── B15 (PR-2 · 지시서 §8-4) — G-U4 따로 창 · 화면 로그아웃 POST 만 503 · /login 착지 · 끝에 세션 놓기 ──
+{
+  const U4 = S('G-U4');
+  const ix = B.SCENES.indexOf(U4);
+  const shape = !!U4 && U4.branch === 'U' && U4.who === 'ga' && U4.flow === 'logout' && U4.page === '/' && U4.inject === '503'
+    && U4.match && U4.match.path === '/api/auth/logout' && U4.match.method === 'POST' && U4.match.re === undefined
+    && U4.tags.length === 1 && U4.tags[0] === '[Auth]' && U4.snack === null && U4.land === '/login' && U4.fixedOnly === true
+    && B.SCENES.filter((s) => s.who === 'ga').length === 1;
+  // 제품 원문 대조 — 로그아웃 단추(이름 · 부름 · /login 새로 부름) · 로그아웃 POST · 503 이 닿는 경고 줄
+  const badge = readSrc('src', 'HitPan.Web', 'Layout', 'AccountBadge.razor');
+  const auth = readSrc('src', 'HitPan.Web', 'Services', 'AuthService.cs');
+  const srcOk = badge.includes('aria-label="로그아웃"') && /await AuthService\.LogoutAsync\(\);\s*Navigation\.NavigateTo\("\/login", forceLoad: true\);/.test(badge)
+    && auth.includes('_http.PostAsJsonAsync("api/auth/logout"') && auth.includes('_logger.LogWarning("[Auth] 로그아웃 서버 처리 실패')
+    && auth.includes('_logger.LogWarning(ex, "[Auth] 로그아웃 요청 실패")');
+  // 장면 몸 글자 — 따로 창이 앞 두 창 뒤 · 로그아웃 흐름은 runLogoutScene · 창마다 finally 에서 API 로그아웃(closeWho) · 대표 계정 이름 0
+  const body = readSrc('scripts', 'playwright-audit', 'ci', 'console-error-band.js');
+  const iStaff = body.indexOf("await runWho(st, 'staff'");
+  const iGa = body.indexOf("await runWho(st, 'ga', env.UI_LOGIN_GA || 'ci-ga', env.UI_PW_GA || '')");
+  const flowOk = iStaff > 0 && iGa > iStaff && body.includes("s.flow === 'logout' ? runLogoutScene(st, kb, s) : runScene(st, kb, s)")
+    && /\} finally \{\s*await closeWho\(st, kb\);\s*\}/.test(body) && body.includes('K.apiLogout(') && !/test1234/.test(body);
+  // 요청 맞춤 — POST 로그아웃만(GET · 로그인 · 갱신 · 비슷한 경로 아님 · 소문자 방식 받음)
+  const hit = !!U4 && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/logout', 'POST') === true
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/logout', 'post') === true
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/logout', 'GET') === false
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/logout', undefined) === false
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/login', 'POST') === false
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/refresh', 'POST') === false
+    && B.reqMatch(U4, 'http://127.0.0.1:18080/api/auth/logout-all', 'POST') === false
+    && B.reqMatch(S('G-R1a'), 'http://127.0.0.1:18080/api/cs/replies/unread-count', 'GET') === true; // 방식 없는 장면 = 주소만
+  // 모드 목록 — 고친 뒤만(대조군 목록 밖)
+  const modeOk = !B.scenesFor('control').includes(U4) && B.scenesFor('fixed').includes(U4);
+  // 판정 — 참 1 · 거짓 7(착지 / · 착지 못 읽음 · 가로챔 0 · 경고 흔적 0 · 띠 +3초 · 띠 +10초 · 앱 표준오류 1)
+  const fx = (o) => ({ ...mat(U4, { band3: false, band10: false, err: 0, warn: 1 }), landPath: '/login', ...o });
+  const pass = !!U4 && B.judgeScene('fixed', U4, fx({})).pass === true;
+  const bad = U4 ? [
+    ['착지 /', B.judgeScene('fixed', U4, fx({ landPath: '/' }))],
+    ['착지 못 읽음', B.judgeScene('fixed', U4, fx({ landPath: null }))],
+    ['가로챔 0', B.judgeScene('fixed', U4, fx({ routeHits: 0 }))],
+    ['경고 흔적 0', B.judgeScene('fixed', U4, { ...mat(U4, { band3: false, band10: false, err: 0, warn: 0 }), landPath: '/login' })],
+    ['띠 +3초', B.judgeScene('fixed', U4, fx({ band3: true }))],
+    ['띠 +10초', B.judgeScene('fixed', U4, fx({ band10: true }))],
+    ['앱 표준오류 1', B.judgeScene('fixed', U4, fx({ appErr: 1 }))],
+  ].filter(([, v]) => v.pass !== false || v.why.length === 0).map(([n]) => n) : ['장면 없음'];
+  // 착지 칸 없는 장면은 착지를 안 봄(G-R1a 고친 뒤 참 재료에 landPath 없음 → 참 그대로)
+  const noLandOk = B.judgeScene('fixed', R1, FIX_OK).pass === true;
+  // 목록 반례 — 창 주인 · 방식 · 흐름 · 착지 · 고친 뒤만 · 정해진 둘 밖 키 · 비 U 장면에 U 전용 칸 · 비 U 장면 로그아웃 POST
+  const miss = listMiss([
+    ['U4 대표 창', (l) => { l[ix].who = 'owner'; }],
+    ['U4 직원 창', (l) => { l[ix].who = 'staff'; }],
+    ['U4 방식 없음', (l) => { delete l[ix].match.method; }],
+    ['U4 방식 GET', (l) => { l[ix].match.method = 'GET'; }],
+    ['U4 흐름 없음', (l) => { delete l[ix].flow; }],
+    ['U4 착지 없음', (l) => { delete l[ix].land; }],
+    ['U4 착지 /', (l) => { l[ix].land = '/'; }],
+    ['U4 고친 뒤만 없음', (l) => { delete l[ix].fixedOnly; }],
+    ['U4 갱신 주소', (l) => { l[ix].match = { path: '/api/auth/refresh', method: 'POST' }; }],
+    ['G-U5(정해진 둘 밖)', (l) => { l[ix].key = 'G-U5'; }],
+    ['비 U 장면 창 주인 ga', (l) => { l[0].who = 'ga'; }],
+    ['비 U 장면 흐름 칸', (l) => { l[0].flow = 'logout'; }],
+    ['비 U 장면 방식 칸', (l) => { l[0].match = { ...l[0].match, method: 'GET' }; }],
+    ['비 U 장면 착지 칸', (l) => { l[0].land = '/login'; }],
+    ['비 U 장면 로그아웃 POST', (l) => { l[0].match = { path: '/api/auth/logout' }; }],
+  ]);
+  check('B15 G-U4 — 꼴(ga 창 하나) · 제품 원문(단추 · POST · 경고 줄) · 장면 몸(앞 두 창 뒤 · finally 세션 놓기 · 대표 계정 0) · POST 로그아웃만 · 고친 뒤만 · 참 1 거짓 7 · 착지 칸 없는 장면 무영향 · 목록 반례 15',
+    shape && srcOk && flowOk && hit && modeOk && pass && bad.length === 0 && noLandOk && miss.length === 0,
+    `꼴 ${shape} · 원문 ${srcOk} · 몸 ${flowOk} · 요청 ${hit} · 모드 ${modeOk} · 참 ${pass} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'}`
+    + ` · 무영향 ${noLandOk} · 못 잡은 목록 반례 ${miss.length ? miss.join(' · ') : '0'}`);
+}
+
+// ── B16 (PR-2) — 상한 시간 셋: 띠 몸 전체 < S9b 단계 < 잡 · 잡 ≥ S8 + S9b + 준비 4분(실측 런 46162003560 준비 3분 16초) ──
+{
+  const yml = readSrc('.github', 'workflows', 'ui-browser.yml');
+  const bodyMin = B.BAND_TOTAL_MS / 60000;
+  const s9b = yml.slice(yml.indexOf('[시험] S9b'), yml.indexOf('[장치] API 멈춤'));
+  const s8 = yml.slice(yml.indexOf('[시험] S8'), yml.indexOf('[시험] S9 판정'));
+  const job = yml.slice(yml.indexOf('  ui-k35:'), yml.indexOf('  ui-selftest:'));
+  const num = (txt, re) => Number((txt.match(re) || [])[1] || NaN);
+  const s9bMin = num(s9b, /^\s*timeout-minutes: (\d+)\s*$/m);
+  const s8Min = num(s8, /^\s*timeout-minutes: (\d+)\s*$/m);
+  const jobMin = num(job, /^ {4}timeout-minutes: (\d+)\s*$/m);
+  const ok = Number.isInteger(bodyMin) && bodyMin < s9bMin && s9bMin < jobMin && jobMin >= s8Min + s9bMin + 4;
+  check('B16 상한 시간 셋 — 띠 몸 전체 < S9b 단계 < 잡 · 잡 ≥ S8 + S9b + 준비 4분', ok,
+    `몸 ${bodyMin}분 · S9b ${s9bMin}분 · S8 ${s8Min}분 · 잡 ${jobMin}분`);
 }
 
 const bad = results.filter((x) => !x.ok).length;

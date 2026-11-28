@@ -11,7 +11,10 @@
 //      넓힘(갈래 X · 지시서 §8-3 대표 ④) 장면 = fixedOnly(고친 뒤 모드에서만 돎) · block 칸이 있으면 그 단추가 막혀 있어야 통과.
 //   ③ 실패 주입은 시험 장치의 가로채기(page.route)로만 — 앱 손 0. ⬛ 옛 줄(대조군 1회째 c3b5240b): 「진짜 403 장면(G-S1)은 가로채기 0 · 서버 판정 그대로.」
 //      → 고침1(지시서 §8-2 · 런 46151366436 G-S1 = 서버 200 · 403 0): G-S1 도 가로채기 403 으로 바꿈 · 진짜 403 주입 꼴(real403)은 틀만 남김(쓰는 장면 0).
-//      `api/auth/update-status` 는 가로채지 않는다(R 과 U(#43) 가 같이 부름 · U 는 PR-2 몫 · 설계 §5-2 ⚠ 줄) — 장면 목록 꼴 검사가 막는다.
+//      ⬛ 옛 줄(PR-2 장면 전): 「`api/auth/update-status` 는 가로채지 않는다(R 과 U(#43) 가 같이 부름 · U 는 PR-2 몫 · 설계 §5-2 ⚠ 줄) — 장면 목록 꼴 검사가 막는다.」
+//      → PR-2(지시서 §8-4): 갈래 U 장면 둘만 정해진 주소 하나씩 가로챈다 — G-U2 = `api/auth/update-status`(503) · G-U4 = `api/auth/logout`(POST 만 · 503).
+//        그 밖 장면은 여전히 NO_INTERCEPT 전부 금지 · U 장면도 자기 주소 밖(로그인 · 갱신 · 남의 주소) 금지 — 장면 목록 꼴 검사(U_SPEC)가 막는다.
+//        가짜 Major 응답 · Major 대기 DB 준비 = 만들지 않음(§8-4 (라)) · 세션 놓기 길(K.apiLogout)은 node 요청이라 브라우저 가로채기에 안 걸린다.
 //   ④ 연 세션은 끝에 반드시 놓는다(로그아웃 · 11/27 계정 잠김 사고 선례) — 정상 · 예외 · 시간 상한 · 신호 모든 길에서 cleanup.
 //   ⑤ 그림을 찍지 않는다 · 콘솔 원문은 메모리에서 수만 센다(표지 낱말 포함 여부) · 찍는 글자는 소독 뒤(K.consoleLine · L.sanitize).
 //   ⑥ 이 PC 에서 돌리지 않는다(이 PC DB = 실물) — CI ui-browser.yml 「[시험] S9b」 단계에서만.
@@ -27,13 +30,23 @@ const env = process.env;
 const BROWSER = 'chromium';
 const SCOPE = 'BAND';
 const MODES = Object.freeze(['control', 'fixed']);
-const BAND_TOTAL_MS = 8 * 60 * 1000; // 이 몸 전체 상한(워크플로 S9b 단계 상한 10분 안)
+// ⬛ 옛 줄(PR-2 장면 전): const BAND_TOTAL_MS = 8 * 60 * 1000; // 이 몸 전체 상한(워크플로 S9b 단계 상한 10분 안)
+//   PR-2(지시서 §8-4) — 장면 13 → 15 · 따로 로그인 1 더함(실측 런 46162003560 S9b = 3분 3초 · 13 장면) → 몸 10분 · S9b 12분 · 잡 54분(자체시험 B16 이 잠금)
+const BAND_TOTAL_MS = 10 * 60 * 1000; // 이 몸 전체 상한(워크플로 S9b 단계 상한 12분 안)
 const PAGE_MS = 60000;
 const FORBID_TEXT = '이 기능에 접근할 권한이 없습니다'; // HitPanApiAuthHandler 평소 403 갈래 알림 글 머리(k35-ws03-closed.js 와 같은 글자 · 따로 둠)
 // 닫힌 주소(BetaClosedRoutes.All · 2026-11-28 판) — 장면이 닫힌 화면을 고르면 안내 화면만 떠 그 줄에 안 닿는다(꼴 검사)
 const CLOSED_PATHS = Object.freeze(['/settings', '/settings/ai-assistant', '/sales/profitability', '/tax-invoice-stats', '/accounting/export', '/welcome']);
 // 가로채면 안 되는 주소 — U(#43) 공유 줄(설계 §5-2 ⚠) · 로그인 · 갱신 · 로그아웃(세션 놓기 길)
 const NO_INTERCEPT = Object.freeze(['/api/auth/update-status', '/api/auth/login', '/api/auth/refresh', '/api/auth/logout']);
+// 갈래 U(#43 · PR-2 · 지시서 §8-4) — 장면 둘만 · 키마다 창 주인 · 주소(정확히 같음 · 정규식 0) · 방식 · 흐름 · 착지 · 고친 뒤만 여부를 못 박는다.
+//   G-U4 = 따로 창(창 주인 ga = CI 시험 DB 자식 계정 · 대표 계정 아님) · 따로 로그인 · 화면 로그아웃 POST 만 503 → /login 착지 · 끝에 API 로그아웃으로 세션 놓기.
+//   G-U4 는 고친 뒤만 — 화면 로그아웃이 /login 으로 문서를 새로 불러(forceLoad) 옛 문서의 흰 띠를 볼 수 없다
+//   (대조군 판정 불가 · 옛 문서의 표준오류는 같은 탭 콘솔 듣기가 이어져 앱 표준오류 셈이 잡는다).
+const U_SPEC = Object.freeze({
+  'G-U2': Object.freeze({ who: 'owner', path: '/api/auth/update-status', method: null, flow: null, land: null, fixedOnly: false }),
+  'G-U4': Object.freeze({ who: 'ga', path: '/api/auth/logout', method: 'POST', flow: 'logout', land: '/login', fixedOnly: true }),
+});
 const INJECTS = Object.freeze({
   503: { status: 503 },
   404: { status: 404 },
@@ -95,6 +108,16 @@ const SCENES = Object.freeze([
   Object.freeze({ key: 'G-P4', branch: 'P', who: 'owner', page: '/purchase-order-status', match: { path: '/api/reports/purchase-orders' }, inject: '503',
     tags: ['[HP15] 발주현황 조회 실패'], snack: '정보를 불러오지 못했습니다',
     lines: 'PurchaseOrderStatusPage.razor:130', what: '넓힘 X2 · 발주 현황 503(띠 0 · 경고 흔적 · 쉬운 알림)' }),
+  // PR-2 갈래 U(#43 · 지시서 §8-4 · 개발명세서 docs/개발/erp/20261129_화면오류기록띠_갈래U_개발명세서.md §9) — 시험 장치만 · 제품 코드 손 0.
+  //   G-U2 = (라) 실패 절반만: 로그인 뒤 새 탭 = 새 문서 → MainLayout 의 UpdateConsentGate 첫 그림(OnAfterRender)이 상태를 묻는다 → 503 → catch → 경고.
+  //     사이드바도 같은 주소를 부른다([HP15][Sidebar/Version] · 기록만 · 판정 밖). 「다음 로그인 재안내」 절반 = G-U3(#1032 first-update) 회귀 + 시험 PC 수동.
+  Object.freeze({ key: 'G-U2', branch: 'U', who: 'owner', page: '/', match: { path: '/api/auth/update-status' }, inject: '503',
+    tags: ['[HP15][UpdateConsentGate]'], snack: null,
+    lines: 'UpdateConsentGate.razor:98 · :208 · :215', what: 'PR-2 #43 · 업데이트 안내 조회 503(띠 0 · 경고 흔적 · 가짜 Major 0)' }),
+  //   G-U4 = 503 은 응답이 오므로 catch 안 줄(:269) 이 아니라 「서버 처리 실패」 줄(:259)에 닿는다(변이 VU2 는 :259 를 되돌려야 빨강).
+  Object.freeze({ key: 'G-U4', branch: 'U', who: 'ga', flow: 'logout', page: '/', match: { path: '/api/auth/logout', method: 'POST' }, inject: '503',
+    tags: ['[Auth]'], snack: null, land: '/login', fixedOnly: true,
+    lines: 'AuthService.cs:248 · :259 · AccountBadge.razor:112', what: 'PR-2 #43 · 화면 로그아웃 POST 503(따로 창 · /login 착지 · 띠 0 · 경고 흔적 · 끝에 세션 놓기)' }),
 ]);
 
 // 모드에 도는 장면 — 대조군은 고치기 전 판에 있던 자리만(fixedOnly 뺌) · 고친 뒤는 전부
@@ -122,6 +145,12 @@ function routeMatch(scene, u) {
   if (typeof scene.match.re === 'string') return new RegExp(scene.match.re).test(p);
   return false;
 }
+// 요청 맞춤 — 주소 + 방식(장면에 방식이 있을 때만 · G-U4 = POST 만). 방식 없는 장면 = routeMatch 그대로.
+function reqMatch(scene, u, method) {
+  if (!routeMatch(scene, u)) return false;
+  const want = scene.match.method;
+  return typeof want !== 'string' || String(method || '').toUpperCase() === want;
+}
 // 장면 목록 꼴 — 문제 글자 목록(빈 목록 = 정상). 판정 시작 전에 부르고, 문제가 있으면 아무것도 안 돌린다.
 function sceneListProblems(list = SCENES) {
   const out = [];
@@ -131,17 +160,40 @@ function sceneListProblems(list = SCENES) {
     const n = `${i + 1}번`;
     if (!s || typeof s !== 'object') { out.push(`${n} 꼴 아님`); return; }
     // ⬛ 옛 줄(넓힘X1 전): if (!/^G-[RSPC][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
-    if (!/^G-[RSPCX][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
+    // ⬛ 옛 줄(PR-2 장면 전): if (!/^G-[RSPCX][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
+    if (!/^G-[RSPCXU][0-9]+[a-z]?$/.test(String(s.key))) out.push(`${n} 키 꼴`);
     else if (s.key.charAt(2) !== s.branch) out.push(`${n} 갈래 어긋남`);
     if (seen.has(s.key)) out.push(`${n} 키 중복`);
     seen.add(s.key);
     // ⬛ 옛 줄(넓힘X1 전): if (!['R', 'S', 'P', 'C'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C 만 — U 는 PR-2)`);
-    if (!['R', 'S', 'P', 'C', 'X'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C · X(넓힘) 만 — U 는 PR-2)`);
+    // ⬛ 옛 줄(PR-2 장면 전): if (!['R', 'S', 'P', 'C', 'X'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C · X(넓힘) 만 — U 는 PR-2)`);
+    if (!['R', 'S', 'P', 'C', 'X', 'U'].includes(s.branch)) out.push(`${n} 갈래 밖(R · S · P · C · X(넓힘) · U(#43 · PR-2) 만)`);
+    // 갈래 U(지시서 §8-4) — 정해진 두 장면만 · 키마다 못 박은 값과 하나하나 같아야 · U 밖 장면은 U 전용 칸(흐름 · 방식 · 착지 · 창 주인 ga) 0
+    const us = s.branch === 'U' && Object.prototype.hasOwnProperty.call(U_SPEC, s.key) ? U_SPEC[s.key] : null;
+    const sm = s.match || {};
+    const orNull = (v) => (v === undefined ? null : v);
+    if (s.branch === 'U') {
+      if (!us) out.push(`${n} U 장면은 ${Object.keys(U_SPEC).join(' · ')} 만(지시서 §8-4)`);
+      else {
+        if (s.who !== us.who) out.push(`${n} U 창 주인(${us.who} 이어야)`);
+        if (sm.path !== us.path || sm.re !== undefined) out.push(`${n} U 주소(${us.path} 정확히 · 정규식 0)`);
+        if (orNull(sm.method) !== us.method) out.push(`${n} U 방식(${us.method || '없음'} 이어야)`);
+        if (orNull(s.flow) !== us.flow) out.push(`${n} U 흐름(${us.flow || '없음'} 이어야)`);
+        if (orNull(s.land) !== us.land) out.push(`${n} U 착지(${us.land || '없음'} 이어야)`);
+        if ((s.fixedOnly === true) !== us.fixedOnly) out.push(`${n} U 고친 뒤만 여부(${us.fixedOnly} 이어야)`);
+      }
+    } else {
+      if (s.flow !== undefined) out.push(`${n} 흐름 칸은 U 만`);
+      if (sm.method !== undefined) out.push(`${n} 방식 칸은 U 만`);
+      if (s.land !== undefined) out.push(`${n} 착지 칸은 U 만`);
+      if (s.who === 'ga') out.push(`${n} 창 주인 ga(따로 창) 는 U 만`);
+    }
     // 넓힘(X) 장면 = 고친 뒤에만(대조군 판엔 그 알림 · 막음이 없다) · 막을 단추 이름은 비지 않은 글자
     if (s.branch === 'X' && s.fixedOnly !== true) out.push(`${n} 넓힘 장면은 고친 뒤에만(fixedOnly)`);
     if (!(s.fixedOnly === undefined || typeof s.fixedOnly === 'boolean')) out.push(`${n} fixedOnly 꼴`);
     if (!(s.block === undefined || (typeof s.block === 'string' && s.block.trim().length > 0))) out.push(`${n} 막을 단추 꼴`);
-    if (!['owner', 'staff'].includes(s.who)) out.push(`${n} 창 주인 꼴`);
+    // ⬛ 옛 줄(PR-2 장면 전): if (!['owner', 'staff'].includes(s.who)) out.push(`${n} 창 주인 꼴`);
+    if (!['owner', 'staff', 'ga'].includes(s.who)) out.push(`${n} 창 주인 꼴`);
     if (!Object.prototype.hasOwnProperty.call(INJECTS, s.inject)) out.push(`${n} 주입 꼴`);
     if (typeof s.page !== 'string' || !s.page.startsWith('/')) out.push(`${n} 화면 주소 꼴`);
     else if (CLOSED_PATHS.includes(s.page.replace(/\/+$/, '') || '/')) out.push(`${n} 닫힌 화면`);
@@ -150,6 +202,7 @@ function sceneListProblems(list = SCENES) {
     const hasRe = typeof m.re === 'string' && m.re.startsWith('^/api/') && m.re.endsWith('$');
     if (hasPath === hasRe) out.push(`${n} 주소 맞춤 꼴(경로 하나 또는 앞뒤 고정 정규식 하나)`);
     for (const bad of NO_INTERCEPT) {
+      if (us && bad === us.path) continue; // U 장면은 자기 주소 하나만 풀림(그 밖 금지 주소는 그대로)
       if (routeMatch(s, `http://127.0.0.1${bad}`)) out.push(`${n} 가로채면 안 되는 주소(${bad})`);
     }
     if (!Array.isArray(s.tags) || s.tags.length === 0 || s.tags.some((t) => typeof t !== 'string' || !t.startsWith('[') || t.length < 3)) out.push(`${n} 표지 꼴`);
@@ -186,6 +239,8 @@ function judgeScene(mode, scene, o) {
   if (scene.snack !== null && !(Number.isInteger(o.snackHit) && o.snackHit >= 1)) why.push('원래 알림 글 0');
   // 넓힘X1 — 막혀야 할 단추가 있는 장면은 그 단추가 막혀 있어야(못 읽음 · 못 찾음 = 거짓)
   if (typeof scene.block === 'string' && o.blocked !== true) why.push(`단추 안 막힘(${scene.block} · ${o.blocked})`);
+  // PR-2 G-U4 — 착지 칸이 있는 장면은 그 주소에 내려앉아야(못 읽음 = 거짓)
+  if (typeof scene.land === 'string' && o.landPath !== scene.land) why.push(`착지 ${o.landPath}(${scene.land} 이어야)`);
   if (mode === 'control') {
     if (!(o.band3 === true || o.band10 === true)) why.push('흰 띠 0(대조군은 1 이어야 — 장면이 그 줄에 안 닿음)');
     for (const t of scene.tags) if (cnt(o.err, t) < 1) why.push(`표준오류 표지 0 ${t}`);
@@ -396,6 +451,69 @@ async function runScene(st, kb, scene) {
   }
 }
 
+// PR-2 G-U4(지시서 §8-4) — 따로 창 하나에 장면 하나 · 화면 열기 · [로그아웃] 누름(그 POST 만 503) · /login 착지 +3초 · +10초 보기 · 판정 · 탭 닫기.
+//   화면 로그아웃이 그 창의 출입증을 지우므로 이 창에서 다른 장면은 안 돈다(창 주인 ga = 이 장면만 · 꼴 검사).
+//   서버 쪽 접속은 503 으로 안 끝났으므로 runWho 의 finally → closeWho 가 API 로그아웃으로 놓는다(실패면 logoutFail → 끝 코드 1).
+async function runLogoutScene(st, kb, scene) {
+  const step = { now: '새 탭' };
+  let page = null;
+  try {
+    page = await kb.context.newPage();
+    const cur = newTally(scene.tags);
+    const hit = { route: 0, statuses: [] };
+    page.on('console', (msg) => tallyLine(cur, msg.type(), msg.text(), scene.tags)); // 같은 탭이라 /login 으로 문서가 바뀌어도 이어 듣는다
+    page.on('response', (res) => {
+      if (!reqMatch(scene, res.url(), res.request().method())) return;
+      if (hit.statuses.length < 6) hit.statuses.push(res.status());
+    });
+    const inj = INJECTS[scene.inject];
+    step.now = '가로채기 걸기';
+    await page.route((u) => routeMatch(scene, u), (route) => {
+      const req = route.request();
+      // 방식이 다르면(로그아웃 주소의 POST 밖) 손대지 않고 다음 처리기로 넘김
+      if (!reqMatch(scene, req.url(), req.method())) return route.fallback().catch((e) => console.log(`띠 장면 ${scene.key} 넘김 거절 ${L.errorName(e)}`));
+      hit.route += 1;
+      return route.fulfill({ status: inj.status, contentType: 'application/json', body: '{}' })
+        .catch((e) => console.log(`띠 장면 ${scene.key} 가로채기 처리 거절 ${L.errorName(e)}`));
+    });
+    step.now = '화면 열기';
+    await page.goto(`${K.BASE}${scene.page}`, { waitUntil: 'domcontentloaded', timeout: PAGE_MS });
+    const s0 = await DC.settleScreen(page, PAGE_MS);
+    if (s0.where !== 'main') throw new K.KitStepError(`못 만듦 — 로그아웃 전 착지 ${s0.where}@${L.sanitize(String(s0.path), 60)}`);
+    step.now = '브리핑 덮개';
+    await DC.closeBriefing(page, { seen: 0, closed: 0, errs: 0, lastErr: null }, 3000);
+    step.now = '화면 로그아웃 누르기';
+    await page.getByRole('button', { name: '로그아웃', exact: true }).first().click({ timeout: PAGE_MS });
+    step.now = '로그인 화면 착지';
+    await page.waitForURL((u) => urlPath(u) === scene.land, { timeout: PAGE_MS });
+    await page.getByLabel('아이디', { exact: true }).waitFor({ state: 'visible', timeout: PAGE_MS });
+    const landAt = Date.now();
+    await K.sleep(Math.max(0, landAt + 3000 - Date.now()));
+    const a = await look(page);
+    await K.sleep(Math.max(0, landAt + 10000 - Date.now()));
+    const b = await look(page);
+    const landPath = urlPath(page.url());
+    const snacks = [...new Set([...(a.snacks || []), ...(b.snacks || [])])];
+    const o = { routeHits: hit.route, real403: 0, band3: a.band, band10: b.band, err: cur.err, warn: cur.warn, appErr: cur.appErr, snackHit: 0, landPath };
+    const v = judgeScene(st.mode, scene, o);
+    const showMap = (m) => scene.tags.map((t) => cnt(m, t)).join('/');
+    // 기록만(판정 아님) — 알림 글 수 · 첫 셋(소독) · 착지 · 응답 숫자
+    console.log(`띠 장면 ${scene.key} 판정=${v.pass} · 모드 ${st.mode} · 로그아웃 전 착지 ${s0.where} · 착지 ${L.sanitize(String(landPath), 60)} · 가로챔 ${hit.route}`
+      + ` · 응답 ${hit.statuses.join(',') || '없음'} · 흰 띠 +3초 ${a.band} +10초 ${b.band} · 표준오류 표지 ${showMap(cur.err)} · 경고 표지 ${showMap(cur.warn)}`
+      + ` · 앱 표준오류 ${cur.appErr} · 알림 ${snacks.length} ${snacks.slice(0, 3).map((t) => K.consoleLine(t, 50)).join(' | ') || '-'}`
+      + `${v.pass ? '' : ` · 이유 ${v.why.join(' · ')}`}`);
+    const got = { m: st.mode, hit: hit.route, b3: a.band, b10: b.band, e: showMap(cur.err), w: showMap(cur.warn), app: cur.appErr, sn: snacks.length, land: landPath };
+    recScene(st, scene, { pass: v.pass, got: v.pass ? got : { ...got, why: v.why } });
+  } catch (e) {
+    devScene(st, scene, step.now, e);
+  } finally {
+    if (page) {
+      await page.unrouteAll({ behavior: 'ignoreErrors' }).catch((e) => console.log(`띠 장면 가로채기 풀기 실패 ${L.errorName(e)}`));
+      await page.close().catch((e) => console.log(`띠 장면 탭 닫기 실패 ${L.errorName(e)}`));
+    }
+  }
+}
+
 async function runWho(st, who, loginId, password) {
   // ⬛ 옛 줄(넓힘X1 전): const list = SCENES.filter((s) => s.who === who);
   const list = st.scenes.filter((s) => s.who === who);
@@ -411,7 +529,8 @@ async function runWho(st, who, loginId, password) {
     return;
   }
   try {
-    for (const s of list) await runScene(st, kb, s);
+    // ⬛ 옛 줄(PR-2 장면 전): for (const s of list) await runScene(st, kb, s);
+    for (const s of list) await (s.flow === 'logout' ? runLogoutScene(st, kb, s) : runScene(st, kb, s));
   } finally {
     await closeWho(st, kb);
   }
@@ -475,6 +594,8 @@ async function main() {
   } else {
     await runWho(st, 'owner', env.UI_LOGIN_PARENT || 'ci-parent', env.UI_PW_PARENT || '');
     await runWho(st, 'staff', env.UI_LOGIN_NA || 'ci-na', env.UI_PW_NA || '');
+    // PR-2 G-U4 — 따로 창 · 따로 로그인(CI 시험 DB 자식 계정 가 · 대표 계정 아님) · 앞 두 창을 놓은 뒤에만(한 PC 규칙 · 겹침 0)
+    await runWho(st, 'ga', env.UI_LOGIN_GA || 'ci-ga', env.UI_PW_GA || '');
   }
   fillLeft(st, '장면 끝 뒤 남은 키(있으면 장치 오류)');
   await cleanup(st);
@@ -492,4 +613,5 @@ module.exports = {
   SCENES, MODES, SCOPE, INJECTS, CLOSED_PATHS, NO_INTERCEPT, FORBID_TEXT,
   modeOf, routeMatch, sceneListProblems, newTally, tallyLine, judgeScene, endCode, bandResultPath,
   scenesFor, // 넓힘X1
+  U_SPEC, reqMatch, BAND_TOTAL_MS, // PR-2 갈래 U
 };
