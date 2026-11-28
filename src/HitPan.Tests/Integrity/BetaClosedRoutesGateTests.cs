@@ -16,6 +16,10 @@ namespace HitPan.Tests.Integrity;
 /// 덧붙여 5 화면 <c>@page</c> 0 · 사용자정보가 사용환경 설정 서버를 부르지 않음 · 세무사 자료 화면 서버 호출 자리 0 · P5 목적지.</item>
 /// </list>
 /// ⚠️ 한계(설계 §8 U1): G-A5 는 소스 글자 대조다 — 화면에 실제로 그려지는지는 [4] 화면 실측(메뉴 9줄 0 · 직접 주소 안내 · 메뉴 밖 3곳 누름)이 맡는다.
+/// <para>
+/// 🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §5 · 설계 §5) — 17·S18 <c>/welcome</c> 을 더했다(닫힌 6 · G-S3-3) ·
+/// 로그인 뒤 갈 곳 함수 <see cref="BetaClosedRoutes.AfterLoginPath"/> 동작(G-S3-4) · 변이 기록은 <c>docs/개발/erp/20261128_W-S-03_서버문닫기_온보딩모바일_개발명세서.md</c>.
+/// </para>
 /// </remarks>
 public sealed class BetaClosedRoutesGateTests
 {
@@ -26,13 +30,16 @@ public sealed class BetaClosedRoutesGateTests
         "/sales/profitability",
         "/tax-invoice-stats",
         "/accounting/export",
+        // 🔴 W-S-03 (2026-11-28 · 설계 §5 G-S3-3) — 17·S18 첫 방문 환영. G-A5-1 전수 대조도 이 글자를 센다(Login.razor 의 옛 이동 글자 0 포함).
+        "/welcome",
     };
 
     // ─────────────────────────────────────────────────────────────
     //  G-A4 — 규칙을 불러 본다
     // ─────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "G-A4-1 닫힌 주소 목록 = 정확히 5개(행 순서)")]
+    // ⬛ [낡은 표시 이름] "G-A4-1 닫힌 주소 목록 = 정확히 5개(행 순서)" — W-S-03 이 /welcome 을 더해 6(함수 이름은 그대로 둠).
+    [Fact(DisplayName = "G-A4-1 닫힌 주소 목록 = 정확히 6개(행 순서 · W-S-03 /welcome 더함)")]
     public void G_A4_1_목록이_정확히_5개다()
     {
         Assert.Equal(Closed, BetaClosedRoutes.All.ToArray());
@@ -48,6 +55,10 @@ public sealed class BetaClosedRoutesGateTests
     [InlineData("/settings?tab=1")]
     [InlineData("/accounting/export#top")]
     [InlineData(" /tax-invoice-stats ")]
+    // 🔴 W-S-03 (설계 §5 G-S3-3) — /welcome 우회(대소문자 · 끝 빗금 · 쿼리).
+    [InlineData("/welcome")]
+    [InlineData("/Welcome/")]
+    [InlineData("/welcome?x=1")]
     public void G_A4_2_닫힌_주소는_닫힘(string href)
     {
         Assert.True(BetaClosedRoutes.IsClosed(href), $"G-A4 {href} 가 닫히지 않았다.");
@@ -65,6 +76,11 @@ public sealed class BetaClosedRoutesGateTests
     [InlineData("/")]
     [InlineData("")]
     [InlineData(null)]
+    // 🔴 W-S-03 (설계 §5 G-S3-3) — 로그인 흐름 이웃 화면(로그인 · 약관 · 폰 안내)은 열림. 수동 업데이트 화면도(G-S3-4 짝).
+    [InlineData("/login")]
+    [InlineData("/terms")]
+    [InlineData("/m/device-register")]
+    [InlineData(LocalSwapUiText.UpdatePath)]
     public void G_A4_3_대조군은_열림(string? href)
     {
         Assert.False(BetaClosedRoutes.IsClosed(href), $"G-A4 대조군 {href} 가 닫혔다 — 닫을 것만 닫아야 한다.");
@@ -212,7 +228,8 @@ public sealed class BetaClosedRoutesGateTests
         // 위반 목록을 먼저 단언한다 — 어디가 새는지(파일:줄)가 먼저 보여야 고칠 수 있다.
         Assert.True(violations.Count == 0,
             $"{gate} 닫힌 주소로 가는 길이 규칙 밖에 {violations.Count} 곳 있다(W-S-01 갈래 A · 설계 §2-7):\n" + string.Join("\n", violations));
-        Assert.True(noticePages == 5, $"{gate} 안내 화면 @page 를 {noticePages} 개 찾았다(기대 5) — 훑기가 안 문다.");
+        // ⬛ [낡은 줄] Assert.True(noticePages == 5, …(기대 5)…) — W-S-03 이 안내 화면에 @page "/welcome" 을 더해 6.
+        Assert.True(noticePages == 6, $"{gate} 안내 화면 @page 를 {noticePages} 개 찾았다(기대 6 · W-S-03 /welcome 포함) — 훑기가 안 문다.");
         Assert.True(guarded >= 9, $"{gate} 규칙으로 감싼 메뉴 자리를 {guarded} 개만 찾았다(기대 9 이상 · 사이드바 5 · 전체 메뉴 3 · 도우미 바 1).");
     }
 
@@ -270,5 +287,56 @@ public sealed class BetaClosedRoutesGateTests
         var close = Regex.Match(userInfo, @"private void Close\(\)\s*\{(?<body>[^}]*)\}");
         Assert.True(close.Success, "G-A5 UserInfoPage.Close() 를 못 찾았다.");
         Assert.Contains("Navigation.NavigateTo(\"/\")", close.Groups["body"].Value);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  G-S3-3 · G-S3-4 — W-S-03 17·S18 첫 방문 환영 (2026-11-28 · 작업지시서 20261128작 §5 · 설계 §5)
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "G-S3-3b 원래 환영 화면에 @page \"/welcome\" 이 없다(⬛ 주석으로만 남음 · 안내 화면과 겹침 방지)")]
+    public void G_S3_3b_환영_화면에_라우트가_없다()
+    {
+        var raw = ReadWeb("Pages", "Welcome.razor");
+        var rx = new Regex(@"@page\s+""/welcome""", RegexOptions.IgnoreCase);
+        Assert.False(rx.IsMatch(raw), "G-S3-3 Pages/Welcome.razor 에 /welcome 라우트가 살아 있다 — 안내 화면과 겹치면 화면이 터진다.");
+        Assert.Contains("⬛ W-S-03", raw); // 원문 보존 줄(#1)
+    }
+
+    [Theory(DisplayName = "G-S3-4-1 로그인 뒤 갈 곳: 첫 로그인이어도 환영 화면 아님 · 넘긴 길 그대로(첫 화면 · 수동 업데이트)")]
+    [InlineData(true, false, "/")]
+    [InlineData(true, true, LocalSwapUiText.UpdatePath)]
+    [InlineData(false, false, "/")]
+    [InlineData(false, true, LocalSwapUiText.UpdatePath)]
+    public void G_S3_4_1_로그인_뒤_갈_곳(bool redirectToWelcome, bool goManualUpdate, string expected)
+    {
+        var normal = LocalSwapUiText.PostLoginPath(goManualUpdate);
+        Assert.Equal(expected, normal); // 넘기는 쪽 함수가 바뀌면 여기서 먼저 보인다
+
+        var actual = BetaClosedRoutes.AfterLoginPath(redirectToWelcome, normal);
+
+        Assert.True(actual == expected,
+            $"G-S3-4 AfterLoginPath({redirectToWelcome}, \"{normal}\") = \"{actual}\" (기대 \"{expected}\") — 환영 화면이 닫혔는데 그리로 보내거나 수동 업데이트 갈래가 끊겼다(W-S-03 · #20).");
+        Assert.NotEqual(BetaClosedRoutes.Welcome, actual);
+    }
+
+    [Fact(DisplayName = "G-S3-4-2 로그인 뒤 갈 곳은 바깥 길을 꾸미지 않는다(아무 고정 길이든 그대로 · 대조군)")]
+    public void G_S3_4_2_넘긴_길_그대로()
+    {
+        Assert.Equal("/x-gate", BetaClosedRoutes.AfterLoginPath(true, "/x-gate"));
+        Assert.Equal("/x-gate", BetaClosedRoutes.AfterLoginPath(false, "/x-gate"));
+    }
+
+    [Fact(DisplayName = "G-S3-4-3 (보조·글자) Login.razor 는 환영 화면으로 바로 가지 않고 갈 곳 함수 하나만 부른다")]
+    public void G_S3_4_3_로그인_화면은_갈_곳_함수만()
+    {
+        // ⚠️ 한계: 소스 글자 대조다(주석 걷은 뒤) — 실제 이동은 [4] 화면 실측(새 직원 첫 로그인 → 첫 화면)이 맡는다.
+        var code = string.Join('\n', CodeLines(ReadWeb("Pages", "Login.razor")));
+        Assert.DoesNotContain("NavigateTo(\"/welcome\"", code, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RedirectToWelcome == true)\n", code);
+        Assert.Contains("BetaClosedRoutes.AfterLoginPath(result.Data?.RedirectToWelcome == true, LocalSwapUiText.PostLoginPath(_goManualUpdateAfterLogin))", code);
+        // 약관 강제는 갈 곳 함수보다 먼저(#20 · #24).
+        var terms = code.IndexOf("Navigation.NavigateTo(\"/terms\"", StringComparison.Ordinal);
+        var after = code.IndexOf("BetaClosedRoutes.AfterLoginPath(", StringComparison.Ordinal);
+        Assert.True(terms >= 0 && after > terms, "G-S3-4 약관 강제(/terms) 가 갈 곳 함수보다 앞이어야 한다.");
     }
 }

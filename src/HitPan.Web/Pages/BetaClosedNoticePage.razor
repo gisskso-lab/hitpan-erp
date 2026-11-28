@@ -3,6 +3,7 @@
 @page "/sales/profitability"
 @page "/tax-invoice-stats"
 @page "/accounting/export"
+@page "/welcome"
 @attribute [Authorize]
 @inject NavigationManager Nav
 
@@ -18,6 +19,10 @@
     BetaClosedRoutes 목록에서 그 주소를 뺀다.
 
     안내 글은 고객 노출 — 개발 낱말 · 「베타」 낱말 0(#23). 글은 BetaClosedRoutes 상수(PM 결재 P2 초안)를 쓴다.
+
+    🔴 W-S-03 (2026-11-28 · 작업지시서 20261128작 §2 · 설계 §2-2 ①) — 17·S18 첫 방문 환영(/welcome)을 더했다(닫힌 화면 6).
+    원래 화면 Welcome.razor 는 지우지 않았다 — @page 한 줄만 ⬛ 주석으로 내렸다(위와 같은 꼴).
+    로그인 분기는 BetaClosedRoutes.AfterLoginPath 가 같은 목록을 보고 첫 화면으로 보낸다(Login.razor).
 *@
 
 <PageTitle>@BetaClosedRoutes.NoticeTitle</PageTitle>
