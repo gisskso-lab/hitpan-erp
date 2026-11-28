@@ -11,6 +11,7 @@
 //      (약관 미동의 첫 로그인 → /terms 는 기존 장면 H-D2 약관 화면 길이 잰다 · 이 몸은 중복으로 만들지 않는다).
 //   ⑥ 연 세션은 장면 끝 finally 에서 반드시 로그아웃(§255 · 계정 잠김 사고 선례) · 브라우저를 닫는다.
 //   ⑦ 이 PC 에서 돌리지 않는다(이 PC DB = 실물) — CI 의 S8 에서만. 이름 = 다른 K 몸 뒤에 돈다(알파벳 순).
+//   ⑧ 고침 3 — 알려진 결함 대장(judge.js KNOWN_DEFECT_ROWS · 첫 화면 2 장면) 꼴일 때만 결과 칸 머리에 표지 · 끝 코드는 판정기 면제 함수를 쓴다(endCode).
 'use strict';
 
 const crypto = require('crypto');
@@ -18,6 +19,8 @@ const { spawnSync } = require('child_process');
 const L = require('./lib');
 const K = require('./kit35');
 const DC = require('./device-check'); // 머리 조건(require.main) 때문에 불러도 장치 본문은 안 돈다 — 내보냄만 쓴다
+// 🔴 고침 3(작업지시서 20261128작_W-S-03_고침3_알려진결함대장 §4 ②) — 알려진 결함 목록 · 표지 · 면제 함수는 판정기 것 그대로(머리 조건 때문에 판정 본문은 안 돈다)
+const J = require('./judge');
 
 const env = process.env;
 const BROWSER = 'chromium';
@@ -136,8 +139,38 @@ async function rawCall(method, p, sess, body) {
 }
 
 // ── 줄 쓰기 ──
+// ⬛ [낡은 몸 · 고침 2] function rec(st, name, res) {
+// ⬛   K.recK(st.r, { key: KEY[name], what: WHAT[name], got: res.got, pass: res.pass, kind: 'TEST' });
+// ⬛ }
+// 🔴 고침 3 — res.known 이 참이고(장면이 알려진 꼴을 따로 계산 · 판정 식은 그대로) 그 키가 판정기 대장에 있으면
+//   결과 칸 머리에 J.KNOWN_WHY + 대장 이름. 결과 칸은 L.rec 가 글자로 저장한다(객체는 JSON 글자) → 머리 글자를 붙여 글자로 넘긴다.
+//   아니면 머리 없음 → 판정기가 종전대로 빨강.
+function knownName(name) {
+  const k = KEY[name];
+  const w = J.KNOWN_DEFECT_ROWS.find((x) => x[0] === k.id && x[1] === k.g && x[2] === k.path && x[3] === k.browser);
+  return w ? w[4] : null;
+}
 function rec(st, name, res) {
-  K.recK(st.r, { key: KEY[name], what: WHAT[name], got: res.got, pass: res.pass, kind: 'TEST' });
+  const kn = res.pass === false && res.known === true ? knownName(name) : null;
+  const got = kn ? `${J.KNOWN_WHY}${kn} · ${typeof res.got === 'string' ? res.got : JSON.stringify(res.got)}` : res.got;
+  K.recK(st.r, { key: KEY[name], what: WHAT[name], got, pass: res.pass, kind: 'TEST' });
+}
+// 🔴 고침 3 — 알려진 꼴(장면 판정 식이 거짓일 때만 따로 계산 · W-S-03 자기 조건이 참일 때만 참)
+//   첫 화면: 본 화면 · 주소 / · 이동 기록에 / · /welcome 이동 0 은 모두 참이고 흰 띠만 참(선행검증서 §2).
+function homeKnown(s, navs, band) {
+  return s.where === 'main' && s.path === HOME_PATH && navs.includes(HOME_PATH) && !navs.some(isWelcome) && band === true;
+}
+//   업데이트: /welcome 이동 0 · 문서 이동 기록에 /data/update 시도 있음(갈 곳 계산은 맞았다) · 실패 사유는
+//   「/data/update 끊김(실패) 뒤 / 」 또는 흰 띠뿐(선행검증서 §1 · §2). 흰 띠 읽기 실패(null) = 꼴 아님.
+function updateKnown(navs, docNavs, band) {
+  if (navs.some(isWelcome)) return false;
+  const ui = docNavs.findIndex((d) => d.startsWith(`${UPDATE_PATH}=`));
+  if (ui < 0) return false;
+  if (band !== true && band !== false) return false;
+  const navOk = navs.includes(UPDATE_PATH);
+  const cutThenHome = !navOk && docNavs[ui].startsWith(`${UPDATE_PATH}=실패`)
+    && docNavs.slice(ui + 1).some((d) => d.startsWith(`${HOME_PATH}=`)) && navs.includes(HOME_PATH);
+  return (navOk || cutThenHome) && !(navOk && band === false);
 }
 function dev(st, name, step, e) {
   const why = e instanceof K.KitStepError ? L.sanitize(e.message, 200) : `예외 ${L.errorName(e)}`;
@@ -365,7 +398,10 @@ async function sceneHome(st) {
     const pass = s.where === 'main' && s.path === HOME_PATH && navs.includes(HOME_PATH) && !navs.some(isWelcome) && band === false;
     const got = { where: s.where, path: s.path, navs, loginRedirectToWelcome: kb.login.redirect, loginTerms: kb.login.terms, errBand: band };
     // ⬛ [낡은 줄 · 고침 1] rec(st, 'home', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
-    rec(st, 'home', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
+    // ⬛ [낡은 줄 · 고침 2] rec(st, 'home', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
+    // 🔴 고침 3 — 판정 식 그대로 · 거짓일 때만 알려진 꼴 계산(머리 글자는 rec 가 붙임)
+    const known = !pass && homeKnown(s, navs, band);
+    rec(st, 'home', { pass, known, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
   } catch (e) {
     dev(st, 'home', step, e);
   }
@@ -419,7 +455,10 @@ async function sceneUpdate(st) {
     const pass = navs.includes(UPDATE_PATH) && !navs.some(isWelcome) && band === false;
     const got = { navs, settled: `${s.where}@${s.path}`, loginRedirectToWelcome: kb.login.redirect, errBand: band };
     // ⬛ [낡은 줄 · 고침 1] rec(st, 'update', { pass, got });  — 🔴 고침 2 실패 때만 진단을 싣는다(판정 칸 그대로)
-    rec(st, 'update', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
+    // ⬛ [낡은 줄 · 고침 2] rec(st, 'update', { pass, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
+    // 🔴 고침 3 — 판정 식 그대로 · 거짓일 때만 알려진 꼴 계산(문서 이동 기록 = diag 와 같은 글자 꼴)
+    const known = !pass && updateKnown(navs, kb.dx.docs.map((d) => `${d.path}=${d.end}`), band);
+    rec(st, 'update', { pass, known, got: pass ? got : { ...got, dx: diag(kb, { noticeClosed: s.noticeClosed, noticeCloseErrs: s.noticeCloseErrs }) } });
   } catch (e) {
     dev(st, 'update', step, e);
   } finally {
@@ -614,12 +653,29 @@ async function main() {
   await probes(st); // 브라우저 없이도 돈다
   K.fillDevice(st.r, allKeys, '경우 끝 뒤 남은 키(있으면 장치 오류)');
   await cleanup(st);
-  const mine = st.r.rows.filter((x) => x.scope === 'K' && String(x.id || '').startsWith('K35-S3'));
+  // ⬛ [낡은 줄 · 고침 2] const mine = st.r.rows.filter((x) => x.scope === 'K' && String(x.id || '').startsWith('K35-S3'));
+  // ⬛ [낡은 줄 · 고침 2] const bad = mine.filter((x) => x.pass !== true).length;
+  // ⬛ [낡은 줄 · 고침 2] console.log(`K 닫힌문 본문 끝: 줄 ${mine.length} · 거짓 ${bad} · 로그아웃 실패 ${st.logoutFail}`);
+  // ⬛ [낡은 줄 · 고침 2] L.saveResult(st.r);
+  // ⬛ [낡은 줄 · 고침 2] process.exit(bad === 0 && st.logoutFail === 0 ? 0 : 1);
+  // 🔴 고침 3 — 끝 코드 = endCode(판정기 면제 함수 그대로) · 끝 줄에 알려진 결함 수
+  const mine = myRows(st.r.rows);
   const bad = mine.filter((x) => x.pass !== true).length;
-  console.log(`K 닫힌문 본문 끝: 줄 ${mine.length} · 거짓 ${bad} · 로그아웃 실패 ${st.logoutFail}`);
+  const known = mine.filter((x) => J.knownDefectFail(x)).length;
+  console.log(`K 닫힌문 본문 끝: 줄 ${mine.length} · 거짓 ${bad} · 로그아웃 실패 ${st.logoutFail} · 알려진 결함 ${known}(거짓 수 안 · 끝 코드에서 뺌)`);
   L.saveResult(st.r);
-  process.exit(bad === 0 && st.logoutFail === 0 ? 0 : 1);
+  process.exit(endCode(st.r.rows, st.logoutFail));
+}
+
+// 🔴 고침 3 — 이 몸의 줄 · 끝 코드(순수 함수 · 자체시험 K-C27h). 거짓 줄 중 판정기 knownDefectFail 참인 줄은 뺀다 · 로그아웃 실패는 그대로 1.
+function myRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((x) => x && x.scope === 'K' && String(x.id || '').startsWith('K35-S3'));
+}
+function endCode(rows, logoutFail) {
+  const bad = myRows(rows).filter((x) => x.pass !== true && !J.knownDefectFail(x)).length;
+  return bad === 0 && logoutFail === 0 ? 0 : 1;
 }
 
 if (require.main === module) main();
-module.exports = { KEY, HANDLER_WORDS, isWelcome };
+// ⬛ [낡은 줄 · 고침 2] module.exports = { KEY, HANDLER_WORDS, isWelcome };
+module.exports = { KEY, HANDLER_WORDS, isWelcome, endCode, homeKnown, updateKnown }; // 고침 3 — endCode · 알려진 꼴 두 식
