@@ -2590,6 +2590,27 @@ const c16Timers = () => (typeof process.getActiveResourcesInfo === 'function' ? 
       check('K-C26b 종 길 사유 소독(등록값 가림 · 대조 = 등록 전엔 보임) · 항목 클릭 실패 뒤 다시 안 누름 · 팝업 기다림은 항목 클릭 바로 전', ok, why);
     }
   }
+  // 🆕 11/28 쿨타임 CT3 장치 고침 F3(지시서 20261128작_쿨타임1b_CT3자정넘김_장치고침) — 둘째 값 눈금 pickGrid 순수 함수 3꼴.
+  //   런 46080568966 시도 4 꼴(출근 23:53 D · 자동 퇴근 00:01 D+1 · 지금 00:04 D+1)이 CI 에서 저절로 나오기 어려워 여기서 잰다.
+  //   대조 = 옛 동작(outDay 없음 = 출근 날짜) 은 같은 꼴에서 23:55(D) 를 골랐다 — 그 값도 함께 확인(고침이 실제로 달라졌나).
+  {
+    const CT = require('./k35-session-cooltime');
+    const d = (day, h, mi) => new Date(2026, 10, day, h, mi, 0, 0); // 로컬 생성 = 러너 시간대 무관
+    const hmOf = (x) => (x ? `${String(x.getDate()).padStart(2, '0')} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}` : 'null');
+    // ① 자정 넘김 — 퇴근 날짜(D+1 = 11/28)에서 골라야 함 → 28일 00:00
+    const a1 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01', '2026-11-28');
+    const a0 = CT.pickGrid(d(27, 23, 53), d(28, 0, 4).getTime(), '00:01'); // 옛 동작 대조
+    // ② 같은 날 — 출근 23:10 · 퇴근 23:16 · 지금 23:22 → 23:20
+    const b1 = CT.pickGrid(d(27, 23, 10), d(27, 23, 22).getTime(), '23:16', '2026-11-27');
+    // ③ 눈금 없음 — 출근 23:58(D) · 지금 23:59(D) · 퇴근 날짜 D → (출근, 지금] 안 눈금 0 → null
+    const c1 = CT.pickGrid(d(27, 23, 58), d(27, 23, 59).getTime(), '23:59', '2026-11-27');
+    // ④ 퇴근 글자에서 날짜 읽기(시간대 바꿈 0)
+    const y1 = CT.ymdOfText('2026-11-28T00:01:00');
+    const y2 = CT.ymdOfText('00:01');
+    check('K-CT3-F 둘째 값 눈금 = 고침 창 날짜(자동 퇴근 날짜) — 자정 넘김 28 00:00(옛 동작 대조 27 23:55) · 같은 날 27 23:20 · 눈금 없음 null · 날짜 읽기',
+      hmOf(a1) === '28 00:00' && hmOf(a0) === '27 23:55' && hmOf(b1) === '27 23:20' && c1 === null && y1 === '2026-11-28' && y2 === null,
+      `자정 넘김 ${hmOf(a1)} · 옛 동작 ${hmOf(a0)} · 같은 날 ${hmOf(b1)} · 없음 ${hmOf(c1)} · 날짜 ${y1} / ${y2}`);
+  }
   const bad = results.filter((x) => !x.ok).length;
   console.log(`합계 ${results.length - bad}/${results.length} PASS`);
   process.exit(bad === 0 ? 0 : 1);

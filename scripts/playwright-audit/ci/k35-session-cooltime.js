@@ -63,12 +63,18 @@ function pickC(nowMs, offGrid) {
   return c;
 }
 // CT3 둘째 값 — (출근, 지금] 안의 5분 눈금 중 가장 늦은 것 · C1 과 다른 분. 없으면 null.
-function pickGrid(checkIn, nowMs, avoidHm) {
+// ⬛ [낡은 머리 · 11/28 자정 넘김 고침 이전] function pickGrid(checkIn, nowMs, avoidHm) {
+// 🆕 11/28 장치 고침 F1(지시서 20261128작_쿨타임1b_CT3자정넘김_장치고침) — 런 46080568966 시도 4: 출근 23:53(D) · 자동 퇴근 00:01(D+1) 인데
+//   눈금을 「출근 날짜」(D) 에서 골라 23:55 → 고침 창은 날짜 칸 기본값이 「지금 퇴근 날짜」(D+1)라 D+1 23:55 로 보내져 서버가 거절(24시간 밖 · 맞는 동작).
+//   → 눈금은 **고침 창 날짜 기본값(= 자동 퇴근 날짜 outDay)** 과 같은 날에서 고른다. outDay 를 안 주면 옛 동작(출근 날짜).
+function pickGrid(checkIn, nowMs, avoidHm, outDay) {
+  const day = outDay || ymd(checkIn);
   const g = new Date(nowMs);
   g.setSeconds(0, 0);
   g.setMinutes(g.getMinutes() - (g.getMinutes() % 5));
   for (let i = 0; i < 3; i += 1) {
-    if (g.getTime() > checkIn.getTime() && hm(g) !== avoidHm && ymd(g) === ymd(checkIn)) return new Date(g);
+    // ⬛ [낡은 줄 · 11/28 이전] if (g.getTime() > checkIn.getTime() && hm(g) !== avoidHm && ymd(g) === ymd(checkIn)) return new Date(g);
+    if (g.getTime() > checkIn.getTime() && hm(g) !== avoidHm && ymd(g) === day) return new Date(g);
     g.setMinutes(g.getMinutes() - 5);
   }
   return null;
@@ -93,6 +99,11 @@ function jwtClaim(token, name) {
 function hmOfText(s) {
   const m = /T?(\d{2}):(\d{2})/.exec(String(s ?? ''));
   return m ? `${m[1]}:${m[2]}` : null;
+}
+// 🆕 11/28 F1 — 같은 글자에서 날짜(yyyy-MM-dd)만(시간대 바꿈 0). 없으면 null.
+function ymdOfText(s) {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(s ?? ''));
+  return m ? m[1] : null;
 }
 // 🆕 첫 CI 런 고침 — 거절 응답 본문의 안내 한 칸만(GlobalExceptionMiddleware `{ error }` · 그 밖 message/code) · 비번 · 토큰 가림(sanitize).
 function bodyWhy(res) {
@@ -521,11 +532,28 @@ async function editOnce(page, rowSel, chip, reason, target, step = { now: '' }) 
   if (target) { step.now = `${base} > 시각 고르기`; await pickTimeInDialog(page, target, step); }
   step.now = `${base} > 까닭 넣기`;
   await dlg.getByLabel('고친 까닭 (꼭 적어 주세요)', { exact: true }).fill(reason);
+  // 🆕 11/28 장치 고침 F2 — 런 46080568966 시도 4: 둘째 저장이 서버에서 거절됐는데(창 그대로 · 오류 안내) 장치가 **첫 고침 때 뜬**
+  //   「퇴근 시각을 고쳤습니다.」 안내에 걸려 지나쳤다. 제품은 성공일 때만 창을 닫는다(SaveCheckOutAsync `_editOpen = false`).
+  //   → 성공 = 창 닫힘 + 성공 안내 보임 · 실패 = 누른 뒤 새로 뜬 다른 안내(서버 까닭) → 그 글을 담아 바로 멈춤 · 상한 20초.
+  const snackTexts = async () => (await page.locator('.mud-snackbar').allInnerTexts().catch(() => [])).map((s) => s.trim()).filter(Boolean);
+  const before = new Set(await snackTexts());
   step.now = `${base} > 저장 누름`;
   await dlg.getByRole('button', { name: '저장', exact: true }).click({ timeout: 10000 });
   step.now = `${base} > 저장 안내`;
-  await page.locator('.mud-snackbar', { hasText: EDIT_OK }).first().waitFor({ state: 'visible', timeout: 20000 });
-  await dlg.waitFor({ state: 'hidden', timeout: 15000 }).catch((e) => console.log(`K 쿨타임 고침 창 닫힘 기다림 끝 (${L.errorName(e)})`));
+  // ⬛ [낡은 줄 · 11/28 F2 이전] await page.locator('.mud-snackbar', { hasText: EDIT_OK }).first().waitFor({ state: 'visible', timeout: 20000 });
+  // ⬛ [낡은 줄 · 11/28 F2 이전] await dlg.waitFor({ state: 'hidden', timeout: 15000 }).catch((e) => console.log(`K 쿨타임 고침 창 닫힘 기다림 끝 (${L.errorName(e)})`));
+  const saveUntil = Date.now() + 20000;
+  let saved = false;
+  while (Date.now() < saveUntil) {
+    const now = await snackTexts();
+    const open = await dlg.isVisible().catch(() => true);
+    if (!open && now.some((t) => t.includes(EDIT_OK))) { saved = true; break; }
+    // 거절 판정은 창이 그대로일 때만(성공 뒤 목록 다시 읽기 등 딴 안내를 거절로 읽지 않게)
+    const fresh = now.filter((t) => !before.has(t) && !t.includes(EDIT_OK));
+    if (open && fresh.length > 0) throw new K.KitStepError(`저장 거절 — 안내 「${L.sanitize(fresh[0], 80)}」(창 그대로)`);
+    await K.sleep(300);
+  }
+  if (!saved) throw new K.KitStepError(`저장 결과 못 봄 — 20초 안에 창 닫힘 + 성공 안내 없음(창 ${(await dlg.isVisible().catch(() => false)) ? '그대로' : '닫힘'})`);
   await K.sleep(1500);
 }
 async function ct3(st) {
@@ -545,15 +573,22 @@ async function ct3(st) {
     if (!row0 || src0 !== 'cooltime') throw new K.KitStepError(`자동 퇴근 행 없음(출처 ${L.sanitize(String(src0 ?? '-'), 30)})`);
     const attId = readJ(row0, 'attendanceId', 'AttendanceId');
     const out0 = hmOfText(readJ(row0, 'checkOut', 'CheckOut'));
+    // 🆕 11/28 F1 — 고침 창 「퇴근 날짜」 기본값 = 지금 퇴근의 날짜(HrAttendancePage.OpenCheckOutDialogAsync). 장치는 시각만 고르므로 눈금도 그 날에서.
+    const outDay = ymdOfText(readJ(row0, 'checkOut', 'CheckOut'));
+    if (!outDay) throw new K.KitStepError('자동 퇴근 날짜 못 읽음(퇴근 글자 꼴 다름)');
 
     step.now = '둘째 값(5분 눈금) 기다림';
     const gridUntil = Date.now() + GRID_CAP_MS;
-    let t2 = pickGrid(st.checkIn, Date.now(), out0);
+    // ⬛ [낡은 줄 · 11/28 이전] let t2 = pickGrid(st.checkIn, Date.now(), out0);
+    let t2 = pickGrid(st.checkIn, Date.now(), out0, outDay);
     while (!t2 && Date.now() < gridUntil) {
       await K.sleep(5000);
-      t2 = pickGrid(st.checkIn, Date.now(), out0);
+      // ⬛ [낡은 줄 · 11/28 이전] t2 = pickGrid(st.checkIn, Date.now(), out0);
+      t2 = pickGrid(st.checkIn, Date.now(), out0, outDay);
     }
-    if (!t2) throw new K.KitStepError(`둘째 값 눈금 없음(출근 ${hm(st.checkIn)} · 자정 넘김이면 미측정)`);
+    // ⬛ [낡은 줄 · 11/28 이전] if (!t2) throw new K.KitStepError(`둘째 값 눈금 없음(출근 ${hm(st.checkIn)} · 자정 넘김이면 미측정)`);
+    if (!t2) throw new K.KitStepError(`둘째 값 눈금 없음(출근 ${hm(st.checkIn)} · 퇴근 ${outDay} ${out0})`);
+    if (ymd(st.checkIn) !== outDay) console.log(`K 쿨타임 CT3 자정 넘김 꼴 — 출근 ${ymd(st.checkIn)} ${hm(st.checkIn)} · 퇴근 ${outDay} ${out0} · 둘째 값 ${ymd(t2)} ${hm(t2)}`);
 
     // 🆕 11/28 진단 — 부모 화면의 고치기 칸은 /api/permissions/{user_id} 의 HR_PROXY 「수정」 으로만 그려진다(서버는 tenant_admin 전권).
     //   그 응답을 판정 밖 한 줄로 남긴다(사용자 키 · 토큰은 안 찍음).
@@ -723,4 +758,5 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { pickC, pickGrid, hmOfText, KEY, N4_KEY };
+// ⬛ [낡은 줄 · 11/28 F1 이전] module.exports = { pickC, pickGrid, hmOfText, KEY, N4_KEY };
+module.exports = { pickC, pickGrid, hmOfText, ymdOfText, KEY, N4_KEY };
