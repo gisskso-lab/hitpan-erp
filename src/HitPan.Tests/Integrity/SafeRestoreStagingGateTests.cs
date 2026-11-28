@@ -84,8 +84,27 @@ public sealed class SafeRestoreStagingGateTests
         Assert.All(outp, s => Assert.Equal("t_backup", s.SourceTable));
     }
 
+    [Fact(DisplayName = "G14-S1b 🔴 (고침 1) mariadb-dump 11.x 실물 묶음 INSERT 꼴 「 VALUES\\n(…),\\n(…)」 · 칸 목록 꼴 통과 — 바이트 그대로 rs_new__")]
+    public void G14_S1b_실물_VALUES_줄바꿈_통과()
+    {
+        // 11.4.10 · 11.7.2 실행 파일 글자 틀 " VALUES\n" (CI db-gate 11.8.6 · 런 46109988942 G3 stage_failed 의 원인 꼴)
+        var dump = Golden
+            + "DROP TABLE IF EXISTS `t_bin`;\nCREATE TABLE `t_bin` (\n  `b` varbinary(255) DEFAULT NULL,\n  `s` varchar(30) DEFAULT NULL\n) ENGINE=InnoDB;\n"
+            + "LOCK TABLES `t_bin` WRITE;\n/*!40000 ALTER TABLE `t_bin` DISABLE KEYS */;\n"
+            + "INSERT INTO `t_bin` VALUES\n(0x00FF,'a\\'b;'),\n(NULL,'T2');\n"
+            + "INSERT INTO `t_bin` (`b`, `s`) VALUES (0x01,'c'),\n(NULL,NULL);\n"
+            + "/*!40000 ALTER TABLE `t_bin` ENABLE KEYS */;\nUNLOCK TABLES;\n";
+        var outp = Run(dump);
+        Assert.Equal(7, outp.Count);
+        Assert.Equal("INSERT INTO `rs_new__t_bin` VALUES\n(0x00FF,'a\\'b;'),\n(NULL,'T2')", Text(outp[5]));
+        Assert.Equal("INSERT INTO `rs_new__t_bin` (`b`, `s`) VALUES (0x01,'c'),\n(NULL,NULL)", Text(outp[6]));
+        Assert.All(outp.Skip(3), s => Assert.Equal("t_bin", s.SourceTable));
+    }
+
     public static IEnumerable<object[]> Variants() => new[]
     {
+        new object[] { "VALUES 뒤 탭(정확한 꼴 둘 밖)", "LOCK TABLES `t_backup` WRITE;\nINSERT INTO `t_backup` VALUES\t(9,'T1',NULL,0);\n" },
+        new object[] { "VALUES 줄바꿈 꼴 속 둘째 문장", "LOCK TABLES `t_backup` WRITE;\nINSERT INTO `t_backup` VALUES\n(9,'T1',NULL,0);DELETE FROM `t_keep`;\n" },
         new object[] { "GRANT", "GRANT ALL ON *.* TO 'x'@'%';\n" },
         new object[] { "DROP DATABASE", "DROP DATABASE `hitpan_erp`;\n" },
         new object[] { "둘째 문장 숨긴 INSERT", "LOCK TABLES `t_backup` WRITE;\nINSERT INTO `t_backup` VALUES (9,'T1',NULL,0);DELETE FROM `t_keep`;\n" },

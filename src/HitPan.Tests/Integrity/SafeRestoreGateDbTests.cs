@@ -212,10 +212,14 @@ public sealed class SafeRestoreGateDbTests : IDisposable
     {
         var c = await SetupAsync("SR-G14");
         if (c is null) return;
+        // 256 바이트 전 값(0x00 ~ 0xFF) — 출하 DDL partner_contacts 의 암호 칸 둘은 varbinary(255)(hitpan_db_clean.sql :2714 · :2715)라
+        // 한 칸에 256 은 안 들어감(고침 1 · CI "Data too long") → 같은 줄 두 칸에 반씩(0x00 ~ 0x7F · 0x80 ~ 0xFF) 나눠 넣고 이어 붙여 대조
         var bytes = Enumerable.Range(0, 256).Select(i => (byte)i).ToArray();
+        var low = bytes[..128];
+        var high = bytes[128..];
         await c.Admin.ExecuteAsync(
-            "INSERT INTO partner_contacts (contact_id, tenant_id, contact_name, hp_encrypted, memo) VALUES ('pc-1', @T, '홍길동', @B, 'a''b;\\\\c'), ('pc-2', @T, '둘째', NULL, NULL)",
-            new { T = Tenant, B = bytes });
+            "INSERT INTO partner_contacts (contact_id, tenant_id, contact_name, hp_encrypted, email_encrypted, memo) VALUES ('pc-1', @T, '홍길동', @L, @H, 'a''b;\\\\c'), ('pc-2', @T, '둘째', NULL, NULL, NULL)",
+            new { T = Tenant, L = low, H = high });
         var id = await BackupAsync(c);
         var liveBefore = await CountAsync(c.Admin, "partner_contacts");
 
@@ -230,8 +234,11 @@ public sealed class SafeRestoreGateDbTests : IDisposable
 
         Assert.Equal(liveBefore, await CountAsync(c.Admin, "rs_new__partner_contacts"));
         Assert.Equal(liveBefore, await CountAsync(c.Admin, "partner_contacts"));
-        var back = await c.Admin.ExecuteScalarAsync<byte[]>("SELECT hp_encrypted FROM rs_new__partner_contacts WHERE contact_id = 'pc-1'");
-        Assert.Equal(bytes, back);
+        var back = (await c.Admin.QueryAsync<(byte[] Hp, byte[] Email)>(
+            "SELECT hp_encrypted, email_encrypted FROM rs_new__partner_contacts WHERE contact_id = 'pc-1'")).Single();
+        Assert.Equal(low, back.Hp);
+        Assert.Equal(high, back.Email);
+        Assert.Equal(bytes, back.Hp.Concat(back.Email).ToArray());
         Assert.Equal("a'b;\\c", await c.Admin.ExecuteScalarAsync<string>("SELECT memo FROM rs_new__partner_contacts WHERE contact_id = 'pc-1'"));
         Assert.Equal(0, await c.Admin.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND LEFT(TABLE_NAME, 8) = 'rs_new__' AND REFERENCED_TABLE_NAME IS NOT NULL"));

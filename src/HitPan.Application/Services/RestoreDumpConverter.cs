@@ -223,11 +223,15 @@ public static class RestoreDumpConverter
         return n is not null && At(s, "CONSTRAINT `".Length + n.Length + 1, A(" FOREIGN KEY "));
     }
 
-    // INSERT INTO `x` VALUES … / INSERT INTO `x` (`a`,`b`) VALUES … — VALUES 뒤 첫 바이트 위치를 돌려줌
+    // INSERT INTO `x` VALUES … / INSERT INTO `x` VALUES\n… / INSERT INTO `x` (`a`,`b`) VALUES … — VALUES 뒤 첫 바이트 위치를 돌려줌
+    // 🔴 고침 1(CI 런 46109988942 G3 빨강) — mariadb-dump 11.x 의 묶음 INSERT 실물 꼴은 「 VALUES\n(…),\n(…)」 다
+    //    (11.4.10 · 11.7.2 실행 파일 글자 틀 " VALUES\n" · CI 11.8.6 같음). 옛 꼴 「 VALUES (」 와 둘만 받는다(정확한 글자 · 다른 공백 = 멈춤).
     private static int CheckInsertTail(byte[] t, int i, string name)
     {
         var values = A(" VALUES ");
         if (At(t, i, values)) return i + values.Length;
+        var valuesNewLine = A(" VALUES\n");
+        if (At(t, i, valuesNewLine)) return i + valuesNewLine.Length;
         if (!At(t, i, A(" ("))) throw new RestoreDumpRejectedException($"INSERT `{name}` 꼴 어긋남");
         var j = i + 2;
         while (true)
