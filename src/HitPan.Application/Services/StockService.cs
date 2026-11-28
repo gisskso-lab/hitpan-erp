@@ -187,6 +187,16 @@ public class StockService : IStockService
     {
         await EnsureOpenAsync(ct).ConfigureAwait(false);
 
+        // 🔴 후7 · 후9 W1(작업지시서 20261129작 · 설계 §3 · §4-1) — 첫 읽기 · 쓰기 · 접속기록 전에 막는다.
+        //   ① 모양(빈 · 공백 · 앞뒤 공백) ② 품목 = 이 회사 품목(ItemTenantGuard 재사용) ③ 창고 = 이 회사 · 활성 창고.
+        //   트랜잭션 열기 전이라 tx = null · 테넌트 값 = 인자(JWT · 헌법 #2).
+        RejectBlankOrPadded(req.ItemId, ItemTenantGuard.NotThisTenantItemMessage);
+        RejectBlankOrPadded(req.WarehouseId, WarehouseTenantGuard.NotUsableWarehouseMessage);
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _dbConnection, tenantId, new[] { req.ItemId }, null, ct).ConfigureAwait(false);
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _dbConnection, tenantId, new[] { req.WarehouseId }, null, ct).ConfigureAwait(false);
+
         // 1. 현재 장부 수량 조회
         const string qtySQL = """
             SELECT COALESCE(current_qty, 0)
@@ -330,6 +340,17 @@ public class StockService : IStockService
         // 유효성 검사: 출발 창고와 도착 창고가 동일하면 안 됨
         if (req.FromWarehouseId == req.ToWarehouseId)
             throw new InvalidOperationException("출발 창고와 도착 창고가 동일합니다.");
+
+        // 🔴 후7 · 후9 W2 · W3(작업지시서 20261129작 · 설계 §3 · §4-1) — 출발 가용 조회 · 쓰기 · 접속기록 전에 막는다.
+        //   ① 모양(빈 · 공백 · 앞뒤 공백) ② 품목 = 이 회사 품목(간접 차단에 기대지 않음 · 후7 X2)
+        //   ③ 출발 · 도착 창고를 한 호출로 = 이 회사 · 활성 창고. tx = null(트랜잭션 열기 전) · 테넌트 값 = 인자(헌법 #2).
+        RejectBlankOrPadded(req.ItemId, ItemTenantGuard.NotThisTenantItemMessage);
+        RejectBlankOrPadded(req.FromWarehouseId, WarehouseTenantGuard.NotUsableWarehouseMessage);
+        RejectBlankOrPadded(req.ToWarehouseId, WarehouseTenantGuard.NotUsableWarehouseMessage);
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _dbConnection, tenantId, new[] { req.ItemId }, null, ct).ConfigureAwait(false);
+        await WarehouseTenantGuard.EnsureWarehousesUsableAsync(
+            _dbConnection, tenantId, new[] { req.FromWarehouseId, req.ToWarehouseId }, null, ct).ConfigureAwait(false);
 
         // 출발 창고 가용 수량 확인 — 실 스키마에 available_qty 없음 → current_qty 사용.
         const string checkSql = """
@@ -496,6 +517,19 @@ public class StockService : IStockService
     }
 
     /// <summary>DB 연결 열기 헬퍼</summary>
+    /// <summary>
+    /// 🔴 후7 · 후9 모양 검사(설계 §3-1) — 빈 · 공백만 · 앞뒤 공백이 붙은 id 는 거절한다(자르지 않음 · K3 (가)).
+    /// 서비스 직접 호출은 모델 바인딩을 지나지 않으므로 암묵 <c>[Required]</c> 에 기대지 않는다(F-7).
+    /// 공용 함수는 빈 칸을 「서버 기본창고 길」 로 빼므로, 빈 칸 길이 없는 재고 조정 · 이관은 여기서 먼저 거절한다.
+    /// </summary>
+    private static void RejectBlankOrPadded(string? id, string message)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id != id.Trim())
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
+
     private async Task EnsureOpenAsync(CancellationToken ct)
     {
         if (_dbConnection.State != ConnectionState.Open)
