@@ -28,6 +28,9 @@ namespace HitPan.Tests.Integrity;
 ///   정상일 때 <b>가드 문구 예외 없음</b>을 잰다(후1 E3 · E5 · E8 · E9 꼴).
 /// 🔴 사실 24 = 설계 §6-3 표 23(W4 2 · W5 3 · W5c 2 · W6a/b 4 · W7 2 · W8 3 · W9a/b 4 · W10 2 · 확정 길 1) + PM 결재 K6 · Q8 1
 ///   (공개 <c>CreateReceiptAsync</c> 에 쉬게 한 창고 WA0 = 거절 — 공개 쪽에 회사만 길이 잘못 이어지면 빨강).
+/// 🔴 <b>전결 2(PR #1058 고침 1 · 작업지시서 §15 · 설계 §6-3)</b> — ⬛ 위 요약의 「9곳 = 회사 · 활성」 은 낡음: <b>반품 4입구(W6a · W6b · W9a · W9b) = 회사만</b>
+///   (반품 화면엔 줄 창고 칸이 없다 · #20). 사실 24 → <b>32</b>(+4 쉬게 한 내 창고 반품 = 저장됨 · +4 공백만 창고 id 반품 = 거절 · 쓴 행 0).
+///   WA0 저장 4 = 「회사만 → 활성」 되돌림을 동작으로 잡고(R2) · 공백만 4 = 변이 B ⓓ(공백만 거절 줄 뺌)를 잡는다(R6 · R7).
 /// 🔴 <b>W5c 전환</b> — <c>ConvertOrderToReceiptAsync</c> 는 발주 머리 · 줄을 EF 저장소로 읽으므로 발주 씨앗은 가짜 저장소에 심는다
 ///   (창고 검사 · 번호 · 기존 매입 조회는 TEMPORARY 표의 실제 DB 로 간다).
 /// 🔴 <b>표 = 시험 연결 하나의 TEMPORARY 표만</b> — 시험 DB 의 기본 표 전부를 같은 이름 TEMPORARY 표로 <c>CREATE TEMPORARY TABLE … LIKE</c> 가린다
@@ -61,6 +64,11 @@ public sealed class VoucherSaveWarehouseTenantGateDbTests
         { (ItemA1, 2m, 1100m, WhA), (ItemA2, 1m, 1370m, WhB) };
     private static readonly (string Id, decimal Qty, decimal Price, string Wh)[] InactiveLines =
         { (ItemA1, 2m, 1100m, WhA), (ItemA2, 1m, 1370m, WhA0) };
+
+    // 🔴 전결 2 — 공백만 창고 id(공용 가드는 빼고 지나감 · 반품 4입구만 따로 거절). 한 사실에 둘 다 넣는다.
+    private static readonly string[] Blanks = { "   ", "\t" };
+    private static (string Id, decimal Qty, decimal Price, string Wh)[] BlankLines(string blank) =>
+        new[] { (ItemA1, 2m, 1100m, WhA), (ItemA2, 1m, 1370m, blank) };
 
     // ════════════════════════════════════════════════════════════════════════
     //  W4 발주 신규 (EF)
@@ -233,6 +241,70 @@ public sealed class VoucherSaveWarehouseTenantGateDbTests
         Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA2}' AND supply_amount=5000"));
     }
 
+    [Fact(DisplayName = "후9 W6a WA0 🔴 매입 반품 신규 · 쉬게 한 내 창고 줄 = 저장됨(전결 2 회사만 · #20) · 줄 창고 WA0 그대로")]
+    public async Task W6a_WA0_PurchaseReturnCreate_InactiveOwnWarehouse_Saved()
+    {
+        if (Skip("W6a WA0")) return;
+        using var db = FreshDb();
+
+        var (returnId, _) = await Purchase(db).CreatePurchaseReturnAsync(PurchaseReturnReq(InactiveLines, Orig), TenantA);
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_returns WHERE return_id='{returnId}' AND tenant_id='{TenantA}'"));
+        Assert.Equal(2, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA0}'"));
+    }
+
+    [Fact(DisplayName = "후9 W6b WA0 🔴 매입 반품 수정 · 저장 뒤 쉬게 한 내 창고 줄의 수량만 고침 = 저장됨(전결 2 회사만 · #20)")]
+    public async Task W6b_WA0_PurchaseReturnUpdate_InactiveOwnWarehouse_Saved()
+    {
+        if (Skip("W6b WA0")) return;
+        using var db = FreshDb();
+        var svc = Purchase(db);
+        // [반품전환] 초안 흉내 — 활성 WA2 로 저장한 뒤 WA2 를 쉬게 한다(신규 입구 W6a 에 기대지 않고 W6b 만 잰다).
+        var (returnId, _) = await svc.CreatePurchaseReturnAsync(PurchaseReturnReq(new[] { (ItemA2, 2m, 1250m, WhA2) }, Orig), TenantA);
+        Exec(db, $"UPDATE warehouses SET is_active = 0 WHERE warehouse_id = '{WhA2}'");
+
+        await svc.UpdatePurchaseReturnAsync(returnId, PurchaseReturnUpdateReq(new[] { (ItemA2, 4m, 1250m, WhA2) }, Changed), TenantA);
+
+        Assert.Equal(Changed, Str(db, $"SELECT memo FROM purchase_returns WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA2}' AND supply_amount=5000"));
+    }
+
+    [Fact(DisplayName = "후9 W6a 공백 🔴 매입 반품 신규 · 줄 창고 id 공백만(\"   \" · \"\\t\") = 거절 · 문구 · 쓴 행 0(전결 2)")]
+    public async Task W6a_Whitespace_PurchaseReturnCreate_Rejected()
+    {
+        if (Skip("W6a 공백")) return;
+        using var db = FreshDb();
+
+        foreach (var blank in Blanks)
+        {
+            await AssertGuardRejects(() => Purchase(db).CreatePurchaseReturnAsync(PurchaseReturnReq(BlankLines(blank), Orig), TenantA));
+
+            Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM purchase_returns"));
+            Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM purchase_return_items"));
+        }
+    }
+
+    [Fact(DisplayName = "후9 W6b 공백 🔴 매입 반품 수정 · 줄 창고 id 공백만(\"   \" · \"\\t\") = 거절 · 머리 UPDATE 안 일어남 · 기존 줄 그대로(전결 2)")]
+    public async Task W6b_Whitespace_PurchaseReturnUpdate_Rejected()
+    {
+        if (Skip("W6b 공백")) return;
+        using var db = FreshDb();
+        var svc = Purchase(db);
+        var (returnId, _) = await svc.CreatePurchaseReturnAsync(PurchaseReturnReq(SameLines, Orig), TenantA);
+
+        foreach (var blank in Blanks)
+        {
+            await AssertGuardRejects(() => svc.UpdatePurchaseReturnAsync(returnId, PurchaseReturnUpdateReq(BlankLines(blank), Changed), TenantA));
+
+            Assert.Equal(Orig, Str(db, $"SELECT memo FROM purchase_returns WHERE return_id='{returnId}'"));
+            Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM purchase_returns WHERE return_id='{returnId}' AND total_amount=5950"));
+            Assert.Equal(2, Count(db, $"SELECT COUNT(*) FROM purchase_return_items WHERE return_id='{returnId}' AND warehouse_id='{WhA}'"));
+            Assert.Equal(2, Count(db, "SELECT COUNT(*) FROM purchase_return_items"));
+        }
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     //  W7 거래명세 신규 (EF)
     // ════════════════════════════════════════════════════════════════════════
@@ -360,6 +432,70 @@ public sealed class VoucherSaveWarehouseTenantGateDbTests
         Assert.Equal(Changed, Str(db, $"SELECT memo FROM sales_returns WHERE return_id='{returnId}'"));
         Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}'"));
         Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA2}' AND supply_amount=5000"));
+    }
+
+    [Fact(DisplayName = "후9 W9a WA0 🔴 판매 반품 신규 · 쉬게 한 내 창고 줄 = 저장됨(전결 2 회사만 · #20) · 줄 창고 WA0 그대로")]
+    public async Task W9a_WA0_SalesReturnCreate_InactiveOwnWarehouse_Saved()
+    {
+        if (Skip("W9a WA0")) return;
+        using var db = FreshDb();
+
+        var (returnId, _) = await Sales(db).CreateSalesReturnAsync(SalesReturnReq(InactiveLines, Orig), TenantA);
+
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_returns WHERE return_id='{returnId}' AND tenant_id='{TenantA}'"));
+        Assert.Equal(2, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA0}'"));
+    }
+
+    [Fact(DisplayName = "후9 W9b WA0 🔴 판매 반품 수정 · 저장 뒤 쉬게 한 내 창고 줄의 수량만 고침 = 저장됨(전결 2 회사만 · #20)")]
+    public async Task W9b_WA0_SalesReturnUpdate_InactiveOwnWarehouse_Saved()
+    {
+        if (Skip("W9b WA0")) return;
+        using var db = FreshDb();
+        var svc = Sales(db);
+        // 활성 WA2 로 저장한 뒤 WA2 를 쉬게 한다(신규 입구 W9a 에 기대지 않고 W9b 만 잰다).
+        var (returnId, _) = await svc.CreateSalesReturnAsync(SalesReturnReq(new[] { (ItemA2, 2m, 1250m, WhA2) }, Orig), TenantA);
+        Exec(db, $"UPDATE warehouses SET is_active = 0 WHERE warehouse_id = '{WhA2}'");
+
+        await svc.UpdateSalesReturnAsync(returnId, SalesReturnUpdateReq(new[] { (ItemA2, 4m, 1250m, WhA2) }, Changed), TenantA);
+
+        Assert.Equal(Changed, Str(db, $"SELECT memo FROM sales_returns WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}'"));
+        Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}' AND item_id='{ItemA2}' AND warehouse_id='{WhA2}' AND supply_amount=5000"));
+    }
+
+    [Fact(DisplayName = "후9 W9a 공백 🔴 판매 반품 신규 · 줄 창고 id 공백만(\"   \" · \"\\t\") = 거절 · 문구 · 쓴 행 0(전결 2)")]
+    public async Task W9a_Whitespace_SalesReturnCreate_Rejected()
+    {
+        if (Skip("W9a 공백")) return;
+        using var db = FreshDb();
+
+        foreach (var blank in Blanks)
+        {
+            await AssertGuardRejects(() => Sales(db).CreateSalesReturnAsync(SalesReturnReq(BlankLines(blank), Orig), TenantA));
+
+            Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM sales_returns"));
+            Assert.Equal(0, Count(db, "SELECT COUNT(*) FROM sales_return_items"));
+        }
+    }
+
+    [Fact(DisplayName = "후9 W9b 공백 🔴 판매 반품 수정 · 줄 창고 id 공백만(\"   \" · \"\\t\") = 거절 · 머리 UPDATE 안 일어남 · 기존 줄 그대로(전결 2)")]
+    public async Task W9b_Whitespace_SalesReturnUpdate_Rejected()
+    {
+        if (Skip("W9b 공백")) return;
+        using var db = FreshDb();
+        var svc = Sales(db);
+        var (returnId, _) = await svc.CreateSalesReturnAsync(SalesReturnReq(SameLines, Orig), TenantA);
+
+        foreach (var blank in Blanks)
+        {
+            await AssertGuardRejects(() => svc.UpdateSalesReturnAsync(returnId, SalesReturnUpdateReq(BlankLines(blank), Changed), TenantA));
+
+            Assert.Equal(Orig, Str(db, $"SELECT memo FROM sales_returns WHERE return_id='{returnId}'"));
+            Assert.Equal(1, Count(db, $"SELECT COUNT(*) FROM sales_returns WHERE return_id='{returnId}' AND total_amount=5950"));
+            Assert.Equal(2, Count(db, $"SELECT COUNT(*) FROM sales_return_items WHERE return_id='{returnId}' AND warehouse_id='{WhA}'"));
+            Assert.Equal(2, Count(db, "SELECT COUNT(*) FROM sales_return_items"));
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════
