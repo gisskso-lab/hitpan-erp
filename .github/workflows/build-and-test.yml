@@ -1412,6 +1412,11 @@ jobs:
           GATES="$GATES|BackofficeAnonymousEntry"
           GATES="$GATES|FormYMigrationNoCoordsGate"
           GATES="$GATES|ReturnPrintItemTenantGate"
+          # 🔴 20261127 W-G1-51-후1(별 작업 25) — 품목 회사 일치: 전표 출력 7자리 · 판매 반품 상세 · 공용 검사 함수 · 저장 입구 13 + 전환 2 (TEMPORARY 표만)
+          GATES="$GATES|VoucherPrintItemTenantGate"
+          GATES="$GATES|SalesReturnDetailItemTenantGate"
+          GATES="$GATES|ItemTenantGuardGate"
+          GATES="$GATES|VoucherSaveItemTenantGate"
           # §59 고침 1 ④′ 테스트 환경 준비 — 리눅스 닷넷 공용 앱 데이터 뿌리 = /usr/share(루트 소유) · FormYMigrationNoCoordsGateDbTests 가 제품 그림 뿌리에 실제 PNG 를 쓴다
           if [ -w /usr/share ]; then echo "▶ [환경] /usr/share 쓰기 가능($(id -un))"; else echo "▶ [환경] /usr/share 쓰기 불가($(id -un)) → 그림 폴더만 준비"; fi
           sudo mkdir -p /usr/share/HitPan/form-backgrounds

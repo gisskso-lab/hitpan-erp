@@ -13,6 +13,10 @@ namespace HitPan.Application.Services;
 
 public class SalesService : ISalesService
 {
+    // W-G1-51 후1 §15-9 (K13) — 거래명세서 수정 저장 때 머리 UPDATE 가 1행이 아니면(이미 확정 · 다른 곳에서 바뀜) 저장하지 않는다.
+    public const string DeliveryChangedElsewhereMessage =
+        "이미 확정되었거나 다른 곳에서 바뀐 거래명세서라 저장하지 않았습니다. 화면을 새로 열어 확인해 주세요.";
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentTenant _currentTenant;
     private readonly IDbConnection _db;
@@ -43,6 +47,10 @@ public class SalesService : ISalesService
 
     public async Task<string> CreateOrderAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
     {
+        // 🔴 W-G1-51 후1 E3 — 번호 따기 · 첫 쓰기 전에 품목이 이 회사 것인지 본다(회사 값 = JWT).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId), null, ct);
+
         var orderRepo = _unitOfWork.Repository<SalesOrder>();
         var itemRepo = _unitOfWork.Repository<SalesOrderItem>();
 
@@ -112,6 +120,11 @@ public class SalesService : ISalesService
         {
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
+
+        // 🔴 W-G1-51 후1 E5 — 잔량 검사 · 자동 수주 · 첫 쓰기 전. 저장할 값과 같은 꼴(Trim)로 넘기고
+        //   id 가 빈 줄(이름으로 찾기 · 이미 이 회사 안에서만 찾음)은 함수가 뺀다.
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, _currentTenant.TenantId, request.Items.Select(x => x.ItemId?.Trim()), null, ct);
 
         // 🔴 20260828작14 W5 — P0-1 봉합: **화면이 지나가는 경로에 잔량 검사를 둔다.**
         //
@@ -978,6 +991,10 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
+        // 🔴 W-G1-51 후1 E6 — 트랜잭션 · 머리 UPDATE 전에 본다(회사 값 = JWT 에서 온 인자).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, dto.Items.Select(x => x.ItemId), null, ct);
+
         // 폐기 (2026-08-25, 20260825작1, 사장님 결재): 1+1 자동 2배 제거 — 생성 경로(:112)와 동일 사유.
         //   두 경로를 함께 뺀다. 한쪽만 빼면 "만들 때와 고칠 때 수량이 달라지는" 더 나쁜 상태가 된다.
 
@@ -1027,7 +1044,8 @@ public class SalesService : ISalesService
         using var tx = _db.BeginTransaction();
         try
         {
-            await _db.ExecuteAsync(new CommandDefinition(updateSql,
+            // 종전: 머리 UPDATE 결과 행 수를 버려, 검사 뒤 다른 곳에서 확정되면 0행인데도 줄을 지우고 다시 넣었다 (W-G1-51 후1 §15-9 · K13).
+            var headerUpdated = await _db.ExecuteAsync(new CommandDefinition(updateSql,
                 new
                 {
                     DeliveryId = deliveryId,
@@ -1040,6 +1058,8 @@ public class SalesService : ISalesService
                     UserId = string.IsNullOrEmpty(userId) ? null : userId
                 },
                 transaction: tx, cancellationToken: ct));
+            if (headerUpdated != 1)
+                throw new InvalidOperationException(DeliveryChangedElsewhereMessage);
 
             // 🔴 20260827작10 W1 — 지우기 전에 수주라인 링크를 읽어둔다.
             //   종전엔 라인을 전량 DELETE 하고 order_item_id 에 NULL 을 하드코딩해 다시 넣었다.
@@ -1075,8 +1095,9 @@ public class SalesService : ISalesService
             // 🔴 20260903작19 W4 — 사장님 오더: 매출도 상품등록 시 지정한 창고에서 뺀다.
             //   이 경로(수정 저장)는 신규 저장보다 더 나빴다 — 라인 창고를 **보지도 않고**
             //   무조건 테넌트 기본창고를 박았다. 화면에서 창고를 골라도 수정 한 번에 날아갔다.
+            // 종전: 트랜잭션 없이 조회 → 수정 저장이 MySqlConnector 예외로 롤백(#372 · 대표 §252) — 20261127 후1 §15 로 tx 를 넘김
             var itemDefaultWarehouses = await LoadItemDefaultWarehousesAsync(
-                tenantId, dto.Items.Select(x => x.ItemId ?? string.Empty), ct);
+                tenantId, dto.Items.Select(x => x.ItemId ?? string.Empty), ct, tx);
 
             foreach (var item in dto.Items)
             {
@@ -1783,6 +1804,10 @@ public class SalesService : ISalesService
             throw new InvalidOperationException("품목이 한 줄 이상 필요합니다.");
         }
 
+        // 🔴 W-G1-51 후1 E4 — 트랜잭션 · 머리 UPDATE 전에 본다(회사 값 = JWT 에서 온 인자).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
+
         var supplyAmount = request.Items.Sum(x => x.SupplyAmount);
         var vatAmount = request.Items.Sum(x => x.VatAmount);
         var orderDate = request.OrderDate == default ? DateTime.UtcNow.Date : request.OrderDate.Date;
@@ -1992,6 +2017,10 @@ public class SalesService : ISalesService
     {
         var results = new List<AutoOrderResultDto>();
         if (candidates.Count == 0) return results;
+
+        // 🔴 W-G1-51 후1 §16(외부 판정 P1) — 후보는 요청 본문 값이라 번호 따기 · 첫 쓰기 전에 저장될 줄(공급처 있는 줄)의 품목이 이 회사 것인지 본다(회사 값 = JWT · 하나라도 밖이면 전체 거절).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, candidates.Where(c => !string.IsNullOrWhiteSpace(c.PartnerId)).Select(c => c.ItemId), null, ct);
 
         // 공급처별 그룹핑. 미지정 품목은 별도 실패 결과.
         var noPartner = candidates.Where(c => string.IsNullOrWhiteSpace(c.PartnerId)).ToList();
@@ -2226,6 +2255,8 @@ public class SalesService : ISalesService
         var lossSelect = await HasSalesReturnLossColumnAsync(ct).ConfigureAwait(false)
             ? "sri.is_loss"
             : "0";
+        // 🔴 2026-11-27 W-G1-51-후1 갈래 1(작업지시서 §3 S1) — 품목 조인에 상세행 회사 조건 한 조각 더함(LEFT JOIN 유지 · 다른 회사 품목 줄은 행 · 금액 남고 품명 · 규격만 빈 칸).
+        // 종전: LEFT JOIN items i ON i.item_id = sri.item_id
         var items = await _db.QueryAsync<SalesReturnDetailItemDto>(new CommandDefinition(
             $"""
             SELECT sri.return_item_id AS ReturnItemId, sri.item_id AS ItemId,
@@ -2238,7 +2269,7 @@ public class SalesService : ISalesService
                    sri.delivery_item_id AS DeliveryItemId,
                    {lossSelect} AS IsLoss
             FROM sales_return_items sri
-            LEFT JOIN items i ON i.item_id = sri.item_id
+            LEFT JOIN items i ON i.item_id = sri.item_id AND i.tenant_id = sri.tenant_id
             WHERE sri.return_id = @Id AND sri.tenant_id = @Tid
             ORDER BY sri.return_item_id
             """,
@@ -2259,6 +2290,11 @@ public class SalesService : ISalesService
             if (_db is System.Data.Common.DbConnection dbConn) await dbConn.OpenAsync(ct);
             else _db.Open();
         }
+
+        // 🔴 W-G1-51 후1 E12 — 원 거래명세 잔량 검사 · 첫 쓰기 전 · DeliveryId 유무와 상관없이 본다.
+        //   원 거래명세 잔량으로 걸리는 간접 차단은 그대로 둔다(원본이 옛 무검사 자료일 수 있어 그것만 믿지 않는다).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         // 🔴 20260828작14 W5 — 잔량 기준 (사장님 결재 4·6).
         //
@@ -2409,6 +2445,11 @@ public class SalesService : ISalesService
         var status = (string)current.status;
         if (!string.Equals(status, "draft", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"draft 상태만 수정 가능합니다. (현재: {status})");
+
+        // 🔴 W-G1-51 후1 E13 — 이 길은 트랜잭션 없이 머리 UPDATE → 줄 DELETE → INSERT 라
+        //   반드시 머리 UPDATE 앞에서 본다(거절되면 머리 · 기존 줄 그대로).
+        await ItemTenantGuard.EnsureItemsBelongToTenantAsync(
+            _db, tenantId, request.Items.Select(x => x.ItemId), null, ct);
 
         var returnDate = request.ReturnDate == default ? DateTime.UtcNow.Date : request.ReturnDate.Date;
         decimal totalAmount = 0, totalVat = 0;
@@ -2958,8 +2999,9 @@ public class SalesService : ISalesService
     ///    item_stock·stock_ledger 가 유령 창고에 쌓인다(10차 P0-4 가 막았던 사고).
     ///    유효하지 않으면 이 사전에서 빠지고 테넌트 폴백이 받는다.
     /// </summary>
+    // 종전: (tenantId, itemIds, ct) 세 인자 · 트랜잭션 없이 조회 → 수정 저장이 MySqlConnector 예외로 롤백(#372 · 대표 §252) — 20261127 후1 §15 로 선택 인자 tx 를 끝에 더함
     private async Task<Dictionary<string, string>> LoadItemDefaultWarehousesAsync(
-        string tenantId, IEnumerable<string> itemIds, CancellationToken ct)
+        string tenantId, IEnumerable<string> itemIds, CancellationToken ct, IDbTransaction? tx = null)
     {
         var ids = itemIds.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
         if (ids.Count == 0) return new Dictionary<string, string>();
@@ -2979,6 +3021,8 @@ public class SalesService : ISalesService
                    AND i.default_warehouse_id <> ''
                 """,
                 new { TenantId = tenantId, Ids = ids },
+                // 종전: transaction 인자 없음 — 20261127 후1 §15 로 tx 를 넘김(공용 WarehouseLookup 꼴)
+                transaction: tx,
                 cancellationToken: ct)).ConfigureAwait(false);
 
         return rows.ToDictionary(r => r.ItemId, r => r.WarehouseId);
