@@ -292,6 +292,33 @@ const FIX_OK = mat(R1, { band3: false, band10: false, err: 0, warn: 1, appErr: 0
     `꼴 ${ok1} · 알림 글 ${textOk} · 모드 목록 ${modeOk} · 못 잡은 목록 반례 ${miss.length ? miss.join(' · ') : '0'} · 참 ${pass}`
     + ` · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 무영향 ${noBlockOk} · 주소 ${hitOk}`);
 }
+// ── B13 (넓힘 X2 · 지시서 §8-3 대표 ④) — G-P4 발주 현황 = 503 가로채기 · 쉬운 알림 글 = 앱 LoadFailedNotice.Text 앞머리 · 띠 0 · 경고 흔적 · 알림 0 이면 거짓 ──
+{
+  const P4 = S('G-P4');
+  const svc = path.join(__dirname, '..', '..', '..', 'src', 'HitPan.Web', 'Services', 'LoadFailedNotice.cs');
+  const svcText = fs.existsSync(svc) ? fs.readFileSync(svc, 'utf8') : '';
+  const m = /public const string Text = "([^"]+)";/.exec(svcText);
+  const page = path.join(__dirname, '..', '..', '..', 'src', 'HitPan.Web', 'Pages', 'Purchase', 'PurchaseOrderStatusPage.razor');
+  const pageText = fs.existsSync(page) ? fs.readFileSync(page, 'utf8') : '';
+  const shape = !!P4 && P4.inject === '503' && P4.page === '/purchase-order-status' && P4.match.path === '/api/reports/purchase-orders'
+    && P4.tags.length === 1 && pageText.includes(`Logger.LogWarning(_hp15Ex, "${P4.tags[0]}");`) && pageText.includes('@page "/purchase-order-status"')
+    && pageText.includes('"api/reports/purchase-orders?"') && pageText.includes('LoadFailedNotice.Show(Snackbar, _hp15Ex);');
+  const snackOk = !!P4 && !!m && m[1].startsWith(P4.snack);
+  const last = B.SCENES.indexOf(P4) > B.SCENES.findIndex((s) => s.key === 'G-C2'); // 기존 11 장면 뒤에 덧붙임(X1 장면이 더 뒤에 와도 참)
+  const ok = P4 && B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, snackHit: 1 })).pass === true;
+  const bad = P4 ? [
+    ['알림 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, snackHit: 0 }))],
+    ['띠 +3초', B.judgeScene('fixed', P4, mat(P4, { band3: true, band10: false, err: 0, warn: 1 }))],
+    ['경고 흔적 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 0 }))],
+    ['앱 표준오류 1', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, appErr: 1 }))],
+    ['가로챔 0', B.judgeScene('fixed', P4, mat(P4, { band3: false, band10: false, err: 0, warn: 1, routeHits: 0 }))],
+  ].filter(([, v]) => v.pass !== false).map(([n]) => n) : ['장면 없음'];
+  const hit = P4 && B.routeMatch(P4, 'http://127.0.0.1:18080/api/reports/purchase-orders?view=date&from=2026-11-01') === true
+    && B.routeMatch(P4, 'http://127.0.0.1:18080/api/reports/purchase-statistics?view=date') === false;
+  check('B13 G-P4 넓힘 X2 — 꼴 · 화면 원문 대조(표지 · 주소 · 알림 줄) · 알림 글 = 앱 글 앞머리 · G-C2 뒤 · 고친 뒤 참 1 · 거짓 5 · 주소 맞춤',
+    shape && snackOk && last && ok && bad.length === 0 && hit,
+    `꼴 ${shape} · 알림 글 ${snackOk} · 순서 ${last} · 참 ${ok} · 기대와 다른 거짓 반례 ${bad.length ? bad.join(' · ') : '0'} · 주소 ${hit}`);
+}
 
 const bad = results.filter((x) => !x.ok).length;
 console.log(`띠 자체시험 합계 ${results.length - bad}/${results.length} PASS`);

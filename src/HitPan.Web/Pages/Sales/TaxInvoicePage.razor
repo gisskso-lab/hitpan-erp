@@ -273,11 +273,17 @@
         {
             var detail = await DeliveryService.GetAsync(item.DeliveryId);
             _detailLines = detail?.Items ?? new();
+            // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — DeliveryService.GetAsync 는 실패를 삼키고 null 을 돌려 위 catch 가 돌지 않는다
+            //   (갈래 S 파일 · 손 0). 목록에 있는 전표라 null = 못 불러옴 → 빈 품목 창만 뜨지 않게 쉬운 알림 한 번.
+            //   ⚠ 서비스가 상태 번호를 버려 401 · 403 을 가를 수 없다(처리기 알림과 겹칠 수 있음 · 개발명세서 넘김 표).
+            if (detail is null) Snackbar.Add(LoadFailedNotice.Text, Severity.Warning);
         }
         catch (Exception _hp15Ex)
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Logger.LogWarning(_hp15Ex, "[HP15] 계산서 상세 품목 조회 실패");
+            // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
+            LoadFailedNotice.Show(Snackbar, _hp15Ex);
             _detailLines = new();
         }
         _detailOpen = true;

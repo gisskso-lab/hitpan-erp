@@ -111,6 +111,8 @@
         {
             // ⬛ [낡은 줄 · 화면오류기록띠] Console.Error.WriteLine($"[HP15] " + _hp15Ex.GetType().Name + ": " + _hp15Ex.Message);
             Logger.LogWarning(_hp15Ex, "[HP15] 창고분리 조회 실패");
+            // 20261129 화면오류기록띠 대표 ④(넓힘 X2) — 흰 띠가 실패의 유일한 신호였다 → 쉬운 알림 한 번(401 · 403 · 화면 떠난 조회 뺌 · 지시서 §8-3).
+            LoadFailedNotice.Show(Snackbar, _hp15Ex);
             _rows = new();
             _kpi = new();
         }
