@@ -202,11 +202,14 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     {
         try
         {
-            var current = await SettingsSvc.GetAsync().ConfigureAwait(false);
-            if (current is not null)
-            {
-                _model.BusinessType = current.IndustryType;
-            }
+            // ⬛ W-S-01 갈래 A (2026-11-27 · 설계 §2-1 · PM 결재 P1 (A) + GET :205) — 사용환경 설정 루트 GET 을 서버에서 닫아
+            //   불러올 때 부르지 않는다(닫힌 뒤 매번 404 · 경고 로그 · 헛호출이 남지 않게). 업태 칸은 바로 아래 회사 정보가
+            //   이미 덮어쓴다(BizType) — 고객이 보는 동작은 같다. 원문 줄 보존(#1 · 다시 열 때 되살림):
+            // var current = await SettingsSvc.GetAsync().ConfigureAwait(false);
+            // if (current is not null)
+            // {
+            //     _model.BusinessType = current.IndustryType;
+            // }
 
             // tenants 테이블에서 사업장 정보를 불러와 화면 모델에 반영한다.
             var company = await SettingsSvc.GetCompanyAsync().ConfigureAwait(false);
@@ -448,9 +451,14 @@ public partial class UserInfoPage : ComponentBase, IDisposable
     private async Task ApplyAsync()
     {
         _saving = true;
-        var current = await SettingsSvc.GetAsync().ConfigureAwait(false) ?? new TenantSettingsModel();
-        current.IndustryType = _model.BusinessType;
-        var okSettings = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
+        // ⬛ W-S-01 갈래 A (2026-11-27 · 설계 §2-1 · PM 결재 P1 (A)) — 사용환경 설정 루트 GET/PUT 을 서버에서 닫았다.
+        //   그대로 두면 [적용] 이 늘 「적용 실패」 로 끊긴다(#20 · 6단계 1단계). industry_type 을 읽는 곳은 SettingsService 뿐
+        //   (소비자 0)이고 업태는 아래 회사 정보(BizType)로 저장되므로 설정 저장은 하지 않고 성공으로 갈음한다.
+        //   덤: GET 실패 때 빈 모델 PUT 이 다른 칸을 기본값으로 덮어쓰던 잠재 위험도 사라진다. 원문 줄 보존(#1 · 다시 열 때 되살림):
+        // var current = await SettingsSvc.GetAsync().ConfigureAwait(false) ?? new TenantSettingsModel();
+        // current.IndustryType = _model.BusinessType;
+        // var okSettings = await SettingsSvc.SaveAsync(current).ConfigureAwait(false);
+        var okSettings = true;
 
         // local_company 사업장 컬럼과 동일한 필드를 API로 전달한다(비고는 저장 대상 아님).
         var company = new TenantCompanyModel
@@ -533,7 +541,10 @@ public partial class UserInfoPage : ComponentBase, IDisposable
 
     private void Close()
     {
-        Navigation.NavigateTo("/settings");
+        // ⬛ W-S-01 갈래 A (2026-11-27 · 설계 §2-7 · PM 결재 P5 「처음 화면 / 로 확정」) — 사용환경 설정을 지금 판에서 닫아
+        //   [닫기] 는 처음 화면으로 간다. 원문 줄 보존(#1 · 다시 열 때 되살림):
+        // Navigation.NavigateTo("/settings");
+        Navigation.NavigateTo("/");
     }
 
     public void Dispose()

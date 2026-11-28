@@ -161,7 +161,9 @@ else
     </MudGrid>
 
     <div style="margin-top:24px;display:flex;justify-content:flex-end">
-        <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/settings"))">사용자정보설정으로 돌아가기</MudButton>
+        @* ⬛ W-S-01 갈래 A (2026-11-27 · 설계 §2-7 · PM 결재 P5) — 원문 줄 보존(#1). 단추 글 그대로 사용자정보로 가도록 목적지만 바꿨다:
+             <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/settings"))">사용자정보설정으로 돌아가기</MudButton> *@
+        <MudButton Variant="Variant.Outlined" OnClick="@(() => Nav.NavigateTo("/settings/user-info"))">사용자정보설정으로 돌아가기</MudButton>
     </div>
 }
 

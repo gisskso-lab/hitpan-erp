@@ -9,7 +9,10 @@
     </button>
 
     @* 계정 아바타 *@
-    <button type="button" class="hp-mha-btn" @onclick="@(() => Nav.NavigateTo("/settings"))">
+    @* ⬛ W-S-01 갈래 A (2026-11-27 · 설계 §2-7 · PM 결재 P5) — 원문 줄 보존(#1). 사용환경 설정을 지금 판에서 닫아
+         누르는 사람이 가려는 곳(내 계정 = 사용자정보)으로 목적지만 바꿨다:
+         <button type="button" class="hp-mha-btn" @onclick="@(() => Nav.NavigateTo("/settings"))"> *@
+    <button type="button" class="hp-mha-btn" @onclick="@(() => Nav.NavigateTo("/settings/user-info"))">
         <div class="hp-mha-avatar">@_initial</div>
     </button>
 </div>
