@@ -425,7 +425,9 @@ public sealed class BackupService : IBackupService
             _logger.LogWarning("안전 복원 요청을 막았습니다(깃발 닫힘) tenantId={TenantId} userId={UserId}", tenantId, userId);
             return Task.FromResult(new SafeRestoreResponse
             {
-                Success = false, FailedStep = SafeRestoreStep.None, DenyCode = null,
+                // ⬛ A-2② 옛 줄: Success = false, FailedStep = SafeRestoreStep.None, DenyCode = null,
+                // 🔴 A-2③ D5 — 닫힘 전용 글자(화면 B 가 닫힘과 실패를 가름 · 계약 덧 = BackupDtos SafeRestoreDenyCodes.RestoreClosed)
+                Success = false, FailedStep = SafeRestoreStep.None, DenyCode = SafeRestoreDenyCodes.RestoreClosed,
                 Message = RestoreClosedNotice, DataUnchanged = true,
             });
         }
@@ -679,6 +681,22 @@ public sealed class BackupService : IBackupService
             {
                 // C-16 ③ (#15) — 사용 중이면 다음 회차에 정리. 빈 catch 대신 기록을 남긴다.
                 _logger.LogWarning(ex, "보관정책: 오래된 백업 파일을 지우지 못함 — 다음 회차에 다시 정리 {File}", old.FullName);
+            }
+        }
+
+        // 🔴 W-G1-52 갈래 A-2③ D14 — 복원 전 자동 백업(hitpan_pre_restore_*)도 쌓이지 않게 정리한다.
+        //   일반 백업과 **따로 센다**(같은 n = 기존 보관 규칙 값 · 새 설정 0) — 일반 백업이 많아도 가장 최근 사전 백업 n 개는 남는다(G8 · 되돌릴 자리).
+        var preFiles = Directory.GetFiles(folder, "hitpan_pre_restore_*.sql")
+            .Select(f => new FileInfo(f))
+            .Where(f => f.Length > 0)
+            .OrderByDescending(f => f.CreationTime)
+            .ToList();
+        foreach (var old in preFiles.Skip(keep))
+        {
+            try { old.Delete(); }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "보관정책: 오래된 복원 전 자동 백업을 지우지 못함 — 다음 회차에 다시 정리 {File}", old.FullName);
             }
         }
     }

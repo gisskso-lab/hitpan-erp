@@ -90,6 +90,7 @@ public sealed class RestoreHistoryDto
 /// 안전 경로 복원 요청(부모계정 · 메인PC · 한 화면 4장 중 3장 「확인」 에서 보냄).
 /// 외부 파일 경로 칸은 <b>없다</b> — 이 회사 백업 목록에 있는 것만(조건 4 · K9).
 /// </summary>
+// 🔴 Z3(보1 §4 · 덧1-6 D6 ⓐ′) — 이 요청을 받는 끝점(복원 · 비번 되찾기)에 [IdempotencyKey] 금지(비번 칸 × 멱등키 = 비번이 멱등 표에 남음 · G23 ①).
 public sealed class SafeRestoreRequest
 {
     /// <summary>백업 목록(<c>backup_history</c>)의 ID — 이 회사 목록 밖이면 거절(<see cref="SafeRestoreDenyCodes.BackupNotInList"/>).</summary>
@@ -173,6 +174,14 @@ public static class SafeRestoreDenyCodes
     public const string AuditWriteFailed = "audit_write_failed";
     /// <summary>감사 파일을 믿을 수 없음 · 끝나지 않은 교체 기록 → 자동 정리 0 · 「확인 필요」(덧 지시서 H2 · H4 · H5).</summary>
     public const string CheckNeeded = "check_needed";
+
+    // 🔴 W-G1-52 갈래 A-2③ 덧(작업지시서 §11 D5 · D4 · D13) — 더하기만(옛 글자 손 0)
+    /// <summary>복원 길이 닫혀 있음(깃발 <c>BackupService.RestoreTemporarilyClosed</c> · D5) — 화면 B 가 닫힘과 실패를 가른다.</summary>
+    public const string RestoreClosed = "restore_closed";
+    /// <summary>자료이관이 도는 중 — 걸음 ④ 앞에서 멈춤(D4 · 자료 그대로).</summary>
+    public const string MigrationRunning = "migration_running";
+    /// <summary>업데이트 내려받기 · 교체가 도는 중 — 걸음 ④ 앞에서 멈춤(D13 · 읽기만 · #43 업데이트 로직 손 0).</summary>
+    public const string UpdateRunning = "update_running";
 }
 
 /// <summary>안전 경로 복원 결과(화면 4장 「진행 · 끝」).</summary>
@@ -193,6 +202,7 @@ public sealed class SafeRestoreResponse
     public string? DenyCode { get; set; }
 
     /// <summary>쉬운 말 1줄(개발 용어 0 · 비밀번호 · 경로 · 내부 오류 글을 담지 않음).</summary>
+    // 🔴 P3-9(A-2③) — 서버가 DenyCode → 고정 문구 표(RestoreOverlayRules.MessageFor)로만 채움 · restore_history.error_message · 예외 글 옮기기 금지.
     public string? Message { get; set; }
 
     /// <summary>
@@ -275,6 +285,7 @@ public sealed class SafeRestoreLastResultDto
     public bool DataUnchanged { get; set; }
 
     /// <summary>쉬운 말 1줄(개발 용어 0).</summary>
+    // 🔴 P3-9(A-2③) — 서버가 DenyCode → 고정 문구 표(RestoreOverlayRules.MessageFor)로만 채움 · restore_history.error_message 옮기기 금지.
     public string? Message { get; set; }
 }
 

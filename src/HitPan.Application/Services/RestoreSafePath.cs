@@ -17,7 +17,7 @@ namespace HitPan.Application.Services;
 /// <para>깃발 <c>BackupService.RestoreTemporarilyClosed</c> 닫힌 채 = 제품 길에서 부르는 곳 0. 시험은 DB 게이트에서 직접 부른다(§9 ②).</para>
 /// <para>회사 = JWT 에서 온 <c>tenantId</c> 하나(#2) · 걸음 ① ~ ③ 은 라이브 「백업 값」 표 손 0 · 쓰는 곳 = 비번 실패 칸 · 백업 목록(사전 백업) · <c>rs_new__</c> 임시 표뿐.</para>
 /// <para>붓기 꼴 = (ㄴ) 앱 연결 직접 실행(설계 §15-3 ③-3 검토 권고) — 변환기가 이미 문장을 나누므로 클라이언트 명령 면 · 실행 파일 찾기 · 비번 환경 변수 길이 통째로 없다.</para>
-/// <para>임시 표 지우기 = <see cref="DropStagingTablesAsync"/> 한 곳(G9) · 원장 교체 함수는 A-2③ 이 이 클래스에 private 으로 더한다.</para>
+/// <para>임시 표 지우기 = <see cref="DropStagingTablesAsync"/> 한 곳(G9) · 원장 교체 함수는 A-2③ <see cref="RestoreSwapStep"/>(지시서 §4-1 A-2③ 줄 · 새 파일 · 부르는 곳 울타리 = G9 정적 게이트).</para>
 /// </remarks>
 public sealed class RestoreSafePath : IRestoreSafePath
 {
@@ -260,8 +260,10 @@ public sealed class RestoreSafePath : IRestoreSafePath
         var sessionChanged = false;
         try
         {
+            // ⬛ A-2② 옛 줄: "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO', time_zone = '+00:00', foreign_key_checks = 0, unique_checks = 0",
+            // 🔴 A-2③ D15 ① — 서버 전역 autocommit = 0 인 고객 PC 대비: 붓기 세션은 autocommit = 1 을 명시(문장마다 커밋 · 열린 거래 0 · 다른 연결이 임시 표를 다 봄)
             await _db.ExecuteAsync(new CommandDefinition(
-                "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO', time_zone = '+00:00', foreign_key_checks = 0, unique_checks = 0",
+                "SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO', time_zone = '+00:00', foreign_key_checks = 0, unique_checks = 0, autocommit = 1",
                 cancellationToken: ct)).ConfigureAwait(false);
             sessionChanged = true;
 
@@ -448,8 +450,10 @@ public sealed class RestoreSafePath : IRestoreSafePath
     {
         try
         {
+            // ⬛ A-2② 옛 줄: "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1",
+            // 🔴 A-2③ D15 ② — autocommit 도 전역 값으로 되돌림(붓기 때 1 로 바꿨으므로)
             await _db.ExecuteAsync(new CommandDefinition(
-                "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1",
+                "SET SESSION sql_mode = @@GLOBAL.sql_mode, time_zone = @@GLOBAL.time_zone, foreign_key_checks = 1, unique_checks = 1, autocommit = @@GLOBAL.autocommit",
                 cancellationToken: CancellationToken.None)).ConfigureAwait(false);
         }
         catch (DbException ex)
